@@ -117,7 +117,7 @@ Inspect the title and body, then stamp the baseline scoped labels:
 
 ### Step 2: Presentation & Additional Context Pass
 - Clean up typos, formatting, and markdown layout without changing the operator's intent or meaning.
-- **Add Relevant Context**: Enrich the ticket with relevant repository paths, upstream documentation links, existing symbol names, and background findings directly into a clearly demarcated section (e.g. `### Additional Context & Findings`).
+- **Add Relevant Context (Orchestrator Discretion)**: At the Orchestrator's discretion, enrich the ticket with helpful context—such as relevant repository paths, upstream documentation links, existing symbol names, or background findings—directly into a clearly demarcated section (e.g. `### Additional Context & Findings`). Keep it high-signal; do not add noise.
 - Apply `format/1-ok` once the body, presentation, and context are clean.
 
 ### Step 3: Upstream & Feasibility Audit
