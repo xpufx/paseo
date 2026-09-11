@@ -111,9 +111,9 @@ graph TD
 Inspect the title and body, then stamp the baseline scoped labels:
 - **`kind/`**: Is this a `kind/bug`, `kind/feature`, `kind/chore`, `kind/explore`, or `kind/discussion`?
 - **`target/`**: Which package(s) does it touch? (`target/helper`, `target/top`, `target/x-comms`, `target/monorepo`).
-- **`size/`**: Estimate effort: `size/0-cheap`, `size/1-medium`, or `size/2-expensive`.
+- **`size/`**: Estimate effort: `size/0-cheap`, `size/1-medium`, `size/2-expensive`, or `size/3-chunk`.
 - **`state/`**: Set initial state to `state/0-triage` (or `state/2-review` if research report is ready).
-- **`attention/`**: Attach `attention/0-agent` to signal active ownership.
+- **`attention/`**: Attach `attention/0-orchestrator` while actively triaging/shaping; hand off to `attention/1-agent` when ready for worker claim.
 
 ### Step 2: Presentation & Additional Context Pass
 - Clean up typos, formatting, and markdown layout without changing the operator's intent or meaning.

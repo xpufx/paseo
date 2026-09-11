@@ -122,7 +122,7 @@ Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent
 - **`format/` Scope**: `format/0-needed` ↔ `format/1-ok` (cleaning presentation and applying `format/1-ok` automatically clears `format/0-needed`).
 - **`spec/` Scope**: `spec/0-needed` → `spec/1-checklist` → `spec/2-approved` (shaping phase transitions automatically clear previous stages).
 - **`state/` Scope**: `state/0-triage` → `state/1-wip` → `state/2-review` → `state/3-verify` → `state/4-done` (execution lifecycle).
-- **`attention/` Scope**: `attention/0-agent` ↔ `attention/1-user` ↔ `attention/2-ignore` (action token).
+- **`attention/` Scope**: `attention/0-orchestrator` ↔ `attention/1-agent` ↔ `attention/2-user` ↔ `attention/3-ignore` (action token).
 - **`priority/` Scope**: `priority/0-SOS` ↔ `priority/1-high` ↔ `priority/2-normal` ↔ `priority/3-low` ↔ `priority/4-backburner`.
 
 ### Board Prioritization & Intelligence Model

@@ -302,11 +302,11 @@ All repository workflows use two-tone exclusive scoped labels (`scope/name`):
 | **Review** | `review/0-needed`, `review/1-changes-requested`, `review/2-approved` | Formal diff and architectural signoff gate. |
 | **Verify** | `verify/automated-ok`, `verify/needs-device` | Automated suites pass vs physical desktop/hardware verification needed. |
 | **Upstream** | `upstream/0-explore`, `upstream/1-blocked`, `upstream/2-aligned` | Upstream Paseo core tracking and alignment. |
-| **Attention** | `attention/0-agent`, `attention/1-user`, `attention/2-ignore` | Signal target (`attention/0-agent` requests agent triage). |
+| **Attention** | `attention/0-orchestrator`, `attention/1-agent`, `attention/2-user`, `attention/3-ignore` | Signal target (`0-orchestrator` requests triage; `1-agent` requests worker claim). |
 | **Flags** | `flag/evergreen`, `flag/security`, `flag/stop-work`, `flag/wont-do`, `flag/audit` | Behavioral flags (`stop-work` is a hard circuit breaker). |
-| **Target** | `target/helper`, `target/top`, `target/x-comms`, `target/mcp-tools`, `target/forgejo`, `target/monorepo`, `target/daemon` | Domain or package boundary. |
+| **Target** | `target/helper`, `target/top`, `target/x-comms`, `target/mcp-tools`, `target/forgejo`, `target/monorepo`, `target/daemon`, `target/paseo-plugin` | Domain or package boundary. |
 
-Label combinations steer autonomous agents deterministically: an issue requires `state/0-triage` + `spec/2-approved` (or `attention/0-agent`) without blocking labels (`dep/blocked`, `flag/stop-work`, `size/3-chunk`, `linked/0-needs-split`) to qualify for autonomous claim.
+Label combinations steer autonomous agents deterministically: an issue requires `state/0-triage` + `spec/2-approved` (or `attention/1-agent`) without blocking labels (`dep/blocked`, `flag/stop-work`, `size/3-chunk`, `linked/0-needs-split`, `attention/0-orchestrator`) to qualify for autonomous claim.
 
 ---
 

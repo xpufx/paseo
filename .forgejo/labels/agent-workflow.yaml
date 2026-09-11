@@ -164,17 +164,22 @@ labels:
   # ============================================================================
   # Attention Scope (Mutually Exclusive - Ordered by Urgency)
   # ============================================================================
-  - name: "attention/0-agent"
+  - name: "attention/0-orchestrator"
+    color: "#1d76db"
+    exclusive: true
+    description: "Requires Orchestrator triage, decomposition, or dispatch"
+
+  - name: "attention/1-agent"
     color: "#0e8a16"
     exclusive: true
-    description: "Active signal for agent inspection or pickup"
+    description: "Active signal for autonomous worker agent inspection or pickup"
 
-  - name: "attention/1-user"
+  - name: "attention/2-user"
     color: "#b60205"
     exclusive: true
     description: "Blocked on human operator clarification"
 
-  - name: "attention/2-ignore"
+  - name: "attention/3-ignore"
     color: "#6b7280"
     exclusive: true
     description: "Suppresses automated agent triage unless escalated with SOS"
