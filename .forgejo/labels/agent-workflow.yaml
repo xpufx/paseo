@@ -138,6 +138,11 @@ labels:
     exclusive: true
     description: "High cognitive load, broad refactor, or multi-package change"
 
+  - name: "size/3-chunk"
+    color: "#e11d48"
+    exclusive: true
+    description: "Oversized scope; halt implementation and chunk into smaller PRs/tickets"
+
   # ============================================================================
   # Upstream Scope (Mutually Exclusive - Ordered by Status)
   # ============================================================================
@@ -261,7 +266,7 @@ labels:
     description: "Concerns backend daemons, system services, or socket protocols"
 
   # ============================================================================
-  # Dependency Scope (Non-Exclusive to allow complex links)
+  # Dependency Scope (Exclusive Scoped Badge)
   # ============================================================================
   - name: "dep/blocker"
     color: "#b60205"
@@ -272,6 +277,24 @@ labels:
     color: "#e99695"
     exclusive: true
     description: "This issue is blocked waiting on another issue"
+
+  # ============================================================================
+  # Linked / Cluster Coordination Scope (Mutually Exclusive - Ordered by Stage)
+  # ============================================================================
+  - name: "linked/0-needs-split"
+    color: "#e11d48"
+    exclusive: true
+    description: "Multiple cross-cutting concerns; halt implementation and split into domain tickets"
+
+  - name: "linked/1-peer"
+    color: "#5319e7"
+    exclusive: true
+    description: "Part of an active cluster of co-evolving sister issues (see Linked: line)"
+
+  - name: "linked/2-done"
+    color: "#0e8a16"
+    exclusive: true
+    description: "All sister/peer issues merged and verified; synchronization resolved"
 
   # ============================================================================
   # Special / Behavioral Flags

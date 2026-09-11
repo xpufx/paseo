@@ -286,52 +286,27 @@ fgjx issue list --sort updated --not-by xpufx   # what moved without you
 fgjx issue view 12                              # labels, body, comments
 ```
 
-### Labels, in importance order
+### Scoped Label Taxonomy
 
-| Label | Meaning |
-| :--- | :--- |
-| `SOS` | **Critical emergency — trumps all.** Immediate pickup required. |
-| `user-attention` | Blocked or ambiguous requirements; requires explicit human direction with a clear comment. |
-| `agent-attention` | Available task signal. If aging with no blocking labels, must be handed out/claimed immediately. |
-| `high priority` | Do before routine work. |
-| `green-light` | Ready for an agent to pick up. |
-| `stop-work` | Halt all work on this issue immediately. |
-| `agent-ignore` | Hard silence. Agents shall ignore entirely UNLESS `SOS` is set. |
-| `backburner` | Lowest priority task at bottom of queue. Surfaced only periodically. |
-| `wip` | An agent is actively working on it (must be set on claim). |
-| `ready-for-review` | Work complete, ready for Orchestrator review. |
-| `verify` | Built, awaiting human verification on device. |
-| `agent-finished` | Agent completed its check/work (pairs with `agent-attention`). |
-| `blocker` | This issue blocks other issues. |
-| `blockee` | Blocked by another issue. |
-| `security` | Secrets, credentials, exfiltration surface. |
-| `bug` | Defect, not a feature. |
-| `spec` | Needs a detailed spec before building. |
-| `triage` | Needs initial sorting before entering the queue. |
-| `explore` | Initial exploration of an idea, problem space, or existing code. |
-| `discussion` | Open question, decide before building. |
-| `idea` | Raw idea, not yet shaped. |
-| `checklistify-issue` | Make a checklist of deliverables or steps. |
-| `format-issue` | Agent reformats issue for clarity. |
-| `upstream-check` | Check upstream Paseo PRs, issues, code, and discussions first. |
-| `upstream` | Blocked on upstream Paseo changes. |
-| `audit` | Needs a doctor/audit pass. |
-| `chore` | Routine maintenance, no product change. |
-| `meta` | Repo and Forgejo housekeeping. |
-| `evergreen` | Living tracker, grows instead of closing. |
-| `new-plugin` | Idea grown into a plugin proposal. |
-| `expensive` | Big build, think before starting. |
-| `cheap` | Small, safe to just do. |
-| `low priority` | Whenever, no urgency. |
-| `plugin:helper` | Concerns paseo-plugin-helper. |
-| `plugin:top` | Concerns the top plugin. |
-| `plugin:mcp-tools` | Concerns the mcp-tools plugin. |
-| `plugin:x-comms` | Concerns the x-comms plugin. |
+All repository workflows use two-tone exclusive scoped labels (`scope/name`):
 
-Label instructions are work orders: `format-issue` and `checklistify-issue`
-mean reformat and checklist the issue, then remove those labels when done.
-`agent-attention` issues that age without active blockers trigger immediate
-pickup under our board dispatch heuristics.
+| Scope | Labels | Purpose & Lifecycle |
+| :--- | :--- | :--- |
+| **Priority** | `priority/0-SOS`, `priority/1-high`, `priority/2-normal`, `priority/3-low`, `priority/4-backburner` | Urgency tier (`0-SOS` preempts all tasks immediately). |
+| **State** | `state/0-triage`, `state/1-wip`, `state/2-review`, `state/3-verify`, `state/4-done` | Execution stage lifecycle. |
+| **Spec** | `spec/0-needed`, `spec/1-checklist`, `spec/2-approved` | Shaping gate (`spec/2-approved` allows autonomous coding). |
+| **Format** | `format/0-needed`, `format/1-ok` | Presentation and markdown quality check. |
+| **Size** | `size/0-cheap`, `size/1-medium`, `size/2-expensive`, `size/3-chunk` | Cognitive effort; `size/3-chunk` halts implementation to slice PRs. |
+| **Linked** | `linked/0-needs-split`, `linked/1-peer`, `linked/2-done` | Cluster coordination (`0-needs-split` splits domain; `1-peer` syncs via `Linked: #...`). |
+| **Dep** | `dep/blocker`, `dep/blocked` | Hard issue dependencies. |
+| **Review** | `review/0-needed`, `review/1-changes-requested`, `review/2-approved` | Formal diff and architectural signoff gate. |
+| **Verify** | `verify/automated-ok`, `verify/needs-device` | Automated suites pass vs physical desktop/hardware verification needed. |
+| **Upstream** | `upstream/0-explore`, `upstream/1-blocked`, `upstream/2-aligned` | Upstream Paseo core tracking and alignment. |
+| **Attention** | `attention/0-agent`, `attention/1-user`, `attention/2-ignore` | Signal target (`attention/0-agent` requests agent triage). |
+| **Flags** | `flag/evergreen`, `flag/security`, `flag/stop-work`, `flag/wont-do`, `flag/audit` | Behavioral flags (`stop-work` is a hard circuit breaker). |
+| **Target** | `target/helper`, `target/top`, `target/x-comms`, `target/mcp-tools`, `target/forgejo`, `target/monorepo`, `target/daemon` | Domain or package boundary. |
+
+Label combinations steer autonomous agents deterministically: an issue requires `state/0-triage` + `spec/2-approved` (or `attention/0-agent`) without blocking labels (`dep/blocked`, `flag/stop-work`, `size/3-chunk`, `linked/0-needs-split`) to qualify for autonomous claim.
 
 ---
 
