@@ -192,36 +192,36 @@ labels:
     description: "Code restructuring without changing external behavior"
 
   # ============================================================================
-  # Target / Package Scope (Non-Exclusive to allow multi-package issues)
+  # Target / Package Scope (Exclusive Scoped Badge)
   # ============================================================================
   - name: "target/helper"
     color: "#bfdadc"
-    exclusive: false
+    exclusive: true
     description: "Concerns packages/paseo-plugin-helper"
 
   - name: "target/top"
     color: "#c5def5"
-    exclusive: false
+    exclusive: true
     description: "Concerns plugins/top"
 
   - name: "target/x-comms"
     color: "#d4c5f9"
-    exclusive: false
+    exclusive: true
     description: "Concerns plugins/x-comms"
 
   - name: "target/mcp-tools"
     color: "#e99695"
-    exclusive: false
+    exclusive: true
     description: "Concerns plugins/mcp-tools"
 
   - name: "target/forgejo"
     color: "#ff7600"
-    exclusive: false
+    exclusive: true
     description: "Concerns plugins/forgejo"
 
   - name: "target/monorepo"
     color: "#f9d0c4"
-    exclusive: false
+    exclusive: true
     description: "Concerns root workspace or cross-cutting configuration"
 
   # ============================================================================
