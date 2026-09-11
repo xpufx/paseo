@@ -2,6 +2,164 @@
 # Compatible with Forgejo label templates & REST API
 labels:
   # ============================================================================
+  # Kind / Nature Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "kind/bug"
+    color: "#ee0701"
+    exclusive: true
+    description: "Defect or unexpected breakage, not a feature"
+
+  - name: "kind/feature"
+    color: "#0288d1"
+    exclusive: true
+    description: "New user-facing functionality or capability"
+
+  - name: "kind/chore"
+    color: "#a2eeef"
+    exclusive: true
+    description: "Routine maintenance, dependency bump, internal cleanup"
+
+  - name: "kind/discussion"
+    color: "#cc317c"
+    exclusive: true
+    description: "Open architectural question or debate; decide before building"
+
+  - name: "kind/explore"
+    color: "#84b6eb"
+    exclusive: true
+    description: "Research or technical spike into problem space or feasibility"
+
+  - name: "kind/idea"
+    color: "#fbca04"
+    exclusive: true
+    description: "Raw proposal or brainstorm, not yet shaped"
+
+  - name: "kind/meta"
+    color: "#5319e7"
+    exclusive: true
+    description: "Repo housekeeping, board workflow, or tooling"
+
+  - name: "kind/docs"
+    color: "#0075ca"
+    exclusive: true
+    description: "Documentation, style guide, or usage guides"
+
+  - name: "kind/refactor"
+    color: "#1d76db"
+    exclusive: true
+    description: "Code restructuring without changing external behavior"
+
+  # ============================================================================
+  # Size / Effort Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "size/cheap"
+    color: "#c2e0c6"
+    exclusive: true
+    description: "Small, low-risk task safe for autonomous worker dispatch"
+
+  - name: "size/medium"
+    color: "#fef2c0"
+    exclusive: true
+    description: "Standard sprint task with defined scope"
+
+  - name: "size/expensive"
+    color: "#f9d0c4"
+    exclusive: true
+    description: "High cognitive load, broad refactor, or multi-package change"
+
+  # ============================================================================
+  # Upstream Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "upstream/explore"
+    color: "#5319e7"
+    exclusive: true
+    description: "Investigate upstream Paseo core repos, PRs, and docs before coding"
+
+  - name: "upstream/blocked"
+    color: "#880e4f"
+    exclusive: true
+    description: "Hard dependency blocked on an upstream Paseo release or fix"
+
+  - name: "upstream/aligned"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Verified aligned and compatible with upstream Paseo"
+
+  # ============================================================================
+  # Target / Package Scope (Non-Exclusive to allow multi-package issues)
+  # ============================================================================
+  - name: "target/helper"
+    color: "#bfdadc"
+    exclusive: false
+    description: "Concerns packages/paseo-plugin-helper"
+
+  - name: "target/top"
+    color: "#c5def5"
+    exclusive: false
+    description: "Concerns plugins/top"
+
+  - name: "target/x-comms"
+    color: "#d4c5f9"
+    exclusive: false
+    description: "Concerns plugins/x-comms"
+
+  - name: "target/mcp-tools"
+    color: "#e99695"
+    exclusive: false
+    description: "Concerns plugins/mcp-tools"
+
+  - name: "target/forgejo"
+    color: "#ff7600"
+    exclusive: false
+    description: "Concerns plugins/forgejo"
+
+  - name: "target/monorepo"
+    color: "#f9d0c4"
+    exclusive: false
+    description: "Concerns root workspace or cross-cutting configuration"
+
+  # ============================================================================
+  # Dependency Scope (Non-Exclusive to allow complex links)
+  # ============================================================================
+  - name: "dep/blocker"
+    color: "#b60205"
+    exclusive: false
+    description: "This issue blocks other issues from proceeding"
+
+  - name: "dep/blocked"
+    color: "#e99695"
+    exclusive: false
+    description: "This issue is blocked waiting on another issue"
+
+  # ============================================================================
+  # Special / Behavioral Flags (Scoped under 'flag/' to avoid bare tags)
+  # ============================================================================
+  - name: "flag/evergreen"
+    color: "#0e8a16"
+    exclusive: false
+    description: "Living tracker or operational standard; remains open"
+
+  - name: "flag/security"
+    color: "#b60205"
+    exclusive: false
+    description: "Concerns authentication, secrets, or exfiltration boundary"
+
+  - name: "flag/stop-work"
+    color: "#e11d48"
+    exclusive: false
+    description: "Circuit breaker; halt all work on this issue immediately"
+
+  - name: "flag/wont-do"
+    color: "#ffffff"
+    exclusive: false
+    description: "Decided against; preserved for architectural record"
+
+  - name: "flag/audit"
+    color: "#fbca04"
+    exclusive: false
+    description: "Requires codebase audit or health check pass"
+
+  # ============================================================================
   # Presentation & Formatting Scope (Mutually Exclusive)
   # ============================================================================
   - name: "format/needed"
@@ -95,6 +253,11 @@ labels:
     color: "#0e8a16"
     exclusive: true
     description: "Normal priority task"
+
+  - name: "priority/low"
+    color: "#808080"
+    exclusive: true
+    description: "Low priority task"
 
   - name: "priority/backburner"
     color: "#8a8a8a"
