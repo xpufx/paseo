@@ -92,9 +92,10 @@ Understand the intent of board labels:
   - **Mandatory Requirement**: Whenever applying `user-attention`, the agent **MUST** post a clear, precise comment directly addressing the human user (`@oktay`) stating what options exist and what exact clarification or decision is required to unblock execution.
 - **`upstream-check` / `check-upstream`**: Steering instruction. Before implementing custom logic or local workarounds, investigate upstream Paseo code, releases, PRs, issues, or discussions to see what Paseo already provides, plans to support, or how it implements the pattern natively.
 - **`upstream`**: Blocked directly on an upstream Paseo capability or bug fix.
-- **`format-issue` / `checklistify-issue` / `spec` (Two-Phase Steering Flow)**:
-  - **Phase 1: Shape & Plan**: When these labels are present (even alongside `agent-attention`), the agent's job is **strictly pre-code shaping**. Ingest human steering from comments/chat, update the ticket body with clear specifications, boundary constraints, and concrete `- [ ]` checklists. **Zero code or file modifications are permitted during this phase.**
-  - **Phase 2: Human Approval (`green-light`)**: Once shaped, remove `checklistify-issue`/`format-issue`, attach `ready-for-review`, and wait. Implementation may **ONLY** begin after the human operator reviews the checklist and explicitly applies `green-light`.
+- **`format-issue`**: Clean up presentation, spelling, typos, broken markdown, code blocks, or formatting of the issue text without altering what it says or changing the author's meaning/intent.
+- **`checklistify-issue` / `spec` (Pre-Code Steering Flow)**:
+  - **Phase 1: Shape & Plan**: When `checklistify-issue` or `spec` is present, the agent's job is **strictly pre-code shaping**. Ingest human steering, update the ticket body with clear specifications, boundary constraints, and concrete `- [ ]` checklists. **Zero code or file modifications are permitted during this phase.**
+  - **Phase 2: Human Approval (`green-light`)**: Once shaped, remove `checklistify-issue`/`spec`, attach `ready-for-review`, and wait. Implementation may **ONLY** begin after the human operator reviews the checklist and explicitly applies `green-light`.
 - **`green-light`**: Explicit human authorization that the specification and checklist are approved for implementation.
 - **`SOS`**: Highest priority urgent dispatch. Any available coding agent should claim and tackle this immediately.
 - **`stop-work`**: Circuit breaker scoped strictly to this issue. If working on this issue, stop immediately—do not commit or push further changes for it.
