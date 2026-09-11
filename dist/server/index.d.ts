@@ -6,35 +6,57 @@ import '../rpc-D27pph91.js';
 interface PluginStorageOptions<T> {
     defaultData?: T;
     /**
-     * Base directory override. Defaults to ~/.paseo
+     * Base directory override. When provided, storage is located at path.join(baseDir, pluginId).
+     * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "xpufx-plugins", pluginId).
      */
     baseDir?: string;
+    /**
+     * Namespace directory under ~/.paseo. Defaults to "xpufx-plugins".
+     */
+    namespace?: string;
+    /**
+     * Legacy directory override for backward compatibility testing or custom setups.
+     */
+    legacyDir?: string;
     /**
      * Optional Zod schema to validate and parse data on read/write, automatically applying defaults.
      */
     schema?: ZodType<T>;
 }
+interface StorageStats {
+    path: string;
+    fileCount: number;
+    totalBytes: number;
+    lastModified: Date | null;
+}
+declare const DEFAULT_NAMESPACE_README = "# Paseo Plugins Storage (xpufx)\n\nThis directory is managed by `paseo-plugin-helper` to store persistent settings, cached metrics, and state for plugins.\n- Safe to inspect or backup.\n- Avoid editing files manually while the Paseo daemon is active.\n";
 /**
  * Scoped, atomic filesystem-backed document storage for Paseo daemon plugins.
  * Automatically handles directory creation, atomic temporary file swaps,
- * schema validation, and default state fallback.
+ * schema validation, default state fallback, and isolated namespace auditing.
  */
 declare class PluginStorage<T extends Record<string, any>> {
     readonly pluginId: string;
     readonly filename: string;
+    readonly pluginDir: string;
     readonly filePath: string;
+    readonly namespaceDir: string | null;
+    readonly legacyPluginDir: string | null;
+    readonly legacyFilePath: string | null;
     readonly defaultData?: T;
     readonly schema?: ZodType<T>;
     constructor(pluginId: string, filename?: string, options?: PluginStorageOptions<T>);
     private ensureDir;
+    private checkMigrateLegacy;
+    private checkMigrateLegacyAsync;
     private getDefault;
     private parseData;
     /**
-     * Checks if the backing state file exists.
+     * Checks if the backing state file exists (in primary or legacy path).
      */
     exists(): boolean;
     /**
-     * Reads data synchronously. If file does not exist, returns defaultData or schema defaults.
+     * Reads data synchronously. If file does not exist, checks legacy location or returns defaultData.
      */
     read(): T;
     /**
@@ -61,6 +83,14 @@ declare class PluginStorage<T extends Record<string, any>> {
      * Removes the state file if it exists.
      */
     reset(): void;
+    /**
+     * Audits storage consumption, returning path, fileCount, totalBytes, and lastModified.
+     */
+    getStorageStats(): Promise<StorageStats>;
+    /**
+     * Alias for getStorageStats()
+     */
+    getStats(): Promise<StorageStats>;
 }
 
 /**
@@ -646,4 +676,4 @@ interface LoopWatchdogOptions {
 }
 declare function createLoopWatchdog(options?: LoopWatchdogOptions): () => void;
 
-export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type StampVersionOptions, type SystemMetrics, type UpsertMcpServerOptions, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };

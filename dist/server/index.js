@@ -6,10 +6,20 @@ import net from 'net';
 import { z } from 'zod';
 
 // src/server/storage.ts
+var DEFAULT_NAMESPACE_README = `# Paseo Plugins Storage (xpufx)
+
+This directory is managed by \`paseo-plugin-helper\` to store persistent settings, cached metrics, and state for plugins.
+- Safe to inspect or backup.
+- Avoid editing files manually while the Paseo daemon is active.
+`;
 var PluginStorage = class {
   pluginId;
   filename;
+  pluginDir;
   filePath;
+  namespaceDir;
+  legacyPluginDir;
+  legacyFilePath;
   defaultData;
   schema;
   constructor(pluginId, filename = "state.json", options = {}) {
@@ -17,14 +27,53 @@ var PluginStorage = class {
     this.filename = filename;
     this.defaultData = options.defaultData;
     this.schema = options.schema;
-    const base = options.baseDir || path3.join(os3.homedir(), ".paseo");
-    const pluginDir = path3.join(base, pluginId);
-    this.filePath = path3.join(pluginDir, filename);
+    const namespace = options.namespace ?? "xpufx-plugins";
+    if (options.baseDir) {
+      this.namespaceDir = options.baseDir;
+      this.pluginDir = path3.join(options.baseDir, pluginId);
+      this.legacyPluginDir = options.legacyDir ?? null;
+    } else {
+      this.namespaceDir = path3.join(os3.homedir(), ".paseo", namespace);
+      this.pluginDir = path3.join(this.namespaceDir, pluginId);
+      this.legacyPluginDir = options.legacyDir ?? path3.join(os3.homedir(), ".paseo", pluginId);
+    }
+    this.filePath = path3.join(this.pluginDir, filename);
+    this.legacyFilePath = this.legacyPluginDir ? path3.join(this.legacyPluginDir, filename) : null;
   }
   ensureDir() {
+    if (this.namespaceDir && !fs.existsSync(this.namespaceDir)) {
+      fs.mkdirSync(this.namespaceDir, { recursive: true });
+    }
+    if (this.namespaceDir) {
+      const readmePath = path3.join(this.namespaceDir, "README.md");
+      if (!fs.existsSync(readmePath)) {
+        try {
+          fs.writeFileSync(readmePath, DEFAULT_NAMESPACE_README, "utf8");
+        } catch {
+        }
+      }
+    }
     const dir = path3.dirname(this.filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+  checkMigrateLegacy() {
+    if (!fs.existsSync(this.filePath) && this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
+      try {
+        this.ensureDir();
+        fs.copyFileSync(this.legacyFilePath, this.filePath);
+      } catch {
+      }
+    }
+  }
+  async checkMigrateLegacyAsync() {
+    if (!fs.existsSync(this.filePath) && this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
+      try {
+        this.ensureDir();
+        await fs.promises.copyFile(this.legacyFilePath, this.filePath);
+      } catch {
+      }
     }
   }
   getDefault() {
@@ -47,17 +96,24 @@ var PluginStorage = class {
     return raw;
   }
   /**
-   * Checks if the backing state file exists.
+   * Checks if the backing state file exists (in primary or legacy path).
    */
   exists() {
-    return fs.existsSync(this.filePath);
+    if (fs.existsSync(this.filePath)) return true;
+    if (this.legacyFilePath && fs.existsSync(this.legacyFilePath)) return true;
+    return false;
   }
   /**
-   * Reads data synchronously. If file does not exist, returns defaultData or schema defaults.
+   * Reads data synchronously. If file does not exist, checks legacy location or returns defaultData.
    */
   read() {
     try {
+      this.checkMigrateLegacy();
       if (!fs.existsSync(this.filePath)) {
+        if (this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
+          const raw2 = fs.readFileSync(this.legacyFilePath, "utf8");
+          return this.parseData(JSON.parse(raw2));
+        }
         return this.getDefault();
       }
       const raw = fs.readFileSync(this.filePath, "utf8");
@@ -71,7 +127,12 @@ var PluginStorage = class {
    */
   async readAsync() {
     try {
+      await this.checkMigrateLegacyAsync();
       if (!fs.existsSync(this.filePath)) {
+        if (this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
+          const raw2 = await fs.promises.readFile(this.legacyFilePath, "utf8");
+          return this.parseData(JSON.parse(raw2));
+        }
         return this.getDefault();
       }
       const raw = await fs.promises.readFile(this.filePath, "utf8");
@@ -132,6 +193,42 @@ var PluginStorage = class {
       } catch {
       }
     }
+  }
+  /**
+   * Audits storage consumption, returning path, fileCount, totalBytes, and lastModified.
+   */
+  async getStorageStats() {
+    const stats = {
+      path: this.pluginDir,
+      fileCount: 0,
+      totalBytes: 0,
+      lastModified: null
+    };
+    if (!fs.existsSync(this.pluginDir)) {
+      return stats;
+    }
+    try {
+      const entries = await fs.promises.readdir(this.pluginDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile()) {
+          stats.fileCount++;
+          const target = path3.join(this.pluginDir, entry.name);
+          const st = await fs.promises.stat(target);
+          stats.totalBytes += st.size;
+          if (!stats.lastModified || st.mtime > stats.lastModified) {
+            stats.lastModified = st.mtime;
+          }
+        }
+      }
+    } catch {
+    }
+    return stats;
+  }
+  /**
+   * Alias for getStorageStats()
+   */
+  async getStats() {
+    return this.getStorageStats();
   }
 };
 
@@ -1519,6 +1616,6 @@ function createLoopWatchdog(options = {}) {
   return () => clearInterval(timer);
 }
 
-export { CpuSampler, CustomPillPoller, McpConfigPaths, PluginStorage, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { CpuSampler, CustomPillPoller, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

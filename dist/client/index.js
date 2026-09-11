@@ -172,6 +172,123 @@ function responsiveSelect(layout, options) {
   if (options.mobile !== void 0) return options.mobile;
   return void 0;
 }
+
+// src/client/theme/tokens.ts
+var spacing = {
+  xxs: 2,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24
+};
+var FALLBACK_ACCENT_FOREGROUND = "#ffffff";
+function resolveElevation(level) {
+  switch (level) {
+    case "none":
+      return {
+        shadowColor: "#000",
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 0
+      };
+    case "sm":
+      return {
+        shadowColor: "#000",
+        shadowOpacity: 0.12,
+        shadowRadius: 3,
+        shadowOffset: { width: 0, height: 1 },
+        elevation: 1
+      };
+    case "lg":
+      return {
+        shadowColor: "#000",
+        shadowOpacity: 0.24,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 4
+      };
+    case "md":
+    default:
+      return {
+        shadowColor: "#000",
+        shadowOpacity: 0.18,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2
+      };
+  }
+}
+function elevationForPlatform(level, platform) {
+  const style = resolveElevation(level);
+  if (platform !== "android") {
+    return { ...style, elevation: 0 };
+  }
+  return style;
+}
+
+// src/client/theme/host-variables.ts
+var PASEO_HOST_CSS_VARIABLES = {
+  "--background": "surface0",
+  "--foreground": "foreground",
+  "--muted": "foregroundMuted",
+  "--accent": "accent",
+  "--accent-foreground": "accentForeground",
+  "--border": "border"
+};
+var HOST_FONT_VARIABLES = {
+  sans: ["--font-sans", "--font-family"],
+  mono: ["--font-mono", "--font-family-monospace"]
+};
+function readVariable(names) {
+  const runtime = globalThis;
+  const doc = runtime.document;
+  if (!doc?.documentElement) return void 0;
+  const getStyle = runtime.getComputedStyle ?? doc.defaultView?.getComputedStyle.bind(doc.defaultView);
+  if (!getStyle) return void 0;
+  try {
+    const computed = getStyle(doc.documentElement);
+    for (const name of names) {
+      const value = computed.getPropertyValue(name).trim().replace(/^["']|["']$/g, "");
+      if (value) return value;
+    }
+  } catch {
+  }
+  return void 0;
+}
+function readHostThemeVariables() {
+  const colors = {};
+  for (const [variable, slot] of Object.entries(PASEO_HOST_CSS_VARIABLES)) {
+    const value = readVariable([variable]);
+    if (value) {
+      colors[slot] = value;
+    }
+  }
+  const fonts = {};
+  const sans = readVariable(HOST_FONT_VARIABLES.sans);
+  if (sans) fonts.sans = sans;
+  const mono = readVariable(HOST_FONT_VARIABLES.mono);
+  if (mono) fonts.mono = mono;
+  return { colors, fonts };
+}
+function definedValues(obj) {
+  const out = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== void 0) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+function mergeThemeColors(defaults, hostVariables, injected, accentOverride) {
+  return {
+    ...defaults,
+    ...definedValues(hostVariables),
+    ...definedValues(injected),
+    ...accentOverride ? { accent: accentOverride } : {}
+  };
+}
 var defaultLayout = {
   compact: false,
   platform: "web"
@@ -220,6 +337,7 @@ var initialDefaultTheme = getDefaultTheme();
 var PluginThemeContext = createContext({
   theme: initialDefaultTheme,
   colors: initialDefaultTheme.colors,
+  fonts: {},
   layout: defaultLayout,
   flair: defaultFlair,
   isCompact: false,
@@ -240,10 +358,13 @@ function PluginThemeProvider({
 }) {
   const value = useMemo(() => {
     const flair = { ...defaultFlair, ...userFlair };
-    const effectiveColors = {
-      ...theme.colors,
-      ...flair.accentColor ? { accent: flair.accentColor } : {}
-    };
+    const hostVariables = readHostThemeVariables();
+    const effectiveColors = mergeThemeColors(
+      getDefaultTheme().colors,
+      hostVariables.colors,
+      theme.colors,
+      flair.accentColor
+    );
     const isCompact = Boolean(layout.compact);
     const isMobile = isMobilePlatform(layout.platform);
     const touchTargetMin = getTouchTargetMin(layout);
@@ -251,6 +372,7 @@ function PluginThemeProvider({
     return {
       theme,
       colors: effectiveColors,
+      fonts: hostVariables.fonts,
       layout,
       flair,
       isCompact,
@@ -334,7 +456,7 @@ function Button({
   switch (variant) {
     case "primary":
       bg = colors.accent;
-      textColor = colors.accentForeground || "#ffffff";
+      textColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
       break;
     case "danger":
       bg = alpha2(colors.statusDanger, 0.15);
@@ -438,7 +560,7 @@ function Badge({
   } else if (styleVariant === "solid") {
     bg = solidColor;
     border = "transparent";
-    textColor = colors.accentForeground || "#ffffff";
+    textColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
   }
   const renderIcon = () => {
     if (dot) {
@@ -637,7 +759,7 @@ function CardHeader({
   ] });
 }
 function Card({ children, variant, style, noPadding = false }) {
-  const { colors, flair, resolveRadius: resolveRadius2, isCompact, alpha: alpha2 } = usePluginTheme();
+  const { colors, flair, resolveRadius: resolveRadius2, padding, alpha: alpha2 } = usePluginTheme();
   const effectiveVariant = variant || flair.surfaceStyle;
   const radius = resolveRadius2("md");
   let bg = colors.surface0;
@@ -649,7 +771,6 @@ function Card({ children, variant, style, noPadding = false }) {
     bg = colors.surface1;
     border = colors.border;
   }
-  const padding = noPadding ? 0 : isCompact ? 12 : 16;
   return /* @__PURE__ */ jsx(
     View,
     {
@@ -660,7 +781,8 @@ function Card({ children, variant, style, noPadding = false }) {
           borderColor: border,
           borderRadius: radius,
           borderWidth: flair.borderWidth,
-          padding
+          paddingHorizontal: noPadding ? 0 : padding.horizontal,
+          paddingVertical: noPadding ? 0 : padding.vertical
         },
         style
       ],
@@ -799,8 +921,8 @@ function Tabs({
             borderRadius: radius - 2,
             minHeight: Math.max(30, touchTargetMin - 8),
             backgroundColor: isActive ? colors.surface2 : pressed ? alpha2(colors.surface2, 0.5) : "transparent",
-            paddingHorizontal: shouldFit ? isCompact ? 6 : 12 : 14,
-            paddingVertical: isCompact ? 5 : 7
+            paddingHorizontal: shouldFit ? isCompact ? spacing.sm : spacing.md : spacing.md,
+            paddingVertical: isCompact ? spacing.xs : spacing.sm
           }
         ],
         children: [
@@ -842,7 +964,7 @@ function Tabs({
                   style: [
                     styles5.badgeText,
                     {
-                      color: isActive ? colors.accentForeground || "#ffffff" : colors.foregroundMuted
+                      color: isActive ? colors.accentForeground || FALLBACK_ACCENT_FOREGROUND : colors.foregroundMuted
                     }
                   ],
                   children: tab.badge
@@ -1002,10 +1124,7 @@ var styles5 = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     top: 5,
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
-    elevation: 2
+    ...resolveElevation("sm")
   },
   arrowLeft: {
     left: 4
@@ -1564,11 +1683,7 @@ var styles9 = StyleSheet.create({
     justifyContent: "center"
   },
   thumb: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.5,
-    elevation: 2
+    ...resolveElevation("sm")
   }
 });
 function Collapsible({
@@ -2164,7 +2279,7 @@ function KeyValue({
   valueStyle
 }) {
   const { Icon: Icon2, useToast } = getClientHost();
-  const { colors, flair, isCompact, touchTargetMin } = usePluginTheme();
+  const { colors, flair, isCompact, touchTargetMin, fonts } = usePluginTheme();
   const toast = useToast();
   const [copied, setCopied] = useState(false);
   const displayValue = value === null || value === void 0 ? "-" : String(value);
@@ -2179,7 +2294,7 @@ function KeyValue({
       setTimeout(() => setCopied(false), 2e3);
     }
   };
-  const fontFamily = mono ? Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }) : void 0;
+  const fontFamily = mono ? fonts.mono ?? Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }) : void 0;
   const shouldStack = stackOnCompact && isCompact;
   const copyButton = copyable && value ? /* @__PURE__ */ jsx(
     Pressable,
@@ -2200,8 +2315,79 @@ function KeyValue({
     }
   ) : null;
   if (shouldStack) {
-    return /* @__PURE__ */ jsxs(View, { style: [styles14.container, styles14.stackedContainer, style], children: [
-      /* @__PURE__ */ jsxs(View, { style: styles14.stackedHeaderRow, children: [
+    return /* @__PURE__ */ jsxs(
+      View,
+      {
+        style: [
+          styles14.container,
+          styles14.stackedContainer,
+          { paddingVertical: isCompact ? spacing.xs : spacing.sm },
+          style
+        ],
+        children: [
+          /* @__PURE__ */ jsxs(View, { style: styles14.stackedHeaderRow, children: [
+            /* @__PURE__ */ jsx(
+              Text,
+              {
+                style: [
+                  styles14.label,
+                  {
+                    color: colors.foregroundMuted,
+                    fontSize: 11,
+                    textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none"
+                  },
+                  labelStyle
+                ],
+                children: label
+              }
+            ),
+            copyButton
+          ] }),
+          /* @__PURE__ */ jsx(
+            Text,
+            {
+              selectable: true,
+              style: [
+                styles14.stackedValueText,
+                {
+                  color: colors.foreground,
+                  fontSize: 13,
+                  lineHeight: 19,
+                  fontFamily
+                },
+                valueStyle
+              ],
+              children: displayValue
+            }
+          ),
+          subValue ? /* @__PURE__ */ jsx(
+            Text,
+            {
+              style: [
+                styles14.subValue,
+                {
+                  color: colors.foregroundMuted,
+                  fontSize: 11,
+                  lineHeight: 15
+                }
+              ],
+              children: subValue
+            }
+          ) : null
+        ]
+      }
+    );
+  }
+  return /* @__PURE__ */ jsxs(
+    View,
+    {
+      style: [
+        styles14.container,
+        styles14.rowContainer,
+        { paddingVertical: isCompact ? spacing.xs : spacing.sm },
+        style
+      ],
+      children: [
         /* @__PURE__ */ jsx(
           Text,
           {
@@ -2209,7 +2395,7 @@ function KeyValue({
               styles14.label,
               {
                 color: colors.foregroundMuted,
-                fontSize: 11,
+                fontSize: 12,
                 textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none"
               },
               labelStyle
@@ -2217,83 +2403,34 @@ function KeyValue({
             children: label
           }
         ),
-        copyButton
-      ] }),
-      /* @__PURE__ */ jsx(
-        Text,
-        {
-          selectable: true,
-          style: [
-            styles14.stackedValueText,
+        /* @__PURE__ */ jsxs(View, { style: styles14.rowValueWrapper, children: [
+          /* @__PURE__ */ jsx(
+            Text,
             {
-              color: colors.foreground,
-              fontSize: 13,
-              lineHeight: 19,
-              fontFamily
-            },
-            valueStyle
-          ],
-          children: displayValue
-        }
-      ),
-      subValue ? /* @__PURE__ */ jsx(
-        Text,
-        {
-          style: [
-            styles14.subValue,
-            {
-              color: colors.foregroundMuted,
-              fontSize: 11,
-              lineHeight: 15
+              selectable: true,
+              style: [
+                styles14.rowValueText,
+                {
+                  color: colors.foreground,
+                  fontSize: 13,
+                  fontFamily
+                },
+                valueStyle
+              ],
+              children: displayValue
             }
-          ],
-          children: subValue
-        }
-      ) : null
-    ] });
-  }
-  return /* @__PURE__ */ jsxs(View, { style: [styles14.container, styles14.rowContainer, style], children: [
-    /* @__PURE__ */ jsx(
-      Text,
-      {
-        style: [
-          styles14.label,
-          {
-            color: colors.foregroundMuted,
-            fontSize: 12,
-            textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none"
-          },
-          labelStyle
-        ],
-        children: label
-      }
-    ),
-    /* @__PURE__ */ jsxs(View, { style: styles14.rowValueWrapper, children: [
-      /* @__PURE__ */ jsx(
-        Text,
-        {
-          selectable: true,
-          style: [
-            styles14.rowValueText,
-            {
-              color: colors.foreground,
-              fontSize: 13,
-              fontFamily
-            },
-            valueStyle
-          ],
-          children: displayValue
-        }
-      ),
-      subValue && /* @__PURE__ */ jsx(Text, { style: [styles14.subValue, { color: colors.foregroundMuted, fontSize: 11 }], children: subValue }),
-      copyButton
-    ] })
-  ] });
+          ),
+          subValue && /* @__PURE__ */ jsx(Text, { style: [styles14.subValue, { color: colors.foregroundMuted, fontSize: 11 }], children: subValue }),
+          copyButton
+        ] })
+      ]
+    }
+  );
 }
 function KeyValueGroup({
   children,
   columns = 2,
-  gap = 12,
+  gap = spacing.md,
   style
 }) {
   const { isCompact } = usePluginTheme();
@@ -2314,7 +2451,7 @@ function KeyValueGroup({
 }
 var styles14 = StyleSheet.create({
   container: {
-    paddingVertical: 5
+    width: "100%"
   },
   rowContainer: {
     flexDirection: "row",
@@ -2483,7 +2620,7 @@ function AboutSection({
   style
 }) {
   const { Icon: Icon2 } = getClientHost();
-  const { colors, flair, resolveRadius: resolveRadius2 } = usePluginTheme();
+  const { colors, resolveRadius: resolveRadius2 } = usePluginTheme();
   const { isCompact, platform } = useResponsive();
   const [copied, setCopied] = useState(false);
   let resolvedLogoNode = null;
@@ -2581,20 +2718,23 @@ function AboutSection({
     ...links
   ];
   return /* @__PURE__ */ jsxs(View, { style: [styles16.container, style], children: [
-    /* @__PURE__ */ jsxs(Card, { variant: flair.surfaceStyle, children: [
+    /* @__PURE__ */ jsxs(Card, { variant: "elevated", children: [
+      /* @__PURE__ */ jsx(
+        Card.Header,
+        {
+          title: name,
+          subtitle: description,
+          badge: /* @__PURE__ */ jsx(Badge, { variant: "accent", label: `v${version}` })
+        }
+      ),
       /* @__PURE__ */ jsxs(View, { style: styles16.headerRow, children: [
         resolvedLogoNode,
         /* @__PURE__ */ jsxs(View, { style: styles16.metaColumn, children: [
-          /* @__PURE__ */ jsxs(View, { style: styles16.titleRow, children: [
-            /* @__PURE__ */ jsx(Text, { style: [styles16.nameText, { color: colors.foreground }], children: name }),
-            /* @__PURE__ */ jsx(Badge, { variant: "accent", label: `v${version}` }),
-            license ? /* @__PURE__ */ jsx(Badge, { variant: "neutral", label: license }) : null
-          ] }),
           author ? /* @__PURE__ */ jsxs(Text, { style: [styles16.authorText, { color: colors.foregroundMuted }], children: [
             "by ",
             author
           ] }) : null,
-          description ? /* @__PURE__ */ jsx(Text, { style: [styles16.descText, { color: colors.foregroundMuted }], children: description }) : null
+          license ? /* @__PURE__ */ jsx(View, { style: styles16.titleRow, children: /* @__PURE__ */ jsx(Badge, { variant: "neutral", label: license }) }) : null
         ] })
       ] }),
       /* @__PURE__ */ jsxs(View, { style: styles16.actionsRow, children: [
@@ -2621,7 +2761,7 @@ function AboutSection({
         )
       ] })
     ] }),
-    /* @__PURE__ */ jsxs(Card, { variant: flair.surfaceStyle, children: [
+    /* @__PURE__ */ jsxs(Card, { variant: "elevated", children: [
       /* @__PURE__ */ jsx(
         Card.Header,
         {
@@ -2679,17 +2819,8 @@ var styles16 = StyleSheet.create({
     flexWrap: "wrap",
     gap: 6
   },
-  nameText: {
-    fontSize: 16,
-    fontWeight: "700"
-  },
   authorText: {
     fontSize: 11
-  },
-  descText: {
-    fontSize: 12,
-    lineHeight: 16,
-    marginTop: 2
   },
   actionsRow: {
     flexDirection: "row",
@@ -3693,6 +3824,6 @@ function Icon(props) {
   return /* @__PURE__ */ jsx(HostIconComponent, { ...props });
 }
 
-export { AboutSection, ActionBar, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { AboutSection, ActionBar, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

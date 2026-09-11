@@ -131,9 +131,83 @@ interface ResponsiveSelectOptions<T> {
  */
 declare function responsiveSelect<T>(layout: ResponsiveLayout, options: ResponsiveSelectOptions<T>): T | undefined;
 
+/**
+ * Standard spacing scale (pt/px) shared by every helper surface.
+ * Density rule: compact viewports step exactly one rung down the scale.
+ */
+declare const spacing: {
+    readonly xxs: 2;
+    readonly xs: 4;
+    readonly sm: 8;
+    readonly md: 12;
+    readonly lg: 16;
+    readonly xl: 24;
+};
+type SpacingKey = keyof typeof spacing;
+/** Fallback text color on accent fills when the host omits accentForeground. */
+declare const FALLBACK_ACCENT_FOREGROUND = "#ffffff";
+type ElevationLevel = "none" | "sm" | "md" | "lg";
+interface ElevationStyle {
+    shadowColor: string;
+    shadowOpacity: number;
+    shadowRadius: number;
+    shadowOffset: {
+        width: number;
+        height: number;
+    };
+    elevation: number;
+}
+/**
+ * Standard shadow/elevation presets. shadowColor lives here once so client
+ * components never hardcode their own.
+ */
+declare function resolveElevation(level: ElevationLevel): ElevationStyle;
+/**
+ * Native `elevation` is Android-only; iOS renders the shadow props.
+ * Kept as a helper so call sites read consistently.
+ */
+declare function elevationForPlatform(level: ElevationLevel, platform: PlatformType): ElevationStyle;
+
+/**
+ * Paseo 0.8 host theme variables. On web hosts the live theme is exposed as
+ * CSS custom properties on the document root; this map binds each variable
+ * to the semantic ThemeColors slot it feeds.
+ */
+declare const PASEO_HOST_CSS_VARIABLES: {
+    readonly "--background": "surface0";
+    readonly "--foreground": "foreground";
+    readonly "--muted": "foregroundMuted";
+    readonly "--accent": "accent";
+    readonly "--accent-foreground": "accentForeground";
+    readonly "--border": "border";
+};
+type PaseoHostCssVariable = keyof typeof PASEO_HOST_CSS_VARIABLES;
+interface HostFontVariables {
+    sans?: string;
+    mono?: string;
+}
+interface HostThemeVariables {
+    colors: Partial<ThemeColors>;
+    fonts: HostFontVariables;
+}
+/**
+ * Reads the live Paseo 0.8 host variables. Returns empty slots outside a DOM
+ * runtime so native callers merge to static defaults untouched.
+ */
+declare function readHostThemeVariables(): HostThemeVariables;
+/**
+ * Pure merge for the provider: static defaults lose to live host variables,
+ * which lose to the injected host theme, which loses to the flair accent.
+ * Runtime `undefined` slots are skipped so a partial host theme falls back
+ * instead of blanking a slot. Exported for tests; the provider applies it
+ * inside useMemo.
+ */
+declare function mergeThemeColors(defaults: ThemeColors, hostVariables: Partial<ThemeColors>, injected: ThemeColors, accentOverride?: string): ThemeColors;
+
 interface PluginThemeContextValue {
     theme: PluginTheme;
     colors: ThemeColors;
+    fonts: HostFontVariables;
     layout: ResponsiveLayout;
     flair: VisualFlair;
     isCompact: boolean;
@@ -1196,4 +1270,4 @@ declare function registerCustomPills(client: ComposerPillRegistrar, options: Reg
 
 declare function Icon(props: HostIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonProps, type ButtonSize, type ButtonVariant, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, EmptyState, type EmptyStateProps, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, HostToast, HostWorkspacePanelProps, Icon, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type PillLiveContext, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, type SidebarSurfaceRegistrar, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonProps, type ButtonSize, type ButtonVariant, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillLiveContext, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, type SidebarSurfaceRegistrar, type SpacingKey, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
