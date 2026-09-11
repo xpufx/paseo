@@ -114,6 +114,7 @@ Understand the intent of board labels:
 - **`SOS`**: Highest priority urgent dispatch. Any available coding agent should claim and tackle this immediately.
 - **`stop-work`**: Circuit breaker scoped strictly to this issue. If working on this issue, stop immediately—do not commit or push further changes for it.
 - **`agent-ignore`**: Hard silence directive. Agents shall ignore this issue entirely UNLESS `SOS` is explicitly set. Suppresses automated board triage, aging attention pickup, and routine check triggers unless escalated with `SOS`.
+- **`backburner`**: Lowest priority task. Positioned at the very bottom of the queue. Agents must never prioritize this over standard or high priority work, and the Orchestrator should only surface or mention it periodically if it requires attention.
 - **`blockee` / `blocker`**: Dependency indicators. Check linked blocking issues before proceeding.
 
 ---
@@ -138,7 +139,8 @@ Understand the intent of board labels:
 ### Step 3: Handoff to `Orchestrator` (`ready-for-review`)
 When code is implemented and verified locally:
 1. Push your branch/commits.
-2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`) including:
+2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
+   - **Strict Formatting Standard**: Never dump an unformatted, narrative wall of text. Use clean GitHub-flavored markdown with structured headers (`### Implementation Summary`), bulleted deliverables, explicit code host/repo/branch/SHA, and test results.
    - Summary of changes implemented.
    - Updated checklist showing completed items.
    - Branch name and commit hash(es).
