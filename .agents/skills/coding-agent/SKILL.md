@@ -114,6 +114,7 @@ Understand the intent of board labels:
 - **`SOS`**: Highest priority urgent dispatch. Any available coding agent should claim and tackle this immediately.
 - **`stop-work`**: Circuit breaker scoped strictly to this issue. If working on this issue, stop immediately—do not commit or push further changes for it.
 - **`agent-ignore`**: Hard silence directive. Agents shall ignore this issue entirely UNLESS `SOS` is explicitly set. Suppresses automated board triage, aging attention pickup, and routine check triggers unless escalated with `SOS`.
+- **`backburner`**: Lowest priority task. Positioned at the very bottom of the queue. Agents must never prioritize this over standard or high priority work, and the Orchestrator should only surface or mention it periodically if it requires attention.
 - **`blockee` / `blocker`**: Dependency indicators. Check linked blocking issues before proceeding.
 
 ---
