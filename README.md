@@ -7,5 +7,6 @@ Tracks [issue #30](https://forge.mrs.aager.de/xpufx/paseo-plugin-helper/issues/3
 entries, `client/` / `server/` / `shared/` split, manifest declares
 `requirements.paseo >= 0.8.0`.
 
-Status: scaffold only. Next: pill with open issue count, pill modal,
-timeline linkifier, issue search tab.
+Status: pill with live open-issue count, issue modal, and timeline
+issue-link cards implemented. Remaining: issue search tab, install on both
+daemons, verify.
