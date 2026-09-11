@@ -68,24 +68,13 @@ All agents share authentication under `@xpufx`. Because the Orchestrator does **
 
 ### Envelope Template
 
-Actual comment text comes first. The agent envelope is placed at the bottom, rendered in `<small>`:
+Actual comment text comes first. The agent envelope is appended as a clean, single-line footer rendered automatically when using `--envelope`:
 
 ```markdown
 <Your actual comment / progress report / deliverable here>
 
 ---
-<small>
-
-[x-agent] **<AgentName>** (<ShortId>) via <Provider/Model> on <Hostname>
-
-- **agentId**: <Full UUID or session ID>
-- **agentName**: <Human/Tab name or role>
-- **provider/model**: <e.g. opencode/muse-spark, gemini-3.8-flash, etc.>
-- **daemon serverId**: <srv_... if running inside Paseo, host machine name>
-- **workspace**: <Absolute path to worktree/repo>, branch <branch-name>
-- **action at**: <ISO-8601 UTC timestamp>
-
-</small>
+<sub>🤖 **<AgentName/SessionTitle>** (`<ShortId>`) · `<Model>` · `<Repo>:<Branch>` · _<UTC Timestamp>_</sub>
 ```
 
 ---
