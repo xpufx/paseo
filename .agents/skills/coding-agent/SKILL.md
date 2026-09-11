@@ -125,23 +125,20 @@ Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent
 - **`attention/` Scope**: `attention/0-agent` ↔ `attention/1-user` ↔ `attention/2-ignore` (action token).
 - **`priority/` Scope**: `priority/0-SOS` ↔ `priority/1-high` ↔ `priority/2-normal` ↔ `priority/3-low` ↔ `priority/4-backburner`.
 
-### Dual-Engine Triage & Prioritization Model
-Orchestration operates on a **two-layer decision model**:
+### Board Prioritization & Intelligence Model
 
-1. **Layer 1: Deterministic Script Prioritization (`forgejo-issues-check`)**:
-   - Computes a mathematical priority tuple `(tier, urgency, effort, age)`:
-     - **Preemption Tier**: Feedback delta (Precedence Rule) → `priority/0-SOS` → `priority/1-high` → `priority/2-normal` → `priority/3-low` / `priority/4-backburner`.
-     - **Kind Urgency**: `kind/bug` / `flag/security` → `kind/feature` → `kind/chore` / `kind/refactor` → `kind/docs` → `kind/explore` / `kind/discussion`.
-     - **Effort Rating**: `size/0-cheap` (fast unblocking) → `size/1-medium` → `size/2-expensive`.
-     - **Aging**: Older unblocked tasks break ties to prevent starvation.
+Agents and Orchestrators evaluate the board using a two-step approach:
 
-2. **Layer 2: Agent Reasoning & Contextual Fallback (The Intelligence Layer)**:
-   - **Do NOT blind-trust a "0 items" return from the script**: Deterministic rule engines only evaluate static labels and recent comment deltas. They cannot parse semantic nuance, implicit blockers resolved elsewhere, or emergent requirements.
-   - **Active Reasoning Pass**: If the checker reports 0 items, or if higher-level user goals supersede static queue items, the Orchestrator/agent MUST apply its own reasoning:
-     - Scan the active board for unblocked discussion items (`kind/discussion`) that have operator guidance ready to be converted into specifications (`spec/0-needed` → `spec/1-checklist`).
-     - Check whether recent commits or closed issues have unblocked dependent tickets (`dep/blocked`).
-     - Identify issues sitting with ambiguous labels that can be shaped or clarified immediately.
-   - **Reasoning Rules**: The deterministic script provides the baseline order; the agent's contextual awareness makes the final judgment call.
+1. **Deterministic Baseline (`forgejo-issues-check`)**:
+   - Run `/home/xpufx/bin/forgejo-issues-check` to get the ranked list of unblocked, prioritized candidates.
+   - Respect the script's output ordering as the operational baseline.
+
+2. **Agent Reasoning & Contextual Augmentation**:
+   - **Do NOT blind-trust a \"0 items\" return from the script**: Deterministic checks evaluate labels and comment deltas, but cannot infer unstated context or emergent priorities.
+   - When the script returns 0 items or when higher-level user directives take precedence, apply agent reasoning:
+     - Check discussions (`kind/discussion`) with operator guidance to shape into actionable specifications (`spec/0-needed` → `spec/1-checklist`).
+     - Check tickets unblocked by recent commits or sibling issues (`dep/blocked`).
+     - Advance tickets blocked on clarifying questions.
 
 ---
 
