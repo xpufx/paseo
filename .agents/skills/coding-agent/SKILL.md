@@ -110,6 +110,7 @@ Understand the intent of board labels:
   - **Phase 1: Shape & Plan**: When `checklistify-issue` or `spec` is present, the agent's job is **strictly pre-code shaping**. Ingest human steering, update the ticket body with clear specifications, boundary constraints, and concrete `- [ ]` checklists. **Zero code or file modifications are permitted during this phase.**
   - **Phase 2: Human Approval (`green-light`)**: Once shaped, remove `checklistify-issue`/`spec`, attach `ready-for-review`, and wait. Implementation may **ONLY** begin after the human operator reviews the checklist and explicitly applies `green-light`.
 - **`green-light`**: Explicit human authorization that the specification and checklist are approved for implementation.
+- **`confirmed-done`**: Human operator confirms the final deliverable. Human says the last word with this; no other label except `SOS` has precedence. Agents may not reopen or modify an issue tagged `confirmed-done`.
 - **`SOS`**: Highest priority urgent dispatch. Any available coding agent should claim and tackle this immediately.
 - **`stop-work`**: Circuit breaker scoped strictly to this issue. If working on this issue, stop immediately—do not commit or push further changes for it.
 - **`blockee` / `blocker`**: Dependency indicators. Check linked blocking issues before proceeding.
