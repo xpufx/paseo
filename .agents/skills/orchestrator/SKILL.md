@@ -115,9 +115,10 @@ Inspect the title and body, then stamp the baseline scoped labels:
 - **`state/`**: Set initial state to `state/0-triage` (or `state/2-review` if research report is ready).
 - **`attention/`**: Attach `attention/0-agent` to signal active ownership.
 
-### Step 2: Presentation & Formatting Pass
+### Step 2: Presentation & Additional Context Pass
 - Clean up typos, formatting, and markdown layout without changing the operator's intent or meaning.
-- Apply `format/1-ok` once the body and presentation are clean.
+- **Add Relevant Context**: Enrich the ticket with relevant repository paths, upstream documentation links, existing symbol names, and background findings directly into a clearly demarcated section (e.g. `### Additional Context & Findings`).
+- Apply `format/1-ok` once the body, presentation, and context are clean.
 
 ### Step 3: Upstream & Feasibility Audit
 - Check if upstream Paseo core already supports this or has planned primitives (`upstream/0-explore`).
