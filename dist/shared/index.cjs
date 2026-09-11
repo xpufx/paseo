@@ -86,6 +86,52 @@ function truncate(text, maxLength, suffix = "\u2026") {
   if (!text || text.length <= maxLength) return text;
   return text.slice(0, Math.max(0, maxLength - suffix.length)) + suffix;
 }
+function truncateMiddle(text, maxLength, options) {
+  if (!text || text.length <= maxLength) return text;
+  const ellipsis = options?.ellipsis ?? "\u2026";
+  if (maxLength <= ellipsis.length) return ellipsis.slice(0, maxLength);
+  const available = maxLength - ellipsis.length;
+  const headLength = Math.floor(available / 2);
+  const tailLength = available - headLength;
+  const head = text.slice(0, headLength);
+  const tail = tailLength > 0 ? text.slice(-tailLength) : "";
+  return `${head}${ellipsis}${tail}`;
+}
+function truncatePath(filePath, maxLength, options) {
+  if (!filePath || filePath.length <= maxLength) return filePath;
+  const sep = options?.separator ?? "/";
+  const ellipsis = options?.ellipsis ?? "\u2026";
+  let keepLeading = options?.keepLeading ?? 1;
+  const keepTrailing = options?.keepTrailing ?? 1;
+  if (filePath.startsWith(sep) && keepLeading === 1) {
+    keepLeading = 2;
+  }
+  const parts = filePath.split(sep);
+  if (parts.length <= keepLeading + keepTrailing) {
+    return truncateMiddle(filePath, maxLength, { ellipsis });
+  }
+  const prefixParts = parts.slice(0, keepLeading);
+  const suffixParts = parts.slice(parts.length - keepTrailing);
+  let middleParts = parts.slice(keepLeading, parts.length - keepTrailing);
+  while (middleParts.length > 0) {
+    const candidate = [...prefixParts, ellipsis, ...middleParts, ...suffixParts].join(sep);
+    if (candidate.length <= maxLength) {
+      return candidate;
+    }
+    middleParts.shift();
+  }
+  const minimalCandidate = [...prefixParts, ellipsis, ...suffixParts].join(sep);
+  if (minimalCandidate.length <= maxLength) {
+    return minimalCandidate;
+  }
+  const filename = suffixParts.join(sep);
+  const prefix = prefixParts.join(sep);
+  const availableForFile = maxLength - prefix.length - sep.length - ellipsis.length - sep.length;
+  if (availableForFile > 4) {
+    return `${prefix}${sep}${ellipsis}${sep}${truncateMiddle(filename, availableForFile, { ellipsis })}`;
+  }
+  return truncateMiddle(filePath, maxLength, { ellipsis });
+}
 function stripAnsi(text) {
   if (!text) return "";
   return text.replace(
@@ -315,6 +361,8 @@ exports.resolveCustomPillStatus = resolveCustomPillStatus;
 exports.resolveMetricStatus = resolveMetricStatus;
 exports.stripAnsi = stripAnsi;
 exports.truncate = truncate;
+exports.truncateMiddle = truncateMiddle;
+exports.truncatePath = truncatePath;
 exports.withTimeout = withTimeout;
 //# sourceMappingURL=index.cjs.map
 //# sourceMappingURL=index.cjs.map

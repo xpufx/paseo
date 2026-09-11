@@ -1816,6 +1816,56 @@ function resolveMetricStatus(value, thresholds = {}) {
     return "success";
   }
 }
+function truncate(text, maxLength, suffix = "\u2026") {
+  if (!text || text.length <= maxLength) return text;
+  return text.slice(0, Math.max(0, maxLength - suffix.length)) + suffix;
+}
+function truncateMiddle(text, maxLength, options) {
+  if (!text || text.length <= maxLength) return text;
+  const ellipsis = options?.ellipsis ?? "\u2026";
+  if (maxLength <= ellipsis.length) return ellipsis.slice(0, maxLength);
+  const available = maxLength - ellipsis.length;
+  const headLength = Math.floor(available / 2);
+  const tailLength = available - headLength;
+  const head = text.slice(0, headLength);
+  const tail = tailLength > 0 ? text.slice(-tailLength) : "";
+  return `${head}${ellipsis}${tail}`;
+}
+function truncatePath(filePath, maxLength, options) {
+  if (!filePath || filePath.length <= maxLength) return filePath;
+  const sep = options?.separator ?? "/";
+  const ellipsis = options?.ellipsis ?? "\u2026";
+  let keepLeading = options?.keepLeading ?? 1;
+  const keepTrailing = options?.keepTrailing ?? 1;
+  if (filePath.startsWith(sep) && keepLeading === 1) {
+    keepLeading = 2;
+  }
+  const parts = filePath.split(sep);
+  if (parts.length <= keepLeading + keepTrailing) {
+    return truncateMiddle(filePath, maxLength, { ellipsis });
+  }
+  const prefixParts = parts.slice(0, keepLeading);
+  const suffixParts = parts.slice(parts.length - keepTrailing);
+  let middleParts = parts.slice(keepLeading, parts.length - keepTrailing);
+  while (middleParts.length > 0) {
+    const candidate = [...prefixParts, ellipsis, ...middleParts, ...suffixParts].join(sep);
+    if (candidate.length <= maxLength) {
+      return candidate;
+    }
+    middleParts.shift();
+  }
+  const minimalCandidate = [...prefixParts, ellipsis, ...suffixParts].join(sep);
+  if (minimalCandidate.length <= maxLength) {
+    return minimalCandidate;
+  }
+  const filename = suffixParts.join(sep);
+  const prefix = prefixParts.join(sep);
+  const availableForFile = maxLength - prefix.length - sep.length - ellipsis.length - sep.length;
+  if (availableForFile > 4) {
+    return `${prefix}${sep}${ellipsis}${sep}${truncateMiddle(filename, availableForFile, { ellipsis })}`;
+  }
+  return truncateMiddle(filePath, maxLength, { ellipsis });
+}
 function ProgressBar({
   value,
   color,
@@ -2279,6 +2329,9 @@ function KeyValue({
   subValue,
   mono = false,
   copyable = false,
+  truncate: truncateProp = false,
+  truncateMaxLength = 32,
+  truncatePathOptions,
   stackOnCompact = true,
   style,
   labelStyle,
@@ -2288,10 +2341,26 @@ function KeyValue({
   const { colors, flair, isCompact, touchTargetMin, fonts } = usePluginTheme();
   const toast = useToast();
   const [copied, setCopied] = React7.useState(false);
-  const displayValue = value === null || value === void 0 ? "-" : String(value);
+  const rawString = value === null || value === void 0 ? "" : String(value);
+  let displayValue = rawString || "-";
+  if (truncateProp && rawString.length > truncateMaxLength) {
+    const mode = typeof truncateProp === "string" ? truncateProp : "middle";
+    switch (mode) {
+      case "path":
+        displayValue = truncatePath(rawString, truncateMaxLength, truncatePathOptions);
+        break;
+      case "end":
+        displayValue = truncate(rawString, truncateMaxLength);
+        break;
+      case "middle":
+      default:
+        displayValue = truncateMiddle(rawString, truncateMaxLength);
+        break;
+    }
+  }
   const handleCopy = async () => {
-    if (!copyable || !value) return;
-    const ok = await copyToClipboard(String(value), {
+    if (!copyable || !rawString) return;
+    const ok = await copyToClipboard(rawString, {
       toast,
       toastMessage: label
     });
@@ -2839,6 +2908,109 @@ var styles16 = reactNative.StyleSheet.create({
     borderTopColor: "rgba(128, 128, 128, 0.2)"
   }
 });
+function TruncatedText({
+  text,
+  maxLength = 32,
+  mode = "middle",
+  pathOptions,
+  copyable = true,
+  mono = true,
+  toastMessage = "Copied",
+  style,
+  textStyle
+}) {
+  const { colors, fonts, isCompact, touchTargetMin } = usePluginTheme();
+  const { Icon: Icon2, useToast } = getClientHost();
+  const toast = useToast();
+  const [copied, setCopied] = React7.useState(false);
+  if (!text) {
+    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [{ color: colors.foregroundMuted }, textStyle], children: "-" });
+  }
+  let formattedText = text;
+  if (text.length > maxLength) {
+    switch (mode) {
+      case "path":
+        formattedText = truncatePath(text, maxLength, pathOptions);
+        break;
+      case "end":
+        formattedText = truncate(text, maxLength);
+        break;
+      case "middle":
+      default:
+        formattedText = truncateMiddle(text, maxLength);
+        break;
+    }
+  }
+  const handleCopy = async () => {
+    if (!copyable || !text) return;
+    const ok = await copyToClipboard(text, {
+      toast,
+      toastMessage
+    });
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2e3);
+    }
+  };
+  const fontFamily = mono ? fonts.mono ?? reactNative.Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }) : void 0;
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles17.container, style], children: [
+    /* @__PURE__ */ jsxRuntime.jsx(
+      reactNative.Text,
+      {
+        selectable: true,
+        numberOfLines: 1,
+        ellipsizeMode: "clip",
+        accessibilityLabel: text,
+        style: [
+          styles17.text,
+          {
+            color: colors.foreground,
+            fontFamily
+          },
+          textStyle
+        ],
+        children: formattedText
+      }
+    ),
+    copyable && /* @__PURE__ */ jsxRuntime.jsx(
+      reactNative.Pressable,
+      {
+        onPress: handleCopy,
+        hitSlop: Math.max(8, (touchTargetMin - 20) / 2),
+        style: styles17.copyBtn,
+        accessibilityRole: "button",
+        accessibilityLabel: `Copy ${text}`,
+        children: /* @__PURE__ */ jsxRuntime.jsx(
+          Icon2,
+          {
+            name: copied ? "Check" : "Copy",
+            size: isCompact ? 12 : 13,
+            color: copied ? colors.statusSuccess : colors.foregroundMuted
+          }
+        )
+      }
+    )
+  ] });
+}
+var styles17 = reactNative.StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    maxWidth: "100%",
+    gap: 6
+  },
+  text: {
+    fontSize: 12,
+    lineHeight: 18,
+    flexShrink: 1
+  },
+  copyBtn: {
+    padding: 3,
+    borderRadius: 4,
+    justifyContent: "center",
+    alignItems: "center"
+  }
+});
 function ModalBody({
   children,
   style,
@@ -2879,7 +3051,7 @@ function ModalBody({
       reactNative.View,
       {
         style: [
-          styles17.content,
+          styles18.content,
           {
             backgroundColor: colors.surface0,
             paddingHorizontal: padding.horizontal,
@@ -2898,14 +3070,14 @@ function ModalBody({
     ResolvedScrollView,
     {
       ref: setRefs,
-      style: [{ backgroundColor: colors.surface0 }, styles17.container, style],
+      style: [{ backgroundColor: colors.surface0 }, styles18.container, style],
       nestedScrollEnabled: true,
       keyboardShouldPersistTaps: "handled",
       showsVerticalScrollIndicator: true,
       refreshControl,
       onContentSizeChange: stickToEnd ? () => innerRef.current?.scrollToEnd({ animated: true }) : void 0,
       contentContainerStyle: [
-        styles17.content,
+        styles18.content,
         {
           paddingHorizontal: padding.horizontal,
           paddingTop: padding.vertical,
@@ -2918,7 +3090,7 @@ function ModalBody({
     }
   );
 }
-var styles17 = reactNative.StyleSheet.create({
+var styles18 = reactNative.StyleSheet.create({
   container: {
     flex: 1,
     minHeight: 0,
@@ -2943,7 +3115,7 @@ function ActionBar({
     reactNative.View,
     {
       style: [
-        styles18.container,
+        styles19.container,
         {
           flexDirection: isColumn ? "column" : "row",
           justifyContent: isColumn ? "flex-start" : align,
@@ -2957,19 +3129,19 @@ function ActionBar({
     }
   );
 }
-var styles18 = reactNative.StyleSheet.create({
+var styles19 = reactNative.StyleSheet.create({
   container: {
     flexWrap: "wrap"
   }
 });
 function FormRow({ label, description, children, style }) {
   const { colors, flair, isCompact } = usePluginTheme();
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles19.container, style], children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles20.container, style], children: [
     /* @__PURE__ */ jsxRuntime.jsx(
       reactNative.Text,
       {
         style: [
-          styles19.label,
+          styles20.label,
           {
             color: colors.foreground,
             fontSize: isCompact ? 12 : 13,
@@ -2983,16 +3155,16 @@ function FormRow({ label, description, children, style }) {
       reactNative.Text,
       {
         style: [
-          styles19.description,
+          styles20.description,
           { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 }
         ],
         children: description
       }
     ),
-    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles19.content, children })
+    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles20.content, children })
   ] });
 }
-var styles19 = reactNative.StyleSheet.create({
+var styles20 = reactNative.StyleSheet.create({
   container: {
     gap: 4,
     width: "100%"
@@ -3021,7 +3193,7 @@ function registerComposerPill(client, options) {
       layout: props.layout,
       host: props.host ?? { id: "", label: "" }
     };
-    return /* @__PURE__ */ jsxRuntime.jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles20.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
+    return /* @__PURE__ */ jsxRuntime.jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles21.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
   }
   function PillHost(props) {
     const [open, setOpen] = React7.useState(false);
@@ -3249,13 +3421,13 @@ function DefaultPillBody({
   const effectiveTitle = isCompact && compactTitle ? compactTitle : title;
   const effectiveIcon = isCompact && compactIcon ? compactIcon : icon;
   const effectiveBadge = isCompact && compactBadgeText !== void 0 ? compactBadgeText : badgeText;
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles20.pillContainer, children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles21.pillContainer, children: [
     effectiveIcon && /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: effectiveIcon, size: 13, color: theme.colors.foreground }),
-    effectiveTitle ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles20.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
-    effectiveBadge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles20.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles20.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
+    effectiveTitle ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles21.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
+    effectiveBadge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles21.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles21.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
   ] });
 }
-var styles20 = reactNative.StyleSheet.create({
+var styles21 = reactNative.StyleSheet.create({
   popoverContainer: {
     width: "100%"
   },
@@ -3687,16 +3859,16 @@ function CustomPillBody({ state }) {
   const { isCompact } = useResponsive();
   const title = isCompact && state.compactTitle ? state.compactTitle : state.title;
   const icon = isCompact && state.compactIcon ? state.compactIcon : state.icon;
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles21.pillContainer, children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles22.pillContainer, children: [
     icon && /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: icon, size: 13, color: colors.foreground }),
-    title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles21.pillTitle, { color: colors.foreground }], children: title }) : null,
+    title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles22.pillTitle, { color: colors.foreground }], children: title }) : null,
     /* @__PURE__ */ jsxRuntime.jsx(
       Badge,
       {
         label: state.displayValue,
         variant: state.status,
         styleVariant: "tinted",
-        style: styles21.pillBadge
+        style: styles22.pillBadge
       }
     )
   ] });
@@ -3708,7 +3880,7 @@ function CustomPillModalContent({
 }) {
   const { colors, isCompact } = usePluginTheme();
   const displayText = state.modalOutput || state.rawValue || (state.error ? `Error: ${state.error}` : "No output");
-  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles21.modalContent, children: /* @__PURE__ */ jsxRuntime.jsxs(Card, { children: [
+  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles22.modalContent, children: /* @__PURE__ */ jsxRuntime.jsxs(Card, { children: [
     /* @__PURE__ */ jsxRuntime.jsx(
       Card.Header,
       {
@@ -3738,7 +3910,7 @@ function CustomPillModalContent({
         copyable: true
       }
     ),
-    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles21.footerRow, children: /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles21.timestampText, { color: colors.foregroundMuted }], children: [
+    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles22.footerRow, children: /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles22.timestampText, { color: colors.foregroundMuted }], children: [
       "Last updated: ",
       new Date(state.lastUpdated).toLocaleTimeString()
     ] }) })
@@ -3795,7 +3967,7 @@ function registerCustomPills(client, options) {
     }
   };
 }
-var styles21 = reactNative.StyleSheet.create({
+var styles22 = reactNative.StyleSheet.create({
   modalContent: {
     width: "100%",
     padding: 12
@@ -3859,6 +4031,7 @@ exports.StatusDot = StatusDot;
 exports.Tabs = Tabs;
 exports.TextInput = TextInput;
 exports.Toggle = Toggle;
+exports.TruncatedText = TruncatedText;
 exports.alpha = alpha;
 exports.contractSchemaToFields = contractSchemaToFields;
 exports.copyToClipboard = copyToClipboard;

@@ -127,12 +127,102 @@ export function formatNumber(num: number): string {
   return new Intl.NumberFormat("en-US").format(num);
 }
 
+export interface TruncateOptions {
+  /** Ellipsis token to insert. Default: "…" */
+  ellipsis?: string;
+}
+
+export interface TruncatePathOptions extends TruncateOptions {
+  /** Directory separator. Default: "/" */
+  separator?: string;
+  /** Keep leading path segments (e.g. 1 keeps the root/first folder). Default: 1 */
+  keepLeading?: number;
+  /** Keep trailing path segments (e.g. 1 keeps the filename). Default: 1 */
+  keepTrailing?: number;
+}
+
 /**
  * Safely truncates a string with an ellipsis if it exceeds maxLength.
  */
 export function truncate(text: string, maxLength: number, suffix = "…"): string {
   if (!text || text.length <= maxLength) return text;
   return text.slice(0, Math.max(0, maxLength - suffix.length)) + suffix;
+}
+
+/**
+ * Truncates a string in the middle, preserving distinct head and tail characters.
+ * Ideal for UUIDs, commit SHAs, hashes, cryptographic keys, and long identifiers.
+ *
+ * Example: `truncateMiddle("0359a72f-5b58-453b-a35b-956a3f6908ba", 16)` => `"0359a72…6908ba"`
+ */
+export function truncateMiddle(text: string, maxLength: number, options?: TruncateOptions): string {
+  if (!text || text.length <= maxLength) return text;
+  const ellipsis = options?.ellipsis ?? "…";
+  if (maxLength <= ellipsis.length) return ellipsis.slice(0, maxLength);
+
+  const available = maxLength - ellipsis.length;
+  const headLength = Math.floor(available / 2);
+  const tailLength = available - headLength;
+
+  const head = text.slice(0, headLength);
+  const tail = tailLength > 0 ? text.slice(-tailLength) : "";
+  return `${head}${ellipsis}${tail}`;
+}
+
+/**
+ * Truncates file system and URL paths intelligently, preserving the leaf filename
+ * and root directory while compressing intermediate parent directories.
+ *
+ * Example: `truncatePath("~/code/paseo-plugin-helper/src/client/approvals.tsx", 35)`
+ *       => `"~/code/…/src/client/approvals.tsx"`
+ */
+export function truncatePath(filePath: string, maxLength: number, options?: TruncatePathOptions): string {
+  if (!filePath || filePath.length <= maxLength) return filePath;
+
+  const sep = options?.separator ?? "/";
+  const ellipsis = options?.ellipsis ?? "…";
+  let keepLeading = options?.keepLeading ?? 1;
+  const keepTrailing = options?.keepTrailing ?? 1;
+
+  // If path starts with separator (e.g. /home/...), parts[0] is empty, so adjust keepLeading
+  if (filePath.startsWith(sep) && keepLeading === 1) {
+    keepLeading = 2; // Keep ["", "home"] which joins to "/home"
+  }
+
+  const parts = filePath.split(sep);
+  // If no path separators or very few segments, fallback to truncateMiddle
+  if (parts.length <= keepLeading + keepTrailing) {
+    return truncateMiddle(filePath, maxLength, { ellipsis });
+  }
+
+  const prefixParts = parts.slice(0, keepLeading);
+  const suffixParts = parts.slice(parts.length - keepTrailing);
+  let middleParts = parts.slice(keepLeading, parts.length - keepTrailing);
+
+  // Progressive compression: drop elements from start of middle until it fits
+  while (middleParts.length > 0) {
+    const candidate = [...prefixParts, ellipsis, ...middleParts, ...suffixParts].join(sep);
+    if (candidate.length <= maxLength) {
+      return candidate;
+    }
+    middleParts.shift();
+  }
+
+  // If still too long with full ellipsis, just join prefix + ellipsis + suffix
+  const minimalCandidate = [...prefixParts, ellipsis, ...suffixParts].join(sep);
+  if (minimalCandidate.length <= maxLength) {
+    return minimalCandidate;
+  }
+
+  // If even prefix + ellipsis + filename exceeds maxLength, middle-truncate the filename
+  const filename = suffixParts.join(sep);
+  const prefix = prefixParts.join(sep);
+  const availableForFile = maxLength - prefix.length - sep.length - ellipsis.length - sep.length;
+  if (availableForFile > 4) {
+    return `${prefix}${sep}${ellipsis}${sep}${truncateMiddle(filename, availableForFile, { ellipsis })}`;
+  }
+
+  return truncateMiddle(filePath, maxLength, { ellipsis });
 }
 
 /**

@@ -5,6 +5,8 @@ import {
   formatDuration,
   formatNumber,
   truncate,
+  truncateMiddle,
+  truncatePath,
   stripAnsi,
   resolveMetricStatus,
 } from "../shared/formatters.js";
@@ -64,6 +66,24 @@ describe("Shared Formatters", () => {
     expect(truncate("hello", 10)).toBe("hello");
     expect(truncate("hello world", 8)).toBe("hello w…");
     expect(truncate("", 5)).toBe("");
+  });
+
+  it("truncates strings in the middle for identifiers and UUIDs", () => {
+    const uuid = "0359a72f-5b58-453b-a35b-956a3f6908ba";
+    expect(truncateMiddle(uuid, 40)).toBe(uuid);
+    expect(truncateMiddle(uuid, 16)).toBe("0359a72…3f6908ba");
+    expect(truncateMiddle("abcdefghij", 7)).toBe("abc…hij");
+    expect(truncateMiddle("", 5)).toBe("");
+  });
+
+  it("truncates paths intelligently keeping root and filename", () => {
+    const path = "/home/xpufx/code/paseo-plugin-helper/src/client/approvals.tsx";
+    expect(truncatePath(path, 100)).toBe(path);
+    const shortened = truncatePath(path, 35);
+    expect(shortened).toContain("…");
+    expect(shortened.endsWith("approvals.tsx")).toBe(true);
+    expect(shortened.startsWith("/home")).toBe(true);
+    expect(shortened.length).toBeLessThanOrEqual(35);
   });
 
   it("strips ANSI escape codes from terminal strings", () => {

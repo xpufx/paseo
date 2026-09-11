@@ -4,7 +4,7 @@ import React__default, { ReactNode, Ref, ComponentType } from 'react';
 import { c as HostLayout, d as HostPillProps, e as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, f as HostAgentPanelProps, g as HostWorkspacePanelProps, h as HostToast, i as HostIconProps } from '../host-BsbqDlSJ.cjs';
 export { j as ClientHostDeps, k as ComposerPillButtonContribution, l as ComposerPillButtonDescriptor, m as ComposerPillButtonIcon, C as ComposerPillContribution, n as ComposerPillRegistration, o as ComposerPillRegistrationHandle, H as HostAgentRef, b as HostAgentUpdate, p as HostAgentsApi, q as HostCopyText, r as HostFlatList, s as HostIcon, t as HostModal, u as HostModalContentProps, v as HostModalProps, w as HostRpcContract, x as HostScrollView, y as HostTextInput, z as HostTheme, A as HostThemeColors, B as HostUseRpc, D as HostUseToast, E as getClientHost, F as getOptionalClientHost, G as initClientHelpers, I as isClientHostInitialized, J as selectHostScrollView } from '../host-BsbqDlSJ.cjs';
 import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView } from 'react-native';
-import { M as MetricThresholds } from '../formatters-CQSnqWmS.cjs';
+import { M as MetricThresholds, T as TruncatePathOptions } from '../formatters-BLQfCB_p.cjs';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.cjs';
 import { UseMutationOptions, UseQueryOptions, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import * as _tanstack_query_core from '@tanstack/query-core';
@@ -475,18 +475,25 @@ interface DataTableProps<T> {
  */
 declare function DataTable<T>({ data, columns, keyExtractor, emptyState, style, }: DataTableProps<T>): React__default.JSX.Element | null;
 
+type KeyValueTruncateMode = "end" | "middle" | "path";
 interface KeyValueProps {
     label: string;
     value: string | number | null | undefined;
     subValue?: string;
     mono?: boolean;
     copyable?: boolean;
+    /** Truncate long value: "middle" (UUIDs/hashes), "path" (filepaths), or "end" (standard) */
+    truncate?: boolean | KeyValueTruncateMode;
+    /** Maximum length before truncation applies. Default: 32 */
+    truncateMaxLength?: number;
+    /** Custom options when truncate="path" */
+    truncatePathOptions?: TruncatePathOptions;
     stackOnCompact?: boolean;
     style?: StyleProp<ViewStyle>;
     labelStyle?: StyleProp<TextStyle>;
     valueStyle?: StyleProp<TextStyle>;
 }
-declare function KeyValue({ label, value, subValue, mono, copyable, stackOnCompact, style, labelStyle, valueStyle, }: KeyValueProps): React__default.JSX.Element;
+declare function KeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, truncatePathOptions, stackOnCompact, style, labelStyle, valueStyle, }: KeyValueProps): React__default.JSX.Element;
 interface KeyValueGroupProps {
     children: ReactNode;
     columns?: 1 | 2 | 3 | 4;
@@ -619,6 +626,33 @@ interface AboutSectionProps {
  * - Pre-styled external links with native browser launch via React Native `Linking`.
  */
 declare function AboutSection({ name, description, version, author, logo, repository, issues, homepage, license, links, extraItems, showDiagnosticsCopy, style, }: AboutSectionProps): React__default.JSX.Element;
+
+type TruncateMode = "end" | "middle" | "path";
+interface TruncatedTextProps {
+    /** The full, raw text string (e.g. UUID, file path, commit SHA, token) */
+    text: string;
+    /** Maximum length allowed before truncation. Default: 32 */
+    maxLength?: number;
+    /** Truncation algorithm: "middle" (UUIDs/hashes), "path" (directory paths), or "end" (standard). Default: "middle" */
+    mode?: TruncateMode;
+    /** Additional path truncation options when mode="path" */
+    pathOptions?: TruncatePathOptions;
+    /** Whether to render an inline copy button. Default: true */
+    copyable?: boolean;
+    /** Use monospace font. Default: true */
+    mono?: boolean;
+    /** Toast message on successful copy. Default: "Copied" */
+    toastMessage?: string;
+    /** Custom container style */
+    style?: StyleProp<ViewStyle>;
+    /** Custom text style */
+    textStyle?: StyleProp<TextStyle>;
+}
+/**
+ * Renders long strings (paths, UUIDs, hashes) shortened with smart truncation,
+ * while preserving the full untruncated string for one-click clipboard copying.
+ */
+declare function TruncatedText({ text, maxLength, mode, pathOptions, copyable, mono, toastMessage, style, textStyle, }: TruncatedTextProps): React__default.JSX.Element;
 
 interface ModalBodyProps {
     children: ReactNode;
@@ -1270,4 +1304,4 @@ declare function registerCustomPills(client: ComposerPillRegistrar, options: Reg
 
 declare function Icon(props: HostIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonProps, type ButtonSize, type ButtonVariant, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillLiveContext, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, type SidebarSurfaceRegistrar, type SpacingKey, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonProps, type ButtonSize, type ButtonVariant, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillLiveContext, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, type SidebarSurfaceRegistrar, type SpacingKey, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
