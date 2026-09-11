@@ -130,21 +130,21 @@ Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent
 ## 6. Task Execution Lifecycle
 
 ### Step 1: Discover & Claim Work
-1. Look for unblocked issues tagged **`agent-attention`** (available task) or urgent **`SOS`**.
+1. Look for unblocked issues tagged **`attention/agent`** (available task) or urgent **`priority/SOS`**.
 2. **Mandatory Full Ticket & History Audit**:
    - **Read the entire ticket**: Never assume you know the scope from the title or prior memory. The issue body may have been rewritten, amended, or contain crucial boundary constraints.
    - **Read the ENTIRE comment thread**: Human operators frequently modify scope (e.g. *"SKIP step 2"*, *"Do not touch X"*, *"Focus only on Y"*), or another agent might have added crucial context or warnings. Blindly executing a plan without verifying the latest comment thread is a critical protocol violation.
 3. If the issue has **`upstream-check`**, first audit upstream Paseo repositories/docs to inform your approach.
 4. Check issue comments to verify no other agent has already claimed it.
 5. Post an Agent Envelope comment announcing your claim.
-6. **Attach the `wip` label immediately** (e.g. `fgjx issue edit <number> --add-label wip`) to indicate active work and prevent duplicate pickup.
+6. **Attach the `state/wip` label immediately** (e.g. `fgjx issue edit <number> --add-label state/wip`). Because `state/` is an exclusive scope, applying `state/wip` automatically clears any prior state like `state/triage` without needing removal flags.
 
 ### Step 2: Implementation Guidelines
-- **Autonomous Execution (`agent-attention`, `cheap`):**
+- **Autonomous Execution (`attention/agent`, `cheap`):**
   Work quietly in your designated worktree/checkout without spamming chat.
 - **Verification:** Run typechecks (`npm run typecheck`), linters, and test suites locally before claiming completion.
 
-### Step 3: Handoff to `Orchestrator` (`ready-for-review`)
+### Step 3: Handoff to `Orchestrator` (`state/ready-for-review` or `state/verify`)
 When code is implemented and verified locally:
 1. Push your branch/commits.
 2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
@@ -153,6 +153,8 @@ When code is implemented and verified locally:
    - Updated checklist showing completed items.
    - Branch name and commit hash(es).
    - Confirmation that typechecks and tests passed.
-3. **Remove the `wip` label** and attach **`agent-finished`** (keeping `agent-attention`), and signal handoff to the **`Orchestrator`** for review (`ready-for-review`), or tag `verify` for on-device/human verification (`fgjx issue edit <number> --remove-label wip --add-label agent-finished --add-label verify`).
-4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` with `agent-finished` and `verify` (and/or `ready-for-review`) attached so the human operator can verify and close it.
+3. **Transition the state**: Apply **`state/ready-for-review`** (for Orchestrator review) or **`state/verify`** (for on-device/human testing).
+   - Command: `fgjx issue edit <number> --add-label state/ready-for-review` (or `--add-label state/verify`).
+   - **Automatic Eviction**: Because `state/` is exclusive, adding `state/ready-for-review` or `state/verify` automatically removes `state/wip` at the database level.
+4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` with `state/verify` (and/or `state/ready-for-review`) attached so the human operator can verify and close it.
 5. Stand by for fast review from the `Orchestrator` or testing by human user `oktay`.
