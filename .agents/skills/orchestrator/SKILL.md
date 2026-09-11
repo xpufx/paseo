@@ -89,3 +89,47 @@ Once the structured proposal is presented:
 3. **If Approved**:
    - **Phase A (Agent Execution)**: Fan out autonomous tasks to worker agents or execute local commands (commits, tags, pushes, daemon restarts).
    - **Phase B (User Handoff)**: Once Phase A is 100% green, formally prompt the user to complete their portion (device testing, 2FA prompt, issue closure).
+
+---
+
+## 5. First-Look Ingestion Protocol (Brand New / Raw Issues)
+
+When an issue is **first seen** (e.g. human operator posts a quick idea with only `priority/0-SOS` or minimal text):
+
+The Orchestrator must **never jump straight into coding or assign a worker blindly**. Instead, it executes the **First-Look Ingestion Sequence**:
+
+```mermaid
+graph TD
+    A["New Ticket Detected"] --> B["Step 1: Classification & Taxonomy Stamping"]
+    B --> C["Step 2: Presentation & Formatting Pass"]
+    C --> D["Step 3: Boundary & Upstream Audit"]
+    D --> E["Step 4: Checklistification (spec/1-checklist)"]
+    E --> F["Step 5: Hold for Operator Approval (spec/2-approved)"]
+```
+
+### Step 1: Classification & Taxonomy Stamping
+Inspect the title and body, then stamp the baseline scoped labels:
+- **`kind/`**: Is this a `kind/bug`, `kind/feature`, `kind/chore`, `kind/explore`, or `kind/discussion`?
+- **`target/`**: Which package(s) does it touch? (`target/helper`, `target/top`, `target/x-comms`, `target/monorepo`).
+- **`size/`**: Estimate effort: `size/0-cheap`, `size/1-medium`, or `size/2-expensive`.
+- **`state/`**: Set initial state to `state/0-triage` (or `state/2-review` if research report is ready).
+- **`attention/`**: Attach `attention/0-agent` to signal active ownership.
+
+### Step 2: Presentation & Formatting Pass
+- Clean up typos, formatting, and markdown layout without changing the operator's intent or meaning.
+- Apply `format/1-ok` once the body and presentation are clean.
+
+### Step 3: Upstream & Feasibility Audit
+- Check if upstream Paseo core already supports this or has planned primitives (`upstream/0-explore`).
+- Determine if existing helper utilities (`packages/paseo-plugin-helper`) already implement the required logic.
+
+### Step 4: Checklistification (`spec/1-checklist`)
+- Formulate a clear specification with explicit boundary constraints:
+  - What will be built.
+  - What will NOT be touched (anti-scope).
+  - Concrete `- [ ]` actionable checkboxes for implementation and verification.
+- Advance label to **`spec/1-checklist`**.
+
+### Step 5: Self-Stamped Envelope Comment & Hold
+- Post a self-stamped envelope comment (`fgjx issue comment <id> --envelope -b "..."`) outlining the triage findings and the proposed checklist.
+- **Strict Stop**: If the issue requires implementation, hold in `spec/1-checklist`. Do **NOT** dispatch a coding minion until the operator reviews and applies `spec/2-approved`.
