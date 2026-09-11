@@ -40,7 +40,7 @@ fgjx api repos/xpufx/paseo-plugin-helper/issues/<NUMBER> --hostname forge.mrs.aa
 > **Clean Markdown & Backticks**: When posting comments via shell or heredocs, do NOT double-escape backticks with backslashes (e.g. avoid `\`\`\`` or `\`code\``). Backslashes display literally on the Forgejo web UI. Use unescaped single quotes, heredocs (`cat << 'EOF'`), or raw file input (`-F file` or python) to preserve clean triple backticks (` ``` `).
 
 > [!NOTE]
-> Forgejo (`forge.mrs.aager.de`) is the **primary git remote (`origin`) and issues tracker**. All code pushes go to `origin` on Forgejo, which automatically mirrors branches and tags downstream to GitHub (`github.com/xpufx/paseo-plugin-helper`) via Forgejo's automated push mirror.
+> Forgejo (`forge.mrs.aager.de`) is the **primary git remote (`origin`) and issues tracker**. All agent code pushes go to `origin` on Forgejo. Pushes to public GitHub are strictly manual and gated by human review.
 
 ---
 
@@ -58,7 +58,7 @@ When referencing issues in comments, commit messages, or chat harness:
 If an issue fix includes a code commit:
 1. **Always record the exact commit SHA and branch**:
    `commit: abc1234 on branch v8 in forge.mrs.aager.de/xpufx/paseo-plugin-helper`
-2. **Automatic Mirroring**: Pushing to `origin` (Forgejo) automatically mirrors to `github.com/xpufx/paseo-plugin-helper` asynchronously. For external repositories (like `paseo-x-comms`), state the repository origin remote + branch + SHA explicitly.
+2. **Public Mirroring**: Never push directly to GitHub without human instruction; code stays on Forgejo `origin`. For external repositories (like `paseo-x-comms`), state the repository origin remote + branch + SHA explicitly.
 
 ---
 
