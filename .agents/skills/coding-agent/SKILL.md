@@ -139,7 +139,8 @@ Understand the intent of board labels:
 ### Step 3: Handoff to `Orchestrator` (`ready-for-review`)
 When code is implemented and verified locally:
 1. Push your branch/commits.
-2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`) including:
+2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
+   - **Strict Formatting Standard**: Never dump an unformatted, narrative wall of text. Use clean GitHub-flavored markdown with structured headers (`### Implementation Summary`), bulleted deliverables, explicit code host/repo/branch/SHA, and test results.
    - Summary of changes implemented.
    - Updated checklist showing completed items.
    - Branch name and commit hash(es).
