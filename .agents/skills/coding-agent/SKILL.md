@@ -114,10 +114,13 @@ Understand the intent of board labels:
 
 ### Step 1: Discover & Claim Work
 1. Look for unblocked issues tagged **`agent-attention`** (available task) or urgent **`SOS`**.
-2. If the issue has **`upstream-check`**, first audit upstream Paseo repositories/docs to inform your approach.
-3. Check issue comments to verify no other agent has already claimed it.
-4. Post an Agent Envelope comment announcing your claim.
-5. **Attach the `wip` label immediately** (e.g. `fgjx issue edit <number> --add-label wip`) to indicate active work and prevent duplicate pickup.
+2. **Mandatory Full Ticket & History Audit**:
+   - **Read the entire ticket**: Never assume you know the scope from the title or prior memory. The issue body may have been rewritten, amended, or contain crucial boundary constraints.
+   - **Read the ENTIRE comment thread**: Human operators frequently modify scope (e.g. *"SKIP step 2"*, *"Do not touch X"*, *"Focus only on Y"*), or another agent might have added crucial context or warnings. Blindly executing a plan without verifying the latest comment thread is a critical protocol violation.
+3. If the issue has **`upstream-check`**, first audit upstream Paseo repositories/docs to inform your approach.
+4. Check issue comments to verify no other agent has already claimed it.
+5. Post an Agent Envelope comment announcing your claim.
+6. **Attach the `wip` label immediately** (e.g. `fgjx issue edit <number> --add-label wip`) to indicate active work and prevent duplicate pickup.
 
 ### Step 2: Implementation Guidelines
 - **Autonomous Execution (`agent-attention`, `cheap`):**
