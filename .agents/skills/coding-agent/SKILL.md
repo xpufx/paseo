@@ -113,6 +113,7 @@ Understand the intent of board labels:
 - **`confirmed-done`**: Human operator confirms the final deliverable. Human says the last word with this; no other label except `SOS` has precedence. Agents may not reopen or modify an issue tagged `confirmed-done`.
 - **`SOS`**: Highest priority urgent dispatch. Any available coding agent should claim and tackle this immediately.
 - **`stop-work`**: Circuit breaker scoped strictly to this issue. If working on this issue, stop immediately—do not commit or push further changes for it.
+- **`agent-ignore`**: Hard silence directive. Agents shall ignore this issue entirely UNLESS `SOS` is explicitly set. Suppresses automated board triage, aging attention pickup, and routine check triggers unless escalated with `SOS`.
 - **`blockee` / `blocker`**: Dependency indicators. Check linked blocking issues before proceeding.
 
 ---

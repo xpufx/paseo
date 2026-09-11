@@ -296,6 +296,7 @@ fgjx issue view 12                              # labels, body, comments
 | `high priority` | Do before routine work. |
 | `green-light` | Ready for an agent to pick up. |
 | `stop-work` | Halt all work on this issue immediately. |
+| `agent-ignore` | Hard silence. Agents shall ignore entirely UNLESS `SOS` is set. |
 | `wip` | An agent is actively working on it (must be set on claim). |
 | `ready-for-review` | Work complete, ready for Orchestrator review. |
 | `verify` | Built, awaiting human verification on device. |
