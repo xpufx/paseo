@@ -1,0 +1,102 @@
+# Forgejo Scoped & Exclusive Labels Definition
+# Compatible with Forgejo label templates & REST API
+labels:
+  # ============================================================================
+  # Presentation & Formatting Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "format/needed"
+    color: "#1d76db"
+    exclusive: true
+    description: "Issue body requires markdown or typo cleanup without changing intent"
+
+  - name: "format/ok"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Issue presentation and formatting verified clean"
+
+  # ============================================================================
+  # Specification & Shaping Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "spec/needed"
+    color: "#d4a017"
+    exclusive: true
+    description: "Needs pre-code technical specification or boundary analysis"
+
+  - name: "spec/checklist"
+    color: "#1d76db"
+    exclusive: true
+    description: "Actionable - [ ] checklist shaped and ready for human review"
+
+  - name: "spec/approved"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Specification and checklist approved for implementation"
+
+  # ============================================================================
+  # Execution State Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "state/triage"
+    color: "#fbca04"
+    exclusive: true
+    description: "New issue awaiting triage"
+
+  - name: "state/wip"
+    color: "#e11d48"
+    exclusive: true
+    description: "Active implementation in progress"
+
+  - name: "state/ready-for-review"
+    color: "#7057ff"
+    exclusive: true
+    description: "Implementation complete and verified locally, awaiting review"
+
+  - name: "state/verify"
+    color: "#0075ca"
+    exclusive: true
+    description: "Awaiting human or on-device test verification"
+
+  - name: "state/confirmed-done"
+    color: "#006b75"
+    exclusive: true
+    description: "Final acceptance confirmed"
+
+  # ============================================================================
+  # Attention Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "attention/agent"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Active signal for agent inspection or pickup"
+
+  - name: "attention/user"
+    color: "#b60205"
+    exclusive: true
+    description: "Blocked on human operator clarification"
+
+  - name: "attention/ignore"
+    color: "#6b7280"
+    exclusive: true
+    description: "Suppresses automated agent triage unless escalated with SOS"
+
+  # ============================================================================
+  # Priority Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "priority/SOS"
+    color: "#b60205"
+    exclusive: true
+    description: "Highest priority urgent dispatch; preempts all standard tasks"
+
+  - name: "priority/high"
+    color: "#d93f0b"
+    exclusive: true
+    description: "High priority task"
+
+  - name: "priority/normal"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Normal priority task"
+
+  - name: "priority/backburner"
+    color: "#8a8a8a"
+    exclusive: true
+    description: "Parked or low-priority background item"
