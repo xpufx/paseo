@@ -77,16 +77,16 @@ labels:
     description: "Diff, typing, and test suites inspected and approved by Orchestrator"
 
   # ============================================================================
-  # Verification Nature Scope (Non-Exclusive to allow multiple verification tags)
+  # Verification Nature Scope (Exclusive Scoped Badge)
   # ============================================================================
   - name: "verify/automated-ok"
     color: "#0e8a16"
-    exclusive: false
+    exclusive: true
     description: "All automated test suites, typechecks, and linters pass 100%"
 
   - name: "verify/needs-device"
     color: "#fbca04"
-    exclusive: false
+    exclusive: true
     description: "Requires visual inspection or physical interaction on desktop/device"
 
   # ============================================================================
@@ -265,12 +265,12 @@ labels:
   # ============================================================================
   - name: "dep/blocker"
     color: "#b60205"
-    exclusive: false
+    exclusive: true
     description: "This issue blocks other issues from proceeding"
 
   - name: "dep/blocked"
     color: "#e99695"
-    exclusive: false
+    exclusive: true
     description: "This issue is blocked waiting on another issue"
 
   # ============================================================================
@@ -278,25 +278,25 @@ labels:
   # ============================================================================
   - name: "flag/evergreen"
     color: "#0e8a16"
-    exclusive: false
+    exclusive: true
     description: "Living tracker or operational standard; remains open"
 
   - name: "flag/security"
     color: "#b60205"
-    exclusive: false
+    exclusive: true
     description: "Concerns authentication, secrets, or exfiltration boundary"
 
   - name: "flag/stop-work"
     color: "#e11d48"
-    exclusive: false
+    exclusive: true
     description: "Circuit breaker; halt all work on this issue immediately"
 
   - name: "flag/wont-do"
     color: "#ffffff"
-    exclusive: false
+    exclusive: true
     description: "Decided against; preserved for architectural record"
 
   - name: "flag/audit"
     color: "#fbca04"
-    exclusive: false
+    exclusive: true
     description: "Requires codebase audit or health check pass"
