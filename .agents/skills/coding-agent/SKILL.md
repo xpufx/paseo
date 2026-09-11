@@ -66,6 +66,8 @@ If an issue fix includes a code commit:
 
 All agents share authentication under `@xpufx`. Because the Orchestrator does **not** have access to your local agent environment, **you must stamp every issue comment and status update with your own agent envelope** (use `fgjx issue comment <id> --envelope -b ...`).
 
+The envelope generator is powered by `xpufx-tool envelope` (available in `$PATH`).
+
 ### Envelope Template
 
 Actual comment text comes first. The agent envelope is appended as a clean, single-line footer rendered automatically when using `--envelope`:
@@ -76,6 +78,17 @@ Actual comment text comes first. The agent envelope is appended as a clean, sing
 ---
 <sub>🤖 **<AgentName/SessionTitle>** (`<ShortId>`) · `<Model>` · `<Repo>:<Branch>` · _<UTC Timestamp>_</sub>
 ```
+
+### Environment Toolkit: `xpufx-tool`
+
+`xpufx-tool` is the unified, parameterized CLI toolkit for agent and environment utilities:
+- `xpufx-tool envelope`: Outputs the standardized markdown badge footer.
+- `xpufx-tool envelope --format json`: Dumps full agent metadata as JSON.
+- `xpufx-tool envelope --format kv`: Dumps key-value pairs for shell consumption.
+- Supports override flags: `--agent-id`, `--agent-name`, `--model`, `--provider`, `--workspace`, `--branch`.
+
+> [!IMPORTANT]
+> **No Standalone Script Creation**: Never create loose, one-off standalone scripts in `~/bin` or repo directories. Any agent/environment helper utility must be implemented as a scoped, parameterized subcommand inside `xpufx-tool` (with proper `argparse` argv handling), or embedded directly into `fgjx` if Forgejo-specific.
 
 ---
 
