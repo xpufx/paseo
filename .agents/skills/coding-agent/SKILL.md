@@ -117,6 +117,14 @@ Understand the intent of board labels:
 - **`backburner`**: Lowest priority task. Positioned at the very bottom of the queue. Agents must never prioritize this over standard or high priority work, and the Orchestrator should only surface or mention it periodically if it requires attention.
 - **`blockee` / `blocker`**: Dependency indicators. Check linked blocking issues before proceeding.
 
+### Scoped & Exclusive Labels (Forgejo Native Standard)
+Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent-workflow.yaml). When scoped labels (`scope/name`) with `exclusive: true` are present, applying a new label in that scope automatically evicts any existing label sharing that scope prefix at the Forgejo DB level (zero `--remove-label` needed):
+- **`format/` Scope**: `format/needed` ↔ `format/ok` (cleaning presentation and applying `format/ok` automatically clears `format/needed`).
+- **`spec/` Scope**: `spec/needed` → `spec/checklist` → `spec/approved` (shaping phase transitions automatically clear previous stages).
+- **`state/` Scope**: `state/triage` → `state/wip` → `state/ready-for-review` → `state/verify` → `state/confirmed-done` (execution lifecycle).
+- **`attention/` Scope**: `attention/agent` ↔ `attention/user` ↔ `attention/ignore` (action token).
+- **`priority/` Scope**: `priority/SOS` ↔ `priority/high` ↔ `priority/normal` ↔ `priority/backburner`.
+
 ---
 
 ## 6. Task Execution Lifecycle
