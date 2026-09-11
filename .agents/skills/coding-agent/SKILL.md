@@ -119,11 +119,29 @@ Understand the intent of board labels:
 
 ### Scoped & Exclusive Labels (Forgejo Native Standard)
 Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent-workflow.yaml). When scoped labels (`scope/name`) with `exclusive: true` are present, applying a new label in that scope automatically evicts any existing label sharing that scope prefix at the Forgejo DB level (zero `--remove-label` needed):
-- **`format/` Scope**: `format/needed` ↔ `format/ok` (cleaning presentation and applying `format/ok` automatically clears `format/needed`).
-- **`spec/` Scope**: `spec/needed` → `spec/checklist` → `spec/approved` (shaping phase transitions automatically clear previous stages).
-- **`state/` Scope**: `state/triage` → `state/wip` → `state/ready-for-review` → `state/verify` → `state/confirmed-done` (execution lifecycle).
-- **`attention/` Scope**: `attention/agent` ↔ `attention/user` ↔ `attention/ignore` (action token).
-- **`priority/` Scope**: `priority/SOS` ↔ `priority/high` ↔ `priority/normal` ↔ `priority/backburner`.
+- **`format/` Scope**: `format/0-needed` ↔ `format/1-ok` (cleaning presentation and applying `format/1-ok` automatically clears `format/0-needed`).
+- **`spec/` Scope**: `spec/0-needed` → `spec/1-checklist` → `spec/2-approved` (shaping phase transitions automatically clear previous stages).
+- **`state/` Scope**: `state/0-triage` → `state/1-wip` → `state/2-review` → `state/3-verify` → `state/4-done` (execution lifecycle).
+- **`attention/` Scope**: `attention/0-agent` ↔ `attention/1-user` ↔ `attention/2-ignore` (action token).
+- **`priority/` Scope**: `priority/0-SOS` ↔ `priority/1-high` ↔ `priority/2-normal` ↔ `priority/3-low` ↔ `priority/4-backburner`.
+
+### Dual-Engine Triage & Prioritization Model
+Orchestration operates on a **two-layer decision model**:
+
+1. **Layer 1: Deterministic Script Prioritization (`forgejo-issues-check`)**:
+   - Computes a mathematical priority tuple `(tier, urgency, effort, age)`:
+     - **Preemption Tier**: Feedback delta (Precedence Rule) → `priority/0-SOS` → `priority/1-high` → `priority/2-normal` → `priority/3-low` / `priority/4-backburner`.
+     - **Kind Urgency**: `kind/bug` / `flag/security` → `kind/feature` → `kind/chore` / `kind/refactor` → `kind/docs` → `kind/explore` / `kind/discussion`.
+     - **Effort Rating**: `size/0-cheap` (fast unblocking) → `size/1-medium` → `size/2-expensive`.
+     - **Aging**: Older unblocked tasks break ties to prevent starvation.
+
+2. **Layer 2: Agent Reasoning & Contextual Fallback (The Intelligence Layer)**:
+   - **Do NOT blind-trust a "0 items" return from the script**: Deterministic rule engines only evaluate static labels and recent comment deltas. They cannot parse semantic nuance, implicit blockers resolved elsewhere, or emergent requirements.
+   - **Active Reasoning Pass**: If the checker reports 0 items, or if higher-level user goals supersede static queue items, the Orchestrator/agent MUST apply its own reasoning:
+     - Scan the active board for unblocked discussion items (`kind/discussion`) that have operator guidance ready to be converted into specifications (`spec/0-needed` → `spec/1-checklist`).
+     - Check whether recent commits or closed issues have unblocked dependent tickets (`dep/blocked`).
+     - Identify issues sitting with ambiguous labels that can be shaped or clarified immediately.
+   - **Reasoning Rules**: The deterministic script provides the baseline order; the agent's contextual awareness makes the final judgment call.
 
 ---
 
