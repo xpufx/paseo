@@ -46,17 +46,48 @@ labels:
   - name: "state/2-review"
     color: "#7057ff"
     exclusive: true
-    description: "Implementation complete and verified locally; awaiting Orchestrator review"
+    description: "Implementation complete; undergoing Orchestrator or peer review"
 
   - name: "state/3-verify"
     color: "#0075ca"
     exclusive: true
-    description: "Awaiting human operator or on-device test verification"
+    description: "Awaiting human operator signoff or live device verification"
 
   - name: "state/4-done"
     color: "#006b75"
     exclusive: true
     description: "Final acceptance confirmed"
+
+  # ============================================================================
+  # Review Scope (Mutually Exclusive - Granular Code Review Status)
+  # ============================================================================
+  - name: "review/0-needed"
+    color: "#7057ff"
+    exclusive: true
+    description: "Code complete and committed; awaiting Orchestrator diff audit"
+
+  - name: "review/1-changes-requested"
+    color: "#e11d48"
+    exclusive: true
+    description: "Reviewer found flaws, regression, or missing test coverage"
+
+  - name: "review/2-approved"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Diff, typing, and test suites inspected and approved by Orchestrator"
+
+  # ============================================================================
+  # Verification Nature Scope (Non-Exclusive to allow multiple verification tags)
+  # ============================================================================
+  - name: "verify/automated-ok"
+    color: "#0e8a16"
+    exclusive: false
+    description: "All automated test suites, typechecks, and linters pass 100%"
+
+  - name: "verify/needs-device"
+    color: "#fbca04"
+    exclusive: false
+    description: "Requires visual inspection or physical interaction on desktop/device"
 
   # ============================================================================
   # Specification & Shaping Scope (Mutually Exclusive - Ordered by Stage)
@@ -223,6 +254,11 @@ labels:
     color: "#f9d0c4"
     exclusive: true
     description: "Concerns root workspace or cross-cutting configuration"
+
+  - name: "target/daemon"
+    color: "#2f363d"
+    exclusive: true
+    description: "Concerns backend daemons, system services, or socket protocols"
 
   # ============================================================================
   # Dependency Scope (Non-Exclusive to allow complex links)
