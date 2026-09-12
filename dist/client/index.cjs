@@ -485,8 +485,10 @@ function AttentionBeacon({
   haloStyle,
   badgeStyle,
   accessibilityLabel,
-  testID
+  testID,
+  badgeIcon
 }) {
+  const { Icon: Icon2 } = getClientHost();
   const { colors } = usePluginTheme();
   const resolved = normalizeBeaconMode(mode);
   const beaconColor = resolveBeaconToneColor(colors, tone, color);
@@ -522,6 +524,8 @@ function AttentionBeacon({
   if (resolved === "badge") {
     const opacity2 = pip.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
     const scale2 = pip.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.15] });
+    const hasIcon = badgeIcon !== void 0 && badgeIcon !== null && badgeIcon !== "";
+    const iconColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
     return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: [
       children,
       /* @__PURE__ */ jsxRuntime.jsx(
@@ -529,7 +533,13 @@ function AttentionBeacon({
         {
           pointerEvents: "none",
           testID: testID ? `${testID}-badge` : void 0,
-          style: [styles.pip, { backgroundColor: beaconColor, opacity: opacity2, transform: [{ scale: scale2 }] }, badgeStyle]
+          style: [
+            styles.pip,
+            { backgroundColor: beaconColor, opacity: opacity2, transform: [{ scale: scale2 }] },
+            hasIcon && styles.pipWithIcon,
+            badgeStyle
+          ],
+          children: hasIcon ? typeof badgeIcon === "string" ? /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: badgeIcon, size: 10, color: iconColor }) : badgeIcon : null
         }
       )
     ] });
@@ -585,6 +595,13 @@ var styles = reactNative.StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5
+  },
+  pipWithIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center"
   }
 });
 function resolveButtonAttentionMode(attention) {

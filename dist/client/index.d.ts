@@ -289,10 +289,11 @@ interface AttentionBeaconProps {
     badgeStyle?: StyleProp<ViewStyle>;
     accessibilityLabel?: string;
     testID?: string;
+    badgeIcon?: string | ReactNode;
 }
 declare function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce";
 declare function resolveBeaconToneColor(colors: ThemeColors, tone?: AttentionBeaconTone, customColor?: string): string;
-declare function AttentionBeacon({ children, mode, tone, color, active, style, haloStyle, badgeStyle, accessibilityLabel, testID, }: AttentionBeaconProps): React__default.JSX.Element;
+declare function AttentionBeacon({ children, mode, tone, color, active, style, haloStyle, badgeStyle, accessibilityLabel, testID, badgeIcon, }: AttentionBeaconProps): React__default.JSX.Element;
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 type ButtonSize = "sm" | "md" | "lg";
