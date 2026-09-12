@@ -164,7 +164,7 @@ export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalP
   );
   const failed = Boolean(data?.error) || isError;
   return (
-    <ModalBody refreshing={isRefetching} onRefresh={() => refetch()}>
+    <ModalBody refreshing={isRefetching} onRefresh={() => { refetch(); }}>
       <Tabs
         tabs={[
           { id: "issues", label: "Open Issues", shortLabel: "Issues" },
@@ -228,7 +228,7 @@ export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalP
         API, so copy the reference and paste it into chat.
       </Text>
       <View style={styles.actions}>
-        <Button label="Refresh" variant="secondary" onPress={() => refetch()} />
+        <Button label="Refresh" variant="secondary" onPress={() => { refetch(); }} />
         <Button label="Close" variant="ghost" onPress={close} />
       </View>
     </ModalBody>
