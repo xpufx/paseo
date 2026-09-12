@@ -34,7 +34,6 @@ import {
   useAutoRefreshQuery,
   usePluginSettings,
   usePluginTheme,
-  useResponsive,
   getStatusColor,
   triggerHaptic,
   type RenderModalProps,
@@ -1321,8 +1320,6 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     setSelectedTab(tabId as ModalTab);
   };
 
-  const { isCompact } = useResponsive();
-
   if (isError && !data) {
     return (
       <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
@@ -1348,7 +1345,6 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
           onRefresh={handleRefresh}
           contentContainerStyle={[
             { paddingTop: Math.round(padding.gap / 2) },
-            !isCompact ? styles.modalContentDesktop : undefined,
           ]}
         >
           <Card variant="elevated">
@@ -1392,7 +1388,6 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
         onRefresh={handleRefresh}
         contentContainerStyle={[
           { paddingTop: Math.round(padding.gap / 2) },
-          !isCompact ? styles.modalContentDesktop : undefined,
         ]}
       >
         {activeTab === "system" && (
@@ -2555,10 +2550,6 @@ const styles = StyleSheet.create({
     width: "100%",
     zIndex: 10,
   },
-  modalContentDesktop: {
-    minWidth: 460,
-    minHeight: 460,
-  },
   pillContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -2623,9 +2614,13 @@ const styles = StyleSheet.create({
   },
   gaugeContainer: {
     flexDirection: "row",
+    flexWrap: "wrap",
     justifyContent: "space-around",
     alignItems: "center",
     paddingVertical: 12,
+    width: "100%",
+    flexShrink: 1,
+    minWidth: 0,
   },
   settingsToggles: {
     gap: 8,
@@ -2679,7 +2674,8 @@ const styles = StyleSheet.create({
   },
   modeCard: {
     flex: 1,
-    minWidth: 90,
+    flexShrink: 1,
+    minWidth: 0,
     paddingVertical: 6,
     paddingHorizontal: 8,
     borderRadius: 6,
