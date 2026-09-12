@@ -1135,7 +1135,7 @@ function MetricSurfaceMatrix({
                     : def.description}
             </Text>
             <View style={{ flexDirection: "row", gap: 24, paddingLeft: 4 }}>
-              <View style={{ alignItems: "flex-start", gap: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
                   Pill
                 </Text>
@@ -1145,7 +1145,7 @@ function MetricSurfaceMatrix({
                   onValueChange={(val) => setBox("pill", val)}
                 />
               </View>
-              <View style={{ alignItems: "flex-start", gap: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
                   Timeline
                 </Text>
@@ -1188,7 +1188,7 @@ function MetricSurfaceMatrix({
                 : "Drop-in pill from ~/.paseo/top/pills"}
             </Text>
             <View style={{ flexDirection: "row", gap: 16, paddingLeft: 4 }}>
-              <View style={{ alignItems: "flex-start", gap: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
                   Pill
                 </Text>
@@ -1198,7 +1198,7 @@ function MetricSurfaceMatrix({
                   onValueChange={(val) => onCustomToggle(pill.id, val)}
                 />
               </View>
-              <View style={{ alignItems: "flex-start", gap: 4 }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
                   Timeline
                 </Text>
