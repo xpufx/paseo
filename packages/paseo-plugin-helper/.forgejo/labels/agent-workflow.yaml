@@ -1,0 +1,330 @@
+# Forgejo Scoped & Exclusive Labels Definition
+# Compatible with Forgejo label templates & REST API
+# Numeric prefixes enforce natural lexicographical ordering in Forgejo UI
+labels:
+  # ============================================================================
+  # Priority Scope (Mutually Exclusive - Ordered by Urgency)
+  # ============================================================================
+  - name: "priority/0-SOS"
+    color: "#b60205"
+    exclusive: true
+    description: "Highest priority urgent dispatch; preempts all standard tasks"
+
+  - name: "priority/1-high"
+    color: "#d93f0b"
+    exclusive: true
+    description: "High priority task"
+
+  - name: "priority/2-normal"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Normal priority task"
+
+  - name: "priority/3-low"
+    color: "#808080"
+    exclusive: true
+    description: "Low priority task"
+
+  - name: "priority/4-backburner"
+    color: "#8a8a8a"
+    exclusive: true
+    description: "Parked or low-priority background item"
+
+  # ============================================================================
+  # Execution State Scope (Mutually Exclusive - Ordered by Lifecycle Pipeline)
+  # ============================================================================
+  - name: "state/0-triage"
+    color: "#fbca04"
+    exclusive: true
+    description: "New issue awaiting initial triage"
+
+  - name: "state/1-wip"
+    color: "#e11d48"
+    exclusive: true
+    description: "Active implementation in progress"
+
+  - name: "state/2-review"
+    color: "#7057ff"
+    exclusive: true
+    description: "Implementation complete; undergoing Orchestrator or peer review"
+
+  - name: "state/3-verify"
+    color: "#0075ca"
+    exclusive: true
+    description: "Awaiting human operator signoff or live device verification"
+
+  - name: "state/4-done"
+    color: "#006b75"
+    exclusive: true
+    description: "Final acceptance confirmed"
+
+  # ============================================================================
+  # Review Scope (Mutually Exclusive - Granular Code Review Status)
+  # ============================================================================
+  - name: "review/0-needed"
+    color: "#7057ff"
+    exclusive: true
+    description: "Code complete and committed; awaiting Orchestrator diff audit"
+
+  - name: "review/1-changes-requested"
+    color: "#e11d48"
+    exclusive: true
+    description: "Reviewer found flaws, regression, or missing test coverage"
+
+  - name: "review/2-approved"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Diff, typing, and test suites inspected and approved by Orchestrator"
+
+  # ============================================================================
+  # Verification Nature Scope (Exclusive Scoped Badge)
+  # ============================================================================
+  - name: "verify/automated-ok"
+    color: "#0e8a16"
+    exclusive: true
+    description: "All automated test suites, typechecks, and linters pass 100%"
+
+  - name: "verify/needs-device"
+    color: "#fbca04"
+    exclusive: true
+    description: "Requires visual inspection or physical interaction on desktop/device"
+
+  # ============================================================================
+  # Specification & Shaping Scope (Mutually Exclusive - Ordered by Stage)
+  # ============================================================================
+  - name: "spec/0-needed"
+    color: "#d4a017"
+    exclusive: true
+    description: "Needs pre-code technical specification or boundary analysis"
+
+  - name: "spec/1-checklist"
+    color: "#1d76db"
+    exclusive: true
+    description: "Actionable - [ ] checklist shaped and ready for human review"
+
+  - name: "spec/2-approved"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Specification and checklist approved for implementation"
+
+  # ============================================================================
+  # Presentation & Formatting Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "format/0-needed"
+    color: "#1d76db"
+    exclusive: true
+    description: "Issue body requires markdown or typo cleanup without changing intent"
+
+  - name: "format/1-ok"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Issue presentation and formatting verified clean"
+
+  # ============================================================================
+  # Size / Effort Scope (Mutually Exclusive - Ordered by Weight)
+  # ============================================================================
+  - name: "size/0-cheap"
+    color: "#c2e0c6"
+    exclusive: true
+    description: "Small, low-risk task safe for autonomous worker dispatch"
+
+  - name: "size/1-medium"
+    color: "#fef2c0"
+    exclusive: true
+    description: "Standard sprint task with defined scope"
+
+  - name: "size/2-expensive"
+    color: "#f9d0c4"
+    exclusive: true
+    description: "High cognitive load, broad refactor, or multi-package change"
+
+  - name: "size/3-chunk"
+    color: "#e11d48"
+    exclusive: true
+    description: "Oversized scope; halt implementation and chunk into smaller PRs/tickets"
+
+  # ============================================================================
+  # Upstream Scope (Mutually Exclusive - Ordered by Status)
+  # ============================================================================
+  - name: "upstream/0-explore"
+    color: "#5319e7"
+    exclusive: true
+    description: "Investigate upstream Paseo core repos, PRs, and docs before coding"
+
+  - name: "upstream/1-blocked"
+    color: "#880e4f"
+    exclusive: true
+    description: "Hard dependency blocked on an upstream Paseo release or fix"
+
+  - name: "upstream/2-aligned"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Verified aligned and compatible with upstream Paseo"
+
+  # ============================================================================
+  # Attention Scope (Mutually Exclusive - Ordered by Urgency)
+  # ============================================================================
+  - name: "attention/0-orchestrator"
+    color: "#1d76db"
+    exclusive: true
+    description: "Requires Orchestrator triage, decomposition, or dispatch"
+
+  - name: "attention/1-agent"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Active signal for autonomous worker agent inspection or pickup"
+
+  - name: "attention/2-user"
+    color: "#b60205"
+    exclusive: true
+    description: "Blocked on human operator clarification"
+
+  - name: "attention/3-ignore"
+    color: "#6b7280"
+    exclusive: true
+    description: "Suppresses automated agent triage unless escalated with SOS"
+
+  # ============================================================================
+  # Kind / Nature Scope (Mutually Exclusive)
+  # ============================================================================
+  - name: "kind/bug"
+    color: "#ee0701"
+    exclusive: true
+    description: "Defect or unexpected breakage, not a feature"
+
+  - name: "kind/feature"
+    color: "#0288d1"
+    exclusive: true
+    description: "New user-facing functionality or capability"
+
+  - name: "kind/chore"
+    color: "#a2eeef"
+    exclusive: true
+    description: "Routine maintenance, dependency bump, internal cleanup"
+
+  - name: "kind/discussion"
+    color: "#cc317c"
+    exclusive: true
+    description: "Open architectural question or debate; decide before building"
+
+  - name: "kind/explore"
+    color: "#84b6eb"
+    exclusive: true
+    description: "Research or technical spike into problem space or feasibility"
+
+  - name: "kind/idea"
+    color: "#fbca04"
+    exclusive: true
+    description: "Raw proposal or brainstorm, not yet shaped"
+
+  - name: "kind/meta"
+    color: "#5319e7"
+    exclusive: true
+    description: "Repo housekeeping, board workflow, or tooling"
+
+  - name: "kind/docs"
+    color: "#0075ca"
+    exclusive: true
+    description: "Documentation, style guide, or usage guides"
+
+  - name: "kind/refactor"
+    color: "#1d76db"
+    exclusive: true
+    description: "Code restructuring without changing external behavior"
+
+  # ============================================================================
+  # Target / Package Scope (Exclusive Scoped Badge)
+  # ============================================================================
+  - name: "target/helper"
+    color: "#bfdadc"
+    exclusive: true
+    description: "Concerns packages/paseo-plugin-helper"
+
+  - name: "target/top"
+    color: "#c5def5"
+    exclusive: true
+    description: "Concerns plugins/top"
+
+  - name: "target/x-comms"
+    color: "#d4c5f9"
+    exclusive: true
+    description: "Concerns plugins/x-comms"
+
+  - name: "target/mcp-tools"
+    color: "#e99695"
+    exclusive: true
+    description: "Concerns plugins/mcp-tools"
+
+  - name: "target/forgejo"
+    color: "#ff7600"
+    exclusive: true
+    description: "Concerns plugins/forgejo"
+
+  - name: "target/monorepo"
+    color: "#f9d0c4"
+    exclusive: true
+    description: "Concerns root workspace or cross-cutting configuration"
+
+  - name: "target/daemon"
+    color: "#2f363d"
+    exclusive: true
+    description: "Concerns backend daemons, system services, or socket protocols"
+
+  # ============================================================================
+  # Dependency Scope (Exclusive Scoped Badge)
+  # ============================================================================
+  - name: "dep/blocker"
+    color: "#b60205"
+    exclusive: true
+    description: "This issue blocks other issues from proceeding"
+
+  - name: "dep/blocked"
+    color: "#e99695"
+    exclusive: true
+    description: "This issue is blocked waiting on another issue"
+
+  # ============================================================================
+  # Linked / Cluster Coordination Scope (Mutually Exclusive - Ordered by Stage)
+  # ============================================================================
+  - name: "linked/0-needs-split"
+    color: "#e11d48"
+    exclusive: true
+    description: "Multiple cross-cutting concerns; halt implementation and split into domain tickets"
+
+  - name: "linked/1-peer"
+    color: "#5319e7"
+    exclusive: true
+    description: "Part of an active cluster of co-evolving sister issues (see Linked: line)"
+
+  - name: "linked/2-done"
+    color: "#0e8a16"
+    exclusive: true
+    description: "All sister/peer issues merged and verified; synchronization resolved"
+
+  # ============================================================================
+  # Special / Behavioral Flags
+  # ============================================================================
+  - name: "flag/evergreen"
+    color: "#0e8a16"
+    exclusive: true
+    description: "Living tracker or operational standard; remains open"
+
+  - name: "flag/security"
+    color: "#b60205"
+    exclusive: true
+    description: "Concerns authentication, secrets, or exfiltration boundary"
+
+  - name: "flag/stop-work"
+    color: "#e11d48"
+    exclusive: true
+    description: "Circuit breaker; halt all work on this issue immediately"
+
+  - name: "flag/wont-do"
+    color: "#ffffff"
+    exclusive: true
+    description: "Decided against; preserved for architectural record"
+
+  - name: "flag/audit"
+    color: "#fbca04"
+    exclusive: true
+    description: "Requires codebase audit or health check pass"

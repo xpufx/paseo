@@ -117,33 +117,59 @@ Understand the intent of board labels:
 - **`backburner`**: Lowest priority task. Positioned at the very bottom of the queue. Agents must never prioritize this over standard or high priority work, and the Orchestrator should only surface or mention it periodically if it requires attention.
 - **`blockee` / `blocker`**: Dependency indicators. Check linked blocking issues before proceeding.
 
+### Scoped & Exclusive Labels (Forgejo Native Standard)
+Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent-workflow.yaml). When scoped labels (`scope/name`) with `exclusive: true` are present, applying a new label in that scope automatically evicts any existing label sharing that scope prefix at the Forgejo DB level (zero `--remove-label` needed):
+- **`format/` Scope**: `format/0-needed` ↔ `format/1-ok` (cleaning presentation and applying `format/1-ok` automatically clears `format/0-needed`).
+- **`spec/` Scope**: `spec/0-needed` → `spec/1-checklist` → `spec/2-approved` (shaping phase transitions automatically clear previous stages).
+- **`state/` Scope**: `state/0-triage` → `state/1-wip` → `state/2-review` → `state/3-verify` → `state/4-done` (execution lifecycle).
+- **`attention/` Scope**: `attention/0-orchestrator` ↔ `attention/1-agent` ↔ `attention/2-user` ↔ `attention/3-ignore` (action token).
+- **`priority/` Scope**: `priority/0-SOS` ↔ `priority/1-high` ↔ `priority/2-normal` ↔ `priority/3-low` ↔ `priority/4-backburner`.
+
+### Board Prioritization & Intelligence Model
+
+Agents and Orchestrators evaluate the board using a two-step approach:
+
+1. **Deterministic Baseline (`forgejo-issues-check`)**:
+   - Run `/home/xpufx/bin/forgejo-issues-check` to get the ranked list of unblocked, prioritized candidates.
+   - Respect the script's output ordering as the operational baseline.
+
+2. **Agent Reasoning & Contextual Augmentation**:
+   - **Do NOT blind-trust a \"0 items\" return from the script**: Deterministic checks evaluate labels and comment deltas, but cannot infer unstated context or emergent priorities.
+   - When the script returns 0 items or when higher-level user directives take precedence, apply agent reasoning:
+     - Check discussions (`kind/discussion`) with operator guidance to shape into actionable specifications (`spec/0-needed` → `spec/1-checklist`).
+     - Check tickets unblocked by recent commits or sibling issues (`dep/blocked`).
+     - Advance tickets blocked on clarifying questions.
+
 ---
 
 ## 6. Task Execution Lifecycle
 
 ### Step 1: Discover & Claim Work
-1. Look for unblocked issues tagged **`agent-attention`** (available task) or urgent **`SOS`**.
+1. Look for unblocked issues tagged **`attention/agent`** (available task) or urgent **`priority/SOS`**.
 2. **Mandatory Full Ticket & History Audit**:
    - **Read the entire ticket**: Never assume you know the scope from the title or prior memory. The issue body may have been rewritten, amended, or contain crucial boundary constraints.
    - **Read the ENTIRE comment thread**: Human operators frequently modify scope (e.g. *"SKIP step 2"*, *"Do not touch X"*, *"Focus only on Y"*), or another agent might have added crucial context or warnings. Blindly executing a plan without verifying the latest comment thread is a critical protocol violation.
 3. If the issue has **`upstream-check`**, first audit upstream Paseo repositories/docs to inform your approach.
 4. Check issue comments to verify no other agent has already claimed it.
 5. Post an Agent Envelope comment announcing your claim.
-6. **Attach the `wip` label immediately** (e.g. `fgjx issue edit <number> --add-label wip`) to indicate active work and prevent duplicate pickup.
+6. **Attach the `state/wip` label immediately** (e.g. `fgjx issue edit <number> --add-label state/wip`). Because `state/` is an exclusive scope, applying `state/wip` automatically clears any prior state like `state/triage` without needing removal flags.
 
 ### Step 2: Implementation Guidelines
-- **Autonomous Execution (`agent-attention`, `cheap`):**
+- **Autonomous Execution (`attention/agent`, `cheap`):**
   Work quietly in your designated worktree/checkout without spamming chat.
 - **Verification:** Run typechecks (`npm run typecheck`), linters, and test suites locally before claiming completion.
 
-### Step 3: Handoff to `Orchestrator` (`ready-for-review`)
+### Step 3: Handoff to `Orchestrator` (`state/ready-for-review` or `state/verify`)
 When code is implemented and verified locally:
 1. Push your branch/commits.
-2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`) including:
+2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
+   - **Strict Formatting Standard**: Never dump an unformatted, narrative wall of text. Use clean GitHub-flavored markdown with structured headers (`### Implementation Summary`), bulleted deliverables, explicit code host/repo/branch/SHA, and test results.
    - Summary of changes implemented.
    - Updated checklist showing completed items.
    - Branch name and commit hash(es).
    - Confirmation that typechecks and tests passed.
-3. **Remove the `wip` label** and attach **`agent-finished`** (keeping `agent-attention`), and signal handoff to the **`Orchestrator`** for review (`ready-for-review`), or tag `verify` for on-device/human verification (`fgjx issue edit <number> --remove-label wip --add-label agent-finished --add-label verify`).
-4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` with `agent-finished` and `verify` (and/or `ready-for-review`) attached so the human operator can verify and close it.
+3. **Transition the state**: Apply **`state/ready-for-review`** (for Orchestrator review) or **`state/verify`** (for on-device/human testing).
+   - Command: `fgjx issue edit <number> --add-label state/ready-for-review` (or `--add-label state/verify`).
+   - **Automatic Eviction**: Because `state/` is exclusive, adding `state/ready-for-review` or `state/verify` automatically removes `state/wip` at the database level.
+4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` with `state/verify` (and/or `state/ready-for-review`) attached so the human operator can verify and close it.
 5. Stand by for fast review from the `Orchestrator` or testing by human user `oktay`.

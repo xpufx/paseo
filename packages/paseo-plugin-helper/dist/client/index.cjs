@@ -1,13 +1,13 @@
 'use strict';
 
-var React7 = require('react');
+var React8 = require('react');
 var reactNative = require('react-native');
 var jsxRuntime = require('react/jsx-runtime');
 var reactQuery = require('@tanstack/react-query');
 
 function _interopDefault (e) { return e && e.__esModule ? e : { default: e }; }
 
-var React7__default = /*#__PURE__*/_interopDefault(React7);
+var React8__default = /*#__PURE__*/_interopDefault(React8);
 
 var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
   get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
@@ -340,7 +340,7 @@ function getDefaultTheme() {
   return defaultDarkTheme;
 }
 var initialDefaultTheme = getDefaultTheme();
-var PluginThemeContext = React7.createContext({
+var PluginThemeContext = React8.createContext({
   theme: initialDefaultTheme,
   colors: initialDefaultTheme.colors,
   fonts: {},
@@ -362,7 +362,7 @@ function PluginThemeProvider({
   flair: userFlair,
   children
 }) {
-  const value = React7.useMemo(() => {
+  const value = React8.useMemo(() => {
     const flair = { ...defaultFlair, ...userFlair };
     const hostVariables = readHostThemeVariables();
     const effectiveColors = mergeThemeColors(
@@ -395,7 +395,7 @@ function PluginThemeProvider({
   return /* @__PURE__ */ jsxRuntime.jsx(PluginThemeContext.Provider, { value, children });
 }
 function usePluginTheme() {
-  return React7.useContext(PluginThemeContext);
+  return React8.useContext(PluginThemeContext);
 }
 
 // src/client/theme/useResponsive.ts
@@ -436,6 +436,184 @@ function selectHostScrollView(host, fallback) {
 function isClientHostInitialized() {
   return deps !== void 0;
 }
+function normalizeBeaconMode(mode) {
+  if (mode === "ring") return "radar";
+  if (mode === "glow" || mode === "badge" || mode === "bounce" || mode === "radar") return mode;
+  return "radar";
+}
+function resolveBeaconToneColor(colors, tone = "warning", customColor) {
+  if (customColor) return customColor;
+  if (tone === "danger") return colors.statusDanger;
+  if (tone === "accent") return colors.accent;
+  return colors.statusWarning;
+}
+function useLoop(driver, toValue, duration, active) {
+  React8.useEffect(() => {
+    if (!active) return;
+    driver.setValue(0);
+    const animation = reactNative.Animated.loop(
+      reactNative.Animated.sequence([
+        reactNative.Animated.timing(driver, { toValue, duration, easing: reactNative.Easing.linear, useNativeDriver: true }),
+        reactNative.Animated.timing(driver, { toValue: 0, duration: 0, useNativeDriver: true })
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [driver, toValue, duration, active]);
+}
+function usePingPong(driver, duration, active) {
+  React8.useEffect(() => {
+    if (!active) return;
+    driver.setValue(0);
+    const animation = reactNative.Animated.loop(
+      reactNative.Animated.sequence([
+        reactNative.Animated.timing(driver, { toValue: 1, duration, easing: reactNative.Easing.linear, useNativeDriver: true }),
+        reactNative.Animated.timing(driver, { toValue: 0, duration, easing: reactNative.Easing.linear, useNativeDriver: true })
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [driver, duration, active]);
+}
+function AttentionBeacon({
+  children,
+  mode = "radar",
+  tone = "warning",
+  color,
+  active = true,
+  style,
+  haloStyle,
+  badgeStyle,
+  accessibilityLabel,
+  testID,
+  badgeIcon
+}) {
+  const { Icon: Icon2 } = getClientHost();
+  const { colors } = usePluginTheme();
+  const resolved = normalizeBeaconMode(mode);
+  const beaconColor = resolveBeaconToneColor(colors, tone, color);
+  const radar = React8.useRef(new reactNative.Animated.Value(0)).current;
+  const breath = React8.useRef(new reactNative.Animated.Value(0)).current;
+  const pip = React8.useRef(new reactNative.Animated.Value(0)).current;
+  const jiggle = React8.useRef(new reactNative.Animated.Value(0)).current;
+  const isRadar = resolved === "radar" && active;
+  const isGlow = resolved === "glow" && active;
+  const isBadge = resolved === "badge" && active;
+  const isBounce = resolved === "bounce" && active;
+  useLoop(radar, 1, 1600, isRadar);
+  usePingPong(breath, 900, isGlow);
+  usePingPong(pip, 900, isBadge);
+  usePingPong(jiggle, 350, isBounce);
+  if (!active) {
+    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles.wrapper, style], children });
+  }
+  if (resolved === "glow") {
+    const opacity2 = breath.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] });
+    return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: [
+      children,
+      /* @__PURE__ */ jsxRuntime.jsx(
+        reactNative.Animated.View,
+        {
+          pointerEvents: "none",
+          testID: testID ? `${testID}-glow` : void 0,
+          style: [styles.glowHalo, { borderColor: beaconColor, opacity: opacity2 }, haloStyle]
+        }
+      )
+    ] });
+  }
+  if (resolved === "badge") {
+    const opacity2 = pip.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
+    const scale2 = pip.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.15] });
+    const hasIcon = badgeIcon !== void 0 && badgeIcon !== null && badgeIcon !== "";
+    const iconColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
+    return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: [
+      children,
+      /* @__PURE__ */ jsxRuntime.jsx(
+        reactNative.Animated.View,
+        {
+          pointerEvents: "none",
+          testID: testID ? `${testID}-badge` : void 0,
+          style: [
+            styles.pip,
+            { backgroundColor: beaconColor, opacity: opacity2, transform: [{ scale: scale2 }] },
+            hasIcon && styles.pipWithIcon,
+            badgeStyle
+          ],
+          children: hasIcon ? typeof badgeIcon === "string" ? /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: badgeIcon, size: 10, color: iconColor }) : badgeIcon : null
+        }
+      )
+    ] });
+  }
+  if (resolved === "bounce") {
+    const translateY = jiggle.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
+    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.Animated.View, { style: { transform: [{ translateY }] }, children }) });
+  }
+  const scale = radar.interpolate({ inputRange: [0, 1], outputRange: [1, 1.5] });
+  const opacity = radar.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] });
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: [
+    /* @__PURE__ */ jsxRuntime.jsx(
+      reactNative.Animated.View,
+      {
+        pointerEvents: "none",
+        testID: testID ? `${testID}-halo` : void 0,
+        style: [
+          styles.radarHalo,
+          { borderColor: beaconColor, opacity, transform: [{ scale }] },
+          haloStyle
+        ]
+      }
+    ),
+    children
+  ] });
+}
+var styles = reactNative.StyleSheet.create({
+  wrapper: {
+    position: "relative"
+  },
+  radarHalo: {
+    position: "absolute",
+    top: -4,
+    left: -4,
+    right: -4,
+    bottom: -4,
+    borderWidth: 2,
+    borderRadius: 12
+  },
+  glowHalo: {
+    position: "absolute",
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderWidth: 2,
+    borderRadius: 10
+  },
+  pip: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    width: 10,
+    height: 10,
+    borderRadius: 5
+  },
+  pipWithIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center"
+  }
+});
+function resolveButtonAttentionMode(attention) {
+  if (!attention) return null;
+  if (attention === true) return "radar";
+  return attention;
+}
+function resolveButtonAttentionTone(variant) {
+  if (variant === "danger") return "danger";
+  if (variant === "primary") return "accent";
+  return "warning";
+}
 function Button({
   label,
   variant = "secondary",
@@ -447,7 +625,8 @@ function Button({
   loading = false,
   style,
   textStyle,
-  accessibilityLabel
+  accessibilityLabel,
+  attention
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, resolveRadius: resolveRadius2, touchTargetMin, isCompact, alpha: alpha2 } = usePluginTheme();
@@ -487,7 +666,8 @@ function Button({
     }
     return icon;
   };
-  return /* @__PURE__ */ jsxRuntime.jsx(
+  const attentionMode = resolveButtonAttentionMode(attention);
+  const pressable = /* @__PURE__ */ jsxRuntime.jsx(
     reactNative.Pressable,
     {
       onPress,
@@ -496,7 +676,7 @@ function Button({
       accessibilityLabel: accessibilityLabel || label,
       hitSlop: Math.max(0, (touchTargetMin - 32) / 2),
       style: ({ pressed }) => [
-        styles.base,
+        styles2.base,
         {
           backgroundColor: pressed && !disabled ? alpha2(bg, 0.8) : bg,
           borderColor: border,
@@ -515,7 +695,7 @@ function Button({
           reactNative.Text,
           {
             style: [
-              styles.text,
+              styles2.text,
               {
                 color: textColor,
                 fontSize
@@ -529,8 +709,10 @@ function Button({
       ] })
     }
   );
+  if (!attentionMode) return pressable;
+  return /* @__PURE__ */ jsxRuntime.jsx(AttentionBeacon, { mode: attentionMode, tone: resolveButtonAttentionTone(variant), children: pressable });
 }
-var styles = reactNative.StyleSheet.create({
+var styles2 = reactNative.StyleSheet.create({
   base: {
     flexDirection: "row",
     alignItems: "center",
@@ -574,7 +756,7 @@ function Badge({
         reactNative.View,
         {
           style: [
-            styles2.dot,
+            styles3.dot,
             {
               backgroundColor: textColor
             }
@@ -592,7 +774,7 @@ function Badge({
     reactNative.View,
     {
       style: [
-        styles2.badge,
+        styles3.badge,
         {
           backgroundColor: bg,
           borderColor: border,
@@ -608,7 +790,7 @@ function Badge({
           reactNative.Text,
           {
             style: [
-              styles2.text,
+              styles3.text,
               {
                 color: textColor,
                 fontSize: isCompact ? 10 : 11,
@@ -623,7 +805,7 @@ function Badge({
     }
   );
 }
-var styles2 = reactNative.StyleSheet.create({
+var styles3 = reactNative.StyleSheet.create({
   badge: {
     flexDirection: "row",
     alignItems: "center",
@@ -643,8 +825,8 @@ var styles2 = reactNative.StyleSheet.create({
 function StatusDot({ variant = "neutral", size = "md", pulse = false, style }) {
   const { getStatusColor: getStatusColor2, alpha: alpha2 } = usePluginTheme();
   const color = getStatusColor2(variant);
-  const pulseAnim = React7.useRef(new reactNative.Animated.Value(1)).current;
-  React7.useEffect(() => {
+  const pulseAnim = React8.useRef(new reactNative.Animated.Value(1)).current;
+  React8.useEffect(() => {
     if (!pulse) return;
     const loop = reactNative.Animated.loop(
       reactNative.Animated.sequence([
@@ -668,7 +850,7 @@ function StatusDot({ variant = "neutral", size = "md", pulse = false, style }) {
     reactNative.View,
     {
       style: [
-        styles3.container,
+        styles4.container,
         {
           width: dimension,
           height: dimension
@@ -679,7 +861,7 @@ function StatusDot({ variant = "neutral", size = "md", pulse = false, style }) {
         reactNative.Animated.View,
         {
           style: [
-            styles3.dot,
+            styles4.dot,
             {
               width: dimension,
               height: dimension,
@@ -694,7 +876,7 @@ function StatusDot({ variant = "neutral", size = "md", pulse = false, style }) {
     }
   );
 }
-var styles3 = reactNative.StyleSheet.create({
+var styles4 = reactNative.StyleSheet.create({
   container: {
     alignItems: "center",
     justifyContent: "center"
@@ -717,15 +899,15 @@ function CardHeader({
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, flair, isCompact } = usePluginTheme();
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles4.headerContainer, style], children: [
-    /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles4.headerLeft, children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles5.headerContainer, style], children: [
+    /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles5.headerLeft, children: [
       icon ? /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: icon, size: 15, color: colors.foregroundMuted }) : null,
-      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles4.titleColumn, children: [
+      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles5.titleColumn, children: [
         /* @__PURE__ */ jsxRuntime.jsx(
           reactNative.Text,
           {
             style: [
-              styles4.headerTitle,
+              styles5.headerTitle,
               {
                 color: colors.foreground,
                 fontSize: isCompact ? 12 : 13,
@@ -740,7 +922,7 @@ function CardHeader({
           reactNative.Text,
           {
             style: [
-              styles4.headerSubtitle,
+              styles5.headerSubtitle,
               { color: colors.foregroundMuted, fontSize: 11 }
             ],
             children: subtitle
@@ -748,13 +930,13 @@ function CardHeader({
         ) : null
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles4.headerRight, children: [
+    /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles5.headerRight, children: [
       badge ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: { marginRight: 6 }, children: badge }) : null,
       typeof value === "string" || typeof value === "number" ? /* @__PURE__ */ jsxRuntime.jsx(
         reactNative.Text,
         {
           style: [
-            styles4.headerValue,
+            styles5.headerValue,
             { color: colors.foreground, fontSize: isCompact ? 12 : 13 }
           ],
           children: value
@@ -781,7 +963,7 @@ function Card({ children, variant, style, noPadding = false }) {
     reactNative.View,
     {
       style: [
-        styles4.card,
+        styles5.card,
         {
           backgroundColor: bg,
           borderColor: border,
@@ -797,7 +979,7 @@ function Card({ children, variant, style, noPadding = false }) {
   );
 }
 Card.Header = CardHeader;
-var styles4 = reactNative.StyleSheet.create({
+var styles5 = reactNative.StyleSheet.create({
   card: {
     overflow: "hidden",
     width: "100%"
@@ -851,22 +1033,22 @@ function Tabs({
     reactNative.ScrollView
   );
   const { colors, resolveRadius: resolveRadius2, touchTargetMin, isCompact, alpha: alpha2 } = usePluginTheme();
-  const scrollRef = React7.useRef(null);
-  const tabLayouts = React7.useRef({});
-  const [viewportWidth, setViewportWidth] = React7.useState(0);
-  const [contentWidth, setContentWidth] = React7.useState(0);
-  const [canScrollLeft, setCanScrollLeft] = React7.useState(false);
-  const [canScrollRight, setCanScrollRight] = React7.useState(false);
+  const scrollRef = React8.useRef(null);
+  const tabLayouts = React8.useRef({});
+  const [viewportWidth, setViewportWidth] = React8.useState(0);
+  const [contentWidth, setContentWidth] = React8.useState(0);
+  const [canScrollLeft, setCanScrollLeft] = React8.useState(false);
+  const [canScrollRight, setCanScrollRight] = React8.useState(false);
   const radius = resolveRadius2("sm");
   const shouldFit = mode === "fit" || mode === "auto" && (isCompact || tabs.length <= 4);
-  const currentScrollX = React7.useRef(0);
+  const currentScrollX = React8.useRef(0);
   const checkOverflow = (cWidth, vWidth, scrollX) => {
     if (vWidth <= 0 || cWidth <= 0) return;
     setCanScrollLeft(scrollX > 4);
     setCanScrollRight(scrollX + vWidth < cWidth - 4);
   };
-  const prevActiveTab = React7.useRef(activeTab);
-  React7.useEffect(() => {
+  const prevActiveTab = React8.useRef(activeTab);
+  React8.useEffect(() => {
     if (!shouldFit && scrollRef.current && tabLayouts.current[activeTab] && viewportWidth > 0) {
       if (prevActiveTab.current !== activeTab) {
         prevActiveTab.current = activeTab;
@@ -921,8 +1103,8 @@ function Tabs({
         accessibilityRole: "tab",
         accessibilityState: { selected: isActive },
         style: ({ pressed }) => [
-          styles5.tab,
-          shouldFit ? styles5.tabFit : styles5.tabScroll,
+          styles6.tab,
+          shouldFit ? styles6.tabFit : styles6.tabScroll,
           {
             borderRadius: radius - 2,
             minHeight: Math.max(30, touchTargetMin - 8),
@@ -945,7 +1127,7 @@ function Tabs({
             {
               numberOfLines: 1,
               style: [
-                styles5.tabText,
+                styles6.tabText,
                 {
                   color: isActive ? colors.foreground : colors.foregroundMuted,
                   fontSize: isCompact ? 11 : 12,
@@ -959,7 +1141,7 @@ function Tabs({
             reactNative.View,
             {
               style: [
-                styles5.badge,
+                styles6.badge,
                 {
                   backgroundColor: isActive ? colors.accent : alpha2(colors.foregroundMuted, 0.2)
                 }
@@ -968,7 +1150,7 @@ function Tabs({
                 reactNative.Text,
                 {
                   style: [
-                    styles5.badgeText,
+                    styles6.badgeText,
                     {
                       color: isActive ? colors.accentForeground || FALLBACK_ACCENT_FOREGROUND : colors.foregroundMuted
                     }
@@ -988,7 +1170,7 @@ function Tabs({
       reactNative.View,
       {
         style: [
-          styles5.frame,
+          styles6.frame,
           {
             backgroundColor: colors.surface1,
             borderRadius: radius,
@@ -996,7 +1178,7 @@ function Tabs({
           },
           style
         ],
-        children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles5.trackFit, children: tabs.map((tab) => renderTab(tab)) })
+        children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles6.trackFit, children: tabs.map((tab) => renderTab(tab)) })
       }
     );
   }
@@ -1005,7 +1187,7 @@ function Tabs({
     {
       onLayout: handleContainerLayout,
       style: [
-        styles5.frame,
+        styles6.frame,
         {
           backgroundColor: colors.surface1,
           borderRadius: radius,
@@ -1019,8 +1201,8 @@ function Tabs({
           {
             onPress: () => scrollByDelta(-(viewportWidth * 0.7 || 140)),
             style: [
-              styles5.arrowButton,
-              styles5.arrowLeft,
+              styles6.arrowButton,
+              styles6.arrowLeft,
               {
                 backgroundColor: alpha2(colors.surface2, 0.92),
                 borderColor: colors.border
@@ -1042,8 +1224,8 @@ function Tabs({
             onContentSizeChange: handleContentSizeChange,
             scrollEventThrottle: 16,
             showsHorizontalScrollIndicator: !isCompact,
-            style: styles5.scrollView,
-            contentContainerStyle: styles5.scrollContent,
+            style: styles6.scrollView,
+            contentContainerStyle: styles6.scrollContent,
             children: tabs.map((tab) => renderTab(tab))
           }
         ),
@@ -1052,8 +1234,8 @@ function Tabs({
           {
             onPress: () => scrollByDelta(viewportWidth * 0.7 || 140),
             style: [
-              styles5.arrowButton,
-              styles5.arrowRight,
+              styles6.arrowButton,
+              styles6.arrowRight,
               {
                 backgroundColor: alpha2(colors.surface2, 0.92),
                 borderColor: colors.border
@@ -1067,7 +1249,7 @@ function Tabs({
     }
   );
 }
-var styles5 = reactNative.StyleSheet.create({
+var styles6 = reactNative.StyleSheet.create({
   frame: {
     width: "100%",
     maxWidth: "100%",
@@ -1225,7 +1407,7 @@ function CodeBlock({
   );
   const { colors, resolveRadius: resolveRadius2, isCompact, touchTargetMin, alpha: alpha2 } = usePluginTheme();
   const toast = useToast();
-  const [copied, setCopied] = React7.useState(false);
+  const [copied, setCopied] = React8.useState(false);
   const radius = resolveRadius2("md");
   const handleCopy = async () => {
     const ok = await copyToClipboard(code, {
@@ -1246,7 +1428,7 @@ function CodeBlock({
     reactNative.View,
     {
       style: [
-        styles6.container,
+        styles7.container,
         {
           backgroundColor: colors.surface0,
           borderColor: colors.border,
@@ -1259,20 +1441,20 @@ function CodeBlock({
           reactNative.View,
           {
             style: [
-              styles6.header,
+              styles7.header,
               {
                 borderBottomColor: alpha2(colors.border, 0.7)
               }
             ],
             children: [
-              /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles6.headerLeft, children: title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles6.title, { color: colors.foreground }], children: title }) : language ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles6.language, { color: colors.foregroundMuted }], children: language.toUpperCase() }) : null }),
+              /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles7.headerLeft, children: title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles7.title, { color: colors.foreground }], children: title }) : language ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles7.language, { color: colors.foregroundMuted }], children: language.toUpperCase() }) : null }),
               copyable && /* @__PURE__ */ jsxRuntime.jsxs(
                 reactNative.Pressable,
                 {
                   onPress: handleCopy,
                   hitSlop: Math.max(0, (touchTargetMin - 28) / 2),
                   style: ({ pressed }) => [
-                    styles6.copyButton,
+                    styles7.copyButton,
                     {
                       backgroundColor: pressed ? colors.surface2 : colors.surface1,
                       borderColor: colors.border,
@@ -1292,7 +1474,7 @@ function CodeBlock({
                       reactNative.Text,
                       {
                         style: [
-                          styles6.copyText,
+                          styles7.copyText,
                           { color: copied ? colors.statusSuccess : colors.foregroundMuted }
                         ],
                         children: copied ? "Copied!" : "Copy"
@@ -1309,13 +1491,13 @@ function CodeBlock({
           {
             nestedScrollEnabled: true,
             style: { maxHeight },
-            contentContainerStyle: styles6.scrollContent,
+            contentContainerStyle: styles7.scrollContent,
             children: /* @__PURE__ */ jsxRuntime.jsx(ResolvedScrollView, { horizontal: true, showsHorizontalScrollIndicator: true, children: /* @__PURE__ */ jsxRuntime.jsx(
               reactNative.Text,
               {
                 selectable: true,
                 style: [
-                  styles6.codeText,
+                  styles7.codeText,
                   {
                     color: colors.foreground,
                     fontFamily,
@@ -1332,7 +1514,7 @@ function CodeBlock({
     }
   );
 }
-var styles6 = reactNative.StyleSheet.create({
+var styles7 = reactNative.StyleSheet.create({
   container: {
     borderWidth: 1,
     overflow: "hidden"
@@ -1399,7 +1581,7 @@ function SearchInput({
     reactNative.View,
     {
       style: [
-        styles7.container,
+        styles8.container,
         {
           backgroundColor: colors.surface1,
           borderColor: colors.border,
@@ -1409,7 +1591,7 @@ function SearchInput({
         style
       ],
       children: [
-        /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles7.iconWrapper, children: /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: "Search", size: 16, color: colors.foregroundMuted }) }),
+        /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles8.iconWrapper, children: /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: "Search", size: 16, color: colors.foregroundMuted }) }),
         /* @__PURE__ */ jsxRuntime.jsx(
           ResolvedInput,
           {
@@ -1419,7 +1601,7 @@ function SearchInput({
             placeholder,
             placeholderTextColor: colors.foregroundMuted,
             style: [
-              styles7.input,
+              styles8.input,
               {
                 color: colors.foreground,
                 fontSize: isCompact ? 13 : 14
@@ -1435,7 +1617,7 @@ function SearchInput({
           reactNative.Pressable,
           {
             onPress: handleClear,
-            style: styles7.clearButton,
+            style: styles8.clearButton,
             hitSlop: 8,
             accessibilityLabel: "Clear search",
             children: /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: "X", size: 14, color: colors.foregroundMuted })
@@ -1445,7 +1627,7 @@ function SearchInput({
     }
   );
 }
-var styles7 = reactNative.StyleSheet.create({
+var styles8 = reactNative.StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
@@ -1487,18 +1669,18 @@ function TextInput({
   onSubmitEditing
 }) {
   const { colors, resolveRadius: resolveRadius2, isCompact, touchTargetMin, alpha: alpha2 } = usePluginTheme();
-  const [isFocused, setIsFocused] = React7.useState(false);
+  const [isFocused, setIsFocused] = React8.useState(false);
   const ResolvedInput = getOptionalClientHost()?.TextInput ?? reactNative.TextInput;
   const radius = resolveRadius2("md");
   const hasError = Boolean(errorText);
   const borderColor = hasError ? colors.statusDanger : isFocused ? colors.accent : colors.border;
   const minHeight = multiline ? Math.max(touchTargetMin * 1.5, 64) : touchTargetMin;
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles8.container, style], children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles9.container, style], children: [
     label ? /* @__PURE__ */ jsxRuntime.jsx(
       reactNative.Text,
       {
         style: [
-          styles8.label,
+          styles9.label,
           {
             color: hasError ? colors.statusDanger : colors.foreground,
             fontSize: isCompact ? 12 : 13
@@ -1525,7 +1707,7 @@ function TextInput({
         onBlur: () => setIsFocused(false),
         onSubmitEditing,
         style: [
-          styles8.input,
+          styles9.input,
           {
             color: disabled ? colors.foregroundMuted : colors.foreground,
             backgroundColor: disabled ? alpha2(colors.surface1, 0.5) : colors.surface0,
@@ -1545,7 +1727,7 @@ function TextInput({
       reactNative.Text,
       {
         style: [
-          styles8.hint,
+          styles9.hint,
           {
             color: hasError ? colors.statusDanger : colors.foregroundMuted,
             fontSize: 11
@@ -1556,7 +1738,7 @@ function TextInput({
     )
   ] });
 }
-var styles8 = reactNative.StyleSheet.create({
+var styles9 = reactNative.StyleSheet.create({
   container: {
     gap: 4
   },
@@ -1598,7 +1780,7 @@ function Toggle({
       disabled,
       hitSlop: Math.max(0, (touchTargetMin - trackHeight) / 2),
       style: ({ pressed }) => [
-        styles9.container,
+        styles10.container,
         {
           minHeight: touchTargetMin,
           opacity: disabled ? 0.5 : pressed ? 0.8 : 1
@@ -1606,12 +1788,12 @@ function Toggle({
         style
       ],
       children: [
-        (label || description) && /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles9.textContainer, children: [
+        (label || description) && /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles10.textContainer, children: [
           label && /* @__PURE__ */ jsxRuntime.jsx(
             reactNative.Text,
             {
               style: [
-                styles9.label,
+                styles10.label,
                 {
                   color: colors.foreground,
                   fontSize: isCompact ? 13 : 14
@@ -1625,7 +1807,7 @@ function Toggle({
             reactNative.Text,
             {
               style: [
-                styles9.description,
+                styles10.description,
                 {
                   color: colors.foregroundMuted,
                   fontSize: 11
@@ -1639,7 +1821,7 @@ function Toggle({
           reactNative.View,
           {
             style: [
-              styles9.track,
+              styles10.track,
               {
                 width: trackWidth,
                 height: trackHeight,
@@ -1651,7 +1833,7 @@ function Toggle({
               reactNative.View,
               {
                 style: [
-                  styles9.thumb,
+                  styles10.thumb,
                   {
                     width: thumbSize,
                     height: thumbSize,
@@ -1668,7 +1850,7 @@ function Toggle({
     }
   );
 }
-var styles9 = reactNative.StyleSheet.create({
+var styles10 = reactNative.StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
@@ -1692,21 +1874,45 @@ var styles9 = reactNative.StyleSheet.create({
     ...resolveElevation("sm")
   }
 });
+function resolveCollapsibleChevron(expanded) {
+  return expanded ? "ChevronDown" : "ChevronRight";
+}
+function resolveCollapsibleHeaderBackground(colors, pressed) {
+  return pressed ? colors.surface1 : colors.surface0;
+}
+function renderTitle(title, titleStyle) {
+  if (typeof title === "string" || title === void 0) {
+    return title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: titleStyle, children: title }) : null;
+  }
+  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.titleSlot, children: title });
+}
+function renderSubtitle(subtitle, subtitleStyle) {
+  if (typeof subtitle === "string") {
+    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: subtitleStyle, children: subtitle });
+  }
+  return subtitle ?? null;
+}
 function Collapsible({
   title,
+  subtitle,
   children,
   initiallyExpanded = false,
   isExpanded: controlledExpanded,
   onToggle,
   badge,
+  headerRight,
+  summary,
   icon,
-  style
+  style,
+  headerStyle,
+  contentStyle,
+  variant
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, resolveRadius: resolveRadius2, isCompact, touchTargetMin, alpha: alpha2 } = usePluginTheme();
-  const [internalExpanded, setInternalExpanded] = React7.useState(initiallyExpanded);
+  const [internalExpanded, setInternalExpanded] = React8.useState(initiallyExpanded);
   const isExpanded = controlledExpanded !== void 0 ? controlledExpanded : internalExpanded;
-  const radius = resolveRadius2("md");
+  const radius = resolveRadius2(variant === "elevated" ? "lg" : "md");
   const handlePress = () => {
     const next = !isExpanded;
     if (controlledExpanded === void 0) {
@@ -1714,11 +1920,19 @@ function Collapsible({
     }
     onToggle?.(next);
   };
+  const titleStyle = {
+    color: colors.foreground,
+    fontSize: isCompact ? 12 : 13
+  };
+  const subtitleStyle = {
+    color: colors.foregroundMuted,
+    fontSize: isCompact ? 11 : 12
+  };
   return /* @__PURE__ */ jsxRuntime.jsxs(
     reactNative.View,
     {
       style: [
-        styles10.container,
+        styles11.container,
         {
           borderColor: colors.border,
           borderRadius: radius,
@@ -1731,50 +1945,69 @@ function Collapsible({
           reactNative.Pressable,
           {
             onPress: handlePress,
+            accessibilityRole: "button",
+            accessibilityState: { expanded: isExpanded },
             style: ({ pressed }) => [
-              styles10.header,
+              styles11.header,
               {
                 minHeight: Math.max(touchTargetMin, 36),
-                backgroundColor: pressed ? colors.surface1 : colors.surface0,
-                borderBottomColor: isExpanded ? alpha2(colors.border, 0.6) : "transparent",
-                borderBottomWidth: isExpanded ? 1 : 0
-              }
+                backgroundColor: resolveCollapsibleHeaderBackground(colors, pressed),
+                cursor: "pointer"
+              },
+              headerStyle
             ],
             children: [
-              /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles10.headerLeft, children: [
+              /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles11.headerLeft, children: [
                 /* @__PURE__ */ jsxRuntime.jsx(
-                  Icon2,
+                  reactNative.View,
                   {
-                    name: isExpanded ? "ChevronDown" : "ChevronRight",
-                    size: 14,
-                    color: colors.foregroundMuted
+                    style: [
+                      styles11.chevronBadge,
+                      {
+                        backgroundColor: alpha2(colors.accent, 0.12),
+                        borderColor: alpha2(colors.accent, 0.25)
+                      }
+                    ],
+                    children: /* @__PURE__ */ jsxRuntime.jsx(
+                      Icon2,
+                      {
+                        name: resolveCollapsibleChevron(isExpanded),
+                        size: 14,
+                        color: colors.foregroundMuted
+                      }
+                    )
                   }
                 ),
                 icon && /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: icon, size: 14, color: colors.accent }),
-                /* @__PURE__ */ jsxRuntime.jsx(
-                  reactNative.Text,
-                  {
-                    style: [
-                      styles10.title,
-                      {
-                        color: colors.foreground,
-                        fontSize: isCompact ? 12 : 13
-                      }
-                    ],
-                    children: title
-                  }
-                )
+                /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles11.titleBlock, children: [
+                  /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles11.titleRow, children: [
+                    renderTitle(title, [styles11.title, titleStyle]),
+                    badge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.badgeSlot, children: badge })
+                  ] }),
+                  subtitle ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.subtitleSlot, children: renderSubtitle(subtitle, [styles11.subtitle, subtitleStyle]) }) : null,
+                  summary ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.summarySlot, children: summary }) : null
+                ] })
               ] }),
-              badge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles10.headerRight, children: badge })
+              (headerRight || summary === void 0) && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.headerRight, children: headerRight })
             ]
           }
         ),
-        isExpanded && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles10.content, children })
+        isExpanded && /* @__PURE__ */ jsxRuntime.jsx(
+          reactNative.View,
+          {
+            style: [
+              styles11.content,
+              { borderTopColor: colors.border, borderTopWidth: 1 },
+              contentStyle
+            ],
+            children
+          }
+        )
       ]
     }
   );
 }
-var styles10 = reactNative.StyleSheet.create({
+var styles11 = reactNative.StyleSheet.create({
   container: {
     borderWidth: 1,
     overflow: "hidden"
@@ -1789,14 +2022,50 @@ var styles10 = reactNative.StyleSheet.create({
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+    flex: 1
+  },
+  chevronBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  titleBlock: {
+    flex: 1
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8
   },
-  headerRight: {
+  titleSlot: {
     flexDirection: "row",
     alignItems: "center"
   },
+  badgeSlot: {
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  subtitleSlot: {
+    marginTop: 2
+  },
+  summarySlot: {
+    marginTop: 4,
+    flexDirection: "row"
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8
+  },
   title: {
     fontWeight: "600"
+  },
+  subtitle: {
+    fontWeight: "400"
   },
   content: {
     padding: 12
@@ -1815,6 +2084,56 @@ function resolveMetricStatus(value, thresholds = {}) {
     if (value <= warning) return "warning";
     return "success";
   }
+}
+function truncate(text, maxLength, suffix = "\u2026") {
+  if (!text || text.length <= maxLength) return text;
+  return text.slice(0, Math.max(0, maxLength - suffix.length)) + suffix;
+}
+function truncateMiddle(text, maxLength, options) {
+  if (!text || text.length <= maxLength) return text;
+  const ellipsis = options?.ellipsis ?? "\u2026";
+  if (maxLength <= ellipsis.length) return ellipsis.slice(0, maxLength);
+  const available = maxLength - ellipsis.length;
+  const headLength = Math.floor(available / 2);
+  const tailLength = available - headLength;
+  const head = text.slice(0, headLength);
+  const tail = tailLength > 0 ? text.slice(-tailLength) : "";
+  return `${head}${ellipsis}${tail}`;
+}
+function truncatePath(filePath, maxLength, options) {
+  if (!filePath || filePath.length <= maxLength) return filePath;
+  const sep = options?.separator ?? "/";
+  const ellipsis = options?.ellipsis ?? "\u2026";
+  let keepLeading = options?.keepLeading ?? 1;
+  const keepTrailing = options?.keepTrailing ?? 1;
+  if (filePath.startsWith(sep) && keepLeading === 1) {
+    keepLeading = 2;
+  }
+  const parts = filePath.split(sep);
+  if (parts.length <= keepLeading + keepTrailing) {
+    return truncateMiddle(filePath, maxLength, { ellipsis });
+  }
+  const prefixParts = parts.slice(0, keepLeading);
+  const suffixParts = parts.slice(parts.length - keepTrailing);
+  let middleParts = parts.slice(keepLeading, parts.length - keepTrailing);
+  while (middleParts.length > 0) {
+    const candidate = [...prefixParts, ellipsis, ...middleParts, ...suffixParts].join(sep);
+    if (candidate.length <= maxLength) {
+      return candidate;
+    }
+    middleParts.shift();
+  }
+  const minimalCandidate = [...prefixParts, ellipsis, ...suffixParts].join(sep);
+  if (minimalCandidate.length <= maxLength) {
+    return minimalCandidate;
+  }
+  const filename = suffixParts.join(sep);
+  const prefix = prefixParts.join(sep);
+  const availableForFile = maxLength - prefix.length - sep.length - ellipsis.length - sep.length;
+  if (availableForFile > 4) {
+    return `${prefix}${sep}${ellipsis}${sep}${truncateMiddle(filename, availableForFile, { ellipsis })}`;
+  }
+  return truncateMiddle(filePath, maxLength, { ellipsis });
 }
 function ProgressBar({
   value,
@@ -1840,13 +2159,13 @@ function ProgressBar({
       barColor = colors.statusSuccess;
     }
   }
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles11.container, style], children: [
-    (label || showValueText) && /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles11.labelRow, children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles12.container, style], children: [
+    (label || showValueText) && /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles12.labelRow, children: [
       label ? /* @__PURE__ */ jsxRuntime.jsx(
         reactNative.Text,
         {
           style: [
-            styles11.labelText,
+            styles12.labelText,
             { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 }
           ],
           children: label
@@ -1856,7 +2175,7 @@ function ProgressBar({
         reactNative.Text,
         {
           style: [
-            styles11.valueText,
+            styles12.valueText,
             { color: colors.foreground, fontSize: isCompact ? 11 : 12 }
           ],
           children: [
@@ -1870,7 +2189,7 @@ function ProgressBar({
       reactNative.View,
       {
         style: [
-          styles11.track,
+          styles12.track,
           {
             backgroundColor: colors.surface2,
             height,
@@ -1881,7 +2200,7 @@ function ProgressBar({
           reactNative.View,
           {
             style: [
-              styles11.fill,
+              styles12.fill,
               {
                 width: `${clamped}%`,
                 backgroundColor: barColor,
@@ -1894,7 +2213,7 @@ function ProgressBar({
     )
   ] });
 }
-var styles11 = reactNative.StyleSheet.create({
+var styles12 = reactNative.StyleSheet.create({
   container: {
     gap: 4
   },
@@ -1948,12 +2267,12 @@ function MetricGauge({
   const trackColor = colors.surface2;
   if (reactNative.Platform.OS === "web") {
     const webBackground = `conic-gradient(${gaugeColor} 0% ${clamped}%, ${trackColor} ${clamped}% 100%)`;
-    return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles12.wrapper, style], children: [
+    return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles13.wrapper, style], children: [
       /* @__PURE__ */ jsxRuntime.jsx(
         reactNative.View,
         {
           style: [
-            styles12.gaugeBox,
+            styles13.gaugeBox,
             {
               width: size,
               height: size,
@@ -1965,7 +2284,7 @@ function MetricGauge({
             reactNative.View,
             {
               style: [
-                styles12.centerHole,
+                styles13.centerHole,
                 {
                   width: innerSize,
                   height: innerSize,
@@ -1973,7 +2292,7 @@ function MetricGauge({
                   backgroundColor: colors.surface0
                 }
               ],
-              children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles12.percentText, { color: colors.foreground }], children: [
+              children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles13.percentText, { color: colors.foreground }], children: [
                 Math.round(clamped),
                 "%"
               ] }) : null
@@ -1981,13 +2300,13 @@ function MetricGauge({
           )
         }
       ),
-      label ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles12.labelText, { color: colors.foregroundMuted }], children: label }) : null
+      label ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles13.labelText, { color: colors.foregroundMuted }], children: label }) : null
     ] });
   }
   const firstHalfRotation = Math.min(180, clamped * 3.6);
   const secondHalfRotation = clamped > 50 ? (clamped - 50) * 3.6 : 0;
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles12.wrapper, style], children: [
-    /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles12.gaugeBox, { width: size, height: size }], children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles13.wrapper, style], children: [
+    /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles13.gaugeBox, { width: size, height: size }], children: [
       /* @__PURE__ */ jsxRuntime.jsx(
         reactNative.View,
         {
@@ -2005,7 +2324,7 @@ function MetricGauge({
         reactNative.View,
         {
           style: [
-            styles12.halfCircleContainer,
+            styles13.halfCircleContainer,
             {
               width: size,
               height: size,
@@ -2016,7 +2335,7 @@ function MetricGauge({
             reactNative.View,
             {
               style: [
-                styles12.halfCircle,
+                styles13.halfCircle,
                 {
                   width: size,
                   height: size,
@@ -2035,7 +2354,7 @@ function MetricGauge({
         reactNative.View,
         {
           style: [
-            styles12.halfCircleContainer,
+            styles13.halfCircleContainer,
             {
               width: size,
               height: size,
@@ -2046,7 +2365,7 @@ function MetricGauge({
             reactNative.View,
             {
               style: [
-                styles12.halfCircle,
+                styles13.halfCircle,
                 {
                   width: size,
                   height: size,
@@ -2065,7 +2384,7 @@ function MetricGauge({
         reactNative.View,
         {
           style: [
-            styles12.centerHole,
+            styles13.centerHole,
             {
               width: innerSize,
               height: innerSize,
@@ -2073,17 +2392,17 @@ function MetricGauge({
               backgroundColor: colors.surface0
             }
           ],
-          children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles12.percentText, { color: colors.foreground }], children: [
+          children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles13.percentText, { color: colors.foreground }], children: [
             Math.round(clamped),
             "%"
           ] }) : null
         }
       )
     ] }),
-    label ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles12.labelText, { color: colors.foregroundMuted }], children: label }) : null
+    label ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles13.labelText, { color: colors.foregroundMuted }], children: label }) : null
   ] });
 }
-var styles12 = reactNative.StyleSheet.create({
+var styles13 = reactNative.StyleSheet.create({
   wrapper: {
     alignItems: "center",
     justifyContent: "center",
@@ -2134,20 +2453,20 @@ function DataTable({
     return emptyState ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style, children: emptyState }) : null;
   }
   if (isCompact) {
-    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles13.compactContainer, style], children: data.map((item, idx) => /* @__PURE__ */ jsxRuntime.jsx(
+    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles14.compactContainer, style], children: data.map((item, idx) => /* @__PURE__ */ jsxRuntime.jsx(
       reactNative.View,
       {
         style: [
-          styles13.compactCard,
+          styles14.compactCard,
           {
             backgroundColor: colors.surface1,
             borderColor: colors.border,
             borderRadius: radius
           }
         ],
-        children: columns.map((col) => /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles13.compactRow, children: [
-          /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles13.compactHeader, { color: colors.foregroundMuted }], children: col.header }),
-          /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles13.compactValue, children: col.render(item) })
+        children: columns.map((col) => /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles14.compactRow, children: [
+          /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles14.compactHeader, { color: colors.foregroundMuted }], children: col.header }),
+          /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles14.compactValue, children: col.render(item) })
         ] }, col.key))
       },
       keyExtractor(item, idx)
@@ -2157,7 +2476,7 @@ function DataTable({
     reactNative.View,
     {
       style: [
-        styles13.table,
+        styles14.table,
         {
           borderColor: colors.border,
           borderRadius: radius,
@@ -2170,7 +2489,7 @@ function DataTable({
           reactNative.View,
           {
             style: [
-              styles13.headerRow,
+              styles14.headerRow,
               {
                 backgroundColor: colors.surface1,
                 borderBottomColor: colors.border
@@ -2180,12 +2499,12 @@ function DataTable({
               reactNative.View,
               {
                 style: [
-                  styles13.cell,
+                  styles14.cell,
                   col.flex !== void 0 ? { flex: col.flex } : { flex: 1 },
                   col.width !== void 0 ? { width: col.width } : void 0,
-                  col.align === "right" ? styles13.alignRight : col.align === "center" ? styles13.alignCenter : styles13.alignLeft
+                  col.align === "right" ? styles14.alignRight : col.align === "center" ? styles14.alignCenter : styles14.alignLeft
                 ],
-                children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles13.headerText, { color: colors.foregroundMuted }], children: col.header })
+                children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles14.headerText, { color: colors.foregroundMuted }], children: col.header })
               },
               col.key
             ))
@@ -2195,17 +2514,17 @@ function DataTable({
           reactNative.View,
           {
             style: [
-              styles13.row,
+              styles14.row,
               idx < data.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 1 }
             ],
             children: columns.map((col) => /* @__PURE__ */ jsxRuntime.jsx(
               reactNative.View,
               {
                 style: [
-                  styles13.cell,
+                  styles14.cell,
                   col.flex !== void 0 ? { flex: col.flex } : { flex: 1 },
                   col.width !== void 0 ? { width: col.width } : void 0,
-                  col.align === "right" ? styles13.alignRight : col.align === "center" ? styles13.alignCenter : styles13.alignLeft
+                  col.align === "right" ? styles14.alignRight : col.align === "center" ? styles14.alignCenter : styles14.alignLeft
                 ],
                 children: col.render(item)
               },
@@ -2218,7 +2537,7 @@ function DataTable({
     }
   );
 }
-var styles13 = reactNative.StyleSheet.create({
+var styles14 = reactNative.StyleSheet.create({
   table: {
     borderWidth: 1,
     overflow: "hidden"
@@ -2279,6 +2598,9 @@ function KeyValue({
   subValue,
   mono = false,
   copyable = false,
+  truncate: truncateProp = false,
+  truncateMaxLength = 32,
+  truncatePathOptions,
   stackOnCompact = true,
   style,
   labelStyle,
@@ -2287,11 +2609,27 @@ function KeyValue({
   const { Icon: Icon2, useToast } = getClientHost();
   const { colors, flair, isCompact, touchTargetMin, fonts } = usePluginTheme();
   const toast = useToast();
-  const [copied, setCopied] = React7.useState(false);
-  const displayValue = value === null || value === void 0 ? "-" : String(value);
+  const [copied, setCopied] = React8.useState(false);
+  const rawString = value === null || value === void 0 ? "" : String(value);
+  let displayValue = rawString || "-";
+  if (truncateProp && rawString.length > truncateMaxLength) {
+    const mode = typeof truncateProp === "string" ? truncateProp : "middle";
+    switch (mode) {
+      case "path":
+        displayValue = truncatePath(rawString, truncateMaxLength, truncatePathOptions);
+        break;
+      case "end":
+        displayValue = truncate(rawString, truncateMaxLength);
+        break;
+      case "middle":
+      default:
+        displayValue = truncateMiddle(rawString, truncateMaxLength);
+        break;
+    }
+  }
   const handleCopy = async () => {
-    if (!copyable || !value) return;
-    const ok = await copyToClipboard(String(value), {
+    if (!copyable || !rawString) return;
+    const ok = await copyToClipboard(rawString, {
       toast,
       toastMessage: label
     });
@@ -2307,7 +2645,7 @@ function KeyValue({
     {
       onPress: handleCopy,
       hitSlop: Math.max(8, (touchTargetMin - 20) / 2),
-      style: styles14.copyBtn,
+      style: styles15.copyBtn,
       accessibilityRole: "button",
       accessibilityLabel: `Copy ${label}`,
       children: /* @__PURE__ */ jsxRuntime.jsx(
@@ -2325,18 +2663,18 @@ function KeyValue({
       reactNative.View,
       {
         style: [
-          styles14.container,
-          styles14.stackedContainer,
+          styles15.container,
+          styles15.stackedContainer,
           { paddingVertical: isCompact ? spacing.xs : spacing.sm },
           style
         ],
         children: [
-          /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles14.stackedHeaderRow, children: [
+          /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles15.stackedHeaderRow, children: [
             /* @__PURE__ */ jsxRuntime.jsx(
               reactNative.Text,
               {
                 style: [
-                  styles14.label,
+                  styles15.label,
                   {
                     color: colors.foregroundMuted,
                     fontSize: 11,
@@ -2354,7 +2692,7 @@ function KeyValue({
             {
               selectable: true,
               style: [
-                styles14.stackedValueText,
+                styles15.stackedValueText,
                 {
                   color: colors.foreground,
                   fontSize: 13,
@@ -2370,7 +2708,7 @@ function KeyValue({
             reactNative.Text,
             {
               style: [
-                styles14.subValue,
+                styles15.subValue,
                 {
                   color: colors.foregroundMuted,
                   fontSize: 11,
@@ -2388,8 +2726,8 @@ function KeyValue({
     reactNative.View,
     {
       style: [
-        styles14.container,
-        styles14.rowContainer,
+        styles15.container,
+        styles15.rowContainer,
         { paddingVertical: isCompact ? spacing.xs : spacing.sm },
         style
       ],
@@ -2398,7 +2736,7 @@ function KeyValue({
           reactNative.Text,
           {
             style: [
-              styles14.label,
+              styles15.label,
               {
                 color: colors.foregroundMuted,
                 fontSize: 12,
@@ -2409,13 +2747,13 @@ function KeyValue({
             children: label
           }
         ),
-        /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles14.rowValueWrapper, children: [
+        /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles15.rowValueWrapper, children: [
           /* @__PURE__ */ jsxRuntime.jsx(
             reactNative.Text,
             {
               selectable: true,
               style: [
-                styles14.rowValueText,
+                styles15.rowValueText,
                 {
                   color: colors.foreground,
                   fontSize: 13,
@@ -2426,7 +2764,7 @@ function KeyValue({
               children: displayValue
             }
           ),
-          subValue && /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles14.subValue, { color: colors.foregroundMuted, fontSize: 11 }], children: subValue }),
+          subValue && /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles15.subValue, { color: colors.foregroundMuted, fontSize: 11 }], children: subValue }),
           copyButton
         ] })
       ]
@@ -2441,8 +2779,8 @@ function KeyValueGroup({
 }) {
   const { isCompact } = usePluginTheme();
   const effectiveColumns = isCompact ? 1 : columns;
-  const childArray = React7__default.default.Children.toArray(children).filter(Boolean);
-  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles14.groupContainer, { gap }, style], children: childArray.map((child, index) => /* @__PURE__ */ jsxRuntime.jsx(
+  const childArray = React8__default.default.Children.toArray(children).filter(Boolean);
+  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles15.groupContainer, { gap }, style], children: childArray.map((child, index) => /* @__PURE__ */ jsxRuntime.jsx(
     reactNative.View,
     {
       style: {
@@ -2455,7 +2793,7 @@ function KeyValueGroup({
     index
   )) });
 }
-var styles14 = reactNative.StyleSheet.create({
+var styles15 = reactNative.StyleSheet.create({
   container: {
     width: "100%"
   },
@@ -2520,23 +2858,23 @@ function EmptyState({
   const { Icon: Icon2 } = getClientHost();
   const { colors, isCompact } = usePluginTheme();
   const resolvedAction = action ? action : actionLabel && onAction ? { label: actionLabel, onPress: onAction, variant: "secondary" } : void 0;
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles15.container, { padding: isCompact ? 20 : 32 }, style], children: [
-    icon ? typeof icon === "string" ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles15.iconWrapper, { backgroundColor: colors.surface1 }], children: /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: icon, size: isCompact ? 24 : 32, color: colors.foregroundMuted }) }) : icon : null,
-    /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles15.title, { color: colors.foreground, fontSize: isCompact ? 14 : 16 }], children: title }),
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles16.container, { padding: isCompact ? 20 : 32 }, style], children: [
+    icon ? typeof icon === "string" ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles16.iconWrapper, { backgroundColor: colors.surface1 }], children: /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: icon, size: isCompact ? 24 : 32, color: colors.foregroundMuted }) }) : icon : null,
+    /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles16.title, { color: colors.foreground, fontSize: isCompact ? 14 : 16 }], children: title }),
     description ? /* @__PURE__ */ jsxRuntime.jsx(
       reactNative.Text,
       {
         style: [
-          styles15.description,
+          styles16.description,
           { color: colors.foregroundMuted, fontSize: isCompact ? 12 : 13 }
         ],
         children: description
       }
     ) : null,
-    resolvedAction ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles15.actionRow, children: /* @__PURE__ */ jsxRuntime.jsx(Button, { size: isCompact ? "sm" : "md", ...resolvedAction }) }) : null
+    resolvedAction ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles16.actionRow, children: /* @__PURE__ */ jsxRuntime.jsx(Button, { size: isCompact ? "sm" : "md", ...resolvedAction }) }) : null
   ] });
 }
-var styles15 = reactNative.StyleSheet.create({
+var styles16 = reactNative.StyleSheet.create({
   container: {
     alignItems: "center",
     justifyContent: "center",
@@ -2628,7 +2966,7 @@ function AboutSection({
   const { Icon: Icon2 } = getClientHost();
   const { colors, resolveRadius: resolveRadius2 } = usePluginTheme();
   const { isCompact, platform } = useResponsive();
-  const [copied, setCopied] = React7.useState(false);
+  const [copied, setCopied] = React8.useState(false);
   let resolvedLogoNode = null;
   const radius = resolveRadius2("md");
   if (logo) {
@@ -2638,7 +2976,7 @@ function AboutSection({
           reactNative.Image,
           {
             source: { uri: logo },
-            style: [styles16.logoImage, { borderRadius: radius }]
+            style: [styles17.logoImage, { borderRadius: radius }]
           }
         );
       } else {
@@ -2646,7 +2984,7 @@ function AboutSection({
           reactNative.View,
           {
             style: [
-              styles16.logoIconFallback,
+              styles17.logoIconFallback,
               {
                 backgroundColor: colors.surface2,
                 borderRadius: radius,
@@ -2662,7 +3000,7 @@ function AboutSection({
         reactNative.Image,
         {
           source: logo,
-          style: [styles16.logoImage, { borderRadius: radius }]
+          style: [styles17.logoImage, { borderRadius: radius }]
         }
       );
     }
@@ -2673,7 +3011,7 @@ function AboutSection({
         reactNative.Image,
         {
           source: { uri: githubAvatar },
-          style: [styles16.logoImage, { borderRadius: radius }]
+          style: [styles17.logoImage, { borderRadius: radius }]
         }
       );
     } else {
@@ -2681,7 +3019,7 @@ function AboutSection({
         reactNative.View,
         {
           style: [
-            styles16.logoIconFallback,
+            styles17.logoIconFallback,
             {
               backgroundColor: colors.surface2,
               borderRadius: radius,
@@ -2723,7 +3061,7 @@ function AboutSection({
     ...homepage ? [{ label: "Documentation", url: homepage, icon: "BookOpen" }] : [],
     ...links
   ];
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles16.container, style], children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles17.container, style], children: [
     /* @__PURE__ */ jsxRuntime.jsxs(Card, { variant: "elevated", children: [
       /* @__PURE__ */ jsxRuntime.jsx(
         Card.Header,
@@ -2733,17 +3071,17 @@ function AboutSection({
           badge: /* @__PURE__ */ jsxRuntime.jsx(Badge, { variant: "accent", label: `v${version}` })
         }
       ),
-      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles16.headerRow, children: [
+      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles17.headerRow, children: [
         resolvedLogoNode,
-        /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles16.metaColumn, children: [
-          author ? /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles16.authorText, { color: colors.foregroundMuted }], children: [
+        /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles17.metaColumn, children: [
+          author ? /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles17.authorText, { color: colors.foregroundMuted }], children: [
             "by ",
             author
           ] }) : null,
-          license ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles16.titleRow, children: /* @__PURE__ */ jsxRuntime.jsx(Badge, { variant: "neutral", label: license }) }) : null
+          license ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles17.titleRow, children: /* @__PURE__ */ jsxRuntime.jsx(Badge, { variant: "neutral", label: license }) }) : null
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles16.actionsRow, children: [
+      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles17.actionsRow, children: [
         allLinks.map((link) => /* @__PURE__ */ jsxRuntime.jsx(
           Button,
           {
@@ -2794,7 +3132,7 @@ function AboutSection({
     ] })
   ] });
 }
-var styles16 = reactNative.StyleSheet.create({
+var styles17 = reactNative.StyleSheet.create({
   container: {
     gap: 12
   },
@@ -2839,6 +3177,109 @@ var styles16 = reactNative.StyleSheet.create({
     borderTopColor: "rgba(128, 128, 128, 0.2)"
   }
 });
+function TruncatedText({
+  text,
+  maxLength = 32,
+  mode = "middle",
+  pathOptions,
+  copyable = true,
+  mono = true,
+  toastMessage = "Copied",
+  style,
+  textStyle
+}) {
+  const { colors, fonts, isCompact, touchTargetMin } = usePluginTheme();
+  const { Icon: Icon2, useToast } = getClientHost();
+  const toast = useToast();
+  const [copied, setCopied] = React8.useState(false);
+  if (!text) {
+    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [{ color: colors.foregroundMuted }, textStyle], children: "-" });
+  }
+  let formattedText = text;
+  if (text.length > maxLength) {
+    switch (mode) {
+      case "path":
+        formattedText = truncatePath(text, maxLength, pathOptions);
+        break;
+      case "end":
+        formattedText = truncate(text, maxLength);
+        break;
+      case "middle":
+      default:
+        formattedText = truncateMiddle(text, maxLength);
+        break;
+    }
+  }
+  const handleCopy = async () => {
+    if (!copyable || !text) return;
+    const ok = await copyToClipboard(text, {
+      toast,
+      toastMessage
+    });
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2e3);
+    }
+  };
+  const fontFamily = mono ? fonts.mono ?? reactNative.Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }) : void 0;
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles18.container, style], children: [
+    /* @__PURE__ */ jsxRuntime.jsx(
+      reactNative.Text,
+      {
+        selectable: true,
+        numberOfLines: 1,
+        ellipsizeMode: "clip",
+        accessibilityLabel: text,
+        style: [
+          styles18.text,
+          {
+            color: colors.foreground,
+            fontFamily
+          },
+          textStyle
+        ],
+        children: formattedText
+      }
+    ),
+    copyable && /* @__PURE__ */ jsxRuntime.jsx(
+      reactNative.Pressable,
+      {
+        onPress: handleCopy,
+        hitSlop: Math.max(8, (touchTargetMin - 20) / 2),
+        style: styles18.copyBtn,
+        accessibilityRole: "button",
+        accessibilityLabel: `Copy ${text}`,
+        children: /* @__PURE__ */ jsxRuntime.jsx(
+          Icon2,
+          {
+            name: copied ? "Check" : "Copy",
+            size: isCompact ? 12 : 13,
+            color: copied ? colors.statusSuccess : colors.foregroundMuted
+          }
+        )
+      }
+    )
+  ] });
+}
+var styles18 = reactNative.StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    maxWidth: "100%",
+    gap: 6
+  },
+  text: {
+    fontSize: 12,
+    lineHeight: 18,
+    flexShrink: 1
+  },
+  copyBtn: {
+    padding: 3,
+    borderRadius: 4,
+    justifyContent: "center",
+    alignItems: "center"
+  }
+});
 function ModalBody({
   children,
   style,
@@ -2855,7 +3296,7 @@ function ModalBody({
     getOptionalClientHost(),
     reactNative.ScrollView
   );
-  const innerRef = React7.useRef(null);
+  const innerRef = React8.useRef(null);
   const setRefs = (node) => {
     innerRef.current = node;
     if (typeof scrollRef === "function") {
@@ -2879,7 +3320,7 @@ function ModalBody({
       reactNative.View,
       {
         style: [
-          styles17.content,
+          styles19.content,
           {
             backgroundColor: colors.surface0,
             paddingHorizontal: padding.horizontal,
@@ -2898,14 +3339,14 @@ function ModalBody({
     ResolvedScrollView,
     {
       ref: setRefs,
-      style: [{ backgroundColor: colors.surface0 }, styles17.container, style],
+      style: [{ backgroundColor: colors.surface0 }, styles19.container, style],
       nestedScrollEnabled: true,
       keyboardShouldPersistTaps: "handled",
       showsVerticalScrollIndicator: true,
       refreshControl,
       onContentSizeChange: stickToEnd ? () => innerRef.current?.scrollToEnd({ animated: true }) : void 0,
       contentContainerStyle: [
-        styles17.content,
+        styles19.content,
         {
           paddingHorizontal: padding.horizontal,
           paddingTop: padding.vertical,
@@ -2918,7 +3359,7 @@ function ModalBody({
     }
   );
 }
-var styles17 = reactNative.StyleSheet.create({
+var styles19 = reactNative.StyleSheet.create({
   container: {
     flex: 1,
     minHeight: 0,
@@ -2943,7 +3384,7 @@ function ActionBar({
     reactNative.View,
     {
       style: [
-        styles18.container,
+        styles20.container,
         {
           flexDirection: isColumn ? "column" : "row",
           justifyContent: isColumn ? "flex-start" : align,
@@ -2957,19 +3398,19 @@ function ActionBar({
     }
   );
 }
-var styles18 = reactNative.StyleSheet.create({
+var styles20 = reactNative.StyleSheet.create({
   container: {
     flexWrap: "wrap"
   }
 });
 function FormRow({ label, description, children, style }) {
   const { colors, flair, isCompact } = usePluginTheme();
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles19.container, style], children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles21.container, style], children: [
     /* @__PURE__ */ jsxRuntime.jsx(
       reactNative.Text,
       {
         style: [
-          styles19.label,
+          styles21.label,
           {
             color: colors.foreground,
             fontSize: isCompact ? 12 : 13,
@@ -2983,16 +3424,16 @@ function FormRow({ label, description, children, style }) {
       reactNative.Text,
       {
         style: [
-          styles19.description,
+          styles21.description,
           { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 }
         ],
         children: description
       }
     ),
-    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles19.content, children })
+    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles21.content, children })
   ] });
 }
-var styles19 = reactNative.StyleSheet.create({
+var styles21 = reactNative.StyleSheet.create({
   container: {
     gap: 4,
     width: "100%"
@@ -3021,12 +3462,12 @@ function registerComposerPill(client, options) {
       layout: props.layout,
       host: props.host ?? { id: "", label: "" }
     };
-    return /* @__PURE__ */ jsxRuntime.jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles20.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
+    return /* @__PURE__ */ jsxRuntime.jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles22.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
   }
   function PillHost(props) {
-    const [open, setOpen] = React7.useState(false);
-    const [payload, setPayload] = React7.useState(void 0);
-    React7.useEffect(() => {
+    const [open, setOpen] = React8.useState(false);
+    const [payload, setPayload] = React8.useState(void 0);
+    React8.useEffect(() => {
       openers.set(props.agentId, (incomingPayload) => {
         setPayload(incomingPayload);
         setOpen(true);
@@ -3036,8 +3477,8 @@ function registerComposerPill(client, options) {
       };
     }, [props.agentId]);
     const effectiveModalTitle = options.modalTitle ?? options.title;
-    const modalIconElement = React7.useMemo(() => {
-      if (React7__default.default.isValidElement(options.modalIcon)) {
+    const modalIconElement = React8.useMemo(() => {
+      if (React8__default.default.isValidElement(options.modalIcon)) {
         return options.modalIcon;
       }
       const iconName = typeof options.modalIcon === "string" ? options.modalIcon : options.icon;
@@ -3249,13 +3690,13 @@ function DefaultPillBody({
   const effectiveTitle = isCompact && compactTitle ? compactTitle : title;
   const effectiveIcon = isCompact && compactIcon ? compactIcon : icon;
   const effectiveBadge = isCompact && compactBadgeText !== void 0 ? compactBadgeText : badgeText;
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles20.pillContainer, children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles22.pillContainer, children: [
     effectiveIcon && /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: effectiveIcon, size: 13, color: theme.colors.foreground }),
-    effectiveTitle ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles20.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
-    effectiveBadge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles20.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles20.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
+    effectiveTitle ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles22.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
+    effectiveBadge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles22.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles22.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
   ] });
 }
-var styles20 = reactNative.StyleSheet.create({
+var styles22 = reactNative.StyleSheet.create({
   popoverContainer: {
     width: "100%"
   },
@@ -3343,8 +3784,8 @@ var REFRESH_INTERVALS = {
 };
 function useAutoRefreshQuery(contract, input, options) {
   const { defaultRate = "2s", customIntervalMs, isOpen = true, ...queryOptions } = options ?? {};
-  const [rate, setRate] = React7.useState(defaultRate);
-  const effectiveInterval = React7.useMemo(() => {
+  const [rate, setRate] = React8.useState(defaultRate);
+  const effectiveInterval = React8.useMemo(() => {
     if (!isOpen || rate === "paused") return false;
     if (typeof customIntervalMs === "number" && customIntervalMs > 0) {
       return customIntervalMs;
@@ -3687,16 +4128,16 @@ function CustomPillBody({ state }) {
   const { isCompact } = useResponsive();
   const title = isCompact && state.compactTitle ? state.compactTitle : state.title;
   const icon = isCompact && state.compactIcon ? state.compactIcon : state.icon;
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles21.pillContainer, children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles23.pillContainer, children: [
     icon && /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: icon, size: 13, color: colors.foreground }),
-    title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles21.pillTitle, { color: colors.foreground }], children: title }) : null,
+    title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: [styles23.pillTitle, { color: colors.foreground }], children: title }) : null,
     /* @__PURE__ */ jsxRuntime.jsx(
       Badge,
       {
         label: state.displayValue,
         variant: state.status,
         styleVariant: "tinted",
-        style: styles21.pillBadge
+        style: styles23.pillBadge
       }
     )
   ] });
@@ -3708,7 +4149,7 @@ function CustomPillModalContent({
 }) {
   const { colors, isCompact } = usePluginTheme();
   const displayText = state.modalOutput || state.rawValue || (state.error ? `Error: ${state.error}` : "No output");
-  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles21.modalContent, children: /* @__PURE__ */ jsxRuntime.jsxs(Card, { children: [
+  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles23.modalContent, children: /* @__PURE__ */ jsxRuntime.jsxs(Card, { children: [
     /* @__PURE__ */ jsxRuntime.jsx(
       Card.Header,
       {
@@ -3738,7 +4179,7 @@ function CustomPillModalContent({
         copyable: true
       }
     ),
-    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles21.footerRow, children: /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles21.timestampText, { color: colors.foregroundMuted }], children: [
+    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles23.footerRow, children: /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles23.timestampText, { color: colors.foregroundMuted }], children: [
       "Last updated: ",
       new Date(state.lastUpdated).toLocaleTimeString()
     ] }) })
@@ -3757,11 +4198,11 @@ function registerCustomPills(client, options) {
       resolveLabel: () => pill.displayValue ? `${pill.title} ${pill.displayValue}` : pill.title,
       renderPill: () => /* @__PURE__ */ jsxRuntime.jsx(CustomPillBody, { state: pill }),
       renderModal: () => {
-        const [refreshing, setRefreshing] = React7.useState(false);
-        const [currentOutput, setCurrentOutput] = React7.useState(
+        const [refreshing, setRefreshing] = React8.useState(false);
+        const [currentOutput, setCurrentOutput] = React8.useState(
           pill.modalOutput
         );
-        const handleRefresh = React7.useCallback(async () => {
+        const handleRefresh = React8.useCallback(async () => {
           if (!options.onRefreshModal) return;
           setRefreshing(true);
           try {
@@ -3795,7 +4236,7 @@ function registerCustomPills(client, options) {
     }
   };
 }
-var styles21 = reactNative.StyleSheet.create({
+var styles23 = reactNative.StyleSheet.create({
   modalContent: {
     width: "100%",
     padding: 12
@@ -3832,6 +4273,7 @@ function Icon(props) {
 
 exports.AboutSection = AboutSection;
 exports.ActionBar = ActionBar;
+exports.AttentionBeacon = AttentionBeacon;
 exports.Badge = Badge;
 exports.Button = Button;
 exports.Card = Card;
@@ -3859,6 +4301,7 @@ exports.StatusDot = StatusDot;
 exports.Tabs = Tabs;
 exports.TextInput = TextInput;
 exports.Toggle = Toggle;
+exports.TruncatedText = TruncatedText;
 exports.alpha = alpha;
 exports.contractSchemaToFields = contractSchemaToFields;
 exports.copyToClipboard = copyToClipboard;
@@ -3878,6 +4321,7 @@ exports.initClientHelpers = initClientHelpers;
 exports.isClientHostInitialized = isClientHostInitialized;
 exports.isMobilePlatform = isMobilePlatform;
 exports.mergeThemeColors = mergeThemeColors;
+exports.normalizeBeaconMode = normalizeBeaconMode;
 exports.readHostThemeVariables = readHostThemeVariables;
 exports.registerAgentPanel = registerAgentPanel;
 exports.registerComposerPill = registerComposerPill;
@@ -3885,6 +4329,11 @@ exports.registerCustomPills = registerCustomPills;
 exports.registerHelperSettingsScreen = registerHelperSettingsScreen;
 exports.registerSidebarSurface = registerSidebarSurface;
 exports.registerWorkspacePanel = registerWorkspacePanel;
+exports.resolveBeaconToneColor = resolveBeaconToneColor;
+exports.resolveButtonAttentionMode = resolveButtonAttentionMode;
+exports.resolveButtonAttentionTone = resolveButtonAttentionTone;
+exports.resolveCollapsibleChevron = resolveCollapsibleChevron;
+exports.resolveCollapsibleHeaderBackground = resolveCollapsibleHeaderBackground;
 exports.resolveElevation = resolveElevation;
 exports.resolvePadding = resolvePadding;
 exports.resolveRadius = resolveRadius;

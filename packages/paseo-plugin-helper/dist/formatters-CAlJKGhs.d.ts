@@ -1,4 +1,4 @@
-import { S as StatusVariant } from './custom-pills-CnrXjVIR.cjs';
+import { S as StatusVariant } from './custom-pills-BRMMkgfE.js';
 
 interface FormatBytesOptions {
     /**
@@ -50,13 +50,40 @@ declare function formatDuration(ms: number): string;
  * Formats a number with comma separators (e.g. 1,234,567).
  */
 declare function formatNumber(num: number): string;
+interface TruncateOptions {
+    /** Ellipsis token to insert. Default: "…" */
+    ellipsis?: string;
+}
+interface TruncatePathOptions extends TruncateOptions {
+    /** Directory separator. Default: "/" */
+    separator?: string;
+    /** Keep leading path segments (e.g. 1 keeps the root/first folder). Default: 1 */
+    keepLeading?: number;
+    /** Keep trailing path segments (e.g. 1 keeps the filename). Default: 1 */
+    keepTrailing?: number;
+}
 /**
  * Safely truncates a string with an ellipsis if it exceeds maxLength.
  */
 declare function truncate(text: string, maxLength: number, suffix?: string): string;
 /**
+ * Truncates a string in the middle, preserving distinct head and tail characters.
+ * Ideal for UUIDs, commit SHAs, hashes, cryptographic keys, and long identifiers.
+ *
+ * Example: `truncateMiddle("0359a72f-5b58-453b-a35b-956a3f6908ba", 16)` => `"0359a72…6908ba"`
+ */
+declare function truncateMiddle(text: string, maxLength: number, options?: TruncateOptions): string;
+/**
+ * Truncates file system and URL paths intelligently, preserving the leaf filename
+ * and root directory while compressing intermediate parent directories.
+ *
+ * Example: `truncatePath("~/code/paseo-plugin-helper/src/client/approvals.tsx", 35)`
+ *       => `"~/code/…/src/client/approvals.tsx"`
+ */
+declare function truncatePath(filePath: string, maxLength: number, options?: TruncatePathOptions): string;
+/**
  * Strips ANSI escape sequences (colors, text formatting, cursor controls) from terminal output strings.
  */
 declare function stripAnsi(text: string): string;
 
-export { type FormatBytesOptions as F, type MetricThresholds as M, formatDuration as a, formatNumber as b, formatUptime as c, formatBytes as f, resolveMetricStatus as r, stripAnsi as s, truncate as t };
+export { type FormatBytesOptions as F, type MetricThresholds as M, type TruncatePathOptions as T, type TruncateOptions as a, formatDuration as b, formatNumber as c, formatUptime as d, truncateMiddle as e, formatBytes as f, truncatePath as g, resolveMetricStatus as r, stripAnsi as s, truncate as t };

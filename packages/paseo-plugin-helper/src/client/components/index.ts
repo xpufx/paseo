@@ -1,4 +1,5 @@
 export * from "./Button.js";
+export * from "./AttentionBeacon.js";
 export * from "./Badge.js";
 export * from "./StatusDot.js";
 export * from "./Card.js";
@@ -15,3 +16,4 @@ export * from "./KeyValue.js";
 export * from "./EmptyState.js";
 export * from "./Responsive.js";
 export * from "./AboutSection.js";
+export * from "./TruncatedText.js";

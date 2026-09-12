@@ -13,6 +13,14 @@ import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 import { spacing } from "../theme/tokens.js";
 import { copyToClipboard } from "../utils/clipboard.js";
+import {
+  truncate,
+  truncateMiddle,
+  truncatePath,
+  TruncatePathOptions,
+} from "../../shared/formatters.js";
+
+export type KeyValueTruncateMode = "end" | "middle" | "path";
 
 export interface KeyValueProps {
   label: string;
@@ -20,6 +28,12 @@ export interface KeyValueProps {
   subValue?: string;
   mono?: boolean;
   copyable?: boolean;
+  /** Truncate long value: "middle" (UUIDs/hashes), "path" (filepaths), or "end" (standard) */
+  truncate?: boolean | KeyValueTruncateMode;
+  /** Maximum length before truncation applies. Default: 32 */
+  truncateMaxLength?: number;
+  /** Custom options when truncate="path" */
+  truncatePathOptions?: TruncatePathOptions;
   stackOnCompact?: boolean;
   style?: StyleProp<ViewStyle>;
   labelStyle?: StyleProp<TextStyle>;
@@ -32,6 +46,9 @@ export function KeyValue({
   subValue,
   mono = false,
   copyable = false,
+  truncate: truncateProp = false,
+  truncateMaxLength = 32,
+  truncatePathOptions,
   stackOnCompact = true,
   style,
   labelStyle,
@@ -42,11 +59,29 @@ export function KeyValue({
   const toast = useToast();
   const [copied, setCopied] = useState(false);
 
-  const displayValue = value === null || value === undefined ? "-" : String(value);
+  const rawString = value === null || value === undefined ? "" : String(value);
+
+  let displayValue = rawString || "-";
+  if (truncateProp && rawString.length > truncateMaxLength) {
+    const mode: KeyValueTruncateMode =
+      typeof truncateProp === "string" ? truncateProp : "middle";
+    switch (mode) {
+      case "path":
+        displayValue = truncatePath(rawString, truncateMaxLength, truncatePathOptions);
+        break;
+      case "end":
+        displayValue = truncate(rawString, truncateMaxLength);
+        break;
+      case "middle":
+      default:
+        displayValue = truncateMiddle(rawString, truncateMaxLength);
+        break;
+    }
+  }
 
   const handleCopy = async () => {
-    if (!copyable || !value) return;
-    const ok = await copyToClipboard(String(value), {
+    if (!copyable || !rawString) return;
+    const ok = await copyToClipboard(rawString, {
       toast,
       toastMessage: label,
     });

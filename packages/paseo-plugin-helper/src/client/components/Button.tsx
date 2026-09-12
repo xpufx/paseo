@@ -11,9 +11,25 @@ import {
 import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 import { FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens.js";
+import { AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconTone } from "./AttentionBeacon.js";
 
 export type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 export type ButtonSize = "sm" | "md" | "lg";
+export type ButtonAttention = boolean | "radar" | "glow" | "bounce";
+
+export function resolveButtonAttentionMode(
+  attention?: ButtonAttention,
+): AttentionBeaconMode | null {
+  if (!attention) return null;
+  if (attention === true) return "radar";
+  return attention;
+}
+
+export function resolveButtonAttentionTone(variant: ButtonVariant): AttentionBeaconTone {
+  if (variant === "danger") return "danger";
+  if (variant === "primary") return "accent";
+  return "warning";
+}
 
 export interface ButtonProps {
   label?: string;
@@ -27,6 +43,7 @@ export interface ButtonProps {
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
   accessibilityLabel?: string;
+  attention?: ButtonAttention;
 }
 
 export function Button({
@@ -41,6 +58,7 @@ export function Button({
   style,
   textStyle,
   accessibilityLabel,
+  attention,
 }: ButtonProps) {
   const { Icon } = getClientHost();
   const { colors, resolveRadius, touchTargetMin, isCompact, alpha } = usePluginTheme();
@@ -88,7 +106,9 @@ export function Button({
     return icon;
   };
 
-  return (
+  const attentionMode = resolveButtonAttentionMode(attention);
+
+  const pressable = (
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
@@ -133,6 +153,14 @@ export function Button({
         </>
       )}
     </Pressable>
+  );
+
+  if (!attentionMode) return pressable;
+
+  return (
+    <AttentionBeacon mode={attentionMode} tone={resolveButtonAttentionTone(variant)}>
+      {pressable}
+    </AttentionBeacon>
   );
 }
 

@@ -23,7 +23,6 @@ import {
   ModalBody,
   ActionBar,
   Card,
-  Tabs,
   Badge,
   StatusDot,
   Button,
@@ -40,6 +39,7 @@ import {
   TextInput,
   AboutSection,
   Responsive,
+  AttentionBeacon,
   triggerHaptic,
   usePluginTheme,
   useResponsive,
@@ -49,6 +49,8 @@ import {
   type RenderModalProps,
   type RenderPillProps,
   type VisualFlair,
+  type AttentionBeaconMode,
+  type AttentionBeaconTone,
 } from "paseo-plugin-helper/client";
 import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
@@ -104,13 +106,14 @@ function DemoModal({ close }: RenderModalProps) {
   const { colors, theme, layout } = usePluginTheme();
   const { isCompact } = useResponsive();
   const [activeTab, setActiveTab] = useState<string>("gauges");
-  const [tabMode, setTabMode] = useState<"fit" | "scroll">(isCompact ? "scroll" : "fit");
+  const [menuOpen, setMenuOpen] = useState<boolean>(false);
 
   const showcaseTabs = [
     { id: "gauges", label: "Gauges & Hardware", shortLabel: "Gauges" },
     { id: "flair", label: "Visual Flair Studio", shortLabel: "Flair" },
     { id: "data", label: "Data Table", shortLabel: "Data" },
     { id: "controls", label: "Interactive Controls", shortLabel: "Controls" },
+    { id: "attention", label: "Attention & Beacons", shortLabel: "Beacon" },
     { id: "settings", label: "Plugin Settings", shortLabel: "Settings" },
     { id: "network", label: "Network Diagnostics", shortLabel: "Net" },
     { id: "logs", label: "System Logs", shortLabel: "Logs" },
@@ -119,6 +122,10 @@ function DemoModal({ close }: RenderModalProps) {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [liveStream, setLiveStream] = useState<boolean>(true);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [attentionOn, setAttentionOn] = useState<boolean>(true);
+  const [beaconMode, setBeaconMode] = useState<AttentionBeaconMode>("radar");
+  const [beaconTone, setBeaconTone] = useState<AttentionBeaconTone>("warning");
+  const [beaconPresses, setBeaconPresses] = useState<number>(0);
 
   const {
     settings,
@@ -220,42 +227,74 @@ function DemoModal({ close }: RenderModalProps) {
           ))}
         </View>
 
-        {/* Tab Display Mode Selector */}
-        <View style={styles.rateControlRow}>
-          <Text style={[styles.rateLabel, { color: colors.foregroundMuted }]}>
-            Tab Mode:
-          </Text>
-          <Button
-            label="Fit (Screen)"
-            size="sm"
-            variant={tabMode === "fit" ? "primary" : "ghost"}
-            onPress={() => {
-              triggerHaptic("light");
-              setTabMode("fit");
-            }}
-          />
-          <Button
-            label="Scroll (Ribbon)"
-            size="sm"
-            variant={tabMode === "scroll" ? "primary" : "ghost"}
-            onPress={() => {
-              triggerHaptic("light");
-              setTabMode("scroll");
-            }}
-          />
-        </View>
-      </Card>
+        </Card>
 
-      {/* Tabs */}
-      <Tabs
-        mode={tabMode}
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          triggerHaptic("light");
-          setActiveTab(tab);
-        }}
-        tabs={showcaseTabs}
-      />
+      {/* Showcase view dropdown selector */}
+      <View style={styles.dropdownWrap}>
+        <Pressable
+          onPress={() => {
+            triggerHaptic("light");
+            setMenuOpen((v) => !v);
+          }}
+          accessibilityLabel="Select showcase view"
+          accessibilityRole="button"
+          style={[
+            styles.dropdownTrigger,
+            {
+              backgroundColor: colors.surface1,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.dropdownTriggerLabel, { color: colors.foreground }]} numberOfLines={1}>
+            {showcaseTabs.find((t) => t.id === activeTab)?.label ?? activeTab}
+          </Text>
+          <Text style={[styles.dropdownChevron, { color: colors.foregroundMuted }]}>
+            {menuOpen ? "▴" : "▾"}
+          </Text>
+        </Pressable>
+        {menuOpen && (
+          <View
+            style={[
+              styles.dropdownMenu,
+              { backgroundColor: colors.surface1, borderColor: colors.border },
+            ]}
+          >
+            {showcaseTabs.map((tab) => {
+              const selected = tab.id === activeTab;
+              return (
+                <Pressable
+                  key={tab.id}
+                  onPress={() => {
+                    triggerHaptic("light");
+                    setActiveTab(tab.id);
+                    setMenuOpen(false);
+                  }}
+                  accessibilityLabel={`Show ${tab.label}`}
+                  accessibilityRole="button"
+                  style={[
+                    styles.dropdownItem,
+                    selected && {
+                      backgroundColor: colors.surface2,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownItemLabel,
+                      { color: selected ? colors.accent : colors.foreground },
+                      selected && styles.dropdownItemLabelActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
 
       {/* TAB 1: GAUGES & HARDWARE */}
       {activeTab === "gauges" && (
@@ -613,6 +652,203 @@ function DemoModal({ close }: RenderModalProps) {
         </>
       )}
 
+      {/* TAB: ATTENTION & BEACONS */}
+      {activeTab === "attention" && (
+        <>
+          <Card variant="elevated">
+            <Card.Header
+              title="Attention Playground"
+              subtitle="Live toggles for beacon animation, mode, and tone"
+            />
+            <FormRow
+              label="Attention Active"
+              description={attentionOn ? "Beacons animating" : "Static wrappers (reduced-motion safe)"}
+            >
+              <Toggle
+                value={attentionOn}
+                onValueChange={(val) => {
+                  triggerHaptic("light");
+                  setAttentionOn(val);
+                }}
+              />
+            </FormRow>
+
+            <FormRow
+              label="Beacon Mode"
+              description={`Active mode: "${beaconMode}"`}
+            >
+              <View style={styles.segmentRow}>
+                {(["radar", "glow", "badge", "bounce"] as const).map((m) => (
+                  <Button
+                    key={m}
+                    size="sm"
+                    label={m}
+                    variant={beaconMode === m ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      setBeaconMode(m);
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+
+            <FormRow
+              label="Beacon Tone"
+              description={`Active tone token: "${beaconTone === "warning" ? "statusWarning" : beaconTone}"`}
+            >
+              <View style={styles.segmentRow}>
+                {(
+                  [
+                    { token: "statusWarning", tone: "warning" },
+                    { token: "accent", tone: "accent" },
+                    { token: "statusDanger", tone: "danger" },
+                  ] as const
+                ).map(({ token, tone }) => (
+                  <Button
+                    key={token}
+                    size="sm"
+                    label={token}
+                    variant={beaconTone === tone ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      setBeaconTone(tone);
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header
+              title="Button attention prop"
+              subtitle="Direct attention across button variants"
+            />
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Primary
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button label="Radar" variant="primary" size="sm" attention={attentionOn ? "radar" : undefined} />
+              <Button label="Glow" variant="primary" size="sm" attention={attentionOn ? "glow" : undefined} />
+              <Button label="Bounce" variant="primary" size="sm" attention={attentionOn ? "bounce" : undefined} />
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Danger
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button label="Radar" variant="danger" size="sm" attention={attentionOn ? "radar" : undefined} />
+              <Button label="Glow" variant="danger" size="sm" attention={attentionOn ? "glow" : undefined} />
+              <Button label="Bounce" variant="danger" size="sm" attention={attentionOn ? "bounce" : undefined} />
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Secondary / Ghost
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button label="Radar" variant="secondary" size="sm" attention={attentionOn ? "radar" : undefined} />
+              <Button label="Default (true)" variant="ghost" size="sm" attention={attentionOn ? true : undefined} />
+            </View>
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Button accepts boolean | radar | glow | bounce. badge and ring are wrapper-only via AttentionBeacon.
+            </Text>
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header
+              title="Beacon Wrappers"
+              subtitle="AttentionBeacon around arbitrary components (playground-driven)"
+            />
+            <View style={styles.beaconGroup}>
+              <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
+                <Card>
+                  <Card.Header
+                    title="Urgent Review Required"
+                    subtitle="Simulated verdict awaiting operator"
+                  />
+                  <KeyValue
+                    label="Awaiting"
+                    value="Command execution verdict"
+                    subValue="twofado-style urgent prompt"
+                  />
+                  <ActionBar align="flex-start">
+                    <Button label="Approve" variant="primary" size="sm" />
+                    <Button label="Deny" variant="danger" size="sm" />
+                  </ActionBar>
+                </Card>
+              </AttentionBeacon>
+            </View>
+            <View style={[styles.beaconRow, styles.beaconGroup]}>
+              <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
+                <Badge label="Wrapped Badge" variant="warning" />
+              </AttentionBeacon>
+              <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
+                <Pressable
+                  onPress={() => {
+                    triggerHaptic("medium");
+                    setBeaconPresses((n) => n + 1);
+                  }}
+                  style={[styles.beaconPressable, { borderColor: colors.border }]}
+                  accessibilityLabel="Custom beacon-wrapped clickable"
+                >
+                  <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>
+                    Custom clickable ({beaconPresses})
+                  </Text>
+                </Pressable>
+              </AttentionBeacon>
+            </View>
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header
+              title="Mode x Tone Matrix"
+              subtitle="All four modes side by side in the playground tone"
+            />
+            <View style={styles.beaconRow}>
+              {(["radar", "glow", "badge", "bounce"] as const).map((m) => (
+                <AttentionBeacon key={m} mode={m} tone={beaconTone} active={attentionOn}>
+                  <Badge label={m} variant="accent" />
+                </AttentionBeacon>
+              ))}
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Tones in playground mode
+            </Text>
+            <View style={styles.beaconRow}>
+              {(["warning", "accent", "danger"] as const).map((t) => (
+                <AttentionBeacon key={t} mode={beaconMode} tone={t} active={attentionOn}>
+                  <Badge label={t === "warning" ? "statusWarning" : t} variant={t} />
+                </AttentionBeacon>
+              ))}
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Ring alias equivalence
+            </Text>
+            <View style={styles.beaconRow}>
+              <AttentionBeacon mode="radar" tone={beaconTone} active={attentionOn}>
+                <Badge label="radar" variant="accent" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="ring" tone={beaconTone} active={attentionOn}>
+                <Badge label="ring" variant="accent" />
+              </AttentionBeacon>
+            </View>
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              ring normalizes to radar; both halos pulse identically.
+            </Text>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Badge with icon
+            </Text>
+            <View style={styles.beaconRow}>
+              <AttentionBeacon mode="badge" tone="danger" active={attentionOn}>
+                <Badge label="bell" variant="danger" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone={beaconTone} active={attentionOn}>
+                <Badge label="plain pip" variant="accent" />
+              </AttentionBeacon>
+            </View>
+          </Card>
+        </>
+      )}
+
       {/* TAB: SETTINGS & STORAGE */}
       {activeTab === "settings" && (
         <Card variant="elevated">
@@ -874,5 +1110,72 @@ const styles = StyleSheet.create({
   colorSwatchActive: {
     borderColor: "#ffffff",
     transform: [{ scale: 1.15 }],
+  },
+  beaconRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    marginTop: 8,
+  },
+  beaconGroup: {
+    marginTop: 10,
+  },
+  beaconSectionLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 10,
+  },
+  beaconCaption: {
+    fontSize: 11,
+    marginTop: 8,
+  },
+  beaconPressable: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  dropdownWrap: {
+    width: "100%",
+    marginTop: 10,
+    zIndex: 10,
+  },
+  dropdownTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    width: "100%",
+  },
+  dropdownTriggerLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  dropdownChevron: {
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  dropdownMenu: {
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 6,
+    overflow: "hidden",
+    width: "100%",
+  },
+  dropdownItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    width: "100%",
+  },
+  dropdownItemLabel: {
+    fontSize: 13,
+  },
+  dropdownItemLabelActive: {
+    fontWeight: "700",
   },
 });
