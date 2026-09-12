@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
-import { useRpc } from "@getpaseo/plugin";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/react-native";
+import { useRpc } from "@getpaseo/plugin/client";
+import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   initClientHelpers,
   type ComposerPillRegistrar,

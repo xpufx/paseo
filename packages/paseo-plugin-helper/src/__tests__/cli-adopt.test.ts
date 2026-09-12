@@ -64,8 +64,8 @@ describe("adopt", () => {
     expect(result.sdkMajor).toBe(7);
 
     const entry = fs.readFileSync(path.join(dir, "index.client.tsx"), "utf8");
-    expect(entry).toContain('from "@getpaseo/plugin/react-native"');
-    expect(entry).not.toContain("@getpaseo/plugin/client");
+    expect(entry).toContain('from "@getpaseo/plugin/client/react-native"');
+    expect(entry).not.toContain('from "@getpaseo/plugin/react-native"');
   });
 
   it("is idempotent on the second run", () => {
