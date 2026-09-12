@@ -3277,6 +3277,148 @@ var styles18 = StyleSheet.create({
     alignItems: "center"
   }
 });
+function formatCommandLine(argv) {
+  return argv.map((arg) => arg.includes(" ") ? JSON.stringify(arg) : arg).join(" ");
+}
+function CommandBox({
+  argv = [],
+  command,
+  style,
+  textStyle,
+  copyLabel = "Copy command"
+}) {
+  const { colors, resolveRadius: resolveRadius2 } = usePluginTheme();
+  const { Icon: Icon2, useToast } = getClientHost();
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const fullCommand = command ?? formatCommandLine(argv);
+  const [prog, ...rest] = argv;
+  const handleCopy = async () => {
+    if (!fullCommand) return;
+    const ok = await copyToClipboard(fullCommand, {
+      toast,
+      toastMessage: "Command"
+    });
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2e3);
+    }
+  };
+  const fontFamily = Platform.select({
+    ios: "Menlo",
+    android: "monospace",
+    default: "monospace"
+  });
+  const radius = resolveRadius2("sm");
+  return /* @__PURE__ */ jsxs(
+    View,
+    {
+      style: [
+        styles19.container,
+        {
+          backgroundColor: colors.surface2,
+          borderColor: colors.border,
+          borderRadius: radius
+        },
+        style
+      ],
+      children: [
+        /* @__PURE__ */ jsxs(View, { style: styles19.textContainer, children: [
+          /* @__PURE__ */ jsx(
+            Text,
+            {
+              style: [
+                styles19.prompt,
+                {
+                  color: colors.statusWarning,
+                  fontFamily
+                }
+              ],
+              children: "$"
+            }
+          ),
+          /* @__PURE__ */ jsx(
+            Text,
+            {
+              selectable: true,
+              numberOfLines: 2,
+              style: [
+                styles19.commandText,
+                {
+                  color: colors.foreground,
+                  fontFamily
+                },
+                textStyle
+              ],
+              children: prog ? /* @__PURE__ */ jsxs(Fragment, { children: [
+                /* @__PURE__ */ jsx(Text, { style: styles19.bold, children: prog }),
+                rest.length > 0 ? /* @__PURE__ */ jsx(Text, { style: { color: colors.foregroundMuted }, children: " " + rest.map((a) => a.includes(" ") ? JSON.stringify(a) : a).join(" ") }) : null
+              ] }) : command ?? ""
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsx(
+          Pressable,
+          {
+            onPress: handleCopy,
+            accessibilityRole: "button",
+            accessibilityLabel: copyLabel,
+            hitSlop: 8,
+            style: ({ pressed }) => [
+              styles19.copyButton,
+              {
+                backgroundColor: pressed ? colors.surface1 : "transparent",
+                borderRadius: Math.max(2, radius - 2)
+              }
+            ],
+            children: /* @__PURE__ */ jsx(
+              Icon2,
+              {
+                name: copied ? "Check" : "Copy",
+                size: 13,
+                color: copied ? colors.statusSuccess : colors.foregroundMuted
+              }
+            )
+          }
+        )
+      ]
+    }
+  );
+}
+var styles19 = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 8
+  },
+  textContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    overflow: "hidden",
+    gap: 6
+  },
+  prompt: {
+    fontWeight: "700",
+    fontSize: 12
+  },
+  commandText: {
+    fontSize: 12,
+    flex: 1
+  },
+  bold: {
+    fontWeight: "700"
+  },
+  copyButton: {
+    padding: 4,
+    alignItems: "center",
+    justifyContent: "center"
+  }
+});
 function ModalBody({
   children,
   style,
@@ -3317,7 +3459,7 @@ function ModalBody({
       View,
       {
         style: [
-          styles19.content,
+          styles20.content,
           {
             backgroundColor: colors.surface0,
             paddingHorizontal: padding.horizontal,
@@ -3336,14 +3478,14 @@ function ModalBody({
     ResolvedScrollView,
     {
       ref: setRefs,
-      style: [{ backgroundColor: colors.surface0 }, styles19.container, style],
+      style: [{ backgroundColor: colors.surface0 }, styles20.container, style],
       nestedScrollEnabled: true,
       keyboardShouldPersistTaps: "handled",
       showsVerticalScrollIndicator: true,
       refreshControl,
       onContentSizeChange: stickToEnd ? () => innerRef.current?.scrollToEnd({ animated: true }) : void 0,
       contentContainerStyle: [
-        styles19.content,
+        styles20.content,
         {
           paddingHorizontal: padding.horizontal,
           paddingTop: padding.vertical,
@@ -3356,7 +3498,7 @@ function ModalBody({
     }
   );
 }
-var styles19 = StyleSheet.create({
+var styles20 = StyleSheet.create({
   container: {
     flex: 1,
     minHeight: 0,
@@ -3381,7 +3523,7 @@ function ActionBar({
     View,
     {
       style: [
-        styles20.container,
+        styles21.container,
         {
           flexDirection: isColumn ? "column" : "row",
           justifyContent: isColumn ? "flex-start" : align,
@@ -3395,19 +3537,19 @@ function ActionBar({
     }
   );
 }
-var styles20 = StyleSheet.create({
+var styles21 = StyleSheet.create({
   container: {
     flexWrap: "wrap"
   }
 });
 function FormRow({ label, description, children, style }) {
   const { colors, flair, isCompact } = usePluginTheme();
-  return /* @__PURE__ */ jsxs(View, { style: [styles21.container, style], children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles22.container, style], children: [
     /* @__PURE__ */ jsx(
       Text,
       {
         style: [
-          styles21.label,
+          styles22.label,
           {
             color: colors.foreground,
             fontSize: isCompact ? 12 : 13,
@@ -3421,16 +3563,16 @@ function FormRow({ label, description, children, style }) {
       Text,
       {
         style: [
-          styles21.description,
+          styles22.description,
           { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 }
         ],
         children: description
       }
     ),
-    /* @__PURE__ */ jsx(View, { style: styles21.content, children })
+    /* @__PURE__ */ jsx(View, { style: styles22.content, children })
   ] });
 }
-var styles21 = StyleSheet.create({
+var styles22 = StyleSheet.create({
   container: {
     gap: 4,
     width: "100%"
@@ -3459,7 +3601,7 @@ function registerComposerPill(client, options) {
       layout: props.layout,
       host: props.host ?? { id: "", label: "" }
     };
-    return /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsx(View, { style: styles22.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
+    return /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsx(View, { style: styles23.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
   }
   function PillHost(props) {
     const [open, setOpen] = useState(false);
@@ -3687,13 +3829,13 @@ function DefaultPillBody({
   const effectiveTitle = isCompact && compactTitle ? compactTitle : title;
   const effectiveIcon = isCompact && compactIcon ? compactIcon : icon;
   const effectiveBadge = isCompact && compactBadgeText !== void 0 ? compactBadgeText : badgeText;
-  return /* @__PURE__ */ jsxs(View, { style: styles22.pillContainer, children: [
+  return /* @__PURE__ */ jsxs(View, { style: styles23.pillContainer, children: [
     effectiveIcon && /* @__PURE__ */ jsx(Icon2, { name: effectiveIcon, size: 13, color: theme.colors.foreground }),
-    effectiveTitle ? /* @__PURE__ */ jsx(Text, { style: [styles22.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
-    effectiveBadge && /* @__PURE__ */ jsx(View, { style: [styles22.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsx(Text, { style: [styles22.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
+    effectiveTitle ? /* @__PURE__ */ jsx(Text, { style: [styles23.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
+    effectiveBadge && /* @__PURE__ */ jsx(View, { style: [styles23.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsx(Text, { style: [styles23.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
   ] });
 }
-var styles22 = StyleSheet.create({
+var styles23 = StyleSheet.create({
   popoverContainer: {
     width: "100%"
   },
@@ -4125,16 +4267,16 @@ function CustomPillBody({ state }) {
   const { isCompact } = useResponsive();
   const title = isCompact && state.compactTitle ? state.compactTitle : state.title;
   const icon = isCompact && state.compactIcon ? state.compactIcon : state.icon;
-  return /* @__PURE__ */ jsxs(View, { style: styles23.pillContainer, children: [
+  return /* @__PURE__ */ jsxs(View, { style: styles24.pillContainer, children: [
     icon && /* @__PURE__ */ jsx(Icon2, { name: icon, size: 13, color: colors.foreground }),
-    title ? /* @__PURE__ */ jsx(Text, { style: [styles23.pillTitle, { color: colors.foreground }], children: title }) : null,
+    title ? /* @__PURE__ */ jsx(Text, { style: [styles24.pillTitle, { color: colors.foreground }], children: title }) : null,
     /* @__PURE__ */ jsx(
       Badge,
       {
         label: state.displayValue,
         variant: state.status,
         styleVariant: "tinted",
-        style: styles23.pillBadge
+        style: styles24.pillBadge
       }
     )
   ] });
@@ -4146,7 +4288,7 @@ function CustomPillModalContent({
 }) {
   const { colors, isCompact } = usePluginTheme();
   const displayText = state.modalOutput || state.rawValue || (state.error ? `Error: ${state.error}` : "No output");
-  return /* @__PURE__ */ jsx(View, { style: styles23.modalContent, children: /* @__PURE__ */ jsxs(Card, { children: [
+  return /* @__PURE__ */ jsx(View, { style: styles24.modalContent, children: /* @__PURE__ */ jsxs(Card, { children: [
     /* @__PURE__ */ jsx(
       Card.Header,
       {
@@ -4176,7 +4318,7 @@ function CustomPillModalContent({
         copyable: true
       }
     ),
-    /* @__PURE__ */ jsx(View, { style: styles23.footerRow, children: /* @__PURE__ */ jsxs(Text, { style: [styles23.timestampText, { color: colors.foregroundMuted }], children: [
+    /* @__PURE__ */ jsx(View, { style: styles24.footerRow, children: /* @__PURE__ */ jsxs(Text, { style: [styles24.timestampText, { color: colors.foregroundMuted }], children: [
       "Last updated: ",
       new Date(state.lastUpdated).toLocaleTimeString()
     ] }) })
@@ -4233,7 +4375,7 @@ function registerCustomPills(client, options) {
     }
   };
 }
-var styles23 = StyleSheet.create({
+var styles24 = StyleSheet.create({
   modalContent: {
     width: "100%",
     padding: 12
@@ -4268,6 +4410,6 @@ function Icon(props) {
   return /* @__PURE__ */ jsx(HostIconComponent, { ...props });
 }
 
-export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CommandBox, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

@@ -17,3 +17,4 @@ export * from "./EmptyState.js";
 export * from "./Responsive.js";
 export * from "./AboutSection.js";
 export * from "./TruncatedText.js";
+export * from "./CommandBox.js";
