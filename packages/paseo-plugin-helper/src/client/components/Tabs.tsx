@@ -149,7 +149,11 @@ export function Tabs({
               : pressed
                 ? alpha(colors.surface2, 0.5)
                 : "transparent",
-            paddingHorizontal: shouldFit ? (isCompact ? spacing.sm : spacing.md) : spacing.md,
+            paddingHorizontal: shouldFit
+              ? isCompact
+                ? (tabs.length > 3 ? spacing.xs : spacing.sm)
+                : (tabs.length >= 3 ? spacing.sm : spacing.md)
+              : spacing.md,
             paddingVertical: isCompact ? spacing.xs : spacing.sm,
           },
         ]}
@@ -302,6 +306,7 @@ const styles = StyleSheet.create({
   },
   trackFit: {
     flexDirection: "row",
+    flexWrap: "nowrap",
     alignItems: "center",
     width: "100%",
     padding: 3,
@@ -321,16 +326,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
+    gap: 4,
+    overflow: "hidden",
   },
   tabFit: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   tabScroll: {
     flexShrink: 0,
   },
   tabText: {
     textAlign: "center",
+    flexShrink: 1,
+    minWidth: 0,
   },
   badge: {
     borderRadius: 9999,

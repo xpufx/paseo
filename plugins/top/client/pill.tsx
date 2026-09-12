@@ -1213,7 +1213,7 @@ function MetricSurfaceMatrix({
 }
 
 function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: ResourceModalProps) {
-  const { colors } = usePluginTheme();
+  const { colors, padding } = usePluginTheme();
   const { settings, updateSettings, resetSettings, refetch: refetchSettings } = usePluginSettings(
     topSettingsContract,
     {
@@ -1321,39 +1321,81 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     setSelectedTab(tabId as ModalTab);
   };
 
+  const { isCompact } = useResponsive();
+
   if (isError && !data) {
     return (
-      <ModalBody refreshing={isRefetching} onRefresh={handleRefresh}>
-        <Card variant="elevated">
-          <View style={styles.errorBox}>
-            <Icon name="Ghost" size={24} color={colors.statusDanger} />
-            <Text style={[styles.errorText, { color: colors.statusDanger }]}>
-              {error instanceof Error ? error.message : "Failed to load metrics"}
-            </Text>
-          </View>
-        </Card>
-      </ModalBody>
+      <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
+        <View
+          style={[
+            styles.navbarContainer,
+            {
+              backgroundColor: colors.surface0,
+              paddingHorizontal: padding.horizontal,
+              paddingTop: padding.vertical,
+              paddingBottom: Math.round(padding.gap / 2),
+            },
+          ]}
+        >
+          <Tabs
+            tabs={TABS}
+            activeTab={activeTab}
+            onTabChange={handleTabChange}
+          />
+        </View>
+        <ModalBody
+          refreshing={isRefetching}
+          onRefresh={handleRefresh}
+          contentContainerStyle={[
+            { paddingTop: Math.round(padding.gap / 2) },
+            !isCompact ? styles.modalContentDesktop : undefined,
+          ]}
+        >
+          <Card variant="elevated">
+            <View style={styles.errorBox}>
+              <Icon name="Ghost" size={24} color={colors.statusDanger} />
+              <Text style={[styles.errorText, { color: colors.statusDanger }]}>
+                {error instanceof Error ? error.message : "Failed to load metrics"}
+              </Text>
+            </View>
+          </Card>
+        </ModalBody>
+      </View>
     );
   }
 
   const { cpuColor, memColor } = getMetricColors(data, colors);
-  const { isCompact } = useResponsive();
 
   return (
-    <ModalBody
-      refreshing={isLoading || isRefetching}
-      onRefresh={handleRefresh}
-      contentContainerStyle={!isCompact ? styles.modalContentDesktop : undefined}
-    >
-      {/* Navigation Tabs */}
-      <Tabs
-        tabs={TABS}
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-        style={styles.tabs}
-      />
+    <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
+      {/* Pinned Navigation Tabs */}
+      <View
+        style={[
+          styles.navbarContainer,
+          {
+            backgroundColor: colors.surface0,
+            paddingHorizontal: padding.horizontal,
+            paddingTop: padding.vertical,
+            paddingBottom: Math.round(padding.gap / 2),
+          },
+        ]}
+      >
+        <Tabs
+          tabs={TABS}
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+      </View>
 
-      {activeTab === "system" && (
+      <ModalBody
+        refreshing={isLoading || isRefetching}
+        onRefresh={handleRefresh}
+        contentContainerStyle={[
+          { paddingTop: Math.round(padding.gap / 2) },
+          !isCompact ? styles.modalContentDesktop : undefined,
+        ]}
+      >
+        {activeTab === "system" && (
         <>
           {/* Dual Metric Gauges Hero */}
           <Card variant="elevated">
@@ -1992,6 +2034,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
         </View>
       )}
     </ModalBody>
+    </View>
   );
 }
 
@@ -2503,6 +2546,15 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
 }
 
 const styles = StyleSheet.create({
+  modalRoot: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%",
+  },
+  navbarContainer: {
+    width: "100%",
+    zIndex: 10,
+  },
   modalContentDesktop: {
     minWidth: 460,
     minHeight: 460,

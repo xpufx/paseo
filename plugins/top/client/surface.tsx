@@ -62,17 +62,35 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
   };
 
   return (
-    <ModalBody
-      contentContainerStyle={{ gap: 12, padding: 12 }}
-      refreshing={isLoading}
-    >
-      <Tabs
-        tabs={TABS}
-        activeTab={activeTab}
-        onTabChange={(id) => setActiveTab(id as SurfaceTab)}
-      />
+    <View style={[styles.root, { backgroundColor: colors.surface0 }]}>
+      <View
+        style={[
+          styles.navbarContainer,
+          {
+            backgroundColor: colors.surface0,
+            paddingHorizontal: 12,
+            paddingTop: 12,
+            paddingBottom: 6,
+          },
+        ]}
+      >
+        <Tabs
+          tabs={TABS}
+          activeTab={activeTab}
+          onTabChange={(id) => setActiveTab(id as SurfaceTab)}
+        />
+      </View>
 
-      {activeTab === "system" && (
+      <ModalBody
+        contentContainerStyle={{
+          gap: 12,
+          paddingHorizontal: 12,
+          paddingBottom: 12,
+          paddingTop: 6,
+        }}
+        refreshing={isLoading}
+      >
+        {activeTab === "system" && (
         <View style={{ gap: 12 }}>
           <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>
             Host System Resources
@@ -337,10 +355,20 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
         />
       )}
     </ModalBody>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%",
+  },
+  navbarContainer: {
+    width: "100%",
+    zIndex: 10,
+  },
   banner: {
     gap: 8,
   },
