@@ -26,6 +26,22 @@ test:
 build:
 	@npm run build --workspaces --if-present
 
+## npm-push-helper-dry: Dry-run publish paseo-plugin-helper to npm
+npm-push-helper-dry:
+	@npm publish --workspace=packages/paseo-plugin-helper --access public --dry-run
+
+## npm-push-helper: Publish paseo-plugin-helper to npm
+npm-push-helper:
+	@npm publish --workspace=packages/paseo-plugin-helper --access public
+
+## npm-push-x-comms-dry: Dry-run publish @xpufx/paseo-x-comms to npm
+npm-push-x-comms-dry:
+	@npm publish plugins/x-comms/mcp --access public --dry-run
+
+## npm-push-x-comms: Publish @xpufx/paseo-x-comms to npm
+npm-push-x-comms:
+	@npm publish plugins/x-comms/mcp --access public
+
 ## help: Display this help message
 help:
 	@echo "Paseo Monorepo Developer Commands:"
