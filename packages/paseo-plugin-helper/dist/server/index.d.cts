@@ -691,4 +691,85 @@ interface AgentIdentityOptions {
 }
 declare function getAgentIdentity(options?: AgentIdentityOptions): Promise<AgentIdentity | null>;
 
-export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+declare const DEFAULT_BEACON_LABEL_PREFIX = "beacon:";
+declare const BEACON_COLORS: readonly ["violet", "sky", "emerald", "orange", "pink", "indigo", "teal", "red", "amber", "blue"];
+type BeaconColor = (typeof BEACON_COLORS)[number];
+interface BeaconLabelState {
+    name: string;
+    color?: string;
+    titleSuffix?: string;
+    title?: string;
+    workspaceId?: string;
+}
+interface BeaconSetOptions extends BeaconLabelState {
+    workspaceId: string;
+}
+interface BeaconBlinkOptions {
+    workspaceId?: string;
+    a: BeaconLabelState;
+    b: BeaconLabelState;
+    intervalMs?: number;
+    rounds?: number;
+}
+interface BeaconClearOptions {
+    workspaceId?: string;
+    name?: string;
+    restoreTitle?: boolean;
+}
+interface WorkspaceTitleHandle {
+    setTitle?: (title: string) => unknown;
+}
+interface BeaconDaemonClient {
+    setWorkspaceLabel?: (args: unknown) => unknown;
+    updateWorkspaceLabel?: (args: unknown) => unknown;
+    removeWorkspaceLabel?: (args: unknown) => unknown;
+    [key: string]: unknown;
+}
+interface WorkspaceBeaconOptions {
+    workspaceHandle?: WorkspaceTitleHandle | null;
+    daemonClient?: BeaconDaemonClient | null;
+    labelPrefix?: string;
+    baseTitle?: string;
+    logger?: PluginLogger;
+}
+interface BeaconSetResult {
+    labelApplied: boolean;
+    titleApplied: boolean;
+    labelName?: string;
+    title?: string;
+}
+interface BeaconClearResult {
+    labelCleared: boolean;
+    titleRestored: boolean;
+}
+interface BeaconBlinkHandle {
+    stop: () => void;
+    done: Promise<void>;
+}
+declare function resolveBeaconLabelName(name: string, prefix?: string): string;
+declare function normalizeBeaconColor(color: string | undefined): string | undefined;
+declare class WorkspaceBeacon {
+    private workspaceHandle?;
+    private daemonClient?;
+    private labelPrefix;
+    private baseTitle?;
+    private logger?;
+    private originalTitles;
+    private blinkTimers;
+    constructor(options?: WorkspaceBeaconOptions);
+    setOptions(options: Partial<WorkspaceBeaconOptions>): void;
+    get activeBlinks(): number;
+    set(options: BeaconSetOptions): Promise<BeaconSetResult>;
+    blink(options: BeaconBlinkOptions): BeaconBlinkHandle;
+    clear(options?: BeaconClearOptions): Promise<BeaconClearResult>;
+    stopAll(): void;
+    private resolveTitle;
+    private applyLabel;
+    private detachLabel;
+    private applyTitle;
+    private restoreTitle;
+    private stopBlink;
+}
+declare function createWorkspaceBeacon(options?: WorkspaceBeaconOptions): WorkspaceBeacon;
+
+export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };

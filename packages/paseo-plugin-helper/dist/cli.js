@@ -510,7 +510,7 @@ function initBlock(sdkMajor) {
   }
   return [
     `import { useRpc } from "@getpaseo/plugin";`,
-    `import { Icon, Modal, useToast } from "@getpaseo/plugin/react-native";`,
+    `import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";`,
     `import { initClientHelpers } from "paseo-plugin-helper/client";`,
     ``,
     `initClientHelpers({ Icon, Modal, useRpc, useToast });`

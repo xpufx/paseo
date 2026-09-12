@@ -351,8 +351,9 @@ interface CardHeaderProps {
     icon?: string;
     style?: StyleProp<ViewStyle>;
     titleStyle?: StyleProp<TextStyle>;
+    subtitleStyle?: StyleProp<TextStyle>;
 }
-declare function CardHeader({ title, subtitle, value, badge, action, icon, style, titleStyle, }: CardHeaderProps): React__default.JSX.Element;
+declare function CardHeader({ title, subtitle, value, badge, action, icon, style, titleStyle, subtitleStyle, }: CardHeaderProps): React__default.JSX.Element;
 declare function Card({ children, variant, style, noPadding }: CardProps): React__default.JSX.Element;
 declare namespace Card {
     var Header: typeof CardHeader;
@@ -646,6 +647,11 @@ interface AboutSectionProps {
      * Optional custom container style.
      */
     style?: StyleProp<ViewStyle>;
+    /**
+     * Visual density. `"tiny"` scales all fonts to the smallest readable
+     * size for dense About pages. Default: `"default"`.
+     */
+    density?: "default" | "compact" | "tiny";
 }
 /**
  * `<AboutSection>` provides a standardized, responsive plugin information and diagnostics view.
@@ -656,7 +662,7 @@ interface AboutSectionProps {
  * - One-click "Copy Diagnostics" button formatting system info for GitHub issue triage.
  * - Pre-styled external links with native browser launch via React Native `Linking`.
  */
-declare function AboutSection({ name, description, version, author, logo, repository, issues, homepage, license, links, extraItems, showDiagnosticsCopy, style, }: AboutSectionProps): React__default.JSX.Element;
+declare function AboutSection({ name, description, version, author, logo, repository, issues, homepage, license, links, extraItems, showDiagnosticsCopy, style, density, }: AboutSectionProps): React__default.JSX.Element;
 
 type TruncateMode = "end" | "middle" | "path";
 interface TruncatedTextProps {

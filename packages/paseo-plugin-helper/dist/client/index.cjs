@@ -895,7 +895,8 @@ function CardHeader({
   action,
   icon,
   style,
-  titleStyle
+  titleStyle,
+  subtitleStyle
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, flair, isCompact } = usePluginTheme();
@@ -923,7 +924,8 @@ function CardHeader({
           {
             style: [
               styles5.headerSubtitle,
-              { color: colors.foregroundMuted, fontSize: 11 }
+              { color: colors.foregroundMuted, fontSize: 11 },
+              subtitleStyle
             ],
             children: subtitle
           }
@@ -2964,12 +2966,14 @@ function AboutSection({
   links = [],
   extraItems = [],
   showDiagnosticsCopy = true,
-  style
+  style,
+  density = "default"
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, resolveRadius: resolveRadius2 } = usePluginTheme();
   const { isCompact, platform } = useResponsive();
   const [copied, setCopied] = React8.useState(false);
+  const isTiny = density === "tiny";
   let resolvedLogoNode = null;
   const radius = resolveRadius2("md");
   if (logo) {
@@ -3064,27 +3068,53 @@ function AboutSection({
     ...homepage ? [{ label: "Documentation", url: homepage, icon: "BookOpen" }] : [],
     ...links
   ];
-  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles17.container, style], children: [
-    /* @__PURE__ */ jsxRuntime.jsxs(Card, { variant: "elevated", children: [
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles17.container, isTiny && tinyStyles.container, style], children: [
+    /* @__PURE__ */ jsxRuntime.jsxs(Card, { variant: "elevated", style: isTiny ? tinyStyles.card : void 0, children: [
       /* @__PURE__ */ jsxRuntime.jsx(
         Card.Header,
         {
           title: name,
           subtitle: description,
-          badge: /* @__PURE__ */ jsxRuntime.jsx(Badge, { variant: "accent", label: `v${version}` })
+          badge: /* @__PURE__ */ jsxRuntime.jsx(
+            Badge,
+            {
+              variant: "accent",
+              label: `v${version}`,
+              textStyle: isTiny ? tinyStyles.text9 : void 0
+            }
+          ),
+          titleStyle: isTiny ? tinyStyles.title : void 0,
+          subtitleStyle: isTiny ? tinyStyles.text9 : void 0
         }
       ),
-      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles17.headerRow, children: [
+      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles17.headerRow, isTiny && tinyStyles.headerRow], children: [
         resolvedLogoNode,
-        /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles17.metaColumn, children: [
-          author ? /* @__PURE__ */ jsxRuntime.jsxs(reactNative.Text, { style: [styles17.authorText, { color: colors.foregroundMuted }], children: [
-            "by ",
-            author
-          ] }) : null,
-          license ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles17.titleRow, children: /* @__PURE__ */ jsxRuntime.jsx(Badge, { variant: "neutral", label: license }) }) : null
+        /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles17.metaColumn, isTiny && tinyStyles.metaColumn], children: [
+          author ? /* @__PURE__ */ jsxRuntime.jsxs(
+            reactNative.Text,
+            {
+              style: [
+                styles17.authorText,
+                { color: colors.foregroundMuted },
+                isTiny && tinyStyles.text9
+              ],
+              children: [
+                "by ",
+                author
+              ]
+            }
+          ) : null,
+          license ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles17.titleRow, children: /* @__PURE__ */ jsxRuntime.jsx(
+            Badge,
+            {
+              variant: "neutral",
+              label: license,
+              textStyle: isTiny ? tinyStyles.text9 : void 0
+            }
+          ) }) : null
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles17.actionsRow, children: [
+      /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: [styles17.actionsRow, isTiny && tinyStyles.actionsRow], children: [
         allLinks.map((link) => /* @__PURE__ */ jsxRuntime.jsx(
           Button,
           {
@@ -3092,7 +3122,8 @@ function AboutSection({
             variant: "secondary",
             icon: link.icon ?? "ExternalLink",
             label: link.label,
-            onPress: () => handleOpenUrl(link.url)
+            onPress: () => handleOpenUrl(link.url),
+            textStyle: isTiny ? tinyStyles.text9 : void 0
           },
           link.url
         )),
@@ -3103,31 +3134,69 @@ function AboutSection({
             variant: copied ? "primary" : "ghost",
             icon: copied ? "Check" : "Copy",
             label: copied ? "Diagnostics Copied!" : "Copy Diagnostics",
-            onPress: handleCopyDiagnostics
+            onPress: handleCopyDiagnostics,
+            textStyle: isTiny ? tinyStyles.text9 : void 0
           }
         )
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntime.jsxs(Card, { variant: "elevated", children: [
+    /* @__PURE__ */ jsxRuntime.jsxs(Card, { variant: "elevated", style: isTiny ? tinyStyles.card : void 0, children: [
       /* @__PURE__ */ jsxRuntime.jsx(
         Card.Header,
         {
           title: "Runtime Environment",
-          subtitle: "Diagnostics for issue reports and system verification"
+          subtitle: "Diagnostics for issue reports and system verification",
+          titleStyle: isTiny ? tinyStyles.title : void 0,
+          subtitleStyle: isTiny ? tinyStyles.text9 : void 0
         }
       ),
-      /* @__PURE__ */ jsxRuntime.jsxs(KeyValueGroup, { columns: isCompact ? 1 : 2, children: [
-        /* @__PURE__ */ jsxRuntime.jsx(KeyValue, { label: "Plugin Version", value: `v${version}`, copyable: true }),
-        /* @__PURE__ */ jsxRuntime.jsx(KeyValue, { label: "Client Platform", value: platform }),
-        author ? /* @__PURE__ */ jsxRuntime.jsx(KeyValue, { label: "Author", value: author }) : null,
-        license ? /* @__PURE__ */ jsxRuntime.jsx(KeyValue, { label: "License", value: license }) : null,
+      /* @__PURE__ */ jsxRuntime.jsxs(KeyValueGroup, { columns: isCompact ? 1 : 2, gap: isTiny ? 6 : void 0, children: [
+        /* @__PURE__ */ jsxRuntime.jsx(
+          KeyValue,
+          {
+            label: "Plugin Version",
+            value: `v${version}`,
+            copyable: true,
+            labelStyle: isTiny ? tinyStyles.text9 : void 0,
+            valueStyle: isTiny ? tinyStyles.text9 : void 0
+          }
+        ),
+        /* @__PURE__ */ jsxRuntime.jsx(
+          KeyValue,
+          {
+            label: "Client Platform",
+            value: platform,
+            labelStyle: isTiny ? tinyStyles.text9 : void 0,
+            valueStyle: isTiny ? tinyStyles.text9 : void 0
+          }
+        ),
+        author ? /* @__PURE__ */ jsxRuntime.jsx(
+          KeyValue,
+          {
+            label: "Author",
+            value: author,
+            labelStyle: isTiny ? tinyStyles.text9 : void 0,
+            valueStyle: isTiny ? tinyStyles.text9 : void 0
+          }
+        ) : null,
+        license ? /* @__PURE__ */ jsxRuntime.jsx(
+          KeyValue,
+          {
+            label: "License",
+            value: license,
+            labelStyle: isTiny ? tinyStyles.text9 : void 0,
+            valueStyle: isTiny ? tinyStyles.text9 : void 0
+          }
+        ) : null,
         extraItems.map((item, idx) => /* @__PURE__ */ jsxRuntime.jsx(
           KeyValue,
           {
             label: item.label,
             value: item.value,
             subValue: item.subValue,
-            copyable: item.copyable
+            copyable: item.copyable,
+            labelStyle: isTiny ? tinyStyles.text9 : void 0,
+            valueStyle: isTiny ? tinyStyles.text9 : void 0
           },
           idx
         ))
@@ -3178,6 +3247,33 @@ var styles17 = reactNative.StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: reactNative.StyleSheet.hairlineWidth,
     borderTopColor: "rgba(128, 128, 128, 0.2)"
+  }
+});
+var tinyStyles = reactNative.StyleSheet.create({
+  container: {
+    gap: 6
+  },
+  card: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 6
+  },
+  title: {
+    fontSize: 11
+  },
+  text9: {
+    fontSize: 9
+  },
+  headerRow: {
+    gap: 8
+  },
+  metaColumn: {
+    gap: 2
+  },
+  actionsRow: {
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 6
   }
 });
 function TruncatedText({

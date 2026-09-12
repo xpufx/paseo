@@ -1670,6 +1670,278 @@ async function getAgentIdentity(options = {}) {
   }
 }
 
-export { CpuSampler, CustomPillPoller, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+// src/server/workspace-beacon.ts
+var DEFAULT_BEACON_LABEL_PREFIX = "beacon:";
+var BEACON_COLORS = [
+  "violet",
+  "sky",
+  "emerald",
+  "orange",
+  "pink",
+  "indigo",
+  "teal",
+  "red",
+  "amber",
+  "blue"
+];
+function resolveBeaconLabelName(name, prefix = DEFAULT_BEACON_LABEL_PREFIX) {
+  const trimmed = (name ?? "").trim();
+  if (!prefix) return trimmed;
+  if (trimmed.toLowerCase().startsWith(prefix.toLowerCase())) return trimmed;
+  return `${prefix}${trimmed}`;
+}
+function normalizeBeaconColor(color) {
+  if (!color) return void 0;
+  const normalized = color.trim().toLowerCase();
+  if (BEACON_COLORS.includes(normalized)) return normalized;
+  return void 0;
+}
+function isFunction(value) {
+  return typeof value === "function";
+}
+async function safeInvoke(fn, logger) {
+  try {
+    await fn();
+    return true;
+  } catch (err) {
+    logger?.debug?.(
+      `WorkspaceBeacon host call failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return false;
+  }
+}
+function toTimerKey(workspaceId) {
+  return workspaceId ?? "__default__";
+}
+var WorkspaceBeacon = class {
+  workspaceHandle;
+  daemonClient;
+  labelPrefix;
+  baseTitle;
+  logger;
+  originalTitles = /* @__PURE__ */ new Map();
+  blinkTimers = /* @__PURE__ */ new Map();
+  constructor(options = {}) {
+    this.workspaceHandle = options.workspaceHandle ?? null;
+    this.daemonClient = options.daemonClient ?? null;
+    this.labelPrefix = options.labelPrefix ?? DEFAULT_BEACON_LABEL_PREFIX;
+    this.baseTitle = options.baseTitle;
+    this.logger = options.logger;
+  }
+  setOptions(options) {
+    if ("workspaceHandle" in options) this.workspaceHandle = options.workspaceHandle ?? null;
+    if ("daemonClient" in options) this.daemonClient = options.daemonClient ?? null;
+    if (options.labelPrefix !== void 0) this.labelPrefix = options.labelPrefix;
+    if (options.baseTitle !== void 0) this.baseTitle = options.baseTitle;
+    if (options.logger !== void 0) this.logger = options.logger;
+  }
+  get activeBlinks() {
+    return this.blinkTimers.size;
+  }
+  async set(options) {
+    const result = { labelApplied: false, titleApplied: false };
+    try {
+      const workspaceId = options.workspaceId;
+      const labelName = options.name ? resolveBeaconLabelName(options.name, this.labelPrefix) : void 0;
+      result.labelName = labelName;
+      if (workspaceId && labelName) {
+        result.labelApplied = await this.applyLabel(workspaceId, labelName, options.color);
+      }
+      const title = this.resolveTitle(options);
+      if (title !== void 0) {
+        result.titleApplied = await this.applyTitle(workspaceId, title);
+        if (result.titleApplied) result.title = title;
+      }
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon.set failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    return result;
+  }
+  blink(options) {
+    const intervalMs = Math.max(50, options.intervalMs ?? 3e3);
+    const totalRounds = options.rounds ?? Number.POSITIVE_INFINITY;
+    const workspaceId = options.workspaceId ?? options.a.workspaceId ?? options.b.workspaceId;
+    const key = toTimerKey(workspaceId);
+    this.stopBlink(key);
+    let stopped = false;
+    let settled = false;
+    let timer;
+    let resolveDone;
+    const done = new Promise((resolve) => {
+      resolveDone = resolve;
+    });
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearInterval(timer);
+      const current = this.blinkTimers.get(key);
+      if (current?.finish === finish) this.blinkTimers.delete(key);
+      resolveDone();
+    };
+    try {
+      const states = [options.a, options.b];
+      const tick = () => {
+        if (stopped) {
+          finish();
+          return;
+        }
+        if (count >= totalRounds) {
+          finish();
+          return;
+        }
+        const state = states[count % 2];
+        count += 1;
+        void this.set({ ...state, workspaceId: state.workspaceId ?? workspaceId ?? "" }).catch(() => void 0);
+        if (count >= totalRounds) {
+          finish();
+        }
+      };
+      let count = 0;
+      void this.set({ ...states[0], workspaceId: states[0].workspaceId ?? workspaceId ?? "" }).catch(
+        () => void 0
+      );
+      count = 1;
+      if (count >= totalRounds) {
+        finish();
+      } else {
+        timer = setInterval(tick, intervalMs);
+        this.blinkTimers.set(key, { timer, finish });
+      }
+    } catch {
+      finish();
+    }
+    return {
+      stop: () => {
+        stopped = true;
+        finish();
+      },
+      done
+    };
+  }
+  async clear(options = {}) {
+    const result = { labelCleared: false, titleRestored: false };
+    try {
+      this.stopBlink(toTimerKey(options.workspaceId));
+      if (options.workspaceId && options.name) {
+        result.labelCleared = await this.detachLabel(
+          options.workspaceId,
+          resolveBeaconLabelName(options.name, this.labelPrefix)
+        );
+      } else if (options.workspaceId && !options.name) {
+        result.labelCleared = false;
+      }
+      if (options.restoreTitle !== false) {
+        result.titleRestored = await this.restoreTitle(options.workspaceId);
+      }
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon.clear failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    return result;
+  }
+  stopAll() {
+    for (const entry of this.blinkTimers.values()) {
+      clearInterval(entry.timer);
+      try {
+        entry.finish();
+      } catch {
+      }
+    }
+    this.blinkTimers.clear();
+  }
+  resolveTitle(options) {
+    if (options.title !== void 0) return options.title;
+    if (options.titleSuffix === void 0) return void 0;
+    const base = this.baseTitle ?? this.originalTitles.get(options.workspaceId ?? "") ?? "";
+    return `${base}${options.titleSuffix}`;
+  }
+  async applyLabel(workspaceId, labelName, color) {
+    const client = this.daemonClient;
+    if (!client || !isFunction(client.setWorkspaceLabel)) return false;
+    const label = { name: labelName };
+    const normalized = normalizeBeaconColor(color);
+    if (normalized) label.color = normalized;
+    else if (color) label.color = color;
+    return safeInvoke(
+      () => client.setWorkspaceLabel({
+        workspaceId,
+        label,
+        assigned: true
+      }),
+      this.logger
+    );
+  }
+  async detachLabel(workspaceId, labelName) {
+    const client = this.daemonClient;
+    if (!client) return false;
+    try {
+      if (isFunction(client.setWorkspaceLabel)) {
+        return await safeInvoke(
+          () => client.setWorkspaceLabel({
+            workspaceId,
+            label: { name: labelName },
+            assigned: false
+          }),
+          this.logger
+        );
+      }
+      if (isFunction(client.removeWorkspaceLabel)) {
+        return await safeInvoke(
+          () => client.removeWorkspaceLabel({
+            workspaceId,
+            name: labelName
+          }),
+          this.logger
+        );
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  }
+  async applyTitle(workspaceId, title) {
+    const handle = this.workspaceHandle;
+    if (!handle || !isFunction(handle.setTitle)) return false;
+    const key = workspaceId ?? "";
+    if (!this.originalTitles.has(key) && this.baseTitle === void 0) {
+      this.originalTitles.set(key, "");
+    } else if (!this.originalTitles.has(key) && this.baseTitle !== void 0) {
+      this.originalTitles.set(key, this.baseTitle);
+    }
+    return safeInvoke(() => handle.setTitle(title), this.logger);
+  }
+  async restoreTitle(workspaceId) {
+    const handle = this.workspaceHandle;
+    if (!handle || !isFunction(handle.setTitle)) return false;
+    const key = workspaceId ?? "";
+    const original = this.originalTitles.get(key) ?? this.baseTitle;
+    if (original === void 0) return false;
+    const ok = await safeInvoke(
+      () => handle.setTitle(original),
+      this.logger
+    );
+    if (ok) this.originalTitles.delete(key);
+    return ok;
+  }
+  stopBlink(key) {
+    const entry = this.blinkTimers.get(key);
+    if (entry) {
+      clearInterval(entry.timer);
+      this.blinkTimers.delete(key);
+      try {
+        entry.finish();
+      } catch {
+      }
+    }
+  }
+};
+function createWorkspaceBeacon(options = {}) {
+  return new WorkspaceBeacon(options);
+}
+
+export { BEACON_COLORS, CpuSampler, CustomPillPoller, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, WorkspaceBeacon, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map
