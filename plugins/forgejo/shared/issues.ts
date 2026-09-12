@@ -112,3 +112,293 @@ export function formatIssueCountLabel(count: number | null | undefined): string 
   if (count == null) return "issues --";
   return count === 1 ? "1 issue" : `${count} issues`;
 }
+
+// ---------------------------------------------------------------------------
+// Scoped label vocabularies (verified against the live board; see spec §4.1).
+// Forgejo scoped labels are exclusive: applying one label in a scope evicts
+// the previous label in that scope at the DB level, so the client only ever
+// sends "add", never "remove".
+// ---------------------------------------------------------------------------
+
+export const STATE_ORDER = [
+  "state/0-triage",
+  "state/1-wip",
+  "state/2-review",
+  "state/3-verify",
+  "state/4-done",
+] as const;
+export type StateLabel = (typeof STATE_ORDER)[number];
+
+export const PRIORITY_ORDER = [
+  "priority/0-SOS",
+  "priority/1-high",
+  "priority/2-normal",
+  "priority/3-low",
+  "priority/4-backburner",
+] as const;
+export type PriorityLabel = (typeof PRIORITY_ORDER)[number];
+
+export const ATTENTION_LABELS = [
+  "attention/0-orchestrator",
+  "attention/1-agent",
+  "attention/2-user",
+  "attention/3-ignore",
+] as const;
+
+export const SPEC_LABELS = [
+  "spec/0-needed",
+  "spec/1-checklist",
+  "spec/2-approved",
+] as const;
+
+const STATE_SHORT: Record<string, string> = {
+  "state/0-triage": "Triage",
+  "state/1-wip": "WIP",
+  "state/2-review": "Review",
+  "state/3-verify": "Verify",
+  "state/4-done": "Done",
+};
+
+const PRIORITY_SHORT: Record<string, string> = {
+  "priority/0-SOS": "SOS",
+  "priority/1-high": "High",
+  "priority/2-normal": "Normal",
+  "priority/3-low": "Low",
+  "priority/4-backburner": "Parked",
+};
+
+/** Compact display alias for a scoped label ("state/1-wip" -> "WIP"). */
+export function shortLabelName(label: string): string {
+  return STATE_SHORT[label] ?? PRIORITY_SHORT[label] ?? label;
+}
+
+/** The issue's current `state/*` label, or null when it carries none. */
+export function currentStateLabel(labels: string[]): string | null {
+  for (const label of labels) {
+    if ((STATE_ORDER as readonly string[]).includes(label)) return label;
+  }
+  return null;
+}
+
+/** The issue's current `priority/*` label, defaulting to normal per spec §4.2. */
+export function currentPriorityLabel(labels: string[]): string {
+  for (const label of labels) {
+    if ((PRIORITY_ORDER as readonly string[]).includes(label)) return label;
+  }
+  return "priority/2-normal";
+}
+
+/** Next `state/*` promotion step, or null when already done. */
+export function nextStateLabel(labels: string[]): string | null {
+  const current = currentStateLabel(labels);
+  if (!current) return "state/1-wip";
+  const idx = (STATE_ORDER as readonly string[]).indexOf(current);
+  if (idx < 0 || idx + 1 >= STATE_ORDER.length) return null;
+  return STATE_ORDER[idx + 1];
+}
+
+// ---------------------------------------------------------------------------
+// Agent Envelope (parsed telemetry, spec §4.4).
+// Every agent comment ends with the footer stamped by
+// `fgjx issue comment --envelope`:
+//   <sub>🤖 **<SessionTitle>** (`<shortId>`) · `<model>` ·
+//   `<repo>:<branch>` · _<UTC timestamp>_</sub>
+// ---------------------------------------------------------------------------
+
+export const AgentEnvelopeSchema = z.object({
+  commentId: z.number(),
+  sessionTitle: z.string(),
+  agentShortId: z.string(),
+  model: z.string().nullable().default(null),
+  repo: z.string().nullable().default(null),
+  branch: z.string().nullable().default(null),
+  postedAt: z.string().nullable().default(null),
+  commitShas: z.array(z.string().regex(/^[0-9a-f]{7,40}$/)).default([]),
+  paseoLinks: z.array(z.string()).default([]),
+  serverId: z.string().nullable().default(null),
+});
+export type AgentEnvelope = z.infer<typeof AgentEnvelopeSchema>;
+
+export const IssueCommentSchema = z.object({
+  id: z.number(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  body: z.string(),
+  envelope: AgentEnvelopeSchema.nullable().default(null),
+});
+export type IssueComment = z.infer<typeof IssueCommentSchema>;
+
+export const IssueDetailSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  labels: z.array(z.string()),
+  body: z.string(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  webUrl: z.string(),
+  comments: z.array(IssueCommentSchema),
+  envelopes: z.array(AgentEnvelopeSchema),
+});
+export type IssueDetail = z.infer<typeof IssueDetailSchema>;
+
+const ENVELOPE_FOOTER_PATTERN =
+  /<sub>\s*🤖\s*\*\*(.+?)\*\*\s*\(`([^`)]+)`\)\s*·\s*`([^`]+)`\s*·\s*`([^`]+)`\s*·\s*_([^_]+)_\s*<\/sub>/;
+
+/** Remove the agent envelope footer so comment bodies render without duplication. */
+export function stripAgentEnvelopeFooter(body: string | undefined | null): string {
+  if (!body || typeof body !== "string") return "";
+  return body.replace(ENVELOPE_FOOTER_PATTERN, "").replace(/---\s*$/, "").trim();
+}
+
+const SHA_PATTERN = /\b[0-9a-f]{7,40}\b/g;
+const PASEO_LINK_PATTERN = /paseo:\/\/[^\s)>\]]+/g;
+const PASEO_SERVER_PATTERN = /paseo:\/\/h\/([^/\s]+)\/agent\//;
+
+/**
+ * Parse the agent envelope footer of one comment body into structured
+ * telemetry. Returns null when the comment carries no parseable footer;
+ * envelope parsing never fails the detail RPC.
+ */
+export function parseAgentEnvelope(
+  commentId: number,
+  body: string | undefined | null,
+): AgentEnvelope | null {
+  if (!body || typeof body !== "string") return null;
+  const match = ENVELOPE_FOOTER_PATTERN.exec(body);
+  if (!match) return null;
+  const sessionTitle = match[1].trim();
+  const agentShortId = match[2].trim();
+  if (!sessionTitle || !agentShortId) return null;
+  const model = match[3].trim() || null;
+  const repoBranch = match[4].trim();
+  const postedAt = match[5].trim() || null;
+  let repo: string | null = null;
+  let branch: string | null = null;
+  if (repoBranch) {
+    const sep = repoBranch.lastIndexOf(":");
+    if (sep > 0) {
+      repo = repoBranch.slice(0, sep) || null;
+      branch = repoBranch.slice(sep + 1) || null;
+    } else {
+      branch = repoBranch;
+    }
+  }
+  const commitShas = Array.from(
+    new Set(
+      (body.match(SHA_PATTERN) ?? []).filter(
+        (sha) => sha !== agentShortId && /[0-9]/.test(sha) && /[a-f]/.test(sha),
+      ),
+    ),
+  );
+  const paseoLinks = Array.from(new Set(body.match(PASEO_LINK_PATTERN) ?? []));
+  const serverMatch = PASEO_SERVER_PATTERN.exec(paseoLinks[0] ?? "");
+  return {
+    commentId,
+    sessionTitle,
+    agentShortId,
+    model,
+    repo,
+    branch,
+    postedAt,
+    commitShas,
+    paseoLinks,
+    serverId: serverMatch ? serverMatch[1] : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Detail / write contracts (spec §5.2–§5.4).
+// Input accepts `issueNumber` (primary) with `number` as a deprecated alias
+// so spec-shaped payloads keep working; handlers normalize via
+// `normalizeIssueNumber`.
+// ---------------------------------------------------------------------------
+
+const IssueNumberInput = z
+  .object({
+    directory: z.string().optional(),
+    issueNumber: z.number().int().positive().optional(),
+    number: z.number().int().positive().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.issueNumber == null && value.number == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "issueNumber (or number) is required",
+      });
+    }
+  });
+export type IssueNumberInput = z.infer<typeof IssueNumberInput>;
+
+/** Resolve the canonical issue number from either input spelling. */
+export function normalizeIssueNumber(
+  input: IssueNumberInput | { issueNumber?: number; number?: number },
+): number | null {
+  const issueNumber = (input as { issueNumber?: unknown }).issueNumber;
+  if (typeof issueNumber === "number" && Number.isInteger(issueNumber) && issueNumber > 0) {
+    return issueNumber;
+  }
+  const legacy = (input as { number?: unknown }).number;
+  if (typeof legacy === "number" && Number.isInteger(legacy) && legacy > 0) {
+    return legacy;
+  }
+  return null;
+}
+
+export const IssueDetailInputSchema = IssueNumberInput;
+export type IssueDetailInput = z.infer<typeof IssueDetailInputSchema>;
+
+export const IssueDetailOutputSchema = z.object({
+  repo: z.string().nullable(),
+  issue: IssueDetailSchema.nullable(),
+  fetchedAt: z.string().datetime(),
+  error: z.string().optional(),
+});
+export type IssueDetailOutput = z.infer<typeof IssueDetailOutputSchema>;
+
+export const issueDetailContract = defineContract({
+  name: "forgejo.issue-detail",
+  description: "Full body, comments, and parsed Agent Envelopes for one issue",
+  input: IssueDetailInputSchema,
+  output: IssueDetailOutputSchema,
+});
+
+export const SetLabelInputSchema = IssueNumberInput.extend({
+  label: z.string().min(1).max(100),
+});
+export type SetLabelInput = z.infer<typeof SetLabelInputSchema>;
+
+export const SetLabelOutputSchema = z.object({
+  number: z.number(),
+  labels: z.array(z.string()),
+  error: z.string().optional(),
+});
+export type SetLabelOutput = z.infer<typeof SetLabelOutputSchema>;
+
+export const setLabelContract = defineContract({
+  name: "forgejo.set-label",
+  description: "Apply one scoped label; Forgejo exclusive scope evicts the rest",
+  input: SetLabelInputSchema,
+  output: SetLabelOutputSchema,
+});
+
+export const AddCommentInputSchema = IssueNumberInput.extend({
+  body: z.string().min(1).max(10000),
+});
+export type AddCommentInput = z.infer<typeof AddCommentInputSchema>;
+
+export const AddCommentOutputSchema = z.object({
+  number: z.number(),
+  commentId: z.number().nullable(),
+  error: z.string().optional(),
+});
+export type AddCommentOutput = z.infer<typeof AddCommentOutputSchema>;
+
+export const addCommentContract = defineContract({
+  name: "forgejo.add-comment",
+  description: "Post a quick comment (or steering note) to the issue thread",
+  input: AddCommentInputSchema,
+  output: AddCommentOutputSchema,
+});
