@@ -5,8 +5,8 @@
  *
  * Verifies that:
  * 1. packages/paseo-plugin-helper/dist is compiled and up-to-date with src
- * 2. Each plugin's shared/version.ts matches current git HEAD
- * 3. Each plugin's Paseo daemon is running and loaded with current git commit
+ * 2. Each plugin's shared/version.ts contains current code changes
+ * 3. Each plugin's Paseo daemon is running and loaded with current code changes
  *
  * Usage:
  *   npm run doctor:live             # Check status and print diagnostic table
@@ -76,12 +76,12 @@ function getRepoHead() {
 function getPluginCommit(dir) {
   try {
     const rel = path.relative(ROOT_DIR, dir);
-    const hash = execSync(`git log -n 1 --format="%h" -- "${rel}"`, {
+    const hash = execSync(`git log -n 1 --format="%h" -- "${rel}" ":(exclude)**/version.ts"`, {
       cwd: ROOT_DIR,
       encoding: "utf8",
       stdio: ["pipe", "pipe", "ignore"],
     }).trim();
-    const timeAgo = execSync(`git log -n 1 --format="%cr" -- "${rel}"`, {
+    const timeAgo = execSync(`git log -n 1 --format="%cr" -- "${rel}" ":(exclude)**/version.ts"`, {
       cwd: ROOT_DIR,
       encoding: "utf8",
       stdio: ["pipe", "pipe", "ignore"],
@@ -89,6 +89,20 @@ function getPluginCommit(dir) {
     return { hash: hash || "-", timeAgo: timeAgo || "-" };
   } catch {
     return { hash: "-", timeAgo: "-" };
+  }
+}
+
+function isAncestorOrEqual(requiredCommit, targetCommit) {
+  if (!requiredCommit || requiredCommit === "-" || !targetCommit || targetCommit === "-") return false;
+  if (targetCommit.startsWith(requiredCommit) || requiredCommit.startsWith(targetCommit)) return true;
+  try {
+    execSync(`git merge-base --is-ancestor "${requiredCommit}" "${targetCommit}"`, {
+      cwd: ROOT_DIR,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -239,15 +253,18 @@ async function main() {
     const daemonRunning = configured && configured.status === "running";
     let liveInfo = configured ? getLivePluginVersion(pluginId) : null;
 
-    // A stamp is considered fresh if it matches repo HEAD OR the plugin's last commit
-    const stampMatches = stamped && (stamped.sha === repoHead || stamped.sha === pluginCommit.hash);
-    const stampStale = stamped && !stampMatches;
+    // Check stamp freshness: stamped SHA must be at least as new as the latest code commit
+    const stampFresh = !stamped || isAncestorOrEqual(pluginCommit.hash, stamped.sha);
+    const stampStale = stamped && !stampFresh;
 
     if (stampStale && shouldReload && stampVersionFn && stamped.file) {
       console.log(`${colors.yellow}⚡ Stamping updated git version into ${path.relative(ROOT_DIR, stamped.file)}...${colors.reset}`);
       stampVersionFn({ cwd: fullPath, targetFile: stamped.file });
       stamped = getStampedVersion(fullPath);
     }
+
+    // Check live daemon freshness: running SHA must be at least as new as the latest code commit
+    const liveFresh = liveInfo ? isAncestorOrEqual(pluginCommit.hash, liveInfo.sha) : false;
 
     let status = "ready";
     let message = "Live & up-to-date";
@@ -259,14 +276,13 @@ async function main() {
       status = "stopped";
       message = `Daemon ${configured.status || "stopped"}`;
       result.ready = false;
-    } else if (liveInfo && !liveInfo.sha.startsWith(repoHead) && !repoHead.startsWith(liveInfo.sha) &&
-               !liveInfo.sha.startsWith(pluginCommit.hash) && !pluginCommit.hash.startsWith(liveInfo.sha)) {
+    } else if (liveInfo && !liveFresh) {
       status = "stale-daemon";
-      message = `Running ${liveInfo.sha}, target at ${repoHead}`;
+      message = `Running ${liveInfo.sha}, needs >= ${pluginCommit.hash}`;
       result.ready = false;
     } else if (stampStale) {
       status = "stale-stamp";
-      message = `version.ts at ${stamped.sha}, target at ${repoHead}`;
+      message = `version.ts at ${stamped.sha}, needs >= ${pluginCommit.hash}`;
       result.ready = false;
     } else if (!liveInfo) {
       status = "running";
@@ -322,7 +338,7 @@ async function main() {
 
   // Plugins Table
   console.log(
-    `${colors.bold}${"Plugin".padEnd(14)} ${"Status".padEnd(17)} ${"Directory".padEnd(10)} ${"Stamped".padEnd(10)} ${"Live SHA".padEnd(10)} Notes${colors.reset}`
+    `${colors.bold}${"Plugin".padEnd(14)} ${"Status".padEnd(17)} ${"Code Commit".padEnd(12)} ${"Stamped".padEnd(10)} ${"Live SHA".padEnd(10)} Notes${colors.reset}`
   );
   console.log("─".repeat(82));
 
@@ -348,7 +364,7 @@ async function main() {
 
     const nameCol = p.name.padEnd(14);
     const statCol = `${statColor}${icon} ${p.status.toUpperCase()}${colors.reset}`.padEnd(26);
-    const repoCol = p.repoHead.padEnd(10);
+    const repoCol = p.repoHead.padEnd(12);
     const stampCol = p.stampedSha.padEnd(10);
     const liveCol = p.liveSha.padEnd(10);
     const noteCol = `${colors.gray}${p.detail}${colors.reset}`;
@@ -374,7 +390,7 @@ async function main() {
     console.log("");
     process.exit(1);
   } else {
-    console.log(`${colors.green}✔ All configured daemons and helper builds are synchronized with git HEAD!${colors.reset}`);
+    console.log(`${colors.green}✔ All configured daemons and helper builds are synchronized with latest code!${colors.reset}`);
     console.log(`${colors.gray}🖥️  Client UI Note: If you have Paseo open, press Ctrl+R (Cmd+R) or re-open the plugin modal/surface to verify UI changes.${colors.reset}`);
     console.log("");
     process.exit(0);
