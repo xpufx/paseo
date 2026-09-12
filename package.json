@@ -14,7 +14,8 @@
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "doctor:live": "node scripts/doctor-live.mjs"
   },
   "repository": {
     "type": "git",

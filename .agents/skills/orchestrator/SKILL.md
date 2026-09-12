@@ -44,9 +44,12 @@ The Orchestrator inspects the affected repositories/worktrees:
 - **Git Tree Cleanliness**: Ensure no untracked files (`??`) or unstaged edits (`M`) remain in the agent's worktree.
 - **Commit History**: Verify changes are committed with semantic messages and proper issue references.
 - **Remote Push**: Confirm commits are pushed to `origin` on Forgejo (`ssh://git@forge.mrs.aager.de:222/...`).
-- **Package Manifest & Versions**: Verify whether `package.json`, `paseo-plugin.json`, or exported version constants need a version bump.
-- **Build / Bundle Output**: Ensure build artifacts (`dist/`) are fresh and match source code.
-- **Daemon / Service Reloads**: Determine if running Paseo daemons or background systemd units need a restart or reload to pick up changes.
+- **Live Deployment & Freshness Audit**:
+  Run `npm run doctor:live` (or `npm run doctor:live -- --reload` to auto-synchronize).
+  - Verify `packages/paseo-plugin-helper/dist` is fresh and newer than `src/`.
+  - Verify the plugin's `shared/version.ts` matches git HEAD.
+  - Verify the live Paseo daemon is actively executing the latest git commit (green `READY`).
+- **Client Window Refresh Flag**: Note whether the user needs to reload their client UI (`Ctrl+R` / `Cmd+R`) to purge cached bundles in memory.
 
 ---
 
@@ -61,19 +64,22 @@ When presenting deliverables to the operator (`@oktay`), the Orchestrator **MUST
 - **Agent**: `<Agent Name>` (`<ShortId>`)
 - **Repo / Branch**: `<repo>:<branch>` @ `<commit-sha>`
 - **Tests**: `X/X pass` | **Typecheck**: `Clean`
+- **Live Doctor**: Passed (`npm run doctor:live`)
 
----
+#### 🚀 Deployment & Verification Status
+- **Helper Dist**: Rebuilt at `<time>` (`dist/` synced)
+- **Live Daemon**: Running `<commit-sha>` (`paseo plugin ls` status: `running`)
+- **Visual Fingerprint**: Look for `<version>+<sha>` in About tab / footer
 
-#### 🤖 Agent Autonomous Actions (Awaiting Your Approval to Fan-Out)
-- [ ] Push commit `<sha>` to Forgejo `main` / `v0.8`
-- [ ] Bump `package.json` to `x.y.z`
-- [ ] Reload daemon plugin `/home/xpufx/...`
-- [ ] Update Forgejo ticket labels (`state/verify`)
+#### 🤖 Agent Autonomous Actions (Completed)
+- [x] Committed and pushed `<sha>` to `origin/main`
+- [x] Rebuilt helper and reloaded daemons (`doctor:live --reload`)
+- [x] Transitioned Forgejo ticket to `state/3-verify`
 
-#### 👤 Operator Actions (Requires Your Action / Device)
-- [ ] Verify UI surface in Paseo desktop / web client
-- [ ] (If publishing) Input 2FA token for `npm publish`
-- [ ] Sign off and close issue on Forgejo
+#### 👤 Operator Actions (Ready for You to Test)
+- [ ] In Paseo client window: Re-open the modal/surface (press `Ctrl+R` or `Cmd+R` if window was already open)
+- [ ] Verify fix visually
+- [ ] Confirm done or request changes
 ```
 
 ---

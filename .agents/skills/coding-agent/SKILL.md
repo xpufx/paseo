@@ -159,15 +159,28 @@ Agents and Orchestrators evaluate the board using a two-step approach:
   Work quietly in your designated worktree/checkout without spamming chat.
 - **Verification:** Run typechecks (`npm run typecheck`), linters, and test suites locally before claiming completion.
 
-### Step 3: Handoff to `Orchestrator` (`state/2-review`)
+### Step 3: Handoff to `Orchestrator` (`state/2-review` or `state/3-verify`)
 When code is implemented and verified locally:
-1. Push your branch/commits.
-2. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
+1. Push your branch/commits to `origin`.
+2. **Mandatory Live Freshness Sync**: Run `npm run doctor:live -- --reload`.
+   - Ensures `packages/paseo-plugin-helper/dist` is compiled and in sync.
+   - Automatically stamps the latest commit into `shared/version.ts`.
+   - Reloads the live Paseo daemon for your plugin (`paseo plugin reload <id>`).
+   - Verifies the daemon is actively running your latest commit before asking the operator to test.
+3. Post a completion comment with your **Agent Envelope** (`fgjx issue comment <number> --envelope -b ...`).
    - **Strict Formatting Standard**: Never dump an unformatted, narrative wall of text. Use clean GitHub-flavored markdown with structured headers (`### Implementation Summary`), bulleted deliverables, explicit code host/repo/branch/SHA, and test results.
    - Summary of changes implemented.
    - Updated checklist showing completed items.
    - Branch name and commit hash(es).
    - Confirmation that typechecks and tests passed.
+   - **Deployment & Verification Status block**:
+     ```markdown
+     ### 🚀 Deployment & Verification Status
+     - **Commit**: `<sha>` on `origin/<branch>`
+     - **Live Doctor**: Passed (`npm run doctor:live`)
+     - **Daemon Status**: Reloaded (`paseo plugin reload <id>`)
+     - **Client Action**: Re-open the modal/surface (or press Ctrl+R / Cmd+R in Paseo if window is open).
+     ```
 3. **Transition the state**: Apply **`state/2-review`** and `review/0-needed`.
    - Command: `fgjx issue edit <number> --add-label state/2-review --add-label review/0-needed`.
    - **Automatic Eviction**: Because `state/` and `review/` are exclusive scopes, this clears prior states automatically.
