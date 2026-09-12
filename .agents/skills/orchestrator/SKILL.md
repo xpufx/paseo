@@ -65,7 +65,7 @@ When presenting deliverables to the operator (`@oktay`), the Orchestrator **MUST
 - **Agent**: `<Agent Name>` (`<ShortId>`)
 - **Repo / Branch**: `<repo>:<branch>` @ `<commit-sha>`
 - **Tests**: `X/X pass` | **Typecheck**: `Clean`
-- **Live Doctor**: Passed (`npm run doctor:live`)
+- **Live Doctor**: Passed (`make doctor` or script `doctor`)
 
 #### 🚀 Deployment & Verification Status
 - **Helper Dist**: Rebuilt at `<time>` (`dist/` synced)
@@ -74,7 +74,7 @@ When presenting deliverables to the operator (`@oktay`), the Orchestrator **MUST
 
 #### 🤖 Agent Autonomous Actions (Completed)
 - [x] Committed and pushed `<sha>` to `origin/main`
-- [x] Rebuilt helper and reloaded daemons (`doctor:live --reload`)
+- [x] Rebuilt helper and reloaded daemons (`make reload` / script `reload`)
 - [x] Transitioned Forgejo ticket to `state/3-verify`
 
 #### 👤 Operator Actions (Ready for You to Test)
@@ -84,6 +84,18 @@ When presenting deliverables to the operator (`@oktay`), the Orchestrator **MUST
 ```
 
 ---
+
+## 4. Worker Dispatch & Context Provisioning Protocol
+
+When dispatching background coding workers via `create_agent`:
+1. **Provide Helper Context, Not Just CSS Patches**:
+   - Never dispatch a worker with a narrow pixel-tweak directive (e.g. "remove minWidth: 460") without providing the helper context.
+   - Point the worker to `plugins/mcp-tools` as the canonical reference implementation of Paseo plugin client UI.
+   - Specify the relevant `paseo-plugin-helper` primitives to use (`ModalBody`, `Card`, `Card.Header`, `FormRow`, `Button`, `Toggle`, `Tabs`, `KeyValueGroup`).
+2. **Strict Ban on Bespoke Primitives**:
+   - Instruct workers to replace bespoke raw React Native styling (`Pressable` cards, custom borders, bespoke switches) with helper components.
+3. **Mandatory Script Verification**:
+   - Require workers to verify their deliverables using `make check` (or workspace script `check`) and reload live daemons via `make reload` (or workspace script `reload`).
 
 ## 4. Gated Fan-Out Protocol
 

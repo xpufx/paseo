@@ -157,6 +157,23 @@ Agents and Orchestrators evaluate the board using a two-step approach:
 ### Step 2: Implementation Guidelines
 - **Autonomous Execution (`attention/1-agent`, `size/0-cheap`):**
   Work quietly in your designated worktree/checkout without spamming chat.
+
+#### Mandatory: Paseo Plugin Helper UI Standards (Never Bespoke Raw React Native)
+When building or modifying client UI in Paseo plugins:
+1. **Reference Gold Standard**: Inspect `plugins/mcp-tools` as the canonical reference implementation. It adheres to all `paseo-plugin-helper` UI patterns.
+2. **Never Handroll Bespoke UI Primitives**:
+   - **Do NOT hardcode modal dimensions**: Never set `minWidth: 460`, `minHeight`, or fixed widths on `<ModalBody>` or modal containers. Modals must be 100% fluid and adapt to whatever dialog width Paseo allocates.
+   - **Do NOT roll custom buttons or selectors using `<Pressable>`**: Use `Button`, `Tabs`, or `FormRow` containing `Button` variants (`variant="primary" | "ghost" | "secondary"`).
+   - **Do NOT roll custom form rows or setting switches**: Use `<FormRow label="..." description="...">` wrapping `<Toggle>` or `<TextInput>`.
+   - **Do NOT roll custom card borders or headers**: Use `<Card variant="elevated">`, `<Card.Header title="..." subtitle="..." />`, or `<SectionHeader>`.
+   - **Do NOT roll custom key/value displays**: Use `<KeyValueGroup>` and `<KeyValue>` (or `CompactKeyValue`).
+   - **Do NOT roll custom empty or status indicators**: Use `<EmptyState>` and `<StatusDot>`.
+3. **Available Helper Client Palette**: Exported from `paseo-plugin-helper/client`:
+   - **Layout**: `ModalBody`, `ActionBar`, `FormRow`
+   - **Components**: `Card`, `Tabs`, `Button`, `Toggle`, `TextInput`, `Badge`, `StatusDot`, `KeyValue`, `KeyValueGroup`, `Collapsible`, `SectionHeader`, `CommandBox`, `AttentionBeacon`, `CodeBlock`, `SearchInput`, `EmptyState`, `ProgressBar`, `MetricGauge`, `DataTable`, `TruncatedText`, `AboutSection`, `Icon`
+4. **Audit Before Delivery**:
+   - Run `./packages/paseo-plugin-helper/bin/paseo-plugin-helper.js audit <plugin-path>` to catch anti-patterns.
+
 - **Verification:** Run typechecks (`npm run typecheck`), linters, and test suites locally before claiming completion.
 
 ### Step 3: Handoff to `Orchestrator` (`state/2-review` or `state/3-verify`)
