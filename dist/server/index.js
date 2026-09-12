@@ -1615,7 +1615,61 @@ function createLoopWatchdog(options = {}) {
   }
   return () => clearInterval(timer);
 }
+function readEnvIdentity(env = process.env) {
+  const id = env.PASEO_AGENT_ID || env.AGENT_ID || void 0;
+  const name = env.AGENT_NAME || void 0;
+  const model = env.AGENT_MODEL || void 0;
+  const provider = env.AGENT_PROVIDER || void 0;
+  if (!id && !name && !model && !provider) return null;
+  return { id, name, model, provider };
+}
+function normalizeEnvelopeJson(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw;
+  const str = (v) => typeof v === "string" && v.length > 0 ? v : void 0;
+  const identity = {
+    id: str(o.id) ?? str(o.agentId),
+    name: str(o.name) ?? str(o.agentName),
+    model: str(o.model),
+    provider: str(o.provider),
+    repo: str(o.repo) ?? str(o.workspace),
+    branch: str(o.branch),
+    envelopeText: str(o.envelopeText) ?? str(o.envelope)
+  };
+  if (!identity.id && !identity.name && !identity.model && !identity.provider && !identity.repo && !identity.branch) return null;
+  return identity;
+}
+async function getAgentIdentity(options = {}) {
+  const timeoutMs = options.timeoutMs ?? 5e3;
+  const command = options.envelopeCommand ?? "xpufx-tool envelope --format json";
+  const envIdentity = readEnvIdentity();
+  try {
+    const result = await safeExec(command, { timeoutMs });
+    if (result.code !== 0) return envIdentity;
+    const text = result.stdout.trim();
+    if (!text) return envIdentity;
+    try {
+      const parsed = JSON.parse(text);
+      const cliIdentity = normalizeEnvelopeJson(parsed);
+      if (!cliIdentity) return envIdentity;
+      if (!envIdentity) return cliIdentity;
+      return {
+        id: envIdentity.id ?? cliIdentity.id,
+        name: envIdentity.name ?? cliIdentity.name,
+        model: envIdentity.model ?? cliIdentity.model,
+        provider: envIdentity.provider ?? cliIdentity.provider,
+        repo: cliIdentity.repo,
+        branch: cliIdentity.branch,
+        envelopeText: cliIdentity.envelopeText
+      };
+    } catch {
+      return envIdentity;
+    }
+  } catch {
+    return envIdentity;
+  }
+}
 
-export { CpuSampler, CustomPillPoller, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { CpuSampler, CustomPillPoller, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map
