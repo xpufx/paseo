@@ -23,7 +23,6 @@ import {
   ModalBody,
   ActionBar,
   Card,
-  Tabs,
   Badge,
   StatusDot,
   Button,
@@ -107,7 +106,7 @@ function DemoModal({ close }: RenderModalProps) {
   const { colors, theme, layout } = usePluginTheme();
   const { isCompact } = useResponsive();
   const [activeTab, setActiveTab] = useState<string>("gauges");
-  const [tabMode, setTabMode] = useState<"fit" | "scroll">(isCompact ? "scroll" : "fit");
+  const [menuOpen, setMenuOpen] = useState<boolean>(false);
 
   const showcaseTabs = [
     { id: "gauges", label: "Gauges & Hardware", shortLabel: "Gauges" },
@@ -228,42 +227,74 @@ function DemoModal({ close }: RenderModalProps) {
           ))}
         </View>
 
-        {/* Tab Display Mode Selector */}
-        <View style={styles.rateControlRow}>
-          <Text style={[styles.rateLabel, { color: colors.foregroundMuted }]}>
-            Tab Mode:
-          </Text>
-          <Button
-            label="Fit (Screen)"
-            size="sm"
-            variant={tabMode === "fit" ? "primary" : "ghost"}
-            onPress={() => {
-              triggerHaptic("light");
-              setTabMode("fit");
-            }}
-          />
-          <Button
-            label="Scroll (Ribbon)"
-            size="sm"
-            variant={tabMode === "scroll" ? "primary" : "ghost"}
-            onPress={() => {
-              triggerHaptic("light");
-              setTabMode("scroll");
-            }}
-          />
-        </View>
-      </Card>
+        </Card>
 
-      {/* Tabs */}
-      <Tabs
-        mode={tabMode}
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          triggerHaptic("light");
-          setActiveTab(tab);
-        }}
-        tabs={showcaseTabs}
-      />
+      {/* Showcase view dropdown selector */}
+      <View style={styles.dropdownWrap}>
+        <Pressable
+          onPress={() => {
+            triggerHaptic("light");
+            setMenuOpen((v) => !v);
+          }}
+          accessibilityLabel="Select showcase view"
+          accessibilityRole="button"
+          style={[
+            styles.dropdownTrigger,
+            {
+              backgroundColor: colors.surface1,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.dropdownTriggerLabel, { color: colors.foreground }]} numberOfLines={1}>
+            {showcaseTabs.find((t) => t.id === activeTab)?.label ?? activeTab}
+          </Text>
+          <Text style={[styles.dropdownChevron, { color: colors.foregroundMuted }]}>
+            {menuOpen ? "▴" : "▾"}
+          </Text>
+        </Pressable>
+        {menuOpen && (
+          <View
+            style={[
+              styles.dropdownMenu,
+              { backgroundColor: colors.surface1, borderColor: colors.border },
+            ]}
+          >
+            {showcaseTabs.map((tab) => {
+              const selected = tab.id === activeTab;
+              return (
+                <Pressable
+                  key={tab.id}
+                  onPress={() => {
+                    triggerHaptic("light");
+                    setActiveTab(tab.id);
+                    setMenuOpen(false);
+                  }}
+                  accessibilityLabel={`Show ${tab.label}`}
+                  accessibilityRole="button"
+                  style={[
+                    styles.dropdownItem,
+                    selected && {
+                      backgroundColor: colors.surface2,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.dropdownItemLabel,
+                      { color: selected ? colors.accent : colors.foreground },
+                      selected && styles.dropdownItemLabelActive,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {tab.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </View>
 
       {/* TAB 1: GAUGES & HARDWARE */}
       {activeTab === "gauges" && (
@@ -807,7 +838,7 @@ function DemoModal({ close }: RenderModalProps) {
               Badge with icon
             </Text>
             <View style={styles.beaconRow}>
-              <AttentionBeacon mode="badge" tone="danger" active={attentionOn} badgeIcon="bell">
+              <AttentionBeacon mode="badge" tone="danger" active={attentionOn}>
                 <Badge label="bell" variant="danger" />
               </AttentionBeacon>
               <AttentionBeacon mode="badge" tone={beaconTone} active={attentionOn}>
@@ -1104,5 +1135,47 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     paddingVertical: 8,
     paddingHorizontal: 12,
+  },
+  dropdownWrap: {
+    width: "100%",
+    marginTop: 10,
+    zIndex: 10,
+  },
+  dropdownTrigger: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    width: "100%",
+  },
+  dropdownTriggerLabel: {
+    fontSize: 13,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  dropdownChevron: {
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  dropdownMenu: {
+    borderWidth: 1,
+    borderRadius: 10,
+    marginTop: 6,
+    overflow: "hidden",
+    width: "100%",
+  },
+  dropdownItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    width: "100%",
+  },
+  dropdownItemLabel: {
+    fontSize: 13,
+  },
+  dropdownItemLabelActive: {
+    fontWeight: "700",
   },
 });
