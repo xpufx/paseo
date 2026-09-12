@@ -3419,6 +3419,54 @@ var styles19 = StyleSheet.create({
     justifyContent: "center"
   }
 });
+function SectionHeader({
+  title,
+  count,
+  badgeVariant,
+  style,
+  textStyle
+}) {
+  const theme = usePluginTheme();
+  const headingTransform = (theme.flair?.headingTransform ?? "uppercase") === "uppercase" ? "uppercase" : "none";
+  return /* @__PURE__ */ jsxs(View, { style: [styles20.container, style], children: [
+    /* @__PURE__ */ jsx(
+      Text,
+      {
+        style: [
+          styles20.title,
+          {
+            color: theme.colors.foregroundMuted,
+            textTransform: headingTransform
+          },
+          textStyle
+        ],
+        children: title
+      }
+    ),
+    count !== void 0 ? /* @__PURE__ */ jsx(
+      Badge,
+      {
+        label: String(count),
+        variant: badgeVariant ?? (count > 0 ? "warning" : "neutral"),
+        styleVariant: count > 0 ? "solid" : "tinted"
+      }
+    ) : null
+  ] });
+}
+var styles20 = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 2
+  },
+  title: {
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.8
+  }
+});
 function ModalBody({
   children,
   style,
@@ -3459,7 +3507,7 @@ function ModalBody({
       View,
       {
         style: [
-          styles20.content,
+          styles21.content,
           {
             backgroundColor: colors.surface0,
             paddingHorizontal: padding.horizontal,
@@ -3478,14 +3526,14 @@ function ModalBody({
     ResolvedScrollView,
     {
       ref: setRefs,
-      style: [{ backgroundColor: colors.surface0 }, styles20.container, style],
+      style: [{ backgroundColor: colors.surface0 }, styles21.container, style],
       nestedScrollEnabled: true,
       keyboardShouldPersistTaps: "handled",
       showsVerticalScrollIndicator: true,
       refreshControl,
       onContentSizeChange: stickToEnd ? () => innerRef.current?.scrollToEnd({ animated: true }) : void 0,
       contentContainerStyle: [
-        styles20.content,
+        styles21.content,
         {
           paddingHorizontal: padding.horizontal,
           paddingTop: padding.vertical,
@@ -3498,7 +3546,7 @@ function ModalBody({
     }
   );
 }
-var styles20 = StyleSheet.create({
+var styles21 = StyleSheet.create({
   container: {
     flex: 1,
     minHeight: 0,
@@ -3523,7 +3571,7 @@ function ActionBar({
     View,
     {
       style: [
-        styles21.container,
+        styles22.container,
         {
           flexDirection: isColumn ? "column" : "row",
           justifyContent: isColumn ? "flex-start" : align,
@@ -3537,19 +3585,19 @@ function ActionBar({
     }
   );
 }
-var styles21 = StyleSheet.create({
+var styles22 = StyleSheet.create({
   container: {
     flexWrap: "wrap"
   }
 });
 function FormRow({ label, description, children, style }) {
   const { colors, flair, isCompact } = usePluginTheme();
-  return /* @__PURE__ */ jsxs(View, { style: [styles22.container, style], children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles23.container, style], children: [
     /* @__PURE__ */ jsx(
       Text,
       {
         style: [
-          styles22.label,
+          styles23.label,
           {
             color: colors.foreground,
             fontSize: isCompact ? 12 : 13,
@@ -3563,16 +3611,16 @@ function FormRow({ label, description, children, style }) {
       Text,
       {
         style: [
-          styles22.description,
+          styles23.description,
           { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 }
         ],
         children: description
       }
     ),
-    /* @__PURE__ */ jsx(View, { style: styles22.content, children })
+    /* @__PURE__ */ jsx(View, { style: styles23.content, children })
   ] });
 }
-var styles22 = StyleSheet.create({
+var styles23 = StyleSheet.create({
   container: {
     gap: 4,
     width: "100%"
@@ -3601,7 +3649,7 @@ function registerComposerPill(client, options) {
       layout: props.layout,
       host: props.host ?? { id: "", label: "" }
     };
-    return /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsx(View, { style: styles23.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
+    return /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsx(View, { style: styles24.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
   }
   function PillHost(props) {
     const [open, setOpen] = useState(false);
@@ -3829,13 +3877,13 @@ function DefaultPillBody({
   const effectiveTitle = isCompact && compactTitle ? compactTitle : title;
   const effectiveIcon = isCompact && compactIcon ? compactIcon : icon;
   const effectiveBadge = isCompact && compactBadgeText !== void 0 ? compactBadgeText : badgeText;
-  return /* @__PURE__ */ jsxs(View, { style: styles23.pillContainer, children: [
+  return /* @__PURE__ */ jsxs(View, { style: styles24.pillContainer, children: [
     effectiveIcon && /* @__PURE__ */ jsx(Icon2, { name: effectiveIcon, size: 13, color: theme.colors.foreground }),
-    effectiveTitle ? /* @__PURE__ */ jsx(Text, { style: [styles23.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
-    effectiveBadge && /* @__PURE__ */ jsx(View, { style: [styles23.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsx(Text, { style: [styles23.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
+    effectiveTitle ? /* @__PURE__ */ jsx(Text, { style: [styles24.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
+    effectiveBadge && /* @__PURE__ */ jsx(View, { style: [styles24.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsx(Text, { style: [styles24.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
   ] });
 }
-var styles23 = StyleSheet.create({
+var styles24 = StyleSheet.create({
   popoverContainer: {
     width: "100%"
   },
@@ -4267,16 +4315,16 @@ function CustomPillBody({ state }) {
   const { isCompact } = useResponsive();
   const title = isCompact && state.compactTitle ? state.compactTitle : state.title;
   const icon = isCompact && state.compactIcon ? state.compactIcon : state.icon;
-  return /* @__PURE__ */ jsxs(View, { style: styles24.pillContainer, children: [
+  return /* @__PURE__ */ jsxs(View, { style: styles25.pillContainer, children: [
     icon && /* @__PURE__ */ jsx(Icon2, { name: icon, size: 13, color: colors.foreground }),
-    title ? /* @__PURE__ */ jsx(Text, { style: [styles24.pillTitle, { color: colors.foreground }], children: title }) : null,
+    title ? /* @__PURE__ */ jsx(Text, { style: [styles25.pillTitle, { color: colors.foreground }], children: title }) : null,
     /* @__PURE__ */ jsx(
       Badge,
       {
         label: state.displayValue,
         variant: state.status,
         styleVariant: "tinted",
-        style: styles24.pillBadge
+        style: styles25.pillBadge
       }
     )
   ] });
@@ -4288,7 +4336,7 @@ function CustomPillModalContent({
 }) {
   const { colors, isCompact } = usePluginTheme();
   const displayText = state.modalOutput || state.rawValue || (state.error ? `Error: ${state.error}` : "No output");
-  return /* @__PURE__ */ jsx(View, { style: styles24.modalContent, children: /* @__PURE__ */ jsxs(Card, { children: [
+  return /* @__PURE__ */ jsx(View, { style: styles25.modalContent, children: /* @__PURE__ */ jsxs(Card, { children: [
     /* @__PURE__ */ jsx(
       Card.Header,
       {
@@ -4318,7 +4366,7 @@ function CustomPillModalContent({
         copyable: true
       }
     ),
-    /* @__PURE__ */ jsx(View, { style: styles24.footerRow, children: /* @__PURE__ */ jsxs(Text, { style: [styles24.timestampText, { color: colors.foregroundMuted }], children: [
+    /* @__PURE__ */ jsx(View, { style: styles25.footerRow, children: /* @__PURE__ */ jsxs(Text, { style: [styles25.timestampText, { color: colors.foregroundMuted }], children: [
       "Last updated: ",
       new Date(state.lastUpdated).toLocaleTimeString()
     ] }) })
@@ -4375,7 +4423,7 @@ function registerCustomPills(client, options) {
     }
   };
 }
-var styles24 = StyleSheet.create({
+var styles25 = StyleSheet.create({
   modalContent: {
     width: "100%",
     padding: 12
@@ -4410,6 +4458,6 @@ function Icon(props) {
   return /* @__PURE__ */ jsx(HostIconComponent, { ...props });
 }
 
-export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CommandBox, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CommandBox, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, SectionHeader, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

@@ -18,3 +18,4 @@ export * from "./Responsive.js";
 export * from "./AboutSection.js";
 export * from "./TruncatedText.js";
 export * from "./CommandBox.js";
+export * from "./SectionHeader.js";
