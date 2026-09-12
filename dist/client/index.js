@@ -1,5 +1,5 @@
-import React7, { createContext, useMemo, useContext, useRef, useEffect, useState, useCallback } from 'react';
-import { StyleSheet, Appearance, Pressable, ActivityIndicator, Text, View, Animated, ScrollView, Platform, TextInput as TextInput$1, Image, RefreshControl, Linking } from 'react-native';
+import React8, { createContext, useMemo, useContext, useRef, useEffect, useState, useCallback } from 'react';
+import { StyleSheet, Appearance, Animated, View, Pressable, ActivityIndicator, Text, ScrollView, Platform, TextInput as TextInput$1, Image, RefreshControl, Linking, Easing } from 'react-native';
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -430,6 +430,167 @@ function selectHostScrollView(host, fallback) {
 function isClientHostInitialized() {
   return deps !== void 0;
 }
+function normalizeBeaconMode(mode) {
+  if (mode === "ring") return "radar";
+  if (mode === "glow" || mode === "badge" || mode === "bounce" || mode === "radar") return mode;
+  return "radar";
+}
+function resolveBeaconToneColor(colors, tone = "warning", customColor) {
+  if (customColor) return customColor;
+  if (tone === "danger") return colors.statusDanger;
+  if (tone === "accent") return colors.accent;
+  return colors.statusWarning;
+}
+function useLoop(driver, toValue, duration, active) {
+  useEffect(() => {
+    if (!active) return;
+    driver.setValue(0);
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(driver, { toValue, duration, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(driver, { toValue: 0, duration: 0, useNativeDriver: true })
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [driver, toValue, duration, active]);
+}
+function usePingPong(driver, duration, active) {
+  useEffect(() => {
+    if (!active) return;
+    driver.setValue(0);
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(driver, { toValue: 1, duration, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(driver, { toValue: 0, duration, easing: Easing.linear, useNativeDriver: true })
+      ])
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [driver, duration, active]);
+}
+function AttentionBeacon({
+  children,
+  mode = "radar",
+  tone = "warning",
+  color,
+  active = true,
+  style,
+  haloStyle,
+  badgeStyle,
+  accessibilityLabel,
+  testID
+}) {
+  const { colors } = usePluginTheme();
+  const resolved = normalizeBeaconMode(mode);
+  const beaconColor = resolveBeaconToneColor(colors, tone, color);
+  const radar = useRef(new Animated.Value(0)).current;
+  const breath = useRef(new Animated.Value(0)).current;
+  const pip = useRef(new Animated.Value(0)).current;
+  const jiggle = useRef(new Animated.Value(0)).current;
+  const isRadar = resolved === "radar" && active;
+  const isGlow = resolved === "glow" && active;
+  const isBadge = resolved === "badge" && active;
+  const isBounce = resolved === "bounce" && active;
+  useLoop(radar, 1, 1600, isRadar);
+  usePingPong(breath, 900, isGlow);
+  usePingPong(pip, 900, isBadge);
+  usePingPong(jiggle, 350, isBounce);
+  if (!active) {
+    return /* @__PURE__ */ jsx(View, { style: [styles.wrapper, style], children });
+  }
+  if (resolved === "glow") {
+    const opacity2 = breath.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] });
+    return /* @__PURE__ */ jsxs(View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: [
+      children,
+      /* @__PURE__ */ jsx(
+        Animated.View,
+        {
+          pointerEvents: "none",
+          testID: testID ? `${testID}-glow` : void 0,
+          style: [styles.glowHalo, { borderColor: beaconColor, opacity: opacity2 }, haloStyle]
+        }
+      )
+    ] });
+  }
+  if (resolved === "badge") {
+    const opacity2 = pip.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
+    const scale2 = pip.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.15] });
+    return /* @__PURE__ */ jsxs(View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: [
+      children,
+      /* @__PURE__ */ jsx(
+        Animated.View,
+        {
+          pointerEvents: "none",
+          testID: testID ? `${testID}-badge` : void 0,
+          style: [styles.pip, { backgroundColor: beaconColor, opacity: opacity2, transform: [{ scale: scale2 }] }, badgeStyle]
+        }
+      )
+    ] });
+  }
+  if (resolved === "bounce") {
+    const translateY = jiggle.interpolate({ inputRange: [0, 1], outputRange: [0, -5] });
+    return /* @__PURE__ */ jsx(View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: /* @__PURE__ */ jsx(Animated.View, { style: { transform: [{ translateY }] }, children }) });
+  }
+  const scale = radar.interpolate({ inputRange: [0, 1], outputRange: [1, 1.5] });
+  const opacity = radar.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] });
+  return /* @__PURE__ */ jsxs(View, { style: [styles.wrapper, style], accessibilityLabel, testID, children: [
+    /* @__PURE__ */ jsx(
+      Animated.View,
+      {
+        pointerEvents: "none",
+        testID: testID ? `${testID}-halo` : void 0,
+        style: [
+          styles.radarHalo,
+          { borderColor: beaconColor, opacity, transform: [{ scale }] },
+          haloStyle
+        ]
+      }
+    ),
+    children
+  ] });
+}
+var styles = StyleSheet.create({
+  wrapper: {
+    position: "relative"
+  },
+  radarHalo: {
+    position: "absolute",
+    top: -4,
+    left: -4,
+    right: -4,
+    bottom: -4,
+    borderWidth: 2,
+    borderRadius: 12
+  },
+  glowHalo: {
+    position: "absolute",
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderWidth: 2,
+    borderRadius: 10
+  },
+  pip: {
+    position: "absolute",
+    top: -4,
+    right: -4,
+    width: 10,
+    height: 10,
+    borderRadius: 5
+  }
+});
+function resolveButtonAttentionMode(attention) {
+  if (!attention) return null;
+  if (attention === true) return "radar";
+  return attention;
+}
+function resolveButtonAttentionTone(variant) {
+  if (variant === "danger") return "danger";
+  if (variant === "primary") return "accent";
+  return "warning";
+}
 function Button({
   label,
   variant = "secondary",
@@ -441,7 +602,8 @@ function Button({
   loading = false,
   style,
   textStyle,
-  accessibilityLabel
+  accessibilityLabel,
+  attention
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, resolveRadius: resolveRadius2, touchTargetMin, isCompact, alpha: alpha2 } = usePluginTheme();
@@ -481,7 +643,8 @@ function Button({
     }
     return icon;
   };
-  return /* @__PURE__ */ jsx(
+  const attentionMode = resolveButtonAttentionMode(attention);
+  const pressable = /* @__PURE__ */ jsx(
     Pressable,
     {
       onPress,
@@ -490,7 +653,7 @@ function Button({
       accessibilityLabel: accessibilityLabel || label,
       hitSlop: Math.max(0, (touchTargetMin - 32) / 2),
       style: ({ pressed }) => [
-        styles.base,
+        styles2.base,
         {
           backgroundColor: pressed && !disabled ? alpha2(bg, 0.8) : bg,
           borderColor: border,
@@ -509,7 +672,7 @@ function Button({
           Text,
           {
             style: [
-              styles.text,
+              styles2.text,
               {
                 color: textColor,
                 fontSize
@@ -523,8 +686,10 @@ function Button({
       ] })
     }
   );
+  if (!attentionMode) return pressable;
+  return /* @__PURE__ */ jsx(AttentionBeacon, { mode: attentionMode, tone: resolveButtonAttentionTone(variant), children: pressable });
 }
-var styles = StyleSheet.create({
+var styles2 = StyleSheet.create({
   base: {
     flexDirection: "row",
     alignItems: "center",
@@ -568,7 +733,7 @@ function Badge({
         View,
         {
           style: [
-            styles2.dot,
+            styles3.dot,
             {
               backgroundColor: textColor
             }
@@ -586,7 +751,7 @@ function Badge({
     View,
     {
       style: [
-        styles2.badge,
+        styles3.badge,
         {
           backgroundColor: bg,
           borderColor: border,
@@ -602,7 +767,7 @@ function Badge({
           Text,
           {
             style: [
-              styles2.text,
+              styles3.text,
               {
                 color: textColor,
                 fontSize: isCompact ? 10 : 11,
@@ -617,7 +782,7 @@ function Badge({
     }
   );
 }
-var styles2 = StyleSheet.create({
+var styles3 = StyleSheet.create({
   badge: {
     flexDirection: "row",
     alignItems: "center",
@@ -662,7 +827,7 @@ function StatusDot({ variant = "neutral", size = "md", pulse = false, style }) {
     View,
     {
       style: [
-        styles3.container,
+        styles4.container,
         {
           width: dimension,
           height: dimension
@@ -673,7 +838,7 @@ function StatusDot({ variant = "neutral", size = "md", pulse = false, style }) {
         Animated.View,
         {
           style: [
-            styles3.dot,
+            styles4.dot,
             {
               width: dimension,
               height: dimension,
@@ -688,7 +853,7 @@ function StatusDot({ variant = "neutral", size = "md", pulse = false, style }) {
     }
   );
 }
-var styles3 = StyleSheet.create({
+var styles4 = StyleSheet.create({
   container: {
     alignItems: "center",
     justifyContent: "center"
@@ -711,15 +876,15 @@ function CardHeader({
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, flair, isCompact } = usePluginTheme();
-  return /* @__PURE__ */ jsxs(View, { style: [styles4.headerContainer, style], children: [
-    /* @__PURE__ */ jsxs(View, { style: styles4.headerLeft, children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles5.headerContainer, style], children: [
+    /* @__PURE__ */ jsxs(View, { style: styles5.headerLeft, children: [
       icon ? /* @__PURE__ */ jsx(Icon2, { name: icon, size: 15, color: colors.foregroundMuted }) : null,
-      /* @__PURE__ */ jsxs(View, { style: styles4.titleColumn, children: [
+      /* @__PURE__ */ jsxs(View, { style: styles5.titleColumn, children: [
         /* @__PURE__ */ jsx(
           Text,
           {
             style: [
-              styles4.headerTitle,
+              styles5.headerTitle,
               {
                 color: colors.foreground,
                 fontSize: isCompact ? 12 : 13,
@@ -734,7 +899,7 @@ function CardHeader({
           Text,
           {
             style: [
-              styles4.headerSubtitle,
+              styles5.headerSubtitle,
               { color: colors.foregroundMuted, fontSize: 11 }
             ],
             children: subtitle
@@ -742,13 +907,13 @@ function CardHeader({
         ) : null
       ] })
     ] }),
-    /* @__PURE__ */ jsxs(View, { style: styles4.headerRight, children: [
+    /* @__PURE__ */ jsxs(View, { style: styles5.headerRight, children: [
       badge ? /* @__PURE__ */ jsx(View, { style: { marginRight: 6 }, children: badge }) : null,
       typeof value === "string" || typeof value === "number" ? /* @__PURE__ */ jsx(
         Text,
         {
           style: [
-            styles4.headerValue,
+            styles5.headerValue,
             { color: colors.foreground, fontSize: isCompact ? 12 : 13 }
           ],
           children: value
@@ -775,7 +940,7 @@ function Card({ children, variant, style, noPadding = false }) {
     View,
     {
       style: [
-        styles4.card,
+        styles5.card,
         {
           backgroundColor: bg,
           borderColor: border,
@@ -791,7 +956,7 @@ function Card({ children, variant, style, noPadding = false }) {
   );
 }
 Card.Header = CardHeader;
-var styles4 = StyleSheet.create({
+var styles5 = StyleSheet.create({
   card: {
     overflow: "hidden",
     width: "100%"
@@ -915,8 +1080,8 @@ function Tabs({
         accessibilityRole: "tab",
         accessibilityState: { selected: isActive },
         style: ({ pressed }) => [
-          styles5.tab,
-          shouldFit ? styles5.tabFit : styles5.tabScroll,
+          styles6.tab,
+          shouldFit ? styles6.tabFit : styles6.tabScroll,
           {
             borderRadius: radius - 2,
             minHeight: Math.max(30, touchTargetMin - 8),
@@ -939,7 +1104,7 @@ function Tabs({
             {
               numberOfLines: 1,
               style: [
-                styles5.tabText,
+                styles6.tabText,
                 {
                   color: isActive ? colors.foreground : colors.foregroundMuted,
                   fontSize: isCompact ? 11 : 12,
@@ -953,7 +1118,7 @@ function Tabs({
             View,
             {
               style: [
-                styles5.badge,
+                styles6.badge,
                 {
                   backgroundColor: isActive ? colors.accent : alpha2(colors.foregroundMuted, 0.2)
                 }
@@ -962,7 +1127,7 @@ function Tabs({
                 Text,
                 {
                   style: [
-                    styles5.badgeText,
+                    styles6.badgeText,
                     {
                       color: isActive ? colors.accentForeground || FALLBACK_ACCENT_FOREGROUND : colors.foregroundMuted
                     }
@@ -982,7 +1147,7 @@ function Tabs({
       View,
       {
         style: [
-          styles5.frame,
+          styles6.frame,
           {
             backgroundColor: colors.surface1,
             borderRadius: radius,
@@ -990,7 +1155,7 @@ function Tabs({
           },
           style
         ],
-        children: /* @__PURE__ */ jsx(View, { style: styles5.trackFit, children: tabs.map((tab) => renderTab(tab)) })
+        children: /* @__PURE__ */ jsx(View, { style: styles6.trackFit, children: tabs.map((tab) => renderTab(tab)) })
       }
     );
   }
@@ -999,7 +1164,7 @@ function Tabs({
     {
       onLayout: handleContainerLayout,
       style: [
-        styles5.frame,
+        styles6.frame,
         {
           backgroundColor: colors.surface1,
           borderRadius: radius,
@@ -1013,8 +1178,8 @@ function Tabs({
           {
             onPress: () => scrollByDelta(-(viewportWidth * 0.7 || 140)),
             style: [
-              styles5.arrowButton,
-              styles5.arrowLeft,
+              styles6.arrowButton,
+              styles6.arrowLeft,
               {
                 backgroundColor: alpha2(colors.surface2, 0.92),
                 borderColor: colors.border
@@ -1036,8 +1201,8 @@ function Tabs({
             onContentSizeChange: handleContentSizeChange,
             scrollEventThrottle: 16,
             showsHorizontalScrollIndicator: !isCompact,
-            style: styles5.scrollView,
-            contentContainerStyle: styles5.scrollContent,
+            style: styles6.scrollView,
+            contentContainerStyle: styles6.scrollContent,
             children: tabs.map((tab) => renderTab(tab))
           }
         ),
@@ -1046,8 +1211,8 @@ function Tabs({
           {
             onPress: () => scrollByDelta(viewportWidth * 0.7 || 140),
             style: [
-              styles5.arrowButton,
-              styles5.arrowRight,
+              styles6.arrowButton,
+              styles6.arrowRight,
               {
                 backgroundColor: alpha2(colors.surface2, 0.92),
                 borderColor: colors.border
@@ -1061,7 +1226,7 @@ function Tabs({
     }
   );
 }
-var styles5 = StyleSheet.create({
+var styles6 = StyleSheet.create({
   frame: {
     width: "100%",
     maxWidth: "100%",
@@ -1240,7 +1405,7 @@ function CodeBlock({
     View,
     {
       style: [
-        styles6.container,
+        styles7.container,
         {
           backgroundColor: colors.surface0,
           borderColor: colors.border,
@@ -1253,20 +1418,20 @@ function CodeBlock({
           View,
           {
             style: [
-              styles6.header,
+              styles7.header,
               {
                 borderBottomColor: alpha2(colors.border, 0.7)
               }
             ],
             children: [
-              /* @__PURE__ */ jsx(View, { style: styles6.headerLeft, children: title ? /* @__PURE__ */ jsx(Text, { style: [styles6.title, { color: colors.foreground }], children: title }) : language ? /* @__PURE__ */ jsx(Text, { style: [styles6.language, { color: colors.foregroundMuted }], children: language.toUpperCase() }) : null }),
+              /* @__PURE__ */ jsx(View, { style: styles7.headerLeft, children: title ? /* @__PURE__ */ jsx(Text, { style: [styles7.title, { color: colors.foreground }], children: title }) : language ? /* @__PURE__ */ jsx(Text, { style: [styles7.language, { color: colors.foregroundMuted }], children: language.toUpperCase() }) : null }),
               copyable && /* @__PURE__ */ jsxs(
                 Pressable,
                 {
                   onPress: handleCopy,
                   hitSlop: Math.max(0, (touchTargetMin - 28) / 2),
                   style: ({ pressed }) => [
-                    styles6.copyButton,
+                    styles7.copyButton,
                     {
                       backgroundColor: pressed ? colors.surface2 : colors.surface1,
                       borderColor: colors.border,
@@ -1286,7 +1451,7 @@ function CodeBlock({
                       Text,
                       {
                         style: [
-                          styles6.copyText,
+                          styles7.copyText,
                           { color: copied ? colors.statusSuccess : colors.foregroundMuted }
                         ],
                         children: copied ? "Copied!" : "Copy"
@@ -1303,13 +1468,13 @@ function CodeBlock({
           {
             nestedScrollEnabled: true,
             style: { maxHeight },
-            contentContainerStyle: styles6.scrollContent,
+            contentContainerStyle: styles7.scrollContent,
             children: /* @__PURE__ */ jsx(ResolvedScrollView, { horizontal: true, showsHorizontalScrollIndicator: true, children: /* @__PURE__ */ jsx(
               Text,
               {
                 selectable: true,
                 style: [
-                  styles6.codeText,
+                  styles7.codeText,
                   {
                     color: colors.foreground,
                     fontFamily,
@@ -1326,7 +1491,7 @@ function CodeBlock({
     }
   );
 }
-var styles6 = StyleSheet.create({
+var styles7 = StyleSheet.create({
   container: {
     borderWidth: 1,
     overflow: "hidden"
@@ -1393,7 +1558,7 @@ function SearchInput({
     View,
     {
       style: [
-        styles7.container,
+        styles8.container,
         {
           backgroundColor: colors.surface1,
           borderColor: colors.border,
@@ -1403,7 +1568,7 @@ function SearchInput({
         style
       ],
       children: [
-        /* @__PURE__ */ jsx(View, { style: styles7.iconWrapper, children: /* @__PURE__ */ jsx(Icon2, { name: "Search", size: 16, color: colors.foregroundMuted }) }),
+        /* @__PURE__ */ jsx(View, { style: styles8.iconWrapper, children: /* @__PURE__ */ jsx(Icon2, { name: "Search", size: 16, color: colors.foregroundMuted }) }),
         /* @__PURE__ */ jsx(
           ResolvedInput,
           {
@@ -1413,7 +1578,7 @@ function SearchInput({
             placeholder,
             placeholderTextColor: colors.foregroundMuted,
             style: [
-              styles7.input,
+              styles8.input,
               {
                 color: colors.foreground,
                 fontSize: isCompact ? 13 : 14
@@ -1429,7 +1594,7 @@ function SearchInput({
           Pressable,
           {
             onPress: handleClear,
-            style: styles7.clearButton,
+            style: styles8.clearButton,
             hitSlop: 8,
             accessibilityLabel: "Clear search",
             children: /* @__PURE__ */ jsx(Icon2, { name: "X", size: 14, color: colors.foregroundMuted })
@@ -1439,7 +1604,7 @@ function SearchInput({
     }
   );
 }
-var styles7 = StyleSheet.create({
+var styles8 = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
@@ -1487,12 +1652,12 @@ function TextInput({
   const hasError = Boolean(errorText);
   const borderColor = hasError ? colors.statusDanger : isFocused ? colors.accent : colors.border;
   const minHeight = multiline ? Math.max(touchTargetMin * 1.5, 64) : touchTargetMin;
-  return /* @__PURE__ */ jsxs(View, { style: [styles8.container, style], children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles9.container, style], children: [
     label ? /* @__PURE__ */ jsx(
       Text,
       {
         style: [
-          styles8.label,
+          styles9.label,
           {
             color: hasError ? colors.statusDanger : colors.foreground,
             fontSize: isCompact ? 12 : 13
@@ -1519,7 +1684,7 @@ function TextInput({
         onBlur: () => setIsFocused(false),
         onSubmitEditing,
         style: [
-          styles8.input,
+          styles9.input,
           {
             color: disabled ? colors.foregroundMuted : colors.foreground,
             backgroundColor: disabled ? alpha2(colors.surface1, 0.5) : colors.surface0,
@@ -1539,7 +1704,7 @@ function TextInput({
       Text,
       {
         style: [
-          styles8.hint,
+          styles9.hint,
           {
             color: hasError ? colors.statusDanger : colors.foregroundMuted,
             fontSize: 11
@@ -1550,7 +1715,7 @@ function TextInput({
     )
   ] });
 }
-var styles8 = StyleSheet.create({
+var styles9 = StyleSheet.create({
   container: {
     gap: 4
   },
@@ -1592,7 +1757,7 @@ function Toggle({
       disabled,
       hitSlop: Math.max(0, (touchTargetMin - trackHeight) / 2),
       style: ({ pressed }) => [
-        styles9.container,
+        styles10.container,
         {
           minHeight: touchTargetMin,
           opacity: disabled ? 0.5 : pressed ? 0.8 : 1
@@ -1600,12 +1765,12 @@ function Toggle({
         style
       ],
       children: [
-        (label || description) && /* @__PURE__ */ jsxs(View, { style: styles9.textContainer, children: [
+        (label || description) && /* @__PURE__ */ jsxs(View, { style: styles10.textContainer, children: [
           label && /* @__PURE__ */ jsx(
             Text,
             {
               style: [
-                styles9.label,
+                styles10.label,
                 {
                   color: colors.foreground,
                   fontSize: isCompact ? 13 : 14
@@ -1619,7 +1784,7 @@ function Toggle({
             Text,
             {
               style: [
-                styles9.description,
+                styles10.description,
                 {
                   color: colors.foregroundMuted,
                   fontSize: 11
@@ -1633,7 +1798,7 @@ function Toggle({
           View,
           {
             style: [
-              styles9.track,
+              styles10.track,
               {
                 width: trackWidth,
                 height: trackHeight,
@@ -1645,7 +1810,7 @@ function Toggle({
               View,
               {
                 style: [
-                  styles9.thumb,
+                  styles10.thumb,
                   {
                     width: thumbSize,
                     height: thumbSize,
@@ -1662,7 +1827,7 @@ function Toggle({
     }
   );
 }
-var styles9 = StyleSheet.create({
+var styles10 = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
@@ -1712,7 +1877,7 @@ function Collapsible({
     View,
     {
       style: [
-        styles10.container,
+        styles11.container,
         {
           borderColor: colors.border,
           borderRadius: radius,
@@ -1726,7 +1891,7 @@ function Collapsible({
           {
             onPress: handlePress,
             style: ({ pressed }) => [
-              styles10.header,
+              styles11.header,
               {
                 minHeight: Math.max(touchTargetMin, 36),
                 backgroundColor: pressed ? colors.surface1 : colors.surface0,
@@ -1735,7 +1900,7 @@ function Collapsible({
               }
             ],
             children: [
-              /* @__PURE__ */ jsxs(View, { style: styles10.headerLeft, children: [
+              /* @__PURE__ */ jsxs(View, { style: styles11.headerLeft, children: [
                 /* @__PURE__ */ jsx(
                   Icon2,
                   {
@@ -1749,7 +1914,7 @@ function Collapsible({
                   Text,
                   {
                     style: [
-                      styles10.title,
+                      styles11.title,
                       {
                         color: colors.foreground,
                         fontSize: isCompact ? 12 : 13
@@ -1759,16 +1924,16 @@ function Collapsible({
                   }
                 )
               ] }),
-              badge && /* @__PURE__ */ jsx(View, { style: styles10.headerRight, children: badge })
+              badge && /* @__PURE__ */ jsx(View, { style: styles11.headerRight, children: badge })
             ]
           }
         ),
-        isExpanded && /* @__PURE__ */ jsx(View, { style: styles10.content, children })
+        isExpanded && /* @__PURE__ */ jsx(View, { style: styles11.content, children })
       ]
     }
   );
 }
-var styles10 = StyleSheet.create({
+var styles11 = StyleSheet.create({
   container: {
     borderWidth: 1,
     overflow: "hidden"
@@ -1884,13 +2049,13 @@ function ProgressBar({
       barColor = colors.statusSuccess;
     }
   }
-  return /* @__PURE__ */ jsxs(View, { style: [styles11.container, style], children: [
-    (label || showValueText) && /* @__PURE__ */ jsxs(View, { style: styles11.labelRow, children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles12.container, style], children: [
+    (label || showValueText) && /* @__PURE__ */ jsxs(View, { style: styles12.labelRow, children: [
       label ? /* @__PURE__ */ jsx(
         Text,
         {
           style: [
-            styles11.labelText,
+            styles12.labelText,
             { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 }
           ],
           children: label
@@ -1900,7 +2065,7 @@ function ProgressBar({
         Text,
         {
           style: [
-            styles11.valueText,
+            styles12.valueText,
             { color: colors.foreground, fontSize: isCompact ? 11 : 12 }
           ],
           children: [
@@ -1914,7 +2079,7 @@ function ProgressBar({
       View,
       {
         style: [
-          styles11.track,
+          styles12.track,
           {
             backgroundColor: colors.surface2,
             height,
@@ -1925,7 +2090,7 @@ function ProgressBar({
           View,
           {
             style: [
-              styles11.fill,
+              styles12.fill,
               {
                 width: `${clamped}%`,
                 backgroundColor: barColor,
@@ -1938,7 +2103,7 @@ function ProgressBar({
     )
   ] });
 }
-var styles11 = StyleSheet.create({
+var styles12 = StyleSheet.create({
   container: {
     gap: 4
   },
@@ -1992,12 +2157,12 @@ function MetricGauge({
   const trackColor = colors.surface2;
   if (Platform.OS === "web") {
     const webBackground = `conic-gradient(${gaugeColor} 0% ${clamped}%, ${trackColor} ${clamped}% 100%)`;
-    return /* @__PURE__ */ jsxs(View, { style: [styles12.wrapper, style], children: [
+    return /* @__PURE__ */ jsxs(View, { style: [styles13.wrapper, style], children: [
       /* @__PURE__ */ jsx(
         View,
         {
           style: [
-            styles12.gaugeBox,
+            styles13.gaugeBox,
             {
               width: size,
               height: size,
@@ -2009,7 +2174,7 @@ function MetricGauge({
             View,
             {
               style: [
-                styles12.centerHole,
+                styles13.centerHole,
                 {
                   width: innerSize,
                   height: innerSize,
@@ -2017,7 +2182,7 @@ function MetricGauge({
                   backgroundColor: colors.surface0
                 }
               ],
-              children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxs(Text, { style: [styles12.percentText, { color: colors.foreground }], children: [
+              children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxs(Text, { style: [styles13.percentText, { color: colors.foreground }], children: [
                 Math.round(clamped),
                 "%"
               ] }) : null
@@ -2025,13 +2190,13 @@ function MetricGauge({
           )
         }
       ),
-      label ? /* @__PURE__ */ jsx(Text, { style: [styles12.labelText, { color: colors.foregroundMuted }], children: label }) : null
+      label ? /* @__PURE__ */ jsx(Text, { style: [styles13.labelText, { color: colors.foregroundMuted }], children: label }) : null
     ] });
   }
   const firstHalfRotation = Math.min(180, clamped * 3.6);
   const secondHalfRotation = clamped > 50 ? (clamped - 50) * 3.6 : 0;
-  return /* @__PURE__ */ jsxs(View, { style: [styles12.wrapper, style], children: [
-    /* @__PURE__ */ jsxs(View, { style: [styles12.gaugeBox, { width: size, height: size }], children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles13.wrapper, style], children: [
+    /* @__PURE__ */ jsxs(View, { style: [styles13.gaugeBox, { width: size, height: size }], children: [
       /* @__PURE__ */ jsx(
         View,
         {
@@ -2049,7 +2214,7 @@ function MetricGauge({
         View,
         {
           style: [
-            styles12.halfCircleContainer,
+            styles13.halfCircleContainer,
             {
               width: size,
               height: size,
@@ -2060,7 +2225,7 @@ function MetricGauge({
             View,
             {
               style: [
-                styles12.halfCircle,
+                styles13.halfCircle,
                 {
                   width: size,
                   height: size,
@@ -2079,7 +2244,7 @@ function MetricGauge({
         View,
         {
           style: [
-            styles12.halfCircleContainer,
+            styles13.halfCircleContainer,
             {
               width: size,
               height: size,
@@ -2090,7 +2255,7 @@ function MetricGauge({
             View,
             {
               style: [
-                styles12.halfCircle,
+                styles13.halfCircle,
                 {
                   width: size,
                   height: size,
@@ -2109,7 +2274,7 @@ function MetricGauge({
         View,
         {
           style: [
-            styles12.centerHole,
+            styles13.centerHole,
             {
               width: innerSize,
               height: innerSize,
@@ -2117,17 +2282,17 @@ function MetricGauge({
               backgroundColor: colors.surface0
             }
           ],
-          children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxs(Text, { style: [styles12.percentText, { color: colors.foreground }], children: [
+          children: centerSlot ? centerSlot : showPercent ? /* @__PURE__ */ jsxs(Text, { style: [styles13.percentText, { color: colors.foreground }], children: [
             Math.round(clamped),
             "%"
           ] }) : null
         }
       )
     ] }),
-    label ? /* @__PURE__ */ jsx(Text, { style: [styles12.labelText, { color: colors.foregroundMuted }], children: label }) : null
+    label ? /* @__PURE__ */ jsx(Text, { style: [styles13.labelText, { color: colors.foregroundMuted }], children: label }) : null
   ] });
 }
-var styles12 = StyleSheet.create({
+var styles13 = StyleSheet.create({
   wrapper: {
     alignItems: "center",
     justifyContent: "center",
@@ -2178,20 +2343,20 @@ function DataTable({
     return emptyState ? /* @__PURE__ */ jsx(View, { style, children: emptyState }) : null;
   }
   if (isCompact) {
-    return /* @__PURE__ */ jsx(View, { style: [styles13.compactContainer, style], children: data.map((item, idx) => /* @__PURE__ */ jsx(
+    return /* @__PURE__ */ jsx(View, { style: [styles14.compactContainer, style], children: data.map((item, idx) => /* @__PURE__ */ jsx(
       View,
       {
         style: [
-          styles13.compactCard,
+          styles14.compactCard,
           {
             backgroundColor: colors.surface1,
             borderColor: colors.border,
             borderRadius: radius
           }
         ],
-        children: columns.map((col) => /* @__PURE__ */ jsxs(View, { style: styles13.compactRow, children: [
-          /* @__PURE__ */ jsx(Text, { style: [styles13.compactHeader, { color: colors.foregroundMuted }], children: col.header }),
-          /* @__PURE__ */ jsx(View, { style: styles13.compactValue, children: col.render(item) })
+        children: columns.map((col) => /* @__PURE__ */ jsxs(View, { style: styles14.compactRow, children: [
+          /* @__PURE__ */ jsx(Text, { style: [styles14.compactHeader, { color: colors.foregroundMuted }], children: col.header }),
+          /* @__PURE__ */ jsx(View, { style: styles14.compactValue, children: col.render(item) })
         ] }, col.key))
       },
       keyExtractor(item, idx)
@@ -2201,7 +2366,7 @@ function DataTable({
     View,
     {
       style: [
-        styles13.table,
+        styles14.table,
         {
           borderColor: colors.border,
           borderRadius: radius,
@@ -2214,7 +2379,7 @@ function DataTable({
           View,
           {
             style: [
-              styles13.headerRow,
+              styles14.headerRow,
               {
                 backgroundColor: colors.surface1,
                 borderBottomColor: colors.border
@@ -2224,12 +2389,12 @@ function DataTable({
               View,
               {
                 style: [
-                  styles13.cell,
+                  styles14.cell,
                   col.flex !== void 0 ? { flex: col.flex } : { flex: 1 },
                   col.width !== void 0 ? { width: col.width } : void 0,
-                  col.align === "right" ? styles13.alignRight : col.align === "center" ? styles13.alignCenter : styles13.alignLeft
+                  col.align === "right" ? styles14.alignRight : col.align === "center" ? styles14.alignCenter : styles14.alignLeft
                 ],
-                children: /* @__PURE__ */ jsx(Text, { style: [styles13.headerText, { color: colors.foregroundMuted }], children: col.header })
+                children: /* @__PURE__ */ jsx(Text, { style: [styles14.headerText, { color: colors.foregroundMuted }], children: col.header })
               },
               col.key
             ))
@@ -2239,17 +2404,17 @@ function DataTable({
           View,
           {
             style: [
-              styles13.row,
+              styles14.row,
               idx < data.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 1 }
             ],
             children: columns.map((col) => /* @__PURE__ */ jsx(
               View,
               {
                 style: [
-                  styles13.cell,
+                  styles14.cell,
                   col.flex !== void 0 ? { flex: col.flex } : { flex: 1 },
                   col.width !== void 0 ? { width: col.width } : void 0,
-                  col.align === "right" ? styles13.alignRight : col.align === "center" ? styles13.alignCenter : styles13.alignLeft
+                  col.align === "right" ? styles14.alignRight : col.align === "center" ? styles14.alignCenter : styles14.alignLeft
                 ],
                 children: col.render(item)
               },
@@ -2262,7 +2427,7 @@ function DataTable({
     }
   );
 }
-var styles13 = StyleSheet.create({
+var styles14 = StyleSheet.create({
   table: {
     borderWidth: 1,
     overflow: "hidden"
@@ -2370,7 +2535,7 @@ function KeyValue({
     {
       onPress: handleCopy,
       hitSlop: Math.max(8, (touchTargetMin - 20) / 2),
-      style: styles14.copyBtn,
+      style: styles15.copyBtn,
       accessibilityRole: "button",
       accessibilityLabel: `Copy ${label}`,
       children: /* @__PURE__ */ jsx(
@@ -2388,18 +2553,18 @@ function KeyValue({
       View,
       {
         style: [
-          styles14.container,
-          styles14.stackedContainer,
+          styles15.container,
+          styles15.stackedContainer,
           { paddingVertical: isCompact ? spacing.xs : spacing.sm },
           style
         ],
         children: [
-          /* @__PURE__ */ jsxs(View, { style: styles14.stackedHeaderRow, children: [
+          /* @__PURE__ */ jsxs(View, { style: styles15.stackedHeaderRow, children: [
             /* @__PURE__ */ jsx(
               Text,
               {
                 style: [
-                  styles14.label,
+                  styles15.label,
                   {
                     color: colors.foregroundMuted,
                     fontSize: 11,
@@ -2417,7 +2582,7 @@ function KeyValue({
             {
               selectable: true,
               style: [
-                styles14.stackedValueText,
+                styles15.stackedValueText,
                 {
                   color: colors.foreground,
                   fontSize: 13,
@@ -2433,7 +2598,7 @@ function KeyValue({
             Text,
             {
               style: [
-                styles14.subValue,
+                styles15.subValue,
                 {
                   color: colors.foregroundMuted,
                   fontSize: 11,
@@ -2451,8 +2616,8 @@ function KeyValue({
     View,
     {
       style: [
-        styles14.container,
-        styles14.rowContainer,
+        styles15.container,
+        styles15.rowContainer,
         { paddingVertical: isCompact ? spacing.xs : spacing.sm },
         style
       ],
@@ -2461,7 +2626,7 @@ function KeyValue({
           Text,
           {
             style: [
-              styles14.label,
+              styles15.label,
               {
                 color: colors.foregroundMuted,
                 fontSize: 12,
@@ -2472,13 +2637,13 @@ function KeyValue({
             children: label
           }
         ),
-        /* @__PURE__ */ jsxs(View, { style: styles14.rowValueWrapper, children: [
+        /* @__PURE__ */ jsxs(View, { style: styles15.rowValueWrapper, children: [
           /* @__PURE__ */ jsx(
             Text,
             {
               selectable: true,
               style: [
-                styles14.rowValueText,
+                styles15.rowValueText,
                 {
                   color: colors.foreground,
                   fontSize: 13,
@@ -2489,7 +2654,7 @@ function KeyValue({
               children: displayValue
             }
           ),
-          subValue && /* @__PURE__ */ jsx(Text, { style: [styles14.subValue, { color: colors.foregroundMuted, fontSize: 11 }], children: subValue }),
+          subValue && /* @__PURE__ */ jsx(Text, { style: [styles15.subValue, { color: colors.foregroundMuted, fontSize: 11 }], children: subValue }),
           copyButton
         ] })
       ]
@@ -2504,8 +2669,8 @@ function KeyValueGroup({
 }) {
   const { isCompact } = usePluginTheme();
   const effectiveColumns = isCompact ? 1 : columns;
-  const childArray = React7.Children.toArray(children).filter(Boolean);
-  return /* @__PURE__ */ jsx(View, { style: [styles14.groupContainer, { gap }, style], children: childArray.map((child, index) => /* @__PURE__ */ jsx(
+  const childArray = React8.Children.toArray(children).filter(Boolean);
+  return /* @__PURE__ */ jsx(View, { style: [styles15.groupContainer, { gap }, style], children: childArray.map((child, index) => /* @__PURE__ */ jsx(
     View,
     {
       style: {
@@ -2518,7 +2683,7 @@ function KeyValueGroup({
     index
   )) });
 }
-var styles14 = StyleSheet.create({
+var styles15 = StyleSheet.create({
   container: {
     width: "100%"
   },
@@ -2583,23 +2748,23 @@ function EmptyState({
   const { Icon: Icon2 } = getClientHost();
   const { colors, isCompact } = usePluginTheme();
   const resolvedAction = action ? action : actionLabel && onAction ? { label: actionLabel, onPress: onAction, variant: "secondary" } : void 0;
-  return /* @__PURE__ */ jsxs(View, { style: [styles15.container, { padding: isCompact ? 20 : 32 }, style], children: [
-    icon ? typeof icon === "string" ? /* @__PURE__ */ jsx(View, { style: [styles15.iconWrapper, { backgroundColor: colors.surface1 }], children: /* @__PURE__ */ jsx(Icon2, { name: icon, size: isCompact ? 24 : 32, color: colors.foregroundMuted }) }) : icon : null,
-    /* @__PURE__ */ jsx(Text, { style: [styles15.title, { color: colors.foreground, fontSize: isCompact ? 14 : 16 }], children: title }),
+  return /* @__PURE__ */ jsxs(View, { style: [styles16.container, { padding: isCompact ? 20 : 32 }, style], children: [
+    icon ? typeof icon === "string" ? /* @__PURE__ */ jsx(View, { style: [styles16.iconWrapper, { backgroundColor: colors.surface1 }], children: /* @__PURE__ */ jsx(Icon2, { name: icon, size: isCompact ? 24 : 32, color: colors.foregroundMuted }) }) : icon : null,
+    /* @__PURE__ */ jsx(Text, { style: [styles16.title, { color: colors.foreground, fontSize: isCompact ? 14 : 16 }], children: title }),
     description ? /* @__PURE__ */ jsx(
       Text,
       {
         style: [
-          styles15.description,
+          styles16.description,
           { color: colors.foregroundMuted, fontSize: isCompact ? 12 : 13 }
         ],
         children: description
       }
     ) : null,
-    resolvedAction ? /* @__PURE__ */ jsx(View, { style: styles15.actionRow, children: /* @__PURE__ */ jsx(Button, { size: isCompact ? "sm" : "md", ...resolvedAction }) }) : null
+    resolvedAction ? /* @__PURE__ */ jsx(View, { style: styles16.actionRow, children: /* @__PURE__ */ jsx(Button, { size: isCompact ? "sm" : "md", ...resolvedAction }) }) : null
   ] });
 }
-var styles15 = StyleSheet.create({
+var styles16 = StyleSheet.create({
   container: {
     alignItems: "center",
     justifyContent: "center",
@@ -2701,7 +2866,7 @@ function AboutSection({
           Image,
           {
             source: { uri: logo },
-            style: [styles16.logoImage, { borderRadius: radius }]
+            style: [styles17.logoImage, { borderRadius: radius }]
           }
         );
       } else {
@@ -2709,7 +2874,7 @@ function AboutSection({
           View,
           {
             style: [
-              styles16.logoIconFallback,
+              styles17.logoIconFallback,
               {
                 backgroundColor: colors.surface2,
                 borderRadius: radius,
@@ -2725,7 +2890,7 @@ function AboutSection({
         Image,
         {
           source: logo,
-          style: [styles16.logoImage, { borderRadius: radius }]
+          style: [styles17.logoImage, { borderRadius: radius }]
         }
       );
     }
@@ -2736,7 +2901,7 @@ function AboutSection({
         Image,
         {
           source: { uri: githubAvatar },
-          style: [styles16.logoImage, { borderRadius: radius }]
+          style: [styles17.logoImage, { borderRadius: radius }]
         }
       );
     } else {
@@ -2744,7 +2909,7 @@ function AboutSection({
         View,
         {
           style: [
-            styles16.logoIconFallback,
+            styles17.logoIconFallback,
             {
               backgroundColor: colors.surface2,
               borderRadius: radius,
@@ -2786,7 +2951,7 @@ function AboutSection({
     ...homepage ? [{ label: "Documentation", url: homepage, icon: "BookOpen" }] : [],
     ...links
   ];
-  return /* @__PURE__ */ jsxs(View, { style: [styles16.container, style], children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles17.container, style], children: [
     /* @__PURE__ */ jsxs(Card, { variant: "elevated", children: [
       /* @__PURE__ */ jsx(
         Card.Header,
@@ -2796,17 +2961,17 @@ function AboutSection({
           badge: /* @__PURE__ */ jsx(Badge, { variant: "accent", label: `v${version}` })
         }
       ),
-      /* @__PURE__ */ jsxs(View, { style: styles16.headerRow, children: [
+      /* @__PURE__ */ jsxs(View, { style: styles17.headerRow, children: [
         resolvedLogoNode,
-        /* @__PURE__ */ jsxs(View, { style: styles16.metaColumn, children: [
-          author ? /* @__PURE__ */ jsxs(Text, { style: [styles16.authorText, { color: colors.foregroundMuted }], children: [
+        /* @__PURE__ */ jsxs(View, { style: styles17.metaColumn, children: [
+          author ? /* @__PURE__ */ jsxs(Text, { style: [styles17.authorText, { color: colors.foregroundMuted }], children: [
             "by ",
             author
           ] }) : null,
-          license ? /* @__PURE__ */ jsx(View, { style: styles16.titleRow, children: /* @__PURE__ */ jsx(Badge, { variant: "neutral", label: license }) }) : null
+          license ? /* @__PURE__ */ jsx(View, { style: styles17.titleRow, children: /* @__PURE__ */ jsx(Badge, { variant: "neutral", label: license }) }) : null
         ] })
       ] }),
-      /* @__PURE__ */ jsxs(View, { style: styles16.actionsRow, children: [
+      /* @__PURE__ */ jsxs(View, { style: styles17.actionsRow, children: [
         allLinks.map((link) => /* @__PURE__ */ jsx(
           Button,
           {
@@ -2857,7 +3022,7 @@ function AboutSection({
     ] })
   ] });
 }
-var styles16 = StyleSheet.create({
+var styles17 = StyleSheet.create({
   container: {
     gap: 12
   },
@@ -2947,7 +3112,7 @@ function TruncatedText({
     }
   };
   const fontFamily = mono ? fonts.mono ?? Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }) : void 0;
-  return /* @__PURE__ */ jsxs(View, { style: [styles17.container, style], children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles18.container, style], children: [
     /* @__PURE__ */ jsx(
       Text,
       {
@@ -2956,7 +3121,7 @@ function TruncatedText({
         ellipsizeMode: "clip",
         accessibilityLabel: text,
         style: [
-          styles17.text,
+          styles18.text,
           {
             color: colors.foreground,
             fontFamily
@@ -2971,7 +3136,7 @@ function TruncatedText({
       {
         onPress: handleCopy,
         hitSlop: Math.max(8, (touchTargetMin - 20) / 2),
-        style: styles17.copyBtn,
+        style: styles18.copyBtn,
         accessibilityRole: "button",
         accessibilityLabel: `Copy ${text}`,
         children: /* @__PURE__ */ jsx(
@@ -2986,7 +3151,7 @@ function TruncatedText({
     )
   ] });
 }
-var styles17 = StyleSheet.create({
+var styles18 = StyleSheet.create({
   container: {
     flexDirection: "row",
     alignItems: "center",
@@ -3045,7 +3210,7 @@ function ModalBody({
       View,
       {
         style: [
-          styles18.content,
+          styles19.content,
           {
             backgroundColor: colors.surface0,
             paddingHorizontal: padding.horizontal,
@@ -3064,14 +3229,14 @@ function ModalBody({
     ResolvedScrollView,
     {
       ref: setRefs,
-      style: [{ backgroundColor: colors.surface0 }, styles18.container, style],
+      style: [{ backgroundColor: colors.surface0 }, styles19.container, style],
       nestedScrollEnabled: true,
       keyboardShouldPersistTaps: "handled",
       showsVerticalScrollIndicator: true,
       refreshControl,
       onContentSizeChange: stickToEnd ? () => innerRef.current?.scrollToEnd({ animated: true }) : void 0,
       contentContainerStyle: [
-        styles18.content,
+        styles19.content,
         {
           paddingHorizontal: padding.horizontal,
           paddingTop: padding.vertical,
@@ -3084,7 +3249,7 @@ function ModalBody({
     }
   );
 }
-var styles18 = StyleSheet.create({
+var styles19 = StyleSheet.create({
   container: {
     flex: 1,
     minHeight: 0,
@@ -3109,7 +3274,7 @@ function ActionBar({
     View,
     {
       style: [
-        styles19.container,
+        styles20.container,
         {
           flexDirection: isColumn ? "column" : "row",
           justifyContent: isColumn ? "flex-start" : align,
@@ -3123,19 +3288,19 @@ function ActionBar({
     }
   );
 }
-var styles19 = StyleSheet.create({
+var styles20 = StyleSheet.create({
   container: {
     flexWrap: "wrap"
   }
 });
 function FormRow({ label, description, children, style }) {
   const { colors, flair, isCompact } = usePluginTheme();
-  return /* @__PURE__ */ jsxs(View, { style: [styles20.container, style], children: [
+  return /* @__PURE__ */ jsxs(View, { style: [styles21.container, style], children: [
     /* @__PURE__ */ jsx(
       Text,
       {
         style: [
-          styles20.label,
+          styles21.label,
           {
             color: colors.foreground,
             fontSize: isCompact ? 12 : 13,
@@ -3149,16 +3314,16 @@ function FormRow({ label, description, children, style }) {
       Text,
       {
         style: [
-          styles20.description,
+          styles21.description,
           { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 }
         ],
         children: description
       }
     ),
-    /* @__PURE__ */ jsx(View, { style: styles20.content, children })
+    /* @__PURE__ */ jsx(View, { style: styles21.content, children })
   ] });
 }
-var styles20 = StyleSheet.create({
+var styles21 = StyleSheet.create({
   container: {
     gap: 4,
     width: "100%"
@@ -3187,7 +3352,7 @@ function registerComposerPill(client, options) {
       layout: props.layout,
       host: props.host ?? { id: "", label: "" }
     };
-    return /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsx(View, { style: styles21.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
+    return /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: /* @__PURE__ */ jsx(View, { style: styles22.popoverContainer, children: options.renderModal({ ...pillProps, close: props.close }) }) });
   }
   function PillHost(props) {
     const [open, setOpen] = useState(false);
@@ -3203,7 +3368,7 @@ function registerComposerPill(client, options) {
     }, [props.agentId]);
     const effectiveModalTitle = options.modalTitle ?? options.title;
     const modalIconElement = useMemo(() => {
-      if (React7.isValidElement(options.modalIcon)) {
+      if (React8.isValidElement(options.modalIcon)) {
         return options.modalIcon;
       }
       const iconName = typeof options.modalIcon === "string" ? options.modalIcon : options.icon;
@@ -3415,13 +3580,13 @@ function DefaultPillBody({
   const effectiveTitle = isCompact && compactTitle ? compactTitle : title;
   const effectiveIcon = isCompact && compactIcon ? compactIcon : icon;
   const effectiveBadge = isCompact && compactBadgeText !== void 0 ? compactBadgeText : badgeText;
-  return /* @__PURE__ */ jsxs(View, { style: styles21.pillContainer, children: [
+  return /* @__PURE__ */ jsxs(View, { style: styles22.pillContainer, children: [
     effectiveIcon && /* @__PURE__ */ jsx(Icon2, { name: effectiveIcon, size: 13, color: theme.colors.foreground }),
-    effectiveTitle ? /* @__PURE__ */ jsx(Text, { style: [styles21.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
-    effectiveBadge && /* @__PURE__ */ jsx(View, { style: [styles21.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsx(Text, { style: [styles21.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
+    effectiveTitle ? /* @__PURE__ */ jsx(Text, { style: [styles22.title, { color: theme.colors.foreground }], children: effectiveTitle }) : null,
+    effectiveBadge && /* @__PURE__ */ jsx(View, { style: [styles22.badge, { backgroundColor: theme.colors.surface1 }], children: /* @__PURE__ */ jsx(Text, { style: [styles22.badgeText, { color: theme.colors.foregroundMuted }], children: effectiveBadge }) })
   ] });
 }
-var styles21 = StyleSheet.create({
+var styles22 = StyleSheet.create({
   popoverContainer: {
     width: "100%"
   },
@@ -3853,16 +4018,16 @@ function CustomPillBody({ state }) {
   const { isCompact } = useResponsive();
   const title = isCompact && state.compactTitle ? state.compactTitle : state.title;
   const icon = isCompact && state.compactIcon ? state.compactIcon : state.icon;
-  return /* @__PURE__ */ jsxs(View, { style: styles22.pillContainer, children: [
+  return /* @__PURE__ */ jsxs(View, { style: styles23.pillContainer, children: [
     icon && /* @__PURE__ */ jsx(Icon2, { name: icon, size: 13, color: colors.foreground }),
-    title ? /* @__PURE__ */ jsx(Text, { style: [styles22.pillTitle, { color: colors.foreground }], children: title }) : null,
+    title ? /* @__PURE__ */ jsx(Text, { style: [styles23.pillTitle, { color: colors.foreground }], children: title }) : null,
     /* @__PURE__ */ jsx(
       Badge,
       {
         label: state.displayValue,
         variant: state.status,
         styleVariant: "tinted",
-        style: styles22.pillBadge
+        style: styles23.pillBadge
       }
     )
   ] });
@@ -3874,7 +4039,7 @@ function CustomPillModalContent({
 }) {
   const { colors, isCompact } = usePluginTheme();
   const displayText = state.modalOutput || state.rawValue || (state.error ? `Error: ${state.error}` : "No output");
-  return /* @__PURE__ */ jsx(View, { style: styles22.modalContent, children: /* @__PURE__ */ jsxs(Card, { children: [
+  return /* @__PURE__ */ jsx(View, { style: styles23.modalContent, children: /* @__PURE__ */ jsxs(Card, { children: [
     /* @__PURE__ */ jsx(
       Card.Header,
       {
@@ -3904,7 +4069,7 @@ function CustomPillModalContent({
         copyable: true
       }
     ),
-    /* @__PURE__ */ jsx(View, { style: styles22.footerRow, children: /* @__PURE__ */ jsxs(Text, { style: [styles22.timestampText, { color: colors.foregroundMuted }], children: [
+    /* @__PURE__ */ jsx(View, { style: styles23.footerRow, children: /* @__PURE__ */ jsxs(Text, { style: [styles23.timestampText, { color: colors.foregroundMuted }], children: [
       "Last updated: ",
       new Date(state.lastUpdated).toLocaleTimeString()
     ] }) })
@@ -3961,7 +4126,7 @@ function registerCustomPills(client, options) {
     }
   };
 }
-var styles22 = StyleSheet.create({
+var styles23 = StyleSheet.create({
   modalContent: {
     width: "100%",
     padding: 12
@@ -3996,6 +4161,6 @@ function Icon(props) {
   return /* @__PURE__ */ jsx(HostIconComponent, { ...props });
 }
 
-export { AboutSection, ActionBar, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map
