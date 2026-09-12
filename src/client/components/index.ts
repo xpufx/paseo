@@ -1,4 +1,5 @@
 export * from "./Button.js";
+export * from "./AttentionBeacon.js";
 export * from "./Badge.js";
 export * from "./StatusDot.js";
 export * from "./Card.js";
