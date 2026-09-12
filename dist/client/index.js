@@ -1868,27 +1868,59 @@ var styles10 = StyleSheet.create({
     ...resolveElevation("sm")
   }
 });
+function resolveCollapsibleChevron(expanded) {
+  return expanded ? "ChevronDown" : "ChevronRight";
+}
+function resolveCollapsibleHeaderBackground(colors, pressed) {
+  return pressed ? colors.surface1 : colors.surface0;
+}
+function renderTitle(title, titleStyle) {
+  if (typeof title === "string" || title === void 0) {
+    return title ? /* @__PURE__ */ jsx(Text, { style: titleStyle, children: title }) : null;
+  }
+  return /* @__PURE__ */ jsx(View, { style: styles11.titleSlot, children: title });
+}
+function renderSubtitle(subtitle, subtitleStyle) {
+  if (typeof subtitle === "string") {
+    return /* @__PURE__ */ jsx(Text, { style: subtitleStyle, children: subtitle });
+  }
+  return subtitle ?? null;
+}
 function Collapsible({
   title,
+  subtitle,
   children,
   initiallyExpanded = false,
   isExpanded: controlledExpanded,
   onToggle,
   badge,
+  headerRight,
+  summary,
   icon,
-  style
+  style,
+  headerStyle,
+  contentStyle,
+  variant
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, resolveRadius: resolveRadius2, isCompact, touchTargetMin, alpha: alpha2 } = usePluginTheme();
   const [internalExpanded, setInternalExpanded] = useState(initiallyExpanded);
   const isExpanded = controlledExpanded !== void 0 ? controlledExpanded : internalExpanded;
-  const radius = resolveRadius2("md");
+  const radius = resolveRadius2(variant === "elevated" ? "lg" : "md");
   const handlePress = () => {
     const next = !isExpanded;
     if (controlledExpanded === void 0) {
       setInternalExpanded(next);
     }
     onToggle?.(next);
+  };
+  const titleStyle = {
+    color: colors.foreground,
+    fontSize: isCompact ? 12 : 13
+  };
+  const subtitleStyle = {
+    color: colors.foregroundMuted,
+    fontSize: isCompact ? 11 : 12
   };
   return /* @__PURE__ */ jsxs(
     View,
@@ -1907,45 +1939,64 @@ function Collapsible({
           Pressable,
           {
             onPress: handlePress,
+            accessibilityRole: "button",
+            accessibilityState: { expanded: isExpanded },
             style: ({ pressed }) => [
               styles11.header,
               {
                 minHeight: Math.max(touchTargetMin, 36),
-                backgroundColor: pressed ? colors.surface1 : colors.surface0,
-                borderBottomColor: isExpanded ? alpha2(colors.border, 0.6) : "transparent",
-                borderBottomWidth: isExpanded ? 1 : 0
-              }
+                backgroundColor: resolveCollapsibleHeaderBackground(colors, pressed),
+                cursor: "pointer"
+              },
+              headerStyle
             ],
             children: [
               /* @__PURE__ */ jsxs(View, { style: styles11.headerLeft, children: [
                 /* @__PURE__ */ jsx(
-                  Icon2,
+                  View,
                   {
-                    name: isExpanded ? "ChevronDown" : "ChevronRight",
-                    size: 14,
-                    color: colors.foregroundMuted
+                    style: [
+                      styles11.chevronBadge,
+                      {
+                        backgroundColor: alpha2(colors.accent, 0.12),
+                        borderColor: alpha2(colors.accent, 0.25)
+                      }
+                    ],
+                    children: /* @__PURE__ */ jsx(
+                      Icon2,
+                      {
+                        name: resolveCollapsibleChevron(isExpanded),
+                        size: 14,
+                        color: colors.foregroundMuted
+                      }
+                    )
                   }
                 ),
                 icon && /* @__PURE__ */ jsx(Icon2, { name: icon, size: 14, color: colors.accent }),
-                /* @__PURE__ */ jsx(
-                  Text,
-                  {
-                    style: [
-                      styles11.title,
-                      {
-                        color: colors.foreground,
-                        fontSize: isCompact ? 12 : 13
-                      }
-                    ],
-                    children: title
-                  }
-                )
+                /* @__PURE__ */ jsxs(View, { style: styles11.titleBlock, children: [
+                  /* @__PURE__ */ jsxs(View, { style: styles11.titleRow, children: [
+                    renderTitle(title, [styles11.title, titleStyle]),
+                    badge && /* @__PURE__ */ jsx(View, { style: styles11.badgeSlot, children: badge })
+                  ] }),
+                  subtitle ? /* @__PURE__ */ jsx(View, { style: styles11.subtitleSlot, children: renderSubtitle(subtitle, [styles11.subtitle, subtitleStyle]) }) : null,
+                  summary ? /* @__PURE__ */ jsx(View, { style: styles11.summarySlot, children: summary }) : null
+                ] })
               ] }),
-              badge && /* @__PURE__ */ jsx(View, { style: styles11.headerRight, children: badge })
+              (headerRight || summary === void 0) && /* @__PURE__ */ jsx(View, { style: styles11.headerRight, children: headerRight })
             ]
           }
         ),
-        isExpanded && /* @__PURE__ */ jsx(View, { style: styles11.content, children })
+        isExpanded && /* @__PURE__ */ jsx(
+          View,
+          {
+            style: [
+              styles11.content,
+              { borderTopColor: colors.border, borderTopWidth: 1 },
+              contentStyle
+            ],
+            children
+          }
+        )
       ]
     }
   );
@@ -1965,14 +2016,50 @@ var styles11 = StyleSheet.create({
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+    flex: 1
+  },
+  chevronBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  titleBlock: {
+    flex: 1
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8
   },
-  headerRight: {
+  titleSlot: {
     flexDirection: "row",
     alignItems: "center"
   },
+  badgeSlot: {
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  subtitleSlot: {
+    marginTop: 2
+  },
+  summarySlot: {
+    marginTop: 4,
+    flexDirection: "row"
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8
+  },
   title: {
     fontWeight: "600"
+  },
+  subtitle: {
+    fontWeight: "400"
   },
   content: {
     padding: 12
@@ -4178,6 +4265,6 @@ function Icon(props) {
   return /* @__PURE__ */ jsx(HostIconComponent, { ...props });
 }
 
-export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

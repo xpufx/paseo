@@ -1874,27 +1874,59 @@ var styles10 = reactNative.StyleSheet.create({
     ...resolveElevation("sm")
   }
 });
+function resolveCollapsibleChevron(expanded) {
+  return expanded ? "ChevronDown" : "ChevronRight";
+}
+function resolveCollapsibleHeaderBackground(colors, pressed) {
+  return pressed ? colors.surface1 : colors.surface0;
+}
+function renderTitle(title, titleStyle) {
+  if (typeof title === "string" || title === void 0) {
+    return title ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: titleStyle, children: title }) : null;
+  }
+  return /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.titleSlot, children: title });
+}
+function renderSubtitle(subtitle, subtitleStyle) {
+  if (typeof subtitle === "string") {
+    return /* @__PURE__ */ jsxRuntime.jsx(reactNative.Text, { style: subtitleStyle, children: subtitle });
+  }
+  return subtitle ?? null;
+}
 function Collapsible({
   title,
+  subtitle,
   children,
   initiallyExpanded = false,
   isExpanded: controlledExpanded,
   onToggle,
   badge,
+  headerRight,
+  summary,
   icon,
-  style
+  style,
+  headerStyle,
+  contentStyle,
+  variant
 }) {
   const { Icon: Icon2 } = getClientHost();
   const { colors, resolveRadius: resolveRadius2, isCompact, touchTargetMin, alpha: alpha2 } = usePluginTheme();
   const [internalExpanded, setInternalExpanded] = React8.useState(initiallyExpanded);
   const isExpanded = controlledExpanded !== void 0 ? controlledExpanded : internalExpanded;
-  const radius = resolveRadius2("md");
+  const radius = resolveRadius2(variant === "elevated" ? "lg" : "md");
   const handlePress = () => {
     const next = !isExpanded;
     if (controlledExpanded === void 0) {
       setInternalExpanded(next);
     }
     onToggle?.(next);
+  };
+  const titleStyle = {
+    color: colors.foreground,
+    fontSize: isCompact ? 12 : 13
+  };
+  const subtitleStyle = {
+    color: colors.foregroundMuted,
+    fontSize: isCompact ? 11 : 12
   };
   return /* @__PURE__ */ jsxRuntime.jsxs(
     reactNative.View,
@@ -1913,45 +1945,64 @@ function Collapsible({
           reactNative.Pressable,
           {
             onPress: handlePress,
+            accessibilityRole: "button",
+            accessibilityState: { expanded: isExpanded },
             style: ({ pressed }) => [
               styles11.header,
               {
                 minHeight: Math.max(touchTargetMin, 36),
-                backgroundColor: pressed ? colors.surface1 : colors.surface0,
-                borderBottomColor: isExpanded ? alpha2(colors.border, 0.6) : "transparent",
-                borderBottomWidth: isExpanded ? 1 : 0
-              }
+                backgroundColor: resolveCollapsibleHeaderBackground(colors, pressed),
+                cursor: "pointer"
+              },
+              headerStyle
             ],
             children: [
               /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles11.headerLeft, children: [
                 /* @__PURE__ */ jsxRuntime.jsx(
-                  Icon2,
+                  reactNative.View,
                   {
-                    name: isExpanded ? "ChevronDown" : "ChevronRight",
-                    size: 14,
-                    color: colors.foregroundMuted
+                    style: [
+                      styles11.chevronBadge,
+                      {
+                        backgroundColor: alpha2(colors.accent, 0.12),
+                        borderColor: alpha2(colors.accent, 0.25)
+                      }
+                    ],
+                    children: /* @__PURE__ */ jsxRuntime.jsx(
+                      Icon2,
+                      {
+                        name: resolveCollapsibleChevron(isExpanded),
+                        size: 14,
+                        color: colors.foregroundMuted
+                      }
+                    )
                   }
                 ),
                 icon && /* @__PURE__ */ jsxRuntime.jsx(Icon2, { name: icon, size: 14, color: colors.accent }),
-                /* @__PURE__ */ jsxRuntime.jsx(
-                  reactNative.Text,
-                  {
-                    style: [
-                      styles11.title,
-                      {
-                        color: colors.foreground,
-                        fontSize: isCompact ? 12 : 13
-                      }
-                    ],
-                    children: title
-                  }
-                )
+                /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles11.titleBlock, children: [
+                  /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles11.titleRow, children: [
+                    renderTitle(title, [styles11.title, titleStyle]),
+                    badge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.badgeSlot, children: badge })
+                  ] }),
+                  subtitle ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.subtitleSlot, children: renderSubtitle(subtitle, [styles11.subtitle, subtitleStyle]) }) : null,
+                  summary ? /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.summarySlot, children: summary }) : null
+                ] })
               ] }),
-              badge && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.headerRight, children: badge })
+              (headerRight || summary === void 0) && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.headerRight, children: headerRight })
             ]
           }
         ),
-        isExpanded && /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: styles11.content, children })
+        isExpanded && /* @__PURE__ */ jsxRuntime.jsx(
+          reactNative.View,
+          {
+            style: [
+              styles11.content,
+              { borderTopColor: colors.border, borderTopWidth: 1 },
+              contentStyle
+            ],
+            children
+          }
+        )
       ]
     }
   );
@@ -1971,14 +2022,50 @@ var styles11 = reactNative.StyleSheet.create({
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
+    flex: 1
+  },
+  chevronBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  titleBlock: {
+    flex: 1
+  },
+  titleRow: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8
   },
-  headerRight: {
+  titleSlot: {
     flexDirection: "row",
     alignItems: "center"
   },
+  badgeSlot: {
+    flexDirection: "row",
+    alignItems: "center"
+  },
+  subtitleSlot: {
+    marginTop: 2
+  },
+  summarySlot: {
+    marginTop: 4,
+    flexDirection: "row"
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 8
+  },
   title: {
     fontWeight: "600"
+  },
+  subtitle: {
+    fontWeight: "400"
   },
   content: {
     padding: 12
@@ -4245,6 +4332,8 @@ exports.registerWorkspacePanel = registerWorkspacePanel;
 exports.resolveBeaconToneColor = resolveBeaconToneColor;
 exports.resolveButtonAttentionMode = resolveButtonAttentionMode;
 exports.resolveButtonAttentionTone = resolveButtonAttentionTone;
+exports.resolveCollapsibleChevron = resolveCollapsibleChevron;
+exports.resolveCollapsibleHeaderBackground = resolveCollapsibleHeaderBackground;
 exports.resolveElevation = resolveElevation;
 exports.resolvePadding = resolvePadding;
 exports.resolveRadius = resolveRadius;
