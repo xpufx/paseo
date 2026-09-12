@@ -1,5 +1,5 @@
 import { ComponentType } from 'react';
-import { H as HostAgentRef, C as ComposerPillContribution, a as HostSurfaceProps, P as PluginCleanup, b as HostAgentUpdate } from '../host-BsbqDlSJ.js';
+import { H as HostAgentRef, C as ComposerPillContribution, a as HostSurfaceProps, P as PluginCleanup, b as HostAgentUpdate } from '../host-BtDV7gIJ.js';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.js';
 import 'react-native';
 import 'zod';

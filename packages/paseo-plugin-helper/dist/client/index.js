@@ -3814,7 +3814,7 @@ function registerComposerPill(client, options) {
               setPayload(void 0);
             }
           },
-          children: /* @__PURE__ */ jsx(Modal.Content, { children: open ? /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: options.renderModal({
+          children: /* @__PURE__ */ jsx(Modal.Content, { scrollable: false, children: open ? /* @__PURE__ */ jsx(PluginThemeProvider, { theme: props.theme, layout: props.layout, flair: options.flair, children: options.renderModal({
             ...props,
             close: () => setOpen(false),
             payload

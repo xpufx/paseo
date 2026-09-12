@@ -65,6 +65,7 @@ export type HostIcon = ComponentType<HostIconProps>;
 
 export interface HostModalContentProps {
   children: ReactNode;
+  scrollable?: boolean;
 }
 
 export interface HostModalProps {

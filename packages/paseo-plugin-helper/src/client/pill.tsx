@@ -244,7 +244,7 @@ export function registerComposerPill<TPayload = any>(
             }
           }}
         >
-          <Modal.Content>
+          <Modal.Content scrollable={false}>
             {open ? (
               <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
                 {options.renderModal({
