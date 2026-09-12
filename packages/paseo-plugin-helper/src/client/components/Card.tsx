@@ -20,6 +20,7 @@ export interface CardHeaderProps {
   icon?: string;
   style?: StyleProp<ViewStyle>;
   titleStyle?: StyleProp<TextStyle>;
+  subtitleStyle?: StyleProp<TextStyle>;
 }
 
 export function CardHeader({
@@ -31,6 +32,7 @@ export function CardHeader({
   icon,
   style,
   titleStyle,
+  subtitleStyle,
 }: CardHeaderProps) {
   const { Icon } = getClientHost();
   const { colors, flair, isCompact } = usePluginTheme();
@@ -59,6 +61,7 @@ export function CardHeader({
               style={[
                 styles.headerSubtitle,
                 { color: colors.foregroundMuted, fontSize: 11 },
+                subtitleStyle,
               ]}
             >
               {subtitle}

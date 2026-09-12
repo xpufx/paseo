@@ -1958,6 +1958,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
           repository="https://github.com/xpufx/paseo-top"
           issues="https://github.com/xpufx/paseo-top/issues"
           license="MIT"
+          density="tiny"
           extraItems={[
             {
               label: "Host Platform",

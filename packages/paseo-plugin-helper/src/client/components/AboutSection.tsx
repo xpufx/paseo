@@ -99,6 +99,12 @@ export interface AboutSectionProps {
    * Optional custom container style.
    */
   style?: StyleProp<ViewStyle>;
+
+  /**
+   * Visual density. `"tiny"` scales all fonts to the smallest readable
+   * size for dense About pages. Default: `"default"`.
+   */
+  density?: "default" | "compact" | "tiny";
 }
 
 /**
@@ -140,11 +146,13 @@ export function AboutSection({
   extraItems = [],
   showDiagnosticsCopy = true,
   style,
+  density = "default",
 }: AboutSectionProps) {
   const { Icon } = getClientHost();
   const { colors, resolveRadius } = usePluginTheme();
   const { isCompact, platform } = useResponsive();
   const [copied, setCopied] = useState(false);
+  const isTiny = density === "tiny";
 
   // 1. Resolve Logo / Avatar
   let resolvedLogoNode: ReactNode = null;
@@ -250,34 +258,52 @@ export function AboutSection({
   ];
 
   return (
-    <View style={[styles.container, style]}>
+    <View style={[styles.container, isTiny && tinyStyles.container, style]}>
       {/* Header Banner Card */}
-      <Card variant="elevated">
+      <Card variant="elevated" style={isTiny ? tinyStyles.card : undefined}>
         <Card.Header
           title={name}
           subtitle={description}
-          badge={<Badge variant="accent" label={`v${version}`} />}
+          badge={
+            <Badge
+              variant="accent"
+              label={`v${version}`}
+              textStyle={isTiny ? tinyStyles.text9 : undefined}
+            />
+          }
+          titleStyle={isTiny ? tinyStyles.title : undefined}
+          subtitleStyle={isTiny ? tinyStyles.text9 : undefined}
         />
-        <View style={styles.headerRow}>
+        <View style={[styles.headerRow, isTiny && tinyStyles.headerRow]}>
           {resolvedLogoNode}
 
-          <View style={styles.metaColumn}>
+          <View style={[styles.metaColumn, isTiny && tinyStyles.metaColumn]}>
             {author ? (
-              <Text style={[styles.authorText, { color: colors.foregroundMuted }]}>
+              <Text
+                style={[
+                  styles.authorText,
+                  { color: colors.foregroundMuted },
+                  isTiny && tinyStyles.text9,
+                ]}
+              >
                 by {author}
               </Text>
             ) : null}
 
             {license ? (
               <View style={styles.titleRow}>
-                <Badge variant="neutral" label={license} />
+                <Badge
+                  variant="neutral"
+                  label={license}
+                  textStyle={isTiny ? tinyStyles.text9 : undefined}
+                />
               </View>
             ) : null}
           </View>
         </View>
 
         {/* Action Buttons: External Links & Diagnostics */}
-        <View style={styles.actionsRow}>
+        <View style={[styles.actionsRow, isTiny && tinyStyles.actionsRow]}>
           {allLinks.map((link) => (
             <Button
               key={link.url}
@@ -286,6 +312,7 @@ export function AboutSection({
               icon={link.icon ?? "ExternalLink"}
               label={link.label}
               onPress={() => handleOpenUrl(link.url)}
+              textStyle={isTiny ? tinyStyles.text9 : undefined}
             />
           ))}
 
@@ -296,22 +323,50 @@ export function AboutSection({
               icon={copied ? "Check" : "Copy"}
               label={copied ? "Diagnostics Copied!" : "Copy Diagnostics"}
               onPress={handleCopyDiagnostics}
+              textStyle={isTiny ? tinyStyles.text9 : undefined}
             />
           )}
         </View>
       </Card>
 
       {/* Environment & Extra Diagnostics Details */}
-      <Card variant="elevated">
+      <Card variant="elevated" style={isTiny ? tinyStyles.card : undefined}>
         <Card.Header
           title="Runtime Environment"
           subtitle="Diagnostics for issue reports and system verification"
+          titleStyle={isTiny ? tinyStyles.title : undefined}
+          subtitleStyle={isTiny ? tinyStyles.text9 : undefined}
         />
-        <KeyValueGroup columns={isCompact ? 1 : 2}>
-          <KeyValue label="Plugin Version" value={`v${version}`} copyable />
-          <KeyValue label="Client Platform" value={platform} />
-          {author ? <KeyValue label="Author" value={author} /> : null}
-          {license ? <KeyValue label="License" value={license} /> : null}
+        <KeyValueGroup columns={isCompact ? 1 : 2} gap={isTiny ? 6 : undefined}>
+          <KeyValue
+            label="Plugin Version"
+            value={`v${version}`}
+            copyable
+            labelStyle={isTiny ? tinyStyles.text9 : undefined}
+            valueStyle={isTiny ? tinyStyles.text9 : undefined}
+          />
+          <KeyValue
+            label="Client Platform"
+            value={platform}
+            labelStyle={isTiny ? tinyStyles.text9 : undefined}
+            valueStyle={isTiny ? tinyStyles.text9 : undefined}
+          />
+          {author ? (
+            <KeyValue
+              label="Author"
+              value={author}
+              labelStyle={isTiny ? tinyStyles.text9 : undefined}
+              valueStyle={isTiny ? tinyStyles.text9 : undefined}
+            />
+          ) : null}
+          {license ? (
+            <KeyValue
+              label="License"
+              value={license}
+              labelStyle={isTiny ? tinyStyles.text9 : undefined}
+              valueStyle={isTiny ? tinyStyles.text9 : undefined}
+            />
+          ) : null}
           {extraItems.map((item, idx) => (
             <KeyValue
               key={idx}
@@ -319,6 +374,8 @@ export function AboutSection({
               value={item.value}
               subValue={item.subValue}
               copyable={item.copyable}
+              labelStyle={isTiny ? tinyStyles.text9 : undefined}
+              valueStyle={isTiny ? tinyStyles.text9 : undefined}
             />
           ))}
         </KeyValueGroup>
@@ -370,5 +427,33 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: "rgba(128, 128, 128, 0.2)",
+  },
+});
+
+const tinyStyles = StyleSheet.create({
+  container: {
+    gap: 6,
+  },
+  card: {
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  title: {
+    fontSize: 11,
+  },
+  text9: {
+    fontSize: 9,
+  },
+  headerRow: {
+    gap: 8,
+  },
+  metaColumn: {
+    gap: 2,
+  },
+  actionsRow: {
+    gap: 6,
+    marginTop: 8,
+    paddingTop: 6,
   },
 });
