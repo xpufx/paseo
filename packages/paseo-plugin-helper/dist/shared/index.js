@@ -227,6 +227,17 @@ function defineSettingsContract(options) {
     ...description !== void 0 ? { description } : {}
   };
 }
+var SuiteSettingsSchema = z.object({
+  suiteTitle: z.string().default("xpufx Suite"),
+  accentColor: z.string().default("#6366f1"),
+  density: z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
+  showSuiteTabs: z.boolean().default(true)
+});
+var SuiteSettingsContract = defineSettingsContract({
+  name: "xpufx.suite.settings",
+  schema: SuiteSettingsSchema,
+  description: "Shared xpufx suite settings"
+});
 
 // src/shared/async.ts
 var TimeoutError = class extends Error {
@@ -358,6 +369,6 @@ function formatPillDisplay(rawValue, prefix, suffix) {
   return `${pre}${cleaned}${suf}`;
 }
 
-export { CustomPillDefinitionSchema, CustomPillModalSchema, CustomPillThresholdsSchema, SettingsEmptyInputSchema, TimeoutError, defineContract, defineRpc, defineSettingsContract, formatBytes, formatCompactNumber, formatDuration, formatNumber, formatPillDisplay, formatUptime, parseNumericPillValue, resolveCustomPillStatus, resolveMetricStatus, stripAnsi, truncate, truncateMiddle, truncatePath, withTimeout };
+export { CustomPillDefinitionSchema, CustomPillModalSchema, CustomPillThresholdsSchema, SettingsEmptyInputSchema, SuiteSettingsContract, SuiteSettingsSchema, TimeoutError, defineContract, defineRpc, defineSettingsContract, formatBytes, formatCompactNumber, formatDuration, formatNumber, formatPillDisplay, formatUptime, parseNumericPillValue, resolveCustomPillStatus, resolveMetricStatus, stripAnsi, truncate, truncateMiddle, truncatePath, withTimeout };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

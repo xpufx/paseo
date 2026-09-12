@@ -127,6 +127,48 @@ declare function createSettingsHandlers<TSettings extends Record<string, any>>(c
     reset: () => Promise<TSettings>;
 };
 
+interface SharedPluginSettingsOptions<TSettings extends Record<string, any>> {
+    suite: string;
+    filename?: string;
+    schema: ZodType<TSettings> & {
+        partial?: () => ZodType<Partial<TSettings>>;
+    };
+    defaultData?: Partial<TSettings>;
+    contractName?: string;
+    description?: string;
+    namespace?: string;
+    baseDir?: string;
+    watchDebounceMs?: number;
+}
+type SharedSettingsListener<TSettings> = (settings: TSettings) => void;
+interface SharedPluginSettings<TSettings extends Record<string, any>> {
+    readonly suite: string;
+    readonly contract: SettingsContract<TSettings>;
+    readonly storage: PluginStorage<TSettings>;
+    readonly filePath: string;
+    get(): Promise<TSettings>;
+    update(patch: Partial<TSettings>): Promise<TSettings>;
+    reset(): Promise<TSettings>;
+    read(): TSettings;
+    reload(): TSettings;
+    subscribe(listener: SharedSettingsListener<TSettings>): () => void;
+    watch(listener: SharedSettingsListener<TSettings>): () => void;
+    register(context: HandleableServerContext, options?: RegisterSettingsRpcOptions<TSettings>): void;
+    createHandlers(options?: RegisterSettingsRpcOptions<TSettings>): {
+        get: () => Promise<TSettings>;
+        update: (input: unknown) => Promise<TSettings>;
+        reset: () => Promise<TSettings>;
+    };
+    dispose(): void;
+}
+/**
+ * Creates a suite-scoped settings store shared across independent sibling plugins.
+ * Every plugin in the suite points at the same file
+ * (`~/.paseo/xpufx-plugins/<suite>/<filename>`) through an atomic PluginStorage,
+ * so an update written by Plugin A is immediately readable by Plugin B.
+ */
+declare function createSharedPluginSettings<TSettings extends Record<string, any>>(options: SharedPluginSettingsOptions<TSettings>): SharedPluginSettings<TSettings>;
+
 /**
  * Strips single-line and multi-line comments and trailing commas from a JSONC string
  * without altering strings or URLs.
@@ -772,4 +814,4 @@ declare class WorkspaceBeacon {
 }
 declare function createWorkspaceBeacon(options?: WorkspaceBeaconOptions): WorkspaceBeacon;
 
-export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };

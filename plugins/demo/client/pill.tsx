@@ -62,6 +62,7 @@ import {
   demoSettingsContract,
   type DemoData,
 } from "../shared/demo.js";
+import { SharedSuiteCard } from "./suite-settings.js";
 import { PLUGIN_VERSION } from "../shared/version.js";
 
 const EMPTY_PARAMS = {};
@@ -944,7 +945,9 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
 
       {/* TAB: SETTINGS & STORAGE */}
       {activeTab === "settings" && (
-        <Card variant="elevated">
+        <>
+          <SharedSuiteCard />
+          <Card variant="elevated">
           <Card.Header
             title="Plugin Settings"
             subtitle="Type-safe Zod storage with optimistic React Query updates"
@@ -1002,6 +1005,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
             />
           </ActionBar>
         </Card>
+        </>
       )}
 
       {/* TAB 4: NETWORK DIAGNOSTICS */}

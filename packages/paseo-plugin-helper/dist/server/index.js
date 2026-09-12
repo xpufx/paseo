@@ -1,9 +1,9 @@
 import fs from 'fs';
-import path3 from 'path';
+import path4 from 'path';
 import os3 from 'os';
+import { z } from 'zod';
 import { spawn, execSync } from 'child_process';
 import net from 'net';
-import { z } from 'zod';
 
 // src/server/storage.ts
 var DEFAULT_NAMESPACE_README = `# Paseo Plugins Storage (xpufx)
@@ -30,22 +30,22 @@ var PluginStorage = class {
     const namespace = options.namespace ?? "xpufx-plugins";
     if (options.baseDir) {
       this.namespaceDir = options.baseDir;
-      this.pluginDir = path3.join(options.baseDir, pluginId);
+      this.pluginDir = path4.join(options.baseDir, pluginId);
       this.legacyPluginDir = options.legacyDir ?? null;
     } else {
-      this.namespaceDir = path3.join(os3.homedir(), ".paseo", namespace);
-      this.pluginDir = path3.join(this.namespaceDir, pluginId);
-      this.legacyPluginDir = options.legacyDir ?? path3.join(os3.homedir(), ".paseo", pluginId);
+      this.namespaceDir = path4.join(os3.homedir(), ".paseo", namespace);
+      this.pluginDir = path4.join(this.namespaceDir, pluginId);
+      this.legacyPluginDir = options.legacyDir ?? path4.join(os3.homedir(), ".paseo", pluginId);
     }
-    this.filePath = path3.join(this.pluginDir, filename);
-    this.legacyFilePath = this.legacyPluginDir ? path3.join(this.legacyPluginDir, filename) : null;
+    this.filePath = path4.join(this.pluginDir, filename);
+    this.legacyFilePath = this.legacyPluginDir ? path4.join(this.legacyPluginDir, filename) : null;
   }
   ensureDir() {
     if (this.namespaceDir && !fs.existsSync(this.namespaceDir)) {
       fs.mkdirSync(this.namespaceDir, { recursive: true });
     }
     if (this.namespaceDir) {
-      const readmePath = path3.join(this.namespaceDir, "README.md");
+      const readmePath = path4.join(this.namespaceDir, "README.md");
       if (!fs.existsSync(readmePath)) {
         try {
           fs.writeFileSync(readmePath, DEFAULT_NAMESPACE_README, "utf8");
@@ -53,7 +53,7 @@ var PluginStorage = class {
         }
       }
     }
-    const dir = path3.dirname(this.filePath);
+    const dir = path4.dirname(this.filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -212,7 +212,7 @@ var PluginStorage = class {
       for (const entry of entries) {
         if (entry.isFile()) {
           stats.fileCount++;
-          const target = path3.join(this.pluginDir, entry.name);
+          const target = path4.join(this.pluginDir, entry.name);
           const st = await fs.promises.stat(target);
           stats.totalBytes += st.size;
           if (!stats.lastModified || st.mtime > stats.lastModified) {
@@ -280,6 +280,265 @@ function createSettingsHandlers(contract, storage, options = {}) {
         await options.onReset(fresh, prev);
       }
       return fresh;
+    }
+  };
+}
+
+// src/shared/rpc.ts
+var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
+function defineRpc(definition) {
+  const name = definition.name.trim();
+  if (!RPC_NAME.test(name)) {
+    throw new Error(`Invalid plugin RPC method: ${definition.name}`);
+  }
+  return { ...definition, name };
+}
+function defineContract(options) {
+  const contract = defineRpc({
+    name: options.name,
+    input: options.input,
+    output: options.output
+  });
+  if (options.description) {
+    Object.defineProperty(contract, "description", {
+      value: options.description,
+      enumerable: true,
+      writable: false
+    });
+  }
+  return contract;
+}
+
+// src/shared/settings.ts
+var SettingsEmptyInputSchema = z.union([z.void(), z.record(z.string(), z.unknown())]).optional();
+function stripDefaults(schema) {
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+  if (schema instanceof z.ZodDefault) {
+    return stripDefaults(schema._def.innerType);
+  }
+  if (schema instanceof z.ZodOptional) {
+    return stripDefaults(schema._def.innerType).optional();
+  }
+  if (schema instanceof z.ZodNullable) {
+    return stripDefaults(schema._def.innerType).nullable();
+  }
+  if (schema._def && schema._def.schema) {
+    return stripDefaults(schema._def.schema);
+  }
+  if (schema instanceof z.ZodObject) {
+    const shape = schema.shape;
+    const newShape = {};
+    for (const key of Object.keys(shape)) {
+      newShape[key] = stripDefaults(shape[key]).optional();
+    }
+    let res = z.object(newShape);
+    const unknownKeys = schema._def?.unknownKeys;
+    if (unknownKeys === "passthrough") {
+      res = res.passthrough();
+    } else if (unknownKeys === "strict") {
+      res = res.strict();
+    }
+    return res;
+  }
+  return typeof schema.optional === "function" ? schema.optional() : schema;
+}
+function defineSettingsContract(options) {
+  const { name, schema, defaultData, description } = options;
+  let computedDefaults;
+  try {
+    computedDefaults = schema.parse(defaultData ?? {});
+  } catch {
+    computedDefaults = defaultData ?? {};
+  }
+  const sanitizedName = name.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const partialSchema = schema instanceof z.ZodObject ? stripDefaults(schema) : typeof schema.partial === "function" ? schema.partial() : z.record(z.string(), z.unknown());
+  const getContract = defineContract({
+    name: `${sanitizedName}.get`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Get ${description}` : `Get ${name} settings`
+  });
+  const updateContract = defineContract({
+    name: `${sanitizedName}.update`,
+    input: partialSchema,
+    output: schema,
+    description: description ? `Update ${description}` : `Update ${name} settings`
+  });
+  const resetContract = defineContract({
+    name: `${sanitizedName}.reset`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Reset ${description}` : `Reset ${name} settings to defaults`
+  });
+  return {
+    name: sanitizedName,
+    schema,
+    defaultSettings: computedDefaults,
+    get: getContract,
+    update: updateContract,
+    reset: resetContract,
+    ...description !== void 0 ? { description } : {}
+  };
+}
+
+// src/server/shared-settings.ts
+function safeSerialize(value) {
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return "";
+  }
+}
+function createSharedPluginSettings(options) {
+  const {
+    suite,
+    filename = "settings.json",
+    schema,
+    defaultData,
+    description,
+    namespace,
+    baseDir,
+    watchDebounceMs = 25
+  } = options;
+  const contractName = options.contractName ?? `${suite}.shared-settings`;
+  const contract = defineSettingsContract({
+    name: contractName,
+    schema,
+    ...defaultData !== void 0 ? { defaultData } : {},
+    ...description !== void 0 ? { description } : {}
+  });
+  const storage = new PluginStorage(suite, filename, {
+    ...namespace !== void 0 ? { namespace } : {},
+    ...baseDir !== void 0 ? { baseDir } : {},
+    schema: contract.schema,
+    defaultData: contract.defaultSettings
+  });
+  const listeners = /* @__PURE__ */ new Set();
+  let watcher = null;
+  let debounceTimer = null;
+  let lastSnapshot = "";
+  function snapshot() {
+    return safeSerialize(storage.read());
+  }
+  function emitIfChanged() {
+    const next = storage.read();
+    const nextSnapshot = safeSerialize(next);
+    if (nextSnapshot !== lastSnapshot) {
+      lastSnapshot = nextSnapshot;
+      for (const listener of [...listeners]) {
+        try {
+          listener(next);
+        } catch {
+        }
+      }
+    }
+  }
+  function scheduleEmit() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      try {
+        emitIfChanged();
+      } catch {
+      }
+    }, watchDebounceMs);
+  }
+  function ensureWatcher() {
+    if (watcher) return;
+    const dir = path4.dirname(storage.filePath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    lastSnapshot = snapshot();
+    watcher = fs.watch(dir, (_event, watchedFile) => {
+      if (watchedFile && watchedFile.toString() !== path4.basename(storage.filePath)) return;
+      scheduleEmit();
+    });
+    watcher.on("error", () => {
+    });
+    if (typeof watcher.unref === "function") {
+      watcher.unref();
+    }
+  }
+  function disposeWatcher() {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    if (watcher) {
+      try {
+        watcher.close();
+      } catch {
+      }
+      watcher = null;
+    }
+  }
+  function subscribe(listener) {
+    listeners.add(listener);
+    try {
+      ensureWatcher();
+    } catch {
+    }
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) disposeWatcher();
+    };
+  }
+  return {
+    suite,
+    contract,
+    storage,
+    filePath: storage.filePath,
+    async get() {
+      return storage.readAsync();
+    },
+    async update(patch) {
+      const updated = await storage.updateAsync((current) => ({
+        ...current,
+        ...patch
+      }));
+      lastSnapshot = safeSerialize(updated);
+      for (const listener of [...listeners]) {
+        try {
+          listener(updated);
+        } catch {
+        }
+      }
+      return updated;
+    },
+    async reset() {
+      storage.reset();
+      const fresh = await storage.readAsync();
+      lastSnapshot = safeSerialize(fresh);
+      for (const listener of [...listeners]) {
+        try {
+          listener(fresh);
+        } catch {
+        }
+      }
+      return fresh;
+    },
+    read() {
+      return storage.read();
+    },
+    reload() {
+      const next = storage.read();
+      lastSnapshot = safeSerialize(next);
+      return next;
+    },
+    subscribe,
+    watch: subscribe,
+    register(context, rpcOptions = {}) {
+      registerSettingsRpc(context, contract, storage, rpcOptions);
+    },
+    createHandlers(rpcOptions = {}) {
+      return createSettingsHandlers(contract, storage, rpcOptions);
+    },
+    dispose() {
+      listeners.clear();
+      disposeWatcher();
     }
   };
 }
@@ -602,10 +861,10 @@ function getSystemMetrics(sampler = defaultSampler) {
   };
 }
 function findPackageJson(startDir) {
-  let current = path3.resolve(startDir);
-  const root = path3.parse(current).root;
+  let current = path4.resolve(startDir);
+  const root = path4.parse(current).root;
   while (current !== root) {
-    const pkgPath = path3.join(current, "package.json");
+    const pkgPath = path4.join(current, "package.json");
     if (fs.existsSync(pkgPath)) {
       try {
         const raw = fs.readFileSync(pkgPath, "utf8");
@@ -614,7 +873,7 @@ function findPackageJson(startDir) {
         return null;
       }
     }
-    const parent = path3.dirname(current);
+    const parent = path4.dirname(current);
     if (parent === current) break;
     current = parent;
   }
@@ -663,7 +922,7 @@ function resolvePluginVersion(options = {}) {
 }
 function stampVersion(options = {}) {
   const cwd = options.cwd ?? process.cwd();
-  const targetFile = options.targetFile ? path3.resolve(cwd, options.targetFile) : path3.resolve(cwd, "version.ts");
+  const targetFile = options.targetFile ? path4.resolve(cwd, options.targetFile) : path4.resolve(cwd, "version.ts");
   const version = resolvePluginVersion(options);
   const content = `// Auto-generated by paseo-plugin-helper. Do not edit.
 export const PLUGIN_VERSION = "${version}";
@@ -673,7 +932,7 @@ export const PLUGIN_VERSION = "${version}";
     existing = fs.readFileSync(targetFile, "utf8");
   }
   if (existing !== content) {
-    fs.mkdirSync(path3.dirname(targetFile), { recursive: true });
+    fs.mkdirSync(path4.dirname(targetFile), { recursive: true });
     fs.writeFileSync(targetFile, content, "utf8");
     return { version, targetFile, updated: true };
   }
@@ -891,46 +1150,46 @@ var McpConfigPaths = {
     const platform = process.platform;
     const home = os3.homedir();
     if (platform === "darwin") {
-      return path3.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+      return path4.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
     }
     if (platform === "win32") {
-      const appData = process.env.APPDATA || path3.join(home, "AppData", "Roaming");
-      return path3.join(appData, "Claude", "claude_desktop_config.json");
+      const appData = process.env.APPDATA || path4.join(home, "AppData", "Roaming");
+      return path4.join(appData, "Claude", "claude_desktop_config.json");
     }
-    const configDir = process.env.XDG_CONFIG_HOME || path3.join(home, ".config");
-    return path3.join(configDir, "Claude", "claude_desktop_config.json");
+    const configDir = process.env.XDG_CONFIG_HOME || path4.join(home, ".config");
+    return path4.join(configDir, "Claude", "claude_desktop_config.json");
   },
   /**
    * Claude Code CLI global configuration: ~/.claude.json
    */
   claudeCode() {
-    return path3.join(os3.homedir(), ".claude.json");
+    return path4.join(os3.homedir(), ".claude.json");
   },
   /**
    * OpenCode configuration path: ~/.config/opencode/opencode.json
    */
   openCode() {
     const home = os3.homedir();
-    const configDir = process.env.XDG_CONFIG_HOME || path3.join(home, ".config");
-    return path3.join(configDir, "opencode", "opencode.json");
+    const configDir = process.env.XDG_CONFIG_HOME || path4.join(home, ".config");
+    return path4.join(configDir, "opencode", "opencode.json");
   },
   /**
    * Cursor editor MCP configuration: ~/.cursor/mcp.json
    */
   cursor() {
-    return path3.join(os3.homedir(), ".cursor", "mcp.json");
+    return path4.join(os3.homedir(), ".cursor", "mcp.json");
   },
   /**
    * Gemini / Antigravity CLI configuration: ~/.gemini/config/mcp_config.json
    */
   gemini() {
-    return path3.join(os3.homedir(), ".gemini", "config", "mcp_config.json");
+    return path4.join(os3.homedir(), ".gemini", "config", "mcp_config.json");
   },
   /**
    * Pi CLI agent configuration: ~/.pi/config.json
    */
   pi() {
-    return path3.join(os3.homedir(), ".pi", "config.json");
+    return path4.join(os3.homedir(), ".pi", "config.json");
   }
 };
 function expandPath(targetPath) {
@@ -938,9 +1197,9 @@ function expandPath(targetPath) {
     return os3.homedir();
   }
   if (targetPath.startsWith("~/") || targetPath.startsWith("~\\")) {
-    return path3.join(os3.homedir(), targetPath.slice(2));
+    return path4.join(os3.homedir(), targetPath.slice(2));
   }
-  return path3.resolve(targetPath);
+  return path4.resolve(targetPath);
 }
 function isDeepEqual(a, b) {
   if (a === b) return true;
@@ -989,7 +1248,7 @@ function readConfigDocument(filePath) {
   return parseJsonc(raw);
 }
 function writeConfigAtomic(filePath, data) {
-  const dir = path3.dirname(filePath);
+  const dir = path4.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -1113,7 +1372,7 @@ function clearPluginCache() {
 }
 function readConfigPluginsFallback() {
   try {
-    const configPath = path3.join(os3.homedir(), ".paseo", "config.json");
+    const configPath = path4.join(os3.homedir(), ".paseo", "config.json");
     if (!fs.existsSync(configPath)) return [];
     const raw = fs.readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw);
@@ -1306,7 +1565,7 @@ async function discoverCustomPillConfigs(dirPath, logger) {
       if (!entry.isFile() || !entry.name.endsWith(".json") && !entry.name.endsWith(".jsonc")) {
         continue;
       }
-      const filePath = path3.join(dirPath, entry.name);
+      const filePath = path4.join(dirPath, entry.name);
       try {
         const rawContent = await fs.promises.readFile(filePath, "utf-8");
         const parsed = parseJsonc(rawContent);
@@ -1942,6 +2201,6 @@ function createWorkspaceBeacon(options = {}) {
   return new WorkspaceBeacon(options);
 }
 
-export { BEACON_COLORS, CpuSampler, CustomPillPoller, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, WorkspaceBeacon, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { BEACON_COLORS, CpuSampler, CustomPillPoller, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, WorkspaceBeacon, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

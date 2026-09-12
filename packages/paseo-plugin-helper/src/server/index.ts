@@ -1,5 +1,6 @@
 export * from "./storage.js";
 export * from "./settings.js";
+export * from "./shared-settings.js";
 export * from "./jsonc.js";
 export * from "./redact.js";
 export * from "./process.js";

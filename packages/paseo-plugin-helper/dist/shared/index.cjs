@@ -229,6 +229,17 @@ function defineSettingsContract(options) {
     ...description !== void 0 ? { description } : {}
   };
 }
+var SuiteSettingsSchema = zod.z.object({
+  suiteTitle: zod.z.string().default("xpufx Suite"),
+  accentColor: zod.z.string().default("#6366f1"),
+  density: zod.z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
+  showSuiteTabs: zod.z.boolean().default(true)
+});
+var SuiteSettingsContract = defineSettingsContract({
+  name: "xpufx.suite.settings",
+  schema: SuiteSettingsSchema,
+  description: "Shared xpufx suite settings"
+});
 
 // src/shared/async.ts
 var TimeoutError = class extends Error {
@@ -364,6 +375,8 @@ exports.CustomPillDefinitionSchema = CustomPillDefinitionSchema;
 exports.CustomPillModalSchema = CustomPillModalSchema;
 exports.CustomPillThresholdsSchema = CustomPillThresholdsSchema;
 exports.SettingsEmptyInputSchema = SettingsEmptyInputSchema;
+exports.SuiteSettingsContract = SuiteSettingsContract;
+exports.SuiteSettingsSchema = SuiteSettingsSchema;
 exports.TimeoutError = TimeoutError;
 exports.defineContract = defineContract;
 exports.defineRpc = defineRpc;
