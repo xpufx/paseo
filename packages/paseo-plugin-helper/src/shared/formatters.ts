@@ -127,6 +127,38 @@ export function formatNumber(num: number): string {
   return new Intl.NumberFormat("en-US").format(num);
 }
 
+export interface FormatCompactNumberOptions {
+  /** Number of decimal places when abbreviated (default: 1). */
+  decimals?: number;
+  /** Minimum threshold before abbreviating with K/M/B suffixes (default: 1000). */
+  threshold?: number;
+}
+
+/**
+ * Formats a count or token number into a compact string (e.g. 950 -> "950", 1250 -> "1.3k", 1450000 -> "1.5M").
+ * Ideal for pills, vitals chips, and narrow timeline badges.
+ */
+export function formatCompactNumber(
+  num: number,
+  options: FormatCompactNumberOptions = {},
+): string {
+  if (!Number.isFinite(num)) return "0";
+  const { decimals = 1, threshold = 1000 } = options;
+  const abs = Math.abs(num);
+  if (abs < threshold) return `${Math.round(num)}`;
+  const sign = num < 0 ? "-" : "";
+  if (abs >= 1_000_000_000) {
+    const val = (abs / 1_000_000_000).toFixed(decimals);
+    return `${sign}${val.replace(/\.0$/, "")}B`;
+  }
+  if (abs >= 1_000_000) {
+    const val = (abs / 1_000_000).toFixed(decimals);
+    return `${sign}${val.replace(/\.0$/, "")}M`;
+  }
+  const val = (abs / 1_000).toFixed(decimals);
+  return `${sign}${val.replace(/\.0$/, "")}k`;
+}
+
 export interface TruncateOptions {
   /** Ellipsis token to insert. Default: "…" */
   ellipsis?: string;

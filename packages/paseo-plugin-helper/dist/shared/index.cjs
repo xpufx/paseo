@@ -82,6 +82,23 @@ function formatNumber(num) {
   if (!Number.isFinite(num)) return "0";
   return new Intl.NumberFormat("en-US").format(num);
 }
+function formatCompactNumber(num, options = {}) {
+  if (!Number.isFinite(num)) return "0";
+  const { decimals = 1, threshold = 1e3 } = options;
+  const abs = Math.abs(num);
+  if (abs < threshold) return `${Math.round(num)}`;
+  const sign = num < 0 ? "-" : "";
+  if (abs >= 1e9) {
+    const val2 = (abs / 1e9).toFixed(decimals);
+    return `${sign}${val2.replace(/\.0$/, "")}B`;
+  }
+  if (abs >= 1e6) {
+    const val2 = (abs / 1e6).toFixed(decimals);
+    return `${sign}${val2.replace(/\.0$/, "")}M`;
+  }
+  const val = (abs / 1e3).toFixed(decimals);
+  return `${sign}${val.replace(/\.0$/, "")}k`;
+}
 function truncate(text, maxLength, suffix = "\u2026") {
   if (!text || text.length <= maxLength) return text;
   return text.slice(0, Math.max(0, maxLength - suffix.length)) + suffix;
@@ -352,6 +369,7 @@ exports.defineContract = defineContract;
 exports.defineRpc = defineRpc;
 exports.defineSettingsContract = defineSettingsContract;
 exports.formatBytes = formatBytes;
+exports.formatCompactNumber = formatCompactNumber;
 exports.formatDuration = formatDuration;
 exports.formatNumber = formatNumber;
 exports.formatPillDisplay = formatPillDisplay;
