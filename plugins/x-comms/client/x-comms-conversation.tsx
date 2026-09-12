@@ -3,8 +3,9 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Clipboard, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Clipboard, Pressable, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
+import { TextInput } from "paseo-plugin-helper/client";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
 import { formatCounterparty, formatPeerDisplay, splitCounterparty, useCounterpartyLabel, usePeerDisplay, type CounterpartyRef } from "./peer-label";
@@ -363,16 +364,8 @@ export function CrossDaemonConversation({
         value={draft}
         onChangeText={setDraftCached}
         placeholder="Message the selected counterparty…"
-        placeholderTextColor={theme.colors.foregroundMuted}
-        style={{
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          borderRadius: 6,
-          padding: 10,
-          color: theme.colors.foreground,
-          fontSize: 13,
-          marginBottom: 8,
-        }}
+        style={{ marginBottom: 8 }}
+        inputStyle={{ fontSize: 13 }}
         multiline
       />
       <Pressable

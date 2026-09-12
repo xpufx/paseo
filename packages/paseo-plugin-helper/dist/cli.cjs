@@ -105,6 +105,18 @@ var AUDIT_RULES = {
     description: "Client code uses paseo-plugin-helper/client components or hooks but never calls initClientHelpers(). Every helper component throws without it.",
     replacement: "Call initClientHelpers({ Icon, Modal, useRpc, useToast }) once in the client entry with version-correct SDK imports",
     docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/client.md"
+  },
+  "no-bare-react-native-ui": {
+    id: "no-bare-react-native-ui",
+    severity: "warn",
+    description: "Bare React Native UI primitive imported in plugin client code.",
+    replacement: "Import ModalBody, Toggle, TextInput, Button from 'paseo-plugin-helper/client'"
+  },
+  "no-hardcoded-modal-dimensions": {
+    id: "no-hardcoded-modal-dimensions",
+    severity: "warn",
+    description: "Hardcoded rigid minWidth / minHeight (> 350) detected on modal or container style.",
+    replacement: "Use fluid layout (e.g. minWidth: 0, flexShrink: 1) with ModalBody"
   }
 };
 
@@ -436,6 +448,51 @@ function auditProject(targetDir, options = {}) {
             docUrl: rule.docUrl
           });
           break;
+        }
+      }
+    }
+    const isClientFile = relPath.split(path__default.default.sep).includes("client") || /\.client\.(tsx?|jsx?|mjs|cjs)$/.test(relPath);
+    if (isClientFile && !inTest && !inBuildOrTool) {
+      const importRe = /import\s+(?!type\b)([^;]*?)\s+from\s+["']react-native["']/g;
+      let match;
+      while ((match = importRe.exec(content)) !== null) {
+        const clause = match[1];
+        const valueClause = clause.replace(/type\s+(ScrollView|Switch|TextInput|Button)\b/g, "");
+        if (/\b(ScrollView|Switch|TextInput|Button)\b/.test(valueClause)) {
+          const before = content.slice(0, match.index);
+          const lineNum = before.split("\n").length;
+          const snippetLine = lines[lineNum - 1]?.trim() || match[0].split("\n")[0].trim();
+          const rule = AUDIT_RULES["no-bare-react-native-ui"];
+          issues.push({
+            ruleId: rule.id,
+            severity: rule.severity,
+            file: relPath,
+            line: lineNum,
+            column: Math.max(0, (lines[lineNum - 1] ?? "").indexOf((lines[lineNum - 1] ?? "").trim())),
+            message: rule.description,
+            codeSnippet: snippetLine,
+            replacement: rule.replacement,
+            docUrl: rule.docUrl
+          });
+        }
+      }
+    }
+    if (isClientFile && !inTest && !inBuildOrTool) {
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (/minWidth\s*:\s*([4-9]\d{2}|\d{4,})/.test(line) || /minHeight\s*:\s*([5-9]\d{2}|\d{4,})/.test(line)) {
+          const rule = AUDIT_RULES["no-hardcoded-modal-dimensions"];
+          issues.push({
+            ruleId: rule.id,
+            severity: rule.severity,
+            file: relPath,
+            line: i + 1,
+            column: line.indexOf(line.trim()),
+            message: rule.description,
+            codeSnippet: line.trim(),
+            replacement: rule.replacement,
+            docUrl: rule.docUrl
+          });
         }
       }
     }

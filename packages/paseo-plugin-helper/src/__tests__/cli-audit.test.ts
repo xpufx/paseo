@@ -223,8 +223,7 @@ describe("Audit CLI & Scanner", () => {
     }
   });
 
-  it("flags bare Node builtins in client code, not just node: prefix", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-bare-"));
+  it("flags bare Node builtins in client code, not just node: prefix", () => {    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-bare-"));
 
     try {
       fs.writeFileSync(
@@ -244,6 +243,74 @@ describe("Audit CLI & Scanner", () => {
 
       const report = auditProject(tmpDir);
       expect(report.issues.filter((i) => i.ruleId === "v8-crossed-import")).toHaveLength(2);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags bare React Native UI primitives in client code", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-rnui-"));
+
+    try {
+      fs.mkdirSync(path.join(tmpDir, "client"));
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "bad.tsx"),
+        `import { ScrollView, Switch, TextInput, Button, Text, View } from "react-native";\nexport const v = 1;`,
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "type-only.tsx"),
+        `import type { ScrollView, TextInput } from "react-native";\nimport { Text, View, StyleSheet } from "react-native";\nexport const v = 1;`,
+      );
+
+      const report = auditProject(tmpDir);
+      const uiIssues = report.issues.filter((i) => i.ruleId === "no-bare-react-native-ui");
+      expect(uiIssues).toHaveLength(1);
+      expect(uiIssues[0].file).toContain("bad.tsx");
+      expect(uiIssues[0].severity).toBe("warn");
+      expect(uiIssues[0].message).toBe("Bare React Native UI primitive imported in plugin client code.");
+      expect(uiIssues[0].replacement).toContain("paseo-plugin-helper/client");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes clean client code using paseo-plugin-helper/client", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-rnui-clean-"));
+
+    try {
+      fs.mkdirSync(path.join(tmpDir, "client"));
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "good.tsx"),
+        `import { Text, View } from "react-native";\nimport { ModalBody, Toggle, TextInput, Button } from "paseo-plugin-helper/client";\nexport const v = 1;`,
+      );
+
+      const report = auditProject(tmpDir);
+      expect(report.issues.filter((i) => i.ruleId === "no-bare-react-native-ui")).toHaveLength(0);
+      expect(report.issues.filter((i) => i.ruleId === "no-hardcoded-modal-dimensions")).toHaveLength(0);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags hardcoded rigid modal dimensions in client styles", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-dims-"));
+
+    try {
+      fs.mkdirSync(path.join(tmpDir, "client"));
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "bad.tsx"),
+        `import { View } from "react-native";\nexport const styles = { modal: { minWidth: 460 } };\nexport const tall = { minHeight: 600 };`,
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "good.tsx"),
+        `import { View } from "react-native";\nexport const styles = { fluid: { minWidth: 0, flexShrink: 1 }, btn: { minWidth: 44, minHeight: 44 } };`,
+      );
+
+      const report = auditProject(tmpDir);
+      const dimIssues = report.issues.filter((i) => i.ruleId === "no-hardcoded-modal-dimensions");
+      expect(dimIssues).toHaveLength(2);
+      expect(dimIssues.every((i) => i.severity === "warn")).toBe(true);
+      expect(dimIssues[0].replacement).toContain("ModalBody");
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -92,4 +92,16 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
     replacement: "Call initClientHelpers({ Icon, Modal, useRpc, useToast }) once in the client entry with version-correct SDK imports",
     docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/client.md",
   },
+  "no-bare-react-native-ui": {
+    id: "no-bare-react-native-ui",
+    severity: "warn",
+    description: "Bare React Native UI primitive imported in plugin client code.",
+    replacement: "Import ModalBody, Toggle, TextInput, Button from 'paseo-plugin-helper/client'",
+  },
+  "no-hardcoded-modal-dimensions": {
+    id: "no-hardcoded-modal-dimensions",
+    severity: "warn",
+    description: "Hardcoded rigid minWidth / minHeight (> 350) detected on modal or container style.",
+    replacement: "Use fluid layout (e.g. minWidth: 0, flexShrink: 1) with ModalBody",
+  },
 };

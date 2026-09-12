@@ -438,6 +438,62 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
         }
       }
     }
+
+    // UI conformance rules apply to client files only.
+    const isClientFile =
+      relPath.split(path.sep).includes("client") ||
+      /\.client\.(tsx?|jsx?|mjs|cjs)$/.test(relPath);
+
+    // Rule: no-bare-react-native-ui
+    if (isClientFile && !inTest && !inBuildOrTool) {
+      const importRe = /import\s+(?!type\b)([^;]*?)\s+from\s+["']react-native["']/g;
+      let match: RegExpExecArray | null;
+      while ((match = importRe.exec(content)) !== null) {
+        const clause = match[1];
+        const valueClause = clause.replace(/type\s+(ScrollView|Switch|TextInput|Button)\b/g, "");
+        if (/\b(ScrollView|Switch|TextInput|Button)\b/.test(valueClause)) {
+          const before = content.slice(0, match.index);
+          const lineNum = before.split("\n").length;
+          const snippetLine = lines[lineNum - 1]?.trim() || match[0].split("\n")[0].trim();
+          const rule = AUDIT_RULES["no-bare-react-native-ui"];
+          issues.push({
+            ruleId: rule.id,
+            severity: rule.severity,
+            file: relPath,
+            line: lineNum,
+            column: Math.max(0, (lines[lineNum - 1] ?? "").indexOf((lines[lineNum - 1] ?? "").trim())),
+            message: rule.description,
+            codeSnippet: snippetLine,
+            replacement: rule.replacement,
+            docUrl: rule.docUrl,
+          });
+        }
+      }
+    }
+
+    // Rule: no-hardcoded-modal-dimensions
+    if (isClientFile && !inTest && !inBuildOrTool) {
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (
+          /minWidth\s*:\s*([4-9]\d{2}|\d{4,})/.test(line) ||
+          /minHeight\s*:\s*([5-9]\d{2}|\d{4,})/.test(line)
+        ) {
+          const rule = AUDIT_RULES["no-hardcoded-modal-dimensions"];
+          issues.push({
+            ruleId: rule.id,
+            severity: rule.severity,
+            file: relPath,
+            line: i + 1,
+            column: line.indexOf(line.trim()),
+            message: rule.description,
+            codeSnippet: line.trim(),
+            replacement: rule.replacement,
+            docUrl: rule.docUrl,
+          });
+        }
+      }
+    }
   }
 
   // Project-level checks needing whole-tree knowledge.

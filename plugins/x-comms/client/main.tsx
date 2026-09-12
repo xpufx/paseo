@@ -1,10 +1,10 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
 import React, { useCallback, useMemo, useState } from "react";
-import { Clipboard, Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { Modal } from "@getpaseo/plugin/client/react-native";
+import { Clipboard, Pressable, Text, View } from "react-native";
+import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { truncate } from "paseo-plugin-helper/shared";
-import { Badge, EmptyState, StatusDot } from "paseo-plugin-helper/client";
+import { Badge, EmptyState, StatusDot, TextInput } from "paseo-plugin-helper/client";
 import { formatPeerDisplay } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 import {
@@ -495,7 +495,8 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
               <View style={styles.cardRow}>
                 <Text style={styles.label}>Name</Text>
                 <TextInput
-                  style={styles.input}
+                  mono
+                  inputStyle={styles.input}
                   value={draft.name}
                   onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: text, value: draft.value } }))}
                   autoCapitalize="none"
@@ -503,7 +504,8 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
                 />
                 <Text style={styles.label}>Host value</Text>
                 <TextInput
-                  style={styles.input}
+                  mono
+                  inputStyle={styles.input}
                   value={draft.value}
                   onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: draft.name, value: text } }))}
                   autoCapitalize="none"
@@ -698,7 +700,8 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
       <Text style={styles.section}>Add daemon</Text>
       <Text style={styles.label}>Host (the daemon's real name; derived for relay links)</Text>
       <TextInput
-        style={styles.input}
+        mono
+        inputStyle={styles.input}
         value={newName}
         onChangeText={setNewName}
         autoCapitalize="none"
@@ -710,13 +713,13 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
         return mismatch ? <Text style={styles.error}>{mismatch}</Text> : null;
       })() : null}
       <TextInput
-        style={styles.input}
+        mono
+        inputStyle={styles.input}
         value={newValue}
         onChangeText={(text) => { setNewValue(text); deriveHost(text); }}
         autoCapitalize="none"
         autoCorrect={false}
         placeholder={HOST_FORM_HINT}
-        placeholderTextColor={theme.colors.foregroundMuted}
       />
       {add.error ? <Text style={styles.error}>{add.error.message}</Text> : null}
       {adding ? <Text style={styles.detail}>Probing host…</Text> : null}
@@ -812,13 +815,14 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
 
       <Text style={styles.label}>Message</Text>
       <TextInput
-        style={[styles.input, { minHeight: 90 }]}
+        mono
+        inputStyle={[styles.input, { minHeight: 90, textAlignVertical: "top" }]}
         multiline
+        numberOfLines={4}
         value={introMessage}
         onChangeText={setIntroMessage}
         autoCapitalize="none"
         autoCorrect={false}
-        textAlignVertical="top"
       />
       {introduce.error ? <Text style={styles.error}>{introduce.error.message}</Text> : null}
       {!introFirst || !introSecond ? (
