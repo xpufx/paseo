@@ -4,22 +4,24 @@ import path from "node:path";
 import { createSharedPluginSettings } from "../dist/server/index.js";
 import { SuiteSettingsSchema } from "../dist/shared/index.js";
 
-const baseDir = path.join(os.tmpdir(), `suite-demo-${Date.now()}`);
+const isLive = process.argv.includes("--live");
+const baseDir = isLive ? undefined : path.join(os.tmpdir(), `suite-demo-${Date.now()}`);
 const suite = "xpufx-suite";
 
 const pluginA = createSharedPluginSettings({
   suite,
   schema: SuiteSettingsSchema,
-  baseDir,
+  ...(baseDir ? { baseDir } : {}),
   description: "Shared xpufx suite settings (Plugin A: demo side)",
 });
 const pluginB = createSharedPluginSettings({
   suite,
   schema: SuiteSettingsSchema,
-  baseDir,
+  ...(baseDir ? { baseDir } : {}),
   description: "Shared xpufx suite settings (Plugin B: top side)",
 });
 
+console.log(`mode: ${isLive ? "LIVE (~/.paseo storage)" : "ISOLATED TEMP DIR (pass --live to target ~/.paseo)"}`);
 console.log(`shared file: ${pluginA.filePath}`);
 console.log(`same file for both plugins: ${pluginA.filePath === pluginB.filePath}`);
 console.log("initial (B):", JSON.stringify(pluginB.read()));
@@ -48,5 +50,7 @@ console.log(synced ? "OK: Plugin B reflects Plugin A via shared suite file" : "F
 
 pluginA.dispose();
 pluginB.dispose();
-fs.rmSync(baseDir, { recursive: true, force: true });
+if (baseDir) {
+  fs.rmSync(baseDir, { recursive: true, force: true });
+}
 process.exit(synced ? 0 : 1);
