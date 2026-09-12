@@ -1,12 +1,20 @@
-import { useRpc, type PluginClientContext, type PluginComposerPillProps } from "@getpaseo/plugin/client";
+import { useRpc } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { AboutSection, Tabs, Toggle, registerComposerPill } from "paseo-plugin-helper/client";
+import {
+  AboutSection,
+  Tabs,
+  Toggle,
+  registerComposerPill,
+  type ComposerPillRegistrar,
+  type RenderModalProps,
+  type RenderPillProps,
+} from "paseo-plugin-helper/client";
 import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { CrossDaemonConversation } from "./x-comms-conversation";
 import { uiPrefsGetRpc, uiPrefsSetRpc } from "../shared/registry";
 
-function CrossDaemonPill(props: PluginComposerPillProps) {
+function CrossDaemonPill(props: RenderPillProps) {
   const { theme } = props;
   const style = useMemo(
     () => ({ color: theme.colors.accent, flexShrink: 1, fontSize: 10 }),
@@ -22,7 +30,7 @@ function CrossDaemonPill(props: PluginComposerPillProps) {
   );
 }
 
-function XCommsSettings({ theme }: { theme: PluginComposerPillProps["theme"] }) {
+function XCommsSettings({ theme }: { theme: RenderPillProps["theme"] }) {
   const callGet = useRpc(uiPrefsGetRpc);
   const callSet = useRpc(uiPrefsSetRpc);
   const [presence, setPresence] = useState<boolean | null>(null);
@@ -93,7 +101,7 @@ function XCommsSettings({ theme }: { theme: PluginComposerPillProps["theme"] }) 
   );
 }
 
-function XCommsModalContent({ theme, agentId }: { theme: PluginComposerPillProps["theme"]; agentId: string }) {
+function XCommsModalContent({ theme, agentId }: { theme: RenderModalProps["theme"]; agentId: string }) {
   const [tab, setTab] = useState("chat");
   return (
     <>
@@ -128,7 +136,7 @@ function XCommsModalContent({ theme, agentId }: { theme: PluginComposerPillProps
  * unmount, modal open state, theme) is managed by registerComposerPill; this
  * module only supplies the pill body and modal content.
  */
-export function contributeClient(client: PluginClientContext) {
+export function contributeClient(client: ComposerPillRegistrar) {
   return registerComposerPill(client, {
     id: "x-comms",
     title: "X-comms",

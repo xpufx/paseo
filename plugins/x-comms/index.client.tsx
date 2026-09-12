@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers } from "paseo-plugin-helper/client";
+import { initClientHelpers, type ComposerPillRegistrar } from "paseo-plugin-helper/client";
 import { MainSurface } from "./client/main";
 import { crossDaemonTransformer, crossDaemonRenderer } from "./client/x-comms-timeline";
 import { crossDaemonToolCallTransformer, crossDaemonToolCallRenderer } from "./client/x-comms-tool-call";
@@ -29,5 +29,6 @@ export default function contribute(client: PluginClientContext) {
     icon: "PhoneOutgoing",
     surface: "main",
   });
-  return contributeClient(client);
+  // Paseo 0.8 client is button-only; registerComposerPill probes the host shape at runtime.
+  return contributeClient(client as unknown as ComposerPillRegistrar);
 }
