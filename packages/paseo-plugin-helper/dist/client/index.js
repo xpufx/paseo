@@ -2,6 +2,7 @@ import React8, { createContext, useMemo, useContext, useRef, useEffect, useState
 import { StyleSheet, Appearance, Animated, View, Pressable, ActivityIndicator, Text, ScrollView, Platform, TextInput as TextInput$1, Image, RefreshControl, Linking, Easing } from 'react-native';
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { z } from 'zod';
 
 var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
   get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
@@ -4170,6 +4171,133 @@ function usePluginSettings(contract, options = {}) {
     refetch: () => query.refetch()
   };
 }
+
+// src/shared/rpc.ts
+var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
+function defineRpc(definition) {
+  const name = definition.name.trim();
+  if (!RPC_NAME.test(name)) {
+    throw new Error(`Invalid plugin RPC method: ${definition.name}`);
+  }
+  return { ...definition, name };
+}
+function defineContract(options) {
+  const contract = defineRpc({
+    name: options.name,
+    input: options.input,
+    output: options.output
+  });
+  if (options.description) {
+    Object.defineProperty(contract, "description", {
+      value: options.description,
+      enumerable: true,
+      writable: false
+    });
+  }
+  return contract;
+}
+
+// src/shared/settings.ts
+var SettingsEmptyInputSchema = z.union([z.void(), z.record(z.string(), z.unknown())]).optional();
+function stripDefaults(schema) {
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+  if (schema instanceof z.ZodDefault) {
+    return stripDefaults(schema._def.innerType);
+  }
+  if (schema instanceof z.ZodOptional) {
+    return stripDefaults(schema._def.innerType).optional();
+  }
+  if (schema instanceof z.ZodNullable) {
+    return stripDefaults(schema._def.innerType).nullable();
+  }
+  if (schema._def && schema._def.schema) {
+    return stripDefaults(schema._def.schema);
+  }
+  if (schema instanceof z.ZodObject) {
+    const shape = schema.shape;
+    const newShape = {};
+    for (const key of Object.keys(shape)) {
+      newShape[key] = stripDefaults(shape[key]).optional();
+    }
+    let res = z.object(newShape);
+    const unknownKeys = schema._def?.unknownKeys;
+    if (unknownKeys === "passthrough") {
+      res = res.passthrough();
+    } else if (unknownKeys === "strict") {
+      res = res.strict();
+    }
+    return res;
+  }
+  return typeof schema.optional === "function" ? schema.optional() : schema;
+}
+function defineSettingsContract(options) {
+  const { name, schema, defaultData, description } = options;
+  let computedDefaults;
+  try {
+    computedDefaults = schema.parse(defaultData ?? {});
+  } catch {
+    computedDefaults = defaultData ?? {};
+  }
+  const sanitizedName = name.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const partialSchema = schema instanceof z.ZodObject ? stripDefaults(schema) : typeof schema.partial === "function" ? schema.partial() : z.record(z.string(), z.unknown());
+  const getContract = defineContract({
+    name: `${sanitizedName}.get`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Get ${description}` : `Get ${name} settings`
+  });
+  const updateContract = defineContract({
+    name: `${sanitizedName}.update`,
+    input: partialSchema,
+    output: schema,
+    description: description ? `Update ${description}` : `Update ${name} settings`
+  });
+  const resetContract = defineContract({
+    name: `${sanitizedName}.reset`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Reset ${description}` : `Reset ${name} settings to defaults`
+  });
+  return {
+    name: sanitizedName,
+    schema,
+    defaultSettings: computedDefaults,
+    get: getContract,
+    update: updateContract,
+    reset: resetContract,
+    ...description !== void 0 ? { description } : {}
+  };
+}
+
+// src/shared/suite-settings.ts
+var SuiteSettingsSchema = z.object({
+  suiteTitle: z.string().default("xpufx Suite"),
+  accentColor: z.string().default("#6366f1"),
+  density: z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
+  showSuiteTabs: z.boolean().default(true)
+});
+var SuiteSettingsContract = defineSettingsContract({
+  name: "xpufx.suite.settings",
+  schema: SuiteSettingsSchema,
+  description: "Shared xpufx suite settings"
+});
+
+// src/client/shared-settings.ts
+function useSharedPluginSettings(contract, options = {}) {
+  const { pollIntervalMs = 2e3, ...rest } = options;
+  return usePluginSettings(contract, {
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    ...rest,
+    refetchInterval: rest.refetchInterval ?? pollIntervalMs
+  });
+}
+function useSuiteSettings(options = {}) {
+  return useSharedPluginSettings(SuiteSettingsContract, options);
+}
 var WRAPPER_TYPES = /* @__PURE__ */ new Set([
   "default",
   "ZodDefault",
@@ -4554,6 +4682,6 @@ function Icon(props) {
   return /* @__PURE__ */ jsx(HostIconComponent, { ...props });
 }
 
-export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CommandBox, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, SectionHeader, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery };
+export { AboutSection, ActionBar, AttentionBeacon, Badge, Button, Card, CardHeader, CodeBlock, Collapsible, CommandBox, CustomPillBody, CustomPillModalContent, DataTable, EmptyState, FALLBACK_ACCENT_FOREGROUND, FormRow, Icon, KeyValue, KeyValueGroup, MetricGauge, ModalBody, PASEO_HOST_CSS_VARIABLES, PluginThemeProvider, ProgressBar, REFRESH_INTERVALS, Responsive, SearchInput, SectionHeader, StatusDot, Tabs, TextInput, Toggle, TruncatedText, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getClientHost, getContrastColor, getDefaultTheme, getLuminance, getOptionalClientHost, getStatusColor, getTouchTargetMin, getVariantPalette, initClientHelpers, isClientHostInitialized, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, selectHostScrollView, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

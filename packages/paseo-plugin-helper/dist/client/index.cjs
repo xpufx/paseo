@@ -4,6 +4,7 @@ var React8 = require('react');
 var reactNative = require('react-native');
 var jsxRuntime = require('react/jsx-runtime');
 var reactQuery = require('@tanstack/react-query');
+var zod = require('zod');
 
 function _interopDefault (e) { return e && e.__esModule ? e : { default: e }; }
 
@@ -4176,6 +4177,133 @@ function usePluginSettings(contract, options = {}) {
     refetch: () => query.refetch()
   };
 }
+
+// src/shared/rpc.ts
+var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
+function defineRpc(definition) {
+  const name = definition.name.trim();
+  if (!RPC_NAME.test(name)) {
+    throw new Error(`Invalid plugin RPC method: ${definition.name}`);
+  }
+  return { ...definition, name };
+}
+function defineContract(options) {
+  const contract = defineRpc({
+    name: options.name,
+    input: options.input,
+    output: options.output
+  });
+  if (options.description) {
+    Object.defineProperty(contract, "description", {
+      value: options.description,
+      enumerable: true,
+      writable: false
+    });
+  }
+  return contract;
+}
+
+// src/shared/settings.ts
+var SettingsEmptyInputSchema = zod.z.union([zod.z.void(), zod.z.record(zod.z.string(), zod.z.unknown())]).optional();
+function stripDefaults(schema) {
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+  if (schema instanceof zod.z.ZodDefault) {
+    return stripDefaults(schema._def.innerType);
+  }
+  if (schema instanceof zod.z.ZodOptional) {
+    return stripDefaults(schema._def.innerType).optional();
+  }
+  if (schema instanceof zod.z.ZodNullable) {
+    return stripDefaults(schema._def.innerType).nullable();
+  }
+  if (schema._def && schema._def.schema) {
+    return stripDefaults(schema._def.schema);
+  }
+  if (schema instanceof zod.z.ZodObject) {
+    const shape = schema.shape;
+    const newShape = {};
+    for (const key of Object.keys(shape)) {
+      newShape[key] = stripDefaults(shape[key]).optional();
+    }
+    let res = zod.z.object(newShape);
+    const unknownKeys = schema._def?.unknownKeys;
+    if (unknownKeys === "passthrough") {
+      res = res.passthrough();
+    } else if (unknownKeys === "strict") {
+      res = res.strict();
+    }
+    return res;
+  }
+  return typeof schema.optional === "function" ? schema.optional() : schema;
+}
+function defineSettingsContract(options) {
+  const { name, schema, defaultData, description } = options;
+  let computedDefaults;
+  try {
+    computedDefaults = schema.parse(defaultData ?? {});
+  } catch {
+    computedDefaults = defaultData ?? {};
+  }
+  const sanitizedName = name.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const partialSchema = schema instanceof zod.z.ZodObject ? stripDefaults(schema) : typeof schema.partial === "function" ? schema.partial() : zod.z.record(zod.z.string(), zod.z.unknown());
+  const getContract = defineContract({
+    name: `${sanitizedName}.get`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Get ${description}` : `Get ${name} settings`
+  });
+  const updateContract = defineContract({
+    name: `${sanitizedName}.update`,
+    input: partialSchema,
+    output: schema,
+    description: description ? `Update ${description}` : `Update ${name} settings`
+  });
+  const resetContract = defineContract({
+    name: `${sanitizedName}.reset`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Reset ${description}` : `Reset ${name} settings to defaults`
+  });
+  return {
+    name: sanitizedName,
+    schema,
+    defaultSettings: computedDefaults,
+    get: getContract,
+    update: updateContract,
+    reset: resetContract,
+    ...description !== void 0 ? { description } : {}
+  };
+}
+
+// src/shared/suite-settings.ts
+var SuiteSettingsSchema = zod.z.object({
+  suiteTitle: zod.z.string().default("xpufx Suite"),
+  accentColor: zod.z.string().default("#6366f1"),
+  density: zod.z.enum(["compact", "comfortable", "spacious"]).default("comfortable"),
+  showSuiteTabs: zod.z.boolean().default(true)
+});
+var SuiteSettingsContract = defineSettingsContract({
+  name: "xpufx.suite.settings",
+  schema: SuiteSettingsSchema,
+  description: "Shared xpufx suite settings"
+});
+
+// src/client/shared-settings.ts
+function useSharedPluginSettings(contract, options = {}) {
+  const { pollIntervalMs = 2e3, ...rest } = options;
+  return usePluginSettings(contract, {
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    ...rest,
+    refetchInterval: rest.refetchInterval ?? pollIntervalMs
+  });
+}
+function useSuiteSettings(options = {}) {
+  return useSharedPluginSettings(SuiteSettingsContract, options);
+}
 var WRAPPER_TYPES = /* @__PURE__ */ new Set([
   "default",
   "ZodDefault",
@@ -4640,5 +4768,7 @@ exports.usePluginTheme = usePluginTheme;
 exports.useResponsive = useResponsive;
 exports.useRpcMutation = useRpcMutation;
 exports.useRpcQuery = useRpcQuery;
+exports.useSharedPluginSettings = useSharedPluginSettings;
+exports.useSuiteSettings = useSuiteSettings;
 //# sourceMappingURL=index.cjs.map
 //# sourceMappingURL=index.cjs.map

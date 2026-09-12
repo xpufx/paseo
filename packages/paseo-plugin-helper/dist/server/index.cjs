@@ -1,16 +1,16 @@
 'use strict';
 
 var fs = require('fs');
-var path3 = require('path');
+var path4 = require('path');
 var os3 = require('os');
+var zod = require('zod');
 var child_process = require('child_process');
 var net = require('net');
-var zod = require('zod');
 
 function _interopDefault (e) { return e && e.__esModule ? e : { default: e }; }
 
 var fs__default = /*#__PURE__*/_interopDefault(fs);
-var path3__default = /*#__PURE__*/_interopDefault(path3);
+var path4__default = /*#__PURE__*/_interopDefault(path4);
 var os3__default = /*#__PURE__*/_interopDefault(os3);
 var net__default = /*#__PURE__*/_interopDefault(net);
 
@@ -39,22 +39,22 @@ var PluginStorage = class {
     const namespace = options.namespace ?? "xpufx-plugins";
     if (options.baseDir) {
       this.namespaceDir = options.baseDir;
-      this.pluginDir = path3__default.default.join(options.baseDir, pluginId);
+      this.pluginDir = path4__default.default.join(options.baseDir, pluginId);
       this.legacyPluginDir = options.legacyDir ?? null;
     } else {
-      this.namespaceDir = path3__default.default.join(os3__default.default.homedir(), ".paseo", namespace);
-      this.pluginDir = path3__default.default.join(this.namespaceDir, pluginId);
-      this.legacyPluginDir = options.legacyDir ?? path3__default.default.join(os3__default.default.homedir(), ".paseo", pluginId);
+      this.namespaceDir = path4__default.default.join(os3__default.default.homedir(), ".paseo", namespace);
+      this.pluginDir = path4__default.default.join(this.namespaceDir, pluginId);
+      this.legacyPluginDir = options.legacyDir ?? path4__default.default.join(os3__default.default.homedir(), ".paseo", pluginId);
     }
-    this.filePath = path3__default.default.join(this.pluginDir, filename);
-    this.legacyFilePath = this.legacyPluginDir ? path3__default.default.join(this.legacyPluginDir, filename) : null;
+    this.filePath = path4__default.default.join(this.pluginDir, filename);
+    this.legacyFilePath = this.legacyPluginDir ? path4__default.default.join(this.legacyPluginDir, filename) : null;
   }
   ensureDir() {
     if (this.namespaceDir && !fs__default.default.existsSync(this.namespaceDir)) {
       fs__default.default.mkdirSync(this.namespaceDir, { recursive: true });
     }
     if (this.namespaceDir) {
-      const readmePath = path3__default.default.join(this.namespaceDir, "README.md");
+      const readmePath = path4__default.default.join(this.namespaceDir, "README.md");
       if (!fs__default.default.existsSync(readmePath)) {
         try {
           fs__default.default.writeFileSync(readmePath, DEFAULT_NAMESPACE_README, "utf8");
@@ -62,7 +62,7 @@ var PluginStorage = class {
         }
       }
     }
-    const dir = path3__default.default.dirname(this.filePath);
+    const dir = path4__default.default.dirname(this.filePath);
     if (!fs__default.default.existsSync(dir)) {
       fs__default.default.mkdirSync(dir, { recursive: true });
     }
@@ -221,7 +221,7 @@ var PluginStorage = class {
       for (const entry of entries) {
         if (entry.isFile()) {
           stats.fileCount++;
-          const target = path3__default.default.join(this.pluginDir, entry.name);
+          const target = path4__default.default.join(this.pluginDir, entry.name);
           const st = await fs__default.default.promises.stat(target);
           stats.totalBytes += st.size;
           if (!stats.lastModified || st.mtime > stats.lastModified) {
@@ -289,6 +289,265 @@ function createSettingsHandlers(contract, storage, options = {}) {
         await options.onReset(fresh, prev);
       }
       return fresh;
+    }
+  };
+}
+
+// src/shared/rpc.ts
+var RPC_NAME = /^[a-z][a-z0-9._-]*$/;
+function defineRpc(definition) {
+  const name = definition.name.trim();
+  if (!RPC_NAME.test(name)) {
+    throw new Error(`Invalid plugin RPC method: ${definition.name}`);
+  }
+  return { ...definition, name };
+}
+function defineContract(options) {
+  const contract = defineRpc({
+    name: options.name,
+    input: options.input,
+    output: options.output
+  });
+  if (options.description) {
+    Object.defineProperty(contract, "description", {
+      value: options.description,
+      enumerable: true,
+      writable: false
+    });
+  }
+  return contract;
+}
+
+// src/shared/settings.ts
+var SettingsEmptyInputSchema = zod.z.union([zod.z.void(), zod.z.record(zod.z.string(), zod.z.unknown())]).optional();
+function stripDefaults(schema) {
+  if (!schema || typeof schema !== "object") {
+    return schema;
+  }
+  if (schema instanceof zod.z.ZodDefault) {
+    return stripDefaults(schema._def.innerType);
+  }
+  if (schema instanceof zod.z.ZodOptional) {
+    return stripDefaults(schema._def.innerType).optional();
+  }
+  if (schema instanceof zod.z.ZodNullable) {
+    return stripDefaults(schema._def.innerType).nullable();
+  }
+  if (schema._def && schema._def.schema) {
+    return stripDefaults(schema._def.schema);
+  }
+  if (schema instanceof zod.z.ZodObject) {
+    const shape = schema.shape;
+    const newShape = {};
+    for (const key of Object.keys(shape)) {
+      newShape[key] = stripDefaults(shape[key]).optional();
+    }
+    let res = zod.z.object(newShape);
+    const unknownKeys = schema._def?.unknownKeys;
+    if (unknownKeys === "passthrough") {
+      res = res.passthrough();
+    } else if (unknownKeys === "strict") {
+      res = res.strict();
+    }
+    return res;
+  }
+  return typeof schema.optional === "function" ? schema.optional() : schema;
+}
+function defineSettingsContract(options) {
+  const { name, schema, defaultData, description } = options;
+  let computedDefaults;
+  try {
+    computedDefaults = schema.parse(defaultData ?? {});
+  } catch {
+    computedDefaults = defaultData ?? {};
+  }
+  const sanitizedName = name.trim().toLowerCase().replace(/[^a-z0-9._-]/g, "_");
+  const partialSchema = schema instanceof zod.z.ZodObject ? stripDefaults(schema) : typeof schema.partial === "function" ? schema.partial() : zod.z.record(zod.z.string(), zod.z.unknown());
+  const getContract = defineContract({
+    name: `${sanitizedName}.get`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Get ${description}` : `Get ${name} settings`
+  });
+  const updateContract = defineContract({
+    name: `${sanitizedName}.update`,
+    input: partialSchema,
+    output: schema,
+    description: description ? `Update ${description}` : `Update ${name} settings`
+  });
+  const resetContract = defineContract({
+    name: `${sanitizedName}.reset`,
+    input: SettingsEmptyInputSchema,
+    output: schema,
+    description: description ? `Reset ${description}` : `Reset ${name} settings to defaults`
+  });
+  return {
+    name: sanitizedName,
+    schema,
+    defaultSettings: computedDefaults,
+    get: getContract,
+    update: updateContract,
+    reset: resetContract,
+    ...description !== void 0 ? { description } : {}
+  };
+}
+
+// src/server/shared-settings.ts
+function safeSerialize(value) {
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return "";
+  }
+}
+function createSharedPluginSettings(options) {
+  const {
+    suite,
+    filename = "settings.json",
+    schema,
+    defaultData,
+    description,
+    namespace,
+    baseDir,
+    watchDebounceMs = 25
+  } = options;
+  const contractName = options.contractName ?? `${suite}.shared-settings`;
+  const contract = defineSettingsContract({
+    name: contractName,
+    schema,
+    ...defaultData !== void 0 ? { defaultData } : {},
+    ...description !== void 0 ? { description } : {}
+  });
+  const storage = new PluginStorage(suite, filename, {
+    ...namespace !== void 0 ? { namespace } : {},
+    ...baseDir !== void 0 ? { baseDir } : {},
+    schema: contract.schema,
+    defaultData: contract.defaultSettings
+  });
+  const listeners = /* @__PURE__ */ new Set();
+  let watcher = null;
+  let debounceTimer = null;
+  let lastSnapshot = "";
+  function snapshot() {
+    return safeSerialize(storage.read());
+  }
+  function emitIfChanged() {
+    const next = storage.read();
+    const nextSnapshot = safeSerialize(next);
+    if (nextSnapshot !== lastSnapshot) {
+      lastSnapshot = nextSnapshot;
+      for (const listener of [...listeners]) {
+        try {
+          listener(next);
+        } catch {
+        }
+      }
+    }
+  }
+  function scheduleEmit() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+      try {
+        emitIfChanged();
+      } catch {
+      }
+    }, watchDebounceMs);
+  }
+  function ensureWatcher() {
+    if (watcher) return;
+    const dir = path4__default.default.dirname(storage.filePath);
+    if (!fs__default.default.existsSync(dir)) {
+      fs__default.default.mkdirSync(dir, { recursive: true });
+    }
+    lastSnapshot = snapshot();
+    watcher = fs__default.default.watch(dir, (_event, watchedFile) => {
+      if (watchedFile && watchedFile.toString() !== path4__default.default.basename(storage.filePath)) return;
+      scheduleEmit();
+    });
+    watcher.on("error", () => {
+    });
+    if (typeof watcher.unref === "function") {
+      watcher.unref();
+    }
+  }
+  function disposeWatcher() {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
+    if (watcher) {
+      try {
+        watcher.close();
+      } catch {
+      }
+      watcher = null;
+    }
+  }
+  function subscribe(listener) {
+    listeners.add(listener);
+    try {
+      ensureWatcher();
+    } catch {
+    }
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) disposeWatcher();
+    };
+  }
+  return {
+    suite,
+    contract,
+    storage,
+    filePath: storage.filePath,
+    async get() {
+      return storage.readAsync();
+    },
+    async update(patch) {
+      const updated = await storage.updateAsync((current) => ({
+        ...current,
+        ...patch
+      }));
+      lastSnapshot = safeSerialize(updated);
+      for (const listener of [...listeners]) {
+        try {
+          listener(updated);
+        } catch {
+        }
+      }
+      return updated;
+    },
+    async reset() {
+      storage.reset();
+      const fresh = await storage.readAsync();
+      lastSnapshot = safeSerialize(fresh);
+      for (const listener of [...listeners]) {
+        try {
+          listener(fresh);
+        } catch {
+        }
+      }
+      return fresh;
+    },
+    read() {
+      return storage.read();
+    },
+    reload() {
+      const next = storage.read();
+      lastSnapshot = safeSerialize(next);
+      return next;
+    },
+    subscribe,
+    watch: subscribe,
+    register(context, rpcOptions = {}) {
+      registerSettingsRpc(context, contract, storage, rpcOptions);
+    },
+    createHandlers(rpcOptions = {}) {
+      return createSettingsHandlers(contract, storage, rpcOptions);
+    },
+    dispose() {
+      listeners.clear();
+      disposeWatcher();
     }
   };
 }
@@ -611,10 +870,10 @@ function getSystemMetrics(sampler = defaultSampler) {
   };
 }
 function findPackageJson(startDir) {
-  let current = path3__default.default.resolve(startDir);
-  const root = path3__default.default.parse(current).root;
+  let current = path4__default.default.resolve(startDir);
+  const root = path4__default.default.parse(current).root;
   while (current !== root) {
-    const pkgPath = path3__default.default.join(current, "package.json");
+    const pkgPath = path4__default.default.join(current, "package.json");
     if (fs__default.default.existsSync(pkgPath)) {
       try {
         const raw = fs__default.default.readFileSync(pkgPath, "utf8");
@@ -623,7 +882,7 @@ function findPackageJson(startDir) {
         return null;
       }
     }
-    const parent = path3__default.default.dirname(current);
+    const parent = path4__default.default.dirname(current);
     if (parent === current) break;
     current = parent;
   }
@@ -672,7 +931,7 @@ function resolvePluginVersion(options = {}) {
 }
 function stampVersion(options = {}) {
   const cwd = options.cwd ?? process.cwd();
-  const targetFile = options.targetFile ? path3__default.default.resolve(cwd, options.targetFile) : path3__default.default.resolve(cwd, "version.ts");
+  const targetFile = options.targetFile ? path4__default.default.resolve(cwd, options.targetFile) : path4__default.default.resolve(cwd, "version.ts");
   const version = resolvePluginVersion(options);
   const content = `// Auto-generated by paseo-plugin-helper. Do not edit.
 export const PLUGIN_VERSION = "${version}";
@@ -682,7 +941,7 @@ export const PLUGIN_VERSION = "${version}";
     existing = fs__default.default.readFileSync(targetFile, "utf8");
   }
   if (existing !== content) {
-    fs__default.default.mkdirSync(path3__default.default.dirname(targetFile), { recursive: true });
+    fs__default.default.mkdirSync(path4__default.default.dirname(targetFile), { recursive: true });
     fs__default.default.writeFileSync(targetFile, content, "utf8");
     return { version, targetFile, updated: true };
   }
@@ -900,46 +1159,46 @@ var McpConfigPaths = {
     const platform = process.platform;
     const home = os3__default.default.homedir();
     if (platform === "darwin") {
-      return path3__default.default.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+      return path4__default.default.join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
     }
     if (platform === "win32") {
-      const appData = process.env.APPDATA || path3__default.default.join(home, "AppData", "Roaming");
-      return path3__default.default.join(appData, "Claude", "claude_desktop_config.json");
+      const appData = process.env.APPDATA || path4__default.default.join(home, "AppData", "Roaming");
+      return path4__default.default.join(appData, "Claude", "claude_desktop_config.json");
     }
-    const configDir = process.env.XDG_CONFIG_HOME || path3__default.default.join(home, ".config");
-    return path3__default.default.join(configDir, "Claude", "claude_desktop_config.json");
+    const configDir = process.env.XDG_CONFIG_HOME || path4__default.default.join(home, ".config");
+    return path4__default.default.join(configDir, "Claude", "claude_desktop_config.json");
   },
   /**
    * Claude Code CLI global configuration: ~/.claude.json
    */
   claudeCode() {
-    return path3__default.default.join(os3__default.default.homedir(), ".claude.json");
+    return path4__default.default.join(os3__default.default.homedir(), ".claude.json");
   },
   /**
    * OpenCode configuration path: ~/.config/opencode/opencode.json
    */
   openCode() {
     const home = os3__default.default.homedir();
-    const configDir = process.env.XDG_CONFIG_HOME || path3__default.default.join(home, ".config");
-    return path3__default.default.join(configDir, "opencode", "opencode.json");
+    const configDir = process.env.XDG_CONFIG_HOME || path4__default.default.join(home, ".config");
+    return path4__default.default.join(configDir, "opencode", "opencode.json");
   },
   /**
    * Cursor editor MCP configuration: ~/.cursor/mcp.json
    */
   cursor() {
-    return path3__default.default.join(os3__default.default.homedir(), ".cursor", "mcp.json");
+    return path4__default.default.join(os3__default.default.homedir(), ".cursor", "mcp.json");
   },
   /**
    * Gemini / Antigravity CLI configuration: ~/.gemini/config/mcp_config.json
    */
   gemini() {
-    return path3__default.default.join(os3__default.default.homedir(), ".gemini", "config", "mcp_config.json");
+    return path4__default.default.join(os3__default.default.homedir(), ".gemini", "config", "mcp_config.json");
   },
   /**
    * Pi CLI agent configuration: ~/.pi/config.json
    */
   pi() {
-    return path3__default.default.join(os3__default.default.homedir(), ".pi", "config.json");
+    return path4__default.default.join(os3__default.default.homedir(), ".pi", "config.json");
   }
 };
 function expandPath(targetPath) {
@@ -947,9 +1206,9 @@ function expandPath(targetPath) {
     return os3__default.default.homedir();
   }
   if (targetPath.startsWith("~/") || targetPath.startsWith("~\\")) {
-    return path3__default.default.join(os3__default.default.homedir(), targetPath.slice(2));
+    return path4__default.default.join(os3__default.default.homedir(), targetPath.slice(2));
   }
-  return path3__default.default.resolve(targetPath);
+  return path4__default.default.resolve(targetPath);
 }
 function isDeepEqual(a, b) {
   if (a === b) return true;
@@ -998,7 +1257,7 @@ function readConfigDocument(filePath) {
   return parseJsonc(raw);
 }
 function writeConfigAtomic(filePath, data) {
-  const dir = path3__default.default.dirname(filePath);
+  const dir = path4__default.default.dirname(filePath);
   if (!fs__default.default.existsSync(dir)) {
     fs__default.default.mkdirSync(dir, { recursive: true });
   }
@@ -1122,7 +1381,7 @@ function clearPluginCache() {
 }
 function readConfigPluginsFallback() {
   try {
-    const configPath = path3__default.default.join(os3__default.default.homedir(), ".paseo", "config.json");
+    const configPath = path4__default.default.join(os3__default.default.homedir(), ".paseo", "config.json");
     if (!fs__default.default.existsSync(configPath)) return [];
     const raw = fs__default.default.readFileSync(configPath, "utf-8");
     const parsed = JSON.parse(raw);
@@ -1315,7 +1574,7 @@ async function discoverCustomPillConfigs(dirPath, logger) {
       if (!entry.isFile() || !entry.name.endsWith(".json") && !entry.name.endsWith(".jsonc")) {
         continue;
       }
-      const filePath = path3__default.default.join(dirPath, entry.name);
+      const filePath = path4__default.default.join(dirPath, entry.name);
       try {
         const rawContent = await fs__default.default.promises.readFile(filePath, "utf-8");
         const parsed = parseJsonc(rawContent);
@@ -1964,6 +2223,7 @@ exports.createLoopWatchdog = createLoopWatchdog;
 exports.createPeriodicTask = createPeriodicTask;
 exports.createPluginLogger = createPluginLogger;
 exports.createSettingsHandlers = createSettingsHandlers;
+exports.createSharedPluginSettings = createSharedPluginSettings;
 exports.createWorkspaceBeacon = createWorkspaceBeacon;
 exports.discoverCustomPillConfigs = discoverCustomPillConfigs;
 exports.expandPath = expandPath;
