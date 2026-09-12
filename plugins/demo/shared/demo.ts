@@ -69,3 +69,47 @@ export const triggerDemoActionRpc = defineContract({
 });
 
 export type DemoData = RpcOutput<typeof getDemoDataRpc>;
+
+export const demoBeaconSetContract = defineContract({
+  name: "helper-demo-v8.beacon-set",
+  description: "Set workspace status beacon label on the active workspace",
+  input: z.object({
+    workspaceId: z.string().min(1),
+    name: z.string().default("DEMO:ACTIVE"),
+    color: z.string().default("sky"),
+  }),
+  output: z.object({
+    success: z.boolean(),
+    message: z.string(),
+    labelApplied: z.boolean(),
+    titleApplied: z.boolean(),
+  }),
+});
+
+export const demoBeaconBlinkContract = defineContract({
+  name: "helper-demo-v8.beacon-blink",
+  description: "Blink workspace beacon between emerald and orange states",
+  input: z.object({
+    workspaceId: z.string().min(1),
+    rounds: z.number().int().positive().default(5),
+  }),
+  output: z.object({
+    success: z.boolean(),
+    message: z.string(),
+  }),
+});
+
+export const demoBeaconClearContract = defineContract({
+  name: "helper-demo-v8.beacon-clear",
+  description: "Clear workspace beacon label and restore original title",
+  input: z.object({
+    workspaceId: z.string().min(1),
+    name: z.string().default("DEMO:ACTIVE"),
+  }),
+  output: z.object({
+    success: z.boolean(),
+    message: z.string(),
+    labelCleared: z.boolean(),
+    titleRestored: z.boolean(),
+  }),
+});

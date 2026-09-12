@@ -56,6 +56,9 @@ import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   getDemoDataRpc,
   triggerDemoActionRpc,
+  demoBeaconSetContract,
+  demoBeaconBlinkContract,
+  demoBeaconClearContract,
   demoSettingsContract,
   type DemoData,
 } from "../shared/demo.js";
@@ -102,9 +105,10 @@ function DemoPill({ isOpen }: RenderPillProps) {
   );
 }
 
-function DemoModal({ close }: RenderModalProps) {
+function DemoModal({ close, workspaceId }: RenderModalProps) {
   const { colors, theme, layout } = usePluginTheme();
   const { isCompact } = useResponsive();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<string>("gauges");
   const [menuOpen, setMenuOpen] = useState<boolean>(false);
 
@@ -152,6 +156,50 @@ function DemoModal({ close }: RenderModalProps) {
         triggerHaptic("success");
         setActionFeedback(res.message);
         refetch();
+      },
+    }
+  );
+
+  const [beaconFeedback, setBeaconFeedback] = useState<string | null>(null);
+
+  const { mutate: setBeacon, isPending: isBeaconSetPending } = useRpcMutation(
+    demoBeaconSetContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("success");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "success" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const { mutate: blinkBeacon, isPending: isBeaconBlinkPending } = useRpcMutation(
+    demoBeaconBlinkContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("success");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "success" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const { mutate: clearBeacon, isPending: isBeaconClearPending } = useRpcMutation(
+    demoBeaconClearContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("light");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "info" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
       },
     }
   );
@@ -655,6 +703,51 @@ function DemoModal({ close }: RenderModalProps) {
       {/* TAB: ATTENTION & BEACONS */}
       {activeTab === "attention" && (
         <>
+          <Card variant="elevated">
+            <Card.Header
+              title="Workspace Beacon"
+              subtitle="Live workspace-row status ticker driven by createWorkspaceBeacon()"
+            />
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Targets this workspace ({workspaceId}). Watch the workspace row chip and title while
+              triggering.
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button
+                label={isBeaconSetPending ? "Setting..." : "Set Status Beacon"}
+                variant="primary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("medium");
+                  setBeacon({ workspaceId, name: "DEMO:ACTIVE", color: "sky" });
+                }}
+              />
+              <Button
+                label={isBeaconBlinkPending ? "Blinking..." : "Blink Beacon (5 rounds)"}
+                variant="secondary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("medium");
+                  blinkBeacon({ workspaceId, rounds: 5 });
+                }}
+              />
+              <Button
+                label={isBeaconClearPending ? "Clearing..." : "Clear Beacon"}
+                variant="ghost"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("light");
+                  clearBeacon({ workspaceId, name: "DEMO:ACTIVE" });
+                }}
+              />
+            </View>
+            {beaconFeedback ? (
+              <Text style={[styles.feedbackText, { color: colors.statusSuccess }]}>
+                {beaconFeedback}
+              </Text>
+            ) : null}
+          </Card>
+
           <Card variant="elevated">
             <Card.Header
               title="Attention Playground"
