@@ -46,7 +46,7 @@ labels:
   - name: "state/2-review"
     color: "#7057ff"
     exclusive: true
-    description: "Implementation complete; undergoing Orchestrator or peer review"
+    description: "Awaiting operator verdict: review/2-approved advances to state/3-verify, review/1-changes-requested returns to state/1-wip"
 
   - name: "state/3-verify"
     color: "#0075ca"
@@ -69,12 +69,12 @@ labels:
   - name: "review/1-changes-requested"
     color: "#e11d48"
     exclusive: true
-    description: "Reviewer found flaws, regression, or missing test coverage"
+    description: "Operator verdict: flaws found; agent returns issue to state/1-wip"
 
   - name: "review/2-approved"
     color: "#0e8a16"
     exclusive: true
-    description: "Diff, typing, and test suites inspected and approved by Orchestrator"
+    description: "Operator verdict: approved; agent advances issue to state/3-verify"
 
   # ============================================================================
   # Verification Nature Scope (Exclusive Scoped Badge)

@@ -131,9 +131,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+    width: "100%",
   },
   textContainer: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
   label: {
@@ -144,6 +146,7 @@ const styles = StyleSheet.create({
   },
   track: {
     justifyContent: "center",
+    flexShrink: 0,
   },
   thumb: {
     ...resolveElevation("sm"),

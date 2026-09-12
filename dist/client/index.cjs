@@ -1855,10 +1855,12 @@ var styles10 = reactNative.StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12
+    gap: 12,
+    width: "100%"
   },
   textContainer: {
     flex: 1,
+    minWidth: 0,
     gap: 2
   },
   label: {
@@ -1868,7 +1870,8 @@ var styles10 = reactNative.StyleSheet.create({
     lineHeight: 15
   },
   track: {
-    justifyContent: "center"
+    justifyContent: "center",
+    flexShrink: 0
   },
   thumb: {
     ...resolveElevation("sm")

@@ -1,4 +1,4 @@
-import { S as StatusVariant } from './custom-pills-BRMMkgfE.js';
+import { S as StatusVariant } from './custom-pills-CnrXjVIR.cjs';
 
 interface FormatBytesOptions {
     /**
@@ -50,6 +50,17 @@ declare function formatDuration(ms: number): string;
  * Formats a number with comma separators (e.g. 1,234,567).
  */
 declare function formatNumber(num: number): string;
+interface FormatCompactNumberOptions {
+    /** Number of decimal places when abbreviated (default: 1). */
+    decimals?: number;
+    /** Minimum threshold before abbreviating with K/M/B suffixes (default: 1000). */
+    threshold?: number;
+}
+/**
+ * Formats a count or token number into a compact string (e.g. 950 -> "950", 1250 -> "1.3k", 1450000 -> "1.5M").
+ * Ideal for pills, vitals chips, and narrow timeline badges.
+ */
+declare function formatCompactNumber(num: number, options?: FormatCompactNumberOptions): string;
 interface TruncateOptions {
     /** Ellipsis token to insert. Default: "…" */
     ellipsis?: string;
@@ -86,4 +97,4 @@ declare function truncatePath(filePath: string, maxLength: number, options?: Tru
  */
 declare function stripAnsi(text: string): string;
 
-export { type FormatBytesOptions as F, type MetricThresholds as M, type TruncatePathOptions as T, type TruncateOptions as a, formatDuration as b, formatNumber as c, formatUptime as d, truncateMiddle as e, formatBytes as f, truncatePath as g, resolveMetricStatus as r, stripAnsi as s, truncate as t };
+export { type FormatBytesOptions as F, type MetricThresholds as M, type TruncatePathOptions as T, type FormatCompactNumberOptions as a, type TruncateOptions as b, formatCompactNumber as c, formatDuration as d, formatNumber as e, formatBytes as f, formatUptime as g, truncateMiddle as h, truncatePath as i, resolveMetricStatus as r, stripAnsi as s, truncate as t };

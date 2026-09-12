@@ -4,6 +4,7 @@ import {
   formatUptime,
   formatDuration,
   formatNumber,
+  formatCompactNumber,
   truncate,
   truncateMiddle,
   truncatePath,
@@ -60,6 +61,19 @@ describe("Shared Formatters", () => {
     expect(formatNumber(0)).toBe("0");
     expect(formatNumber(1000)).toBe("1,000");
     expect(formatNumber(1234567)).toBe("1,234,567");
+  });
+
+  it("formats compact numbers with k, M, B suffixes", () => {
+    expect(formatCompactNumber(0)).toBe("0");
+    expect(formatCompactNumber(450)).toBe("450");
+    expect(formatCompactNumber(999)).toBe("999");
+    expect(formatCompactNumber(1000)).toBe("1k");
+    expect(formatCompactNumber(1250)).toBe("1.3k");
+    expect(formatCompactNumber(45800)).toBe("45.8k");
+    expect(formatCompactNumber(1000000)).toBe("1M");
+    expect(formatCompactNumber(1500000)).toBe("1.5M");
+    expect(formatCompactNumber(2500000000)).toBe("2.5B");
+    expect(formatCompactNumber(-1250)).toBe("-1.3k");
   });
 
   it("truncates long strings with ellipsis", () => {
