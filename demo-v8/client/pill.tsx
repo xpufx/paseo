@@ -803,6 +803,17 @@ function DemoModal({ close }: RenderModalProps) {
             <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
               ring normalizes to radar; both halos pulse identically.
             </Text>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Badge with icon
+            </Text>
+            <View style={styles.beaconRow}>
+              <AttentionBeacon mode="badge" tone="danger" active={attentionOn} badgeIcon="bell">
+                <Badge label="bell" variant="danger" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone={beaconTone} active={attentionOn}>
+                <Badge label="plain pip" variant="accent" />
+              </AttentionBeacon>
+            </View>
           </Card>
         </>
       )}

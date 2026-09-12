@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import React from "react";
 import {
   AttentionBeacon,
   normalizeBeaconMode,
@@ -44,6 +45,24 @@ describe("AttentionBeacon", () => {
 
   it("prefers explicit color override", () => {
     expect(resolveBeaconToneColor(colors, "warning", "#123456")).toBe("#123456");
+  });
+
+  it("accepts badgeIcon as string and ReactNode", () => {
+    const withString = React.createElement(AttentionBeacon, {
+      mode: "badge",
+      badgeIcon: "bell",
+      children: null,
+    });
+    expect(withString.props.badgeIcon).toBe("bell");
+    const node = React.createElement("span", null, "!");
+    const withNode = React.createElement(AttentionBeacon, {
+      mode: "badge",
+      badgeIcon: node,
+      children: null,
+    });
+    expect(withNode.props.badgeIcon).toBe(node);
+    const without = React.createElement(AttentionBeacon, { mode: "badge", children: null });
+    expect(without.props.badgeIcon).toBeUndefined();
   });
 });
 

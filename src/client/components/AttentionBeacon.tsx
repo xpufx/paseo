@@ -7,7 +7,9 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
+import { FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens.js";
 import type { ThemeColors } from "../../shared/types.js";
 
 export type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce";
@@ -24,6 +26,7 @@ export interface AttentionBeaconProps {
   badgeStyle?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
   testID?: string;
+  badgeIcon?: string | ReactNode;
 }
 
 export function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce" {
@@ -84,7 +87,9 @@ export function AttentionBeacon({
   badgeStyle,
   accessibilityLabel,
   testID,
+  badgeIcon,
 }: AttentionBeaconProps) {
+  const { Icon } = getClientHost();
   const { colors } = usePluginTheme();
   const resolved = normalizeBeaconMode(mode);
   const beaconColor = resolveBeaconToneColor(colors, tone, color);
@@ -125,14 +130,29 @@ export function AttentionBeacon({
   if (resolved === "badge") {
     const opacity = pip.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] });
     const scale = pip.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.15] });
+    const hasIcon = badgeIcon !== undefined && badgeIcon !== null && badgeIcon !== "";
+    const iconColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
     return (
       <View style={[styles.wrapper, style]} accessibilityLabel={accessibilityLabel} testID={testID}>
         {children}
         <Animated.View
           pointerEvents="none"
           testID={testID ? `${testID}-badge` : undefined}
-          style={[styles.pip, { backgroundColor: beaconColor, opacity, transform: [{ scale }] }, badgeStyle]}
-        />
+          style={[
+            styles.pip,
+            { backgroundColor: beaconColor, opacity, transform: [{ scale }] },
+            hasIcon && styles.pipWithIcon,
+            badgeStyle,
+          ]}
+        >
+          {hasIcon ? (
+            typeof badgeIcon === "string" ? (
+              <Icon name={badgeIcon} size={10} color={iconColor} />
+            ) : (
+              badgeIcon
+            )
+          ) : null}
+        </Animated.View>
       </View>
     );
   }
@@ -193,5 +213,12 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
+  },
+  pipWithIcon: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
