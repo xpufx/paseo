@@ -8,6 +8,7 @@ import {
   KeyValue,
   KeyValueGroup,
   MetricGauge,
+  ModalBody,
   Tabs,
   Toggle,
   CardHeader,
@@ -61,7 +62,10 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
   };
 
   return (
-    <View style={{ gap: 12, padding: 12 }}>
+    <ModalBody
+      contentContainerStyle={{ gap: 12, padding: 12 }}
+      refreshing={isLoading}
+    >
       <Tabs
         tabs={TABS}
         activeTab={activeTab}
@@ -70,30 +74,16 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
 
       {activeTab === "system" && (
         <View style={{ gap: 12 }}>
-          <View style={styles.headerRow}>
-            <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>
-              Host System Resources
-            </Text>
-            <Button
-              label="Settings"
-              size="sm"
-              icon="Sliders"
-              onPress={() => setActiveTab("settings")}
-            />
-          </View>
+          <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>
+            Host System Resources
+          </Text>
 
           {pillHidden && (
             <Card variant="elevated">
               <View style={styles.banner}>
-                <Text style={[styles.bannerText, { color: colors.foreground }]}>
-                  Composer pill is hidden.
+                <Text style={[styles.bannerText, { color: colors.foregroundMuted }]}>
+                  Composer pill is hidden in trackbar. You can re-enable it from the Settings tab above.
                 </Text>
-                <Button
-                  label="Configure in Settings"
-                  size="sm"
-                  variant="primary"
-                  onPress={() => setActiveTab("settings")}
-                />
               </View>
             </Card>
           )}
@@ -346,17 +336,11 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
           ]}
         />
       )}
-    </View>
+    </ModalBody>
   );
 }
 
 const styles = StyleSheet.create({
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
   banner: {
     gap: 8,
   },
