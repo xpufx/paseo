@@ -45,10 +45,11 @@ The Orchestrator inspects the affected repositories/worktrees:
 - **Commit History**: Verify changes are committed with semantic messages and proper issue references.
 - **Remote Push**: Confirm commits are pushed to `origin` on Forgejo (`ssh://git@forge.mrs.aager.de:222/...`).
 - **Live Deployment & Freshness Audit**:
-  Run `npm run doctor:live` (or `npm run doctor:live -- --reload` to auto-synchronize).
+  Run `make doctor` or invoke workspace script `doctor` via `start_workspace_script` (or `make reload` / script `reload` to auto-synchronize).
   - Verify `packages/paseo-plugin-helper/dist` is fresh and newer than `src/`.
   - Verify the plugin's `shared/version.ts` matches git HEAD.
   - Verify the live Paseo daemon is actively executing the latest git commit (green `READY`).
+  - *Tip*: Scripts are defined in `paseo.json` (`check`, `doctor`, `reload`) and visible in Paseo's Scripts panel/menu for real-time mobile/desktop visibility.
 - **Client Window Refresh Flag**: Note whether the user needs to reload their client UI (`Ctrl+R` / `Cmd+R`) to purge cached bundles in memory.
 
 ---

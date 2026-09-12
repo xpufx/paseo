@@ -1,0 +1,16 @@
+{
+  "scripts": {
+    "doctor": {
+      "type": "script",
+      "command": "make doctor"
+    },
+    "reload": {
+      "type": "script",
+      "command": "make reload"
+    },
+    "check": {
+      "type": "script",
+      "command": "make check"
+    }
+  }
+}
