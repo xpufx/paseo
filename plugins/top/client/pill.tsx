@@ -34,6 +34,7 @@ import {
   useAutoRefreshQuery,
   usePluginSettings,
   usePluginTheme,
+  useResponsive,
   getStatusColor,
   triggerHaptic,
   type RenderModalProps,
@@ -78,7 +79,10 @@ import { TopDashboardSurface } from "./surface";
 import {
   buildAllLabel,
   enabledItemsForSettings,
+  extractTokenMetrics,
+  formatCompactTokens,
   formatSegmentLabel,
+  formatTokensLabel,
   nextCycleItem,
   type SegmentSnapshot,
 } from "./pill-labels";
@@ -246,6 +250,7 @@ function CompactBadge(props: BadgeProps) {
 
 interface LiveSnapshot extends SegmentSnapshot {
   workspaceDirectory?: string | null;
+  updatedAt?: number;
 }
 
 const liveSnapshots = new Map<string, LiveSnapshot>();
@@ -253,7 +258,7 @@ let rpcInvoker: ((contract: any, input: any) => Promise<any>) | null = null;
 
 export function updateLiveSnapshot(agentId: string, partial: Partial<LiveSnapshot>) {
   const prev = liveSnapshots.get(agentId) ?? {};
-  liveSnapshots.set(agentId, { ...prev, ...partial });
+  liveSnapshots.set(agentId, { ...prev, ...partial, updatedAt: Date.now() });
 }
 
 function fieldsForItem(item: PillItemType, workspaceDirectory?: string | null): ResourceField[] {
@@ -273,18 +278,40 @@ function fieldsForItem(item: PillItemType, workspaceDirectory?: string | null): 
   }
 }
 
+const LIVE_SNAPSHOT_TTL_MS = 2500;
+const liveSnapshotInflight = new Map<string, Promise<SystemResources | null>>();
+
 async function liveSnapshotFor(
   ctx: PillLiveContext,
   fields?: ResourceField[],
 ): Promise<SegmentSnapshot> {
   const cached = liveSnapshots.get(ctx.agentId);
   let data = cached?.data;
+  const cacheAge = cached?.updatedAt ? Date.now() - cached.updatedAt : Infinity;
   try {
     if (rpcInvoker) {
       const params: Record<string, unknown> = {};
       if (cached?.workspaceDirectory) params.directory = cached.workspaceDirectory;
       if (fields && fields.length > 0) params.fields = fields;
-      const fresh = await rpcInvoker(getSystemResourcesRpc, params);
+      const cacheKey = `${ctx.agentId}::${JSON.stringify(params)}`;
+      let inflight = liveSnapshotInflight.get(cacheKey);
+      if (!inflight && cacheAge > LIVE_SNAPSHOT_TTL_MS) {
+        inflight = (async () => {
+          try {
+            return (await rpcInvoker!(getSystemResourcesRpc, params)) as SystemResources | null;
+          } catch {
+            return null;
+          } finally {
+            liveSnapshotInflight.delete(cacheKey);
+          }
+        })();
+        liveSnapshotInflight.set(cacheKey, inflight);
+      }
+      const fresh = inflight
+        ? await inflight
+        : cacheAge <= LIVE_SNAPSHOT_TTL_MS
+          ? null
+          : null;
       if (fresh) {
         data = { ...(data ?? {}), ...fresh } as SystemResources;
         updateLiveSnapshot(ctx.agentId, { data });
@@ -467,7 +494,7 @@ function PillItemContent({
           <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
             <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
             <Text style={{ color: cpuColor, fontWeight: "600" }}>
-              {data?.loadAvg?.[0] !== undefined ? data.loadAvg[0].toFixed(2) : "--"}
+              {data?.loadAvg?.[0] !== undefined ? data?.loadAvg[0].toFixed(2) : "--"}
             </Text>
           </Text>
         </View>
@@ -479,7 +506,7 @@ function PillItemContent({
           <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
             <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
             <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-              {data?.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "--"}
+              {data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "--"}
             </Text>
           </Text>
         </View>
@@ -538,23 +565,22 @@ function PillItemContent({
     }
 
     case "tokens": {
-      const live = data?.liveUsage;
-      const liveTotal =
-        live && (live.inputTokens != null || live.outputTokens != null)
-          ? (live.inputTokens ?? 0) + (live.outputTokens ?? 0)
-          : null;
-      const last = data?.lastTurn;
-      const lastTotal =
-        last && (last.inputTokens != null || last.outputTokens != null)
-          ? (last.inputTokens ?? 0) + (last.outputTokens ?? 0)
-          : null;
-      const total = liveTotal ?? lastTotal;
+      const metrics = extractTokenMetrics({ data, agent });
+      const label = formatTokensLabel(metrics, "");
+      const isPlaceholder = !metrics;
       return (
         <View style={styles.pillContainer}>
           <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
-            <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-              {total ?? "--"}
+            <Text style={{ color: colors.foregroundMuted }}>
+              {isPlaceholder && def?.shortLabel ? `${def.shortLabel} ` : ""}
+            </Text>
+            <Text
+              style={{
+                color: isPlaceholder ? colors.foregroundMuted : colors.foreground,
+                fontWeight: "600",
+              }}
+            >
+              {label}
             </Text>
           </Text>
         </View>
@@ -595,10 +621,10 @@ function PillItemContent({
     default: {
       const ramGb =
         data?.memoryUsedBytes !== undefined
-          ? formatBytes(data.memoryUsedBytes, { compact: true, decimals: 1 })
+          ? formatBytes(data?.memoryUsedBytes, { compact: true, decimals: 1 })
           : "--";
       const cpuText =
-        data?.cpuUsagePercent !== undefined ? `${data.cpuUsagePercent}%` : "--";
+        data?.cpuUsagePercent !== undefined ? `${data?.cpuUsagePercent}%` : "--";
       return (
         <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
           <Text style={{ color: cpuColor, fontWeight: "600" }}>{cpuText}</Text>
@@ -644,6 +670,7 @@ export function SingleItemPillView({
     provider: a?.provider,
     status: a?.status,
     lastActivityAt: a?.lastActivityAt,
+    lastUsage: (a as any)?.lastUsage,
   }));
 
   const neededFields = useMemo(() => {
@@ -677,8 +704,9 @@ export function SingleItemPillView({
     queryParams,
     {
       enabled: shouldPoll,
-      refetchInterval: shouldPoll ? 3000 : false,
-    },
+      refetchInterval: shouldPoll ? 5000 : false,
+      staleTime: 2500,
+    } as any,
   );
 
   const worktreeLocationText = useMemo(
@@ -699,7 +727,7 @@ export function SingleItemPillView({
   const targetTab = defaultTab ?? getItemTab(item);
 
   if (item === "mcp") {
-    if (isLoading || !data || !data.mcpInstalled) {
+    if (isLoading || !data || !data?.mcpInstalled) {
       return null;
     }
   }
@@ -768,6 +796,7 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
     provider: a?.provider,
     status: a?.status,
     lastActivityAt: a?.lastActivityAt,
+    lastUsage: (a as any)?.lastUsage,
   }));
 
   const hasAnyEnabled =
@@ -828,8 +857,9 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
     queryParams,
     {
       enabled: shouldPoll,
-      refetchInterval: shouldPoll ? 3000 : false,
-    },
+      refetchInterval: shouldPoll ? 5000 : false,
+      staleTime: 2500,
+    } as any,
   );
 
   const isMcpEnabled = isMcpSurfaceEnabled(settings, "pill", data?.mcpInstalled, data?.mcpRunning);
@@ -844,6 +874,15 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
     if (last && (last.inputTokens != null || last.outputTokens != null)) {
       found.push("tokens");
     }
+    const agentUsage = (agent as any)?.lastUsage;
+    if (
+      agentUsage &&
+      (agentUsage.inputTokens != null ||
+        agentUsage.outputTokens != null ||
+        agentUsage.contextWindowUsedTokens != null)
+    ) {
+      found.push("tokens");
+    }
     if (agent?.model || agent?.provider) {
       found.push("agent", "agent_provider");
     }
@@ -856,7 +895,7 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.lastTurn, data?.liveUsage, agent?.model, agent?.provider]);
+  }, [data?.lastTurn, data?.liveUsage, agent?.model, agent?.provider, (agent as any)?.lastUsage]);
 
   const worktreeLocationText = useMemo(
     () => formatWorktreeLocation(workspaceDirectory),
@@ -1219,6 +1258,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     status: a?.status,
     cwd: a?.cwd,
     lastActivityAt: a?.lastActivityAt,
+    lastUsage: (a as any)?.lastUsage,
   }));
 
   const queryParams = useMemo(() => {
@@ -1233,6 +1273,15 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
       isOpen: true,
     },
   );
+
+  const tokenMetrics = useMemo(() => {
+    return extractTokenMetrics({ data, agent });
+  }, [data, agent]);
+
+  const contextPercent = useMemo(() => {
+    if (!tokenMetrics?.contextMaxTokens || tokenMetrics.contextMaxTokens <= 0) return null;
+    return Math.round(((tokenMetrics.contextUsedTokens ?? 0) / tokenMetrics.contextMaxTokens) * 100);
+  }, [tokenMetrics]);
 
   const isMcpEnabled = isMcpSurfaceEnabled(settings, "pill", data?.mcpInstalled, data?.mcpRunning);
 
@@ -1287,18 +1336,15 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     );
   }
 
-  if (isLoading || !data) {
-    return (
-      <ModalBody refreshing={isRefetching} onRefresh={handleRefresh}>
-        <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>Loading system metrics…</Text>
-      </ModalBody>
-    );
-  }
-
   const { cpuColor, memColor } = getMetricColors(data, colors);
+  const { isCompact } = useResponsive();
 
   return (
-    <ModalBody refreshing={isRefetching} onRefresh={handleRefresh}>
+    <ModalBody
+      refreshing={isLoading || isRefetching}
+      onRefresh={handleRefresh}
+      contentContainerStyle={!isCompact ? styles.modalContentDesktop : undefined}
+    >
       {/* Navigation Tabs */}
       <Tabs
         tabs={TABS}
@@ -1313,13 +1359,13 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
           <Card variant="elevated">
             <View style={styles.gaugeContainer}>
               <MetricGauge
-                value={data.cpuUsagePercent ?? 0}
+                value={data?.cpuUsagePercent ?? 0}
                 thresholds={CPU_THRESHOLDS}
                 label="CPU Load"
                 size={72}
               />
               <MetricGauge
-                value={data.memoryUsedPercent ?? 0}
+                value={data?.memoryUsedPercent ?? 0}
                 thresholds={MEM_THRESHOLDS}
                 label="RAM Used"
                 size={72}
@@ -1330,16 +1376,16 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
           {/* Host Meta Card */}
           <Card variant="elevated">
             <KeyValueGroup columns={1}>
-              <CompactKeyValue label="Host" value={data.hostname ?? "Unknown"} copyable />
+              <CompactKeyValue label="Host" value={data?.hostname ?? "Unknown"} copyable />
               <CompactKeyValue
                 label="Uptime"
-                value={data.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "--"}
+                value={data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "--"}
               />
             </KeyValueGroup>
             <CompactKeyValue
               label="Processor"
-              value={data.cpuModel ?? "--"}
-              subValue={data.cpuCores ? `(${data.cpuCores} cores)` : undefined}
+              value={data?.cpuModel ?? "--"}
+              subValue={data?.cpuCores ? `(${data?.cpuCores} cores)` : undefined}
             />
           </Card>
 
@@ -1349,20 +1395,20 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               title="CPU Details"
               value={
                 <Text style={[styles.metricHighlight, { color: cpuColor }]}>
-                  {data.cpuUsagePercent ?? 0}%
+                  {data?.cpuUsagePercent ?? 0}%
                 </Text>
               }
             />
 
             <ProgressBar
-              value={data.cpuUsagePercent ?? 0}
+              value={data?.cpuUsagePercent ?? 0}
               thresholds={CPU_THRESHOLDS}
               height={8}
             />
 
             <CompactKeyValue
               label="Load Average (1m, 5m, 15m)"
-              value={data.loadAvg ? data.loadAvg.map((n) => n.toFixed(2)).join("  ") : "--"}
+              value={data?.loadAvg ? data?.loadAvg.map((n) => n.toFixed(2)).join("  ") : "--  --  --"}
               mono
             />
           </Card>
@@ -1373,35 +1419,35 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               title="Memory Details"
               value={
                 <Text style={[styles.metricHighlight, { color: memColor }]}>
-                  {data.memoryUsedPercent ?? 0}%
+                  {data?.memoryUsedPercent ?? 0}%
                 </Text>
               }
             />
 
             <ProgressBar
-              value={data.memoryUsedPercent ?? 0}
+              value={data?.memoryUsedPercent ?? 0}
               thresholds={MEM_THRESHOLDS}
               height={8}
             />
 
             <CompactKeyValue
               label="Used / Total"
-              value={`${formatBytes(data.memoryUsedBytes ?? 0)} / ${formatBytes(data.memoryTotalBytes ?? 0)}`}
+              value={`${formatBytes(data?.memoryUsedBytes ?? 0)} / ${formatBytes(data?.memoryTotalBytes ?? 0)}`}
             />
           </Card>
 
           {/* MCP Servers Card */}
-          {Boolean(data.mcpInstalled) && (
+          {Boolean(data?.mcpInstalled) && (
             <Card variant="elevated">
               <CompactCardHeader
                 title="MCP Servers"
                 subtitle="Source: paseo-mcp-tools"
                 icon="Server"
                 value={
-                  data.mcp ? (
+                  data?.mcp ? (
                     <CompactBadge
-                      label={data.mcp.isStale ? "Stale Snapshot" : "Live"}
-                      variant={data.mcp.isStale ? "warning" : "success"}
+                      label={data?.mcp.isStale ? "Stale Snapshot" : "Live"}
+                      variant={data?.mcp.isStale ? "warning" : "success"}
                       dot
                     />
                   ) : (
@@ -1410,16 +1456,16 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                 }
               />
 
-              {data.mcp ? (
+              {data?.mcp ? (
                 <>
                   <KeyValueGroup columns={1}>
                     <CompactKeyValue
                       label="Health"
-                      value={`${data.mcp.healthy} healthy / ${data.mcp.total} total`}
+                      value={`${data?.mcp.healthy} healthy / ${data?.mcp.total} total`}
                     />
                     <CompactKeyValue
                       label="Snapshot Updated"
-                      value={formatTimeAgo(data.mcp.updatedAt)}
+                      value={formatTimeAgo(data?.mcp.updatedAt)}
                     />
                     <CompactKeyValue
                       label="Data Provider"
@@ -1427,9 +1473,9 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                     />
                   </KeyValueGroup>
 
-                  {data.mcp.servers && data.mcp.servers.length > 0 ? (
+                  {data?.mcp.servers && data?.mcp.servers.length > 0 ? (
                     <View style={styles.mcpList}>
-                      {data.mcp.servers.map((srv) => {
+                      {data?.mcp.servers.map((srv) => {
                         const badgeVariant: "success" | "warning" | "danger" | "neutral" =
                           srv.status === "healthy"
                             ? "success"
@@ -1471,7 +1517,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
           )}
 
           {/* Custom Metric Pills Card */}
-          {Boolean(data.customPills && data.customPills.length > 0) && (
+          {Boolean(data?.customPills && data?.customPills.length > 0) && (
             <Card variant="elevated">
               <CompactCardHeader
                 title="Custom Metric Pills"
@@ -1479,13 +1525,13 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                 icon="Sliders"
                 value={
                   <CompactBadge
-                    label={`${data.customPills?.length ?? 0} active`}
+                    label={`${data?.customPills?.length ?? 0} active`}
                     variant="accent"
                   />
                 }
               />
               <KeyValueGroup columns={1}>
-                {data.customPills!.map((cp) => (
+                {(data?.customPills ?? []).map((cp) => (
                   <CompactKeyValue
                     key={cp.id}
                     label={cp.title}
@@ -1582,6 +1628,79 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               <CompactKeyValue label="Working Directory" value={agent.cwd} copyable mono />
             ) : null}
           </Card>
+
+          {/* Token Usage & Context Window */}
+          <Card variant="elevated">
+            <CompactCardHeader
+              title="Tokens & Context Window"
+              icon="Coins"
+              value={
+                contextPercent != null ? (
+                  <CompactBadge
+                    label={`${contextPercent}% ctx`}
+                    variant={contextPercent >= 85 ? "danger" : contextPercent >= 70 ? "warning" : "success"}
+                  />
+                ) : tokenMetrics?.totalTokens != null ? (
+                  <CompactBadge
+                    label={`${formatCompactTokens(tokenMetrics.totalTokens)} tok`}
+                    variant="neutral"
+                  />
+                ) : undefined
+              }
+            />
+
+            {tokenMetrics?.contextMaxTokens != null && tokenMetrics.contextMaxTokens > 0 ? (
+              <View style={{ marginVertical: 4 }}>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+                  <Text style={[styles.compactKvLabel, { color: colors.foregroundMuted }]}>Context Utilization</Text>
+                  <Text style={[styles.compactKvValue, { color: colors.foreground, fontWeight: "600" }]}>
+                    {formatCompactTokens(tokenMetrics.contextUsedTokens ?? 0)} / {formatCompactTokens(tokenMetrics.contextMaxTokens)} ({contextPercent}%)
+                  </Text>
+                </View>
+                <ProgressBar
+                  value={contextPercent ?? 0}
+                  thresholds={{ warning: 70, danger: 85 }}
+                  height={8}
+                />
+              </View>
+            ) : tokenMetrics?.contextUsedTokens != null ? (
+              <CompactKeyValue
+                label="Context Used"
+                value={`${tokenMetrics.contextUsedTokens.toLocaleString()} (${formatCompactTokens(tokenMetrics.contextUsedTokens)})`}
+              />
+            ) : null}
+
+            <KeyValueGroup columns={1}>
+              <CompactKeyValue
+                label="Input Tokens"
+                value={tokenMetrics?.inputTokens != null ? tokenMetrics.inputTokens.toLocaleString() : "--"}
+                subValue={tokenMetrics?.inputTokens != null ? formatCompactTokens(tokenMetrics.inputTokens) : undefined}
+              />
+              <CompactKeyValue
+                label="Output Tokens"
+                value={tokenMetrics?.outputTokens != null ? tokenMetrics.outputTokens.toLocaleString() : "--"}
+                subValue={tokenMetrics?.outputTokens != null ? formatCompactTokens(tokenMetrics.outputTokens) : undefined}
+              />
+              {tokenMetrics?.cachedTokens != null && (
+                <CompactKeyValue
+                  label="Cached Tokens"
+                  value={tokenMetrics.cachedTokens.toLocaleString()}
+                  subValue={formatCompactTokens(tokenMetrics.cachedTokens)}
+                />
+              )}
+              {tokenMetrics?.costUsd != null && (
+                <CompactKeyValue
+                  label="Session / Turn Cost"
+                  value={`$${tokenMetrics.costUsd < 0.01 ? tokenMetrics.costUsd.toFixed(4) : tokenMetrics.costUsd.toFixed(2)}`}
+                />
+              )}
+            </KeyValueGroup>
+            {!tokenMetrics && (
+              <Text style={[styles.mcpEmpty, { color: colors.foregroundMuted, marginTop: 4 }]}>
+                No token usage recorded for this agent session yet
+              </Text>
+            )}
+          </Card>
         </>
       )}
 
@@ -1643,6 +1762,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               <Toggle
                 label="Show Composer Pill"
                 description="Hide the composer pill entirely; the dashboard stays available from the sidebar"
+                style={{ width: "100%", alignSelf: "stretch" }}
                 value={settings.showComposerPill ?? true}
                 onValueChange={(val) => {
                   const next = { ...settings, showComposerPill: val };
@@ -1703,6 +1823,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               <Toggle
                 label="Show Custom Metric Pills"
                 description="Display pills defined in ~/.paseo/top/pills as standalone composer pills"
+                style={{ width: "100%", alignSelf: "stretch" }}
                 labelStyle={styles.compactToggleLabel}
                 value={settings.showCustomPills ?? true}
                 onValueChange={(val) => {
@@ -1840,7 +1961,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
           extraItems={[
             {
               label: "Host Platform",
-              value: data?.platform ? `${data.platform} (${data.arch ?? "unknown"})` : "Linux",
+              value: data?.platform ? `${data?.platform} (${data?.arch ?? "unknown"})` : "Linux",
               copyable: true,
             },
             { label: "Host Name", value: data?.hostname ?? "localhost", copyable: true },
@@ -1851,11 +1972,11 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
             },
             {
               label: "Total Memory",
-              value: data?.memoryTotalBytes ? formatBytes(data.memoryTotalBytes) : "unknown",
+              value: data?.memoryTotalBytes ? formatBytes(data?.memoryTotalBytes) : "unknown",
             },
             {
               label: "Host Uptime",
-              value: data?.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "unknown",
+              value: data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "unknown",
             },
           ]}
         />
@@ -2055,12 +2176,14 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         title: string;
         modalTitle: string;
         defaultTab: "system" | "context";
+        icon: string;
       }[] = [];
 
       if (effectiveCpu) {
         desiredPills.push({
           id: "paseo-top-cpu",
           item: "cpu_ram",
+          icon: "Cpu",
           title: "CPU & RAM",
           modalTitle: "Host System Resources",
           defaultTab: "system",
@@ -2070,6 +2193,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-branch",
           item: "branch",
+          icon: "GitBranch",
           title: "Git Branch",
           modalTitle: "Host System Resources",
           defaultTab: "context",
@@ -2079,6 +2203,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-worktree",
           item: "worktree",
+          icon: "FolderGit2",
           title: "Worktree",
           modalTitle: "Host System Resources",
           defaultTab: "context",
@@ -2088,6 +2213,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-agent-title",
           item: "agent_title",
+          icon: "Bot",
           title: "Agent Tab",
           modalTitle: "Host System Resources",
           defaultTab: "context",
@@ -2097,6 +2223,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-agent",
           item: "agent",
+          icon: "Bot",
           title: "Agent Model",
           modalTitle: "Host System Resources",
           defaultTab: "context",
@@ -2106,6 +2233,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-agent-provider",
           item: "agent_provider",
+          icon: "Sparkles",
           title: "Provider",
           modalTitle: "Host System Resources",
           defaultTab: "context",
@@ -2115,6 +2243,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-agent-activity",
           item: "agent_activity",
+          icon: "Activity",
           title: "Activity",
           modalTitle: "Host System Resources",
           defaultTab: "context",
@@ -2124,6 +2253,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-agent-id",
           item: "agent_id",
+          icon: "Hash",
           title: "Agent ID",
           modalTitle: "Host System Resources",
           defaultTab: "context",
@@ -2133,6 +2263,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-load",
           item: "load",
+          icon: "Gauge",
           title: "Load",
           modalTitle: "Host System Resources",
           defaultTab: "system",
@@ -2142,6 +2273,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-uptime",
           item: "uptime",
+          icon: "Clock",
           title: "Uptime",
           modalTitle: "Host System Resources",
           defaultTab: "system",
@@ -2151,6 +2283,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-mcp",
           item: "mcp",
+          icon: "Server",
           title: "MCP Health",
           modalTitle: "Host System Resources",
           defaultTab: "system",
@@ -2160,6 +2293,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-changes",
           item: "changes",
+          icon: "GitCompare",
           title: "Git Changes",
           modalTitle: "Host System Resources",
           defaultTab: "system",
@@ -2169,15 +2303,17 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-tokens",
           item: "tokens",
+          icon: "Coins",
           title: "Token Usage",
           modalTitle: "Host System Resources",
-          defaultTab: "system",
+          defaultTab: "context",
         });
       }
       if (settings.metricSurfaces && isPillEnabled(settings.metricSurfaces.tools)) {
         desiredPills.push({
           id: "paseo-top-tools",
           item: "tools",
+          icon: "Sigma",
           title: "Tool Calls",
           modalTitle: "Host System Resources",
           defaultTab: "system",
@@ -2187,6 +2323,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
         desiredPills.push({
           id: "paseo-top-turns",
           item: "turns",
+          icon: "RotateCw",
           title: "Turn Count",
           modalTitle: "Host System Resources",
           defaultTab: "system",
@@ -2210,10 +2347,11 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
             id: pillDef.id,
             title: pillDef.title,
             modalTitle: pillDef.modalTitle,
-            modalIcon: "Activity",
+            icon: pillDef.icon,
+            modalIcon: pillDef.icon,
             resolveDefaultPayload: () => pillDef.defaultTab,
             resolveLabel: singleItemLabelResolver(pillDef.item),
-            refreshIntervalMs: 3000,
+            refreshIntervalMs: 5000,
             renderPill: (props) => (
               <SingleItemPillView
                 item={pillDef.item}
@@ -2364,6 +2502,10 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
 }
 
 const styles = StyleSheet.create({
+  modalContentDesktop: {
+    minWidth: 460,
+    minHeight: 460,
+  },
   pillContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -2434,6 +2576,7 @@ const styles = StyleSheet.create({
   },
   settingsToggles: {
     gap: 8,
+    width: "100%",
   },
   speedRow: {
     flexDirection: "row",
