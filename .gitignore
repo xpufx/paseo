@@ -33,3 +33,6 @@ coverage/
 dist/
 !packages/paseo-plugin-helper/dist/
 plugins/*/dist/
+
+# Local opencode config (per-machine, never committed)
+opencode.jsonc
