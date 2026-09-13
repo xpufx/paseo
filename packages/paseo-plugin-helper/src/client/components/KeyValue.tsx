@@ -251,7 +251,7 @@ export function KeyValueGroup({
           key={index}
           style={{
             flexGrow: 1,
-            flexShrink: 0,
+            flexShrink: 1,
             flexBasis: `${Math.floor(100 / effectiveColumns) - 2}%`,
           }}
         >
@@ -291,6 +291,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
+    flexGrow: 1,
     flexShrink: 1,
     gap: 6,
   },
@@ -305,6 +306,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontWeight: "500",
+    flexShrink: 1,
   },
   subValue: {
     fontWeight: "400",

@@ -2805,7 +2805,7 @@ function KeyValueGroup({
     {
       style: {
         flexGrow: 1,
-        flexShrink: 0,
+        flexShrink: 1,
         flexBasis: `${Math.floor(100 / effectiveColumns) - 2}%`
       },
       children: child
@@ -2842,6 +2842,7 @@ var styles15 = reactNative.StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
+    flexGrow: 1,
     flexShrink: 1,
     gap: 6
   },
@@ -2855,7 +2856,8 @@ var styles15 = reactNative.StyleSheet.create({
     width: "100%"
   },
   label: {
-    fontWeight: "500"
+    fontWeight: "500",
+    flexShrink: 1
   },
   subValue: {
     fontWeight: "400"
