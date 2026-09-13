@@ -185,6 +185,7 @@ async function main() {
     repoHead,
     helper: null,
     plugins: [],
+    nestedHelperShadows: [],
     reloaded: [],
   };
 
@@ -241,6 +242,29 @@ async function main() {
 
   for (const name of pluginDirs) {
     const fullPath = path.join(pluginsDir, name);
+    // Guard: a registry-installed nested paseo-plugin-helper shadows the
+    // workspace symlink and freezes the plugin on stale helper types/code.
+    // (Orbit: scoped `npm install --workspace` during version bumps.)
+    const nestedHelper = path.join(fullPath, "node_modules", "paseo-plugin-helper");
+    let nestedStat = null;
+    try {
+      nestedStat = fs.lstatSync(nestedHelper);
+    } catch {}
+    if (nestedStat && !nestedStat.isSymbolicLink()) {
+      let nestedVersion = "?";
+      try {
+        nestedVersion = JSON.parse(
+          fs.readFileSync(path.join(nestedHelper, "package.json"), "utf-8")
+        ).version;
+      } catch {}
+      result.nestedHelperShadows.push({ plugin: name, version: nestedVersion });
+      result.ready = false;
+      if (shouldReload) {
+        console.log(`${colors.yellow}⚡ Removing nested paseo-plugin-helper@${nestedVersion} shadowing workspace link in plugins/${name}...${colors.reset}`);
+        fs.rmSync(nestedHelper, { recursive: true, force: true });
+        result.reloaded.push(`plugins/${name}/node_modules/paseo-plugin-helper`);
+      }
+    }
     const pluginCommit = getPluginCommit(fullPath);
     let stamped = getStampedVersion(fullPath);
 
@@ -317,6 +341,12 @@ async function main() {
   }
 
   // 3. Output Handling
+  // Re-resolve workspace links once after removing nested shadows (without
+  // this the plugin keeps resolving stale nested helper types)
+  if (shouldReload && result.nestedHelperShadows.length > 0) {
+    console.log(`${colors.yellow}⚡ Restoring workspace links via root npm install...${colors.reset}`);
+    execSync("npm install", { cwd: ROOT_DIR, stdio: "inherit" });
+  }
   if (isJson) {
     console.log(JSON.stringify(result, null, 2));
     process.exit(result.ready ? 0 : 1);
@@ -378,6 +408,11 @@ async function main() {
     console.log(`${colors.yellow}⚠️  Action Required to Test Fresh Code:${colors.reset}`);
     if (result.helper.status === "stale") {
       console.log(`  1. Rebuild helper: ${colors.cyan}npm run build --workspace=packages/paseo-plugin-helper${colors.reset}`);
+    }
+    if (result.nestedHelperShadows.length > 0) {
+      for (const s of result.nestedHelperShadows) {
+        console.log(`  ⚠️  Nested paseo-plugin-helper@${s.version} shadows workspace link in plugins/${s.plugin} (stale types/code): ${colors.cyan}rm -rf plugins/${s.plugin}/node_modules/paseo-plugin-helper && npm install${colors.reset}`);
+      }
     }
     const needsReload = result.plugins.filter((p) => p.status === "stale-daemon" || p.status === "stale-stamp");
     if (needsReload.length > 0) {
