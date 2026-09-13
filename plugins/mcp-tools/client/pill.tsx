@@ -840,6 +840,7 @@ function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
           repository="https://github.com/xpufx/paseo-mcp-tools"
           issues="https://github.com/xpufx/paseo-mcp-tools/issues"
           license="MIT"
+          density="tiny"
           extraItems={[
             { label: "Servers", value: `${query.data?.servers.length ?? 0}`, copyable: false },
             { label: "Provider", value: query.data?.provider ?? "unknown", copyable: true },

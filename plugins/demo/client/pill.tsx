@@ -931,12 +931,47 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
             <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
               Badge with icon
             </Text>
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Badge accepts string host icons and custom emoji/graphic nodes via the icon prop, plus a dot variant.
+            </Text>
+            <View style={styles.beaconRow}>
+              <Badge icon="Bell" label="Bell Icon" variant="danger" />
+              <Badge icon="Flame" label="Flame Icon" variant="warning" />
+              <Badge
+                icon={<Text style={{ fontSize: 11 }}>🚀</Text>}
+                label="Emoji Graphic"
+                variant="accent"
+              />
+              <Badge
+                icon={<Text style={{ fontSize: 11 }}>⚡</Text>}
+                label="Zap Graphic"
+                variant="success"
+              />
+              <Badge dot label="Status Dot" variant="info" />
+            </View>
             <View style={styles.beaconRow}>
               <AttentionBeacon mode="badge" tone="danger" active={attentionOn}>
-                <Badge label="bell" variant="danger" />
+                <Badge icon="Bell" label="Bell Icon" variant="danger" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="warning" active={attentionOn}>
+                <Badge icon="Flame" label="Flame Icon" variant="warning" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="accent" active={attentionOn}>
+                <Badge
+                  icon={<Text style={{ fontSize: 11 }}>🚀</Text>}
+                  label="Emoji Graphic"
+                  variant="accent"
+                />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="accent" active={attentionOn}>
+                <Badge
+                  icon={<Text style={{ fontSize: 11 }}>⚡</Text>}
+                  label="Zap Graphic"
+                  variant="success"
+                />
               </AttentionBeacon>
               <AttentionBeacon mode="badge" tone={beaconTone} active={attentionOn}>
-                <Badge label="plain pip" variant="accent" />
+                <Badge dot label="Status Dot" variant="info" />
               </AttentionBeacon>
             </View>
           </Card>
@@ -1054,6 +1089,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
           repository="https://github.com/xpufx/paseo-plugin-helper"
           issues="https://github.com/xpufx/paseo-plugin-helper/issues"
           license="MIT"
+          density="tiny"
           extraItems={[
             { label: "Daemon Verified Port", value: `${data?.daemonPort ?? 4280}`, copyable: true },
             { label: "Host Platform", value: `${data?.platform ?? "unknown"}`, copyable: true },

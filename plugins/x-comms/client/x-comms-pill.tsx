@@ -121,6 +121,7 @@ function XCommsModalContent({ theme, agentId }: { theme: RenderModalProps["theme
           version="0.3.0"
           repository="https://github.com/xpufx/paseo-cross-daemon-comms.git"
           license="Apache-2.0"
+          density="tiny"
         />
       ) : tab === "settings" ? (
         <XCommsSettings theme={theme} />
