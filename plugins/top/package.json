@@ -1,7 +1,7 @@
 {
   "name": "top",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "scripts": {
     "build": "node -e \"import('paseo-plugin-helper/server').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "pretypecheck": "npm run build",
