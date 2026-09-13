@@ -191,3 +191,4 @@ The operator signals with line-anchored `/`-commands in issue comments. This rep
 - `attention/0-orchestrator` means "do something": if no stoppers, delegate (hand to `attention/1-agent` for fleet pickup once tree-safe); if the next step is unclear, ask — flip to `attention/2-user` with a one-line question.
 - Tree conflicts keep gating dispatch: no worker enters a checkout the operator is hands-on in. This is smart, not timid — queue, don't collide.
 - Pre-flight stands: never present unverified work for operator testing.
+- Verify is non-binding: `state/3-verify` never means "blocked on human forever." If the operator doesn't test, resolve unilaterally — close as superseded/done with rationale, requeue, or verify by proxy — and say so on the ticket. Mutual-wait deadlocks (operator waits on orchestrator token while orchestrator waits on verify) are a process failure; the orchestrator breaks them by acting and narrating.
