@@ -27,6 +27,14 @@
     "npm-push-x-comms": {
       "type": "script",
       "command": "make npm-push-x-comms"
+    },
+    "github-mirror-top-dry": {
+      "type": "script",
+      "command": "make github-mirror-top-dry"
+    },
+    "github-mirror-top": {
+      "type": "script",
+      "command": "make github-mirror-top"
     }
   }
 }

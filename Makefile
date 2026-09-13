@@ -42,6 +42,14 @@ npm-push-x-comms-dry:
 npm-push-x-comms:
 	@npm publish plugins/x-comms/mcp --access public
 
+## github-mirror-top-dry: Dry-run synchronize top plugin to GitHub mirror
+github-mirror-top-dry:
+	@node scripts/mirror-github-top.mjs --dry-run
+
+## github-mirror-top: Synchronize top plugin and monorepo baseline to GitHub mirror
+github-mirror-top:
+	@node scripts/mirror-github-top.mjs
+
 ## help: Display this help message
 help:
 	@echo "Paseo Monorepo Developer Commands:"
