@@ -4,6 +4,11 @@ Live host system resource monitor and telemetry provider for [Paseo](https://git
 
 Displays real-time host metrics, session metadata, turn telemetry, and custom pill widgets directly in the composer track bar without cluttering the interface. Automatically stamps performance summaries into agent conversation timelines and provides an interactive modal dashboard with live gauges.
 
+> [!NOTE]
+> **Prerequisites & Platform Support**:
+> - Requires **npm** and **Node.js** (v18+) available in your system path (Paseo runs `npm install` during plugin installation).
+> - Developed and tested primarily on **Linux** (using `/proc` telemetry), with fallback support for **macOS** and **Windows** host platforms.
+
 ### General Composer View
 <p align="center">
   <img src="screenshots/paseo-top-general-view.jpg" alt="General Composer View" />
@@ -14,30 +19,10 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
   <img src="screenshots/paseo-top-dashboard.jpg" alt="Dashboard View" />
 </p>
 
-> [!NOTE]
-> **Prerequisites & Platform Support**:
-> - Requires **npm** and **Node.js** (v18+) available in your system path (Paseo runs `npm install` during plugin installation).
-> - Developed and tested primarily on **Linux** (using `/proc` telemetry), with fallback support for **macOS** and **Windows** host platforms.
+| System Resources Modal | Workspace Context Modal | Settings Modal | About Modal |
+| :---: | :---: | :---: | :---: |
+| <img src="screenshots/1-paseo-top-modal-system.jpg" alt="System Resources Modal" width="100%" /> | <img src="screenshots/2-paseo-top-modal-workspace.jpg" alt="Workspace Context Modal" width="100%" /> | <img src="screenshots/3-paseo-top-modal-settings.jpg" alt="Settings Modal" width="100%" /> | <img src="screenshots/4-paseo-top-modal-about.jpg" alt="About Modal" width="100%" /> |
 
-### System Resources Modal
-<p align="center">
-  <img src="screenshots/1-paseo-top-modal-system.jpg" alt="System Resources Modal" />
-</p>
-
-### Workspace Context Modal
-<p align="center">
-  <img src="screenshots/2-paseo-top-modal-workspace.jpg" alt="Workspace Context Modal" />
-</p>
-
-### Settings Modal
-<p align="center">
-  <img src="screenshots/3-paseo-top-modal-settings.jpg" alt="Settings Modal" />
-</p>
-
-### About Modal
-<p align="center">
-  <img src="screenshots/4-paseo-top-modal-about.jpg" alt="About Modal" />
-</p>
 
 ## Core Capabilities
 
