@@ -56,6 +56,7 @@ import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   getDemoDataRpc,
   triggerDemoActionRpc,
+  demoAgentIdentityContract,
   demoBeaconSetContract,
   demoBeaconBlinkContract,
   demoBeaconClearContract,
@@ -162,6 +163,14 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
   );
 
   const [beaconFeedback, setBeaconFeedback] = useState<string | null>(null);
+  const [showEnvelope, setShowEnvelope] = useState<boolean>(false);
+
+  const { data: agentData, isLoading: isAgentLoading } = useAutoRefreshQuery(
+    demoAgentIdentityContract,
+    EMPTY_PARAMS,
+    { defaultRate: "5s" }
+  );
+  const agentIdentity = agentData?.identity ?? null;
 
   const { mutate: setBeacon, isPending: isBeaconSetPending } = useRpcMutation(
     demoBeaconSetContract,
@@ -1081,6 +1090,82 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
 
       {/* TAB 6: ABOUT PLUGIN */}
       {activeTab === "about" && (
+        <>
+        <Card variant="elevated">
+          <Card.Header
+            title="Agent Identity & Session"
+            subtitle="Self-inspection via getAgentIdentity()"
+          />
+          {isAgentLoading ? (
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Resolving agent identity...
+            </Text>
+          ) : !agentIdentity ? (
+            <EmptyState
+              icon="Bot"
+              title="No Active Agent Session"
+              description="Running outside an active agent session. Identity resolves via getAgentIdentity() when a session envelope is present."
+            />
+          ) : (
+            <>
+              <KeyValueGroup columns={isCompact ? 1 : 2}>
+                <KeyValue
+                  label="Active Agent ID"
+                  value={agentIdentity.id ?? "—"}
+                  copyable={Boolean(agentIdentity.id)}
+                />
+                <KeyValue
+                  label="Session Name"
+                  value={agentIdentity.name ?? "—"}
+                  copyable={Boolean(agentIdentity.name)}
+                />
+                <KeyValue
+                  label="Model"
+                  value={agentIdentity.model ?? "—"}
+                  copyable={Boolean(agentIdentity.model)}
+                />
+                <KeyValue
+                  label="Provider"
+                  value={agentIdentity.provider ?? "—"}
+                  copyable={Boolean(agentIdentity.provider)}
+                />
+                <KeyValue
+                  label="Repo"
+                  value={agentIdentity.repo ?? "—"}
+                  copyable={Boolean(agentIdentity.repo)}
+                />
+                <KeyValue
+                  label="Branch"
+                  value={agentIdentity.branch ?? "—"}
+                  copyable={Boolean(agentIdentity.branch)}
+                />
+              </KeyValueGroup>
+              {agentIdentity.envelopeText ? (
+                <>
+                  <View style={styles.beaconRow}>
+                    <Badge label="Audit envelope present" variant="success" />
+                    <Button
+                      label={showEnvelope ? "Hide Envelope" : "Inspect Envelope"}
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => {
+                        triggerHaptic("light");
+                        setShowEnvelope((v) => !v);
+                      }}
+                    />
+                  </View>
+                  {showEnvelope ? (
+                    <CodeBlock
+                      language="bash"
+                      code={agentIdentity.envelopeText}
+                      copyable
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </>
+          )}
+        </Card>
         <AboutSection
           name="Paseo Helper Demo"
           description="Interactive design system showcase and daemon runtime verification suite for paseo-plugin-helper."
@@ -1096,6 +1181,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
             { label: "Background Uptime", value: `${Math.round(data?.uptimeSeconds ?? 0)}s` },
           ]}
         />
+        </>
       )}
 
       {/* Footer */}

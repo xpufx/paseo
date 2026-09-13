@@ -70,6 +70,27 @@ export const triggerDemoActionRpc = defineContract({
 
 export type DemoData = RpcOutput<typeof getDemoDataRpc>;
 
+export const demoAgentIdentityContract = defineContract({
+  name: "helper-demo-v8.agent-identity",
+  description: "Get active agent identity and session for self-inspection",
+  input: z.object({}),
+  output: z.object({
+    identity: z
+      .object({
+        id: z.string().optional(),
+        name: z.string().optional(),
+        model: z.string().optional(),
+        provider: z.string().optional(),
+        repo: z.string().optional(),
+        branch: z.string().optional(),
+        envelopeText: z.string().optional(),
+      })
+      .nullable(),
+  }),
+});
+
+export type DemoAgentIdentity = RpcOutput<typeof demoAgentIdentityContract>;
+
 export const demoBeaconSetContract = defineContract({
   name: "helper-demo-v8.beacon-set",
   description: "Set workspace status beacon label on the active workspace",

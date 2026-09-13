@@ -3,6 +3,7 @@ import {
   createPeriodicTask,
   findAvailablePort,
   getSystemMetrics,
+  getAgentIdentity,
   PluginStorage,
   createSettingsHandlers,
   createWorkspaceBeacon,
@@ -78,6 +79,11 @@ export function handleTriggerDemoAction(input: { actionName: string }) {
     success: true,
     message: `Triggered action "${input.actionName}" (Worker tick #${backgroundTicks})`,
   };
+}
+
+export async function handleGetAgentIdentity() {
+  const identity = await getAgentIdentity();
+  return { identity };
 }
 
 export const demoBeacon = createWorkspaceBeacon();

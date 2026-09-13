@@ -3,6 +3,7 @@ import {
   demoSettingsContract,
   getDemoDataRpc,
   triggerDemoActionRpc,
+  demoAgentIdentityContract,
   demoBeaconSetContract,
   demoBeaconBlinkContract,
   demoBeaconClearContract,
@@ -10,6 +11,7 @@ import {
 import {
   handleGetDemoData,
   handleTriggerDemoAction,
+  handleGetAgentIdentity,
   handleDemoBeaconSet,
   handleDemoBeaconBlink,
   handleDemoBeaconClear,
@@ -29,6 +31,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(suiteSettings.contract.reset, suiteSettingsHandlers.reset);
   server.handle(getDemoDataRpc, handleGetDemoData);
   server.handle(triggerDemoActionRpc, handleTriggerDemoAction);
+  server.handle(demoAgentIdentityContract, handleGetAgentIdentity);
   server.handle(demoBeaconSetContract, handleDemoBeaconSet);
   server.handle(demoBeaconBlinkContract, handleDemoBeaconBlink);
   server.handle(demoBeaconClearContract, handleDemoBeaconClear);
