@@ -1,5 +1,8 @@
 # xpufx/paseo
 
+> [!NOTE]
+> **Release mirror**: this GitHub repository mirrors releases of the canonical monorepo, which lives on a private Forgejo instance. It is read-only for development purposes.
+
 Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared runtime libraries, plugins, MCP servers, and agent skills.
 
 > [!NOTE]
