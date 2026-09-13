@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { guardRpcHandler } from "paseo-plugin-helper/server";
+import { guardRpcHandler } from "./server/vendor/paseo-plugin-helper/index";
 import {
   getSystemResourcesRpc,
   getCustomPillsRpc,
@@ -32,7 +32,11 @@ export default function contribute(server: PluginServerContext) {
 
   // Shed load instead of hanging the daemon RPC: saturated or slow handlers
   // answer from the last good snapshot (system-resources) or fail fast.
+  // WARNs are rate-limited (one per minute per cause): saturation fires once
+  // per poll tick per caller while the modal is open, which flooded the log.
   let lastSystemResources: SystemResources | null = null;
+  const lastWarnAt = { timeout: 0, saturated: 0 };
+  const WARN_COOLDOWN_MS = 60_000;
   const guardedSystemResources = guardRpcHandler(
     async (input: Parameters<typeof handleGetSystemResources>[0]) => {
       const resources = await handleGetSystemResources(input);
@@ -43,10 +47,18 @@ export default function contribute(server: PluginServerContext) {
       timeoutMs: 5000,
       maxInflight: 4,
       getStale: () => lastSystemResources,
-      onTimeout: ({ timeoutMs }) =>
-        log.warn("system-resources handler timed out", { timeoutMs }),
-      onSaturated: ({ maxInflight }) =>
-        log.warn("system-resources handler saturated, serving stale", { maxInflight }),
+      onTimeout: ({ timeoutMs }) => {
+        const now = Date.now();
+        if (now - lastWarnAt.timeout < WARN_COOLDOWN_MS) return;
+        lastWarnAt.timeout = now;
+        log.warn("system-resources handler timed out", { timeoutMs });
+      },
+      onSaturated: ({ maxInflight }) => {
+        const now = Date.now();
+        if (now - lastWarnAt.saturated < WARN_COOLDOWN_MS) return;
+        lastWarnAt.saturated = now;
+        log.warn("system-resources handler saturated, serving stale", { maxInflight });
+      },
     },
   );
 

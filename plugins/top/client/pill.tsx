@@ -41,14 +41,14 @@ import {
   type KeyValueProps,
   type CardHeaderProps,
   type BadgeProps,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 import {
   formatBytes,
   formatUptime,
   resolveMetricStatus,
   type MetricThresholds,
   type CustomPillState,
-} from "paseo-plugin-helper/shared";
+} from "../shared/vendor/paseo-plugin-helper/index";
 import {
   getSystemResourcesRpc,
   topSettingsContract,
@@ -1272,7 +1272,9 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     getSystemResourcesRpc,
     queryParams,
     {
-      defaultRate: "2s",
+      // 5s matches the composer pill pollers: the 2s modal rate stacked with
+      // per-item pill queries and saturated the server's maxInflight=4 guard.
+      defaultRate: "5s",
       isOpen: true,
     },
   );
@@ -1324,29 +1326,28 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     setSelectedTab(tabId as ModalTab);
   };
 
+  const navbar = (
+    <Tabs
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={handleTabChange}
+    />
+  );
+  const navbarStyle = {
+    backgroundColor: colors.surface0,
+    paddingHorizontal: padding.horizontal,
+    paddingTop: padding.vertical,
+    paddingBottom: Math.round(padding.gap / 2),
+  };
+
   if (isError && !data) {
     return (
       <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
-        <View
-          style={[
-            styles.navbarContainer,
-            {
-              backgroundColor: colors.surface0,
-              paddingHorizontal: padding.horizontal,
-              paddingTop: padding.vertical,
-              paddingBottom: Math.round(padding.gap / 2),
-            },
-          ]}
-        >
-          <Tabs
-            tabs={TABS}
-            activeTab={activeTab}
-            onTabChange={handleTabChange}
-          />
-        </View>
         <ModalBody
           refreshing={isRefetching}
           onRefresh={handleRefresh}
+          header={navbar}
+          headerStyle={navbarStyle}
           contentContainerStyle={[
             { paddingTop: Math.round(padding.gap / 2) },
           ]}
@@ -1368,28 +1369,11 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
 
   return (
     <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
-      {/* Pinned Navigation Tabs */}
-      <View
-        style={[
-          styles.navbarContainer,
-          {
-            backgroundColor: colors.surface0,
-            paddingHorizontal: padding.horizontal,
-            paddingTop: padding.vertical,
-            paddingBottom: Math.round(padding.gap / 2),
-          },
-        ]}
-      >
-        <Tabs
-          tabs={TABS}
-          activeTab={activeTab}
-          onTabChange={handleTabChange}
-        />
-      </View>
-
       <ModalBody
         refreshing={isLoading || isRefetching}
         onRefresh={handleRefresh}
+        header={navbar}
+        headerStyle={navbarStyle}
         contentContainerStyle={[
           { paddingTop: Math.round(padding.gap / 2) },
         ]}
@@ -2553,10 +2537,6 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     width: "100%",
-  },
-  navbarContainer: {
-    width: "100%",
-    zIndex: 10,
   },
   pillContainer: {
     flexDirection: "row",

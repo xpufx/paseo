@@ -6,7 +6,7 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 
 > [!NOTE]
 > **Prerequisites & Platform Support**:
-> - Requires **npm** and **Node.js** (v18+) available in your system path (Paseo runs `npm install` during plugin installation).
+> - Zero install requirements: the helper runtime is vendored (`client|server|shared/vendor/paseo-plugin-helper/`, pinned helper 0.4.0-beta.12 — see `shared/vendor/paseo-plugin-helper/README.md`), so Paseo installs this plugin with no build step and no npm/registry access. For local development (`typecheck`/`test`), Node.js (v18+) is enough.
 > - Developed and tested primarily on **Linux** (using `/proc` telemetry), with fallback support for **macOS** and **Windows** host platforms.
 
 | General Composer View | Dashboard View |

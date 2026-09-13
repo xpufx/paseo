@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers } from "paseo-plugin-helper/client";
+import { initClientHelpers } from "./client/vendor/paseo-plugin-helper/index";
 import { contributeClient } from "./client/pill";
 import { TopTimelineTelemetryCard } from "./client/telemetry";
 import {

@@ -2,8 +2,8 @@ import React, { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAgent, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { alpha, usePluginSettings } from "paseo-plugin-helper/client";
-import { formatBytes, formatUptime, truncatePath } from "paseo-plugin-helper/shared";
+import { alpha, usePluginSettings } from "./vendor/paseo-plugin-helper/index";
+import { formatBytes, formatUptime, truncatePath } from "../shared/vendor/paseo-plugin-helper/index";
 import {
   isTimelineEnabled,
   isMcpSurfaceEnabled,
