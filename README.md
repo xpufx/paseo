@@ -1,59 +1,48 @@
 # xpufx/paseo
 
-Monorepo for xpufx Paseo tooling. Primary home is Forgejo
-(`ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git`); GitHub
-(`xpufx/paseo`) is a mirror target.
+Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared runtime libraries, plugins, MCP servers, and agent skills.
 
 ## Layout
 
-- `packages/paseo-plugin-helper/` — shared runtime library for Paseo
-  plugins (client UI, server utilities, settings contracts). Published to
-  npm as `paseo-plugin-helper`; workspaces link it locally.
-- `plugins/top/` — host resource monitor plugin.
-- `plugins/mcp-tools/` — MCP server fleet management plugin.
-- `plugins/x-comms/` — cross-daemon agent conversation plugin.
-- `plugins/forgejo/` — Forgejo issues plugin.
-- `mcp/` — standalone MCP servers (copy of `plugins/x-comms/mcp` at
-  consolidation time; the plugin-embedded copy under `plugins/x-comms/mcp`
-  is canonical).
-- `skills/` — agent skills (copy of
-  `packages/paseo-plugin-helper/.agents/skills` at consolidation time;
-  the helper tree is canonical).
+- `plugins/top/` — Live host system resource monitor, timeline telemetry, and customizable metric pills (v0.4.0).
+- `packages/paseo-plugin-helper/` — Shared runtime library for Paseo plugins (UI components, server utilities, RPC contracts, settings schema, and testing harness). Published to npm as `paseo-plugin-helper`.
+- `plugins/mcp-tools/` — MCP server fleet management and diagnostic plugin.
+- `plugins/x-comms/` — Cross-daemon agent conversation mesh plugin.
+- `plugins/forgejo/` — Forgejo issue tracker and workflow integration plugin.
+- `plugins/demo/` — Conformance testbed and canonical showcase for `paseo-plugin-helper` primitives.
 
-## Install (no fleet script)
+## Installation
 
-Plugins install individually via native Paseo 0.8 subpath syntax:
+Plugins install individually via native Paseo 0.8 monorepo subpath syntax:
 
 ```sh
+# Host system resource monitor
 paseo plugin add xpufx/paseo --path plugins/top
-paseo plugin add xpufx/paseo --path plugins/mcp-tools
-paseo plugin add xpufx/paseo --path plugins/x-comms
-paseo plugin add xpufx/paseo --path plugins/forgejo
 ```
 
-## Develop
+*(Additional plugins will be enabled for public install as their releases are finalized.)*
+
+## Development
 
 ```sh
 npm install
-npm run typecheck
-npm test
+make check      # Run full typecheck and unit test suite
+make doctor     # Freshness diagnostic for helper build and running daemons
+make reload     # Auto-rebuild helper, stamp git versions, and reload daemons
 ```
 
-Helper, top, and mcp-tools are green under the hoisted workspace
-dependencies. Two pre-existing cross-version drifts fail root typecheck
-and are intentionally untouched here (aggregation only, no plugin edits):
+### Granular Workspace Commands
 
-- `plugins/x-comms` targets SDK `0.8.0-beta.1` while the workspace hoists
-  stable `0.8.0`, which dropped `PluginComposerPillProps`. It typechecks
-  under its own lockfile; migration to the stable SDK belongs to its
-  owner.
-- `plugins/forgejo` passes react-query v5 `refetch()` promises into
-  `void` slots. Same story: green in its own tree, fix belongs upstream
-  of this repo.
+```sh
+# Typecheck or test a single plugin
+npm run typecheck --workspace=plugins/top
+npm test --workspace=plugins/top
+```
 
-## Storage namespace
+## Storage Namespace
 
-Plugin persistent storage converges on `~/.paseo/xpufx-plugins/<pluginId>/`.
-Tracked in [Issue #49](https://forge.mrs.aager.de/xpufx/paseo-plugin-helper/issues/49);
-the helper implementation lives in its own issue, this repo only records
-the direction.
+Plugin persistent storage converges on `~/.paseo/xpufx-plugins/<pluginId>/`, managed canonically by `paseo-plugin-helper`.
+
+## License
+
+MIT
