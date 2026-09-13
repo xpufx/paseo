@@ -1,8 +1,5 @@
 # paseo-top
 
-> [!NOTE]
-> **Release mirror**: this GitHub repository mirrors releases of the canonical monorepo, which lives on a private Forgejo instance. It is read-only for development purposes.
-
 Live host system resource monitor and telemetry provider for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
 
 Displays real-time host metrics, session metadata, turn telemetry, and custom pill widgets directly in the composer track bar without cluttering the interface. Automatically stamps performance summaries into agent conversation timelines and provides an interactive modal dashboard with live gauges.
