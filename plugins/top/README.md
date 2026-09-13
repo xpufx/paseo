@@ -1,7 +1,8 @@
 # paseo-top
 
 <p align="center">
-  <img src="screenshots/paseo-top-general-view.jpg" alt="Paseo Top General View" />
+  <img src="screenshots/paseo-top-general-view.jpg" alt="Paseo Top General View" width="48%" />
+  <img src="screenshots/paseo-top-dashboard.jpg" alt="Paseo Top Dashboard Surface" width="48%" />
 </p>
 
 Live host system resource monitor and telemetry provider for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
