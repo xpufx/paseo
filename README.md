@@ -2,6 +2,11 @@
 
 Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared runtime libraries, plugins, MCP servers, and agent skills.
 
+> [!NOTE]
+> **Prerequisites & Platform Support**:
+> - Requires **npm** and **Node.js** (v18+) available in your `$PATH` (Paseo automatically runs `npm install` during plugin installation).
+> - Developed and tested primarily on **Linux**, but structured to work cross-platform on **macOS** and **Windows**.
+
 ## Layout
 
 - `plugins/top/` — Live host system resource monitor, timeline telemetry, and customizable metric pills (v0.4.0).

@@ -10,6 +10,11 @@ Live host system resource monitor and telemetry provider for [Paseo](https://git
 
 Displays real-time host metrics (CPU, memory, load averages) right in the composer track bar without cluttering the interface, powers detailed timeline telemetry cards at the end of agent turns, and provides an extensible custom-pill engine via JSONC configs.
 
+> [!NOTE]
+> **Prerequisites & Platform Support**:
+> - Requires **npm** and **Node.js** (v18+) available in your system path.
+> - Tested on **Linux** (native `/proc` telemetry), with fallback support for **macOS** and **Windows** host platforms.
+
 ## Features
 
 - **Composer Pill**: Unobtrusive live telemetry widget in the composer track bar directly above the agent prompt.
