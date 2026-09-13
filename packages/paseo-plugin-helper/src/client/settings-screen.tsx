@@ -284,8 +284,8 @@ function createSettingsScreenComponent<TSettings extends Record<string, any>>(
   return function HelperSettingsScreen(_props: HostSurfaceProps) {
     const { settings, updateSettings } = usePluginSettings(contract);
     return (
-      <ui.SettingsCard>
-        <ui.SettingsSection title={sectionTitle}>
+      <ui.SettingsSection title={sectionTitle}>
+        <ui.SettingsCard>
           {fields.map((field) => {
             if (field.kind === "boolean") {
               return (
@@ -346,8 +346,8 @@ function createSettingsScreenComponent<TSettings extends Record<string, any>>(
               />
             );
           })}
-        </ui.SettingsSection>
-      </ui.SettingsCard>
+        </ui.SettingsCard>
+      </ui.SettingsSection>
     );
   };
 }

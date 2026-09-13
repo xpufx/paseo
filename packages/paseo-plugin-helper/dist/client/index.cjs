@@ -4481,7 +4481,7 @@ function createSettingsScreenComponent(contract, ui, fields, sectionTitle) {
   const Select = ui.SettingsSelect;
   return function HelperSettingsScreen(_props) {
     const { settings, updateSettings } = usePluginSettings(contract);
-    return /* @__PURE__ */ jsxRuntime.jsx(ui.SettingsCard, { children: /* @__PURE__ */ jsxRuntime.jsx(ui.SettingsSection, { title: sectionTitle, children: fields.map((field) => {
+    return /* @__PURE__ */ jsxRuntime.jsx(ui.SettingsSection, { title: sectionTitle, children: /* @__PURE__ */ jsxRuntime.jsx(ui.SettingsCard, { children: fields.map((field) => {
       if (field.kind === "boolean") {
         return /* @__PURE__ */ jsxRuntime.jsx(
           ui.SettingsSwitch,

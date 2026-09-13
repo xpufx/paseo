@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
+import React from "react";
+import TestRenderer, { act } from "react-test-renderer";
 import { z } from "zod";
 import {
   contractSchemaToFields,
@@ -116,5 +118,42 @@ describe("registerHelperSettingsScreen", () => {
     const client2 = createMockClientContext();
     registerHelperSettingsScreen(client2, contract, { ui: stubUi });
     expect(client2.registeredSettingsScreens[0].title).toBe("plain.settings");
+  });
+
+  it("nests SettingsCard inside SettingsSection", async () => {
+    const settingsModule = await import("../client/settings.js");
+    vi.spyOn(settingsModule, "usePluginSettings").mockReturnValue({
+      settings: { showCpu: true },
+      updateSettings: () => {},
+    } as any);
+    const SettingsSection = ({ title, children }: any) =>
+      React.createElement("mock-section", { title }, children);
+    const SettingsCard = ({ children }: any) =>
+      React.createElement("mock-card", null, children);
+    const ui = {
+      ...stubUi,
+      SettingsSection: SettingsSection as any,
+      SettingsCard: SettingsCard as any,
+      SettingsSwitch: (() => null) as any,
+    };
+    const contract = defineSettingsContract({
+      name: "nest.settings",
+      schema: z.object({ showCpu: z.boolean().default(true) }),
+    });
+    const client = createMockClientContext();
+    registerHelperSettingsScreen(client, contract, { ui });
+    const Component = client.registeredSettingsScreens[0].Component;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(React.createElement(Component, {}));
+    });
+    const section = renderer.root.findByType(SettingsSection);
+    const card = section.findByType(SettingsCard);
+    expect(card).toBeDefined();
+    expect(renderer.root.findByType("mock-section")).toBeDefined();
+    expect(section.findByType("mock-card")).toBeDefined();
+    expect(() =>
+      renderer.root.findByType(SettingsCard).findByType(SettingsSection),
+    ).toThrow();
   });
 });
