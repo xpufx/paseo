@@ -11,12 +11,12 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 
 ### General Composer View
 <p align="center">
-  <img src="screenshots/paseo-top-general-view.jpg" alt="General Composer View" />
+  <img src="screenshots/paseo-top-general-view.jpg" width="100%" alt="General Composer View" />
 </p>
 
 ### Dashboard View
 <p align="center">
-  <img src="screenshots/paseo-top-dashboard.jpg" alt="Dashboard View" />
+  <img src="screenshots/paseo-top-dashboard.jpg" width="100%" alt="Dashboard View" />
 </p>
 
 | System Resources Modal | Workspace Context Modal | Settings Modal | About Modal |
@@ -55,6 +55,9 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 - **Cycle Mode**: Automatically cycles through enabled metric segments on each refresh interval.
 - **All Mode**: Combines all enabled metrics into a single unified ticker.
 - **Multiple Mode**: Splits selected metrics into distinct, individual pills placed side-by-side in the composer track bar.
+
+> [!NOTE]
+> Displaying too many pills separately in Multiple Mode may cause UI performance issues. Consider using **Cycle Mode** or **All Mode** when monitoring multiple metrics simultaneously.
 
 ### 6. Dual Surface Routing Matrix
 Every metric can be routed independently via settings to:
