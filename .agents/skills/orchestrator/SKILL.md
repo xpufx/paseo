@@ -96,6 +96,11 @@ When dispatching background coding workers via `create_agent`:
    - Instruct workers to replace bespoke raw React Native styling (`Pressable` cards, custom borders, bespoke switches) with helper components.
 3. **Mandatory Script Verification**:
    - Require workers to verify their deliverables using `make check` (or workspace script `check`) and reload live daemons via `make reload` (or workspace script `reload`).
+4. **Mandatory State Labeling Instruction**:
+   - Every worker prompt MUST explicitly instruct the worker to update labels:
+     - On claim: `fgjx issue edit <id> --add-label state/1-wip`
+     - On completion: `fgjx issue edit <id> --add-label state/3-verify` (or `state/2-review`)
+   - Emphasize to the worker that posting a comment alone is insufficient; the `fgjx issue edit` command is required.
 
 ## 4. Gated Fan-Out Protocol
 

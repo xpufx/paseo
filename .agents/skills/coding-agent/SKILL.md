@@ -198,9 +198,13 @@ When code is implemented and verified locally:
      - **Daemon Status**: Reloaded (`paseo plugin reload <id>`)
      - **Client Action**: Re-open the modal/surface (or press Ctrl+R / Cmd+R in Paseo if window is open).
      ```
-3. **Transition the state**: Apply **`state/2-review`** and `review/0-needed`.
-   - Command: `fgjx issue edit <number> --add-label state/2-review --add-label review/0-needed`.
+3. **Transition the state**: Apply **`state/2-review`** and `review/0-needed` (or **`state/3-verify`** if delivering directly for user verification).
+   - Command: `fgjx issue edit <number> --add-label state/2-review --add-label review/0-needed` (or `fgjx issue edit <number> --add-label state/3-verify`).
    - **Automatic Eviction**: Because `state/` and `review/` are exclusive scopes, this clears prior states automatically.
    - **Operator verdict**: `review/2-approved` means advance to `state/3-verify`; `review/1-changes-requested` means return to `state/1-wip`.
+
+   > [!CAUTION]
+   > **MANDATORY LABEL UPDATE**: You MUST execute `fgjx issue edit <number> --add-label ...`. Merely posting an envelope comment without executing the label update command leaves the issue stranded in its old state on the board.
+
 4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` so the human operator can verify and close it.
 5. Stand by for fast review from the `Orchestrator` or testing by human user `oktay`.
