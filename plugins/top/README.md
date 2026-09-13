@@ -11,7 +11,7 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 
 | General Composer View | Dashboard View |
 | :---: | :---: |
-| <a href="screenshots/paseo-top-general-view.jpg"><img src="screenshots/paseo-top-general-view.jpg" width="400" alt="General Composer View" /></a> | <a href="screenshots/paseo-top-dashboard.jpg"><img src="screenshots/paseo-top-dashboard.jpg" width="400" alt="Dashboard View" /></a> |
+| [![General Composer View](screenshots/paseo-top-general-view.jpg)](screenshots/paseo-top-general-view.jpg) | [![Dashboard View](screenshots/paseo-top-dashboard.jpg)](screenshots/paseo-top-dashboard.jpg) |
 
 | System Resources Modal | Workspace Context Modal | Settings Modal | About Modal |
 | :---: | :---: | :---: | :---: |
