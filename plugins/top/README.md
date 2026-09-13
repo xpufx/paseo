@@ -1,9 +1,7 @@
 # paseo-top
 
 <p align="center">
-  <img src="screenshots/pill.png" alt="Paseo Top Composer Pill" />
-  <br /><br />
-  <img src="screenshots/modal.png" alt="Paseo Top Resource Modal" />
+  <img src="screenshots/paseo-top-general-view.jpg" alt="Paseo Top General View" />
 </p>
 
 Live host system resource monitor and telemetry provider for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
