@@ -51,6 +51,8 @@ export function Toggle({
     ? trackWidth - thumbSize - thumbPadding
     : thumbPadding;
 
+  const hasText = Boolean(label || description);
+
   return (
     <Pressable
       onPress={handlePress}
@@ -58,6 +60,7 @@ export function Toggle({
       hitSlop={Math.max(0, (touchTargetMin - trackHeight) / 2)}
       style={({ pressed }) => [
         styles.container,
+        !hasText && styles.bareContainer,
         {
           minHeight: touchTargetMin,
           opacity: disabled ? 0.5 : pressed ? 0.8 : 1,
@@ -132,6 +135,12 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
     width: "100%",
+  },
+  bareContainer: {
+    width: "auto",
+    alignSelf: "flex-start",
+    flexShrink: 0,
+    justifyContent: "flex-start",
   },
   textContainer: {
     flex: 1,

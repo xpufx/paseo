@@ -1776,6 +1776,7 @@ function Toggle({
   const thumbPadding = 3;
   const trackColor = value ? colors.accent : alpha2(colors.foregroundMuted, 0.35);
   const thumbPosition = value ? trackWidth - thumbSize - thumbPadding : thumbPadding;
+  const hasText = Boolean(label || description);
   return /* @__PURE__ */ jsxs(
     Pressable,
     {
@@ -1784,6 +1785,7 @@ function Toggle({
       hitSlop: Math.max(0, (touchTargetMin - trackHeight) / 2),
       style: ({ pressed }) => [
         styles10.container,
+        !hasText && styles10.bareContainer,
         {
           minHeight: touchTargetMin,
           opacity: disabled ? 0.5 : pressed ? 0.8 : 1
@@ -1860,6 +1862,12 @@ var styles10 = StyleSheet.create({
     justifyContent: "space-between",
     gap: 12,
     width: "100%"
+  },
+  bareContainer: {
+    width: "auto",
+    alignSelf: "flex-start",
+    flexShrink: 0,
+    justifyContent: "flex-start"
   },
   textContainer: {
     flex: 1,
