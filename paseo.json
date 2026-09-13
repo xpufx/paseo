@@ -1,5 +1,9 @@
 {
   "scripts": {
+    "forgejo-hook": {
+      "type": "service",
+      "command": "node scripts/forgejo-hook.mjs"
+    },
     "doctor": {
       "type": "script",
       "command": "make doctor"
