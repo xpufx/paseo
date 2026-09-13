@@ -9,15 +9,9 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 > - Requires **npm** and **Node.js** (v18+) available in your system path (Paseo runs `npm install` during plugin installation).
 > - Developed and tested primarily on **Linux** (using `/proc` telemetry), with fallback support for **macOS** and **Windows** host platforms.
 
-### General Composer View
-<p align="center">
-  <img src="screenshots/paseo-top-general-view.jpg" width="100%" alt="General Composer View" />
-</p>
-
-### Dashboard View
-<p align="center">
-  <img src="screenshots/paseo-top-dashboard.jpg" width="100%" alt="Dashboard View" />
-</p>
+| General Composer View | Dashboard View |
+| :---: | :---: |
+| <a href="screenshots/paseo-top-general-view.jpg"><img src="screenshots/paseo-top-general-view.jpg" width="400" alt="General Composer View" /></a> | <a href="screenshots/paseo-top-dashboard.jpg"><img src="screenshots/paseo-top-dashboard.jpg" width="400" alt="Dashboard View" /></a> |
 
 | System Resources Modal | Workspace Context Modal | Settings Modal | About Modal |
 | :---: | :---: | :---: | :---: |
