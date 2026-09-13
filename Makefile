@@ -42,13 +42,33 @@ npm-push-x-comms-dry:
 npm-push-x-comms:
 	@npm publish plugins/x-comms/mcp --access public
 
+## github-mirror: Synchronize target(s) to GitHub mirror (e.g. make github-mirror TARGET=top,helper DRY=1)
+github-mirror:
+	@node scripts/mirror-github.mjs $(if $(TARGET),--target=$(TARGET)) $(if $(PLUGIN),--target=$(PLUGIN)) $(if $(DRY),--dry-run)
+
 ## github-mirror-top-dry: Dry-run synchronize top plugin to GitHub mirror
 github-mirror-top-dry:
-	@node scripts/mirror-github-top.mjs --dry-run
+	@node scripts/mirror-github.mjs --target=top --dry-run
 
 ## github-mirror-top: Synchronize top plugin and monorepo baseline to GitHub mirror
 github-mirror-top:
-	@node scripts/mirror-github-top.mjs
+	@node scripts/mirror-github.mjs --target=top
+
+## github-mirror-helper-dry: Dry-run synchronize helper package to GitHub mirror
+github-mirror-helper-dry:
+	@node scripts/mirror-github.mjs --target=helper --dry-run
+
+## github-mirror-helper: Synchronize helper package and monorepo baseline to GitHub mirror
+github-mirror-helper:
+	@node scripts/mirror-github.mjs --target=helper
+
+## github-mirror-top-and-helper-dry: Dry-run synchronize top and helper to GitHub mirror
+github-mirror-top-and-helper-dry:
+	@node scripts/mirror-github.mjs --target=top,helper --dry-run
+
+## github-mirror-top-and-helper: Synchronize top and helper to GitHub mirror
+github-mirror-top-and-helper:
+	@node scripts/mirror-github.mjs --target=top,helper
 
 ## help: Display this help message
 help:

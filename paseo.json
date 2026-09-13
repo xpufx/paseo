@@ -35,6 +35,22 @@
     "github-mirror-top": {
       "type": "script",
       "command": "make github-mirror-top"
+    },
+    "github-mirror-helper-dry": {
+      "type": "script",
+      "command": "make github-mirror-helper-dry"
+    },
+    "github-mirror-helper": {
+      "type": "script",
+      "command": "make github-mirror-helper"
+    },
+    "github-mirror-top-and-helper-dry": {
+      "type": "script",
+      "command": "make github-mirror-top-and-helper-dry"
+    },
+    "github-mirror-top-and-helper": {
+      "type": "script",
+      "command": "make github-mirror-top-and-helper"
     }
   }
 }
