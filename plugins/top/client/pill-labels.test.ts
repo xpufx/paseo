@@ -5,6 +5,7 @@ import {
   enabledItemsForSettings,
   extractTokenMetrics,
   formatCompactTokens,
+  formatSegmentIcon,
   formatSegmentLabel,
   formatTokensLabel,
   nextCycleItem,
@@ -195,3 +196,30 @@ test("formatSegmentLabel tokens falls back through liveUsage, lastTurn, and agen
   assert.notEqual(withTokens, "tok ");
   assert.equal(withTokens, "42 tok");
 });
+
+test("formatSegmentIcon returns definition icon per metric and dynamic activity icon", () => {
+  assert.equal(formatSegmentIcon("cpu_ram"), "Cpu");
+  assert.equal(formatSegmentIcon("branch"), "GitBranch");
+  assert.equal(formatSegmentIcon("tokens"), "Coins");
+  assert.equal(formatSegmentIcon("worktree"), "Folder");
+  assert.equal(formatSegmentIcon("agent"), "Bot");
+  assert.equal(formatSegmentIcon("agent_id"), "Hash");
+  assert.equal(formatSegmentIcon("load"), "Activity");
+  assert.equal(formatSegmentIcon("uptime"), "Power");
+  assert.equal(formatSegmentIcon("mcp"), "Server");
+  assert.equal(formatSegmentIcon("changes"), "GitCommitHorizontal");
+  assert.equal(formatSegmentIcon("tools"), "Wrench");
+  assert.equal(formatSegmentIcon("turns"), "Repeat");
+
+  // Dynamic agent_activity icon based on agent status
+  assert.equal(
+    formatSegmentIcon("agent_activity", { agent: { status: "running" } as never }),
+    "Activity",
+  );
+  assert.equal(
+    formatSegmentIcon("agent_activity", { agent: { status: "idle" } as never }),
+    "Clock",
+  );
+  assert.equal(formatSegmentIcon("agent_activity", {}), "Clock");
+});
+

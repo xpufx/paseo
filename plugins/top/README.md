@@ -1,9 +1,5 @@
 # paseo-top
 
-<p align="center">
-  <img src="screenshots/paseo-top-general-view.jpg" alt="Paseo Top General View" />
-</p>
-
 Live host system resource monitor and telemetry provider for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
 
 Displays real-time host metrics, session metadata, turn telemetry, and custom pill widgets directly in the composer track bar without cluttering the interface. Automatically stamps performance summaries into agent conversation timelines and provides an interactive modal dashboard with live gauges.
@@ -12,6 +8,15 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 > **Prerequisites & Platform Support**:
 > - Requires **npm** and **Node.js** (v18+) available in your system path (Paseo runs `npm install` during plugin installation).
 > - Developed and tested primarily on **Linux** (using `/proc` telemetry), with fallback support for **macOS** and **Windows** host platforms.
+
+| General Composer View | Dashboard View |
+| :---: | :---: |
+| [![General Composer View](screenshots/paseo-top-general-view.jpg)](screenshots/paseo-top-general-view.jpg) | [![Dashboard View](screenshots/paseo-top-dashboard.jpg)](screenshots/paseo-top-dashboard.jpg) |
+
+| System Resources Modal | Workspace Context Modal | Settings Modal | About Modal |
+| :---: | :---: | :---: | :---: |
+| <img src="screenshots/1-paseo-top-modal-system.jpg" alt="System Resources Modal" width="100%" /> | <img src="screenshots/2-paseo-top-modal-workspace.jpg" alt="Workspace Context Modal" width="100%" /> | <img src="screenshots/3-paseo-top-modal-settings.jpg" alt="Settings Modal" width="100%" /> | <img src="screenshots/4-paseo-top-modal-about.jpg" alt="About Modal" width="100%" /> |
+
 
 ## Core Capabilities
 
@@ -44,6 +49,9 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 - **Cycle Mode**: Automatically cycles through enabled metric segments on each refresh interval.
 - **All Mode**: Combines all enabled metrics into a single unified ticker.
 - **Multiple Mode**: Splits selected metrics into distinct, individual pills placed side-by-side in the composer track bar.
+
+> [!NOTE]
+> Displaying too many pills separately in Multiple Mode may cause UI performance issues. Consider using **Cycle Mode** or **All Mode** when monitoring multiple metrics simultaneously.
 
 ### 6. Dual Surface Routing Matrix
 Every metric can be routed independently via settings to:

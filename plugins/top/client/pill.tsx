@@ -80,6 +80,7 @@ import {
   enabledItemsForSettings,
   extractTokenMetrics,
   formatCompactTokens,
+  formatSegmentIcon,
   formatSegmentLabel,
   formatTokensLabel,
   nextCycleItem,
@@ -326,10 +327,13 @@ async function liveSnapshotFor(
 }
 
 function singleItemLabelResolver(item: PillItemType) {
-  return async (ctx: PillLiveContext): Promise<string | undefined> => {
+  return async (ctx: PillLiveContext) => {
     const cached = liveSnapshots.get(ctx.agentId);
     const snap = await liveSnapshotFor(ctx, fieldsForItem(item, cached?.workspaceDirectory));
-    return formatSegmentLabel(item, snap);
+    return {
+      label: formatSegmentLabel(item, snap),
+      icon: formatSegmentIcon(item, snap),
+    };
   };
 }
 
@@ -2164,6 +2168,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
           title: "top",
           modalTitle: "Host System Resources",
           modalIcon: "Activity",
+          icon: "Cpu",
           resolveDefaultPayload: ({ agentId }) => {
             if (latestSettings.pillMode === "all") {
               return latestSettings.defaultTab;
@@ -2173,14 +2178,17 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
           resolveLabel: async (ctx) => {
             const snap = await liveSnapshotFor(ctx);
             const items = enabledItemsForSettings(latestSettings);
-            if (items.length === 0) return "top";
+            if (items.length === 0) return { label: "top", icon: "Activity" };
             if ((latestSettings.pillMode ?? "cycle") === "all") {
-              return buildAllLabel(items, snap);
+              return { label: buildAllLabel(items, snap), icon: "Activity" };
             }
             const item = nextCycleItem(ctx.agentId, items);
-            if (!item) return "top";
+            if (!item) return { label: "top", icon: "Activity" };
             currentCycleTabByAgent.set(ctx.agentId, getItemTab(item));
-            return formatSegmentLabel(item, snap);
+            return {
+              label: formatSegmentLabel(item, snap),
+              icon: formatSegmentIcon(item, snap),
+            };
           },
           refreshIntervalMs: 3000,
           renderPill: (props) => <PillView {...props} />,

@@ -273,6 +273,14 @@ export function formatSegmentLabel(item: PillItemType, snap: SegmentSnapshot): s
   }
 }
 
+export function formatSegmentIcon(item: PillItemType, snap?: SegmentSnapshot): string {
+  if (item === "agent_activity") {
+    return snap?.agent?.status === "running" ? "Activity" : "Clock";
+  }
+  const def = METRIC_DEFINITIONS.find((d) => d.id === item);
+  return def?.icon ?? "Activity";
+}
+
 export function enabledItemsForSettings(settings: TopSettings): PillItemType[] {
   const flags = legacyFlagView(settings);
   const items: PillItemType[] = [];
