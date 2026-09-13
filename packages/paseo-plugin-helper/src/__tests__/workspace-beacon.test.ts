@@ -145,6 +145,33 @@ describe("WorkspaceBeacon.blink", () => {
     expect(setWorkspaceLabel.mock.calls.length).toBe(countAfterStop);
   });
 
+  it("restores original title and label when restoreOnDone is enabled", async () => {
+    const setTitle = vi.fn();
+    const setWorkspaceLabel = vi.fn().mockResolvedValue(undefined);
+    const beacon = new WorkspaceBeacon({
+      workspaceHandle: { setTitle },
+      daemonClient: { setWorkspaceLabel },
+      baseTitle: "MyProject",
+    });
+    const handle = beacon.blink({
+      workspaceId: "wks_restore",
+      a: { name: "run", titleSuffix: " [RUN]" },
+      b: { name: "wait", titleSuffix: " [WAIT]" },
+      intervalMs: 100,
+      rounds: 2,
+      restoreOnDone: true,
+    });
+    await vi.advanceTimersByTimeAsync(300);
+    await handle.done;
+    expect(beacon.activeBlinks).toBe(0);
+    expect(setTitle).toHaveBeenLastCalledWith("MyProject");
+    expect(setWorkspaceLabel).toHaveBeenLastCalledWith({
+      workspaceId: "wks_restore",
+      label: { name: "beacon:run" },
+      assigned: false,
+    });
+  });
+
   it("replaces a running blink for the same workspace", async () => {
     const setWorkspaceLabel = vi.fn().mockResolvedValue(undefined);
     const beacon = new WorkspaceBeacon({ daemonClient: { setWorkspaceLabel } });

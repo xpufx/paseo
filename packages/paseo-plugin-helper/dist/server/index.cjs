@@ -412,7 +412,7 @@ function createSharedPluginSettings(options) {
     watchDebounceMs = 25
   } = options;
   const contractName = options.contractName ?? `${suite}.shared-settings`;
-  const contract = defineSettingsContract({
+  const contract = options.contract ?? defineSettingsContract({
     name: contractName,
     schema,
     ...defaultData !== void 0 ? { defaultData } : {},
@@ -2046,6 +2046,13 @@ var WorkspaceBeacon = class {
       if (timer) clearInterval(timer);
       const current = this.blinkTimers.get(key);
       if (current?.finish === finish) this.blinkTimers.delete(key);
+      if (options.restoreOnDone) {
+        void this.clear({
+          workspaceId,
+          name: options.a.name ?? options.b.name,
+          restoreTitle: true
+        }).catch(() => void 0);
+      }
       resolveDone();
     };
     try {
@@ -2123,7 +2130,7 @@ var WorkspaceBeacon = class {
   resolveTitle(options) {
     if (options.title !== void 0) return options.title;
     if (options.titleSuffix === void 0) return void 0;
-    const base = this.baseTitle ?? this.originalTitles.get(options.workspaceId ?? "") ?? "";
+    const base = this.originalTitles.get(options.workspaceId ?? "") ?? this.baseTitle ?? "";
     return `${base}${options.titleSuffix}`;
   }
   async applyLabel(workspaceId, labelName, color) {
@@ -2170,14 +2177,23 @@ var WorkspaceBeacon = class {
       return false;
     }
   }
+  setOriginalTitle(workspaceId, title) {
+    this.originalTitles.set(workspaceId, title);
+  }
+  hasOriginalTitle(workspaceId) {
+    return this.originalTitles.has(workspaceId);
+  }
+  getOriginalTitle(workspaceId) {
+    return this.originalTitles.get(workspaceId);
+  }
   async applyTitle(workspaceId, title) {
     const handle = this.workspaceHandle;
     if (!handle || !isFunction(handle.setTitle)) return false;
     const key = workspaceId ?? "";
-    if (!this.originalTitles.has(key) && this.baseTitle === void 0) {
-      this.originalTitles.set(key, "");
-    } else if (!this.originalTitles.has(key) && this.baseTitle !== void 0) {
-      this.originalTitles.set(key, this.baseTitle);
+    if (!this.originalTitles.has(key)) {
+      if (this.baseTitle !== void 0) {
+        this.originalTitles.set(key, this.baseTitle);
+      }
     }
     return safeInvoke(() => handle.setTitle(title), this.logger);
   }
@@ -2191,7 +2207,12 @@ var WorkspaceBeacon = class {
       () => handle.setTitle(original),
       this.logger
     );
-    if (ok) this.originalTitles.delete(key);
+    if (ok) {
+      this.originalTitles.delete(key);
+      if (this.baseTitle === original) {
+        this.baseTitle = void 0;
+      }
+    }
     return ok;
   }
   stopBlink(key) {

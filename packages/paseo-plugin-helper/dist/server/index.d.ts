@@ -134,6 +134,7 @@ interface SharedPluginSettingsOptions<TSettings extends Record<string, any>> {
         partial?: () => ZodType<Partial<TSettings>>;
     };
     defaultData?: Partial<TSettings>;
+    contract?: SettingsContract<TSettings>;
     contractName?: string;
     description?: string;
     namespace?: string;
@@ -752,6 +753,7 @@ interface BeaconBlinkOptions {
     b: BeaconLabelState;
     intervalMs?: number;
     rounds?: number;
+    restoreOnDone?: boolean;
 }
 interface BeaconClearOptions {
     workspaceId?: string;
@@ -808,6 +810,9 @@ declare class WorkspaceBeacon {
     private resolveTitle;
     private applyLabel;
     private detachLabel;
+    setOriginalTitle(workspaceId: string, title: string): void;
+    hasOriginalTitle(workspaceId: string): boolean;
+    getOriginalTitle(workspaceId: string): string | undefined;
     private applyTitle;
     private restoreTitle;
     private stopBlink;

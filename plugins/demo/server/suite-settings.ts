@@ -1,10 +1,15 @@
 import { createSharedPluginSettings } from "paseo-plugin-helper/server";
-import { SuiteSettingsSchema, type SuiteSettings } from "paseo-plugin-helper/shared";
+import {
+  SuiteSettingsContract,
+  SuiteSettingsSchema,
+  type SuiteSettings,
+} from "paseo-plugin-helper/shared";
 import { log } from "./demo.js";
 
 export const suiteSettings = createSharedPluginSettings<SuiteSettings>({
   suite: "xpufx-suite",
   schema: SuiteSettingsSchema,
+  contract: SuiteSettingsContract,
   description: "Shared xpufx suite settings (demo plugin side)",
 });
 

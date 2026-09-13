@@ -115,12 +115,22 @@ async function resolveBaseTitle(
   paseo: PluginHandlerContext["paseo"],
   workspaceId: string,
 ): Promise<void> {
+  if (demoBeacon.hasOriginalTitle(workspaceId)) {
+    return;
+  }
   try {
     const handle = paseo.workspaces.ref(workspaceId);
     const snapshot = handle.current() ?? (await handle.refresh());
-    const baseTitle = (snapshot as { title?: unknown } | null)?.title;
-    if (typeof baseTitle === "string" && baseTitle.length > 0) {
-      demoBeacon.setOptions({ baseTitle });
+    let rawTitle = (snapshot as { title?: unknown; name?: unknown } | null)?.title;
+    if (typeof rawTitle !== "string" || rawTitle.trim().length === 0) {
+      rawTitle = (snapshot as { name?: unknown } | null)?.name as string | undefined;
+    }
+    if (typeof rawTitle === "string" && rawTitle.trim().length > 0) {
+      // Strip any leftover beacon suffix if present from previous run
+      const cleaned = rawTitle.replace(/\s*[●🟢🟠○◉].*$/, "").trim();
+      const finalTitle = cleaned.length > 0 ? cleaned : rawTitle;
+      demoBeacon.setOriginalTitle(workspaceId, finalTitle);
+      demoBeacon.setOptions({ baseTitle: finalTitle });
     }
   } catch {
     // Best-effort only; beacon falls back to stored/original title.
@@ -137,7 +147,7 @@ export async function handleDemoBeaconSet(
     workspaceId: input.workspaceId,
     name: input.name,
     color: input.color,
-    titleSuffix: ` \u25CF ${input.name}`,
+    titleSuffix: ` 🟢 ${input.name}`,
   });
   log.info(`Demo beacon set "${input.name}" (${input.color}) on ${input.workspaceId}`);
   return {
@@ -156,15 +166,16 @@ export async function handleDemoBeaconBlink(
   await resolveBaseTitle(context.paseo, input.workspaceId);
   demoBeacon.blink({
     workspaceId: input.workspaceId,
-    a: { name: "DEMO:ACTIVE", color: "emerald", titleSuffix: " \u25CF DEMO:ACTIVE" },
-    b: { name: "DEMO:ACTIVE", color: "orange", titleSuffix: " \u25CF DEMO:ACTIVE" },
+    a: { name: "DEMO:ACTIVE", color: "emerald", titleSuffix: " 🟢 RUNNING" },
+    b: { name: "DEMO:WAITING", color: "orange", titleSuffix: " 🟠 WAITING" },
     intervalMs: 1000,
     rounds: input.rounds,
+    restoreOnDone: true,
   });
   log.info(`Demo beacon blink started on ${input.workspaceId} for ${input.rounds} rounds`);
   return {
     success: true,
-    message: `Beacon blinking emerald <-> orange for ${input.rounds} rounds`,
+    message: `Beacon blinking 🟢 RUNNING <-> 🟠 WAITING for ${input.rounds} rounds (auto-restores)`,
   };
 }
 

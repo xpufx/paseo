@@ -15,6 +15,7 @@ export interface SharedPluginSettingsOptions<TSettings extends Record<string, an
   filename?: string;
   schema: ZodType<TSettings> & { partial?: () => ZodType<Partial<TSettings>> };
   defaultData?: Partial<TSettings>;
+  contract?: SettingsContract<TSettings>;
   contractName?: string;
   description?: string;
   namespace?: string;
@@ -77,12 +78,14 @@ export function createSharedPluginSettings<TSettings extends Record<string, any>
   } = options;
   const contractName = options.contractName ?? `${suite}.shared-settings`;
 
-  const contract = defineSettingsContract({
-    name: contractName,
-    schema,
-    ...(defaultData !== undefined ? { defaultData } : {}),
-    ...(description !== undefined ? { description } : {}),
-  });
+  const contract =
+    options.contract ??
+    defineSettingsContract({
+      name: contractName,
+      schema,
+      ...(defaultData !== undefined ? { defaultData } : {}),
+      ...(description !== undefined ? { description } : {}),
+    });
 
   const storage = new PluginStorage<TSettings>(suite, filename, {
     ...(namespace !== undefined ? { namespace } : {}),
