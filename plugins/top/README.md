@@ -13,6 +13,15 @@ Displays real-time host metrics, session metadata, turn telemetry, and custom pi
 > - Requires **npm** and **Node.js** (v18+) available in your system path (Paseo runs `npm install` during plugin installation).
 > - Developed and tested primarily on **Linux** (using `/proc` telemetry), with fallback support for **macOS** and **Windows** host platforms.
 
+<p align="center">
+  <img src="screenshots/1-paseo-top-modal-system.jpg" alt="Paseo Top - System Resources" width="48%" />
+  <img src="screenshots/2-paseo-top-modal-workspace.jpg" alt="Paseo Top - Workspace Context" width="48%" />
+</p>
+<p align="center">
+  <img src="screenshots/3-paseo-top-modal-settings.jpg" alt="Paseo Top - Settings" width="48%" />
+  <img src="screenshots/4-paseo-top-modal-about.jpg" alt="Paseo Top - About" width="48%" />
+</p>
+
 ## Core Capabilities
 
 ### 1. Host Resource Telemetry
