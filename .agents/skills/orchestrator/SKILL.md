@@ -137,7 +137,7 @@ Inspect the title and body, then stamp the baseline scoped labels:
 - **`target/`**: Which package(s) does it touch? (`target/helper`, `target/top`, `target/x-comms`, `target/monorepo`).
 - **`size/`**: Estimate effort: `size/0-cheap`, `size/1-medium`, `size/2-expensive`, or `size/3-chunk`.
 - **`state/`**: Set initial state to `state/0-triage` (or `state/2-review` if research report is ready).
-- **`attention/`**: Attach `attention/0-orchestrator` while actively triaging/shaping; hand off to `attention/1-agent` when ready for worker claim.
+- **`attention/`**: Attach `attention/0-orchestrator` while actively triaging/shaping; hand off to `attention/1-agent` when ready for worker claim. Reverse direction is operator speech: the operator setting `attention/0-orchestrator` means "back at you, orchestrator" (equivalent to `/hold`); never treat it as automation noise.
 
 ### Step 2: Presentation & Additional Context Pass
 - Clean up typos, formatting, and markdown layout without changing the operator's intent or meaning.
@@ -158,3 +158,36 @@ Inspect the title and body, then stamp the baseline scoped labels:
 ### Step 5: Self-Stamped Envelope Comment & Hold
 - Post a self-stamped envelope comment (`fgjx issue comment <id> --envelope -b "..."`) outlining the triage findings and the proposed checklist.
 - **Strict Stop**: If the issue requires implementation, hold in `spec/1-checklist`. Do **NOT** dispatch a coding minion until the operator reviews and applies `spec/2-approved`.
+
+---
+
+## 6. Operator Slash-Command Protocol (Issue Comments)
+The operator signals with line-anchored `/`-commands in issue comments. This replaces SOS for routine signaling and bare prose for directives. Parse the **3 latest comments first** (further back on inconclusive context) for commands before acting on static labels.
+
+### Recognition rules
+- A command is a line whose first non-space character is `/`: `^/\w+` plus optional same-line args.
+- Only commands authored by the operator handle apply; identical text from agents or others is ignored.
+- Inline `/words` mid-sentence never trigger.
+- Unknown `/words` are ignored (forward-compatible; Paseo-side slash commands such as s/ash never collide — those live in Paseo, not in Forgejo comments).
+- Free-text bodies continue on following non-blank, non-command lines until a blank line or the next command.
+
+### Deterministic lifecycle commands
+- `/approve` — spec/checklist accepted (`spec/2-approved` or equivalent state advance).
+- `/verify` or `/done` — work accepted pending check: run pre-flight, present for operator testing (`state/3-verify`).
+- `/close` — operator confirms the deliverable (`confirmed-done`).
+- `/hold` — stop and hand back to orchestrator (`attention/0-orchestrator`); equals the "back at you" token flip.
+- `/rework <note>` — return to `state/1-wip` with the note as the steering directive.
+
+### Free-text routing commands (orchestrator interprets, may route)
+- `/instruction <text>` — free-text directive to the orchestrator; it executes or routes to the worker itself.
+- `/orchestrator <text>` — explicit override: orchestrator handles directly, never forwards.
+- `/agent <text>` — explicit override: forward verbatim as steering to the active worker on that issue.
+
+---
+
+## 7. Attention Contract (Agreed Operating Rules)
+
+- The operator only reads `attention/2-user`. Anything needing their eyes (approval, verify, decision, question) MUST carry it — otherwise it is invisible.
+- `attention/0-orchestrator` means "do something": if no stoppers, delegate (hand to `attention/1-agent` for fleet pickup once tree-safe); if the next step is unclear, ask — flip to `attention/2-user` with a one-line question.
+- Tree conflicts keep gating dispatch: no worker enters a checkout the operator is hands-on in. This is smart, not timid — queue, don't collide.
+- Pre-flight stands: never present unverified work for operator testing.
