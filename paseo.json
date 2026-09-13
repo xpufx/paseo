@@ -1,0 +1,32 @@
+{
+  "scripts": {
+    "doctor": {
+      "type": "script",
+      "command": "make doctor"
+    },
+    "reload": {
+      "type": "script",
+      "command": "make reload"
+    },
+    "check": {
+      "type": "script",
+      "command": "make check"
+    },
+    "npm-push-helper-dry": {
+      "type": "script",
+      "command": "make npm-push-helper-dry"
+    },
+    "npm-push-helper": {
+      "type": "script",
+      "command": "make npm-push-helper"
+    },
+    "npm-push-x-comms-dry": {
+      "type": "script",
+      "command": "make npm-push-x-comms-dry"
+    },
+    "npm-push-x-comms": {
+      "type": "script",
+      "command": "make npm-push-x-comms"
+    }
+  }
+}

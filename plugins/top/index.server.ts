@@ -1,0 +1,202 @@
+import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { guardRpcHandler } from "paseo-plugin-helper/server";
+import {
+  getSystemResourcesRpc,
+  getCustomPillsRpc,
+  listCustomPillsRpc,
+  runCustomPillModalCommandRpc,
+  topSettingsContract,
+  TOP_TIMELINE_KIND,
+  TOP_TIMELINE_VERSION,
+  type LiveUsage,
+  type SystemResources,
+} from "./shared/resources";
+import {
+  handleGetSystemResources,
+  handleGetCustomPills,
+  handleListCustomPills,
+  handleRunCustomPillModalCommand,
+  handleGetSettings,
+  handleUpdateSettings,
+  handleResetSettings,
+  customPillPoller,
+  collectTurnTelemetry,
+  collectGitDiffStat,
+  getLastLiveUsage,
+  setLastLiveUsage,
+  log,
+} from "./server/resources";
+
+export default function contribute(server: PluginServerContext) {
+  void customPillPoller.start();
+
+  // Shed load instead of hanging the daemon RPC: saturated or slow handlers
+  // answer from the last good snapshot (system-resources) or fail fast.
+  let lastSystemResources: SystemResources | null = null;
+  const guardedSystemResources = guardRpcHandler(
+    async (input: Parameters<typeof handleGetSystemResources>[0]) => {
+      const resources = await handleGetSystemResources(input);
+      lastSystemResources = resources;
+      return resources;
+    },
+    {
+      timeoutMs: 5000,
+      maxInflight: 4,
+      getStale: () => lastSystemResources,
+      onTimeout: ({ timeoutMs }) =>
+        log.warn("system-resources handler timed out", { timeoutMs }),
+      onSaturated: ({ maxInflight }) =>
+        log.warn("system-resources handler saturated, serving stale", { maxInflight }),
+    },
+  );
+
+  server.handle(topSettingsContract.get, handleGetSettings);
+  server.handle(topSettingsContract.update, handleUpdateSettings);
+  server.handle(topSettingsContract.reset, handleResetSettings);
+  server.handle(getSystemResourcesRpc, guardedSystemResources);
+  server.handle(getCustomPillsRpc, handleGetCustomPills);
+  server.handle(listCustomPillsRpc, handleListCustomPills);
+  server.handle(runCustomPillModalCommandRpc, handleRunCustomPillModalCommand);
+
+  const turnStartTimes = new Map<string, number>();
+  const turnGitBefore = new Map<string, { insertions: number; deletions: number; filesChanged: number }>();
+
+  const unsubscribeTurnStarted = server.on("agent.turn_started", (event, context) => {
+    turnStartTimes.set(event.agent.id, Date.now());
+    if ((event.agent as any)?.lastUsage) {
+      setLastLiveUsage((event.agent as any).lastUsage);
+    }
+    void context.paseo.agents
+      .ref(event.agent.id)
+      .refresh()
+      .then((refetched) => {
+        if (refetched && (refetched.agent as any)?.lastUsage) {
+          setLastLiveUsage((refetched.agent as any).lastUsage);
+        }
+      })
+      .catch(() => {});
+    void collectGitDiffStat(event.agent.cwd).then(
+      (before) => {
+        if (before) {
+          turnGitBefore.set(event.agent.id, before);
+        } else {
+          turnGitBefore.delete(event.agent.id);
+        }
+      },
+      () => {
+        turnGitBefore.delete(event.agent.id);
+      },
+    );
+  });
+
+  const unsubscribeAgentCreated = server.on("agent.created", (event) => {
+    if ((event.agent as any)?.lastUsage) {
+      setLastLiveUsage((event.agent as any).lastUsage);
+    }
+  });
+
+  const unsubscribeTurnEnded = server.on("agent.turn_ended", async (event, context) => {
+    try {
+      const settings = await handleGetSettings();
+      if (settings.recordTurnTelemetry === false) {
+        turnStartTimes.delete(event.agent.id);
+        turnGitBefore.delete(event.agent.id);
+        return;
+      }
+
+      const startTime = turnStartTimes.get(event.agent.id);
+      turnStartTimes.delete(event.agent.id);
+      const gitBefore = turnGitBefore.get(event.agent.id);
+      turnGitBefore.delete(event.agent.id);
+      const durationMs = startTime ? Date.now() - startTime : undefined;
+
+      let agentModel: string | null = null;
+      let agentProvider: string | null = event.agent.provider ?? null;
+      let agentTitle: string | null = event.agent.title ?? null;
+      try {
+        const refetched = await context.paseo.agents.ref(event.agent.id).refresh();
+        agentModel = refetched?.agent?.model ?? agentModel;
+        agentProvider = refetched?.agent?.provider ?? agentProvider;
+        agentTitle = refetched?.agent?.title ?? agentTitle;
+        let liveUsage =
+          (refetched?.agent?.lastUsage as LiveUsage | null | undefined) ??
+          ((event.agent as any)?.lastUsage as LiveUsage | null | undefined) ??
+          null;
+        const lacksTokens =
+          liveUsage?.inputTokens == null &&
+          liveUsage?.outputTokens == null &&
+          (liveUsage as any)?.contextWindowUsedTokens == null;
+        if (lacksTokens) {
+          const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+          await sleep(150);
+          try {
+            const retry1 = await context.paseo.agents.ref(event.agent.id).refresh();
+            liveUsage =
+              (retry1?.agent?.lastUsage as LiveUsage | null | undefined) ?? liveUsage;
+          } catch {}
+          const stillLacks =
+            liveUsage?.inputTokens == null &&
+            liveUsage?.outputTokens == null &&
+            (liveUsage as any)?.contextWindowUsedTokens == null;
+          if (stillLacks) {
+            await sleep(250);
+            try {
+              const retry2 = await context.paseo.agents.ref(event.agent.id).refresh();
+              liveUsage =
+                (retry2?.agent?.lastUsage as LiveUsage | null | undefined) ?? liveUsage;
+            } catch {}
+          }
+        }
+        setLastLiveUsage(liveUsage);
+      } catch {
+        // Model, provider, and title stay at event snapshot values; the card renders placeholders
+      }
+
+      const telemetry = await collectTurnTelemetry(
+        event.turnId,
+        event.agent.id,
+        event.outcome,
+        durationMs,
+        {
+          cwd: event.agent.cwd,
+          provider: agentProvider,
+          title: agentTitle,
+          model: agentModel,
+          timeline: event.timeline,
+          gitBefore: gitBefore ?? null,
+          liveUsage: getLastLiveUsage(),
+        },
+      );
+
+      await context.paseo.agents.ref(event.agent.id).timeline.append({
+        type: "plugin",
+        id: `top-turn-${event.turnId ?? Date.now()}`,
+        kind: TOP_TIMELINE_KIND,
+        version: TOP_TIMELINE_VERSION,
+        data: telemetry,
+      });
+
+      log.info("Appended turn telemetry to timeline", {
+        agentId: event.agent.id,
+        turnId: event.turnId,
+        outcome: event.outcome.kind,
+        durationMs,
+        cpuPercent: telemetry.cpuPercent,
+        memPercent: telemetry.memPercent,
+      });
+    } catch (err) {
+      log.warn("Failed to record turn telemetry", {
+        agentId: event.agent.id,
+        turnId: event.turnId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  return () => {
+    customPillPoller.stop();
+    unsubscribeTurnStarted();
+    unsubscribeAgentCreated();
+    unsubscribeTurnEnded();
+  };
+}
