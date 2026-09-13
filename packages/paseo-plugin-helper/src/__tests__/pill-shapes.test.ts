@@ -302,4 +302,59 @@ describe("registerComposerPill host shapes", () => {
 
     cleanup();
   });
+
+  it("pushes both resolved label and icon through update() when resolveLabel returns an object", async () => {
+    const { client, updates } = modernRegistrar();
+    const cleanup = registerComposerPill(client, {
+      id: "dynamic-pill",
+      title: "Dynamic",
+      renderModal: () => null,
+      resolveLabel: () => ({ label: "12%", icon: "Cpu" }),
+      refreshIntervalMs: 0,
+    });
+
+    (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].patch).toEqual({ label: "12%", icon: "Cpu" });
+
+    cleanup();
+  });
+
+  it("supports standalone resolveIcon together with resolveLabel", async () => {
+    const { client, updates } = modernRegistrar();
+    const cleanup = registerComposerPill(client, {
+      id: "split-pill",
+      title: "Split",
+      renderModal: () => null,
+      resolveLabel: () => "main",
+      resolveIcon: () => "GitBranch",
+      refreshIntervalMs: 0,
+    });
+
+    (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].patch).toEqual({ label: "main", icon: "GitBranch" });
+
+    cleanup();
+  });
+
+  it("falls back to modalIcon for button initial icon if icon is omitted", () => {
+    const { client, pills } = modernRegistrar();
+    const cleanup = registerComposerPill(client, {
+      id: "modal-icon-pill",
+      title: "ModalIcon",
+      modalIcon: "Server",
+      renderModal: () => null,
+    });
+
+    (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    expect(pills).toHaveLength(1);
+    expect(pills[0].contribution.button.icon).toBe("Server");
+
+    cleanup();
+  });
 });

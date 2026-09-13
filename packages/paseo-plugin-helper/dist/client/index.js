@@ -3849,10 +3849,25 @@ function registerComposerPill(client, options) {
   }
   function resolveAndPushLabel(agentId, workspaceId, registration) {
     if (typeof registration === "function") return;
-    if (!options.resolveLabel) return;
-    Promise.resolve().then(() => options.resolveLabel({ agentId, workspaceId })).then((label) => {
-      if (label !== void 0 && pills.has(agentId)) {
-        registration.update({ label });
+    if (!options.resolveLabel && !options.resolveIcon) return;
+    const ctx = { agentId, workspaceId };
+    Promise.all([
+      options.resolveLabel ? Promise.resolve(options.resolveLabel(ctx)) : Promise.resolve(void 0),
+      options.resolveIcon ? Promise.resolve(options.resolveIcon(ctx)) : Promise.resolve(void 0)
+    ]).then(([labelResult, iconResult]) => {
+      if (!pills.has(agentId)) return;
+      const patch = {};
+      if (typeof labelResult === "string") {
+        patch.label = labelResult;
+      } else if (labelResult && typeof labelResult === "object") {
+        if (labelResult.label !== void 0) patch.label = labelResult.label;
+        if (labelResult.icon !== void 0) patch.icon = labelResult.icon;
+      }
+      if (iconResult !== void 0) {
+        patch.icon = iconResult;
+      }
+      if (Object.keys(patch).length > 0) {
+        registration.update(patch);
       }
     }).catch((error) => {
       options.onError?.({
@@ -3893,13 +3908,14 @@ function registerComposerPill(client, options) {
         detectedShape = detectShape(agentId, workspaceId);
       }
       if (detectedShape === "button") {
+        const initialIcon = (typeof options.icon === "string" ? options.icon : void 0) ?? (typeof options.modalIcon === "string" ? options.modalIcon : void 0) ?? "Activity";
         const registration = client.addComposerPill({
           id: options.id,
           workspaceId,
           agentId,
           button: {
             title: options.title,
-            icon: options.icon ?? "Activity",
+            icon: initialIcon,
             label: options.title,
             behavior: {
               kind: "popover",
@@ -3911,7 +3927,7 @@ function registerComposerPill(client, options) {
           dispose: toCleanup(registration)
         };
         pills.set(agentId, entry);
-        if (options.resolveLabel && typeof registration !== "function") {
+        if ((options.resolveLabel || options.resolveIcon) && typeof registration !== "function") {
           resolveAndPushLabel(agentId, workspaceId, registration);
           const intervalMs = options.refreshIntervalMs ?? 5e3;
           if (intervalMs > 0) {

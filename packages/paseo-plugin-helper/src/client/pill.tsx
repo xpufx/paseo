@@ -30,6 +30,23 @@ export interface PillLiveContext {
   workspaceId: string;
 }
 
+export interface PillLivePayload {
+  label?: string;
+  icon?: string;
+}
+
+export type PillLabelResolver = (
+  context: PillLiveContext,
+) =>
+  | string
+  | PillLivePayload
+  | undefined
+  | Promise<string | PillLivePayload | undefined>;
+
+export type PillIconResolver = (
+  context: PillLiveContext,
+) => string | undefined | Promise<string | undefined>;
+
 let probeSequence = 0;
 
 export interface RegisterComposerPillOptions<TPayload = any> {
@@ -45,7 +62,7 @@ export interface RegisterComposerPillOptions<TPayload = any> {
 
   /**
    * Optional compact title shown in the composer trackbar when screen or track is narrow/mobile
-   * (when `layout.compact` is true). Defaults to `title`.
+   * (when `layout.compact` is true). Defaults to `title`.\
    */
   compactTitle?: string;
 
@@ -61,7 +78,7 @@ export interface RegisterComposerPillOptions<TPayload = any> {
   icon?: string;
 
   /**
-   * Optional compact Lucide icon name shown when in compact mode. Defaults to `icon`.\
+   * Optional compact Lucide icon name shown when in compact mode. Defaults to `icon`.
    */
   compactIcon?: string;
 
@@ -94,25 +111,32 @@ export interface RegisterComposerPillOptions<TPayload = any> {
 
   /**
    * Custom pill body renderer if you want to replace the default pill layout.
-   * Receives `isOpen`, `open`, `close`, and `toggle` along with standard pill props.
+   * Receives `isOpen`, `open`, `close`, and `toggle` along with standard pill props.\
    */
   renderPill?: (props: RenderPillProps<TPayload>) => ReactNode;
 
   /**
-    * Resolves the live pill label on button-shaped hosts (Paseo 0.8+), where the
-    * pill body is host-rendered from a static `label` string and `renderPill`
-    * never mounts. Called once at registration and then every
-    * `refreshIntervalMs`. Keep it cheap and synchronous when possible; async
-    * resolvers are awaited. Returning `undefined` leaves the current label.
-    * Cycle modes can advance rotation state on each call.
-    */
-  resolveLabel?: (context: PillLiveContext) => string | undefined | Promise<string | undefined>;
+   * Resolves the live pill label (and optionally icon) on button-shaped hosts (Paseo 0.8+), where the
+   * pill body is host-rendered from a static `label` and `icon` string and `renderPill`
+   * never mounts. Called once at registration and then every
+   * `refreshIntervalMs`. Keep it cheap and synchronous when possible; async
+   * resolvers are awaited. Returning `undefined` leaves the current label/icon.
+   * Can return a plain string (label) or an object `{ label?: string; icon?: string }`.
+   * Cycle modes can advance rotation state on each call.
+   */
+  resolveLabel?: PillLabelResolver;
 
   /**
-    * Poll interval for `resolveLabel` on button-shaped hosts. Defaults to 5000ms
-    * when `resolveLabel` is set. Set to 0 to resolve once at registration.
-    * Ignored on legacy hosts (their `renderPill` re-renders via React state).
-    */
+   * Optional standalone resolver for the button icon on button-shaped hosts (Paseo 0.8+).
+   * Evaluated alongside `resolveLabel` on each tick.
+   */
+  resolveIcon?: PillIconResolver;
+
+  /**
+   * Poll interval for `resolveLabel` on button-shaped hosts. Defaults to 5000ms
+   * when `resolveLabel` or `resolveIcon` is set. Set to 0 to resolve once at registration.
+   * Ignored on legacy hosts (their `renderPill` re-renders via React state).
+   */
   refreshIntervalMs?: number;
 
   /**
@@ -283,12 +307,26 @@ export function registerComposerPill<TPayload = any>(
     registration: ComposerPillRegistration,
   ): void {
     if (typeof registration === "function") return;
-    if (!options.resolveLabel) return;
-    Promise.resolve()
-      .then(() => options.resolveLabel!({ agentId, workspaceId }))
-      .then((label) => {
-        if (label !== undefined && pills.has(agentId)) {
-          registration.update({ label });
+    if (!options.resolveLabel && !options.resolveIcon) return;
+    const ctx = { agentId, workspaceId };
+    Promise.all([
+      options.resolveLabel ? Promise.resolve(options.resolveLabel(ctx)) : Promise.resolve(undefined),
+      options.resolveIcon ? Promise.resolve(options.resolveIcon(ctx)) : Promise.resolve(undefined),
+    ])
+      .then(([labelResult, iconResult]) => {
+        if (!pills.has(agentId)) return;
+        const patch: Record<string, any> = {};
+        if (typeof labelResult === "string") {
+          patch.label = labelResult;
+        } else if (labelResult && typeof labelResult === "object") {
+          if (labelResult.label !== undefined) patch.label = labelResult.label;
+          if (labelResult.icon !== undefined) patch.icon = labelResult.icon;
+        }
+        if (iconResult !== undefined) {
+          patch.icon = iconResult;
+        }
+        if (Object.keys(patch).length > 0) {
+          registration.update(patch);
         }
       })
       .catch((error) => {
@@ -331,13 +369,18 @@ export function registerComposerPill<TPayload = any>(
         detectedShape = detectShape(agentId, workspaceId);
       }
       if (detectedShape === "button") {
+        const initialIcon =
+          (typeof options.icon === "string" ? options.icon : undefined) ??
+          (typeof options.modalIcon === "string" ? options.modalIcon : undefined) ??
+          "Activity";
+
         const registration = client.addComposerPill({
           id: options.id,
           workspaceId,
           agentId,
           button: {
             title: options.title,
-            icon: options.icon ?? "Activity",
+            icon: initialIcon,
             label: options.title,
             behavior: {
               kind: "popover",
@@ -349,7 +392,7 @@ export function registerComposerPill<TPayload = any>(
           dispose: toCleanup(registration),
         };
         pills.set(agentId, entry);
-        if (options.resolveLabel && typeof registration !== "function") {
+        if ((options.resolveLabel || options.resolveIcon) && typeof registration !== "function") {
           resolveAndPushLabel(agentId, workspaceId, registration);
           const intervalMs = options.refreshIntervalMs ?? 5000;
           if (intervalMs > 0) {
