@@ -83,6 +83,11 @@ if (!isAll) {
 
   // Internal/development tooling
   unwantedPaths.push("mcp", ".agents", "skills");
+
+  // The monorepo lockfile references pruned workspace paths (packages/*,
+  // sibling plugins); shipping it breaks `npm install` in the scoped
+  // checkout, so dependency resolution falls back to the registry instead.
+  unwantedPaths.push("package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml");
 }
 
 // 3. Prepare isolated temporary git index
