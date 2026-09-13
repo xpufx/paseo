@@ -5,6 +5,7 @@ import type { AuditIssue, AuditOptions, AuditReport } from "./types.js";
 
 const DEFAULT_IGNORED_DIRS = new Set([
   "node_modules",
+  "vendor",
   ".git",
   "dist",
   "build",

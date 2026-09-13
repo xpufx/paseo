@@ -16,6 +16,8 @@ export interface ModalBodyProps {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  header?: ReactNode;
+  headerStyle?: StyleProp<ViewStyle>;
   extraBottomInset?: number;
   refreshing?: boolean;
   onRefresh?: () => void | Promise<void>;
@@ -32,11 +34,17 @@ export interface ModalBodyProps {
  * integrated on Paseo v0.8), otherwise plain React Native ScrollView.
  * Pass `stickToEnd` for conversation-style views that track new content, or
  * `scrollRef` for imperative scrolling.
+ * Pass `header` for a pinned navbar (e.g. <Tabs>): it renders above the
+ * scroller in a flex column, so the header stays fixed while the body scrolls.
+ * Requires the host <Modal.Content scrollable={false}> so no outer sheet
+ * scroller drags the header along.
  */
 export function ModalBody({
   children,
   style,
   contentContainerStyle,
+  header,
+  headerStyle,
   extraBottomInset = 0,
   refreshing = false,
   onRefresh,
@@ -44,7 +52,6 @@ export function ModalBody({
   scrollRef,
 }: ModalBodyProps) {
   const { isCompact, padding, colors } = usePluginTheme();
-  const hostScrollView = getOptionalClientHost()?.ScrollView;
   const ResolvedScrollView = selectHostScrollView(
     getOptionalClientHost(),
     FallbackScrollView as unknown as HostScrollView,
@@ -72,32 +79,10 @@ export function ModalBody({
     />
   ) : undefined;
 
-  // Compact without an injected host scroller keeps the legacy plain View:
-  // on pre-0.8 hosts the sheet already scrolls, and a nested RN ScrollView
-  // would fight it. With a host scroller present, use it: it cooperates
-  // with sheet gestures by design.
-  if (isCompact && !hostScrollView) {
-    return (
-      <View
-        style={[
-          styles.content,
-          {
-            backgroundColor: colors.surface0,
-            paddingHorizontal: padding.horizontal,
-            paddingTop: padding.vertical,
-            paddingBottom: bottomPadding,
-            gap: padding.gap,
-          },
-          style,
-          contentContainerStyle,
-        ]}
-      >
-        {children}
-      </View>
-    );
-  }
-
-  return (
+  // Compact without an injected host scroller still scrolls via the plain
+  // fallback: the helper pill sets <Modal.Content scrollable={false}>, so no
+  // outer sheet scroller fights the inner one.
+  const body = (
     <ResolvedScrollView
       ref={setRefs}
       style={[{ backgroundColor: colors.surface0 }, styles.container, style]}
@@ -122,9 +107,27 @@ export function ModalBody({
       {children}
     </ResolvedScrollView>
   );
+
+  if (!header) return body;
+
+  return (
+    <View style={styles.screen}>
+      <View style={[styles.header, headerStyle]}>{header}</View>
+      {body}
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%",
+  },
+  header: {
+    width: "100%",
+    flexShrink: 0,
+  },
   container: {
     flex: 1,
     minHeight: 0,

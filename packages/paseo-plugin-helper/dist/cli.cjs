@@ -123,6 +123,7 @@ var AUDIT_RULES = {
 // src/cli/scanner.ts
 var DEFAULT_IGNORED_DIRS = /* @__PURE__ */ new Set([
   "node_modules",
+  "vendor",
   ".git",
   "dist",
   "build",

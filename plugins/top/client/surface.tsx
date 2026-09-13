@@ -15,8 +15,8 @@ import {
   useRpcQuery,
   usePluginSettings,
   usePluginTheme,
-} from "paseo-plugin-helper/client";
-import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
+} from "./vendor/paseo-plugin-helper/index";
+import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
   getSystemResourcesRpc,
   topSettingsContract,
@@ -63,25 +63,20 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
 
   return (
     <View style={[styles.root, { backgroundColor: colors.surface0 }]}>
-      <View
-        style={[
-          styles.navbarContainer,
-          {
-            backgroundColor: colors.surface0,
-            paddingHorizontal: 12,
-            paddingTop: 12,
-            paddingBottom: 6,
-          },
-        ]}
-      >
-        <Tabs
-          tabs={TABS}
-          activeTab={activeTab}
-          onTabChange={(id) => setActiveTab(id as SurfaceTab)}
-        />
-      </View>
-
       <ModalBody
+        header={
+          <Tabs
+            tabs={TABS}
+            activeTab={activeTab}
+            onTabChange={(id) => setActiveTab(id as SurfaceTab)}
+          />
+        }
+        headerStyle={{
+          backgroundColor: colors.surface0,
+          paddingHorizontal: 12,
+          paddingTop: 12,
+          paddingBottom: 6,
+        }}
         contentContainerStyle={{
           gap: 12,
           paddingHorizontal: 12,
@@ -364,10 +359,6 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     width: "100%",
-  },
-  navbarContainer: {
-    width: "100%",
-    zIndex: 10,
   },
   banner: {
     gap: 8,

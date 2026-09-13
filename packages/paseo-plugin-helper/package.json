@@ -56,7 +56,7 @@
   ],
   "scripts": {
     "build": "NODE_OPTIONS=\"--max-old-space-size=2048\" tsup",
-    "prepare": "NODE_OPTIONS=\"--max-old-space-size=2048\" tsup",
+    "prepack": "NODE_OPTIONS=\"--max-old-space-size=2048\" tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import {
   getClientHost,
   type ComposerPillRegistrar,
@@ -509,6 +509,15 @@ function DefaultPillBody({
 const styles = StyleSheet.create({
   popoverContainer: {
     width: "100%",
+    flex: 1,
+    minHeight: 0,
+    // 0.8+ hosts render popover content at an unbounded height with their own
+    // scroller: without a bound the inner ModalBody column never resolves a
+    // finite height, so the pinned header scrolls with the body (or nothing
+    // scrolls at all). Cap to a viewport fraction so the inner ScrollView
+    // always has a finite bound and only the body scrolls.
+    maxHeight: Math.min(560, Dimensions.get("window").height * 0.8),
+    overflow: "hidden",
   },
   pillContainer: {
     flexDirection: "row",

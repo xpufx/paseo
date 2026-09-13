@@ -3590,6 +3590,8 @@ function ModalBody({
   children,
   style,
   contentContainerStyle,
+  header,
+  headerStyle,
   extraBottomInset = 0,
   refreshing = false,
   onRefresh,
@@ -3597,7 +3599,6 @@ function ModalBody({
   scrollRef
 }) {
   const { isCompact, padding, colors } = usePluginTheme();
-  const hostScrollView = getOptionalClientHost()?.ScrollView;
   const ResolvedScrollView = selectHostScrollView(
     getOptionalClientHost(),
     reactNative.ScrollView
@@ -3621,27 +3622,7 @@ function ModalBody({
       colors: [colors.accent]
     }
   ) : void 0;
-  if (isCompact && !hostScrollView) {
-    return /* @__PURE__ */ jsxRuntime.jsx(
-      reactNative.View,
-      {
-        style: [
-          styles21.content,
-          {
-            backgroundColor: colors.surface0,
-            paddingHorizontal: padding.horizontal,
-            paddingTop: padding.vertical,
-            paddingBottom: bottomPadding,
-            gap: padding.gap
-          },
-          style,
-          contentContainerStyle
-        ],
-        children
-      }
-    );
-  }
-  return /* @__PURE__ */ jsxRuntime.jsx(
+  const body = /* @__PURE__ */ jsxRuntime.jsx(
     ResolvedScrollView,
     {
       ref: setRefs,
@@ -3664,8 +3645,22 @@ function ModalBody({
       children
     }
   );
+  if (!header) return body;
+  return /* @__PURE__ */ jsxRuntime.jsxs(reactNative.View, { style: styles21.screen, children: [
+    /* @__PURE__ */ jsxRuntime.jsx(reactNative.View, { style: [styles21.header, headerStyle], children: header }),
+    body
+  ] });
 }
 var styles21 = reactNative.StyleSheet.create({
+  screen: {
+    flex: 1,
+    minHeight: 0,
+    width: "100%"
+  },
+  header: {
+    width: "100%",
+    flexShrink: 0
+  },
   container: {
     flex: 1,
     minHeight: 0,
@@ -4020,7 +4015,16 @@ function DefaultPillBody({
 }
 var styles24 = reactNative.StyleSheet.create({
   popoverContainer: {
-    width: "100%"
+    width: "100%",
+    flex: 1,
+    minHeight: 0,
+    // 0.8+ hosts render popover content at an unbounded height with their own
+    // scroller: without a bound the inner ModalBody column never resolves a
+    // finite height, so the pinned header scrolls with the body (or nothing
+    // scrolls at all). Cap to a viewport fraction so the inner ScrollView
+    // always has a finite bound and only the body scrolls.
+    maxHeight: Math.min(560, reactNative.Dimensions.get("window").height * 0.8),
+    overflow: "hidden"
   },
   pillContainer: {
     flexDirection: "row",

@@ -1,4 +1,4 @@
-import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
+import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
   isPillEnabled,
   legacyFlagView,

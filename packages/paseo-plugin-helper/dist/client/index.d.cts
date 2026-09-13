@@ -719,6 +719,8 @@ interface ModalBodyProps {
     children: ReactNode;
     style?: StyleProp<ViewStyle>;
     contentContainerStyle?: StyleProp<ViewStyle>;
+    header?: ReactNode;
+    headerStyle?: StyleProp<ViewStyle>;
     extraBottomInset?: number;
     refreshing?: boolean;
     onRefresh?: () => void | Promise<void>;
@@ -734,8 +736,12 @@ interface ModalBodyProps {
  * integrated on Paseo v0.8), otherwise plain React Native ScrollView.
  * Pass `stickToEnd` for conversation-style views that track new content, or
  * `scrollRef` for imperative scrolling.
+ * Pass `header` for a pinned navbar (e.g. <Tabs>): it renders above the
+ * scroller in a flex column, so the header stays fixed while the body scrolls.
+ * Requires the host <Modal.Content scrollable={false}> so no outer sheet
+ * scroller drags the header along.
  */
-declare function ModalBody({ children, style, contentContainerStyle, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
+declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
 
 interface ActionBarProps {
     children: ReactNode;
