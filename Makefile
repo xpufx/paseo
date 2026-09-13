@@ -26,6 +26,14 @@ test:
 build:
 	@npm run build --workspaces --if-present
 
+## vendor-sync: Re-copy helper src into top vendor trees (Track B, #71)
+vendor-sync:
+	@node scripts/vendor-sync.mjs
+
+## vendor-check: Fail if vendor trees drifted from helper src
+vendor-check:
+	@node scripts/vendor-sync.mjs --check
+
 ## npm-push-helper-dry: Dry-run publish paseo-plugin-helper to npm
 npm-push-helper-dry:
 	@npm publish --workspace=packages/paseo-plugin-helper --access public --dry-run
