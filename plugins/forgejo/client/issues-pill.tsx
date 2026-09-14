@@ -18,6 +18,7 @@ import {
   TextInput,
   useRpcQuery,
   useRpcMutation,
+  usePluginSettings,
   usePluginTheme,
   copyToClipboard,
   useResponsive,
@@ -25,7 +26,7 @@ import {
   type RenderModalProps,
   type RenderPillProps,
   type PillLiveContext,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index.ts";
 import {
   ATTENTION_LABELS,
   PRIORITY_ORDER,
@@ -35,6 +36,7 @@ import {
   currentPriorityLabel,
   currentStateLabel,
   formatIssueCountLabel,
+  forgejoSettingsContract,
   issueDetailContract,
   nextStateLabel,
   openIssuesContract,
@@ -556,6 +558,30 @@ function IssueDetailView({
 export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalProps) {
   const { colors } = usePluginTheme();
   const { data, isLoading, isError, refetch, isRefetching } = useOpenIssues(workspaceId, agentId);
+  const directory = useDirectory(workspaceId);
+  const { settings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
+  const [remoteDraft, setRemoteDraft] = useState<string | null>(null);
+  const [remoteSaving, setRemoteSaving] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const storedRemote = directory ? (settings.remotesByDirectory?.[directory] ?? "") : "";
+  const remoteValue = remoteDraft ?? storedRemote;
+  const saveRemote = async () => {
+    if (!directory) return;
+    setRemoteSaving(true);
+    setRemoteError(null);
+    try {
+      const next = { ...(settings.remotesByDirectory ?? {}) };
+      if (remoteValue.trim()) next[directory] = remoteValue.trim();
+      else delete next[directory];
+      await updateSettingsAsync({ remotesByDirectory: next });
+      setRemoteDraft(null);
+      refetch();
+    } catch (error) {
+      setRemoteError(error instanceof Error ? error.message : "Could not save remote URL");
+    } finally {
+      setRemoteSaving(false);
+    }
+  };
   const repo = data?.repo ?? null;
   const [activeTab, setActiveTab] = useState("issues");
   const [query, setQuery] = useState("");
@@ -586,10 +612,44 @@ export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalP
             tabs={[
               { id: "issues", label: "Open Issues", shortLabel: "Issues" },
               { id: "search", label: "Search", shortLabel: "Search" },
+              { id: "remote", label: "Remote", shortLabel: "Remote" },
             ]}
             activeTab={activeTab}
             onTabChange={setActiveTab}
           />
+          {activeTab === "remote" ? (
+            <Card>
+              <Card.Header
+                title="Forgejo remote"
+                subtitle="Explicit override beats git-remote derivation"
+                icon="Settings"
+              />
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                Accepts owner/repo, scp-like (git@host:owner/repo.git), ssh:// and https:// URLs.
+                Leave empty to derive from the git origin remote.
+              </Text>
+              <TextInput
+                value={remoteValue}
+                onChangeText={(text) => setRemoteDraft(text)}
+                placeholder="e.g. https://forge.mrs.aager.de/xpufx/paseo"
+              />
+              {remoteError ? (
+                <Text style={[styles.hint, { color: colors.foreground }]}>
+                  {remoteError}
+                </Text>
+              ) : null}
+              <View style={styles.actions}>
+                <Button
+                  label={remoteSaving ? "Saving…" : "Save"}
+                  variant="primary"
+                  disabled={remoteSaving || !directory || remoteValue === storedRemote}
+                  loading={remoteSaving}
+                  onPress={() => { void saveRemote(); }}
+                />
+              </View>
+            </Card>
+          ) : (
+          <>
           {activeTab === "search" ? (
             <SearchInput
               value={query}
@@ -650,6 +710,8 @@ export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalP
             <Button label="Refresh" variant="secondary" onPress={() => { refetch(); }} />
             <Button label="Close" variant="ghost" onPress={close} />
           </View>
+          </>
+          )}
         </>
       )}
     </ModalBody>

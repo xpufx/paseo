@@ -8,7 +8,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { copyToClipboard } from "paseo-plugin-helper/client";
+import { copyToClipboard } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   extractForgejoIssueUrls,
   type ForgejoIssueLink,
@@ -27,11 +27,12 @@ const ForgejoIssueLinkSchema = z.object({
 });
 type ForgejoIssueLinkData = z.infer<typeof ForgejoIssueLinkSchema>;
 
-function transformTextItem(item: { text: string }) {
+function transformTextItem<T extends { text: string }>(item: T) {
   const links = extractForgejoIssueUrls(item.text);
   if (links.length === 0) return undefined;
   return {
     items: [
+      item,
       {
         type: "plugin" as const,
         kind: "forgejo-issue-link",

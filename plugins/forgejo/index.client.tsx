@@ -4,7 +4,7 @@ import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   initClientHelpers,
   registerComposerPill,
-} from "paseo-plugin-helper/client";
+} from "./client/vendor/paseo-plugin-helper/index.ts";
 import {
   ISSUES_PILL_ID,
   ForgejoPill,

@@ -5,7 +5,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "esbuild shared/issues.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forgejo-issues.test.mjs --log-level=error && node --test ${TMPDIR:-/tmp}/paseo-forgejo-issues.test.mjs"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.8.0-beta.1",
@@ -13,8 +14,5 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "typescript": "^5.9.3"
-  },
-  "dependencies": {
-    "paseo-plugin-helper": "^0.4.0-beta.10"
   }
 }

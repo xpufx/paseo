@@ -1,7 +1,8 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createPluginLogger } from "paseo-plugin-helper/server";
+import { createPluginLogger } from "./server/vendor/paseo-plugin-helper/index.ts";
 import {
   addCommentContract,
+  forgejoSettingsContract,
   issueDetailContract,
   openIssuesContract,
   setLabelContract,
@@ -12,6 +13,7 @@ import {
   handleOpenIssues,
   handleSetLabel,
 } from "./server/issues.js";
+import { settingsHandlers } from "./server/settings.js";
 
 const log = createPluginLogger("paseo-forgejo");
 
@@ -20,6 +22,9 @@ export default function contribute(server: PluginServerContext) {
   server.handle(issueDetailContract, handleIssueDetail);
   server.handle(setLabelContract, handleSetLabel);
   server.handle(addCommentContract, handleAddComment);
+  server.handle(forgejoSettingsContract.get, settingsHandlers.get);
+  server.handle(forgejoSettingsContract.update, settingsHandlers.update);
+  server.handle(forgejoSettingsContract.reset, settingsHandlers.reset);
   log.info("paseo-forgejo server handlers registered");
   return () => {};
 }

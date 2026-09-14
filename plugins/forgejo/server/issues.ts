@@ -1,11 +1,11 @@
-import { safeSpawn, createPluginLogger } from "paseo-plugin-helper/server";
+import { safeSpawn, createPluginLogger } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   ForgejoIssueSchema,
   IssueDetailSchema,
   normalizeIssueNumber,
   openIssuesContract,
   parseAgentEnvelope,
-  parseForgejoRemote,
+  resolveForgejoRepo,
   type AddCommentInput,
   type AddCommentOutput,
   type IssueDetail,
@@ -16,7 +16,7 @@ import {
   type SetLabelInput,
   type SetLabelOutput,
 } from "../shared/issues.js";
-import type { RpcOutput } from "paseo-plugin-helper/shared";
+import type { RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
 
 const log = createPluginLogger("paseo-forgejo");
 
@@ -32,13 +32,19 @@ async function spawnText(command: string, args: string[]): Promise<string | null
   }
 }
 
-async function resolveRepo(directory?: string): Promise<{ host: string; repo: string } | null> {
-  if (!directory) return null;
-  const remoteUrl = await spawnText("git", ["-C", directory, "remote", "get-url", "origin"]);
-  if (!remoteUrl) return null;
-  const parsed = parseForgejoRemote(remoteUrl);
-  if (!parsed) return null;
-  return { host: parsed.host, repo: `${parsed.owner}/${parsed.repo}` };
+import { storedRemoteForDirectory } from "./settings.js";
+
+async function resolveRepo(
+  directory?: string,
+  explicitRemote?: string,
+): Promise<{ host: string; repo: string } | null> {
+  const stored = await storedRemoteForDirectory(directory);
+  const explicit = explicitRemote?.trim() ? explicitRemote : stored;
+  if (!directory && !explicit) return null;
+  const remoteUrl = directory
+    ? await spawnText("git", ["-C", directory, "remote", "get-url", "origin"])
+    : null;
+  return resolveForgejoRepo(explicit, remoteUrl);
 }
 
 async function listIssuesJson(
@@ -90,7 +96,7 @@ function toIssueRefs(rows: unknown[]): OpenIssuesResult["issues"] {
  * error field so the pill renders a placeholder instead of breaking.
  */
 export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssuesOutput> {
-  const resolved = await resolveRepo(input?.directory);
+  const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
   if (!resolved) {
     return {
       repo: null,
@@ -258,7 +264,7 @@ export async function handleIssueDetail(
     if (issueNumber == null) {
       return { repo: null, issue: null, fetchedAt, error: "issueNumber is required" };
     }
-    const resolved = await resolveRepo(input?.directory);
+    const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
     if (!resolved) {
       return {
         repo: null,
@@ -295,7 +301,7 @@ export async function handleSetLabel(input: SetLabelInput): Promise<SetLabelOutp
       return { number: issueNumber, labels: [], error: labelError };
     }
     const label = ((input as { label: string }).label as string).trim();
-    const resolved = await resolveRepo(input?.directory);
+    const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
     if (!resolved) {
       return {
         number: issueNumber,
@@ -344,7 +350,7 @@ export async function handleAddComment(
     if (body.length > 10000) {
       return { number: issueNumber, commentId: null, error: "Comment body is too long" };
     }
-    const resolved = await resolveRepo(input?.directory);
+    const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
     if (!resolved) {
       return {
         number: issueNumber,

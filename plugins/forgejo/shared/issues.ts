@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineContract } from "paseo-plugin-helper/shared";
+import { defineContract, defineSettingsContract } from "./vendor/paseo-plugin-helper/index.ts";
 
 export const FORGEJO_PLUGIN_ID = "paseo-forgejo";
 
@@ -14,6 +14,7 @@ export type ForgejoIssue = z.infer<typeof ForgejoIssueSchema>;
 
 export const OpenIssuesInputSchema = z.object({
   directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
 });
 export type OpenIssuesInput = z.infer<typeof OpenIssuesInputSchema>;
 
@@ -70,6 +71,54 @@ export function parseForgejoRemote(url: string | undefined | null): ForgejoRemot
   const repo = segments.pop() as string;
   const owner = segments.pop() as string;
   return { host, owner, repo };
+}
+
+// ---------------------------------------------------------------------------
+// Explicit remote URL override (issue #109 operator redirect).
+// A workspace may pin its Forgejo coordinates via the settings screen
+// instead of relying on the git origin remote (which can carry SSH
+// aliases fgjx does not know). Precedence: explicit config > git remote.
+// ---------------------------------------------------------------------------
+
+const BARE_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+export const ForgejoSettingsSchema = z.object({
+  remotesByDirectory: z.record(z.string(), z.string()).default({}),
+});
+export type ForgejoSettings = z.infer<typeof ForgejoSettingsSchema>;
+
+export const forgejoSettingsContract = defineSettingsContract({
+  name: "paseo-forgejo.settings",
+  schema: ForgejoSettingsSchema,
+  description: "Forgejo plugin settings: per-workspace remote URL overrides",
+});
+
+export interface ResolvedForgejoRepo {
+  host: string;
+  repo: string;
+}
+
+/**
+ * Resolve Forgejo coordinates with explicit-config-wins precedence.
+ * The explicit value accepts every `parseForgejoRemote` form
+ * (scp-like, ssh://, https://) plus a bare `owner/repo`, which borrows
+ * its host from the git remote. Returns null when neither yields coords.
+ */
+export function resolveForgejoRepo(
+  explicitRemote: string | undefined | null,
+  gitRemoteUrl: string | undefined | null,
+): ResolvedForgejoRepo | null {
+  const git = parseForgejoRemote(gitRemoteUrl);
+  const explicit = typeof explicitRemote === "string" ? explicitRemote.trim() : "";
+  if (explicit) {
+    const parsed = parseForgejoRemote(explicit);
+    if (parsed) return { host: parsed.host, repo: `${parsed.owner}/${parsed.repo}` };
+    if (BARE_REPO_PATTERN.test(explicit) && git) {
+      return { host: git.host, repo: explicit };
+    }
+  }
+  if (!git) return null;
+  return { host: git.host, repo: `${git.owner}/${git.repo}` };
 }
 
 export interface ForgejoIssueLink {
@@ -319,6 +368,7 @@ export function parseAgentEnvelope(
 const IssueNumberInput = z
   .object({
     directory: z.string().optional(),
+    remoteUrl: z.string().optional(),
     issueNumber: z.number().int().positive().optional(),
     number: z.number().int().positive().optional(),
   })
