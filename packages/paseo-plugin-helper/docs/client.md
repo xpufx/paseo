@@ -584,6 +584,32 @@ function SettingsTab() {
 ### `registerHelperSettingsScreen(client, contract, options)`
 Turns a settings contract built by `defineSettingsContract` into a native Paseo settings screen with zero hand-written JSX. Field mapping follows the Zod object schema: boolean fields render as Switch, `z.enum` fields render as Select, string and number fields render as Input. Schema `.describe()` text is used for labels and hints when present, otherwise the field name is used. Unsupported field shapes are skipped with a logged warning and never throw. Values bind through the existing `usePluginSettings(contract)` hook, so the host `useRpc` injected via `initClientHelpers` is reused with no new plumbing. Number fields ignore unparseable keystrokes and keep the last good value, so `NaN` is never written back.
 
+### Shared snapshot keys and no-op guards (`snapshot.ts`)
+When pill, modal, and surface views render one host snapshot, route them
+through a single workspace-scoped cache identity. `sharedSnapshotKey`
+normalizes blank directories to the host-wide entry so `undefined`, `null`,
+and `""` never fragment the cache, and `normalizeSnapshotScope` keeps
+per-workspace entries separate. Keep selective server-side field params out
+of the client key; fetch the shared snapshot and derive per-item views from
+it. Settings listeners and live-label caches should gate fan-out with
+`shouldEmitSnapshotUpdate` (backed by `shallowEqualRecord`): React Query
+returns fresh object identities on every background refetch, and notifying
+on identity alone causes redraw loops with no value change.
+
+```tsx
+import { sharedSnapshotKey, shouldEmitSnapshotUpdate } from "paseo-plugin-helper/client";
+
+const key = sharedSnapshotKey(myStatusContract.name, workspaceDirectory);
+const query = useRpcQuery(myStatusContract, key[1], { refetchInterval: 5000 });
+
+useEffect(() => {
+  if (shouldEmitSnapshotUpdate(prevRef.current, settings)) {
+    prevRef.current = settings;
+    notifySettingsChanged(settings);
+  }
+}, [settings]);
+```
+
 Like `initClientHelpers`, the helper client imports zero Paseo SDK modules. The SDK settings UI components arrive as an explicit `options.ui` bundle supplied by the plugin from its own SDK version:
 
 ```tsx

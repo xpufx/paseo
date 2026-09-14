@@ -6,6 +6,7 @@ export * from "./surface";
 export * from "./panel";
 export * from "./query";
 export * from "./query-refresh";
+export * from "./snapshot";
 export * from "./settings";
 export * from "./shared-settings";
 export * from "./settings-screen";

@@ -6,6 +6,7 @@ export * from "./surface.js";
 export * from "./panel.js";
 export * from "./query.js";
 export * from "./query-refresh.js";
+export * from "./snapshot.js";
 export * from "./settings.js";
 export * from "./shared-settings.js";
 export * from "./settings-screen.js";
