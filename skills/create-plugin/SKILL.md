@@ -1,6 +1,6 @@
 ---
 name: create-plugin
-description: Scaffold a new Paseo plugin on paseo-plugin-helper from scratch with v8 layout, init wiring, and verify steps
+description: Scaffold a new Paseo plugin on paseo-plugin-helper from scratch with 0.8 layout, init wiring, and verify steps
 parameters:
   path:
     type: string
@@ -29,11 +29,11 @@ npx paseo-plugin-helper adopt .
 npm install && npm run typecheck
 ```
 
-The golden reference is `demo-v8/` in the helper repo: every pattern below
+The golden reference is `demo/` in the helper repo: every pattern below
 appears there in working form. For migrating an existing plugin, use the
 `audit-plugin` skill instead.
 
-## 1. Layout (Paseo v0.8)
+## 1. Layout (Paseo 0.8)
 
 ```text
 my-plugin/
@@ -61,7 +61,7 @@ module at the root. At least one entry required.
 }
 ```
 
-Missing `requirements.paseo` means `<0.8.0`, and a v0.8 daemon rejects the
+Missing `requirements.paseo` means `<0.8.0`, and a 0.8 daemon rejects the
 plugin before any code runs.
 
 ## 3. Dependencies (`package.json`)
@@ -69,7 +69,7 @@ plugin before any code runs.
 ```json
 {
   "dependencies": { "paseo-plugin-helper": "^0.4.0" },
-  "devDependencies": { "@getpaseo/plugin": "0.8.0-beta.1" }
+  "devDependencies": { "@getpaseo/plugin": "0.8.0" }
 }
 ```
 
@@ -82,17 +82,8 @@ The init call is REQUIRED and comes first. Use the specifiers matching the
 installed SDK:
 
 ```tsx
-// Paseo v0.8
+// Paseo 0.8
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers } from "paseo-plugin-helper/client";
-
-initClientHelpers({ Icon, Modal, useRpc, useToast });
-```
-
-```tsx
-// Paseo v0.7
-import { useRpc } from "@getpaseo/plugin";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers } from "paseo-plugin-helper/client";
 

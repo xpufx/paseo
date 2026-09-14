@@ -1,6 +1,6 @@
 # paseo-x-comms
 
-> Tracks the latest paseo beta (`@getpaseo/* 0.8.0-beta.1`, manifest requires `paseo >= 0.8.0`). Expect breaking changes between versions.
+> Tracks stable paseo (`@getpaseo/* 0.8.0`, manifest requires `paseo >= 0.8.0`). Expect breaking changes between versions.
 
 > Work in progress. Not all features work %100 as described.
 

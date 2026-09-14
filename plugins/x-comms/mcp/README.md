@@ -1,6 +1,6 @@
 # paseo-x-comms
 
-> This repo closely follows the latest beta versions of paseo in order to benefit
+> This repo closely follows stable releases of paseo in order to benefit
 > from new features in the plugin system. Expect breaking changes between
 > versions.
 

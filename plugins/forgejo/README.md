@@ -1,9 +1,11 @@
 # paseo-forgejo
 
-Work with Forgejo issues from inside Paseo, built on `fgjx` as the tool.
+Work with Forgejo issues from inside Paseo via the embedded fetch API client
+(`server/forgejo-client.ts`, token from daemon-side plugin settings). `fgjx`
+remains the human/CLI path.
 
 Tracks [issue #30](https://forge.mrs.aager.de/xpufx/paseo-plugin-helper/issues/30)
-(checklist lives there). v8 layout: `index.client.tsx` / `index.server.ts`
+(checklist lives there). 0.8 layout: `index.client.tsx` / `index.server.ts`
 entries, `client/` / `server/` / `shared/` split, manifest declares
 `requirements.paseo >= 0.8.0`.
 

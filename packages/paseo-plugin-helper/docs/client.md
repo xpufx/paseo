@@ -95,20 +95,11 @@ Or via render prop:
 ### `initClientHelpers({ Icon, Modal, useRpc, useToast })`
 Required once per plugin client entry, before any other helper client API is
 used. The helper never imports the Paseo SDK itself, so one published build
-runs on both Paseo v0.7 and v0.8: the plugin supplies the host
+runs on Paseo >= 0.8.0: the plugin supplies the host
 implementations using whichever specifiers match its installed SDK.
 
 ```tsx
-// Paseo v0.7
-import { useRpc } from "@getpaseo/plugin";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers } from "paseo-plugin-helper/client";
-
-initClientHelpers({ Icon, Modal, useRpc, useToast });
-```
-
-```tsx
-// Paseo v0.8
+// Paseo 0.8
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers } from "paseo-plugin-helper/client";
@@ -116,13 +107,13 @@ import { initClientHelpers } from "paseo-plugin-helper/client";
 initClientHelpers({ Icon, Modal, useRpc, useToast });
 ```
 
-On Paseo v0.8 the host also owns scrolling, input, and clipboard primitives
+On Paseo 0.8 the host also owns scrolling, input, and clipboard primitives
 with sheet-gesture and keyboard integration. Pass them as optional extras;
 every helper falls back to plain React Native when they are absent, so the
 four-field call above keeps working unchanged:
 
 ```tsx
-// Paseo v0.8 with host-owned primitives
+// Paseo 0.8 with host-owned primitives
 import { useRpc } from "@getpaseo/plugin/client";
 import {
   Icon,
@@ -178,7 +169,7 @@ up immediately in development rather than as a silent blank pill.
 ### `registerComposerPill(client, options)`
 Handles the complete lifecycle of injecting a composer pill for each active agent, subscribing to agent updates, opening modals, and unmounting cleanly.
 
-Works on both host generations: legacy `{Component, onPress}` pills (Paseo 0.7 and beta apps) and `button`-descriptor pills with anchored popovers (Paseo 0.8+), detected once with a throwaway probe registration that is removed immediately. Pass `onError({ agentId, workspaceId, error })` to surface registration failures in your own UI instead of throwing out of plugin setup. On 0.8 hosts the modal becomes an anchored popover driven by the host, so `renderPill` custom bodies and programmatic `open`/`toggle` only apply on legacy hosts; `title`, `icon`, and `renderModal` work on both. Live pill text on 0.8 hosts comes from `resolveLabel({ agentId, workspaceId })`, called once at registration and polled every `refreshIntervalMs` (default 5000, `0` for once-only); each resolved string is pushed via the registration `update({ label })`. Returning `undefined` keeps the current label. Expect a narrow popover column, not a wide modal, so keep `renderModal` content vertically stacked.
+Works on both host generations: legacy `{Component, onPress}` pills (pre-0.8 hosts) and `button`-descriptor pills with anchored popovers (Paseo 0.8+), detected once with a throwaway probe registration that is removed immediately. Pass `onError({ agentId, workspaceId, error })` to surface registration failures in your own UI instead of throwing out of plugin setup. On 0.8 hosts the modal becomes an anchored popover driven by the host, so `renderPill` custom bodies and programmatic `open`/`toggle` only apply on legacy hosts; `title`, `icon`, and `renderModal` work on both. Live pill text on 0.8 hosts comes from `resolveLabel({ agentId, workspaceId })`, called once at registration and polled every `refreshIntervalMs` (default 5000, `0` for once-only); each resolved string is pushed via the registration `update({ label })`. Returning `undefined` keeps the current label. Expect a narrow popover column, not a wide modal, so keep `renderModal` content vertically stacked.
 
 Supports declarative **compact props** so default pills automatically shrink to fit narrow mobile/split-screen tracks without truncating:
 
@@ -329,7 +320,7 @@ Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`f
 ```
 
 ### `<Tabs>`
-Segmented horizontal tab selector designed for Paseo modal and surface environments. Features automatic fitting on mobile with `shortLabel` support and elevated edge navigation chevrons when scrolling. On Paseo v0.8 the tab ribbon renders inside the host `ScrollView`, so sheet gestures work without extra capture handling.
+Segmented horizontal tab selector designed for Paseo modal and surface environments. Features automatic fitting on mobile with `shortLabel` support and elevated edge navigation chevrons when scrolling. On Paseo 0.8 the tab ribbon renders inside the host `ScrollView`, so sheet gestures work without extra capture handling.
 
 ```tsx
 <Tabs
@@ -643,7 +634,7 @@ with `~/...`) rather than as a raw absolute path.
 ### `copyToClipboard(text, options?)`
 Universal cross-platform copy function for Paseo plugins. Works reliably across React Native (Hermes / mobile webviews / touch events), desktop, and modern secure browsers.
 Automatically integrates with Paseo's `useToast()` to display a toast notification on success.
-Tier order: host `copyText` from `initClientHelpers` (Paseo v0.8, when supplied), then React Native Clipboard, then `navigator.clipboard`, then an `execCommand` fallback.
+Tier order: host `copyText` from `initClientHelpers` (Paseo 0.8, when supplied), then React Native Clipboard, then `navigator.clipboard`, then an `execCommand` fallback.
 
 ```tsx
 import { copyToClipboard, useToast } from "paseo-plugin-helper/client";

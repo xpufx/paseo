@@ -10,7 +10,7 @@
 > [!NOTE]
 > **Developer Library**: `paseo-plugin-helper` is an npm developer toolkit / SDK used by plugin authors (it is **not** a standalone Paseo plugin itself and cannot be installed directly via `paseo plugin add`).
 >
-> **Compatibility**: one published build runs on **Paseo v0.7 and v0.8**. `paseo-plugin-helper/client` imports zero Paseo SDK modules and instead receives `Icon`, `Modal`, `useRpc`, and `useToast` via a single `initClientHelpers()` call in the plugin client entry (see `docs/client.md`). `server`, `shared`, `mcp`, and `testing` carry no SDK imports at all.
+> **Compatibility**: one published build runs on **Paseo >= 0.8.0**. `paseo-plugin-helper/client` imports zero Paseo SDK modules and instead receives `Icon`, `Modal`, `useRpc`, and `useToast` via a single `initClientHelpers()` call in the plugin client entry (see `docs/client.md`). `server`, `shared`, `mcp`, and `testing` carry no SDK imports at all.
 
 ---
 
