@@ -19,6 +19,7 @@ const PLUGINS = {
   "mcp-tools": ["client", "server", "shared", "mcp"],
   "demo": ["client", "server", "shared"],
   "forgejo": ["client", "server", "shared"],
+  "slash": ["client", "server", "shared"],
   "x-comms": ["client", "server", "shared", "mcp"],
 };
 const TREES = ["client", "server", "shared", "mcp"];

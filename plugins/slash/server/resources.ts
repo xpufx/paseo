@@ -7,7 +7,7 @@ import {
   type SlashCommand,
   type SlashSettings,
 } from "../shared/resources";
-import { SLASH_PLUGIN_VERSION } from "../shared/version";
+import { PLUGIN_VERSION as SLASH_PLUGIN_VERSION } from "../shared/version";
 
 export const log = createPluginLogger("slash", { version: SLASH_PLUGIN_VERSION });
 

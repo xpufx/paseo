@@ -176,6 +176,12 @@ export function registerComposerPill<TPayload = any>(
   let detectedShape: "button" | "legacy" | null = null;
   let disposed = false;
 
+  // 0.8 popover scroll ownership (#110): exactly ONE vertical scroll owner on
+  // this path — the inner ModalBody ScrollView (flex:1 + minHeight:0). The outer
+  // popoverContainer below is a plain View (locked: no ScrollView, overflow
+  // hidden), never a scroller. If the outer ever scrolls again we get both-own
+  // (mobile gesture jam); if the inner loses flex:1/minHeight:0 we get
+  // neither-own (dead content that never moves). Keep it outer-locked ⟺ inner-owns.
   function PillPopoverContent(props: {
     agentId: string;
     workspaceId: string;

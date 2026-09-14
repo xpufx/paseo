@@ -18,6 +18,22 @@ export interface ModalBodyProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   header?: ReactNode;
   headerStyle?: StyleProp<ViewStyle>;
+  /**
+   * "scroll" (default): header renders INSIDE the ScrollView and moves with
+   * content. "pinned": header renders above the scroller in a flex column.
+   * Default is "scroll" per #110 fallback: the host enforces its own outer
+   * scroller on mobile regardless of our locks, so a pinned header either
+   * fights it or goes dead — Tabs-scroll-with-content (mcp-tools pattern)
+   * always moves because it rides whichever scroller actually owns gestures.
+   */
+  headerMode?: "pinned" | "scroll";
+  /**
+   * When set, ModalBody logs measured layout values (viewport height,
+   * content height) via onLayout/onContentSizeChange under this tag, e.g.
+   * `[ModalBody:mcp] viewport=… content=…`. Use on-device to see which
+   * container actually scrolls instead of guessing from theory (#110).
+   */
+  debugTag?: string;
   extraBottomInset?: number;
   refreshing?: boolean;
   onRefresh?: () => void | Promise<void>;
@@ -27,6 +43,17 @@ export interface ModalBodyProps {
 
 /**
  * Mobile-safe scrollable body for Paseo <Modal.Content>.
+ * Scroll ownership (#110, 0.8 popover path): exactly ONE vertical scroll owner —
+ * this inner ScrollView (flex:1 + minHeight:0). The outer (popoverContainer plain
+ * View / <Modal.Content scrollable={false}>) stays locked and never scrolls.
+ * Give the outer a scroller and gestures jam (both own); drop flex:1/minHeight:0
+ * here and content goes dead (neither owns).
+ * #110 second verify FAILED on device (no change): theory above did not move
+ * the host, so do not trust it blindly — pass debugTag to log MEASURED
+ * viewport/content heights, and prefer headerMode="scroll" (default): the
+ * header rides INSIDE the scroller (mcp-tools Tabs-scroll-with-content
+ * pattern) so it moves with whichever scroller the host actually enforces.
+ * "pinned" is opt-in and only valid when the outer is provably locked.
  * Automatically calculates responsive bottom padding so controls are not cut off
  * by mobile home bars or virtual keyboards.
  * Supports pull-to-refresh on mobile via `refreshing` and `onRefresh`.
@@ -45,6 +72,8 @@ export function ModalBody({
   contentContainerStyle,
   header,
   headerStyle,
+  headerMode = "scroll",
+  debugTag,
   extraBottomInset = 0,
   refreshing = false,
   onRefresh,
@@ -82,6 +111,11 @@ export function ModalBody({
   // Compact without an injected host scroller still scrolls via the plain
   // fallback: the helper pill sets <Modal.Content scrollable={false}>, so no
   // outer sheet scroller fights the inner one.
+  const log = debugTag
+    ? (kind: string, v: Record<string, unknown>) =>
+        // eslint-disable-next-line no-console
+        console.log(`[ModalBody:${debugTag}] ${kind}`, JSON.stringify(v))
+    : undefined;
   const body = (
     <ResolvedScrollView
       ref={setRefs}
@@ -90,9 +124,16 @@ export function ModalBody({
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={true}
       refreshControl={refreshControl}
-      onContentSizeChange={
-        stickToEnd ? () => innerRef.current?.scrollToEnd({ animated: true }) : undefined
+      onLayout={
+        log
+          ? (e: { nativeEvent: { layout: { height: number; width: number } } }) =>
+              log("viewport", e.nativeEvent.layout)
+          : undefined
       }
+      onContentSizeChange={(w: number, h: number) => {
+        log?.("content", { width: w, height: h });
+        if (stickToEnd) innerRef.current?.scrollToEnd({ animated: true });
+      }}
       contentContainerStyle={[
         styles.content,
         {
@@ -109,6 +150,46 @@ export function ModalBody({
   );
 
   if (!header) return body;
+
+  // #110 fallback: "scroll" (default) renders the header INSIDE the scroller
+  // (mcp-tools Tabs-scroll-with-content pattern) so it rides whichever outer
+  // scroller the host enforces on mobile. "pinned" keeps the old flex-column
+  // layout and is only valid when the outer is provably locked.
+  if (headerMode === "scroll") {
+    return (
+      <ResolvedScrollView
+        ref={setRefs}
+        style={[{ backgroundColor: colors.surface0 }, styles.container, style]}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={true}
+        refreshControl={refreshControl}
+        onLayout={
+          log
+            ? (e: { nativeEvent: { layout: { height: number; width: number } } }) =>
+                log("viewport", e.nativeEvent.layout)
+            : undefined
+        }
+        onContentSizeChange={(w: number, h: number) => {
+          log?.("content", { width: w, height: h });
+          if (stickToEnd) innerRef.current?.scrollToEnd({ animated: true });
+        }}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: padding.horizontal,
+            paddingTop: padding.vertical,
+            paddingBottom: bottomPadding,
+            gap: padding.gap,
+          },
+          contentContainerStyle,
+        ]}
+      >
+        <View style={[styles.header, headerStyle]}>{header}</View>
+        {children}
+      </ResolvedScrollView>
+    );
+  }
 
   return (
     <View style={styles.screen}>
