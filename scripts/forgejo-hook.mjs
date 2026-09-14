@@ -73,7 +73,7 @@ function summarize(event, body) {
   if (event === "issues" || event === "issue_comment") {
     const issue = body?.issue ?? {};
     const action = body?.action ?? "";
-    return `${head} [${event}:${action}] ${repo}#${issue.number ?? "?"} ${issue.title ?? ""} (by ${sender}) ${issue.html_url ?? ""}`.trim();
+    return `${head} [${event}:${action}] ${repo}#${issue.number ?? "?"} ${issue.title ?? ""} (by ${sender})`.trim();
   }
   if (event === "push") {
     const commits = (body?.commits ?? []).length;
@@ -111,17 +111,75 @@ const server = http.createServer((req, res) => {
       return;
     }
     const msg = summarize(String(event), body);
-    console.log(new Date().toISOString(), msg);
+    const delivery = req.headers["x-forgejo-delivery"] ?? "local";
+    console.log(new Date().toISOString(), `delivery=${delivery}`, msg);
     resolveOrchestrator().then(
-      (id) =>
-        execFile("paseo", ["send", id, msg], (err) => {
-          if (err) console.error("paseo send failed:", err.message);
-          else console.log("sent to", id.slice(0, 7));
-        }),
+      (id) => handleMessage(id, msg),
       (err) => console.error("ORCHESTRATOR UNRESOLVED:", err.message),
     );
     res.writeHead(200).end("ok");
   });
 });
+
+const pending = new Map();
+const FLUSH_MS = Number(process.env.HOOK_FLUSH_MS ?? 30000);
+const MAX_PENDING_PER_AGENT = 100;
+
+async function agentBusy(id) {
+  const { connectToDaemon } = await import(cliClientModule());
+  const client = await connectToDaemon({});
+  try {
+    const a = await client.fetchAgent(id);
+    const snap = a?.agent ?? a;
+    return snap?.status === "running" || Boolean(snap?.activeTurn);
+  } finally {
+    await client.close?.().catch(() => undefined);
+  }
+}
+
+function deliver(id, msg) {
+  execFile("paseo", ["send", id, msg], (err) => {
+    if (err) {
+      console.error("paseo send failed:", err.message);
+      const list = pending.get(id) ?? [];
+      if (!list.includes(msg)) list.unshift(msg);
+      while (list.length > MAX_PENDING_PER_AGENT) {
+        const dropped = list.pop();
+        console.error(`pending queue full for ${id.slice(0, 7)} (cap=${MAX_PENDING_PER_AGENT}), dropped oldest: ${dropped}`);
+      }
+      pending.set(id, list);
+      console.log(`re-queued for ${id.slice(0, 7)} (send failed), queue=${list.length}`);
+    } else console.log("sent to", id.slice(0, 7));
+  });
+}
+
+async function handleMessage(id, msg) {
+  try {
+    if (await agentBusy(id)) {
+      const list = pending.get(id) ?? [];
+      if (!list.includes(msg)) list.push(msg);
+      pending.set(id, list);
+      console.log(`deferred for ${id.slice(0, 7)} (busy), queue=${list.length}`);
+      return;
+    }
+  } catch (err) {
+    console.error("busy check failed, sending anyway:", err.message);
+  }
+  deliver(id, msg);
+}
+
+setInterval(async () => {
+  for (const [id, list] of pending) {
+    if (list.length === 0) continue;
+    try {
+      if (await agentBusy(id)) continue;
+    } catch (err) {
+      console.error("flush busy check failed:", err.message);
+      continue;
+    }
+    pending.set(id, []);
+    for (const m of list) deliver(id, m);
+  }
+}, FLUSH_MS).unref();
 
 server.listen(PORT, HOST, () => console.log(`forgejo-hook listening on ${HOST}:${PORT}`));
