@@ -8,7 +8,7 @@ import {
   createSettingsHandlers,
   createWorkspaceBeacon,
   type BeaconDaemonClient,
-} from "paseo-plugin-helper/server";
+} from "./vendor/paseo-plugin-helper/index";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { demoSettingsContract, type DemoData, type DemoSettings } from "../shared/demo.js";
 import { PLUGIN_VERSION } from "../shared/version.js";

@@ -1,9 +1,9 @@
-import { createSharedPluginSettings } from "paseo-plugin-helper/server";
+import { createSharedPluginSettings } from "./vendor/paseo-plugin-helper/index";
 import {
   SuiteSettingsContract,
   SuiteSettingsSchema,
   type SuiteSettings,
-} from "paseo-plugin-helper/shared";
+} from "../shared/vendor/paseo-plugin-helper/index";
 import { log } from "./demo.js";
 
 export const suiteSettings = createSharedPluginSettings<SuiteSettings>({

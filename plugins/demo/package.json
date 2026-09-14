@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "scripts": {
-    "build": "node -e \"import('paseo-plugin-helper/server').then(m => m.stampVersion())\"",
+    "build": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "pretypecheck": "npm run build",
     "typecheck": "tsc --noEmit"
   },
@@ -15,8 +15,5 @@
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
     "zod": "^4.4.3"
-  },
-  "dependencies": {
-    "paseo-plugin-helper": "^0.4.0-beta.11"
   }
 }
