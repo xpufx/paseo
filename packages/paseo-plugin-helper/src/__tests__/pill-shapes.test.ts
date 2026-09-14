@@ -357,4 +357,27 @@ describe("registerComposerPill host shapes", () => {
 
     cleanup();
   });
+
+  it("ignores stale agent list and late subscribe events after cleanup (no zombie double-registration)", async () => {
+    let resolveList!: (result: any) => void;
+    const listPromise = new Promise<any>((resolve) => {
+      resolveList = resolve;
+    });
+    const { client, pills } = modernRegistrar();
+    (client.paseo.agents as any).list = () => listPromise;
+    const cleanup = registerComposerPill(client, {
+      id: "zombie-pill",
+      title: "Zombie",
+      renderModal: () => null,
+    });
+
+    cleanup();
+    resolveList({ entries: [{ agent: { id: "a1", workspaceId: "w1" } }] });
+    await listPromise;
+    await Promise.resolve();
+    expect(pills.filter((p) => !p.contribution.id.startsWith("php-probe-"))).toHaveLength(0);
+
+    (client as any).emit({ kind: "upsert", agent: { id: "a2", workspaceId: "w1" } });
+    expect(pills.filter((p) => !p.contribution.id.startsWith("php-probe-"))).toHaveLength(0);
+  });
 });
