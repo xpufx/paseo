@@ -396,7 +396,7 @@ async function main() {
 
   // Plugins Table
   console.log(
-    `${colors.bold}${"Plugin".padEnd(14)} ${"Status".padEnd(17)} ${"Code Commit".padEnd(12)} ${"Stamped".padEnd(10)} ${"Live SHA".padEnd(10)} Notes${colors.reset}`
+    `${colors.bold}${"Plugin".padEnd(12)} ${"Status".padEnd(17)} ${"SDK".padEnd(14)} ${"Code".padEnd(9)} ${"Stamped".padEnd(9)} ${"Live".padEnd(9)} Notes${colors.reset}`
   );
   console.log("─".repeat(82));
 
@@ -420,14 +420,15 @@ async function main() {
       icon = "✔";
     }
 
-    const nameCol = p.name.padEnd(14);
+    const nameCol = p.name.padEnd(12);
     const statCol = `${statColor}${icon} ${p.status.toUpperCase()}${colors.reset}`.padEnd(26);
-    const repoCol = p.repoHead.padEnd(12);
-    const stampCol = p.stampedSha.padEnd(10);
-    const liveCol = p.liveSha.padEnd(10);
+    const sdkCol = (p.sdk + (p.helperDep ? " +npmHelper" : "")).padEnd(14);
+    const repoCol = p.repoHead.padEnd(9);
+    const stampCol = p.stampedSha.padEnd(9);
+    const liveCol = p.liveSha.padEnd(9);
     const noteCol = `${colors.gray}${p.detail}${colors.reset}`;
 
-    console.log(`${nameCol} ${statCol} ${repoCol} ${stampCol} ${liveCol} ${noteCol}`);
+    console.log(`${nameCol} ${statCol} ${sdkCol} ${repoCol} ${stampCol} ${liveCol} ${noteCol}`);
   }
 
   console.log("─".repeat(82));
