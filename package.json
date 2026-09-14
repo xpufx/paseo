@@ -10,7 +10,8 @@
     "plugins/mcp-tools",
     "plugins/x-comms",
     "plugins/forgejo",
-    "plugins/demo"
+    "plugins/demo",
+    "plugins/slash"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
