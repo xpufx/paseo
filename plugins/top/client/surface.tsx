@@ -12,13 +12,12 @@ import {
   Tabs,
   Toggle,
   CardHeader,
-  useRpcQuery,
   usePluginSettings,
   usePluginTheme,
+  shouldEmitSnapshotUpdate,
 } from "./vendor/paseo-plugin-helper/index";
 import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
-  getSystemResourcesRpc,
   topSettingsContract,
   checkboxesFromTarget,
   targetFromCheckboxes,
@@ -28,8 +27,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { notifySettingsChanged } from "./pill";
-
-const EMPTY_PARAMS = {};
+import { useTopResourceQuery } from "./resources-query";
 
 type SurfaceTab = "system" | "settings" | "about";
 
@@ -45,17 +43,24 @@ const MEM_THRESHOLDS = { warning: 70, danger: 85 };
 export function TopDashboardSurface(_props: PluginSurfaceProps) {
   const { colors } = usePluginTheme();
   const [activeTab, setActiveTab] = useState<SurfaceTab>("system");
+  // No background settings poll: mount/focus verification plus mutation
+  // invalidation keep the dashboard in sync without daemon churn.
   const { settings, updateSettings, resetSettings } = usePluginSettings(
     topSettingsContract,
-    { refetchInterval: 2000 },
   );
-  const { data, isLoading } = useRpcQuery(getSystemResourcesRpc, EMPTY_PARAMS, {
-    refetchInterval: 5000,
-  });
+  // The dashboard surface carries no workspace scope, so it reads the
+  // host-wide entry of the same shared snapshot path the pill and modal use
+  // per workspace (see useTopResourceQuery).
+  const { data, isLoading } = useTopResourceQuery();
 
   const pillHidden = settings.showComposerPill === false;
 
   const applySettings = (updates: Partial<TopSettings>) => {
+    const changed = Object.entries(updates).some(
+      ([key, value]) =>
+        !Object.is((settings as Record<string, unknown>)[key], value),
+    );
+    if (!changed) return;
     const next = { ...settings, ...updates };
     updateSettings(updates);
     notifySettingsChanged(next);
@@ -64,6 +69,7 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
   return (
     <View style={[styles.root, { backgroundColor: colors.surface0 }]}>
       <ModalBody
+        headerMode="pinned"
         header={
           <Tabs
             tabs={TABS}
@@ -303,6 +309,53 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
                   </Text>
                 </View>
               ))}
+            </View>
+          </Card>
+
+          <Card variant="elevated">
+            <CardHeader
+              title="Timeline Cadence"
+              icon="Clock"
+              value={
+                <Text style={{ color: colors.accent, fontWeight: "600" }}>
+                  {(settings.timelineCadence ?? 1) === 0
+                    ? "Never"
+                    : (settings.timelineCadence ?? 1) === 1
+                      ? "Every turn"
+                      : `Every ${(settings.timelineCadence ?? 1)} turns`}
+                </Text>
+              }
+              subtitle="How often a card is stamped into the timeline view (0 = never)"
+            />
+            <View style={styles.speedRow}>
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+                const isSelected = (settings.timelineCadence ?? 1) === n;
+                return (
+                  <View
+                    key={n}
+                    style={[
+                      styles.speedChip,
+                      {
+                        backgroundColor: isSelected ? colors.accent : colors.surface1,
+                        borderColor: isSelected ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      onPress={() => applySettings({ timelineCadence: n })}
+                      style={[
+                        styles.speedChipText,
+                        {
+                          color: isSelected ? colors.accentForeground : colors.foreground,
+                          fontWeight: isSelected ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      {n === 0 ? "Never" : n === 1 ? "Every turn" : `${n}`}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
           </Card>
 

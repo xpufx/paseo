@@ -1,4 +1,4 @@
-.PHONY: all doctor reload check test typecheck build clean help
+.PHONY: all doctor reload check test typecheck conformance build clean help
 
 # Default target: diagnostic freshness check
 all: doctor
@@ -7,12 +7,12 @@ all: doctor
 doctor:
 	@node scripts/doctor-live.mjs
 
-## reload: Auto-rebuild helper if stale, stamp version, and reload running daemons
+## reload: Auto-rebuild and vendor helper, stamp version, and reload affected daemons
 reload:
 	@node scripts/doctor-live.mjs --reload
 
-## check: Run full typecheck and test suite across all packages and plugins
-check: typecheck test
+## check: Run typecheck, tests, and plugin UI conformance across the monorepo
+check: typecheck test conformance
 
 ## typecheck: Run TypeScript compiler check across workspaces
 typecheck:
@@ -21,6 +21,10 @@ typecheck:
 ## test: Run unit tests across workspaces
 test:
 	@npm test
+
+## conformance: Check helper UI conformance for every plugin
+conformance:
+	@node packages/paseo-plugin-helper/bin/paseo-plugin-helper.js conformance --all plugins --strict
 
 ## build: Build helper and compile plugin bundles
 build:
@@ -87,8 +91,9 @@ help:
 	@echo "Paseo Monorepo Developer Commands:"
 	@echo "  make doctor    - Inspect helper dist sync and running daemon freshness"
 	@echo "  make reload    - Auto-rebuild helper, stamp git versions, and reload daemons"
-	@echo "  make check     - Run monorepo typecheck and test suite"
+	@echo "  make check     - Run typecheck, tests, and plugin UI conformance"
 	@echo "  make typecheck - Run tsc across all workspaces"
 	@echo "  make test      - Run unit tests across all workspaces"
+	@echo "  make conformance - Check helper UI conformance for every plugin"
 	@echo "  make build     - Build packages and plugins"
 	@echo "  make cafe-submit PLUGIN=top CATEGORIES=monitoring - Emit Biome-clean paseo.cafe registry JSON"

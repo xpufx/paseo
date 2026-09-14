@@ -5,6 +5,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
+    "packages/paseo-plugin-helper",
+    "plugins/demo",
     "plugins/top"
   ],
   "scripts": {

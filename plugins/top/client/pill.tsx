@@ -31,11 +31,11 @@ import {
   CustomPillBody,
   CustomPillModalContent,
   useRpcQuery,
-  useAutoRefreshQuery,
   usePluginSettings,
   usePluginTheme,
   getStatusColor,
   triggerHaptic,
+  shouldEmitSnapshotUpdate,
   type RenderModalProps,
   type RenderPillProps,
   type KeyValueProps,
@@ -65,7 +65,6 @@ import {
   checkboxesFromTarget,
   targetFromCheckboxes,
   type SystemResources,
-  type ResourceField,
   type TopSettings,
   type PillMode,
   type CustomPillDefinition,
@@ -75,6 +74,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { TopDashboardSurface } from "./surface";
+import { useTopResourceQuery } from "./resources-query";
 import {
   buildAllLabel,
   enabledItemsForSettings,
@@ -261,30 +261,18 @@ export function updateLiveSnapshot(agentId: string, partial: Partial<LiveSnapsho
   liveSnapshots.set(agentId, { ...prev, ...partial, updatedAt: Date.now() });
 }
 
-function fieldsForItem(item: PillItemType, workspaceDirectory?: string | null): ResourceField[] {
-  switch (item) {
-    case "cpu_ram":
-      return ["cpu", "memory"];
-    case "branch":
-      return workspaceDirectory ? ["branch"] : [];
-    case "load":
-      return ["load"];
-    case "uptime":
-      return ["uptime"];
-    case "mcp":
-      return ["mcp"];
-    default:
-      return [];
-  }
-}
-
 const LIVE_SNAPSHOT_TTL_MS = 2500;
 const liveSnapshotInflight = new Map<string, Promise<SystemResources | null>>();
 
-async function liveSnapshotFor(
-  ctx: PillLiveContext,
-  fields?: ResourceField[],
-): Promise<SegmentSnapshot> {
+/**
+ * Shared full-snapshot fetch for button-host live labels.
+ * One in-flight request per agent: per-item field params fragmented this
+ * path into a poller per visible pill. Selective `fields` stay supported on
+ * the server RPC, but Top label resolvers share the full snapshot so every
+ * pill, modal, and surface reads the same data. MCP/plugin detection cost
+ * stays bounded by the server's long-lived cache/in-flight guard.
+ */
+async function liveSnapshotFor(ctx: PillLiveContext): Promise<SegmentSnapshot> {
   const cached = liveSnapshots.get(ctx.agentId);
   let data = cached?.data;
   const cacheAge = cached?.updatedAt ? Date.now() - cached.updatedAt : Infinity;
@@ -292,8 +280,7 @@ async function liveSnapshotFor(
     if (rpcInvoker) {
       const params: Record<string, unknown> = {};
       if (cached?.workspaceDirectory) params.directory = cached.workspaceDirectory;
-      if (fields && fields.length > 0) params.fields = fields;
-      const cacheKey = `${ctx.agentId}::${JSON.stringify(params)}`;
+      const cacheKey = ctx.agentId;
       let inflight = liveSnapshotInflight.get(cacheKey);
       if (!inflight && cacheAge > LIVE_SNAPSHOT_TTL_MS) {
         inflight = (async () => {
@@ -307,11 +294,7 @@ async function liveSnapshotFor(
         })();
         liveSnapshotInflight.set(cacheKey, inflight);
       }
-      const fresh = inflight
-        ? await inflight
-        : cacheAge <= LIVE_SNAPSHOT_TTL_MS
-          ? null
-          : null;
+      const fresh = inflight ? await inflight : null;
       if (fresh) {
         data = { ...(data ?? {}), ...fresh } as SystemResources;
         updateLiveSnapshot(ctx.agentId, { data });
@@ -328,8 +311,7 @@ async function liveSnapshotFor(
 
 function singleItemLabelResolver(item: PillItemType) {
   return async (ctx: PillLiveContext) => {
-    const cached = liveSnapshots.get(ctx.agentId);
-    const snap = await liveSnapshotFor(ctx, fieldsForItem(item, cached?.workspaceDirectory));
+    const snap = await liveSnapshotFor(ctx);
     return {
       label: formatSegmentLabel(item, snap),
       icon: formatSegmentIcon(item, snap),
@@ -641,8 +623,16 @@ function PillItemContent({
 
 type SettingsListener = (settings: TopSettings) => void;
 const settingsListeners = new Set<SettingsListener>();
+let lastNotifiedSettings: TopSettings | null = null;
 
 export function notifySettingsChanged(settings: TopSettings) {
+  if (!shouldEmitSnapshotUpdate(
+    lastNotifiedSettings as unknown as Record<string, unknown> | null,
+    settings as unknown as Record<string, unknown>,
+  )) {
+    return;
+  }
+  lastNotifiedSettings = settings;
   for (const listener of settingsListeners) {
     try {
       listener(settings);
@@ -665,7 +655,7 @@ export function SingleItemPillView({
   isOpen,
   open,
 }: SingleItemPillViewProps) {
-  const { colors } = usePluginTheme();
+  const { colors, isCompact } = usePluginTheme();
   const workspaceDirectory = useWorkspace(workspaceId, (w: PluginWorkspaceSnapshot) => w?.directory);
   const agent = useAgent(agentId, (a: PluginAgentSnapshot) => ({
     title: a?.title,
@@ -676,41 +666,25 @@ export function SingleItemPillView({
     lastUsage: (a as any)?.lastUsage,
   }));
 
-  const neededFields = useMemo(() => {
+  const needsResource = useMemo(() => {
     switch (item) {
       case "cpu_ram":
-        return ["cpu", "memory"] as ResourceField[];
-      case "branch":
-        return workspaceDirectory ? (["branch"] as ResourceField[]) : [];
-    case "load":
-        return ["load"] as ResourceField[];
+      case "load":
       case "uptime":
-        return ["uptime"] as ResourceField[];
       case "mcp":
-        return ["mcp"] as ResourceField[];
+        return true;
+      case "branch":
+        return Boolean(workspaceDirectory);
       default:
-        return [] as ResourceField[];
+        return false;
     }
   }, [item, workspaceDirectory]);
 
-  const shouldPoll = neededFields.length > 0;
-
-  const queryParams = useMemo(() => {
-    return {
-      ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
-      ...(shouldPoll ? { fields: neededFields } : {}),
-    };
-  }, [workspaceDirectory, shouldPoll, neededFields]);
-
-  const { data, isError, isLoading } = useRpcQuery(
-    getSystemResourcesRpc,
-    queryParams,
-    {
-      enabled: shouldPoll,
-      refetchInterval: shouldPoll ? 5000 : false,
-      staleTime: 2500,
-    } as any,
-  );
+  const shouldPoll = needsResource;
+  const { data, isError, isLoading } = useTopResourceQuery(workspaceDirectory, {
+    enabled: shouldPoll,
+    staleTime: 2500,
+  });
 
   const worktreeLocationText = useMemo(
     () => formatWorktreeLocation(workspaceDirectory),
@@ -730,8 +704,21 @@ export function SingleItemPillView({
   const targetTab = defaultTab ?? getItemTab(item);
 
   if (item === "mcp") {
-    if (isLoading || !data || !data?.mcpInstalled) {
+    if (data && !data.mcpInstalled) {
       return null;
+    }
+    if (isLoading || !data) {
+      return (
+        <Pressable
+          onPress={() => open(targetTab)}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+          style={styles.pillContainer}
+        >
+          <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+            MCP…
+          </Text>
+        </Pressable>
+      );
     }
   }
 
@@ -783,9 +770,11 @@ export function SingleItemPillView({
 
 function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalTab>) {
   const { colors } = usePluginTheme();
-  const { settings, updateSettings } = usePluginSettings(topSettingsContract, {
-    refetchInterval: 5000,
-  });
+  // No background settings poll here: the hook re-verifies on mount and
+  // window focus, and mutations invalidate the shared settings cache.
+  // Polling from every mounted pill/modal/surface multiplied daemon reads
+  // with no value change; fan-out stays guarded by notifySettingsChanged.
+  const { settings, updateSettings } = usePluginSettings(topSettingsContract);
   const flags = legacyFlagView(settings);
 
   useEffect(() => {
@@ -818,64 +807,22 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
   // If no items are selected, fallback to CPU & RAM without mutating saved settings
   const effectiveShowCpuRam = flags.showCpuRam || !hasAnyEnabled;
 
-  const neededFields = useMemo(() => {
-    const fields: ResourceField[] = [];
-    if (effectiveShowCpuRam) {
-      fields.push("cpu", "memory");
-    }
-    if (flags.showBranch && workspaceDirectory) {
-      fields.push("branch");
-    }
-    if (flags.showLoad) {
-      fields.push("load");
-    }
-    if (flags.showUptime) {
-      fields.push("uptime");
-    }
-    if (flags.showMcp) {
-      fields.push("mcp");
-    }
-    return fields;
-  }, [
-    effectiveShowCpuRam,
-    flags.showBranch,
-    flags.showLoad,
-    flags.showUptime,
-    flags.showMcp,
-    settings.mcp,
-    workspaceDirectory,
-  ]);
-
-  const shouldPoll = neededFields.length > 0;
-
-  const queryParams = useMemo(() => {
-    return {
-      ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
-      ...(shouldPoll ? { fields: neededFields } : {}),
-    };
-  }, [workspaceDirectory, shouldPoll, neededFields]);
-
-  const { data, isError, isLoading } = useRpcQuery(
-    getSystemResourcesRpc,
-    queryParams,
-    {
-      enabled: shouldPoll,
-      refetchInterval: shouldPoll ? 5000 : false,
-      staleTime: 2500,
-    } as any,
-  );
+  const shouldPoll = true;
+  const { data, isError, isLoading } = useTopResourceQuery(workspaceDirectory, {
+    staleTime: 2500,
+  });
 
   const isMcpEnabled = isMcpSurfaceEnabled(settings, "pill", data?.mcpInstalled, data?.mcpRunning);
 
   useEffect(() => {
-    const found: MetricId[] = [];
+    const found = new Set<MetricId>();
     const live = data?.liveUsage;
     if (live && (live.inputTokens != null || live.outputTokens != null)) {
-      found.push("tokens");
+      found.add("tokens");
     }
     const last = data?.lastTurn;
     if (last && (last.inputTokens != null || last.outputTokens != null)) {
-      found.push("tokens");
+      found.add("tokens");
     }
     const agentUsage = (agent as any)?.lastUsage;
     if (
@@ -884,17 +831,17 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
         agentUsage.outputTokens != null ||
         agentUsage.contextWindowUsedTokens != null)
     ) {
-      found.push("tokens");
+      found.add("tokens");
     }
     if (agent?.model || agent?.provider) {
-      found.push("agent", "agent_provider");
+      found.add("agent");
+      found.add("agent_provider");
     }
-    if (found.length > 0) {
+    if (found.size > 0) {
       const have = new Set(settings.provisionedMetrics ?? []);
-      if (found.some((id) => !have.has(id))) {
-        updateSettings({
-          provisionedMetrics: [...have, ...found.filter((id) => !have.has(id))],
-        });
+      const additions = [...found].filter((id) => !have.has(id));
+      if (additions.length > 0) {
+        updateSettings({ provisionedMetrics: [...have, ...additions] });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1076,9 +1023,10 @@ function MetricSurfaceMatrix({
   customOverrides: Record<string, boolean> | undefined;
   onCustomToggle: (id: string, val: boolean) => void;
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, isCompact } = usePluginTheme();
   const surfaces = settings.metricSurfaces ?? DEFAULT_METRIC_SURFACES;
   const provisioned = new Set(settings.provisionedMetrics ?? []);
+  const matrixRowMinHeight = isCompact ? 44 : 32;
   const setTarget = (id: MetricId, target: SurfaceTarget) => {
     const next = { ...surfaces, [id]: target };
     const s = { ...settings, metricSurfaces: next };
@@ -1086,13 +1034,36 @@ function MetricSurfaceMatrix({
     notifySettingsChanged(s);
   };
   return (
-    <View style={{ gap: 12 }}>
+    <View style={[styles.metricMatrix, isCompact && styles.metricMatrixCompact]}>
+      <View style={[styles.metricMatrixHeader, isCompact && styles.metricMatrixHeaderCompact]}>
+        <Text style={[styles.metricMatrixHeaderText, { color: colors.foregroundMuted }]}>
+          Metric
+        </Text>
+        <View style={[styles.metricMatrixTargetHeader, isCompact && styles.metricMatrixTargetHeaderCompact]}>
+          <Text style={[styles.metricMatrixHeaderText, { color: colors.foregroundMuted }]}>
+            Pill
+          </Text>
+          <Text style={[styles.metricMatrixHeaderText, { color: colors.foregroundMuted }]}>
+            Timeline
+          </Text>
+        </View>
+      </View>
       {METRIC_DEFINITIONS.map((def, index) => {
         const boxes = checkboxesFromTarget(surfaces[def.id]);
         const unprovisioned =
           isProviderDependent(def.id) && !provisioned.has(def.id);
         const timelineDisabled = !!def.pillOnly;
         const disabled = def.id === "mcp" && !mcpInstalled;
+        const note =
+          def.pillOnly
+            ? "live only"
+            : def.id === "mcp" && !mcpInstalled
+              ? "mcp-tools not installed"
+              : def.id === "mcp" && mcpRunning === false
+                ? "mcp-tools disabled"
+                : unprovisioned
+                  ? "waiting for provider"
+                  : null;
         const setBox = (which: "pill" | "timeline", val: boolean) => {
           const nextBoxes = { ...boxes, [which]: val };
           if (def.pillOnly) nextBoxes.timeline = false;
@@ -1105,59 +1076,40 @@ function MetricSurfaceMatrix({
           <View
             key={def.id}
             style={[
+              styles.metricMatrixRow,
+              isCompact && styles.metricMatrixRowCompact,
+              { minHeight: matrixRowMinHeight },
               index < METRIC_DEFINITIONS.length - 1
                 ? {
                     borderBottomWidth: 1,
                     borderBottomColor: colors.border,
-                    paddingBottom: 10,
                   }
                 : undefined,
             ]}
           >
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: colors.foreground,
-                marginBottom: 2,
-              }}
-            >
-              {def.title}
-            </Text>
-            <Text
-              style={{ fontSize: 9, color: colors.foregroundMuted, marginBottom: 8 }}
-            >
-              {def.pillOnly
-                ? "Live value only; snapshots would freeze it"
-                : def.id === "mcp" && !mcpInstalled
-                  ? "Requires paseo-mcp-tools plugin (not installed)"
-                  : def.id === "mcp" && mcpRunning === false
-                    ? "mcp-tools is disabled: surfaces hidden until it runs"
-                  : unprovisioned
-                    ? `${def.description} (waiting for provider data)`
-                    : def.description}
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 24, paddingLeft: 4 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Pill
+            <View style={styles.metricMatrixLabel}>
+              <Text style={[styles.metricMatrixTitle, { color: colors.foreground }]}>
+                {def.title}
+              </Text>
+              {note ? (
+                <Text style={[styles.metricMatrixNote, { color: colors.foregroundMuted }]}>
+                  {note}
                 </Text>
-                <Toggle
-                  value={boxes.pill}
-                  disabled={disabled}
-                  onValueChange={(val) => setBox("pill", val)}
-                />
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Timeline
-                </Text>
-                <Toggle
-                  value={boxes.timeline && !def.pillOnly}
-                  disabled={disabled || timelineDisabled}
-                  onValueChange={(val) => setBox("timeline", val)}
-                />
-              </View>
+              ) : null}
+            </View>
+            <View style={[styles.metricMatrixTargets, isCompact && styles.metricMatrixTargetsCompact]}>
+              <Toggle
+                value={boxes.pill}
+                disabled={disabled}
+                onValueChange={(val) => setBox("pill", val)}
+                style={styles.matrixToggle}
+              />
+              <Toggle
+                value={boxes.timeline && !def.pillOnly}
+                disabled={disabled || timelineDisabled}
+                onValueChange={(val) => setBox("timeline", val)}
+                style={styles.matrixToggle}
+              />
             </View>
           </View>
         );
@@ -1168,45 +1120,29 @@ function MetricSurfaceMatrix({
         return (
           <View
             key={`custom-${pill.id}`}
-            style={{
-              borderBottomWidth: 0,
-              paddingBottom: 0,
-            }}
+            style={styles.metricMatrixRow}
           >
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: colors.foreground,
-                marginBottom: 2,
-              }}
-            >
-              {pill.title}
-            </Text>
-            <Text
-              style={{ fontSize: 9, color: colors.foregroundMuted, marginBottom: 8 }}
-            >
-              {pill.sourceFile
-                ? `Drop-in pill: ${pill.sourceFile}`
-                : "Drop-in pill from ~/.paseo/top/pills"}
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 16, paddingLeft: 4 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Pill
-                </Text>
-                <Toggle
-                  value={enabled}
-                  disabled={!masterOn}
-                  onValueChange={(val) => onCustomToggle(pill.id, val)}
-                />
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Timeline
-                </Text>
-                <Toggle value={false} disabled={true} onValueChange={() => {}} />
-              </View>
+            <View style={styles.metricMatrixLabel}>
+              <Text style={[styles.metricMatrixTitle, { color: colors.foreground }]}>
+                {pill.title}
+              </Text>
+              <Text style={[styles.metricMatrixNote, { color: colors.foregroundMuted }]}>
+                custom pill
+              </Text>
+            </View>
+            <View style={[styles.metricMatrixTargets, isCompact && styles.metricMatrixTargetsCompact]}>
+              <Toggle
+                value={enabled}
+                disabled={!masterOn}
+                onValueChange={(val) => onCustomToggle(pill.id, val)}
+                style={styles.matrixToggle}
+              />
+              <Toggle
+                value={false}
+                disabled={true}
+                onValueChange={() => {}}
+                style={styles.matrixToggle}
+              />
             </View>
           </View>
         );
@@ -1217,11 +1153,12 @@ function MetricSurfaceMatrix({
 
 function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: ResourceModalProps) {
   const { colors, padding } = usePluginTheme();
+  // Settings re-verify on mount/focus via hook defaults; the settings tab
+  // refetches explicitly below. No background poll: the modal only lives
+  // while open. Custom-pill definitions are a separate data source and keep
+  // their own lightweight poll while the modal is mounted.
   const { settings, updateSettings, resetSettings, refetch: refetchSettings } = usePluginSettings(
     topSettingsContract,
-    {
-      refetchInterval: 2000,
-    },
   );
   const { data: customPillList } = useRpcQuery(listCustomPillsRpc, EMPTY_PARAMS, {
     refetchInterval: 5000,
@@ -1264,19 +1201,8 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     lastUsage: (a as any)?.lastUsage,
   }));
 
-  const queryParams = useMemo(() => {
-    return workspace?.directory ? { directory: workspace.directory } : EMPTY_PARAMS;
-  }, [workspace?.directory]);
-
-  const { data, isError, error, isLoading, isRefetching, refetch } = useAutoRefreshQuery(
-    getSystemResourcesRpc,
-    queryParams,
-    {
-      // 5s matches the composer pill pollers: the 2s modal rate stacked with
-      // per-item pill queries and saturated the server's maxInflight=4 guard.
-      defaultRate: "5s",
-      isOpen: true,
-    },
+  const { data, isError, error, isLoading, isRefetching, refetch } = useTopResourceQuery(
+    workspace?.directory,
   );
 
   const tokenMetrics = useMemo(() => {
@@ -1344,6 +1270,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     return (
       <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
         <ModalBody
+          headerMode="pinned"
           refreshing={isRefetching}
           onRefresh={handleRefresh}
           header={navbar}
@@ -1370,6 +1297,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
   return (
     <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
       <ModalBody
+        headerMode="pinned"
         refreshing={isLoading || isRefetching}
         onRefresh={handleRefresh}
         header={navbar}
@@ -1911,6 +1839,101 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
             </Card>
           )}
 
+          {/* Timeline Cadence Setting */}
+          <Card variant="elevated">
+            <CompactCardHeader
+              title="Timeline Cadence"
+              icon="Clock"
+              value={
+                <Text style={{ color: colors.accent, fontWeight: "600" }}>
+                  {(settings.timelineCadence ?? 1) === 0
+                    ? "Never"
+                    : (settings.timelineCadence ?? 1) === 1
+                      ? "Every turn"
+                      : `Every ${(settings.timelineCadence ?? 1)} turns`}
+                </Text>
+              }
+              subtitle="How often a card is stamped into the timeline view"
+            />
+            <View style={styles.speedRow}>
+              {[
+                { id: 0, label: "Never" },
+                { id: 1, label: "Every turn" },
+              ].map((cadenceOption) => {
+                const isSelected = (settings.timelineCadence ?? 1) === cadenceOption.id;
+                return (
+                  <View
+                    key={cadenceOption.label}
+                    style={[
+                      styles.speedChip,
+                      {
+                        flex: 1,
+                        backgroundColor: isSelected ? colors.accent : colors.surface1,
+                        borderColor: isSelected ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      onPress={() => {
+                        triggerHaptic("light");
+                        const next = { ...settings, timelineCadence: cadenceOption.id };
+                        updateSettings({ timelineCadence: cadenceOption.id });
+                        notifySettingsChanged(next);
+                      }}
+                      style={[
+                        styles.speedChipText,
+                        {
+                          color: isSelected ? colors.accentForeground : colors.foreground,
+                          fontWeight: isSelected ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      {cadenceOption.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            <View style={[styles.speedRow, { marginTop: 8 }]}>
+              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+                const isSelected = (settings.timelineCadence ?? 1) === n;
+                return (
+                  <View
+                    key={n}
+                    style={[
+                      styles.speedChip,
+                      {
+                        backgroundColor: isSelected ? colors.accent : colors.surface1,
+                        borderColor: isSelected ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      onPress={() => {
+                        triggerHaptic("light");
+                        const next = { ...settings, timelineCadence: n };
+                        updateSettings({ timelineCadence: n });
+                        notifySettingsChanged(next);
+                      }}
+                      style={[
+                        styles.speedChipText,
+                        {
+                          color: isSelected ? colors.accentForeground : colors.foreground,
+                          fontWeight: isSelected ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      {`${n}`}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            <Text style={[styles.modeDesc, { color: colors.foregroundMuted, marginTop: 8 }]}>
+              0 behaves as never; N above 1 stamps every Nth turn
+            </Text>
+          </Card>
+
           {/* Default Modal Tab Setting */}
           <Card variant="elevated">
             <CompactCardHeader
@@ -2123,8 +2146,10 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   }
   const activePills = new Map<string, () => void>();
   let latestSettings: TopSettings = topSettingsContract.defaultSettings;
+  let mountDisposed = false;
 
   function syncPills(settings: TopSettings) {
+    if (mountDisposed) return;
     latestSettings = settings;
     if (settings.showComposerPill === false) {
       for (const [, cleanup] of activePills.entries()) {
@@ -2418,6 +2443,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
     void clientWithRpc
       .rpc(topSettingsContract.get, {})
       .then((fetchedSettings: any) => {
+        if (mountDisposed) return;
         if (fetchedSettings) {
           syncPills(fetchedSettings as TopSettings);
         }
@@ -2431,6 +2457,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   const activeCustomPills = new Map<string, () => void>();
 
   async function syncCustomPills() {
+    if (mountDisposed) return;
     if (latestSettings.showComposerPill === false) {
       for (const [id, cleanup] of activeCustomPills.entries()) {
         cleanup();
@@ -2451,6 +2478,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
     try {
       if (typeof clientWithRpc.rpc !== "function") return;
       const res = await clientWithRpc.rpc(getCustomPillsRpc, EMPTY_PARAMS);
+      if (mountDisposed) return;
       const pills: CustomPillStateOutput[] = res?.pills ?? [];
       const pillIds = new Set(pills.map((p: CustomPillStateOutput) => p.id));
 
@@ -2509,6 +2537,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
+    mountDisposed = true;
     if (cleanupSidebar) {
       cleanupSidebar();
       cleanupSidebar = null;
@@ -2613,6 +2642,80 @@ const styles = StyleSheet.create({
   settingsToggles: {
     gap: 8,
     width: "100%",
+  },
+  metricMatrix: {
+    gap: 0,
+    width: "100%",
+  },
+  metricMatrixCompact: {
+    minWidth: 0,
+  },
+  metricMatrixHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingLeft: 4,
+    paddingRight: 4,
+    paddingBottom: 2,
+  },
+  metricMatrixHeaderCompact: {
+    paddingLeft: 2,
+    paddingRight: 2,
+  },
+  metricMatrixHeaderText: {
+    fontSize: 9,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  metricMatrixTargetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 28,
+    paddingRight: 10,
+  },
+  metricMatrixTargetHeaderCompact: {
+    gap: 16,
+    paddingRight: 8,
+  },
+  metricMatrixRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingLeft: 4,
+    paddingRight: 4,
+  },
+  metricMatrixRowCompact: {
+    paddingLeft: 2,
+    paddingRight: 2,
+  },
+  metricMatrixLabel: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 2,
+  },
+  metricMatrixTitle: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  metricMatrixNote: {
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 1,
+  },
+  metricMatrixTargets: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    paddingLeft: 8,
+  },
+  metricMatrixTargetsCompact: {
+    gap: 8,
+    paddingLeft: 4,
+  },
+  matrixToggle: {
+    width: 38,
+    minHeight: 44,
   },
   speedRow: {
     flexDirection: "row",

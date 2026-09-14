@@ -2,6 +2,8 @@
 // vendor-sync: re-copy paseo-plugin-helper src trees into
 // plugins/<plugin>/{client,server,shared}/vendor/paseo-plugin-helper/ so the
 // released plugin installs with zero host requirements (no npm, no registry).
+// Directory plugins import these vendored trees directly; they do not resolve
+// the workspace package at runtime.
 // See plugins/top/shared/vendor/paseo-plugin-helper/README.md (Track B, #71).
 //
 // Usage: node scripts/vendor-sync.mjs [--check]
@@ -17,6 +19,10 @@ const HELPER_SRC = path.join(ROOT, "packages", "paseo-plugin-helper", "src");
 const PLUGINS = {
   "top": ["client", "server", "shared"],
   "mcp-tools": ["client", "server", "shared", "mcp"],
+  "demo": ["client", "server", "shared"],
+  "forgejo": ["client", "server", "shared"],
+  "slash": ["client", "server", "shared"],
+  "x-comms": ["client", "server", "shared", "mcp"],
 };
 const TREES = ["client", "server", "shared", "mcp"];
 const DEST_ROOT = "vendor/paseo-plugin-helper";

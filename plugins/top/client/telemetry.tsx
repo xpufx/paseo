@@ -787,6 +787,16 @@ export function TopTimelineTelemetryCard({
       )}
         </View>
       )}
+
+      {!isExpanded && data.outcomeKind === "canceled" && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText} numberOfLines={2}>
+            {!/^cancel/i.test(data.outcomeError ?? "")
+              ? `Canceled${data.outcomeError ? `: ${data.outcomeError}` : ""}`
+              : (data.outcomeError ?? "Canceled")}
+          </Text>
+        </View>
+      )}
     </View>
   );
 }

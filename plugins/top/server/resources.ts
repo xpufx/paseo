@@ -215,16 +215,26 @@ export async function getMcpPluginState(): Promise<McpPluginState> {
   return mcpStateInflight;
 }
 
+const SETTINGS_READ_LOG_INTERVAL_MS = 30_000;
+let lastSettingsReadLogAt = 0;
+
 export async function handleGetSettings(): Promise<TopSettings> {
   const data = await settingsStorage.readAsync();
-  log.info("Settings read requested", { settings: data });
+  // Reads arrive on every client mount/focus verification, so keep the
+  // observable signal but bound it: at most one line per interval, keys only
+  // on writes, never full payloads.
+  const now = Date.now();
+  if (now - lastSettingsReadLogAt > SETTINGS_READ_LOG_INTERVAL_MS) {
+    lastSettingsReadLogAt = now;
+    log.debug("Settings read requested");
+  }
   return data;
 }
 
 export async function handleUpdateSettings(patch: Partial<TopSettings>): Promise<TopSettings> {
-  log.info("Settings update requested", { patch });
+  log.info("Settings update requested", { keys: Object.keys(patch) });
   const updated = await settingsStorage.updateAsync((prev) => ({ ...prev, ...patch }));
-  log.info("Settings updated successfully", { updated });
+  log.info("Settings updated successfully");
   if (patch.customPillEnabled !== undefined || patch.showCustomPills !== undefined) {
     await refreshCustomPillConfigs();
   }
@@ -310,7 +320,9 @@ export async function handleGetSystemResources(input?: {
   const needBranch = !isSelective || fields.includes("branch");
   const needMcp = !isSelective || fields.includes("mcp");
 
-  const { running: mcpRunning, installed: mcpInstalled } = await getMcpPluginState();
+  const mcpState = needMcp ? await getMcpPluginState() : undefined;
+  const mcpRunning = mcpState?.running;
+  const mcpInstalled = mcpState?.installed;
 
   let branch: string | null | undefined = undefined;
   if (needBranch) {

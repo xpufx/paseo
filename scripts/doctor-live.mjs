@@ -186,6 +186,8 @@ async function main() {
     helper: null,
     plugins: [],
     nestedHelperShadows: [],
+    sdkDrift: [],
+    npmHelperDeps: [],
     reloaded: [],
   };
 
@@ -239,6 +241,32 @@ async function main() {
         .filter((d) => d.isDirectory())
         .map((d) => d.name)
     : [];
+
+  // Vendor drift (once): which plugins' vendored helper copies differ
+  // from a fresh sync. Paths look like "drift: plugins/<name>/...".
+  const vendorDrifted = new Set();
+  try {
+    const out = execSync("node scripts/vendor-sync.mjs --check", {
+      cwd: ROOT_DIR,
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    void out;
+  } catch (e) {
+    const out = (e.stdout || "") + "\n" + (e.stderr || "");
+    for (const m of out.matchAll(/drift:\s*plugins\/([^/\s]+)/g)) {
+      vendorDrifted.add(m[1]);
+    }
+  }
+  const vendorNeedsReload = new Set(vendorDrifted);
+  if (shouldReload && vendorDrifted.size > 0) {
+    console.log(`${colors.yellow}⚡ Synchronizing vendored helper trees before reload...${colors.reset}`);
+    execSync("node scripts/vendor-sync.mjs", {
+      cwd: ROOT_DIR,
+      stdio: "inherit",
+    });
+    vendorDrifted.clear();
+  }
 
   for (const name of pluginDirs) {
     const fullPath = path.join(pluginsDir, name);
@@ -325,9 +353,51 @@ async function main() {
       detail: message,
     };
 
+    // SDK + helper-dep audit: every plugin should pin the same
+    // @getpaseo/plugin range, and none should take the helper from npm
+    // post-vendoring (vendored trees are the install path).
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(fullPath, "package.json"), "utf-8"));
+      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      pluginData.sdk = deps["@getpaseo/plugin"] || "-";
+      pluginData.helperDep = deps["paseo-plugin-helper"] || null;
+      if (pluginData.helperDep) {
+        result.npmHelperDeps.push({ plugin: name, range: pluginData.helperDep });
+        result.ready = false;
+      }
+    } catch {
+      pluginData.sdk = "?";
+      pluginData.helperDep = null;
+    }
+
+    // Vendored helper: pinned version stamp + drift vs fresh sync.
+    try {
+      const readme = fs.readFileSync(
+        path.join(fullPath, "shared", "vendor", "paseo-plugin-helper", "README.md"),
+        "utf-8"
+      );
+      const vm = readme.match(/Pinned helper version:\s*([0-9A-Za-z.-]+)/);
+      pluginData.vendorPin = vm ? vm[1].replace(/[.]+$/, "") : "?";
+    } catch {
+      pluginData.vendorPin = "-";
+    }
+    if (pluginData.vendorPin !== "-" && vendorDrifted.has(name)) {
+      pluginData.vendorDrift = true;
+      result.ready = false;
+    } else {
+      pluginData.vendorDrift = false;
+    }
+
     result.plugins.push(pluginData);
 
-    if (shouldReload && configured && (status === "stale-daemon" || status === "stale-stamp" || status === "stopped")) {
+    if (
+      shouldReload &&
+      configured &&
+      (status === "stale-daemon" ||
+        status === "stale-stamp" ||
+        status === "stopped" ||
+        vendorNeedsReload.has(name))
+    ) {
       console.log(`${colors.yellow}⚡ Reloading plugin '${pluginId}' via paseo...${colors.reset}`);
       try {
         execSync(`paseo plugin reload "${pluginId}"`, { stdio: "inherit" });
@@ -339,6 +409,17 @@ async function main() {
       }
     }
   }
+
+  // SDK drift: distinct declared ranges across plugins (ignoring "-" and "?")
+  const sdkRanges = new Set(
+    result.plugins.map((p) => p.sdk).filter((s) => s && s !== "-" && s !== "?")
+  );
+  if (sdkRanges.size > 1) {
+    result.sdkDrift = [...sdkRanges].sort();
+    result.ready = false;
+  }
+
+  // (vendor drift computed above, before the plugin loop)
 
   // 3. Output Handling
   // Re-resolve workspace links once after removing nested shadows (without
@@ -357,10 +438,16 @@ async function main() {
   console.log("─".repeat(82));
 
   // Helper Row
+  let helperVersion = "?";
+  try {
+    helperVersion = JSON.parse(
+      fs.readFileSync(path.join(ROOT_DIR, "packages", "paseo-plugin-helper", "package.json"), "utf-8")
+    ).version || "?";
+  } catch {}
   const helperColor = result.helper.status === "synced" ? colors.green : colors.yellow;
   const helperIcon = result.helper.status === "synced" ? "✔" : "▲";
   console.log(
-    `${helperColor}${helperIcon} helper dist${colors.reset.padEnd(6)}: ` +
+    `${helperColor}${helperIcon} helper@${helperVersion} dist: ${colors.reset}` +
     `${result.helper.status.toUpperCase().padEnd(10)} ` +
     `${colors.gray}(${result.helper.detail})${colors.reset}`
   );
@@ -368,7 +455,7 @@ async function main() {
 
   // Plugins Table
   console.log(
-    `${colors.bold}${"Plugin".padEnd(14)} ${"Status".padEnd(17)} ${"Code Commit".padEnd(12)} ${"Stamped".padEnd(10)} ${"Live SHA".padEnd(10)} Notes${colors.reset}`
+    `${colors.bold}${"Plugin".padEnd(12)} ${"Status".padEnd(17)} ${"SDK".padEnd(10)} ${"Vendor".padEnd(16)} ${"Code".padEnd(9)} ${"Stamped".padEnd(9)} ${"Live".padEnd(9)} Notes${colors.reset}`
   );
   console.log("─".repeat(82));
 
@@ -392,14 +479,16 @@ async function main() {
       icon = "✔";
     }
 
-    const nameCol = p.name.padEnd(14);
+    const nameCol = p.name.padEnd(12);
     const statCol = `${statColor}${icon} ${p.status.toUpperCase()}${colors.reset}`.padEnd(26);
-    const repoCol = p.repoHead.padEnd(12);
-    const stampCol = p.stampedSha.padEnd(10);
-    const liveCol = p.liveSha.padEnd(10);
+    const sdkCol = (p.sdk + (p.helperDep ? " +npmHelper" : "")).padEnd(10);
+    const vendorCol = (p.vendorPin === "-" ? "-" : `${p.vendorPin}${p.vendorDrift ? "*" : ""}`).padEnd(16);
+    const repoCol = p.repoHead.padEnd(9);
+    const stampCol = p.stampedSha.padEnd(9);
+    const liveCol = p.liveSha.padEnd(9);
     const noteCol = `${colors.gray}${p.detail}${colors.reset}`;
 
-    console.log(`${nameCol} ${statCol} ${repoCol} ${stampCol} ${liveCol} ${noteCol}`);
+    console.log(`${nameCol} ${statCol} ${sdkCol} ${vendorCol} ${repoCol} ${stampCol} ${liveCol} ${noteCol}`);
   }
 
   console.log("─".repeat(82));
@@ -408,6 +497,26 @@ async function main() {
     console.log(`${colors.yellow}⚠️  Action Required to Test Fresh Code:${colors.reset}`);
     if (result.helper.status === "stale") {
       console.log(`  1. Rebuild helper: ${colors.cyan}npm run build --workspace=packages/paseo-plugin-helper${colors.reset}`);
+    }
+    if (result.sdkDrift.length > 0) {
+      console.log(`  ⚠️  SDK drift across plugins (expected one range): ${colors.cyan}${result.sdkDrift.join("  vs  ")}${colors.reset}`);
+      for (const p of result.plugins) {
+        console.log(`      ${p.name}: ${p.sdk}`);
+      }
+    }
+    if (result.npmHelperDeps.length > 0) {
+      for (const h of result.npmHelperDeps) {
+        console.log(`  ⚠️  plugins/${h.plugin} still depends on npm paseo-plugin-helper@${h.range} (expected vendored, no dep)`);
+      }
+    }
+    {
+      const drifted = result.plugins.filter((p) => p.vendorDrift);
+      if (drifted.length > 0) {
+        console.log(`  ⚠️  Vendor drift (vendored copy differs from helper src): ${colors.cyan}make vendor-sync${colors.reset}`);
+        for (const p of drifted) {
+          console.log(`      ${p.name}: pinned ${p.vendorPin}, needs re-sync`);
+        }
+      }
     }
     if (result.nestedHelperShadows.length > 0) {
       for (const s of result.nestedHelperShadows) {

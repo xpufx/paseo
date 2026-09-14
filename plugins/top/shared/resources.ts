@@ -625,6 +625,9 @@ export const TopSettingsSchema = z.preprocess(
       if (!obj.metricSurfaces) {
         obj.metricSurfaces = migrateLegacyMetricSurfaces(obj);
       }
+      if (obj.timelineCadence === undefined && obj.recordTurnTelemetry === false) {
+        obj.timelineCadence = 0;
+      }
       return obj;
     }
     return val;
@@ -649,12 +652,31 @@ export const TopSettingsSchema = z.preprocess(
     customPillEnabled: z.record(z.string(), z.boolean()).default({}),
     provisionedMetrics: z.array(MetricIdSchema).default([]),
     recordTurnTelemetry: z.boolean().optional(),
+    timelineCadence: z.number().min(0).max(10).default(1),
     intervalSeconds: z.number().min(1).max(60).default(3),
     defaultTab: z.enum(["system", "context", "settings", "about"]).default("system"),
   })
 );
 
 export type TopSettings = z.infer<typeof TopSettingsSchema>;
+
+/**
+ * Timeline card cadence: 0 suppresses the card (legacy `never`),
+ * 1 appends every turn, N>1 appends every Nth turn.
+ */
+export function resolveTimelineCadence(settings: {
+  timelineCadence?: number;
+  recordTurnTelemetry?: boolean;
+}): number {
+  if (settings.timelineCadence !== undefined) return settings.timelineCadence;
+  return settings.recordTurnTelemetry === false ? 0 : 1;
+}
+
+export function shouldAppendTimelineForTurn(cadence: number, turnIndex: number): boolean {
+  if (!Number.isFinite(cadence) || cadence <= 0) return false;
+  if (cadence <= 1) return true;
+  return turnIndex % Math.floor(cadence) === 0;
+}
 
 export const topSettingsContract = defineSettingsContract({
   name: "top.settings",
