@@ -9,6 +9,7 @@ import {
   ISSUES_PILL_ID,
   ForgejoPill,
   ForgejoIssuesModal,
+  ForgejoIssuesPanel,
   resolveForgejoLabel,
 } from "./client/issues-pill.js";
 import {
@@ -16,6 +17,11 @@ import {
   forgejoLinkAssistantTransformer,
   forgejoLinkRenderer,
 } from "./client/linkifier.js";
+import {
+  forgejoBoardAlertUserTransformer,
+  forgejoBoardAlertAssistantTransformer,
+  forgejoBoardAlertRenderer,
+} from "./client/board-alert.js";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast });
 
@@ -23,6 +29,9 @@ export default function contribute(client: PluginClientContext) {
   const removeUserLink = client.addTimelineTransformer(forgejoLinkUserTransformer);
   const removeAssistantLink = client.addTimelineTransformer(forgejoLinkAssistantTransformer);
   const removeLinkRenderer = client.addTimelineRenderer(forgejoLinkRenderer);
+  const removeBoardAlertUser = client.addTimelineTransformer(forgejoBoardAlertUserTransformer);
+  const removeBoardAlertAssistant = client.addTimelineTransformer(forgejoBoardAlertAssistantTransformer);
+  const removeBoardAlertRenderer = client.addTimelineRenderer(forgejoBoardAlertRenderer);
 
   const removePill = registerComposerPill(client, {
     id: ISSUES_PILL_ID,
@@ -37,10 +46,23 @@ export default function contribute(client: PluginClientContext) {
     renderModal: (props) => <ForgejoIssuesModal {...props} />,
   });
 
+  const removePanel = client.addWorkspacePanel({
+    id: "forgejo-issues",
+    title: "Forgejo Issues",
+    icon: "GitPullRequest",
+    context: "workspace",
+    locations: ["workspace", "explorer"],
+    Component: ForgejoIssuesPanel,
+  });
+
   return () => {
+    removePanel();
     removePill();
     removeUserLink();
     removeAssistantLink();
     removeLinkRenderer();
+    removeBoardAlertUser();
+    removeBoardAlertAssistant();
+    removeBoardAlertRenderer();
   };
 }

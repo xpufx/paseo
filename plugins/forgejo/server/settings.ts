@@ -39,3 +39,10 @@ export async function storedRemoteForDirectory(
   const pinned = settings.remotesByDirectory?.[directory];
   return typeof pinned === "string" && pinned.trim() ? pinned.trim() : undefined;
 }
+
+/** Daemon-side API token for a Forgejo host. Never leaves the server. */
+export async function tokenForHost(host: string): Promise<string | undefined> {
+  const settings = await forgejoStorage.readAsync();
+  const token = settings.tokensByHost?.[host];
+  return typeof token === "string" && token.trim() ? token.trim() : undefined;
+}

@@ -79,7 +79,7 @@ function useDirectory(workspaceId: string): string | undefined {
   ) as string | undefined;
 }
 
-function useOpenIssues(workspaceId: string, agentId: string) {
+function useOpenIssues(workspaceId: string, agentId?: string) {
   const directory = useDirectory(workspaceId);
   const query = useRpcQuery(
     openIssuesContract,
@@ -89,9 +89,9 @@ function useOpenIssues(workspaceId: string, agentId: string) {
   const data = query.data;
   React.useEffect(() => {
     if (data) {
-      rememberCount(agentId, directory ?? undefined, data.error ? null : data.issues.length);
+      rememberCount(agentId ?? workspaceId, directory ?? undefined, data.error ? null : data.issues.length);
     }
-  }, [agentId, directory, data]);
+  }, [agentId, workspaceId, directory, data]);
   return { directory, ...query };
 }
 
@@ -256,7 +256,7 @@ function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
       <Card.Header
         title={envelope.sessionTitle}
         subtitle={envelope.postedAt ?? undefined}
-        badge={<Badge variant="info" label={envelope.agentShortId} />}
+        badge={<Badge variant="neutral" label={envelope.agentShortId} />}
         icon="Bot"
       />
       <KeyValueGroup columns={2}>
@@ -289,7 +289,6 @@ function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
 }
 
 function CommentCard({ comment }: { comment: IssueComment }) {
-  const { colors } = usePluginTheme();
   const body = stripAgentEnvelopeFooter(comment.body) || comment.body;
   return (
     <Card style={styles.commentCard}>
@@ -299,13 +298,7 @@ function CommentCard({ comment }: { comment: IssueComment }) {
         icon="MessageSquare"
       />
       <MarkdownLite body={body} />
-      {comment.envelope ? (
-        <View style={styles.commentEnvelope}>
-          <Text style={[styles.envelopeHint, { color: colors.foregroundMuted }]}>
-            Agent envelope: {comment.envelope.sessionTitle} ({comment.envelope.agentShortId})
-          </Text>
-        </View>
-      ) : null}
+      {comment.envelope ? <AgentEnvelopeCard envelope={comment.envelope} /> : null}
     </Card>
   );
 }
@@ -500,25 +493,6 @@ function IssueDetailView({
 
           <Card>
             <Card.Header
-              title={`Agent envelopes (${issue.envelopes.length})`}
-              subtitle="Minion ID · commit SHA · runtime"
-              icon="Bot"
-            />
-            {issue.envelopes.length === 0 ? (
-              <EmptyState
-                icon="Cpu"
-                title="No agent activity yet"
-                description="Envelopes appear here once an agent comments with --envelope."
-              />
-            ) : (
-              issue.envelopes.map((envelope) => (
-                <AgentEnvelopeCard key={`${envelope.commentId}-${envelope.agentShortId}`} envelope={envelope} />
-              ))
-            )}
-          </Card>
-
-          <Card>
-            <Card.Header
               title={`Comments (${issue.comments.length})`}
               icon="MessagesSquare"
             />
@@ -555,7 +529,15 @@ function IssueDetailView({
   );
 }
 
-export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalProps) {
+export function ForgejoIssuesView({
+  agentId,
+  workspaceId,
+  onClose,
+}: {
+  agentId?: string;
+  workspaceId: string;
+  onClose?: () => void;
+}) {
   const { colors } = usePluginTheme();
   const { data, isLoading, isError, refetch, isRefetching } = useOpenIssues(workspaceId, agentId);
   const directory = useDirectory(workspaceId);
@@ -603,7 +585,7 @@ export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalP
           />
           <View style={styles.actions}>
             <Button label="Refresh" variant="secondary" onPress={() => { refetch(); }} />
-            <Button label="Close" variant="ghost" onPress={close} />
+            {onClose ? <Button label="Close" variant="ghost" onPress={onClose} /> : null}
           </View>
         </>
       ) : (
@@ -708,7 +690,7 @@ export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalP
           </Text>
           <View style={styles.actions}>
             <Button label="Refresh" variant="secondary" onPress={() => { refetch(); }} />
-            <Button label="Close" variant="ghost" onPress={close} />
+            {onClose ? <Button label="Close" variant="ghost" onPress={onClose} /> : null}
           </View>
           </>
           )}
@@ -716,6 +698,14 @@ export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalP
       )}
     </ModalBody>
   );
+}
+
+export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalProps) {
+  return <ForgejoIssuesView agentId={agentId} workspaceId={workspaceId} onClose={close} />;
+}
+
+export function ForgejoIssuesPanel({ workspaceId }: { workspaceId: string }) {
+  return <ForgejoIssuesView workspaceId={workspaceId} />;
 }
 
 const styles = StyleSheet.create({
@@ -804,13 +794,6 @@ const styles = StyleSheet.create({
   },
   commentCard: {
     gap: 8,
-  },
-  commentEnvelope: {
-    paddingTop: 4,
-  },
-  envelopeHint: {
-    fontSize: 11,
-    fontStyle: "italic",
   },
   composer: {
     gap: 8,

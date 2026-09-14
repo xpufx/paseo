@@ -1,7 +1,7 @@
 {
   "name": "@xpufx/paseo-forgejo",
   "version": "0.1.0",
-  "description": "Work with Forgejo issues from inside Paseo, built on fgjx as the tool.",
+  "description": "Work with Forgejo issues from inside Paseo via the embedded fetch API client.",
   "type": "module",
   "private": true,
   "scripts": {

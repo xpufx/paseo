@@ -84,6 +84,7 @@ const BARE_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 export const ForgejoSettingsSchema = z.object({
   remotesByDirectory: z.record(z.string(), z.string()).default({}),
+  tokensByHost: z.record(z.string(), z.string()).default({}),
 });
 export type ForgejoSettings = z.infer<typeof ForgejoSettingsSchema>;
 
@@ -244,6 +245,109 @@ export function nextStateLabel(labels: string[]): string | null {
   const idx = (STATE_ORDER as readonly string[]).indexOf(current);
   if (idx < 0 || idx + 1 >= STATE_ORDER.length) return null;
   return STATE_ORDER[idx + 1];
+}
+
+// ---------------------------------------------------------------------------
+// Live label sync (issue #122, decision #121.2): the board is the source of
+// truth. Scopes are derived from the labels actually present on open issues,
+// not from the hardcoded vocabularies above (kept only as fallback/display).
+// ---------------------------------------------------------------------------
+
+/** Scope prefix of a `scope/name` label, or null for unscoped labels. */
+export function scopeOfLabel(label: string): string | null {
+  const slash = label.indexOf("/");
+  if (slash <= 0 || slash + 1 >= label.length) return null;
+  const scope = label.slice(0, slash);
+  if (!/^[A-Za-z0-9_.-]+$/.test(scope)) return null;
+  return scope;
+}
+
+/** Distinct scopes observed across a set of board labels, in first-seen order. */
+export function liveScopesFromLabels(allLabels: string[]): string[] {
+  const scopes: string[] = [];
+  for (const label of allLabels) {
+    const scope = scopeOfLabel(label);
+    if (scope && !scopes.includes(scope)) scopes.push(scope);
+  }
+  return scopes;
+}
+
+/** Distinct scopes observed across a list of issues. */
+export function liveScopesFromIssues(issues: Pick<ForgejoIssue, "labels">[]): string[] {
+  return liveScopesFromLabels(issues.flatMap((issue) => issue.labels));
+}
+
+function rankOf(label: string | null, order: readonly string[]): number {
+  if (!label) return order.length;
+  const idx = (order as readonly string[]).indexOf(label);
+  return idx < 0 ? order.length : idx;
+}
+
+/**
+ * Rank open issues for display: priority first (SOS..backburner, unknown
+ * last), then state order (triage..done), then most recently updated.
+ */
+export function rankIssues<T extends Pick<ForgejoIssue, "labels" | "updatedAt">>(issues: T[]): T[] {
+  return [...issues].sort((a, b) => {
+    const pri = rankOf(currentPriorityLabel(a.labels), PRIORITY_ORDER) -
+      rankOf(currentPriorityLabel(b.labels), PRIORITY_ORDER);
+    if (pri !== 0) return pri;
+    const state = rankOf(currentStateLabel(a.labels), STATE_ORDER) -
+      rankOf(currentStateLabel(b.labels), STATE_ORDER);
+    if (state !== 0) return state;
+    return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Optional label-set install (issue #122, decision #121.3): ships our board
+// taxonomy as data a foreign board may install (keeping or replacing theirs
+// via the editor/API). Never applied automatically.
+// ---------------------------------------------------------------------------
+
+export interface LabelDefinition {
+  name: string;
+  color: string;
+  exclusive: boolean;
+  description: string;
+}
+
+const LABEL_DEFS: LabelDefinition[] = [
+  ...STATE_ORDER.map((name, i): LabelDefinition => ({
+    name,
+    color: ["#1d76db", "#0e7c6b", "#a6700b", "#6e40c9", "#1a7f37"][i] ?? "#59636e",
+    exclusive: true,
+    description: `Workflow state ${i}`,
+  })),
+  ...PRIORITY_ORDER.map((name, i): LabelDefinition => ({
+    name,
+    color: ["#d1242f", "#e85d04", "#1d76db", "#59636e", "#8c959f"][i] ?? "#59636e",
+    exclusive: true,
+    description: `Priority ${i}`,
+  })),
+  ...ATTENTION_LABELS.map((name): LabelDefinition => ({
+    name,
+    color: "#8250df",
+    exclusive: true,
+    description: "Who acts next",
+  })),
+  ...SPEC_LABELS.map((name): LabelDefinition => ({
+    name,
+    color: "#0e7c6b",
+    exclusive: true,
+    description: "Spec readiness",
+  })),
+  ...["kind", "target", "format", "size", "dep", "flag"].map((scope): LabelDefinition => ({
+    name: `${scope}/`,
+    color: "#59636e",
+    exclusive: scope !== "flag",
+    description: `${scope} scope prefix`,
+  })),
+];
+
+/** Our board taxonomy as installable data (see decision #121.3). */
+export function paseoLabelSet(): LabelDefinition[] {
+  return LABEL_DEFS.map((def) => ({ ...def }));
 }
 
 // ---------------------------------------------------------------------------
@@ -452,3 +556,105 @@ export const addCommentContract = defineContract({
   input: AddCommentInputSchema,
   output: AddCommentOutputSchema,
 });
+
+// ---------------------------------------------------------------------------
+// Board-alert timeline card (issue #106).
+// The autonomous board check stamps a raw text delta into chat
+// ("[Autonomous Trigger] Forgejo Board Alert: ..."). The composer view
+// restyles it as a structured card; this parser extracts the payload so
+// the timeline transformer can build typed renderer data. Pure string
+// parsing: no RPC, no side effects.
+// ---------------------------------------------------------------------------
+
+export const BoardAlertIssueSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  labels: z.array(z.string()).default([]),
+  action: z.string().default(""),
+  url: z.string().url().optional(),
+});
+export type BoardAlertIssue = z.infer<typeof BoardAlertIssueSchema>;
+
+export const BoardAlertSchema = z.object({
+  headline: z.string(),
+  issues: z.array(BoardAlertIssueSchema),
+});
+export type BoardAlert = z.infer<typeof BoardAlertSchema>;
+
+export const boardAlertTimelineSchema = z.object({
+  headline: z.string(),
+  issues: z.array(BoardAlertIssueSchema),
+});
+export type BoardAlertTimelineData = z.infer<typeof boardAlertTimelineSchema>;
+
+const BOARD_ALERT_MARKERS = ["forgejo board alert", "forgejo board actionable delta"];
+
+const BOARD_ISSUE_LINE = /^\s*[-*]\s*issue\s*#(\d+)\s*:\s*(.+?)\s*$/i;
+const BOARD_LABELS_LINE = /^\s*labels\s*:\s*(.+?)\s*$/i;
+const BOARD_ACTION_LINE = /^\s*action\s*:\s*(.+?)\s*$/i;
+
+/** True when chat text carries a board-alert delta dump. */
+export function isBoardAlertText(text: string | undefined | null): boolean {
+  if (!text || typeof text !== "string") return false;
+  const lower = text.toLowerCase();
+  return BOARD_ALERT_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/**
+ * Parse a raw board-alert dump into structured card data.
+ * Returns null when the text is not a board alert or carries no issues.
+ */
+export function parseBoardAlert(text: string | undefined | null): BoardAlert | null {
+  if (!isBoardAlertText(text)) return null;
+  const body = text as string;
+  const linksByNumber = new Map<number, string>();
+  for (const link of extractForgejoIssueUrls(body)) {
+    if (!linksByNumber.has(link.number)) linksByNumber.set(link.number, link.url);
+  }
+  const lines = body.split(/\r?\n/);
+  const issues: BoardAlertIssue[] = [];
+  let current: { number: number; title: string; labels: string[]; action: string; url?: string } | null = null;
+  const flush = () => {
+    if (current) {
+      const parsed = BoardAlertIssueSchema.safeParse(current);
+      if (parsed.success) issues.push(parsed.data);
+      current = null;
+    }
+  };
+  for (const line of lines) {
+    const issueMatch = BOARD_ISSUE_LINE.exec(line);
+    if (issueMatch) {
+      flush();
+      const number = Number(issueMatch[1]);
+      const rawTitle = issueMatch[2].trim();
+      const urlInTitle = extractForgejoIssueUrls(rawTitle)[0]?.url;
+      const title = urlInTitle ? rawTitle.replace(urlInTitle, "").replace(/\s{2,}/g, " ").trim() : rawTitle;
+      current = {
+        number,
+        title,
+        labels: [],
+        action: "",
+        ...(linksByNumber.get(number) ? { url: linksByNumber.get(number) as string } : {}),
+      };
+      continue;
+    }
+    if (!current) continue;
+    const labelsMatch = BOARD_LABELS_LINE.exec(line);
+    if (labelsMatch) {
+      current.labels = labelsMatch[1]
+        .split(",")
+        .map((label) => label.trim())
+        .filter(Boolean);
+      continue;
+    }
+    const actionMatch = BOARD_ACTION_LINE.exec(line);
+    if (actionMatch) {
+      current.action = actionMatch[1].trim();
+    }
+  }
+  flush();
+  if (issues.length === 0) return null;
+  const headlineMatch = /forgejo board alert\s*:?\s*([^\n]*)/i.exec(body);
+  const headline = headlineMatch?.[1]?.trim() || "New actionable items detected";
+  return { headline, issues };
+}

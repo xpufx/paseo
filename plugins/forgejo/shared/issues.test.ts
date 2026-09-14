@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { parseForgejoRemote, resolveForgejoRepo } from "./issues.ts";
+import { isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -81,5 +81,62 @@ describe("resolveForgejoRepo precedence", () => {
     assert.equal(resolveForgejoRepo(null, null), null);
     assert.equal(resolveForgejoRepo("garbage!!!", undefined), null);
     assert.equal(resolveForgejoRepo("xpufx/paseo", null), null);
+  });
+});
+
+describe("parseBoardAlert", () => {
+  const sample = `[Autonomous Trigger] Forgejo Board Alert: New actionable items detected:
+============================================================
+FORGEJO BOARD ACTIONABLE DELTA DETECTED
+============================================================
+  - Issue #33: chore(release): evaluate readiness for github mirror
+    Labels: format/1-ok, kind/chore, priority/2-normal
+    Action: [NEW ISSUE FIRST-SEEN] Requires First-Look Ingestion`;
+  it("detects board-alert dumps", () => {
+    assert.equal(isBoardAlertText(sample), true);
+    assert.equal(isBoardAlertText("hello world"), false);
+  });
+  it("parses issues into card data", () => {
+    const parsed = parseBoardAlert(sample);
+    assert.ok(parsed);
+    assert.equal(parsed.issues.length, 1);
+    assert.equal(parsed.issues[0].number, 33);
+    assert.ok(parsed.issues[0].title.includes("github mirror"));
+    assert.deepEqual(parsed.issues[0].labels, ["format/1-ok", "kind/chore", "priority/2-normal"]);
+    assert.ok(parsed.issues[0].action.includes("FIRST-SEEN"));
+  });
+  it("returns null without issues", () => {
+    assert.equal(parseBoardAlert("Forgejo Board Alert: nothing"), null);
+  });
+});
+
+describe("live label sync + ranking (issue #122)", () => {
+  it("derives scopes from board labels", () => {
+    assert.equal(scopeOfLabel("state/1-wip"), "state");
+    assert.equal(scopeOfLabel("no-scope"), null);
+    assert.deepEqual(
+      liveScopesFromIssues([
+        { labels: ["state/1-wip", "priority/1-high"] },
+        { labels: ["custom/x", "state/2-review"] },
+      ]),
+      ["state", "priority", "custom"],
+    );
+  });
+  it("ranks SOS before backburner, triage before done", () => {
+    const ranked = rankIssues([
+      { labels: ["priority/4-backburner", "state/0-triage"], updatedAt: "2026-09-14T00:00:00Z" },
+      { labels: ["priority/0-SOS", "state/0-triage"], updatedAt: "2026-09-14T00:00:00Z" },
+      { labels: ["priority/0-SOS", "state/4-done"], updatedAt: "2026-09-14T00:00:00Z" },
+    ]);
+    assert.deepEqual(
+      ranked.map((issue) => issue.labels[0]),
+      ["priority/0-SOS", "priority/0-SOS", "priority/4-backburner"],
+    );
+    assert.equal(ranked[0].labels[1], "state/0-triage");
+  });
+  it("ships the paseo taxonomy as optional install data", () => {
+    const set = paseoLabelSet();
+    assert.ok(set.some((def) => def.name === "state/1-wip" && def.exclusive));
+    assert.ok(set.some((def) => def.name === "attention/1-agent"));
   });
 });

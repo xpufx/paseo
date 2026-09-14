@@ -15,6 +15,7 @@ import {
 } from "../shared/issues.js";
 
 const ForgejoIssueLinkSchema = z.object({
+  text: z.string(),
   links: z.array(
     z.object({
       host: z.string(),
@@ -32,12 +33,12 @@ function transformTextItem<T extends { text: string }>(item: T) {
   if (links.length === 0) return undefined;
   return {
     items: [
-      item,
       {
         type: "plugin" as const,
         kind: "forgejo-issue-link",
         version: 1,
         data: {
+          text: item.text,
           links: links.map((link) => ({
             host: link.host,
             owner: link.owner,
@@ -100,6 +101,9 @@ function IssueLinkRow({ theme, link }: { theme: PluginTheme; link: ForgejoIssueL
 function ForgejoIssueLinks({ theme, item }: PluginTimelineItemProps<ForgejoIssueLinkData>) {
   return (
     <View style={styles.card}>
+      <Text style={[styles.bodyText, { color: theme.colors.foreground }]}>
+        {item.data.text}
+      </Text>
       <View style={styles.header}>
         <Icon name="GitPullRequest" size={13} color={theme.colors.foregroundMuted} />
         <Text style={[styles.headerText, { color: theme.colors.foregroundMuted }]}>
@@ -124,6 +128,9 @@ const styles = StyleSheet.create({
   card: {
     paddingVertical: 4,
     gap: 4,
+  },
+  bodyText: {
+    fontSize: 13,
   },
   header: {
     flexDirection: "row",
