@@ -73,9 +73,20 @@ export default function contribute(server: PluginServerContext) {
 
   const turnStartTimes = new Map<string, number>();
   const turnGitBefore = new Map<string, { insertions: number; deletions: number; filesChanged: number }>();
-  // Interrupt fires turn_ended twice for the same turnId (canceled + follow-up):
-  // one card per turnId, first event wins so the canceled state is kept.
-  const appendedTurnIds = new Set<string>();
+  // Interrupt fires turn_ended twice for the same turnId (canceled +
+  // follow-up): coalesce both into ONE card. First event is held briefly;
+  // a second event with the same turnId merges into it instead of
+  // appending a second card. The merged card keeps the canceled outcome
+  // with reason text at the bottom where errors render.
+  const MERGE_WINDOW_MS = 750;
+  interface PendingTurn {
+    timer: ReturnType<typeof setTimeout>;
+    firstOutcome: { kind: string; error?: { message: string }; reason?: string };
+    startTime: number | undefined;
+    gitBefore: { insertions: number; deletions: number; filesChanged: number } | undefined;
+    turnIndex: number;
+  }
+  const pendingTurns = new Map<string, PendingTurn>();
   // Per-agent turn counter for the timeline cadence option (0 = never,
   // 1 = every turn, N>1 = every Nth turn). Counts deduped turn_ended events.
   const turnCounters = new Map<string, number>();
@@ -114,25 +125,40 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  const unsubscribeTurnEnded = server.on("agent.turn_ended", async (event, context) => {
+  function mergeOutcomes(
+    first: { kind: string; error?: { message: string }; reason?: string },
+    second: { kind: string; error?: { message: string }; reason?: string },
+  ): { kind: "completed" | "failed" | "canceled"; error?: { message: string }; reason?: string } {
+    const kinds = [first.kind, second.kind];
+    const kind = (kinds.includes("canceled") ? "canceled" : kinds.includes("failed") ? "failed" : "completed") as
+      "completed" | "failed" | "canceled";
+    const parts = [first.reason ?? first.error?.message, second.reason ?? second.error?.message].filter(
+      (p): p is string => !!p,
+    );
+    const merged: { kind: "completed" | "failed" | "canceled"; error?: { message: string }; reason?: string } = {
+      kind,
+    };
+    if (kind === "canceled" && parts.length > 0) {
+      merged.reason = [...new Set(parts)].join(" / ");
+    } else if (kind === "failed" && parts.length > 0) {
+      merged.error = { message: [...new Set(parts)].join(" / ") };
+    } else if (first.error ?? second.error) {
+      merged.error = second.error ?? first.error;
+    }
+    return merged;
+  }
+
+  async function appendTurnCard(
+    event: any,
+    context: any,
+    startTime: number | undefined,
+    gitBefore: { insertions: number; deletions: number; filesChanged: number } | undefined,
+    turnIndex: number,
+    mergedOutcome?: { kind: "completed" | "failed" | "canceled"; error?: { message: string }; reason?: string },
+  ): Promise<void> {
     try {
       const settings = await handleGetSettings();
-      if (settings.recordTurnTelemetry === false) {
-        turnStartTimes.delete(event.agent.id);
-        turnGitBefore.delete(event.agent.id);
-        return;
-      }
-
-      const startTime = turnStartTimes.get(event.agent.id);
-      turnStartTimes.delete(event.agent.id);
-      const gitBefore = turnGitBefore.get(event.agent.id);
-      turnGitBefore.delete(event.agent.id);
-      if (event.turnId && appendedTurnIds.has(event.turnId)) {
-        return;
-      }
       const cadence = resolveTimelineCadence(settings);
-      const turnIndex = (turnCounters.get(event.agent.id) ?? 0) + 1;
-      turnCounters.set(event.agent.id, turnIndex);
       if (!shouldAppendTimelineForTurn(cadence, turnIndex)) {
         return;
       }
@@ -183,7 +209,7 @@ export default function contribute(server: PluginServerContext) {
       const telemetry = await collectTurnTelemetry(
         event.turnId,
         event.agent.id,
-        event.outcome,
+        mergedOutcome ?? event.outcome,
         durationMs,
         {
           cwd: event.agent.cwd,
@@ -203,15 +229,11 @@ export default function contribute(server: PluginServerContext) {
         version: TOP_TIMELINE_VERSION,
         data: telemetry,
       });
-      if (event.turnId) {
-        if (appendedTurnIds.size > 1000) appendedTurnIds.clear();
-        appendedTurnIds.add(event.turnId);
-      }
 
       log.info("Appended turn telemetry to timeline", {
         agentId: event.agent.id,
         turnId: event.turnId,
-        outcome: event.outcome.kind,
+        outcome: (mergedOutcome ?? event.outcome).kind,
         durationMs,
         cpuPercent: telemetry.cpuPercent,
         memPercent: telemetry.memPercent,
@@ -223,9 +245,69 @@ export default function contribute(server: PluginServerContext) {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  const unsubscribeTurnEnded = server.on("agent.turn_ended", (event, context) => {
+    const settingsPromise = handleGetSettings();
+    void settingsPromise.then((settings) => {
+      if (settings.recordTurnTelemetry === false) {
+        turnStartTimes.delete(event.agent.id);
+        turnGitBefore.delete(event.agent.id);
+        return;
+      }
+
+      // Events without a turnId cannot be merged; append immediately.
+      if (!event.turnId) {
+        const startTime = turnStartTimes.get(event.agent.id);
+        turnStartTimes.delete(event.agent.id);
+        const gitBefore = turnGitBefore.get(event.agent.id);
+        turnGitBefore.delete(event.agent.id);
+        const turnIndex = (turnCounters.get(event.agent.id) ?? 0) + 1;
+        turnCounters.set(event.agent.id, turnIndex);
+        void appendTurnCard(event, context, startTime, gitBefore, turnIndex);
+        return;
+      }
+
+      const pending = pendingTurns.get(event.turnId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingTurns.delete(event.turnId);
+        const mergedOutcome = mergeOutcomes(pending.firstOutcome, event.outcome);
+        void appendTurnCard(event, context, pending.startTime, pending.gitBefore, pending.turnIndex, mergedOutcome);
+        return;
+      }
+
+      const startTime = turnStartTimes.get(event.agent.id);
+      turnStartTimes.delete(event.agent.id);
+      const gitBefore = turnGitBefore.get(event.agent.id);
+      turnGitBefore.delete(event.agent.id);
+      const turnIndex = (turnCounters.get(event.agent.id) ?? 0) + 1;
+      turnCounters.set(event.agent.id, turnIndex);
+      const firstOutcome = event.outcome;
+      const holdTurnId: string = event.turnId;
+      // Hold the first event briefly so a follow-up for the same turnId
+      // merges into one card instead of appending a second.
+      const timer = setTimeout(() => {
+        pendingTurns.delete(holdTurnId);
+        void appendTurnCard(event, context, startTime, gitBefore, turnIndex);
+      }, MERGE_WINDOW_MS);
+      if (pendingTurns.size > 1000) {
+        const oldest = pendingTurns.keys().next();
+        if (!oldest.done) pendingTurns.delete(oldest.value);
+      }
+      pendingTurns.set(event.turnId, { timer, firstOutcome, startTime, gitBefore, turnIndex });
+    }).catch((err) => {
+      log.warn("Failed to record turn telemetry", {
+        agentId: event.agent.id,
+        turnId: event.turnId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
 
   return () => {
+    for (const pending of pendingTurns.values()) clearTimeout(pending.timer);
+    pendingTurns.clear();
     customPillPoller.stop();
     unsubscribeTurnStarted();
     unsubscribeAgentCreated();
