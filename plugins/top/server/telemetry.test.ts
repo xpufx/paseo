@@ -18,6 +18,8 @@ import {
   DEFAULT_METRIC_SURFACES,
   isMcpSurfaceEnabled,
   customPillEffectiveEnabled,
+  resolveTimelineCadence,
+  shouldAppendTimelineForTurn,
   type McpStatusSnapshot,
 } from "../shared/resources";
 import { collectTurnTelemetry, countTurns, customPillPoller, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline } from "./resources";
@@ -487,6 +489,25 @@ test("pill render uses definition icons and labels, never hardcoded literals", (
     shorts.length,
     "definition shortLabels must be unique",
   );
+});
+
+test("timeline cadence gates the card: never, every turn, every Nth turn", () => {
+  assert.equal(shouldAppendTimelineForTurn(0, 1), false);
+  assert.equal(shouldAppendTimelineForTurn(0, 10), false);
+  assert.equal(shouldAppendTimelineForTurn(1, 1), true);
+  assert.equal(shouldAppendTimelineForTurn(1, 7), true);
+  assert.deepEqual([1, 2, 3, 4, 5, 6].map((i) => shouldAppendTimelineForTurn(3, i)), [
+    false, false, true, false, false, true,
+  ]);
+  assert.equal(resolveTimelineCadence({ timelineCadence: 0 }), 0);
+  assert.equal(resolveTimelineCadence({ timelineCadence: 5 }), 5);
+  assert.equal(resolveTimelineCadence({}), 1);
+  assert.equal(resolveTimelineCadence({ recordTurnTelemetry: false }), 0);
+  assert.equal(TopSettingsSchema.parse({}).timelineCadence, 1);
+  assert.equal(TopSettingsSchema.parse({ timelineCadence: 4 }).timelineCadence, 4);
+  assert.equal(TopSettingsSchema.parse({ recordTurnTelemetry: false }).timelineCadence, 0);
+  assert.throws(() => TopSettingsSchema.parse({ timelineCadence: 11 }));
+  assert.throws(() => TopSettingsSchema.parse({ timelineCadence: -1 }));
 });
 
 test("custom pill effective state follows master, overrides, then file default", () => {

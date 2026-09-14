@@ -26,6 +26,7 @@ import {
   setLastLiveUsage,
   log,
 } from "./server/resources";
+import { resolveTimelineCadence, shouldAppendTimelineForTurn } from "./shared/resources";
 
 export default function contribute(server: PluginServerContext) {
   void customPillPoller.start();
@@ -75,6 +76,9 @@ export default function contribute(server: PluginServerContext) {
   // Interrupt fires turn_ended twice for the same turnId (canceled + follow-up):
   // one card per turnId, first event wins so the canceled state is kept.
   const appendedTurnIds = new Set<string>();
+  // Per-agent turn counter for the timeline cadence option (0 = never,
+  // 1 = every turn, N>1 = every Nth turn). Counts deduped turn_ended events.
+  const turnCounters = new Map<string, number>();
 
   const unsubscribeTurnStarted = server.on("agent.turn_started", (event, context) => {
     turnStartTimes.set(event.agent.id, Date.now());
@@ -124,6 +128,12 @@ export default function contribute(server: PluginServerContext) {
       const gitBefore = turnGitBefore.get(event.agent.id);
       turnGitBefore.delete(event.agent.id);
       if (event.turnId && appendedTurnIds.has(event.turnId)) {
+        return;
+      }
+      const cadence = resolveTimelineCadence(settings);
+      const turnIndex = (turnCounters.get(event.agent.id) ?? 0) + 1;
+      turnCounters.set(event.agent.id, turnIndex);
+      if (!shouldAppendTimelineForTurn(cadence, turnIndex)) {
         return;
       }
       const durationMs = startTime ? Date.now() - startTime : undefined;

@@ -1911,6 +1911,101 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
             </Card>
           )}
 
+          {/* Timeline Cadence Setting */}
+          <Card variant="elevated">
+            <CompactCardHeader
+              title="Timeline Cadence"
+              icon="Clock"
+              value={
+                <Text style={{ color: colors.accent, fontWeight: "600" }}>
+                  {(settings.timelineCadence ?? 1) === 0
+                    ? "Never"
+                    : (settings.timelineCadence ?? 1) === 1
+                      ? "Every turn"
+                      : `Every ${(settings.timelineCadence ?? 1)} turns`}
+                </Text>
+              }
+              subtitle="How often a card is stamped into the timeline view"
+            />
+            <View style={styles.speedRow}>
+              {[
+                { id: 0, label: "Never" },
+                { id: 1, label: "Every turn" },
+              ].map((cadenceOption) => {
+                const isSelected = (settings.timelineCadence ?? 1) === cadenceOption.id;
+                return (
+                  <View
+                    key={cadenceOption.label}
+                    style={[
+                      styles.speedChip,
+                      {
+                        flex: 1,
+                        backgroundColor: isSelected ? colors.accent : colors.surface1,
+                        borderColor: isSelected ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      onPress={() => {
+                        triggerHaptic("light");
+                        const next = { ...settings, timelineCadence: cadenceOption.id };
+                        updateSettings({ timelineCadence: cadenceOption.id });
+                        notifySettingsChanged(next);
+                      }}
+                      style={[
+                        styles.speedChipText,
+                        {
+                          color: isSelected ? colors.accentForeground : colors.foreground,
+                          fontWeight: isSelected ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      {cadenceOption.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            <View style={[styles.speedRow, { marginTop: 8 }]}>
+              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+                const isSelected = (settings.timelineCadence ?? 1) === n;
+                return (
+                  <View
+                    key={n}
+                    style={[
+                      styles.speedChip,
+                      {
+                        backgroundColor: isSelected ? colors.accent : colors.surface1,
+                        borderColor: isSelected ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      onPress={() => {
+                        triggerHaptic("light");
+                        const next = { ...settings, timelineCadence: n };
+                        updateSettings({ timelineCadence: n });
+                        notifySettingsChanged(next);
+                      }}
+                      style={[
+                        styles.speedChipText,
+                        {
+                          color: isSelected ? colors.accentForeground : colors.foreground,
+                          fontWeight: isSelected ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      {`${n}`}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+            <Text style={[styles.modeDesc, { color: colors.foregroundMuted, marginTop: 8 }]}>
+              0 behaves as never; N above 1 stamps every Nth turn
+            </Text>
+          </Card>
+
           {/* Default Modal Tab Setting */}
           <Card variant="elevated">
             <CompactCardHeader
@@ -2123,8 +2218,10 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   }
   const activePills = new Map<string, () => void>();
   let latestSettings: TopSettings = topSettingsContract.defaultSettings;
+  let mountDisposed = false;
 
   function syncPills(settings: TopSettings) {
+    if (mountDisposed) return;
     latestSettings = settings;
     if (settings.showComposerPill === false) {
       for (const [, cleanup] of activePills.entries()) {
@@ -2418,6 +2515,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
     void clientWithRpc
       .rpc(topSettingsContract.get, {})
       .then((fetchedSettings: any) => {
+        if (mountDisposed) return;
         if (fetchedSettings) {
           syncPills(fetchedSettings as TopSettings);
         }
@@ -2431,6 +2529,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   const activeCustomPills = new Map<string, () => void>();
 
   async function syncCustomPills() {
+    if (mountDisposed) return;
     if (latestSettings.showComposerPill === false) {
       for (const [id, cleanup] of activeCustomPills.entries()) {
         cleanup();
@@ -2451,6 +2550,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
     try {
       if (typeof clientWithRpc.rpc !== "function") return;
       const res = await clientWithRpc.rpc(getCustomPillsRpc, EMPTY_PARAMS);
+      if (mountDisposed) return;
       const pills: CustomPillStateOutput[] = res?.pills ?? [];
       const pillIds = new Set(pills.map((p: CustomPillStateOutput) => p.id));
 
@@ -2509,6 +2609,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   const cleanup = () => {
     if (disposed) return;
     disposed = true;
+    mountDisposed = true;
     if (cleanupSidebar) {
       cleanupSidebar();
       cleanupSidebar = null;

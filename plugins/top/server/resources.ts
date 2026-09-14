@@ -217,7 +217,7 @@ export async function getMcpPluginState(): Promise<McpPluginState> {
 
 export async function handleGetSettings(): Promise<TopSettings> {
   const data = await settingsStorage.readAsync();
-  log.info("Settings read requested", { settings: data });
+  log.debug("Settings read requested", { settings: data });
   return data;
 }
 

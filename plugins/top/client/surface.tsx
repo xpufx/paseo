@@ -306,6 +306,53 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
             </View>
           </Card>
 
+          <Card variant="elevated">
+            <CardHeader
+              title="Timeline Cadence"
+              icon="Clock"
+              value={
+                <Text style={{ color: colors.accent, fontWeight: "600" }}>
+                  {(settings.timelineCadence ?? 1) === 0
+                    ? "Never"
+                    : (settings.timelineCadence ?? 1) === 1
+                      ? "Every turn"
+                      : `Every ${(settings.timelineCadence ?? 1)} turns`}
+                </Text>
+              }
+              subtitle="How often a card is stamped into the timeline view (0 = never)"
+            />
+            <View style={styles.speedRow}>
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+                const isSelected = (settings.timelineCadence ?? 1) === n;
+                return (
+                  <View
+                    key={n}
+                    style={[
+                      styles.speedChip,
+                      {
+                        backgroundColor: isSelected ? colors.accent : colors.surface1,
+                        borderColor: isSelected ? colors.accent : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text
+                      onPress={() => applySettings({ timelineCadence: n })}
+                      style={[
+                        styles.speedChipText,
+                        {
+                          color: isSelected ? colors.accentForeground : colors.foreground,
+                          fontWeight: isSelected ? "700" : "500",
+                        },
+                      ]}
+                    >
+                      {n === 0 ? "Never" : n === 1 ? "Every turn" : `${n}`}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </Card>
+
           <Button
             label="Reset to Defaults"
             variant="secondary"
