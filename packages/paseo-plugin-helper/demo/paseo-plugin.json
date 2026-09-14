@@ -1,0 +1,6 @@
+{
+  "id": "helper-demo",
+  "build": [
+    ["npm", "install"]
+  ]
+}

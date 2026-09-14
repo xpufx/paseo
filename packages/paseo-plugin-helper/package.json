@@ -1,0 +1,98 @@
+{
+  "name": "paseo-plugin-helper",
+  "version": "0.4.0-beta.12",
+  "description": "Developer toolkit, UI design system, and lifecycle primitives for Paseo plugins",
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js",
+      "require": "./dist/client/index.cjs"
+    },
+    "./server": {
+      "types": "./dist/server/index.d.ts",
+      "import": "./dist/server/index.js",
+      "require": "./dist/server/index.cjs"
+    },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "import": "./dist/mcp/index.js",
+      "require": "./dist/mcp/index.cjs"
+    },
+    "./shared": {
+      "types": "./dist/shared/index.d.ts",
+      "import": "./dist/shared/index.js",
+      "require": "./dist/shared/index.cjs"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "require": "./dist/testing/index.cjs"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js",
+      "require": "./dist/cli.cjs"
+    }
+  },
+  "bin": {
+    "paseo-plugin-helper": "./bin/paseo-plugin-helper.js",
+    "paseo-doctor": "./bin/paseo-plugin-helper.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "NODE_OPTIONS=\"--max-old-space-size=2048\" tsup",
+    "prepack": "NODE_OPTIONS=\"--max-old-space-size=2048\" tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xpufx/paseo-plugin-helper.git"
+  },
+  "peerDependencies": {
+    "@getpaseo/plugin": ">=0.7.0 || >=0.8.0-beta.1",
+    "@tanstack/react-query": ">=5.0.0",
+    "react": ">=18.0.0",
+    "react-native": ">=0.70.0",
+    "zod": ">=3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "@getpaseo/plugin": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@getpaseo/client": "0.8.0",
+    "@getpaseo/plugin": "0.8.0",
+    "@tanstack/react-query": "^5.67.2",
+    "@types/node": "^20.17.24",
+    "@types/react": "^19.0.10",
+    "@types/react-test-renderer": "^19.3.0",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-test-renderer": "^19.1.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8",
+    "zod": "^4.5.4"
+  }
+}
