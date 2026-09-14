@@ -4,4 +4,5 @@ export * from "./formatters.js";
 export * from "./settings.js";
 export * from "./suite-settings.js";
 export * from "./async.js";
+export * from "./suppressed.js";
 export * from "./custom-pills.js";

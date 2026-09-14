@@ -42,9 +42,16 @@ export function createPeriodicTask(options: PeriodicTaskOptions): PeriodicTaskHa
       if (onError) {
         try {
           onError(err, failureCount);
-        } catch {
-          // Prevent onError handler from breaking task loop
+        } catch (suppressed) {
+          // Prevent onError handler from breaking task loop, but stay visible in dev logs.
+          console.debug(
+            `[periodic-task] onError handler failed: ${suppressed instanceof Error ? suppressed.message : String(suppressed)}`,
+          );
         }
+      } else {
+        console.debug(
+          `[periodic-task] suppressed error (failure ${failureCount}): ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     } finally {
       inFlight = false;

@@ -197,7 +197,11 @@ export class WorkspaceBeacon {
           workspaceId,
           name: options.a.name ?? options.b.name,
           restoreTitle: true,
-        }).catch(() => undefined);
+        }).catch((err) =>
+          this.logger?.debug?.(
+            `WorkspaceBeacon blink restore failed: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
       }
       resolveDone();
     };
@@ -215,14 +219,21 @@ export class WorkspaceBeacon {
         }
         const state = states[count % 2];
         count += 1;
-        void this.set({ ...state, workspaceId: state.workspaceId ?? workspaceId ?? "" }).catch(() => undefined);
+        void this.set({ ...state, workspaceId: state.workspaceId ?? workspaceId ?? "" }).catch((err) =>
+          this.logger?.debug?.(
+            `WorkspaceBeacon blink tick failed: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
         if (count >= totalRounds) {
           finish();
         }
       };
       let count = 0;
       void this.set({ ...states[0], workspaceId: states[0].workspaceId ?? workspaceId ?? "" }).catch(
-        () => undefined,
+        (err) =>
+          this.logger?.debug?.(
+            `WorkspaceBeacon blink tick failed: ${err instanceof Error ? err.message : String(err)}`,
+          ),
       );
       count = 1;
       if (count >= totalRounds) {
@@ -231,7 +242,10 @@ export class WorkspaceBeacon {
         timer = setInterval(tick, intervalMs);
         this.blinkTimers.set(key, { timer, finish });
       }
-    } catch {
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon blink setup failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       finish();
     }
 
@@ -272,8 +286,10 @@ export class WorkspaceBeacon {
       clearInterval(entry.timer);
       try {
         entry.finish();
-      } catch {
-        // ignore finish errors during teardown
+      } catch (err) {
+        this.logger?.debug?.(
+          `WorkspaceBeacon stopAll finish failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
     this.blinkTimers.clear();
@@ -330,7 +346,10 @@ export class WorkspaceBeacon {
         );
       }
       return false;
-    } catch {
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon detachLabel failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       return false;
     }
   }
@@ -385,8 +404,10 @@ export class WorkspaceBeacon {
       this.blinkTimers.delete(key);
       try {
         entry.finish();
-      } catch {
-        // superseded blink: ignore
+      } catch (err) {
+        this.logger?.debug?.(
+          `WorkspaceBeacon stopBlink finish failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }
