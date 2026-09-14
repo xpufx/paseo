@@ -3,13 +3,6 @@ import { StyleSheet, Text, View, Pressable } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import {
-  SettingsCard,
-  SettingsSection,
-  SettingsSwitch,
-  SettingsSelect,
-  SettingsInput,
-} from "@getpaseo/plugin/client/ui";
-import {
   initClientHelpers,
   type ComposerPillRegistrar,
 } from "./vendor/paseo-plugin-helper/index";
@@ -17,8 +10,6 @@ import {
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import {
   registerComposerPill,
-  registerHelperSettingsScreen,
-  type HelperSettingsScreenRegistrar,
   ModalBody,
   ActionBar,
   Card,
@@ -481,7 +472,7 @@ function DemoModal({ close }: RenderModalProps) {
   );
 }
 
-export function contributeClient(client: ComposerPillRegistrar & HelperSettingsScreenRegistrar) {
+export function contributeClient(client: ComposerPillRegistrar) {
   const removePill = registerComposerPill(client, {
     id: "helper-demo",
     title: "demo",
@@ -495,15 +486,8 @@ export function contributeClient(client: ComposerPillRegistrar & HelperSettingsS
     renderPill: (props) => <DemoPill {...props} />,
     renderModal: (props) => <DemoModal {...props} />,
   });
-  const removeSettingsScreen = registerHelperSettingsScreen(client, demoSettingsContract, {
-    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
-    id: "helper-demo-settings",
-    title: "Demo settings",
-    icon: "Sliders",
-  });
   return () => {
     removePill();
-    removeSettingsScreen();
   };
 }
 
