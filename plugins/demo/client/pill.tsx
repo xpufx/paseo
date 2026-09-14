@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
@@ -48,6 +48,7 @@ import {
   getDemoDataRpc,
   triggerDemoActionRpc,
   demoSettingsContract,
+  resolveDemoHeaderMode,
 } from "../shared/demo.js";
 import { PLUGIN_VERSION } from "../shared/version.js";
 
@@ -126,6 +127,12 @@ function DemoModal({ close }: RenderModalProps) {
     resetSettings,
     isUpdating: isSettingsUpdating,
   } = usePluginSettings(demoSettingsContract);
+
+  // An open in-flow dropdown must not survive a navigation-style switch with
+  // stale state; the menu unmounts but the flag would reopen it on return.
+  useEffect(() => {
+    setNavigationOpen(false);
+  }, [settings.navigationStyle]);
 
   const {
     data,
@@ -231,7 +238,7 @@ function DemoModal({ close }: RenderModalProps) {
   return (
     <ModalBody
       header={header}
-      headerMode="pinned"
+      headerMode={resolveDemoHeaderMode(settings.navigationStyle)}
       headerStyle={{
         backgroundColor: colors.surface0,
         paddingHorizontal: 12,

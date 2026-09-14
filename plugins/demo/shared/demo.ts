@@ -22,6 +22,24 @@ export const DemoSettingsSchema = z.object({
 
 export type DemoSettings = z.infer<typeof DemoSettingsSchema>;
 
+export type DemoNavigationStyle = DemoSettings["navigationStyle"];
+
+/**
+ * Maps the showcase navigation style to ModalBody scroll ownership.
+ * Tabs use a compact pinned navbar (headerMode="pinned": header stays fixed
+ * while the body scrolls). The dropdown menu is in-flow inside the header,
+ * so it must participate in the scroll flow (headerMode="scroll"): on
+ * helper-owned compact surfaces the header renders INSIDE the ScrollView,
+ * and on host-owned 0.8 popovers it drops the sticky header, so an open
+ * menu scrolls with the content instead of staying visibly pinned while
+ * the body scrolls beneath it.
+ */
+export function resolveDemoHeaderMode(
+  navigationStyle: DemoNavigationStyle,
+): "pinned" | "scroll" {
+  return navigationStyle === "dropdown" ? "scroll" : "pinned";
+}
+
 export const demoSettingsContract = defineSettingsContract({
   name: "helper-demo-v8.settings",
   schema: DemoSettingsSchema,
