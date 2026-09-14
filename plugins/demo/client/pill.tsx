@@ -10,6 +10,7 @@ import {
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import {
   registerComposerPill,
+  PluginThemeProvider,
   ModalBody,
   ActionBar,
   Card,
@@ -20,11 +21,17 @@ import {
   KeyValueGroup,
   MetricGauge,
   ProgressBar,
+  DataTable,
   Tabs,
+  SearchInput,
+  EmptyState,
+  CodeBlock,
   Toggle,
   FormRow,
   TextInput,
   AboutSection,
+  Responsive,
+  AttentionBeacon,
   triggerHaptic,
   usePluginTheme,
   useResponsive,
@@ -33,23 +40,27 @@ import {
   usePluginSettings,
   type RenderModalProps,
   type RenderPillProps,
+  type VisualFlair,
+  type AttentionBeaconMode,
+  type AttentionBeaconTone,
 } from "./vendor/paseo-plugin-helper/index";
 import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
   getDemoDataRpc,
   triggerDemoActionRpc,
+  demoAgentIdentityContract,
+  demoBeaconSetContract,
+  demoBeaconBlinkContract,
+  demoBeaconClearContract,
   demoSettingsContract,
   resolveDemoHeaderMode,
+  type DemoData,
 } from "../shared/demo.js";
+import { SharedSuiteCard } from "./suite-settings.js";
 import { PLUGIN_VERSION } from "../shared/version.js";
 
 const EMPTY_PARAMS = {};
 
-/**
- * Responsive composer pill with a meaningful live value: the host CPU
- * reading drives both the label and the status dot, so the trackbar itself
- * demonstrates live polling without opening anything.
- */
 function DemoPill({ isOpen }: RenderPillProps) {
   const { colors } = usePluginTheme();
   const { isCompact } = useResponsive();
@@ -89,28 +100,31 @@ function DemoPill({ isOpen }: RenderPillProps) {
   );
 }
 
-type DemoTab = "metrics" | "action" | "settings" | "about";
-
-const SHOWCASE_TABS: { id: DemoTab; label: string; shortLabel: string }[] = [
-  { id: "metrics", label: "System Metrics", shortLabel: "Metrics" },
-  { id: "action", label: "Run Action", shortLabel: "Action" },
-  { id: "settings", label: "Plugin Settings", shortLabel: "Settings" },
-  { id: "about", label: "About Plugin", shortLabel: "About" },
-];
-
-/**
- * Focused helper reference: one live pill, one metrics card, one typed RPC
- * action, one persisted settings section, and an about reference. Each tab
- * below teaches a single preferred pattern instead of cataloguing every
- * helper primitive.
- */
-function DemoModal({ close }: RenderModalProps) {
-  const { colors } = usePluginTheme();
+function DemoModal({ close, workspaceId }: RenderModalProps) {
+  const { colors, theme, layout } = usePluginTheme();
   const { isCompact } = useResponsive();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<DemoTab>("metrics");
+  const [activeTab, setActiveTab] = useState<string>("gauges");
   const [navigationOpen, setNavigationOpen] = useState<boolean>(false);
+
+  const showcaseTabs = [
+    { id: "gauges", label: "Gauges & Hardware", shortLabel: "Gauges" },
+    { id: "flair", label: "Visual Flair Studio", shortLabel: "Flair" },
+    { id: "data", label: "Data Table", shortLabel: "Data" },
+    { id: "controls", label: "Interactive Controls", shortLabel: "Controls" },
+    { id: "attention", label: "Attention & Beacons", shortLabel: "Beacon" },
+    { id: "settings", label: "Plugin Settings", shortLabel: "Settings" },
+    { id: "network", label: "Network Diagnostics", shortLabel: "Net" },
+    { id: "logs", label: "System Logs", shortLabel: "Logs" },
+    { id: "about", label: "About Plugin", shortLabel: "About" },
+  ];
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [liveStream, setLiveStream] = useState<boolean>(true);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [attentionOn, setAttentionOn] = useState<boolean>(true);
+  const [beaconMode, setBeaconMode] = useState<AttentionBeaconMode>("radar");
+  const [beaconTone, setBeaconTone] = useState<AttentionBeaconTone>("warning");
+  const [beaconPresses, setBeaconPresses] = useState<number>(0);
 
   const {
     settings,
@@ -131,6 +145,7 @@ function DemoModal({ close }: RenderModalProps) {
     refetch,
     rate,
     setRate,
+    isPolling,
   } = useAutoRefreshQuery(getDemoDataRpc, EMPTY_PARAMS, {
     defaultRate: "2s",
   });
@@ -150,112 +165,220 @@ function DemoModal({ close }: RenderModalProps) {
     }
   );
 
-  const header =
-    settings.navigationStyle === "dropdown" ? (
-      <View style={styles.dropdownWrap}>
-        <Pressable
-          onPress={() => {
-            triggerHaptic("light");
-            setNavigationOpen((open) => !open);
-          }}
-          accessibilityLabel="Select showcase view"
-          accessibilityRole="button"
-          style={[
-            styles.dropdownTrigger,
-            { backgroundColor: colors.surface1, borderColor: colors.border },
-          ]}
-        >
-          <Text
-            style={[styles.dropdownTriggerLabel, { color: colors.foreground }]}
-            numberOfLines={1}
-          >
-            {SHOWCASE_TABS.find((tab) => tab.id === activeTab)?.label ?? activeTab}
-          </Text>
-          <Text style={[styles.dropdownChevron, { color: colors.foregroundMuted }]}>
-            {navigationOpen ? "▴" : "▾"}
-          </Text>
-        </Pressable>
-        {navigationOpen ? (
-          <View
-            style={[
-              styles.dropdownMenu,
-              { backgroundColor: colors.surface1, borderColor: colors.border },
-            ]}
-          >
-            {SHOWCASE_TABS.map((tab) => {
-              const selected = tab.id === activeTab;
-              return (
-                <Pressable
-                  key={tab.id}
-                  onPress={() => {
-                    triggerHaptic("light");
-                    setActiveTab(tab.id);
-                    setNavigationOpen(false);
-                  }}
-                  accessibilityLabel={`Show ${tab.label}`}
-                  accessibilityRole="button"
-                  style={[
-                    styles.dropdownItem,
-                    selected && { backgroundColor: colors.surface2 },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownItemLabel,
-                      { color: selected ? colors.accent : colors.foreground },
-                      selected && styles.dropdownItemLabelActive,
-                    ]}
-                  >
-                    {tab.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        ) : null}
-      </View>
-    ) : (
-      <Tabs
-        tabs={SHOWCASE_TABS}
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          triggerHaptic("light");
-          setActiveTab(tab as DemoTab);
-        }}
-        mode="scroll"
-      />
-    );
+  const [beaconFeedback, setBeaconFeedback] = useState<string | null>(null);
+  const [showEnvelope, setShowEnvelope] = useState<boolean>(false);
+
+  const { data: agentData, isLoading: isAgentLoading } = useAutoRefreshQuery(
+    demoAgentIdentityContract,
+    EMPTY_PARAMS,
+    { defaultRate: "5s" }
+  );
+  const agentIdentity = agentData?.identity ?? null;
+
+  const { mutate: setBeacon, isPending: isBeaconSetPending } = useRpcMutation(
+    demoBeaconSetContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("success");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "success" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const { mutate: blinkBeacon, isPending: isBeaconBlinkPending } = useRpcMutation(
+    demoBeaconBlinkContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("success");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "success" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const { mutate: clearBeacon, isPending: isBeaconClearPending } = useRpcMutation(
+    demoBeaconClearContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("light");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "info" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const items = data?.items ?? [];
+  const filteredItems = items.filter(
+    (item) =>
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.category.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const activeFlair: Partial<VisualFlair> = {
+    radius: settings.flairRadius,
+    density: settings.flairDensity,
+    surfaceStyle: settings.flairSurface,
+    borderWidth: settings.flairBorderWidth,
+    headingTransform: settings.flairUppercase ? "uppercase" : "none",
+    accentColor: settings.flairAccentColor,
+  };
 
   return (
-    <ModalBody
-      header={header}
-      headerMode={resolveDemoHeaderMode(settings.navigationStyle)}
-      headerStyle={{
-        backgroundColor: colors.surface0,
-        paddingHorizontal: 12,
-        paddingTop: 12,
-        paddingBottom: 6,
+    <PluginThemeProvider
+      theme={{
+        ...theme,
+        colors: {
+          ...theme.colors,
+          accent: settings.flairAccentColor,
+        },
       }}
-      refreshing={isLoading}
-      onRefresh={async () => {
-        triggerHaptic("light");
-        await refetch();
-      }}
+      layout={layout}
+      flair={activeFlair}
     >
-      {activeTab === "metrics" && (
+      <ModalBody
+        header={
+          settings.navigationStyle === "dropdown" ? (
+            <View style={styles.dropdownWrap}>
+              <Pressable
+                onPress={() => {
+                  triggerHaptic("light");
+                  setNavigationOpen((open) => !open);
+                }}
+                accessibilityLabel="Select showcase view"
+                accessibilityRole="button"
+                style={[
+                  styles.dropdownTrigger,
+                  { backgroundColor: colors.surface1, borderColor: colors.border },
+                ]}
+              >
+                <Text
+                  style={[styles.dropdownTriggerLabel, { color: colors.foreground }]}
+                  numberOfLines={1}
+                >
+                  {showcaseTabs.find((tab) => tab.id === activeTab)?.label ?? activeTab}
+                </Text>
+                <Text style={[styles.dropdownChevron, { color: colors.foregroundMuted }]}>
+                  {navigationOpen ? "▴" : "▾"}
+                </Text>
+              </Pressable>
+              {navigationOpen ? (
+                <View
+                  style={[
+                    styles.dropdownMenu,
+                    { backgroundColor: colors.surface1, borderColor: colors.border },
+                  ]}
+                >
+                  {showcaseTabs.map((tab) => {
+                    const selected = tab.id === activeTab;
+                    return (
+                      <Pressable
+                        key={tab.id}
+                        onPress={() => {
+                          triggerHaptic("light");
+                          setActiveTab(tab.id);
+                          setNavigationOpen(false);
+                        }}
+                        accessibilityLabel={`Show ${tab.label}`}
+                        accessibilityRole="button"
+                        style={[
+                          styles.dropdownItem,
+                          selected && { backgroundColor: colors.surface2 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemLabel,
+                            { color: selected ? colors.accent : colors.foreground },
+                            selected && styles.dropdownItemLabelActive,
+                          ]}
+                        >
+                          {tab.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <Tabs
+              tabs={showcaseTabs}
+              activeTab={activeTab}
+              onTabChange={(tab) => {
+                triggerHaptic("light");
+                setActiveTab(tab);
+              }}
+              mode="scroll"
+            />
+          )
+        }
+        headerMode={resolveDemoHeaderMode(settings.navigationStyle)}
+        headerStyle={{
+          backgroundColor: colors.surface0,
+          paddingHorizontal: 12,
+          paddingTop: 12,
+          paddingBottom: 6,
+        }}
+        refreshing={isLoading}
+        onRefresh={async () => {
+          triggerHaptic("light");
+          setNavigationOpen(false);
+          await refetch();
+        }}
+      >
+      {/* Top Banner Card */}
+      <Card variant="elevated">
+        <View style={styles.headerRow}>
+          <View style={styles.titleCol}>
+            <Text style={[styles.headerTitle, { color: colors.foreground }]}>
+              Helper Showcase
+            </Text>
+            <Text style={[styles.headerSubtitle, { color: colors.foregroundMuted }]}>
+              v0.2 UI Design System & Daemon Primitives
+            </Text>
+          </View>
+          <Badge
+            variant="accent"
+            label={`Polling ${rate}`}
+          />
+        </View>
+
+        {/* Refresh Interval Selector */}
+        <View style={styles.rateControlRow}>
+          <Text style={[styles.rateLabel, { color: colors.foregroundMuted }]}>
+            Auto Refresh:
+          </Text>
+          {(["1s", "2s", "5s", "paused"] as const).map((r) => (
+            <Button
+              key={r}
+              label={r}
+              size="sm"
+              variant={rate === r ? "primary" : "ghost"}
+              onPress={() => {
+                triggerHaptic("light");
+                setRate(r);
+              }}
+            />
+          ))}
+        </View>
+
+        </Card>
+
+      {/* TAB 1: GAUGES & HARDWARE */}
+      {activeTab === "gauges" && (
         <>
           <Card variant="elevated">
-            <Card.Header
-              title="Live System Snapshot"
-              subtitle="Status, gauges, and refresh behavior in one card"
-            />
-            <View style={styles.statusRow}>
-              <StatusDot variant="success" pulse={false} />
-              <Text style={[styles.statusText, { color: colors.foreground }]}>
-                {data?.hostname ?? "..."}
-              </Text>
-              <Badge label={`Polling ${rate}`} variant="accent" />
-            </View>
+            <Card.Header title="Metric Gauges" />
             <View style={styles.gaugesContainer}>
               <MetricGauge
                 value={data?.cpuUsagePercent ?? 0}
@@ -267,7 +390,20 @@ function DemoModal({ close }: RenderModalProps) {
                 label="RAM Used"
                 size={74}
               />
+              <MetricGauge
+                value={38}
+                label="Disk I/O"
+                size={74}
+              />
             </View>
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header title="Linear Progress" />
+            <ProgressBar
+              value={data?.cpuUsagePercent ?? 0}
+              height={8}
+            />
             <ProgressBar
               value={data?.memoryUsedPercent ?? 0}
               height={8}
@@ -275,7 +411,7 @@ function DemoModal({ close }: RenderModalProps) {
           </Card>
 
           <Card variant="elevated">
-            <Card.Header title="Host Details" />
+            <Card.Header title="Host & Network" />
             <KeyValueGroup columns={isCompact ? 1 : 2}>
               <KeyValue
                 label="Hostname"
@@ -283,17 +419,15 @@ function DemoModal({ close }: RenderModalProps) {
                 copyable
               />
               <KeyValue
-                label="Memory"
-                value={
-                  data
-                    ? `${formatBytes(data.memoryUsedBytes, { compact: true, decimals: 1 })} / ${formatBytes(data.memoryTotalBytes)}`
-                    : "..."
-                }
+                label="Verified Daemon Port"
+                value={data?.daemonPort ? String(data.daemonPort) : "..."}
+                copyable
               />
             </KeyValueGroup>
             <KeyValue
               label="Processor"
               value={data?.cpuModel ?? "..."}
+              subValue="Multi-line wrap verified"
               copyable
             />
             <KeyValue
@@ -301,54 +435,583 @@ function DemoModal({ close }: RenderModalProps) {
               value={data ? formatUptime(data.uptimeSeconds) : "..."}
             />
           </Card>
+        </>
+      )}
+
+      {/* TAB: VISUAL FLAIR STUDIO */}
+      {activeTab === "flair" && (
+        <>
+          <Card variant={settings.flairSurface}>
+            <Card.Header
+              title="Visual Flair Studio"
+              subtitle="Live theme & flair customizer backed by atomic settings"
+            />
+
+            {/* Corner Radius Selector */}
+            <FormRow
+              label="Corner Radius"
+              description={`Active preset: "${settings.flairRadius}"`}
+            >
+              <View style={styles.segmentRow}>
+                {(["sharp", "rounded", "pill"] as const).map((r) => (
+                  <Button
+                    key={r}
+                    size="sm"
+                    label={r.toUpperCase()}
+                    variant={settings.flairRadius === r ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      updateSettings({ flairRadius: r });
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+
+            {/* Information Density Selector */}
+            <FormRow
+              label="Layout Density"
+              description={`Active density: "${settings.flairDensity}"`}
+            >
+              <View style={styles.segmentRow}>
+                {(["compact", "comfortable", "spacious"] as const).map((d) => (
+                  <Button
+                    key={d}
+                    size="sm"
+                    label={d.charAt(0).toUpperCase() + d.slice(1)}
+                    variant={settings.flairDensity === d ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      updateSettings({ flairDensity: d });
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+
+            {/* Surface Styling Selector */}
+            <FormRow
+              label="Surface Treatment"
+              description={`Active surface: "${settings.flairSurface}"`}
+            >
+              <View style={styles.segmentRow}>
+                {(["flat", "tinted", "elevated"] as const).map((s) => (
+                  <Button
+                    key={s}
+                    size="sm"
+                    label={s.charAt(0).toUpperCase() + s.slice(1)}
+                    variant={settings.flairSurface === s ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      updateSettings({ flairSurface: s });
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+
+            {/* Border Width Stepper / Selector */}
+            <FormRow
+              label="Border Width"
+              description={`Container outline stroke: ${settings.flairBorderWidth}px`}
+            >
+              <View style={styles.segmentRow}>
+                {[0, 1, 2, 3].map((w) => (
+                  <Button
+                    key={w}
+                    size="sm"
+                    label={`${w}px`}
+                    variant={settings.flairBorderWidth === w ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      updateSettings({ flairBorderWidth: w });
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+
+            {/* Brand Accent Color Swatches */}
+            <FormRow
+              label="Brand Accent Color"
+              description={`Current accent: ${settings.flairAccentColor}`}
+            >
+              <View style={styles.swatchesRow}>
+                {[
+                  { label: "Indigo", color: "#6366f1" },
+                  { label: "Emerald", color: "#10b981" },
+                  { label: "Violet", color: "#8b5cf6" },
+                  { label: "Amber", color: "#f59e0b" },
+                  { label: "Rose", color: "#f43f5e" },
+                  { label: "Cyan", color: "#06b6d4" },
+                ].map((swatch) => {
+                  const isSelected = settings.flairAccentColor.toLowerCase() === swatch.color.toLowerCase();
+                  return (
+                    <Pressable
+                      key={swatch.color}
+                      onPress={() => {
+                        triggerHaptic("light");
+                        updateSettings({ flairAccentColor: swatch.color });
+                      }}
+                      style={[
+                        styles.colorSwatch,
+                        { backgroundColor: swatch.color },
+                        isSelected && styles.colorSwatchActive,
+                      ]}
+                      accessibilityLabel={`Select ${swatch.label} accent color`}
+                    />
+                  );
+                })}
+              </View>
+            </FormRow>
+
+            {/* Uppercase Header Switch */}
+            <FormRow
+              label="Uppercase Section Headings"
+              description="Transform component section titles to uppercase"
+            >
+              <Toggle
+                value={settings.flairUppercase}
+                onValueChange={(val) => {
+                  triggerHaptic("light");
+                  updateSettings({ flairUppercase: val });
+                }}
+              />
+            </FormRow>
+
+            {/* Live Component Preview Card */}
+            <Card variant={settings.flairSurface} style={{ marginTop: 8 }}>
+              <Card.Header
+                title="Live Component Preview"
+                subtitle="Reflects your active Visual Flair in real-time"
+              />
+              <KeyValueGroup columns={isCompact ? 1 : 2}>
+                <KeyValue label="Status" value="Production Ready" />
+                <KeyValue label="Radius Mode" value={settings.flairRadius} />
+              </KeyValueGroup>
+              <ActionBar align="flex-start">
+                <Button label="Primary Button" variant="primary" size="sm" />
+                <Button label="Secondary" variant="secondary" size="sm" />
+                <Badge label="Adaptive Badge" variant="accent" />
+              </ActionBar>
+            </Card>
+          </Card>
+        </>
+      )}
+
+      {/* TAB 2: DATA TABLE */}
+      {activeTab === "data" && (
+        <Card variant="elevated">
+          <Card.Header title={`Services Table (${isCompact ? "Compact 2-Col" : "Desktop 3-Col"})`} />
+          <SearchInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search service name or category..."
+          />
+
+          <DataTable
+            data={filteredItems}
+            keyExtractor={(item) => item.id}
+            emptyState={
+              <EmptyState
+                icon="Search"
+                title="No Services Found"
+                description="Try clearing your search query."
+              />
+            }
+            columns={
+              isCompact
+                ? [
+                    {
+                      key: "name",
+                      header: "Service",
+                      flex: 2,
+                      render: (item) => (
+                        <View>
+                          <Text style={[styles.tableNameText, { color: colors.foreground }]}>
+                            {item.name}
+                          </Text>
+                          <Text style={[styles.tableSubText, { color: colors.foregroundMuted }]}>
+                            {item.category}
+                          </Text>
+                        </View>
+                      ),
+                    },
+                    {
+                      key: "load",
+                      header: "Load",
+                      align: "right",
+                      render: (item) => (
+                        <Text style={[styles.tableMetricText, { color: colors.foreground }]}>
+                          {item.loadPercent}%
+                        </Text>
+                      ),
+                    },
+                  ]
+                : [
+                    {
+                      key: "name",
+                      header: "Service",
+                      flex: 2,
+                      render: (item) => (
+                        <View>
+                          <Text style={[styles.tableNameText, { color: colors.foreground }]}>
+                            {item.name}
+                          </Text>
+                          <Text style={[styles.tableSubText, { color: colors.foregroundMuted }]}>
+                            {item.category}
+                          </Text>
+                        </View>
+                      ),
+                    },
+                    {
+                      key: "status",
+                      header: "Status",
+                      align: "center",
+                      render: (item) => (
+                        <Badge
+                          label={item.status}
+                          variant={item.status === "running" ? "success" : "warning"}
+                        />
+                      ),
+                    },
+                    {
+                      key: "load",
+                      header: "Load",
+                      align: "right",
+                      render: (item) => (
+                        <Text style={[styles.tableMetricText, { color: colors.foreground }]}>
+                          {item.loadPercent}%
+                        </Text>
+                      ),
+                    },
+                  ]
+            }
+          />
+        </Card>
+      )}
+
+      {/* TAB 3: CONTROLS & CODE */}
+      {activeTab === "controls" && (
+        <>
+          <Card variant="elevated">
+            <Card.Header title="Toggles & Actions" />
+            <Toggle
+              label="Live Log Streaming"
+              description="Stream background task ticks to console"
+              value={liveStream}
+              onValueChange={(val) => {
+                triggerHaptic("medium");
+                setLiveStream(val);
+              }}
+            />
+
+            <Button
+              label={isActionPending ? "Running RPC..." : "Trigger Background RPC Action"}
+              variant="primary"
+              onPress={() => runAction({ actionName: "Showcase Trigger" })}
+            />
+
+            {actionFeedback ? (
+              <Text style={[styles.feedbackText, { color: colors.statusSuccess }]}>
+                {actionFeedback}
+              </Text>
+            ) : null}
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header title="Sample Code Block" />
+            <CodeBlock
+              language="typescript"
+              code={`import { createPluginPill, MetricGauge } from "./vendor/paseo-plugin-helper/index";\n\n// Renders circular ring\n<MetricGauge value={75} label="CPU Load" />`}
+              copyable
+            />
+          </Card>
+        </>
+      )}
+
+      {/* TAB: ATTENTION & BEACONS */}
+      {activeTab === "attention" && (
+        <>
+          <Card variant="elevated">
+            <Card.Header
+              title="Workspace Beacon"
+              subtitle="Live workspace-row status ticker driven by createWorkspaceBeacon()"
+            />
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Targets this workspace ({workspaceId}). Watch the workspace row chip and title while
+              triggering.
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button
+                label={isBeaconSetPending ? "Setting..." : "Set Status Beacon"}
+                variant="primary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("medium");
+                  setBeacon({ workspaceId, name: "DEMO:ACTIVE", color: "sky" });
+                }}
+              />
+              <Button
+                label={isBeaconBlinkPending ? "Blinking..." : "Blink Beacon (5 rounds)"}
+                variant="secondary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("medium");
+                  blinkBeacon({ workspaceId, rounds: 5 });
+                }}
+              />
+              <Button
+                label={isBeaconClearPending ? "Clearing..." : "Clear Beacon"}
+                variant="ghost"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("light");
+                  clearBeacon({ workspaceId, name: "DEMO:ACTIVE" });
+                }}
+              />
+            </View>
+            {beaconFeedback ? (
+              <Text style={[styles.feedbackText, { color: colors.statusSuccess }]}>
+                {beaconFeedback}
+              </Text>
+            ) : null}
+          </Card>
 
           <Card variant="elevated">
             <Card.Header
-              title="Refresh Behavior"
-              subtitle="Pull to refresh, or pick a polling cadence"
+              title="Attention Playground"
+              subtitle="Live toggles for beacon animation, mode, and tone"
             />
-            <View style={styles.rateControlRow}>
-              <Text style={[styles.rateLabel, { color: colors.foregroundMuted }]}>
-                Auto Refresh:
-              </Text>
-              {(["1s", "2s", "5s", "paused"] as const).map((r) => (
-                <Button
-                  key={r}
-                  label={r}
-                  size="sm"
-                  variant={rate === r ? "primary" : "ghost"}
+            <FormRow
+              label="Attention Active"
+              description={attentionOn ? "Beacons animating" : "Static wrappers (reduced-motion safe)"}
+            >
+              <Toggle
+                value={attentionOn}
+                onValueChange={(val) => {
+                  triggerHaptic("light");
+                  setAttentionOn(val);
+                }}
+              />
+            </FormRow>
+
+            <FormRow
+              label="Beacon Mode"
+              description={`Active mode: "${beaconMode}"`}
+            >
+              <View style={styles.segmentRow}>
+                {(["radar", "glow", "badge", "bounce"] as const).map((m) => (
+                  <Button
+                    key={m}
+                    size="sm"
+                    label={m}
+                    variant={beaconMode === m ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      setBeaconMode(m);
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+
+            <FormRow
+              label="Beacon Tone"
+              description={`Active tone token: "${beaconTone === "warning" ? "statusWarning" : beaconTone}"`}
+            >
+              <View style={styles.segmentRow}>
+                {(
+                  [
+                    { token: "statusWarning", tone: "warning" },
+                    { token: "accent", tone: "accent" },
+                    { token: "statusDanger", tone: "danger" },
+                  ] as const
+                ).map(({ token, tone }) => (
+                  <Button
+                    key={token}
+                    size="sm"
+                    label={token}
+                    variant={beaconTone === tone ? "primary" : "ghost"}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      setBeaconTone(tone);
+                    }}
+                  />
+                ))}
+              </View>
+            </FormRow>
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header
+              title="Button attention prop"
+              subtitle="Direct attention across button variants"
+            />
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Primary
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button label="Radar" variant="primary" size="sm" attention={attentionOn ? "radar" : undefined} />
+              <Button label="Glow" variant="primary" size="sm" attention={attentionOn ? "glow" : undefined} />
+              <Button label="Bounce" variant="primary" size="sm" attention={attentionOn ? "bounce" : undefined} />
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Danger
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button label="Radar" variant="danger" size="sm" attention={attentionOn ? "radar" : undefined} />
+              <Button label="Glow" variant="danger" size="sm" attention={attentionOn ? "glow" : undefined} />
+              <Button label="Bounce" variant="danger" size="sm" attention={attentionOn ? "bounce" : undefined} />
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Secondary / Ghost
+            </Text>
+            <View style={styles.beaconRow}>
+              <Button label="Radar" variant="secondary" size="sm" attention={attentionOn ? "radar" : undefined} />
+              <Button label="Default (true)" variant="ghost" size="sm" attention={attentionOn ? true : undefined} />
+            </View>
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Button accepts boolean | radar | glow | bounce. badge and ring are wrapper-only via AttentionBeacon.
+            </Text>
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header
+              title="Beacon Wrappers"
+              subtitle="AttentionBeacon around arbitrary components (playground-driven)"
+            />
+            <View style={styles.beaconGroup}>
+              <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
+                <Card>
+                  <Card.Header
+                    title="Urgent Review Required"
+                    subtitle="Simulated verdict awaiting operator"
+                  />
+                  <KeyValue
+                    label="Awaiting"
+                    value="Command execution verdict"
+                    subValue="twofado-style urgent prompt"
+                  />
+                  <ActionBar align="flex-start">
+                    <Button label="Approve" variant="primary" size="sm" />
+                    <Button label="Deny" variant="danger" size="sm" />
+                  </ActionBar>
+                </Card>
+              </AttentionBeacon>
+            </View>
+            <View style={[styles.beaconRow, styles.beaconGroup]}>
+              <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
+                <Badge label="Wrapped Badge" variant="warning" />
+              </AttentionBeacon>
+              <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
+                <Pressable
                   onPress={() => {
-                    triggerHaptic("light");
-                    setRate(r);
+                    triggerHaptic("medium");
+                    setBeaconPresses((n) => n + 1);
                   }}
-                />
+                  style={[styles.beaconPressable, { borderColor: colors.border }]}
+                  accessibilityLabel="Custom beacon-wrapped clickable"
+                >
+                  <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>
+                    Custom clickable ({beaconPresses})
+                  </Text>
+                </Pressable>
+              </AttentionBeacon>
+            </View>
+          </Card>
+
+          <Card variant="elevated">
+            <Card.Header
+              title="Mode x Tone Matrix"
+              subtitle="All four modes side by side in the playground tone"
+            />
+            <View style={styles.beaconRow}>
+              {(["radar", "glow", "badge", "bounce"] as const).map((m) => (
+                <AttentionBeacon key={m} mode={m} tone={beaconTone} active={attentionOn}>
+                  <Badge label={m} variant="accent" />
+                </AttentionBeacon>
               ))}
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Tones in playground mode
+            </Text>
+            <View style={styles.beaconRow}>
+              {(["warning", "accent", "danger"] as const).map((t) => (
+                <AttentionBeacon key={t} mode={beaconMode} tone={t} active={attentionOn}>
+                  <Badge label={t === "warning" ? "statusWarning" : t} variant={t} />
+                </AttentionBeacon>
+              ))}
+            </View>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Ring alias equivalence
+            </Text>
+            <View style={styles.beaconRow}>
+              <AttentionBeacon mode="radar" tone={beaconTone} active={attentionOn}>
+                <Badge label="radar" variant="accent" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="ring" tone={beaconTone} active={attentionOn}>
+                <Badge label="ring" variant="accent" />
+              </AttentionBeacon>
+            </View>
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              ring normalizes to radar; both halos pulse identically.
+            </Text>
+            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
+              Badge with icon
+            </Text>
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Badge accepts string host icons and custom emoji/graphic nodes via the icon prop, plus a dot variant.
+            </Text>
+            <View style={styles.beaconRow}>
+              <Badge icon="Bell" label="Bell Icon" variant="danger" />
+              <Badge icon="Flame" label="Flame Icon" variant="warning" />
+              <Badge
+                icon={<Text style={{ fontSize: 11 }}>🚀</Text>}
+                label="Emoji Graphic"
+                variant="accent"
+              />
+              <Badge
+                icon={<Text style={{ fontSize: 11 }}>⚡</Text>}
+                label="Zap Graphic"
+                variant="success"
+              />
+              <Badge dot label="Status Dot" variant="info" />
+            </View>
+            <View style={styles.beaconRow}>
+              <AttentionBeacon mode="badge" tone="danger" active={attentionOn}>
+                <Badge icon="Bell" label="Bell Icon" variant="danger" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="warning" active={attentionOn}>
+                <Badge icon="Flame" label="Flame Icon" variant="warning" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="accent" active={attentionOn}>
+                <Badge
+                  icon={<Text style={{ fontSize: 11 }}>🚀</Text>}
+                  label="Emoji Graphic"
+                  variant="accent"
+                />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="accent" active={attentionOn}>
+                <Badge
+                  icon={<Text style={{ fontSize: 11 }}>⚡</Text>}
+                  label="Zap Graphic"
+                  variant="success"
+                />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone={beaconTone} active={attentionOn}>
+                <Badge dot label="Status Dot" variant="info" />
+              </AttentionBeacon>
             </View>
           </Card>
         </>
       )}
 
-      {activeTab === "action" && (
-        <Card variant="elevated">
-          <Card.Header
-            title="Typed RPC Action"
-            subtitle="Mutation, feedback, and haptics/toast handling"
-          />
-          <Button
-            label={isActionPending ? "Running RPC..." : "Trigger Background RPC Action"}
-            variant="primary"
-            onPress={() => runAction({ actionName: "Showcase Trigger" })}
-          />
-          {actionFeedback ? (
-            <Text style={[styles.feedbackText, { color: colors.statusSuccess }]}>
-              {actionFeedback}
-            </Text>
-          ) : null}
-        </Card>
-      )}
-
+      {/* TAB: SETTINGS & STORAGE */}
       {activeTab === "settings" && (
-        <Card variant="elevated">
+        <>
+          <SharedSuiteCard />
+          <Card variant="elevated">
           <Card.Header
             title="Plugin Settings"
             subtitle="Type-safe Zod storage with optimistic React Query updates"
@@ -432,12 +1095,126 @@ function DemoModal({ close }: RenderModalProps) {
             />
           </ActionBar>
         </Card>
+        </>
       )}
 
+      {/* TAB 4: NETWORK DIAGNOSTICS */}
+      {activeTab === "network" && (
+        <Card variant="elevated">
+          <Card.Header
+            title="Network & Ports"
+            subtitle="Daemon network diagnostics"
+          />
+          <KeyValueGroup>
+            <KeyValue
+              label="Daemon TCP Port"
+              value={`${data?.daemonPort ?? 4280}`}
+              subValue="Local verified socket"
+              copyable
+            />
+            <KeyValue
+              label="Network Connectivity"
+              value="Active (Loopback)"
+            />
+          </KeyValueGroup>
+        </Card>
+      )}
+
+      {/* TAB 5: SYSTEM LOGS */}
+      {activeTab === "logs" && (
+        <Card variant="elevated">
+          <Card.Header
+            title="System Logs"
+            subtitle={`Background task tick #${data?.backgroundTicks ?? 0}`}
+          />
+          <CodeBlock
+            language="bash"
+            code={`[INFO] Server running on ${data?.hostname} (${data?.platform})\n[INFO] Background task alive, uptime: ${Math.round(data?.uptimeSeconds ?? 0)}s\n[INFO] Periodic health check OK`}
+          />
+        </Card>
+      )}
+
+      {/* TAB 6: ABOUT PLUGIN */}
       {activeTab === "about" && (
+        <>
+        <Card variant="elevated">
+          <Card.Header
+            title="Agent Identity & Session"
+            subtitle="Self-inspection via getAgentIdentity()"
+          />
+          {isAgentLoading ? (
+            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+              Resolving agent identity...
+            </Text>
+          ) : !agentIdentity ? (
+            <EmptyState
+              icon="Bot"
+              title="No Active Agent Session"
+              description="Running outside an active agent session. Identity resolves via getAgentIdentity() when a session envelope is present."
+            />
+          ) : (
+            <>
+              <KeyValueGroup columns={isCompact ? 1 : 2}>
+                <KeyValue
+                  label="Active Agent ID"
+                  value={agentIdentity.id ?? "—"}
+                  copyable={Boolean(agentIdentity.id)}
+                />
+                <KeyValue
+                  label="Session Name"
+                  value={agentIdentity.name ?? "—"}
+                  copyable={Boolean(agentIdentity.name)}
+                />
+                <KeyValue
+                  label="Model"
+                  value={agentIdentity.model ?? "—"}
+                  copyable={Boolean(agentIdentity.model)}
+                />
+                <KeyValue
+                  label="Provider"
+                  value={agentIdentity.provider ?? "—"}
+                  copyable={Boolean(agentIdentity.provider)}
+                />
+                <KeyValue
+                  label="Repo"
+                  value={agentIdentity.repo ?? "—"}
+                  copyable={Boolean(agentIdentity.repo)}
+                />
+                <KeyValue
+                  label="Branch"
+                  value={agentIdentity.branch ?? "—"}
+                  copyable={Boolean(agentIdentity.branch)}
+                />
+              </KeyValueGroup>
+              {agentIdentity.envelopeText ? (
+                <>
+                  <View style={styles.beaconRow}>
+                    <Badge label="Audit envelope present" variant="success" />
+                    <Button
+                      label={showEnvelope ? "Hide Envelope" : "Inspect Envelope"}
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => {
+                        triggerHaptic("light");
+                        setShowEnvelope((v) => !v);
+                      }}
+                    />
+                  </View>
+                  {showEnvelope ? (
+                    <CodeBlock
+                      language="bash"
+                      code={agentIdentity.envelopeText}
+                      copyable
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </>
+          )}
+        </Card>
         <AboutSection
           name="Paseo Helper Demo"
-          description="Focused reference for building plugins with paseo-plugin-helper: live pill, metrics card, typed action, and persisted settings."
+          description="Interactive design system showcase and daemon runtime verification suite for paseo-plugin-helper."
           version={data?.version ?? PLUGIN_VERSION}
           author="xpufx"
           repository="https://github.com/xpufx/paseo-plugin-helper"
@@ -449,6 +1226,7 @@ function DemoModal({ close }: RenderModalProps) {
             { label: "Background Uptime", value: `${Math.round(data?.uptimeSeconds ?? 0)}s` },
           ]}
         />
+        </>
       )}
 
       {/* Footer */}
@@ -469,6 +1247,7 @@ function DemoModal({ close }: RenderModalProps) {
         </Text>
       </View>
     </ModalBody>
+    </PluginThemeProvider>
   );
 }
 
@@ -505,16 +1284,25 @@ const styles = StyleSheet.create({
   pillTextActive: {
     opacity: 0.85,
   },
-  statusRow: {
+  headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
     flexWrap: "wrap",
+    gap: 8,
+    width: "100%",
   },
-  statusText: {
-    fontSize: 13,
-    fontWeight: "600",
+  titleCol: {
+    gap: 2,
     flexShrink: 1,
+  },
+  headerTitle: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  headerSubtitle: {
+    fontSize: 11,
+    opacity: 0.7,
   },
   rateControlRow: {
     flexDirection: "row",
@@ -537,6 +1325,17 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     paddingVertical: 6,
   },
+  tableNameText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  tableSubText: {
+    fontSize: 11,
+  },
+  tableMetricText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
   feedbackText: {
     fontSize: 12,
     fontWeight: "500",
@@ -550,10 +1349,58 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: "monospace",
   },
+  segmentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  swatchesRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    paddingVertical: 4,
+  },
+  colorSwatch: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  colorSwatchActive: {
+    borderColor: "#ffffff",
+    transform: [{ scale: 1.15 }],
+  },
+  beaconRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flexWrap: "wrap",
+    marginTop: 8,
+  },
+  beaconGroup: {
+    marginTop: 10,
+  },
+  beaconSectionLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 10,
+  },
+  beaconCaption: {
+    fontSize: 11,
+    marginTop: 8,
+  },
+  beaconPressable: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
   dropdownWrap: {
     width: "100%",
     marginTop: 10,
-    zIndex: 10,
   },
   dropdownTrigger: {
     flexDirection: "row",
