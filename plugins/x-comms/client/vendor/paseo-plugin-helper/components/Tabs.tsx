@@ -6,10 +6,7 @@ import {
   Text,
   View,
   type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
   type ScrollView as ScrollViewInstance,
-  type ScrollViewProps,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
@@ -17,7 +14,6 @@ import { getClientHost, selectHostScrollView, type HostScrollView } from "../hos
 import { usePluginTheme } from "../theme/provider";
 import {
   FALLBACK_ACCENT_FOREGROUND,
-  resolveElevation,
   spacing,
 } from "../theme/tokens";
 
@@ -57,23 +53,11 @@ export function Tabs({
   const scrollRef = useRef<ScrollViewInstance>(null);
   const tabLayouts = useRef<Record<string, { x: number; width: number }>>({});
   const [viewportWidth, setViewportWidth] = useState<number>(0);
-  const [contentWidth, setContentWidth] = useState<number>(0);
-  const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
-  const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
 
   const radius = resolveRadius("sm");
 
   // On compact/mobile or with <= 4 tabs, auto mode defaults to full-width fitting track
   const shouldFit = mode === "fit" || (mode === "auto" && (isCompact || tabs.length <= 4));
-
-  // Current scroll position tracker
-  const currentScrollX = useRef<number>(0);
-
-  const checkOverflow = (cWidth: number, vWidth: number, scrollX: number) => {
-    if (vWidth <= 0 || cWidth <= 0) return;
-    setCanScrollLeft(scrollX > 4);
-    setCanScrollRight(scrollX + vWidth < cWidth - 4);
-  };
 
   // Accurately center the active tab inside the viewport ONLY when activeTab changes
   const prevActiveTab = useRef<string>(activeTab);
@@ -87,11 +71,9 @@ export function Tabs({
           x: targetX,
           animated: true,
         });
-        currentScrollX.current = targetX;
-        checkOverflow(contentWidth, viewportWidth, targetX);
       }
     }
-  }, [activeTab, shouldFit, viewportWidth, contentWidth]);
+  }, [activeTab, shouldFit, viewportWidth]);
 
   const handleTabLayout = (tabId: string, event: LayoutChangeEvent) => {
     const { x, width } = event.nativeEvent.layout;
@@ -101,28 +83,6 @@ export function Tabs({
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const width = event.nativeEvent.layout.width;
     setViewportWidth(width);
-    checkOverflow(contentWidth, width, currentScrollX.current);
-  };
-
-  const handleContentSizeChange = (cWidth: number) => {
-    setContentWidth(cWidth);
-    checkOverflow(cWidth, viewportWidth, currentScrollX.current);
-  };
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-    const x = contentOffset.x;
-    currentScrollX.current = x;
-    checkOverflow(contentSize.width, layoutMeasurement.width, x);
-  };
-
-  const scrollByDelta = (delta: number) => {
-    const nextX = Math.max(0, currentScrollX.current + delta);
-    scrollRef.current?.scrollTo({
-      x: nextX,
-      animated: true,
-    });
-    currentScrollX.current = nextX;
   };
 
   const renderTab = (tab: TabItem) => {
@@ -226,7 +186,7 @@ export function Tabs({
     );
   }
 
-  // 2. SCROLL MODE: Closed outer frame with host-gesture ScrollView & Navigation Arrows
+  // 2. SCROLL MODE: Host-gesture horizontal ScrollView
   return (
     <View
       onLayout={handleContainerLayout}
@@ -240,33 +200,12 @@ export function Tabs({
         style,
       ]}
     >
-      {/* Left Scroll Arrow (Visible on both Desktop & Mobile when scrollable) */}
-      {canScrollLeft && (
-        <Pressable
-          onPress={() => scrollByDelta(-(viewportWidth * 0.7 || 140))}
-          style={[
-            styles.arrowButton,
-            styles.arrowLeft,
-            {
-              backgroundColor: alpha(colors.surface2, 0.92),
-              borderColor: colors.border,
-            },
-          ]}
-          accessibilityLabel="Scroll tabs left"
-        >
-          <Icon name="ChevronLeft" size={14} color={colors.foreground} />
-        </Pressable>
-      )}
-
       <ResolvedScrollView
         ref={scrollRef}
         horizontal
         nestedScrollEnabled={true}
         directionalLockEnabled={true}
         keyboardShouldPersistTaps="handled"
-        onScroll={handleScroll}
-        onContentSizeChange={handleContentSizeChange}
-        scrollEventThrottle={16}
         showsHorizontalScrollIndicator={!isCompact}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -274,23 +213,6 @@ export function Tabs({
         {tabs.map((tab) => renderTab(tab))}
       </ResolvedScrollView>
 
-      {/* Right Scroll Arrow (Visible on both Desktop & Mobile when scrollable) */}
-      {canScrollRight && (
-        <Pressable
-          onPress={() => scrollByDelta(viewportWidth * 0.7 || 140)}
-          style={[
-            styles.arrowButton,
-            styles.arrowRight,
-            {
-              backgroundColor: alpha(colors.surface2, 0.92),
-              borderColor: colors.border,
-            },
-          ]}
-          accessibilityLabel="Scroll tabs right"
-        >
-          <Icon name="ChevronRight" size={14} color={colors.foreground} />
-        </Pressable>
-      )}
     </View>
   );
 }
@@ -353,23 +275,5 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 10,
     fontWeight: "700",
-  },
-  arrowButton: {
-    position: "absolute",
-    zIndex: 20,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    top: 5,
-    ...resolveElevation("sm"),
-  },
-  arrowLeft: {
-    left: 4,
-  },
-  arrowRight: {
-    right: 4,
   },
 });

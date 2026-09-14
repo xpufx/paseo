@@ -149,7 +149,7 @@ export function AboutSection({
   density = "default",
 }: AboutSectionProps) {
   const { Icon } = getClientHost();
-  const { colors, resolveRadius } = usePluginTheme();
+  const { colors, resolveRadius, typography } = usePluginTheme();
   const { isCompact, platform } = useResponsive();
   const [copied, setCopied] = useState(false);
   const isTiny = density === "tiny";
@@ -261,28 +261,49 @@ export function AboutSection({
     <View style={[styles.container, isTiny && tinyStyles.container, style]}>
       {/* Header Banner Card */}
       <Card variant="elevated" style={isTiny ? tinyStyles.card : undefined}>
-        <Card.Header
-          title={name}
-          subtitle={description}
-          badge={
-            <Badge
-              variant="accent"
-              label={`v${version}`}
-              textStyle={isTiny ? tinyStyles.text9 : undefined}
-            />
-          }
-          titleStyle={isTiny ? tinyStyles.title : undefined}
-          subtitleStyle={isTiny ? tinyStyles.text9 : undefined}
-        />
         <View style={[styles.headerRow, isTiny && tinyStyles.headerRow]}>
           {resolvedLogoNode}
 
           <View style={[styles.metaColumn, isTiny && tinyStyles.metaColumn]}>
+            <View style={styles.identityTitleRow}>
+              <Text
+                numberOfLines={2}
+                style={[
+                  styles.identityTitle,
+                  {
+                    color: colors.foreground,
+                    ...typography.heading,
+                  },
+                  isTiny && tinyStyles.title,
+                ]}
+              >
+                {name}
+              </Text>
+              <Badge
+                variant="accent"
+                label={`v${version}`}
+                textStyle={isTiny ? tinyStyles.text9 : undefined}
+              />
+            </View>
+
+            {description ? (
+              <Text
+                numberOfLines={3}
+                style={[
+                  styles.identityDescription,
+                  { color: colors.foregroundMuted, ...typography.body },
+                  isTiny && tinyStyles.text9,
+                ]}
+              >
+                {description}
+              </Text>
+            ) : null}
+
             {author ? (
               <Text
                 style={[
                   styles.authorText,
-                  { color: colors.foregroundMuted },
+                  { color: colors.foregroundMuted, ...typography.caption },
                   isTiny && tinyStyles.text9,
                 ]}
               >
@@ -407,7 +428,20 @@ const styles = StyleSheet.create({
   },
   metaColumn: {
     flex: 1,
-    gap: 3,
+    gap: 5,
+    minWidth: 0,
+  },
+  identityTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  identityTitle: {
+    flexShrink: 1,
+  },
+  identityDescription: {
+    flexShrink: 1,
   },
   titleRow: {
     flexDirection: "row",
@@ -416,7 +450,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   authorText: {
-    fontSize: 11,
+    flexShrink: 1,
   },
   actionsRow: {
     flexDirection: "row",
@@ -449,7 +483,7 @@ const tinyStyles = StyleSheet.create({
     gap: 8,
   },
   metaColumn: {
-    gap: 2,
+    gap: 4,
   },
   actionsRow: {
     gap: 6,

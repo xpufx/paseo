@@ -98,6 +98,18 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
     description: "Bare React Native UI primitive imported in plugin client code.",
     replacement: "Import ModalBody, Toggle, TextInput, Button from 'paseo-plugin-helper/client'",
   },
+  "no-bespoke-react-native-interactions": {
+    id: "no-bespoke-react-native-interactions",
+    severity: "warn",
+    description: "Raw React Native Pressable interaction imported in plugin client code.",
+    replacement: "Use Button, Tabs, FormRow, Collapsible, or another paseo-plugin-helper/client interaction primitive",
+  },
+  "no-bespoke-style-system": {
+    id: "no-bespoke-style-system",
+    severity: "warn",
+    description: "React Native StyleSheet styling imported in plugin client code.",
+    replacement: "Use paseo-plugin-helper/client layout and component primitives; retain only small local composition styles when no helper exists",
+  },
   "no-hardcoded-modal-dimensions": {
     id: "no-hardcoded-modal-dimensions",
     severity: "warn",

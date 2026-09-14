@@ -35,7 +35,20 @@ const {
   alpha,             // Helper: alpha(hexColor, opacityNumber) -> hex with alpha
   resolveRadius,     // Helper: resolveRadius("sm" | "md" | "lg" | "pill") -> number
   resolvePadding,    // Helper: resolvePadding("sm" | "md" | "lg") -> number
+  typography,        // Semantic title/heading/body/label/caption text styles
 } = usePluginTheme();
+```
+
+The `typography` scale is derived from the active compact layout and visual
+density. Prefer these semantic styles over inventing per-component font sizes
+so plugin surfaces remain visually consistent:
+
+```tsx
+const { colors, typography } = usePluginTheme();
+
+<Text style={[typography.heading, { color: colors.foreground }]}>
+  Repository
+</Text>
 ```
 
 ---
@@ -148,9 +161,11 @@ Scroll resolution follows one rule (`selectHostScrollView` in
 `src/client/host.ts`): injected host component wins, plain React Native is
 the fallback, so pre-0.8 hosts scroll exactly as before:
 
-- `ModalBody`: desktop always scrolls; on compact viewports it uses the host
-  scroller (with pull-to-refresh) when injected, otherwise the legacy flat
-  `View` that defers to the host sheet and avoids the double-scroll trap.
+- `ModalBody`: compact/mobile viewports use the helper's host-aware scroller
+  (with pull-to-refresh); desktop renders a plain content view so the host
+  modal or surface remains the single scroll owner and nested desktop scroll
+  regions do not appear. Composer popovers on Paseo 0.8 also render plain
+  content because Paseo's `MenuSurface` already supplies the scroll owner.
 - `Tabs` (scroll mode) and `CodeBlock` (vertical + horizontal) render through
   the resolved scroller, keeping `nestedScrollEnabled`/`directionalLockEnabled`
   for the fallback path.
@@ -438,6 +453,18 @@ Placeholder view for empty lists or zero-state panels.
 ### `<ModalBody>`
 A scrollable container for `<Modal.Content>` that automatically applies bottom padding (`paddingBottom: 48` on mobile) to clear OS home navigation bars and keyboards.
 Supports native pull-to-refresh on mobile via `refreshing` and `onRefresh`.
+Pass `header` with `headerMode="pinned"` for a fixed tab/navigation bar. On
+desktop, the host remains the scroll owner and the web header uses sticky
+positioning; on compact/mobile, the header stays above the helper scroller:
+
+```tsx
+<ModalBody
+  header={<Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />}
+  headerMode="pinned"
+>
+  {/* moving page content */}
+</ModalBody>
+```
 
 ```tsx
 <Modal.Content>
@@ -446,6 +473,13 @@ Supports native pull-to-refresh on mobile via `refreshing` and `onRefresh`.
   </ModalBody>
 </Modal.Content>
 ```
+
+For composer popovers, do not add another `ScrollView` around `ModalBody`.
+`registerComposerPill` marks the popover subtree with
+`ModalBodyScrollOwnerContext`, allowing Paseo's outer `FloatingScrollView` or
+`BottomSheetScrollView` to own scrolling on both desktop and mobile. Keep the
+popover wrapper unconstrained: fixed heights and `overflow: hidden` can clip
+content before the host scroller measures it.
 
 For conversation-style views that track new content, pass `stickToEnd` to
 auto-scroll to the bottom on content size changes, or pass `scrollRef` for
@@ -662,3 +696,16 @@ const handlePress = () => {
 ```
 
 
+# Inline actions
+
+Use `InlineButton` for compact links and actions inside timeline cards or
+dense content. It keeps touch targets, accent styling, and accessibility
+consistent without requiring each plugin to hand-roll a `Pressable`.
+
+```tsx
+<InlineButton
+  label="Open issue"
+  icon="ExternalLink"
+  onPress={() => Linking.openURL(url)}
+/>
+```

@@ -27,8 +27,13 @@ export function Badge({
   textStyle,
 }: BadgeProps) {
   const { Icon } = getClientHost();
-  const { colors, flair, resolveRadius, getVariantPalette, getStatusColor, isCompact } =
+  const { colors, flair, resolveRadius, getVariantPalette, getStatusColor, typography } =
     usePluginTheme();
+  const caption = typography?.caption ?? {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "400" as const,
+  };
 
   const radius = resolveRadius("pill");
   const palette = getVariantPalette(variant);
@@ -63,7 +68,13 @@ export function Badge({
     }
     if (!icon) return null;
     if (typeof icon === "string") {
-      return <Icon name={icon} size={isCompact ? 10 : 11} color={textColor} />;
+      return (
+        <Icon
+          name={icon}
+          size={caption.fontSize < 11 ? 10 : 11}
+          color={textColor}
+        />
+      );
     }
     return icon;
   };
@@ -76,8 +87,8 @@ export function Badge({
           backgroundColor: bg,
           borderColor: border,
           borderRadius: radius,
-          paddingVertical: isCompact ? 2 : 3,
-          paddingHorizontal: isCompact ? 6 : 8,
+          paddingVertical: Math.max(2, Math.floor(caption.lineHeight / 5)),
+          paddingHorizontal: caption.fontSize < 11 ? 6 : 8,
         },
         style,
       ]}
@@ -88,7 +99,8 @@ export function Badge({
           styles.text,
           {
             color: textColor,
-            fontSize: isCompact ? 10 : 11,
+            fontSize: caption.fontSize,
+            lineHeight: caption.lineHeight,
             textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
           },
           textStyle,

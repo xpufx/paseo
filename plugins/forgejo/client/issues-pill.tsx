@@ -574,7 +574,28 @@ export function ForgejoIssuesView({
   );
   const failed = Boolean(data?.error) || isError;
   return (
-    <ModalBody refreshing={isRefetching} onRefresh={() => { refetch(); }}>
+    <ModalBody
+      header={
+        <Tabs
+          tabs={[
+            { id: "issues", label: "Open Issues", shortLabel: "Issues" },
+            { id: "search", label: "Search", shortLabel: "Search" },
+            { id: "remote", label: "Remote", shortLabel: "Remote" },
+          ]}
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+        />
+      }
+      headerMode="pinned"
+      headerStyle={{
+        backgroundColor: colors.surface0,
+        paddingHorizontal: 12,
+        paddingTop: 12,
+        paddingBottom: 6,
+      }}
+      refreshing={isRefetching}
+      onRefresh={() => { refetch(); }}
+    >
       {selected != null ? (
         <>
           <IssueDetailView
@@ -590,15 +611,6 @@ export function ForgejoIssuesView({
         </>
       ) : (
         <>
-          <Tabs
-            tabs={[
-              { id: "issues", label: "Open Issues", shortLabel: "Issues" },
-              { id: "search", label: "Search", shortLabel: "Search" },
-              { id: "remote", label: "Remote", shortLabel: "Remote" },
-            ]}
-            activeTab={activeTab}
-            onTabChange={setActiveTab}
-          />
           {activeTab === "remote" ? (
             <Card>
               <Card.Header

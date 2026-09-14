@@ -1,11 +1,39 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { auditProject, doctorProject } from "../cli/scanner.js";
 import { formatReportPretty, formatReportJson } from "../cli/formatter.js";
+import { runCli } from "../cli/index.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 describe("Audit CLI & Scanner", () => {
+  it("runs UI conformance for one plugin directory or all plugin directories", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-conformance-test-"));
+    const pluginsDir = path.join(root, "plugins");
+    const pluginDir = path.join(pluginsDir, "example");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    try {
+      fs.mkdirSync(path.join(pluginDir, "client"), { recursive: true });
+      fs.writeFileSync(
+        path.join(pluginDir, "client", "index.tsx"),
+        `import { Text, View } from "react-native";
+import { Button } from "paseo-plugin-helper/client";
+export const Example = () => <View><Text>Example</Text><Button label="OK" /></View>;`,
+      );
+
+      expect(runCli(["conformance", pluginDir, "--format", "json"])).toBe(0);
+      expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string).targetDir).toBe(pluginDir);
+
+      log.mockClear();
+      expect(runCli(["conformance", "--all", pluginsDir, "--format", "json"])).toBe(0);
+      expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toHaveLength(1);
+    } finally {
+      log.mockRestore();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("detects bespoke patterns in sample plugin files", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-test-"));
 
@@ -269,6 +297,24 @@ describe("Audit CLI & Scanner", () => {
       expect(uiIssues[0].severity).toBe("warn");
       expect(uiIssues[0].message).toBe("Bare React Native UI primitive imported in plugin client code.");
       expect(uiIssues[0].replacement).toContain("paseo-plugin-helper/client");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("flags raw interactions and bespoke StyleSheet imports in client code", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-bespoke-ui-"));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "client"));
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "bad.tsx"),
+        `import { Pressable, StyleSheet, Text, View } from "react-native";\nexport const styles = StyleSheet.create({ row: {} });\nexport const item = <Pressable><Text>Open</Text></Pressable>;`,
+      );
+      const report = auditProject(tmpDir);
+      expect(report.issues.map((issue) => issue.ruleId)).toEqual([
+        "no-bespoke-react-native-interactions",
+        "no-bespoke-style-system",
+      ]);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -258,6 +258,15 @@ async function main() {
       vendorDrifted.add(m[1]);
     }
   }
+  const vendorNeedsReload = new Set(vendorDrifted);
+  if (shouldReload && vendorDrifted.size > 0) {
+    console.log(`${colors.yellow}⚡ Synchronizing vendored helper trees before reload...${colors.reset}`);
+    execSync("node scripts/vendor-sync.mjs", {
+      cwd: ROOT_DIR,
+      stdio: "inherit",
+    });
+    vendorDrifted.clear();
+  }
 
   for (const name of pluginDirs) {
     const fullPath = path.join(pluginsDir, name);
@@ -381,7 +390,14 @@ async function main() {
 
     result.plugins.push(pluginData);
 
-    if (shouldReload && configured && (status === "stale-daemon" || status === "stale-stamp" || status === "stopped")) {
+    if (
+      shouldReload &&
+      configured &&
+      (status === "stale-daemon" ||
+        status === "stale-stamp" ||
+        status === "stopped" ||
+        vendorNeedsReload.has(name))
+    ) {
       console.log(`${colors.yellow}⚡ Reloading plugin '${pluginId}' via paseo...${colors.reset}`);
       try {
         execSync(`paseo plugin reload "${pluginId}"`, { stdio: "inherit" });

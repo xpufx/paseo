@@ -46,6 +46,11 @@ declare function auditProject(targetDir: string, options?: AuditOptions): AuditR
  */
 declare const doctorProject: typeof auditProject;
 
+declare const UI_CONFORMANCE_RULES: Set<string>;
+declare function findPluginDirectories(pluginsDir: string): string[];
+declare function auditPluginConformance(targetDir: string, options?: AuditOptions): AuditReport;
+declare function auditAllPlugins(pluginsDir: string, options?: AuditOptions): AuditReport[];
+
 declare function formatReportPretty(report: AuditReport): string;
 declare function formatReportJson(report: AuditReport): string;
 
@@ -70,4 +75,4 @@ declare function formatAdoptResult(result: AdoptResult): string;
 
 declare function runCli(argv?: string[]): number;
 
-export { AUDIT_RULES, type AdoptOptions, type AdoptResult, type AuditIssue, type AuditOptions, type AuditReport, type AuditRule, type AuditSeverity, adoptProject, auditProject, doctorProject, formatAdoptResult, formatReportJson, formatReportPretty, runCli };
+export { AUDIT_RULES, type AdoptOptions, type AdoptResult, type AuditIssue, type AuditOptions, type AuditReport, type AuditRule, type AuditSeverity, UI_CONFORMANCE_RULES, adoptProject, auditAllPlugins, auditPluginConformance, auditProject, doctorProject, findPluginDirectories, formatAdoptResult, formatReportJson, formatReportPretty, runCli };

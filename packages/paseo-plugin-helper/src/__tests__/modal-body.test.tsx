@@ -49,7 +49,7 @@ function render(el: React.ReactElement) {
 }
 
 describe.each([false, true])("ModalBody pinned header (compact=%s)", (isCompact) => {
-  it("renders a ScrollView body even on compact without a host scroller", () => {
+  it("uses host scrolling on compact/mobile and avoids nested desktop scrolling", () => {
     installStubs(isCompact);
     const r = render(
       <ModalBody header={<Text>tabs</Text>}>
@@ -57,7 +57,7 @@ describe.each([false, true])("ModalBody pinned header (compact=%s)", (isCompact)
       </ModalBody>,
     );
     const scrollViews = r.root.findAllByType(ScrollView);
-    expect(scrollViews.length).toBeGreaterThan(0);
+    expect(scrollViews.length).toBe(isCompact ? 1 : 0);
   });
 
   it("keeps header outside the ScrollView", () => {
@@ -78,5 +78,13 @@ describe.each([false, true])("ModalBody pinned header (compact=%s)", (isCompact)
       node = node.parent;
     }
     expect(insideScroll).toBe(false);
+    expect(r.root.findAllByType(ScrollView)).toHaveLength(isCompact ? 1 : 0);
+    if (!isCompact) {
+      const headerView: any = header.parent;
+      const headerStyle = Array.isArray(headerView.props.style)
+        ? Object.assign({}, ...headerView.props.style)
+        : headerView.props.style;
+      expect(headerStyle.position).toBe("sticky");
+    }
   });
 });

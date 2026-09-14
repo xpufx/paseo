@@ -70,7 +70,7 @@ function buttonRegistrar() {
 beforeEach(() => vi.restoreAllMocks());
 
 describe("0.8 popover scroll ownership (#110)", () => {
-  it("outer locked ⟺ inner owns: plain-View container, inner ScrollView flex:1+minHeight:0", () => {
+  it("0.8 popovers yield scroll ownership to Paseo's outer surface", () => {
     installStubs();
     const { client, pills } = buttonRegistrar();
     const cleanup = registerComposerPill(client, {
@@ -101,26 +101,24 @@ describe("0.8 popover scroll ownership (#110)", () => {
     // Outer: the popover container View directly under the theme provider must be
     // a plain View (no ScrollView ancestor above the inner body).
     const scrolls = renderer.root.findAllByType(ScrollView);
-    expect(scrolls.length).toBe(1);
-    const innerStyle = (scrolls[0].props.style ?? {}) as any;
-    const flatInner = Array.isArray(innerStyle) ? Object.assign({}, ...innerStyle) : innerStyle;
-    expect(flatInner.flex).toBe(1);
-    expect(flatInner.minHeight).toBe(0);
+    expect(scrolls.length).toBe(0);
 
-    // Outer container carries the finite bound + lock (flex:1/minHeight:0/maxHeight/overflow hidden).
+    // The helper must not impose a fixed height or clipping overflow: Paseo's
+    // FloatingScrollView/BottomSheetScrollView owns the viewport.
     const views = renderer.root.findAllByType(View);
     const containers = views.filter((v: any) => {
       const s = v.props.style;
       const flat = Array.isArray(s) ? Object.assign({}, ...s) : s;
-      return flat && typeof flat.maxHeight === "number" && flat.overflow === "hidden";
+      return flat && flat.width === "100%";
     });
     expect(containers.length).toBeGreaterThan(0);
     for (const c of containers) {
       const s: any = Array.isArray(c.props.style)
         ? Object.assign({}, ...c.props.style)
         : c.props.style;
-      expect(s.flex).toBe(1);
-      expect(s.minHeight).toBe(0);
+      expect(s.height).toBeUndefined();
+      expect(s.maxHeight).toBeUndefined();
+      expect(s.overflow).toBeUndefined();
     }
     cleanup();
   });

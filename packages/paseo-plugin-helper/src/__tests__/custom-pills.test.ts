@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -13,6 +13,7 @@ import {
   CustomPillPoller,
 } from "../server/custom-pills.js";
 import { initClientHelpers, type ComposerPillRegistrar } from "../client/host.js";
+import { registerComposerPill } from "../client/pill.js";
 import { registerCustomPills } from "../client/custom-pills.js";
 
 describe("Custom Pills - Shared Logic", () => {
@@ -234,5 +235,29 @@ describe("Custom Pills - Client Registration", () => {
     expect(updates[0].patch).toEqual({ label: "NoValue" });
 
     cleanup();
+  });
+
+  it("does not push unchanged live descriptors on refresh", async () => {
+    vi.useFakeTimers();
+    const { client, updates } = buttonRegistrar();
+    const cleanup = registerComposerPill(client, {
+      id: "live",
+      title: "Live",
+      resolveLabel: () => "Current",
+      refreshIntervalMs: 10,
+      renderModal: () => null,
+    });
+
+    (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(updates).toHaveLength(1);
+    expect(updates[0].patch).toEqual({ label: "Current" });
+
+    await vi.advanceTimersByTimeAsync(30);
+    expect(updates).toHaveLength(1);
+
+    cleanup();
+    vi.useRealTimers();
   });
 });

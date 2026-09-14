@@ -4,6 +4,9 @@ The `paseo-plugin-helper` CLI provides a deterministic scanner for analyzing Pas
 
 `doctor` is an alias for `audit`.
 
+`conformance` runs the UI conformance subset of the audit. It can target one
+plugin directory or every direct child of a plugins directory.
+
 ---
 
 ## Quickstart
@@ -26,6 +29,12 @@ npx paseo-plugin-helper doctor . --strict
 
 # Machine-readable JSON output for agent orchestration
 npx paseo-plugin-helper doctor . --format json
+
+# Check one plugin's helper UI conformance
+npx paseo-plugin-helper conformance plugins/x-comms
+
+# Check every plugin under ./plugins
+npx paseo-plugin-helper conformance --all
 ```
 
 ---
@@ -55,6 +64,7 @@ npm install && npm run typecheck
 | `--strict` | `boolean` | Exit with code 1 if any warnings or suggestions are detected |
 | `--format` | `pretty \| json` | Output human-readable terminal text or JSON |
 | `--ignore` | `string` | Comma-separated list of additional directories to skip |
+| `--all` | `boolean` | With `conformance`, audit every direct plugin directory under the target |
 | `-h, --help` | `boolean` | Show help message |
 
 ---
@@ -75,6 +85,8 @@ npm install && npm run typecheck
 | `v8-root-module` | `error` | Code module at the plugin root in a 0.8 layout | Move into `client/`, `server/`, or `shared/` |
 | `v8-crossed-import` | `error` | Client code reaching into `server/` (or vice versa), or Node APIs in client code | Move the operation behind an RPC defined in `shared/` |
 | `missing-client-init` | `warn` | Helper client usage without `initClientHelpers()` | Call `initClientHelpers()` once in the client entry |
+| `no-bespoke-react-native-interactions` | `warn` | Raw `Pressable` imported in plugin client code | Use helper interaction primitives such as `Button`, `Tabs`, or `Collapsible` |
+| `no-bespoke-style-system` | `warn` | `StyleSheet` imported in plugin client code | Use helper layout/component primitives and retain only small composition styles |
 
 ---
 

@@ -1,6 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import {
   initClientHelpers,
   registerComposerPill,
@@ -23,7 +23,7 @@ import {
   forgejoBoardAlertRenderer,
 } from "./client/board-alert.js";
 
-initClientHelpers({ Icon, Modal, useRpc, useToast });
+initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
 export default function contribute(client: PluginClientContext) {
   const removeUserLink = client.addTimelineTransformer(forgejoLinkUserTransformer);

@@ -24,7 +24,7 @@ export function EmptyState({
   style,
 }: EmptyStateProps) {
   const { Icon } = getClientHost();
-  const { colors, isCompact } = usePluginTheme();
+  const { colors, isCompact, typography, padding } = usePluginTheme();
 
   const resolvedAction: ButtonProps | undefined = action
     ? action
@@ -33,7 +33,7 @@ export function EmptyState({
       : undefined;
 
   return (
-    <View style={[styles.container, { padding: isCompact ? 20 : 32 }, style]}>
+    <View style={[styles.container, { padding: isCompact ? padding.horizontal + 8 : padding.horizontal * 2 }, style]}>
       {icon ? (
         typeof icon === "string" ? (
           <View style={[styles.iconWrapper, { backgroundColor: colors.surface1 }]}>
@@ -44,7 +44,7 @@ export function EmptyState({
         )
       ) : null}
 
-      <Text style={[styles.title, { color: colors.foreground, fontSize: isCompact ? 14 : 16 }]}>
+      <Text style={[styles.title, { color: colors.foreground, ...typography.title }]}>
         {title}
       </Text>
 
@@ -52,7 +52,7 @@ export function EmptyState({
         <Text
           style={[
             styles.description,
-            { color: colors.foregroundMuted, fontSize: isCompact ? 12 : 13 },
+            { color: colors.foregroundMuted, ...typography.body },
           ]}
         >
           {description}

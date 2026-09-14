@@ -10,7 +10,7 @@ export interface FormRowProps {
 }
 
 export function FormRow({ label, description, children, style }: FormRowProps) {
-  const { colors, flair, isCompact } = usePluginTheme();
+  const { colors, flair, typography } = usePluginTheme();
 
   return (
     <View style={[styles.container, style]}>
@@ -19,7 +19,7 @@ export function FormRow({ label, description, children, style }: FormRowProps) {
           styles.label,
           {
             color: colors.foreground,
-            fontSize: isCompact ? 12 : 13,
+            ...typography.label,
             textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
           },
         ]}
@@ -30,7 +30,7 @@ export function FormRow({ label, description, children, style }: FormRowProps) {
         <Text
           style={[
             styles.description,
-            { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 },
+            { color: colors.foregroundMuted, ...typography.caption },
           ]}
         >
           {description}

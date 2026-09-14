@@ -1,4 +1,5 @@
 export * from "./Button";
+export * from "./InlineButton";
 export * from "./AttentionBeacon";
 export * from "./Badge";
 export * from "./StatusDot";

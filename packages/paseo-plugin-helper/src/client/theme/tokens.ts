@@ -1,4 +1,6 @@
 import type { PlatformType } from "../../shared/types.js";
+import type { DensityStyle } from "./flair.js";
+import type { ResponsiveLayout } from "../../shared/types.js";
 
 /**
  * Standard spacing scale (pt/px) shared by every helper surface.
@@ -14,6 +16,44 @@ export const spacing = {
 } as const;
 
 export type SpacingKey = keyof typeof spacing;
+
+export interface TypographyToken {
+  fontSize: number;
+  lineHeight: number;
+  fontWeight: "400" | "500" | "600" | "700";
+}
+
+export interface TypographyScale {
+  title: TypographyToken;
+  heading: TypographyToken;
+  body: TypographyToken;
+  bodyStrong: TypographyToken;
+  caption: TypographyToken;
+  label: TypographyToken;
+}
+
+/**
+ * Semantic text sizes keep helper components visually coherent while still
+ * allowing compact panes and plugin density preferences to breathe.
+ */
+export function resolveTypography(
+  layout: ResponsiveLayout,
+  density: DensityStyle,
+): TypographyScale {
+  const compact = layout.compact;
+  const densityStep = density === "compact" ? -1 : density === "spacious" ? 1 : 0;
+  const size = (regular: number, minimum = 10) =>
+    Math.max(minimum, regular + (compact ? -1 : 0) + densityStep);
+
+  return {
+    title: { fontSize: size(16, 14), lineHeight: size(22, 18), fontWeight: "600" },
+    heading: { fontSize: size(14, 12), lineHeight: size(20, 16), fontWeight: "600" },
+    body: { fontSize: size(13, 12), lineHeight: size(19, 16), fontWeight: "400" },
+    bodyStrong: { fontSize: size(13, 12), lineHeight: size(19, 16), fontWeight: "600" },
+    caption: { fontSize: size(11, 10), lineHeight: size(15, 14), fontWeight: "400" },
+    label: { fontSize: size(12, 11), lineHeight: size(16, 14), fontWeight: "600" },
+  };
+}
 
 /** Fallback text color on accent fills when the host omits accentForeground. */
 export const FALLBACK_ACCENT_FOREGROUND = "#ffffff";

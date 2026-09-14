@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { StyleSheet, Text, View, Pressable } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import {
   SettingsCard,
   SettingsSection,
@@ -14,7 +14,7 @@ import {
   type ComposerPillRegistrar,
 } from "./vendor/paseo-plugin-helper/index";
 
-initClientHelpers({ Icon, Modal, useRpc, useToast });
+initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import {
   registerComposerPill,
   registerHelperSettingsScreen,
@@ -31,6 +31,7 @@ import {
   MetricGauge,
   ProgressBar,
   DataTable,
+  Tabs,
   SearchInput,
   EmptyState,
   CodeBlock,
@@ -112,7 +113,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
   const { isCompact } = useResponsive();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<string>("gauges");
-  const [menuOpen, setMenuOpen] = useState<boolean>(false);
+  const [navigationOpen, setNavigationOpen] = useState<boolean>(false);
 
   const showcaseTabs = [
     { id: "gauges", label: "Gauges & Hardware", shortLabel: "Gauges" },
@@ -243,6 +244,89 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
       flair={activeFlair}
     >
       <ModalBody
+        header={
+          settings.navigationStyle === "dropdown" ? (
+            <View style={styles.dropdownWrap}>
+              <Pressable
+                onPress={() => {
+                  triggerHaptic("light");
+                  setNavigationOpen((open) => !open);
+                }}
+                accessibilityLabel="Select showcase view"
+                accessibilityRole="button"
+                style={[
+                  styles.dropdownTrigger,
+                  { backgroundColor: colors.surface1, borderColor: colors.border },
+                ]}
+              >
+                <Text
+                  style={[styles.dropdownTriggerLabel, { color: colors.foreground }]}
+                  numberOfLines={1}
+                >
+                  {showcaseTabs.find((tab) => tab.id === activeTab)?.label ?? activeTab}
+                </Text>
+                <Text style={[styles.dropdownChevron, { color: colors.foregroundMuted }]}>
+                  {navigationOpen ? "▴" : "▾"}
+                </Text>
+              </Pressable>
+              {navigationOpen ? (
+                <View
+                  style={[
+                    styles.dropdownMenu,
+                    { backgroundColor: colors.surface1, borderColor: colors.border },
+                  ]}
+                >
+                  {showcaseTabs.map((tab) => {
+                    const selected = tab.id === activeTab;
+                    return (
+                      <Pressable
+                        key={tab.id}
+                        onPress={() => {
+                          triggerHaptic("light");
+                          setActiveTab(tab.id);
+                          setNavigationOpen(false);
+                        }}
+                        accessibilityLabel={`Show ${tab.label}`}
+                        accessibilityRole="button"
+                        style={[
+                          styles.dropdownItem,
+                          selected && { backgroundColor: colors.surface2 },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownItemLabel,
+                            { color: selected ? colors.accent : colors.foreground },
+                            selected && styles.dropdownItemLabelActive,
+                          ]}
+                        >
+                          {tab.label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+          ) : (
+            <Tabs
+              tabs={showcaseTabs}
+              activeTab={activeTab}
+              onTabChange={(tab) => {
+                triggerHaptic("light");
+                setActiveTab(tab);
+              }}
+              mode="scroll"
+            />
+          )
+        }
+        headerMode="pinned"
+        headerStyle={{
+          backgroundColor: colors.surface0,
+          paddingHorizontal: 12,
+          paddingTop: 12,
+          paddingBottom: 6,
+        }}
         refreshing={isLoading}
         onRefresh={async () => {
           triggerHaptic("light");
@@ -286,73 +370,6 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
         </View>
 
         </Card>
-
-      {/* Showcase view dropdown selector */}
-      <View style={styles.dropdownWrap}>
-        <Pressable
-          onPress={() => {
-            triggerHaptic("light");
-            setMenuOpen((v) => !v);
-          }}
-          accessibilityLabel="Select showcase view"
-          accessibilityRole="button"
-          style={[
-            styles.dropdownTrigger,
-            {
-              backgroundColor: colors.surface1,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.dropdownTriggerLabel, { color: colors.foreground }]} numberOfLines={1}>
-            {showcaseTabs.find((t) => t.id === activeTab)?.label ?? activeTab}
-          </Text>
-          <Text style={[styles.dropdownChevron, { color: colors.foregroundMuted }]}>
-            {menuOpen ? "▴" : "▾"}
-          </Text>
-        </Pressable>
-        {menuOpen && (
-          <View
-            style={[
-              styles.dropdownMenu,
-              { backgroundColor: colors.surface1, borderColor: colors.border },
-            ]}
-          >
-            {showcaseTabs.map((tab) => {
-              const selected = tab.id === activeTab;
-              return (
-                <Pressable
-                  key={tab.id}
-                  onPress={() => {
-                    triggerHaptic("light");
-                    setActiveTab(tab.id);
-                    setMenuOpen(false);
-                  }}
-                  accessibilityLabel={`Show ${tab.label}`}
-                  accessibilityRole="button"
-                  style={[
-                    styles.dropdownItem,
-                    selected && {
-                      backgroundColor: colors.surface2,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownItemLabel,
-                      { color: selected ? colors.accent : colors.foreground },
-                      selected && styles.dropdownItemLabelActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {tab.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      </View>
 
       {/* TAB 1: GAUGES & HARDWARE */}
       {activeTab === "gauges" && (
@@ -1010,6 +1027,32 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
           </FormRow>
 
           <FormRow
+            label="Navigation Style"
+            description="Choose tabs or a readable dropdown for the showcase navbar"
+          >
+            <View style={styles.navigationStyleOptions}>
+              <Button
+                label="Tabs"
+                size="sm"
+                variant={settings.navigationStyle === "tabs" ? "primary" : "secondary"}
+                onPress={() => {
+                  triggerHaptic("light");
+                  updateSettings({ navigationStyle: "tabs" });
+                }}
+              />
+              <Button
+                label="Dropdown"
+                size="sm"
+                variant={settings.navigationStyle === "dropdown" ? "primary" : "secondary"}
+                onPress={() => {
+                  triggerHaptic("light");
+                  updateSettings({ navigationStyle: "dropdown" });
+                }}
+              />
+            </View>
+          </FormRow>
+
+          <FormRow
             label="Pill Accent Label"
             description="Custom label displayed at the front of the composer pill"
           >
@@ -1174,7 +1217,6 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
           repository="https://github.com/xpufx/paseo-plugin-helper"
           issues="https://github.com/xpufx/paseo-plugin-helper/issues"
           license="MIT"
-          density="tiny"
           extraItems={[
             { label: "Daemon Verified Port", value: `${data?.daemonPort ?? 4280}`, copyable: true },
             { label: "Host Platform", value: `${data?.platform ?? "unknown"}`, copyable: true },
@@ -1272,6 +1314,11 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 10,
     flexWrap: "wrap",
+  },
+  navigationStyleOptions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
   },
   rateLabel: {
     fontSize: 11,

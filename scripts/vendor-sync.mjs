@@ -2,6 +2,8 @@
 // vendor-sync: re-copy paseo-plugin-helper src trees into
 // plugins/<plugin>/{client,server,shared}/vendor/paseo-plugin-helper/ so the
 // released plugin installs with zero host requirements (no npm, no registry).
+// Directory plugins import these vendored trees directly; they do not resolve
+// the workspace package at runtime.
 // See plugins/top/shared/vendor/paseo-plugin-helper/README.md (Track B, #71).
 //
 // Usage: node scripts/vendor-sync.mjs [--check]

@@ -12,13 +12,11 @@ import {
   Tabs,
   Toggle,
   CardHeader,
-  useRpcQuery,
   usePluginSettings,
   usePluginTheme,
 } from "./vendor/paseo-plugin-helper/index";
 import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
-  getSystemResourcesRpc,
   topSettingsContract,
   checkboxesFromTarget,
   targetFromCheckboxes,
@@ -28,8 +26,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { notifySettingsChanged } from "./pill";
-
-const EMPTY_PARAMS = {};
+import { useTopResourceQuery } from "./resources-query";
 
 type SurfaceTab = "system" | "settings" | "about";
 
@@ -49,9 +46,7 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
     topSettingsContract,
     { refetchInterval: 2000 },
   );
-  const { data, isLoading } = useRpcQuery(getSystemResourcesRpc, EMPTY_PARAMS, {
-    refetchInterval: 5000,
-  });
+  const { data, isLoading } = useTopResourceQuery();
 
   const pillHidden = settings.showComposerPill === false;
 
@@ -64,6 +59,7 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
   return (
     <View style={[styles.root, { backgroundColor: colors.surface0 }]}>
       <ModalBody
+        headerMode="pinned"
         header={
           <Tabs
             tabs={TABS}

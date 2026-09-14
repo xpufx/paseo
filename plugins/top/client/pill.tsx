@@ -31,7 +31,6 @@ import {
   CustomPillBody,
   CustomPillModalContent,
   useRpcQuery,
-  useAutoRefreshQuery,
   usePluginSettings,
   usePluginTheme,
   getStatusColor,
@@ -75,6 +74,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { TopDashboardSurface } from "./surface";
+import { useTopResourceQuery } from "./resources-query";
 import {
   buildAllLabel,
   enabledItemsForSettings,
@@ -665,7 +665,7 @@ export function SingleItemPillView({
   isOpen,
   open,
 }: SingleItemPillViewProps) {
-  const { colors } = usePluginTheme();
+  const { colors, isCompact } = usePluginTheme();
   const workspaceDirectory = useWorkspace(workspaceId, (w: PluginWorkspaceSnapshot) => w?.directory);
   const agent = useAgent(agentId, (a: PluginAgentSnapshot) => ({
     title: a?.title,
@@ -694,23 +694,10 @@ export function SingleItemPillView({
   }, [item, workspaceDirectory]);
 
   const shouldPoll = neededFields.length > 0;
-
-  const queryParams = useMemo(() => {
-    return {
-      ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
-      ...(shouldPoll ? { fields: neededFields } : {}),
-    };
-  }, [workspaceDirectory, shouldPoll, neededFields]);
-
-  const { data, isError, isLoading } = useRpcQuery(
-    getSystemResourcesRpc,
-    queryParams,
-    {
-      enabled: shouldPoll,
-      refetchInterval: shouldPoll ? 5000 : false,
-      staleTime: 2500,
-    } as any,
-  );
+  const { data, isError, isLoading } = useTopResourceQuery(workspaceDirectory, {
+    enabled: shouldPoll,
+    staleTime: 2500,
+  });
 
   const worktreeLocationText = useMemo(
     () => formatWorktreeLocation(workspaceDirectory),
@@ -818,64 +805,22 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
   // If no items are selected, fallback to CPU & RAM without mutating saved settings
   const effectiveShowCpuRam = flags.showCpuRam || !hasAnyEnabled;
 
-  const neededFields = useMemo(() => {
-    const fields: ResourceField[] = [];
-    if (effectiveShowCpuRam) {
-      fields.push("cpu", "memory");
-    }
-    if (flags.showBranch && workspaceDirectory) {
-      fields.push("branch");
-    }
-    if (flags.showLoad) {
-      fields.push("load");
-    }
-    if (flags.showUptime) {
-      fields.push("uptime");
-    }
-    if (flags.showMcp) {
-      fields.push("mcp");
-    }
-    return fields;
-  }, [
-    effectiveShowCpuRam,
-    flags.showBranch,
-    flags.showLoad,
-    flags.showUptime,
-    flags.showMcp,
-    settings.mcp,
-    workspaceDirectory,
-  ]);
-
-  const shouldPoll = neededFields.length > 0;
-
-  const queryParams = useMemo(() => {
-    return {
-      ...(workspaceDirectory ? { directory: workspaceDirectory } : {}),
-      ...(shouldPoll ? { fields: neededFields } : {}),
-    };
-  }, [workspaceDirectory, shouldPoll, neededFields]);
-
-  const { data, isError, isLoading } = useRpcQuery(
-    getSystemResourcesRpc,
-    queryParams,
-    {
-      enabled: shouldPoll,
-      refetchInterval: shouldPoll ? 5000 : false,
-      staleTime: 2500,
-    } as any,
-  );
+  const shouldPoll = true;
+  const { data, isError, isLoading } = useTopResourceQuery(workspaceDirectory, {
+    staleTime: 2500,
+  });
 
   const isMcpEnabled = isMcpSurfaceEnabled(settings, "pill", data?.mcpInstalled, data?.mcpRunning);
 
   useEffect(() => {
-    const found: MetricId[] = [];
+    const found = new Set<MetricId>();
     const live = data?.liveUsage;
     if (live && (live.inputTokens != null || live.outputTokens != null)) {
-      found.push("tokens");
+      found.add("tokens");
     }
     const last = data?.lastTurn;
     if (last && (last.inputTokens != null || last.outputTokens != null)) {
-      found.push("tokens");
+      found.add("tokens");
     }
     const agentUsage = (agent as any)?.lastUsage;
     if (
@@ -884,17 +829,17 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
         agentUsage.outputTokens != null ||
         agentUsage.contextWindowUsedTokens != null)
     ) {
-      found.push("tokens");
+      found.add("tokens");
     }
     if (agent?.model || agent?.provider) {
-      found.push("agent", "agent_provider");
+      found.add("agent");
+      found.add("agent_provider");
     }
-    if (found.length > 0) {
+    if (found.size > 0) {
       const have = new Set(settings.provisionedMetrics ?? []);
-      if (found.some((id) => !have.has(id))) {
-        updateSettings({
-          provisionedMetrics: [...have, ...found.filter((id) => !have.has(id))],
-        });
+      const additions = [...found].filter((id) => !have.has(id));
+      if (additions.length > 0) {
+        updateSettings({ provisionedMetrics: [...have, ...additions] });
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1076,9 +1021,10 @@ function MetricSurfaceMatrix({
   customOverrides: Record<string, boolean> | undefined;
   onCustomToggle: (id: string, val: boolean) => void;
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, isCompact } = usePluginTheme();
   const surfaces = settings.metricSurfaces ?? DEFAULT_METRIC_SURFACES;
   const provisioned = new Set(settings.provisionedMetrics ?? []);
+  const matrixRowMinHeight = isCompact ? 44 : 32;
   const setTarget = (id: MetricId, target: SurfaceTarget) => {
     const next = { ...surfaces, [id]: target };
     const s = { ...settings, metricSurfaces: next };
@@ -1086,13 +1032,36 @@ function MetricSurfaceMatrix({
     notifySettingsChanged(s);
   };
   return (
-    <View style={{ gap: 12 }}>
+    <View style={[styles.metricMatrix, isCompact && styles.metricMatrixCompact]}>
+      <View style={[styles.metricMatrixHeader, isCompact && styles.metricMatrixHeaderCompact]}>
+        <Text style={[styles.metricMatrixHeaderText, { color: colors.foregroundMuted }]}>
+          Metric
+        </Text>
+        <View style={[styles.metricMatrixTargetHeader, isCompact && styles.metricMatrixTargetHeaderCompact]}>
+          <Text style={[styles.metricMatrixHeaderText, { color: colors.foregroundMuted }]}>
+            Pill
+          </Text>
+          <Text style={[styles.metricMatrixHeaderText, { color: colors.foregroundMuted }]}>
+            Timeline
+          </Text>
+        </View>
+      </View>
       {METRIC_DEFINITIONS.map((def, index) => {
         const boxes = checkboxesFromTarget(surfaces[def.id]);
         const unprovisioned =
           isProviderDependent(def.id) && !provisioned.has(def.id);
         const timelineDisabled = !!def.pillOnly;
         const disabled = def.id === "mcp" && !mcpInstalled;
+        const note =
+          def.pillOnly
+            ? "live only"
+            : def.id === "mcp" && !mcpInstalled
+              ? "mcp-tools not installed"
+              : def.id === "mcp" && mcpRunning === false
+                ? "mcp-tools disabled"
+                : unprovisioned
+                  ? "waiting for provider"
+                  : null;
         const setBox = (which: "pill" | "timeline", val: boolean) => {
           const nextBoxes = { ...boxes, [which]: val };
           if (def.pillOnly) nextBoxes.timeline = false;
@@ -1105,59 +1074,40 @@ function MetricSurfaceMatrix({
           <View
             key={def.id}
             style={[
+              styles.metricMatrixRow,
+              isCompact && styles.metricMatrixRowCompact,
+              { minHeight: matrixRowMinHeight },
               index < METRIC_DEFINITIONS.length - 1
                 ? {
                     borderBottomWidth: 1,
                     borderBottomColor: colors.border,
-                    paddingBottom: 10,
                   }
                 : undefined,
             ]}
           >
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: colors.foreground,
-                marginBottom: 2,
-              }}
-            >
-              {def.title}
-            </Text>
-            <Text
-              style={{ fontSize: 9, color: colors.foregroundMuted, marginBottom: 8 }}
-            >
-              {def.pillOnly
-                ? "Live value only; snapshots would freeze it"
-                : def.id === "mcp" && !mcpInstalled
-                  ? "Requires paseo-mcp-tools plugin (not installed)"
-                  : def.id === "mcp" && mcpRunning === false
-                    ? "mcp-tools is disabled: surfaces hidden until it runs"
-                  : unprovisioned
-                    ? `${def.description} (waiting for provider data)`
-                    : def.description}
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 24, paddingLeft: 4 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Pill
+            <View style={styles.metricMatrixLabel}>
+              <Text style={[styles.metricMatrixTitle, { color: colors.foreground }]}>
+                {def.title}
+              </Text>
+              {note ? (
+                <Text style={[styles.metricMatrixNote, { color: colors.foregroundMuted }]}>
+                  {note}
                 </Text>
-                <Toggle
-                  value={boxes.pill}
-                  disabled={disabled}
-                  onValueChange={(val) => setBox("pill", val)}
-                />
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Timeline
-                </Text>
-                <Toggle
-                  value={boxes.timeline && !def.pillOnly}
-                  disabled={disabled || timelineDisabled}
-                  onValueChange={(val) => setBox("timeline", val)}
-                />
-              </View>
+              ) : null}
+            </View>
+            <View style={[styles.metricMatrixTargets, isCompact && styles.metricMatrixTargetsCompact]}>
+              <Toggle
+                value={boxes.pill}
+                disabled={disabled}
+                onValueChange={(val) => setBox("pill", val)}
+                style={styles.matrixToggle}
+              />
+              <Toggle
+                value={boxes.timeline && !def.pillOnly}
+                disabled={disabled || timelineDisabled}
+                onValueChange={(val) => setBox("timeline", val)}
+                style={styles.matrixToggle}
+              />
             </View>
           </View>
         );
@@ -1168,45 +1118,29 @@ function MetricSurfaceMatrix({
         return (
           <View
             key={`custom-${pill.id}`}
-            style={{
-              borderBottomWidth: 0,
-              paddingBottom: 0,
-            }}
+            style={styles.metricMatrixRow}
           >
-            <Text
-              style={{
-                fontSize: 11,
-                fontWeight: "700",
-                color: colors.foreground,
-                marginBottom: 2,
-              }}
-            >
-              {pill.title}
-            </Text>
-            <Text
-              style={{ fontSize: 9, color: colors.foregroundMuted, marginBottom: 8 }}
-            >
-              {pill.sourceFile
-                ? `Drop-in pill: ${pill.sourceFile}`
-                : "Drop-in pill from ~/.paseo/top/pills"}
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 16, paddingLeft: 4 }}>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Pill
-                </Text>
-                <Toggle
-                  value={enabled}
-                  disabled={!masterOn}
-                  onValueChange={(val) => onCustomToggle(pill.id, val)}
-                />
-              </View>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                  Timeline
-                </Text>
-                <Toggle value={false} disabled={true} onValueChange={() => {}} />
-              </View>
+            <View style={styles.metricMatrixLabel}>
+              <Text style={[styles.metricMatrixTitle, { color: colors.foreground }]}>
+                {pill.title}
+              </Text>
+              <Text style={[styles.metricMatrixNote, { color: colors.foregroundMuted }]}>
+                custom pill
+              </Text>
+            </View>
+            <View style={[styles.metricMatrixTargets, isCompact && styles.metricMatrixTargetsCompact]}>
+              <Toggle
+                value={enabled}
+                disabled={!masterOn}
+                onValueChange={(val) => onCustomToggle(pill.id, val)}
+                style={styles.matrixToggle}
+              />
+              <Toggle
+                value={false}
+                disabled={true}
+                onValueChange={() => {}}
+                style={styles.matrixToggle}
+              />
             </View>
           </View>
         );
@@ -1264,19 +1198,8 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     lastUsage: (a as any)?.lastUsage,
   }));
 
-  const queryParams = useMemo(() => {
-    return workspace?.directory ? { directory: workspace.directory } : EMPTY_PARAMS;
-  }, [workspace?.directory]);
-
-  const { data, isError, error, isLoading, isRefetching, refetch } = useAutoRefreshQuery(
-    getSystemResourcesRpc,
-    queryParams,
-    {
-      // 5s matches the composer pill pollers: the 2s modal rate stacked with
-      // per-item pill queries and saturated the server's maxInflight=4 guard.
-      defaultRate: "5s",
-      isOpen: true,
-    },
+  const { data, isError, error, isLoading, isRefetching, refetch } = useTopResourceQuery(
+    workspace?.directory,
   );
 
   const tokenMetrics = useMemo(() => {
@@ -1344,6 +1267,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     return (
       <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
         <ModalBody
+          headerMode="pinned"
           refreshing={isRefetching}
           onRefresh={handleRefresh}
           header={navbar}
@@ -1370,6 +1294,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
   return (
     <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
       <ModalBody
+        headerMode="pinned"
         refreshing={isLoading || isRefetching}
         onRefresh={handleRefresh}
         header={navbar}
@@ -2714,6 +2639,80 @@ const styles = StyleSheet.create({
   settingsToggles: {
     gap: 8,
     width: "100%",
+  },
+  metricMatrix: {
+    gap: 0,
+    width: "100%",
+  },
+  metricMatrixCompact: {
+    minWidth: 0,
+  },
+  metricMatrixHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingLeft: 4,
+    paddingRight: 4,
+    paddingBottom: 2,
+  },
+  metricMatrixHeaderCompact: {
+    paddingLeft: 2,
+    paddingRight: 2,
+  },
+  metricMatrixHeaderText: {
+    fontSize: 9,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  metricMatrixTargetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 28,
+    paddingRight: 10,
+  },
+  metricMatrixTargetHeaderCompact: {
+    gap: 16,
+    paddingRight: 8,
+  },
+  metricMatrixRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingLeft: 4,
+    paddingRight: 4,
+  },
+  metricMatrixRowCompact: {
+    paddingLeft: 2,
+    paddingRight: 2,
+  },
+  metricMatrixLabel: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 2,
+  },
+  metricMatrixTitle: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  metricMatrixNote: {
+    fontSize: 9,
+    lineHeight: 12,
+    marginTop: 1,
+  },
+  metricMatrixTargets: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    paddingLeft: 8,
+  },
+  metricMatrixTargetsCompact: {
+    gap: 8,
+    paddingLeft: 4,
+  },
+  matrixToggle: {
+    width: 38,
+    minHeight: 44,
   },
   speedRow: {
     flexDirection: "row",

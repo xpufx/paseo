@@ -1,18 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { auditProject } from "../cli/scanner.js";
+import {
+  auditAllPlugins,
+  auditPluginConformance,
+  findPluginDirectories,
+} from "../cli/conformance.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..", "..", "..", "..");
-const UI_RULES = new Set(["no-bare-react-native-ui", "no-hardcoded-modal-dimensions"]);
+const pluginsDir = path.join(repoRoot, "plugins");
 
 describe("Monorepo plugin UI conformance", () => {
-  for (const plugin of ["top", "mcp-tools", "x-comms", "forgejo"]) {
-    it(`${plugin} has no bare RN UI or rigid modal dimension warnings`, () => {
-      const report = auditProject(path.join(repoRoot, "plugins", plugin));
-      const uiIssues = report.issues.filter((i) => UI_RULES.has(i.ruleId));
-      expect(uiIssues).toEqual([]);
+  for (const pluginDir of findPluginDirectories(pluginsDir)) {
+    it(`${path.basename(pluginDir)} has no UI conformance findings`, () => {
+      expect(auditPluginConformance(pluginDir).issues).toEqual([]);
     });
   }
+
+  it("audits every plugin without a plugin-specific allowlist", () => {
+    const reports = auditAllPlugins(pluginsDir);
+    expect(reports).toHaveLength(findPluginDirectories(pluginsDir).length);
+    expect(reports.every((report) => report.passed)).toBe(true);
+  });
 });

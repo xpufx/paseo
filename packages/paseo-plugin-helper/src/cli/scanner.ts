@@ -469,6 +469,31 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
             docUrl: rule.docUrl,
           });
         }
+        const before = content.slice(0, match.index);
+        const lineNum = before.split("\n").length;
+        const snippetLine = lines[lineNum - 1]?.trim() || match[0].split("\n")[0].trim();
+        const rawUiRules: Array<[string, RegExp]> = [
+          [
+            "no-bespoke-react-native-interactions",
+            /\b(Pressable|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback)\b/,
+          ],
+          ["no-bespoke-style-system", /\bStyleSheet\b/],
+        ];
+        for (const [ruleId, pattern] of rawUiRules) {
+          if (!pattern.test(valueClause)) continue;
+          const rule = AUDIT_RULES[ruleId];
+          issues.push({
+            ruleId: rule.id,
+            severity: rule.severity,
+            file: relPath,
+            line: lineNum,
+            column: Math.max(0, (lines[lineNum - 1] ?? "").indexOf((lines[lineNum - 1] ?? "").trim())),
+            message: rule.description,
+            codeSnippet: snippetLine,
+            replacement: rule.replacement,
+            docUrl: rule.docUrl,
+          });
+        }
       }
     }
 

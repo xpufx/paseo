@@ -35,7 +35,7 @@ export function CardHeader({
   subtitleStyle,
 }: CardHeaderProps) {
   const { Icon } = getClientHost();
-  const { colors, flair, isCompact } = usePluginTheme();
+  const { colors, flair, typography } = usePluginTheme();
 
   return (
     <View style={[styles.headerContainer, style]}>
@@ -47,7 +47,7 @@ export function CardHeader({
               styles.headerTitle,
               {
                 color: colors.foreground,
-                fontSize: isCompact ? 12 : 13,
+                ...typography.heading,
                 textTransform:
                   flair.headingTransform === "uppercase" ? "uppercase" : "none",
               },
@@ -60,7 +60,7 @@ export function CardHeader({
             <Text
               style={[
                 styles.headerSubtitle,
-                { color: colors.foregroundMuted, fontSize: 11 },
+                { color: colors.foregroundMuted, ...typography.caption },
                 subtitleStyle,
               ]}
             >
@@ -76,7 +76,7 @@ export function CardHeader({
           <Text
             style={[
               styles.headerValue,
-              { color: colors.foreground, fontSize: isCompact ? 12 : 13 },
+              { color: colors.foreground, ...typography.bodyStrong },
             ]}
           >
             {value}

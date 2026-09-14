@@ -10,6 +10,7 @@ import {
   readHostThemeVariables,
   type HostFontVariables,
 } from "./host-variables";
+import { resolveTypography, type TypographyScale } from "./tokens";
 import type { ResponsiveLayout, StatusVariant, ThemeColors } from "../../../../shared/vendor/paseo-plugin-helper/types";
 
 export interface PluginThemeContextValue {
@@ -27,6 +28,7 @@ export interface PluginThemeContextValue {
   getVariantPalette: (variant: StatusVariant) => { bg: string; text: string; border: string };
   resolveRadius: (size?: "xs" | "sm" | "md" | "lg" | "pill") => number;
   padding: { horizontal: number; vertical: number; gap: number };
+  typography: TypographyScale;
 }
 
 const defaultLayout: ResponsiveLayout = {
@@ -95,6 +97,7 @@ const PluginThemeContext = createContext<PluginThemeContextValue>({
   getVariantPalette: (v) => getVariantPalette(v, initialDefaultTheme.colors),
   resolveRadius: (s) => resolveRadius("rounded", s),
   padding: resolvePadding(defaultLayout, "comfortable"),
+  typography: resolveTypography(defaultLayout, "comfortable"),
 });
 
 export interface PluginThemeProviderProps {
@@ -124,6 +127,7 @@ export function PluginThemeProvider({
     const isMobile = isMobilePlatform(layout.platform);
     const touchTargetMin = getTouchTargetMin(layout);
     const padding = resolvePadding(layout, flair.density);
+    const typography = resolveTypography(layout, flair.density);
 
     return {
       theme,
@@ -140,6 +144,7 @@ export function PluginThemeProvider({
       getVariantPalette: (v) => getVariantPalette(v, effectiveColors, flair.accentColor),
       resolveRadius: (size = "md") => resolveRadius(flair.radius, size),
       padding,
+      typography,
     };
   }, [theme, layout, userFlair]);
 

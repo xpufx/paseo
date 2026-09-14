@@ -29,7 +29,12 @@ export function SectionHeader({
   textStyle,
 }: SectionHeaderProps): React.ReactElement | null {
   const theme = usePluginTheme();
-  const headingTransform = (theme.flair?.headingTransform ?? "uppercase") === "uppercase"
+  const caption = theme.typography?.caption ?? {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "400" as const,
+  };
+  const headingTransform = (theme.flair?.headingTransform ?? "none") === "uppercase"
     ? "uppercase"
     : "none";
 
@@ -41,6 +46,9 @@ export function SectionHeader({
           {
             color: theme.colors.foregroundMuted,
             textTransform: headingTransform,
+            fontSize: caption.fontSize,
+            lineHeight: caption.lineHeight,
+            fontWeight: "700",
           },
           textStyle,
         ]}
@@ -67,8 +75,6 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   title: {
-    fontSize: 11,
-    fontWeight: "700",
     letterSpacing: 0.8,
   },
 });

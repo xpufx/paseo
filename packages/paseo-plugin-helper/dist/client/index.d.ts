@@ -144,6 +144,24 @@ declare const spacing: {
     readonly xl: 24;
 };
 type SpacingKey = keyof typeof spacing;
+interface TypographyToken {
+    fontSize: number;
+    lineHeight: number;
+    fontWeight: "400" | "500" | "600" | "700";
+}
+interface TypographyScale {
+    title: TypographyToken;
+    heading: TypographyToken;
+    body: TypographyToken;
+    bodyStrong: TypographyToken;
+    caption: TypographyToken;
+    label: TypographyToken;
+}
+/**
+ * Semantic text sizes keep helper components visually coherent while still
+ * allowing compact panes and plugin density preferences to breathe.
+ */
+declare function resolveTypography(layout: ResponsiveLayout, density: DensityStyle): TypographyScale;
 /** Fallback text color on accent fills when the host omits accentForeground. */
 declare const FALLBACK_ACCENT_FOREGROUND = "#ffffff";
 type ElevationLevel = "none" | "sm" | "md" | "lg";
@@ -227,6 +245,7 @@ interface PluginThemeContextValue {
         vertical: number;
         gap: number;
     };
+    typography: TypographyScale;
 }
 declare const defaultDarkTheme: PluginTheme;
 declare const defaultLightTheme: PluginTheme;
@@ -315,6 +334,18 @@ interface ButtonProps {
     attention?: ButtonAttention;
 }
 declare function Button({ label, variant, size, icon, iconPosition, onPress, disabled, loading, style, textStyle, accessibilityLabel, attention, }: ButtonProps): React__default.JSX.Element;
+
+interface InlineButtonProps {
+    label: string;
+    onPress?: () => void | Promise<void>;
+    icon?: string | ReactNode;
+    disabled?: boolean;
+    accessibilityLabel?: string;
+    style?: StyleProp<ViewStyle>;
+    textStyle?: StyleProp<TextStyle>;
+}
+/** Compact text/link action for inline cards and timeline content. */
+declare function InlineButton({ label, onPress, icon, disabled, accessibilityLabel, style, textStyle, }: InlineButtonProps): React__default.JSX.Element;
 
 type BadgeStyle = "tinted" | "outline" | "solid";
 interface BadgeProps {
@@ -722,12 +753,9 @@ interface ModalBodyProps {
     header?: ReactNode;
     headerStyle?: StyleProp<ViewStyle>;
     /**
-     * "scroll" (default): header renders INSIDE the ScrollView and moves with
-     * content. "pinned": header renders above the scroller in a flex column.
-     * Default is "scroll" per #110 fallback: the host enforces its own outer
-     * scroller on mobile regardless of our locks, so a pinned header either
-     * fights it or goes dead — Tabs-scroll-with-content (mcp-tools pattern)
-     * always moves because it rides whichever scroller actually owns gestures.
+     * "scroll" (default): header renders INSIDE the helper-owned compact/mobile
+     * ScrollView and moves with content. "pinned": header renders above that
+     * compact/mobile scroller; on desktop the host remains the scroll owner.
      */
     headerMode?: "pinned" | "scroll";
     /**
@@ -743,19 +771,16 @@ interface ModalBodyProps {
     stickToEnd?: boolean;
     scrollRef?: Ref<ScrollView>;
 }
+declare const ModalBodyScrollOwnerContext: React__default.Context<"helper" | "host">;
 /**
  * Mobile-safe scrollable body for Paseo <Modal.Content>.
- * Scroll ownership (#110, 0.8 popover path): exactly ONE vertical scroll owner —
- * this inner ScrollView (flex:1 + minHeight:0). The outer (popoverContainer plain
- * View / <Modal.Content scrollable={false}>) stays locked and never scrolls.
- * Give the outer a scroller and gestures jam (both own); drop flex:1/minHeight:0
- * here and content goes dead (neither owns).
- * #110 second verify FAILED on device (no change): theory above did not move
- * the host, so do not trust it blindly — pass debugTag to log MEASURED
- * viewport/content heights, and prefer headerMode="scroll" (default): the
- * header rides INSIDE the scroller (mcp-tools Tabs-scroll-with-content
- * pattern) so it moves with whichever scroller the host actually enforces.
- * "pinned" is opt-in and only valid when the outer is provably locked.
+ * Scroll ownership: ordinary compact/mobile modal content uses this helper
+ * scroller. A 0.8 composer popover is different: Paseo's MenuSurface already
+ * supplies the sole outer scroller, and registerComposerPill marks that
+ * subtree through ModalBodyScrollOwnerContext so this component renders plain
+ * content instead.
+ * "pinned" is opt-in. Desktop surfaces retain host-owned scrolling so they do
+ * not create a second scrollbar; web hosts pin the header with sticky layout.
  * Automatically calculates responsive bottom padding so controls are not cut off
  * by mobile home bars or virtual keyboards.
  * Supports pull-to-refresh on mobile via `refreshing` and `onRefresh`.
@@ -1430,4 +1455,4 @@ declare function registerCustomPills(client: ComposerPillRegistrar, options: Reg
 
 declare function Icon(props: HostIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, ModalBodyScrollOwnerContext, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, resolveTypography, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };

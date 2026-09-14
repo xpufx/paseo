@@ -24,7 +24,7 @@ export function ProgressBar({
   height = 8,
   style,
 }: ProgressBarProps) {
-  const { colors, resolveRadius, isCompact } = usePluginTheme();
+  const { colors, resolveRadius, typography } = usePluginTheme();
 
   const clamped = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
   const radius = resolveRadius("pill");
@@ -49,7 +49,7 @@ export function ProgressBar({
             <Text
               style={[
                 styles.labelText,
-                { color: colors.foregroundMuted, fontSize: isCompact ? 11 : 12 },
+                { color: colors.foregroundMuted, ...typography.caption },
               ]}
             >
               {label}
@@ -59,7 +59,7 @@ export function ProgressBar({
             <Text
               style={[
                 styles.valueText,
-                { color: colors.foreground, fontSize: isCompact ? 11 : 12 },
+                { color: colors.foreground, ...typography.caption, fontWeight: "600" },
               ]}
             >
               {Math.round(clamped)}%

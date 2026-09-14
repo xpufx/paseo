@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
-import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import {
   getClientHost,
   type ComposerPillRegistrar,
@@ -12,6 +12,7 @@ import {
 import { PluginThemeProvider } from "./theme/provider";
 import { useResponsive } from "./theme/useResponsive";
 import type { VisualFlair } from "./theme/flair";
+import { ModalBodyScrollOwnerContext } from "./layout/ModalBody";
 
 export interface RenderPillProps<TPayload = any> extends HostPillProps {
   isOpen: boolean;
@@ -173,15 +174,14 @@ export function registerComposerPill<TPayload = any>(
   const { Icon, Modal } = getClientHost();
   const openers = new Map<string, (payload?: TPayload) => void>();
   const pills = new Map<string, { dispose: () => void; timer?: ReturnType<typeof setInterval> }>();
+  const pushedDescriptors = new WeakMap<object, { label?: string; icon?: string }>();
   let detectedShape: "button" | "legacy" | null = null;
   let disposed = false;
 
-  // 0.8 popover scroll ownership (#110): exactly ONE vertical scroll owner on
-  // this path — the inner ModalBody ScrollView (flex:1 + minHeight:0). The outer
-  // popoverContainer below is a plain View (locked: no ScrollView, overflow
-  // hidden), never a scroller. If the outer ever scrolls again we get both-own
-  // (mobile gesture jam); if the inner loses flex:1/minHeight:0 we get
-  // neither-own (dead content that never moves). Keep it outer-locked ⟺ inner-owns.
+  // 0.8 popover scroll ownership: Paseo's MenuSurface/FloatingScrollView or
+  // BottomSheetScrollView already owns the viewport. Keep this wrapper plain,
+  // unconstrained, and mark the subtree so ModalBody does not add a second
+  // ScrollView. Fixed heights or overflow clipping here cut off mobile content.
   function PillPopoverContent(props: {
     agentId: string;
     workspaceId: string;
@@ -200,7 +200,9 @@ export function registerComposerPill<TPayload = any>(
     return (
       <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
         <View style={styles.popoverContainer}>
-          {options.renderModal({ ...pillProps, close: props.close })}
+          <ModalBodyScrollOwnerContext.Provider value="host">
+            {options.renderModal({ ...pillProps, close: props.close })}
+          </ModalBodyScrollOwnerContext.Provider>
         </View>
       </PluginThemeProvider>
     );
@@ -332,8 +334,16 @@ export function registerComposerPill<TPayload = any>(
         if (iconResult !== undefined) {
           patch.icon = iconResult;
         }
-        if (Object.keys(patch).length > 0) {
+        const previous = pushedDescriptors.get(registration as object) ?? {};
+        const changed =
+          (patch.label !== undefined && patch.label !== previous.label) ||
+          (patch.icon !== undefined && patch.icon !== previous.icon);
+        if (changed) {
           registration.update(patch);
+          pushedDescriptors.set(registration as object, {
+            label: patch.label ?? previous.label,
+            icon: patch.icon ?? previous.icon,
+          });
         }
       })
       .catch((error) => {
@@ -520,15 +530,6 @@ function DefaultPillBody({
 const styles = StyleSheet.create({
   popoverContainer: {
     width: "100%",
-    flex: 1,
-    minHeight: 0,
-    // 0.8+ hosts render popover content at an unbounded height with their own
-    // scroller: without a bound the inner ModalBody column never resolves a
-    // finite height, so the pinned header scrolls with the body (or nothing
-    // scrolls at all). Cap to a viewport fraction so the inner ScrollView
-    // always has a finite bound and only the body scrolls.
-    maxHeight: Math.min(560, Dimensions.get("window").height * 0.8),
-    overflow: "hidden",
   },
   pillContainer: {
     flexDirection: "row",

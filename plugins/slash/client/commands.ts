@@ -67,13 +67,7 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
             argumentHint: "",
             context: "agent",
             async onSubmit(ctx) {
-              await ctx.paseo.agents.ref(ctx.agent.id).timeline.append({
-                type: "plugin",
-                id: "slash-open",
-                kind: "slash-result",
-                version: 1,
-                data: { title: command.title, body: `Open target: ${target}` },
-              });
+              ctx.openSettings(target);
             },
           }),
         );
@@ -90,21 +84,9 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
                   runCommandRpc as unknown,
                   { name: command.name, args: ctx.args },
                 );
-                await ctx.paseo.agents.ref(ctx.agent.id).timeline.append({
-                  type: "plugin",
-                  id: "slash-rpc",
-                  kind: "slash-result",
-                  version: 1,
-                  data: { title: command.title, body: JSON.stringify(out.result ?? null) },
-                });
+                await ctx.paseo.agents.ref(ctx.agent.id).send(`/${command.name}: ${JSON.stringify(out.result ?? null)}`);
               } catch (e) {
-                await ctx.paseo.agents.ref(ctx.agent.id).timeline.append({
-                  type: "plugin",
-                  id: "slash-rpc-error",
-                  kind: "slash-result",
-                  version: 1,
-                  data: { title: command.title, body: `Error: ${e instanceof Error ? e.message : String(e)}` },
-                });
+                await ctx.paseo.agents.ref(ctx.agent.id).send(`/${command.name} failed: ${e instanceof Error ? e.message : String(e)}`);
               }
             },
           }),
