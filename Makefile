@@ -78,6 +78,10 @@ github-mirror-top-and-helper-dry:
 github-mirror-top-and-helper:
 	@node scripts/mirror-github.mjs --target=top,helper
 
+## cafe-submit: Emit Biome-clean paseo.cafe registry JSON (e.g. make cafe-submit PLUGIN=top CATEGORIES=monitoring)
+cafe-submit:
+	@node scripts/paseo-cafe-submit.mjs --plugin=$(PLUGIN) --categories=$(CATEGORIES) --write
+
 ## help: Display this help message
 help:
 	@echo "Paseo Monorepo Developer Commands:"
@@ -87,3 +91,4 @@ help:
 	@echo "  make typecheck - Run tsc across all workspaces"
 	@echo "  make test      - Run unit tests across all workspaces"
 	@echo "  make build     - Build packages and plugins"
+	@echo "  make cafe-submit PLUGIN=top CATEGORIES=monitoring - Emit Biome-clean paseo.cafe registry JSON"
