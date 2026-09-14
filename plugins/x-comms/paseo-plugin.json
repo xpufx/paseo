@@ -1,7 +1,4 @@
 {
   "id": "x-comms",
-  "requirements": {
-    "paseo": ">=0.8.0"
-  },
-  "build": [["node", "-e", "const {spawnSync}=require('child_process');const bins=[process.env.CHECK_BIN_NODE||'node',process.env.CHECK_BIN_NPM||'npm'];let failed=false;for(const b of bins){const r=spawnSync(b,['--version'],{stdio:'ignore'});if(r.error||r.status!==0){console.error(`ERROR: required binary '${b}' could not be started by the daemon host (install node and npm; see README prerequisites)`);failed=true;}}if(failed)process.exit(1);"], ["npm", "install"]]
+  "requirements": { "paseo": ">=0.8.0" }
 }

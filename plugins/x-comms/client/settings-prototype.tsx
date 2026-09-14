@@ -15,7 +15,7 @@ import {
   StatusDot,
   TextInput,
   Toggle,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 import {
   daemonAddRpc,
   daemonHealthRpc,

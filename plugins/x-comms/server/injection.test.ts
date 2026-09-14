@@ -7,7 +7,7 @@ import type {
   AgentCreateInjectionRequest,
   McpInjectionHookHandler,
   McpInjectionServer,
-} from "paseo-plugin-helper/server";
+} from "./vendor/paseo-plugin-helper/index";
 import {
   INJECTION_FALLBACK_KEY,
   INJECTION_KEY_PREFIX,

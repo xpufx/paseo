@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test mcp/test/protocol.test.mjs server/presence.test.ts server/injection.test.ts server/settings.test.ts server/conversations-snapshot.test.ts client/tool-call.test.ts client/conversation-threads.test.ts client/attribution.test.ts client/message-direction.test.ts"
+    "test": "node --import ./mcp/test/register-ts-hooks.mjs --test mcp/test/protocol.test.mjs server/presence.test.ts server/injection.test.ts server/settings.test.ts server/conversations-snapshot.test.ts client/tool-call.test.ts client/conversation-threads.test.ts client/attribution.test.ts client/message-direction.test.ts"
   },
   "keywords": [
     "paseo",
@@ -25,8 +25,7 @@
   "dependencies": {
     "@getpaseo/client": "^0.8.0-beta.1",
     "@getpaseo/protocol": "^0.8.0-beta.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
-    "paseo-plugin-helper": "^0.4.0-beta.6"
+    "@modelcontextprotocol/sdk": "^1.30.0"
   },
   "devDependencies": {
     "@getpaseo/plugin": "^0.8.0-beta.1",

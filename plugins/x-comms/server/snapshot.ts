@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createPluginLogger, safeSpawn } from "paseo-plugin-helper/server";
+import { createPluginLogger, safeSpawn } from "./vendor/paseo-plugin-helper/index";
 import { currentRegistryPath, readRegistry, stateDir, migrateFromRoot } from "./registry";
 
 const snapLog = createPluginLogger("paseo-x-comms", { subsystem: "snapshot" });

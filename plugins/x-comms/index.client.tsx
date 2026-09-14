@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers, type ComposerPillRegistrar } from "paseo-plugin-helper/client";
+import { initClientHelpers, type ComposerPillRegistrar } from "./client/vendor/paseo-plugin-helper/index";
 import { MainSurface } from "./client/main";
 import { crossDaemonTransformer, crossDaemonRenderer } from "./client/x-comms-timeline";
 import { crossDaemonToolCallTransformer, crossDaemonToolCallRenderer } from "./client/x-comms-tool-call";

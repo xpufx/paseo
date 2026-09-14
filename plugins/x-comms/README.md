@@ -33,7 +33,7 @@ The plugin lives at the repo root (`paseo-plugin.json` id `x-comms`):
 paseo plugin add xpufx/paseo-x-comms
 ```
 
-Paseo runs a node binary check plus a single `npm install` at the repo root (see `paseo-plugin.json` build), which pulls both plugin deps (`@getpaseo/plugin`, `@getpaseo/client`, `@getpaseo/protocol`, `paseo-plugin-helper`, `react-native`, etc.) and server deps (`@modelcontextprotocol/sdk`, `zod`) into one tree. The server is spawned from `./mcp` and resolves deps from that shared tree.
+The plugin installs with zero host requirements (no npm, no registry, no build step): `paseo-plugin-helper` is vendored under `client/`, `server/`, `shared/` (see `shared/vendor/paseo-plugin-helper/README.md`) and the daemon bundles it from source. The MCP server is spawned from `./mcp` and resolves its deps (`@modelcontextprotocol/sdk`, `zod`, etc.) from that shared tree.
 
 To update:
 

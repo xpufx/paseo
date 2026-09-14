@@ -8,7 +8,7 @@ import {
   type ComposerPillRegistrar,
   type RenderModalProps,
   type RenderPillProps,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 import { useEffect, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { CrossDaemonConversation } from "./x-comms-conversation";

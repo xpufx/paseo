@@ -1,4 +1,4 @@
-import { defineRpc } from "paseo-plugin-helper/shared";
+import { defineRpc } from "./vendor/paseo-plugin-helper/index";
 import { z } from "zod";
 
 const DaemonEntrySchema = z.object({
