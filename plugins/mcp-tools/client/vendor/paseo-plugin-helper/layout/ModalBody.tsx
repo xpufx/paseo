@@ -151,6 +151,46 @@ export function ModalBody({
 
   if (!header) return body;
 
+  // #110 fallback: "scroll" (default) renders the header INSIDE the scroller
+  // (mcp-tools Tabs-scroll-with-content pattern) so it rides whichever outer
+  // scroller the host enforces on mobile. "pinned" keeps the old flex-column
+  // layout and is only valid when the outer is provably locked.
+  if (headerMode === "scroll") {
+    return (
+      <ResolvedScrollView
+        ref={setRefs}
+        style={[{ backgroundColor: colors.surface0 }, styles.container, style]}
+        nestedScrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={true}
+        refreshControl={refreshControl}
+        onLayout={
+          log
+            ? (e: { nativeEvent: { layout: { height: number; width: number } } }) =>
+                log("viewport", e.nativeEvent.layout)
+            : undefined
+        }
+        onContentSizeChange={(w: number, h: number) => {
+          log?.("content", { width: w, height: h });
+          if (stickToEnd) innerRef.current?.scrollToEnd({ animated: true });
+        }}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: padding.horizontal,
+            paddingTop: padding.vertical,
+            paddingBottom: bottomPadding,
+            gap: padding.gap,
+          },
+          contentContainerStyle,
+        ]}
+      >
+        <View style={[styles.header, headerStyle]}>{header}</View>
+        {children}
+      </ResolvedScrollView>
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <View style={[styles.header, headerStyle]}>{header}</View>

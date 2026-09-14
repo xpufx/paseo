@@ -63,7 +63,7 @@ describe.each([false, true])("ModalBody pinned header (compact=%s)", (isCompact)
   it("keeps header outside the ScrollView", () => {
     installStubs(isCompact);
     const r = render(
-      <ModalBody header={<Text testID="pinned-tabs">tabs</Text>}>
+      <ModalBody headerMode="pinned" header={<Text testID="pinned-tabs">tabs</Text>}>
         <Text>body</Text>
       </ModalBody>,
     );
