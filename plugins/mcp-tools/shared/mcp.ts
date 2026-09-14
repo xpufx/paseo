@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
+import { defineContract, defineSettingsContract } from "./vendor/paseo-plugin-helper/index";
 
 export const McpSourceSchema = z.object({
   kind: z.enum(["project", "repo", "personal", "global", "paseo", "session"]),

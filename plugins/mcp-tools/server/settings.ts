@@ -1,4 +1,4 @@
-import { PluginStorage, createSettingsHandlers } from "paseo-plugin-helper/server";
+import { PluginStorage, createSettingsHandlers } from "./vendor/paseo-plugin-helper/index";
 import { log } from "./mcp";
 import { mcpToolsSettingsContract, type McpToolsSettings } from "../shared/mcp";
 

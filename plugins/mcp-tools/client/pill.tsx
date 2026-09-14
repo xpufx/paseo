@@ -3,7 +3,7 @@ import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   initClientHelpers,
   type ComposerPillRegistrar,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast });
 import { useMemo, useState } from "react";
@@ -34,7 +34,7 @@ import {
   type RenderModalProps,
   type RenderPillProps,
   type TabItem,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 import { useMcpHealthQuery, useMcpQuery } from "./mcp-query";
 import {
   callMcpTool,

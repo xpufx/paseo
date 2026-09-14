@@ -8,6 +8,10 @@ Provides an inline UI for checking MCP servers available to an agent session wit
 
 (**Paseo** is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions.)
 
+> [!NOTE]
+> **Prerequisites & Platform Support**:
+> - Zero install requirements: the helper runtime is vendored (`client|server|shared/vendor/paseo-plugin-helper/` plus `server/vendor/paseo-plugin-helper/mcp/`, pinned helper 0.4.0-beta.12 — see `shared/vendor/paseo-plugin-helper/README.md`), so Paseo installs this plugin with no build step and no npm/registry access. For local development (`typecheck`/`test`), Node.js (v18+) is enough.
+
 ## What it does
 
 - **Pill** above the composer shows `MCP n` (live servers for that agent). Badge updates via `mcp.list`, shared between pill and modal.

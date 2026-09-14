@@ -1,4 +1,4 @@
-import { REFRESH_INTERVALS, useRpcQuery, type RefreshRate } from "paseo-plugin-helper/client";
+import { REFRESH_INTERVALS, useRpcQuery, type RefreshRate } from "./vendor/paseo-plugin-helper/index";
 import { checkMcpHealth, listMcp } from "../shared/mcp";
 
 export function useMcpQuery(agentId: string) {
