@@ -65,8 +65,9 @@ The operator signals with line-anchored `/`-commands in issue comments. Obey whe
 
 ## 7. Attention Contract (Agreed Operating Rules)
 
-- The operator only reads `attention/2-user`. Anything needing their eyes (approval, verify, decision, question) MUST carry it — otherwise it is invisible.
-- `attention/0-orchestrator` means "do something": if no stoppers, delegate (hand to `attention/1-agent` once tree-safe); if the next step is unclear, ask — flip to `attention/2-user` with a one-line question.
+- The operator only touches `attention/*`. Nothing else is a signal.
+- `attention/0-orchestrator` means "you own it, don't let it sit": handle the deliverable, delegate, or — if the next step is unclear — flip to `attention/2-user` with a one-line question. An issue must never rest on `0-orchestrator`.
+- Anything needing operator eyes (approval, verify, decision, question) MUST carry `attention/2-user` — otherwise it is invisible.
 - Tree conflicts keep gating dispatch: no worker enters a checkout the operator is hands-on in. Queue, don't collide.
 - Pre-flight stands: never present unverified work for operator testing.
 - Verify is non-binding: resolve unilaterally with narration rather than park in mutual wait.
