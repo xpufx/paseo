@@ -17,6 +17,9 @@ const HELPER_SRC = path.join(ROOT, "packages", "paseo-plugin-helper", "src");
 const PLUGINS = {
   "top": ["client", "server", "shared"],
   "mcp-tools": ["client", "server", "shared", "mcp"],
+  "demo": ["client", "server", "shared"],
+  "forgejo": ["client", "server", "shared"],
+  "x-comms": ["client", "server", "shared", "mcp"],
 };
 const TREES = ["client", "server", "shared", "mcp"];
 const DEST_ROOT = "vendor/paseo-plugin-helper";
