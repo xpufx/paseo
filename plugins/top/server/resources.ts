@@ -215,9 +215,19 @@ export async function getMcpPluginState(): Promise<McpPluginState> {
   return mcpStateInflight;
 }
 
+const SETTINGS_READ_LOG_INTERVAL_MS = 30_000;
+let lastSettingsReadLogAt = 0;
+
 export async function handleGetSettings(): Promise<TopSettings> {
   const data = await settingsStorage.readAsync();
-  log.debug("Settings read requested");
+  // Reads arrive on every client mount/focus verification, so keep the
+  // observable signal but bound it: at most one line per interval, keys only
+  // on writes, never full payloads.
+  const now = Date.now();
+  if (now - lastSettingsReadLogAt > SETTINGS_READ_LOG_INTERVAL_MS) {
+    lastSettingsReadLogAt = now;
+    log.debug("Settings read requested");
+  }
   return data;
 }
 

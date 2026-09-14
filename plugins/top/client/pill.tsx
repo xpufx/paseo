@@ -35,6 +35,7 @@ import {
   usePluginTheme,
   getStatusColor,
   triggerHaptic,
+  shouldEmitSnapshotUpdate,
   type RenderModalProps,
   type RenderPillProps,
   type KeyValueProps,
@@ -64,7 +65,6 @@ import {
   checkboxesFromTarget,
   targetFromCheckboxes,
   type SystemResources,
-  type ResourceField,
   type TopSettings,
   type PillMode,
   type CustomPillDefinition,
@@ -261,30 +261,18 @@ export function updateLiveSnapshot(agentId: string, partial: Partial<LiveSnapsho
   liveSnapshots.set(agentId, { ...prev, ...partial, updatedAt: Date.now() });
 }
 
-function fieldsForItem(item: PillItemType, workspaceDirectory?: string | null): ResourceField[] {
-  switch (item) {
-    case "cpu_ram":
-      return ["cpu", "memory"];
-    case "branch":
-      return workspaceDirectory ? ["branch"] : [];
-    case "load":
-      return ["load"];
-    case "uptime":
-      return ["uptime"];
-    case "mcp":
-      return ["mcp"];
-    default:
-      return [];
-  }
-}
-
 const LIVE_SNAPSHOT_TTL_MS = 2500;
 const liveSnapshotInflight = new Map<string, Promise<SystemResources | null>>();
 
-async function liveSnapshotFor(
-  ctx: PillLiveContext,
-  fields?: ResourceField[],
-): Promise<SegmentSnapshot> {
+/**
+ * Shared full-snapshot fetch for button-host live labels.
+ * One in-flight request per agent: per-item field params fragmented this
+ * path into a poller per visible pill. Selective `fields` stay supported on
+ * the server RPC, but Top label resolvers share the full snapshot so every
+ * pill, modal, and surface reads the same data. MCP/plugin detection cost
+ * stays bounded by the server's long-lived cache/in-flight guard.
+ */
+async function liveSnapshotFor(ctx: PillLiveContext): Promise<SegmentSnapshot> {
   const cached = liveSnapshots.get(ctx.agentId);
   let data = cached?.data;
   const cacheAge = cached?.updatedAt ? Date.now() - cached.updatedAt : Infinity;
@@ -292,8 +280,7 @@ async function liveSnapshotFor(
     if (rpcInvoker) {
       const params: Record<string, unknown> = {};
       if (cached?.workspaceDirectory) params.directory = cached.workspaceDirectory;
-      if (fields && fields.length > 0) params.fields = fields;
-      const cacheKey = `${ctx.agentId}::${JSON.stringify(params)}`;
+      const cacheKey = ctx.agentId;
       let inflight = liveSnapshotInflight.get(cacheKey);
       if (!inflight && cacheAge > LIVE_SNAPSHOT_TTL_MS) {
         inflight = (async () => {
@@ -307,11 +294,7 @@ async function liveSnapshotFor(
         })();
         liveSnapshotInflight.set(cacheKey, inflight);
       }
-      const fresh = inflight
-        ? await inflight
-        : cacheAge <= LIVE_SNAPSHOT_TTL_MS
-          ? null
-          : null;
+      const fresh = inflight ? await inflight : null;
       if (fresh) {
         data = { ...(data ?? {}), ...fresh } as SystemResources;
         updateLiveSnapshot(ctx.agentId, { data });
@@ -328,8 +311,7 @@ async function liveSnapshotFor(
 
 function singleItemLabelResolver(item: PillItemType) {
   return async (ctx: PillLiveContext) => {
-    const cached = liveSnapshots.get(ctx.agentId);
-    const snap = await liveSnapshotFor(ctx, fieldsForItem(item, cached?.workspaceDirectory));
+    const snap = await liveSnapshotFor(ctx);
     return {
       label: formatSegmentLabel(item, snap),
       icon: formatSegmentIcon(item, snap),
@@ -641,8 +623,16 @@ function PillItemContent({
 
 type SettingsListener = (settings: TopSettings) => void;
 const settingsListeners = new Set<SettingsListener>();
+let lastNotifiedSettings: TopSettings | null = null;
 
 export function notifySettingsChanged(settings: TopSettings) {
+  if (!shouldEmitSnapshotUpdate(
+    lastNotifiedSettings as unknown as Record<string, unknown> | null,
+    settings as unknown as Record<string, unknown>,
+  )) {
+    return;
+  }
+  lastNotifiedSettings = settings;
   for (const listener of settingsListeners) {
     try {
       listener(settings);
@@ -676,24 +666,21 @@ export function SingleItemPillView({
     lastUsage: (a as any)?.lastUsage,
   }));
 
-  const neededFields = useMemo(() => {
+  const needsResource = useMemo(() => {
     switch (item) {
       case "cpu_ram":
-        return ["cpu", "memory"] as ResourceField[];
-      case "branch":
-        return workspaceDirectory ? (["branch"] as ResourceField[]) : [];
-    case "load":
-        return ["load"] as ResourceField[];
+      case "load":
       case "uptime":
-        return ["uptime"] as ResourceField[];
       case "mcp":
-        return ["mcp"] as ResourceField[];
+        return true;
+      case "branch":
+        return Boolean(workspaceDirectory);
       default:
-        return [] as ResourceField[];
+        return false;
     }
   }, [item, workspaceDirectory]);
 
-  const shouldPoll = neededFields.length > 0;
+  const shouldPoll = needsResource;
   const { data, isError, isLoading } = useTopResourceQuery(workspaceDirectory, {
     enabled: shouldPoll,
     staleTime: 2500,
@@ -717,8 +704,21 @@ export function SingleItemPillView({
   const targetTab = defaultTab ?? getItemTab(item);
 
   if (item === "mcp") {
-    if (isLoading || !data || !data?.mcpInstalled) {
+    if (data && !data.mcpInstalled) {
       return null;
+    }
+    if (isLoading || !data) {
+      return (
+        <Pressable
+          onPress={() => open(targetTab)}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+          style={styles.pillContainer}
+        >
+          <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+            MCP…
+          </Text>
+        </Pressable>
+      );
     }
   }
 
@@ -770,9 +770,11 @@ export function SingleItemPillView({
 
 function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalTab>) {
   const { colors } = usePluginTheme();
-  const { settings, updateSettings } = usePluginSettings(topSettingsContract, {
-    refetchInterval: 5000,
-  });
+  // No background settings poll here: the hook re-verifies on mount and
+  // window focus, and mutations invalidate the shared settings cache.
+  // Polling from every mounted pill/modal/surface multiplied daemon reads
+  // with no value change; fan-out stays guarded by notifySettingsChanged.
+  const { settings, updateSettings } = usePluginSettings(topSettingsContract);
   const flags = legacyFlagView(settings);
 
   useEffect(() => {
@@ -1151,11 +1153,12 @@ function MetricSurfaceMatrix({
 
 function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: ResourceModalProps) {
   const { colors, padding } = usePluginTheme();
+  // Settings re-verify on mount/focus via hook defaults; the settings tab
+  // refetches explicitly below. No background poll: the modal only lives
+  // while open. Custom-pill definitions are a separate data source and keep
+  // their own lightweight poll while the modal is mounted.
   const { settings, updateSettings, resetSettings, refetch: refetchSettings } = usePluginSettings(
     topSettingsContract,
-    {
-      refetchInterval: 2000,
-    },
   );
   const { data: customPillList } = useRpcQuery(listCustomPillsRpc, EMPTY_PARAMS, {
     refetchInterval: 5000,

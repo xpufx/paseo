@@ -14,6 +14,7 @@ import {
   CardHeader,
   usePluginSettings,
   usePluginTheme,
+  shouldEmitSnapshotUpdate,
 } from "./vendor/paseo-plugin-helper/index";
 import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
@@ -42,15 +43,24 @@ const MEM_THRESHOLDS = { warning: 70, danger: 85 };
 export function TopDashboardSurface(_props: PluginSurfaceProps) {
   const { colors } = usePluginTheme();
   const [activeTab, setActiveTab] = useState<SurfaceTab>("system");
+  // No background settings poll: mount/focus verification plus mutation
+  // invalidation keep the dashboard in sync without daemon churn.
   const { settings, updateSettings, resetSettings } = usePluginSettings(
     topSettingsContract,
-    { refetchInterval: 2000 },
   );
+  // The dashboard surface carries no workspace scope, so it reads the
+  // host-wide entry of the same shared snapshot path the pill and modal use
+  // per workspace (see useTopResourceQuery).
   const { data, isLoading } = useTopResourceQuery();
 
   const pillHidden = settings.showComposerPill === false;
 
   const applySettings = (updates: Partial<TopSettings>) => {
+    const changed = Object.entries(updates).some(
+      ([key, value]) =>
+        !Object.is((settings as Record<string, unknown>)[key], value),
+    );
+    if (!changed) return;
     const next = { ...settings, ...updates };
     updateSettings(updates);
     notifySettingsChanged(next);
