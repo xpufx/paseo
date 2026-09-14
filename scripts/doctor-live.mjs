@@ -385,10 +385,16 @@ async function main() {
   console.log("─".repeat(82));
 
   // Helper Row
+  let helperVersion = "?";
+  try {
+    helperVersion = JSON.parse(
+      fs.readFileSync(path.join(ROOT_DIR, "packages", "paseo-plugin-helper", "package.json"), "utf-8")
+    ).version || "?";
+  } catch {}
   const helperColor = result.helper.status === "synced" ? colors.green : colors.yellow;
   const helperIcon = result.helper.status === "synced" ? "✔" : "▲";
   console.log(
-    `${helperColor}${helperIcon} helper dist${colors.reset.padEnd(6)}: ` +
+    `${helperColor}${helperIcon} helper@${helperVersion}${colors.reset} dist` +
     `${result.helper.status.toUpperCase().padEnd(10)} ` +
     `${colors.gray}(${result.helper.detail})${colors.reset}`
   );
