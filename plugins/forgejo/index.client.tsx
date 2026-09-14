@@ -32,7 +32,7 @@ export default function contribute(client: PluginClientContext) {
     modalIcon: "GitPullRequest",
     icon: "GitPullRequest",
     resolveLabel: (ctx) => resolveForgejoLabel(ctx),
-    refreshIntervalMs: 15000,
+    refreshIntervalMs: 0,
     renderPill: (props) => <ForgejoPill {...props} />,
     renderModal: (props) => <ForgejoIssuesModal {...props} />,
   });

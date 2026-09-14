@@ -20,6 +20,8 @@ import {
   useRpcMutation,
   usePluginTheme,
   copyToClipboard,
+  useResponsive,
+  getClientHost,
   type RenderModalProps,
   type RenderPillProps,
   type PillLiveContext,
@@ -54,13 +56,13 @@ interface IssueCountCache {
 
 const countCache = new Map<string, IssueCountCache>();
 
-function readCachedLabel(ctx: PillLiveContext): string | undefined {
+function readCachedLabel(ctx: PillLiveContext): string {
   const cached = countCache.get(ctx.agentId);
-  if (!cached) return undefined;
-  return formatIssueCountLabel(cached.count);
+  if (!cached || cached.count == null) return "iss";
+  return `${cached.count}`;
 }
 
-export function resolveForgejoLabel(ctx: PillLiveContext): string | undefined {
+export function resolveForgejoLabel(ctx: PillLiveContext): string {
   return readCachedLabel(ctx);
 }
 
@@ -93,13 +95,27 @@ function useOpenIssues(workspaceId: string, agentId: string) {
 
 export function ForgejoPill({ agentId, workspaceId, isOpen }: RenderPillProps) {
   const { colors } = usePluginTheme();
+  const { isCompact } = useResponsive();
+  const { Icon } = getClientHost();
   const { data, isLoading } = useOpenIssues(workspaceId, agentId);
-  const label = isLoading && !data ? "..." : formatIssueCountLabel(
-    data && !data.error ? data.issues.length : null,
-  );
+  const count = data && !data.error ? data.issues.length : null;
+  const label =
+    isLoading && !data
+      ? "..."
+      : isCompact
+        ? (count == null ? "iss" : `${count}`)
+        : formatIssueCountLabel(count);
   return (
-    <View style={styles.pillContainer}>
-      <Text style={[styles.title, { color: colors.foreground }, isOpen && styles.titleActive]}>
+    <View
+      accessibilityLabel={`Forgejo ${formatIssueCountLabel(count)}`}
+      style={styles.pillContainer}
+    >
+      <Icon name="GitPullRequest" size={13} color={colors.foreground} />
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="clip"
+        style={[styles.title, { color: colors.foreground }, isOpen && styles.titleActive]}
+      >
         {label}
       </Text>
     </View>
@@ -644,13 +660,18 @@ const styles = StyleSheet.create({
   pillContainer: {
     flexDirection: "row",
     alignItems: "center",
+    flexWrap: "nowrap",
     gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 6,
+    minWidth: 44,
+    minHeight: 22,
+    overflow: "hidden",
+    flexShrink: 1,
   },
   title: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "500",
+    flexShrink: 1,
   },
   titleActive: {
     fontWeight: "700",
