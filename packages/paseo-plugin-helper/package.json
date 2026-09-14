@@ -66,7 +66,7 @@
     "url": "https://github.com/xpufx/paseo-plugin-helper.git"
   },
   "peerDependencies": {
-    "@getpaseo/plugin": ">=0.7.0 || >=0.8.0-beta.1",
+    "@getpaseo/plugin": ">=0.8.0",
     "@tanstack/react-query": ">=5.0.0",
     "react": ">=18.0.0",
     "react-native": ">=0.70.0",
