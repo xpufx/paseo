@@ -394,7 +394,7 @@ async function main() {
   const helperColor = result.helper.status === "synced" ? colors.green : colors.yellow;
   const helperIcon = result.helper.status === "synced" ? "✔" : "▲";
   console.log(
-    `${helperColor}${helperIcon} helper@${helperVersion}${colors.reset} dist` +
+    `${helperColor}${helperIcon} helper@${helperVersion} dist: ${colors.reset}` +
     `${result.helper.status.toUpperCase().padEnd(10)} ` +
     `${colors.gray}(${result.helper.detail})${colors.reset}`
   );
