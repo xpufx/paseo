@@ -245,6 +245,14 @@ export interface ComposerPillButtonContribution {
   button: ComposerPillButtonDescriptor;
 }
 
+export interface ComposerPillSdkContribution {
+  id: string;
+  workspaceId: string;
+  agentId: string;
+  button: Record<string, any>;
+  [key: string]: any;
+}
+
 export interface ComposerPillRegistrationHandle {
   update(patch: Record<string, any>): void;
   remove(): void;
@@ -254,7 +262,10 @@ export type ComposerPillRegistration = PluginCleanup | ComposerPillRegistrationH
 
 export interface ComposerPillRegistrar {
   addComposerPill(
-    contribution: ComposerPillContribution | ComposerPillButtonContribution,
+    contribution:
+      | ComposerPillContribution
+      | ComposerPillButtonContribution
+      | ComposerPillSdkContribution,
   ): ComposerPillRegistration;
   paseo: {
     agents: HostAgentsApi;
