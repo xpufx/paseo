@@ -4,7 +4,8 @@ import React, { useCallback, useMemo, useState } from "react";
 import { Clipboard, Pressable, Text, View } from "react-native";
 import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { truncate } from "paseo-plugin-helper/shared";
-import { Badge, EmptyState, StatusDot, TextInput } from "paseo-plugin-helper/client";
+import { Badge, EmptyState, StatusDot, Tabs, TextInput } from "paseo-plugin-helper/client";
+import { SettingsPrototype } from "./settings-prototype";
 import { formatPeerDisplay } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 import {
@@ -54,6 +55,8 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
   const callIntroduce = useRpc(introduceAgentsRpc);
   const [newName, setNewName] = useState("");
   const [newValue, setNewValue] = useState("");
+  // Issue #97: prototype surface coexists with the current page behind tabs.
+  const [settingsTab, setSettingsTab] = useState("current");
   const [actionResult, setActionResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [prereqsCollapsed, setPrereqsCollapsed] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -431,6 +434,18 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
       contentContainerStyle={styles.screenContent}
       keyboardShouldPersistTaps="handled"
     >
+      <Tabs
+        tabs={[
+          { id: "current", label: "Current" },
+          { id: "prototype", label: "Prototype", badge: "new" },
+        ]}
+        activeTab={settingsTab}
+        onTabChange={setSettingsTab}
+      />
+      {settingsTab === "prototype" ? (
+        <SettingsPrototype />
+      ) : (
+      <>
       <View style={styles.titleRow}>
         <Text style={styles.title}>X-comms</Text>
         <Pressable
@@ -869,6 +884,8 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
         </Modal.Content>
       </Modal>
       <ViaXComms theme={theme} />
+      </>
+      )}
     </ScrollView>
   );
 }
