@@ -1,13 +1,13 @@
 import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, c as PluginTheme, a as SettingsContract, b as CustomPillState } from '../custom-pills-BRMMkgfE.js';
 import * as React from 'react';
 import React__default, { ReactNode, Ref, ComponentType } from 'react';
-import { c as HostLayout, d as HostPillProps, e as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, f as HostAgentPanelProps, g as HostWorkspacePanelProps, h as HostToast, i as HostIconProps } from '../host-BtDV7gIJ.js';
-export { j as ClientHostDeps, k as ComposerPillButtonContribution, l as ComposerPillButtonDescriptor, m as ComposerPillButtonIcon, C as ComposerPillContribution, n as ComposerPillRegistration, o as ComposerPillRegistrationHandle, H as HostAgentRef, b as HostAgentUpdate, p as HostAgentsApi, q as HostCopyText, r as HostFlatList, s as HostIcon, t as HostModal, u as HostModalContentProps, v as HostModalProps, w as HostRpcContract, x as HostScrollView, y as HostTextInput, z as HostTheme, A as HostThemeColors, B as HostUseRpc, D as HostUseToast, E as getClientHost, F as getOptionalClientHost, G as initClientHelpers, I as isClientHostInitialized, J as selectHostScrollView } from '../host-BtDV7gIJ.js';
+import { c as HostLayout, d as HostPillProps, e as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, f as HostAgentPanelProps, g as HostWorkspacePanelProps, h as HostToast, i as HostIconProps } from '../host-ByMrX8Ua.js';
+export { j as ClientHostDeps, k as ComposerPillButtonContribution, l as ComposerPillButtonDescriptor, m as ComposerPillButtonIcon, C as ComposerPillContribution, n as ComposerPillRegistration, o as ComposerPillRegistrationHandle, p as ComposerPillSdkContribution, H as HostAgentRef, b as HostAgentUpdate, q as HostAgentsApi, r as HostCopyText, s as HostFlatList, t as HostIcon, u as HostModal, v as HostModalContentProps, w as HostModalProps, x as HostRpcContract, y as HostScrollView, z as HostTextInput, A as HostTheme, B as HostThemeColors, D as HostUseRpc, E as HostUseToast, F as getClientHost, G as getOptionalClientHost, I as initClientHelpers, J as isClientHostInitialized, K as selectHostScrollView } from '../host-ByMrX8Ua.js';
 import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView } from 'react-native';
 import { M as MetricThresholds, T as TruncatePathOptions, S as SuiteSettings } from '../suite-settings-XP6-vljd.js';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.js';
-import * as _tanstack_react_query from '@tanstack/react-query';
 import { UseMutationOptions, UseQueryOptions, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import * as _tanstack_query_core from '@tanstack/query-core';
 import 'zod';
 
 type RadiusStyle = "sharp" | "rounded" | "pill";
@@ -1032,8 +1032,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_react_query.FetchStatus;
+    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_query_core.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1062,8 +1062,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_react_query.FetchStatus;
+    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_query_core.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1092,8 +1092,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_react_query.FetchStatus;
+    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_query_core.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1122,8 +1122,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_react_query.FetchStatus;
+    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_query_core.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1152,8 +1152,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_react_query.FetchStatus;
+    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_query_core.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1182,8 +1182,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_react_query.FetchStatus;
+    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_query_core.FetchStatus;
 };
 
 interface UsePluginSettingsOptions<TSettings> {

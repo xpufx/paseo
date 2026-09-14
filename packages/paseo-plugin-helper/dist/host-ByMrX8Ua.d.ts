@@ -182,17 +182,24 @@ interface ComposerPillButtonContribution {
     agentId: string;
     button: ComposerPillButtonDescriptor;
 }
+interface ComposerPillSdkContribution {
+    id: string;
+    workspaceId: string;
+    agentId: string;
+    button: Record<string, any>;
+    [key: string]: any;
+}
 interface ComposerPillRegistrationHandle {
     update(patch: Record<string, any>): void;
     remove(): void;
 }
 type ComposerPillRegistration = PluginCleanup | ComposerPillRegistrationHandle;
 interface ComposerPillRegistrar {
-    addComposerPill(contribution: ComposerPillContribution | ComposerPillButtonContribution): ComposerPillRegistration;
+    addComposerPill(contribution: ComposerPillContribution | ComposerPillButtonContribution | ComposerPillSdkContribution): ComposerPillRegistration;
     paseo: {
         agents: HostAgentsApi;
     };
 }
 declare function isClientHostInitialized(): boolean;
 
-export { type HostThemeColors as A, type HostUseRpc as B, type ComposerPillContribution as C, type HostUseToast as D, getClientHost as E, getOptionalClientHost as F, initClientHelpers as G, type HostAgentRef as H, isClientHostInitialized as I, selectHostScrollView as J, type PluginCleanup as P, type HostSurfaceProps as a, type HostAgentUpdate as b, type HostLayout as c, type HostPillProps as d, type ComposerPillRegistrar as e, type HostAgentPanelProps as f, type HostWorkspacePanelProps as g, type HostToast as h, type HostIconProps as i, type ClientHostDeps as j, type ComposerPillButtonContribution as k, type ComposerPillButtonDescriptor as l, type ComposerPillButtonIcon as m, type ComposerPillRegistration as n, type ComposerPillRegistrationHandle as o, type HostAgentsApi as p, type HostCopyText as q, type HostFlatList as r, type HostIcon as s, type HostModal as t, type HostModalContentProps as u, type HostModalProps as v, type HostRpcContract as w, type HostScrollView as x, type HostTextInput as y, type HostTheme as z };
+export { type HostTheme as A, type HostThemeColors as B, type ComposerPillContribution as C, type HostUseRpc as D, type HostUseToast as E, getClientHost as F, getOptionalClientHost as G, type HostAgentRef as H, initClientHelpers as I, isClientHostInitialized as J, selectHostScrollView as K, type PluginCleanup as P, type HostSurfaceProps as a, type HostAgentUpdate as b, type HostLayout as c, type HostPillProps as d, type ComposerPillRegistrar as e, type HostAgentPanelProps as f, type HostWorkspacePanelProps as g, type HostToast as h, type HostIconProps as i, type ClientHostDeps as j, type ComposerPillButtonContribution as k, type ComposerPillButtonDescriptor as l, type ComposerPillButtonIcon as m, type ComposerPillRegistration as n, type ComposerPillRegistrationHandle as o, type ComposerPillSdkContribution as p, type HostAgentsApi as q, type HostCopyText as r, type HostFlatList as s, type HostIcon as t, type HostModal as u, type HostModalContentProps as v, type HostModalProps as w, type HostRpcContract as x, type HostScrollView as y, type HostTextInput as z };
