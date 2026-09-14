@@ -265,7 +265,7 @@ const tabs: TabItem[] = [
 
 ## Interactive Showcase Demo
 
-The repository includes a runnable reference plugin in [`demo/`](demo/README.md) (`helper-demo`) demonstrating all components, responsive mobile bottom-sheet behaviors, an interactive Visual Flair Studio, and the `<AboutSection>` component with auto-resolved GitHub branding. See the [**Demo README**](demo/README.md) for installation and walkthrough details.
+Live Showcase coverage lives in the monorepo's `plugins/demo` conformance testbed (all components, responsive behaviors, Flair Studio, `AboutSection` branding). The legacy `demo/` reference tree was removed.
 
 ---
 
