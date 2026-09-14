@@ -174,7 +174,14 @@ export function registerComposerPill<TPayload = any>(
   const openers = new Map<string, (payload?: TPayload) => void>();
   const pills = new Map<string, { dispose: () => void; timer?: ReturnType<typeof setInterval> }>();
   let detectedShape: "button" | "legacy" | null = null;
+  let disposed = false;
 
+  // 0.8 popover scroll ownership (#110): exactly ONE vertical scroll owner on
+  // this path — the inner ModalBody ScrollView (flex:1 + minHeight:0). The outer
+  // popoverContainer below is a plain View (locked: no ScrollView, overflow
+  // hidden), never a scroller. If the outer ever scrolls again we get both-own
+  // (mobile gesture jam); if the inner loses flex:1/minHeight:0 we get
+  // neither-own (dead content that never moves). Keep it outer-locked ⟺ inner-owns.
   function PillPopoverContent(props: {
     agentId: string;
     workspaceId: string;
@@ -363,7 +370,7 @@ export function registerComposerPill<TPayload = any>(
   }
 
   function addPill(agentId: string, workspaceId: string) {
-    if (pills.has(agentId)) return;
+    if (disposed || pills.has(agentId)) return;
     try {
       if (!detectedShape) {
         detectedShape = detectShape(agentId, workspaceId);
@@ -432,6 +439,7 @@ export function registerComposerPill<TPayload = any>(
   }
 
   const unsubscribe = client.paseo.agents.subscribe((update) => {
+    if (disposed) return;
     if ("agentId" in update && update.kind === "remove") {
       removePill(update.agentId);
       return;
@@ -445,6 +453,7 @@ export function registerComposerPill<TPayload = any>(
   client.paseo.agents
     .list()
     .then((result) => {
+      if (disposed) return;
       for (const { agent } of result.entries) {
         if (agent.workspaceId) addPill(agent.id, agent.workspaceId);
       }
@@ -452,6 +461,8 @@ export function registerComposerPill<TPayload = any>(
     .catch(() => {});
 
   return () => {
+    if (disposed) return;
+    disposed = true;
     unsubscribe();
     for (const entry of pills.values()) {
       if (entry.timer) clearInterval(entry.timer);

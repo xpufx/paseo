@@ -4,4 +4,5 @@ export * from "./formatters";
 export * from "./settings";
 export * from "./suite-settings";
 export * from "./async";
+export * from "./suppressed";
 export * from "./custom-pills";

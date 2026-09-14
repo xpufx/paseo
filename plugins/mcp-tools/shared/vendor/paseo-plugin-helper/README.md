@@ -1,6 +1,6 @@
 # Vendored paseo-plugin-helper (Track B of issue #71, plugin #100)
 
-Pinned helper version: 0.4.0-beta.12.
+Pinned helper version: 0.4.0-beta.12
 
 Docs: https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper — npm: https://www.npmjs.com/package/paseo-plugin-helper
 
