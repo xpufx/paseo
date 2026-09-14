@@ -31,12 +31,11 @@ Everything else (`spec/*`, `attention/*`, `state/*`, missing labels, one-word ti
 ## 4. Pre-flight before human testing (only real gate)
 
 Before `state/3-verify` + `attention/2-user` ("real-use test this"):
-- Tree clean, committed, pushed, tests + typecheck green.
-- Runtime sync via `make doctor` (or `reload` to auto-synchronize): helper `dist` fresh, plugin `shared/version.ts` matches HEAD, live daemon executing latest commit.
+- Tree clean, committed, pushed, tests + typecheck green.- Runtime sync via `make doctor` (or `reload` to auto-synchronize): helper `dist` fresh, plugin `shared/version.ts` matches HEAD, live daemon executing latest commit.
 - **Source-pinning gate:** `paseo plugin ls` — a `git`-sourced plugin must have checkout COMMIT ≥ expected HEAD or do not present; fix delivery first. State source + commit in every presentation.
 - Client refresh flag: note whether the operator needs `Ctrl+R` / re-open.
 - Never present unverified work.
-
+- The presentation lives on the board: post the pre-flight summary + operator checklist as an issue comment (lasting record). Chat gets a one-line pointer, never the substance.
 ## 5. Verify is non-binding
 
 `state/3-verify` never means "blocked on human forever." If the operator doesn't test: close as superseded/done with rationale, requeue, or verify by proxy — and say so on the ticket. No mutual-wait deadlocks.
