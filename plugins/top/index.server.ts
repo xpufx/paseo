@@ -72,6 +72,9 @@ export default function contribute(server: PluginServerContext) {
 
   const turnStartTimes = new Map<string, number>();
   const turnGitBefore = new Map<string, { insertions: number; deletions: number; filesChanged: number }>();
+  // Interrupt fires turn_ended twice for the same turnId (canceled + follow-up):
+  // one card per turnId, first event wins so the canceled state is kept.
+  const appendedTurnIds = new Set<string>();
 
   const unsubscribeTurnStarted = server.on("agent.turn_started", (event, context) => {
     turnStartTimes.set(event.agent.id, Date.now());
@@ -120,6 +123,9 @@ export default function contribute(server: PluginServerContext) {
       turnStartTimes.delete(event.agent.id);
       const gitBefore = turnGitBefore.get(event.agent.id);
       turnGitBefore.delete(event.agent.id);
+      if (event.turnId && appendedTurnIds.has(event.turnId)) {
+        return;
+      }
       const durationMs = startTime ? Date.now() - startTime : undefined;
 
       let agentModel: string | null = null;
@@ -187,6 +193,10 @@ export default function contribute(server: PluginServerContext) {
         version: TOP_TIMELINE_VERSION,
         data: telemetry,
       });
+      if (event.turnId) {
+        if (appendedTurnIds.size > 1000) appendedTurnIds.clear();
+        appendedTurnIds.add(event.turnId);
+      }
 
       log.info("Appended turn telemetry to timeline", {
         agentId: event.agent.id,
