@@ -36,7 +36,6 @@ Before `state/3-verify` + `attention/2-user` ("real-use test this"):
 - Client refresh flag: note whether the operator needs `Ctrl+R` / re-open.
 - Never present unverified work.
 - The presentation lives on the board: post the pre-flight summary + operator checklist as an issue comment (lasting record). Chat gets a one-line pointer, never the substance.
-- Assign every verify-pending ticket to the operator (`echo '{"assignees":["oktay"]}' | fgjx api repos/<owner>/<repo>/issues/<n> --hostname <host> -X PATCH --input -`). The operator triages by assignee, not labels.
 ## 5. Verify is non-binding
 
 `state/3-verify` never means "blocked on human forever." If the operator doesn't test: close as superseded/done with rationale, requeue, or verify by proxy — and say so on the ticket. No mutual-wait deadlocks.
