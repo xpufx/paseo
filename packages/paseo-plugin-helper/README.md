@@ -51,6 +51,14 @@ To guarantee compliance with Paseo's bundler and compiler rules (no Node builtin
 
 ---
 
+## Bundle Posture (Tree-Shaking & Minification)
+
+Builds run through tsup with `treeshake: true` and `minify: true` (sourcemaps on, `.d.ts` unaffected); the package declares `"sideEffects": false` so bundlers may drop unused modules. All module-level state is inert until an exported function runs: no CSS/polyfill imports, no DOM/global writes at import time (the icon name-cache `Set` and `globalThis`/`process.env` reads all live inside functions), and every `console.*` call sits behind a runtime code path. Import via the subpaths above to narrow what each plugin pulls.
+
+What the helper cannot decide: final per-plugin bundle size is set by the Paseo daemon's own esbuild pass at plugin install time (its minify/tree-shaking settings are host-side). What we guarantee: shipped `dist` is already minified, side-effect-free per module, and split by entry point so the daemon bundler has the smallest possible input to work with.
+
+---
+
 ## Installation
 
 Install directly from GitHub:
