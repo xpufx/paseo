@@ -186,6 +186,8 @@ async function main() {
     helper: null,
     plugins: [],
     nestedHelperShadows: [],
+    sdkDrift: [],
+    npmHelperDeps: [],
     reloaded: [],
   };
 
@@ -325,6 +327,23 @@ async function main() {
       detail: message,
     };
 
+    // SDK + helper-dep audit: every plugin should pin the same
+    // @getpaseo/plugin range, and none should take the helper from npm
+    // post-vendoring (vendored trees are the install path).
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(fullPath, "package.json"), "utf-8"));
+      const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
+      pluginData.sdk = deps["@getpaseo/plugin"] || "-";
+      pluginData.helperDep = deps["paseo-plugin-helper"] || null;
+      if (pluginData.helperDep) {
+        result.npmHelperDeps.push({ plugin: name, range: pluginData.helperDep });
+        result.ready = false;
+      }
+    } catch {
+      pluginData.sdk = "?";
+      pluginData.helperDep = null;
+    }
+
     result.plugins.push(pluginData);
 
     if (shouldReload && configured && (status === "stale-daemon" || status === "stale-stamp" || status === "stopped")) {
@@ -338,6 +357,15 @@ async function main() {
         pluginData.detail = `Reload failed: ${e.message}`;
       }
     }
+  }
+
+  // SDK drift: distinct declared ranges across plugins (ignoring "-" and "?")
+  const sdkRanges = new Set(
+    result.plugins.map((p) => p.sdk).filter((s) => s && s !== "-" && s !== "?")
+  );
+  if (sdkRanges.size > 1) {
+    result.sdkDrift = [...sdkRanges].sort();
+    result.ready = false;
   }
 
   // 3. Output Handling
@@ -408,6 +436,17 @@ async function main() {
     console.log(`${colors.yellow}⚠️  Action Required to Test Fresh Code:${colors.reset}`);
     if (result.helper.status === "stale") {
       console.log(`  1. Rebuild helper: ${colors.cyan}npm run build --workspace=packages/paseo-plugin-helper${colors.reset}`);
+    }
+    if (result.sdkDrift.length > 0) {
+      console.log(`  ⚠️  SDK drift across plugins (expected one range): ${colors.cyan}${result.sdkDrift.join("  vs  ")}${colors.reset}`);
+      for (const p of result.plugins) {
+        console.log(`      ${p.name}: ${p.sdk}`);
+      }
+    }
+    if (result.npmHelperDeps.length > 0) {
+      for (const h of result.npmHelperDeps) {
+        console.log(`  ⚠️  plugins/${h.plugin} still depends on npm paseo-plugin-helper@${h.range} (expected vendored, no dep)`);
+      }
     }
     if (result.nestedHelperShadows.length > 0) {
       for (const s of result.nestedHelperShadows) {
