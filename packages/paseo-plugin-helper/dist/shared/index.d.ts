@@ -14,4 +14,16 @@ declare class TimeoutError extends Error {
  */
 declare function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label?: string): Promise<T>;
 
-export { TimeoutError, withTimeout };
+interface SuppressedSink {
+    debug?(message: string, data?: unknown): void;
+    warn?(message: string, data?: unknown): void;
+}
+/**
+ * Surfaces a caught/suppressed error to the plugin log at debug level
+ * (warn when `level: "warn"`). Fire-and-forget `catch(() => undefined)`
+ * sites should route through here so `paseo plugin logs` shows them
+ * when dev debug logging is enabled.
+ */
+declare function reportSuppressed(sink: Pick<SuppressedSink, "debug" | "warn"> | undefined, context: string, error: unknown, level?: "debug" | "warn"): void;
+
+export { type SuppressedSink, TimeoutError, reportSuppressed, withTimeout };

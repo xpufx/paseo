@@ -263,6 +263,21 @@ async function withTimeout(promise, timeoutMs, label = "Operation") {
     }
   }
 }
+
+// src/shared/suppressed.ts
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function reportSuppressed(sink, context, error, level = "debug") {
+  try {
+    if (level === "warn") {
+      sink?.warn?.(`${context}: ${messageOf(error)}`, error);
+    } else {
+      sink?.debug?.(`${context}: ${messageOf(error)}`, error);
+    }
+  } catch {
+  }
+}
 var CustomPillThresholdsSchema = z.object({
   warning: z.number().optional(),
   danger: z.number().optional(),
@@ -369,6 +384,6 @@ function formatPillDisplay(rawValue, prefix, suffix) {
   return `${pre}${cleaned}${suf}`;
 }
 
-export { CustomPillDefinitionSchema, CustomPillModalSchema, CustomPillThresholdsSchema, SettingsEmptyInputSchema, SuiteSettingsContract, SuiteSettingsSchema, TimeoutError, defineContract, defineRpc, defineSettingsContract, formatBytes, formatCompactNumber, formatDuration, formatNumber, formatPillDisplay, formatUptime, parseNumericPillValue, resolveCustomPillStatus, resolveMetricStatus, stripAnsi, truncate, truncateMiddle, truncatePath, withTimeout };
+export { CustomPillDefinitionSchema, CustomPillModalSchema, CustomPillThresholdsSchema, SettingsEmptyInputSchema, SuiteSettingsContract, SuiteSettingsSchema, TimeoutError, defineContract, defineRpc, defineSettingsContract, formatBytes, formatCompactNumber, formatDuration, formatNumber, formatPillDisplay, formatUptime, parseNumericPillValue, reportSuppressed, resolveCustomPillStatus, resolveMetricStatus, stripAnsi, truncate, truncateMiddle, truncatePath, withTimeout };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

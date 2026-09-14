@@ -265,6 +265,21 @@ async function withTimeout(promise, timeoutMs, label = "Operation") {
     }
   }
 }
+
+// src/shared/suppressed.ts
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function reportSuppressed(sink, context, error, level = "debug") {
+  try {
+    if (level === "warn") {
+      sink?.warn?.(`${context}: ${messageOf(error)}`, error);
+    } else {
+      sink?.debug?.(`${context}: ${messageOf(error)}`, error);
+    }
+  } catch {
+  }
+}
 var CustomPillThresholdsSchema = zod.z.object({
   warning: zod.z.number().optional(),
   danger: zod.z.number().optional(),
@@ -388,6 +403,7 @@ exports.formatNumber = formatNumber;
 exports.formatPillDisplay = formatPillDisplay;
 exports.formatUptime = formatUptime;
 exports.parseNumericPillValue = parseNumericPillValue;
+exports.reportSuppressed = reportSuppressed;
 exports.resolveCustomPillStatus = resolveCustomPillStatus;
 exports.resolveMetricStatus = resolveMetricStatus;
 exports.stripAnsi = stripAnsi;

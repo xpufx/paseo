@@ -946,6 +946,26 @@ var LEVEL_SEVERITY = {
   warn: 30,
   error: 40
 };
+function isLogLevel(value) {
+  return value === "debug" || value === "info" || value === "warn" || value === "error";
+}
+function resolveMinLevelFromEnv(env = process.env) {
+  const raw = env.PASEO_PLUGIN_LOG_LEVEL ?? env.PASEO_LOG_LEVEL;
+  if (typeof raw === "string" && isLogLevel(raw.trim().toLowerCase())) {
+    return raw.trim().toLowerCase();
+  }
+  const debugFlag = env.PASEO_DEBUG ?? env.PASEO_PLUGIN_DEBUG;
+  if (typeof debugFlag === "string" && ["1", "true", "yes", "debug"].includes(debugFlag.trim().toLowerCase())) {
+    return "debug";
+  }
+  return void 0;
+}
+function isProductionEnv(env = process.env) {
+  return (env.NODE_ENV ?? "").trim().toLowerCase() === "production";
+}
+function resolveDefaultMinLevel(env = process.env) {
+  return resolveMinLevelFromEnv(env) ?? (isProductionEnv(env) ? "info" : "debug");
+}
 function formatData(data) {
   if (data === void 0) return "";
   if (data instanceof Error) {
@@ -966,7 +986,7 @@ function createPluginLogger(pluginId, options = {}) {
   const {
     banner = true,
     subsystem,
-    minLevel = "info",
+    minLevel = resolveDefaultMinLevel(),
     meta = {}
   } = options;
   const minSeverity = LEVEL_SEVERITY[minLevel];
@@ -1004,6 +1024,10 @@ function createPluginLogger(pluginId, options = {}) {
     },
     error(message, data) {
       emit("error", message, data);
+    },
+    suppressed(context, error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      emit("debug", `${context}: ${detail}`, error);
     },
     child(subsystemOrOptions) {
       const childOptions = typeof subsystemOrOptions === "string" ? { ...options, version: resolvedVer, banner: false, subsystem: subsystemOrOptions } : { ...options, version: resolvedVer, banner: false, ...subsystemOrOptions };
@@ -1096,8 +1120,15 @@ function createPeriodicTask(options) {
       if (onError) {
         try {
           onError(err, failureCount);
-        } catch {
+        } catch (suppressed) {
+          console.debug(
+            `[periodic-task] onError handler failed: ${suppressed instanceof Error ? suppressed.message : String(suppressed)}`
+          );
         }
+      } else {
+        console.debug(
+          `[periodic-task] suppressed error (failure ${failureCount}): ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     } finally {
       inFlight = false;
@@ -2042,7 +2073,11 @@ var WorkspaceBeacon = class {
           workspaceId,
           name: options.a.name ?? options.b.name,
           restoreTitle: true
-        }).catch(() => void 0);
+        }).catch(
+          (err) => this.logger?.debug?.(
+            `WorkspaceBeacon blink restore failed: ${err instanceof Error ? err.message : String(err)}`
+          )
+        );
       }
       resolveDone();
     };
@@ -2059,14 +2094,20 @@ var WorkspaceBeacon = class {
         }
         const state = states[count % 2];
         count += 1;
-        void this.set({ ...state, workspaceId: state.workspaceId ?? workspaceId ?? "" }).catch(() => void 0);
+        void this.set({ ...state, workspaceId: state.workspaceId ?? workspaceId ?? "" }).catch(
+          (err) => this.logger?.debug?.(
+            `WorkspaceBeacon blink tick failed: ${err instanceof Error ? err.message : String(err)}`
+          )
+        );
         if (count >= totalRounds) {
           finish();
         }
       };
       let count = 0;
       void this.set({ ...states[0], workspaceId: states[0].workspaceId ?? workspaceId ?? "" }).catch(
-        () => void 0
+        (err) => this.logger?.debug?.(
+          `WorkspaceBeacon blink tick failed: ${err instanceof Error ? err.message : String(err)}`
+        )
       );
       count = 1;
       if (count >= totalRounds) {
@@ -2075,7 +2116,10 @@ var WorkspaceBeacon = class {
         timer = setInterval(tick, intervalMs);
         this.blinkTimers.set(key, { timer, finish });
       }
-    } catch {
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon blink setup failed: ${err instanceof Error ? err.message : String(err)}`
+      );
       finish();
     }
     return {
@@ -2113,7 +2157,10 @@ var WorkspaceBeacon = class {
       clearInterval(entry.timer);
       try {
         entry.finish();
-      } catch {
+      } catch (err) {
+        this.logger?.debug?.(
+          `WorkspaceBeacon stopAll finish failed: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
     this.blinkTimers.clear();
@@ -2164,7 +2211,10 @@ var WorkspaceBeacon = class {
         );
       }
       return false;
-    } catch {
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon detachLabel failed: ${err instanceof Error ? err.message : String(err)}`
+      );
       return false;
     }
   }
@@ -2213,7 +2263,10 @@ var WorkspaceBeacon = class {
       this.blinkTimers.delete(key);
       try {
         entry.finish();
-      } catch {
+      } catch (err) {
+        this.logger?.debug?.(
+          `WorkspaceBeacon stopBlink finish failed: ${err instanceof Error ? err.message : String(err)}`
+        );
       }
     }
   }
@@ -2222,6 +2275,6 @@ function createWorkspaceBeacon(options = {}) {
   return new WorkspaceBeacon(options);
 }
 
-export { BEACON_COLORS, CpuSampler, CustomPillPoller, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, WorkspaceBeacon, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { BEACON_COLORS, CpuSampler, CustomPillPoller, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, McpConfigPaths, PluginStorage, WorkspaceBeacon, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, isProductionEnv, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolveDefaultMinLevel, resolveMinLevelFromEnv, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
 //# sourceMappingURL=index.js.map
 //# sourceMappingURL=index.js.map

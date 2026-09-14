@@ -6,8 +6,8 @@ export { j as ClientHostDeps, k as ComposerPillButtonContribution, l as Composer
 import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView } from 'react-native';
 import { M as MetricThresholds, T as TruncatePathOptions, S as SuiteSettings } from '../suite-settings-DZeCSD6_.cjs';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.cjs';
+import * as _tanstack_react_query from '@tanstack/react-query';
 import { UseMutationOptions, UseQueryOptions, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import * as _tanstack_query_core from '@tanstack/query-core';
 import 'zod';
 
 type RadiusStyle = "sharp" | "rounded" | "pill";
@@ -721,6 +721,22 @@ interface ModalBodyProps {
     contentContainerStyle?: StyleProp<ViewStyle>;
     header?: ReactNode;
     headerStyle?: StyleProp<ViewStyle>;
+    /**
+     * "scroll" (default): header renders INSIDE the ScrollView and moves with
+     * content. "pinned": header renders above the scroller in a flex column.
+     * Default is "scroll" per #110 fallback: the host enforces its own outer
+     * scroller on mobile regardless of our locks, so a pinned header either
+     * fights it or goes dead — Tabs-scroll-with-content (mcp-tools pattern)
+     * always moves because it rides whichever scroller actually owns gestures.
+     */
+    headerMode?: "pinned" | "scroll";
+    /**
+     * When set, ModalBody logs measured layout values (viewport height,
+     * content height) via onLayout/onContentSizeChange under this tag, e.g.
+     * `[ModalBody:mcp] viewport=… content=…`. Use on-device to see which
+     * container actually scrolls instead of guessing from theory (#110).
+     */
+    debugTag?: string;
     extraBottomInset?: number;
     refreshing?: boolean;
     onRefresh?: () => void | Promise<void>;
@@ -729,6 +745,17 @@ interface ModalBodyProps {
 }
 /**
  * Mobile-safe scrollable body for Paseo <Modal.Content>.
+ * Scroll ownership (#110, 0.8 popover path): exactly ONE vertical scroll owner —
+ * this inner ScrollView (flex:1 + minHeight:0). The outer (popoverContainer plain
+ * View / <Modal.Content scrollable={false}>) stays locked and never scrolls.
+ * Give the outer a scroller and gestures jam (both own); drop flex:1/minHeight:0
+ * here and content goes dead (neither owns).
+ * #110 second verify FAILED on device (no change): theory above did not move
+ * the host, so do not trust it blindly — pass debugTag to log MEASURED
+ * viewport/content heights, and prefer headerMode="scroll" (default): the
+ * header rides INSIDE the scroller (mcp-tools Tabs-scroll-with-content
+ * pattern) so it moves with whichever scroller the host actually enforces.
+ * "pinned" is opt-in and only valid when the outer is provably locked.
  * Automatically calculates responsive bottom padding so controls are not cut off
  * by mobile home bars or virtual keyboards.
  * Supports pull-to-refresh on mobile via `refreshing` and `onRefresh`.
@@ -741,7 +768,7 @@ interface ModalBodyProps {
  * Requires the host <Modal.Content scrollable={false}> so no outer sheet
  * scroller drags the header along.
  */
-declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
+declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, headerMode, debugTag, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
 
 interface ActionBarProps {
     children: ReactNode;
@@ -1005,8 +1032,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
+    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_react_query.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1035,8 +1062,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
+    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_react_query.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1065,8 +1092,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
+    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_react_query.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1095,8 +1122,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
+    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_react_query.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1125,8 +1152,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
+    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_react_query.FetchStatus;
 } | {
     rate: RefreshRate;
     setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
@@ -1155,8 +1182,8 @@ declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, an
     isRefetching: boolean;
     isStale: boolean;
     isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
+    refetch: (options?: _tanstack_react_query.RefetchOptions) => Promise<_tanstack_react_query.QueryObserverResult<TOutput, Error>>;
+    fetchStatus: _tanstack_react_query.FetchStatus;
 };
 
 interface UsePluginSettingsOptions<TSettings> {

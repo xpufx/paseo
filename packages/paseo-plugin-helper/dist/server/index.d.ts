@@ -262,6 +262,27 @@ declare class CpuSampler {
 declare function getSystemMetrics(sampler?: CpuSampler): SystemMetrics;
 
 type LogLevel = "debug" | "info" | "warn" | "error";
+/**
+ * Resolves the minimum log level from the environment. Precedence:
+ * `PASEO_PLUGIN_LOG_LEVEL` > `PASEO_LOG_LEVEL` > `PASEO_DEBUG=1` (debug).
+ * Returns undefined when nothing is set so callers can apply their default.
+ */
+declare function resolveMinLevelFromEnv(env?: NodeJS.ProcessEnv): LogLevel | undefined;
+/**
+ * True when running in production (quiet default). Everything else counts as
+ * "developing": NODE_ENV unset, empty, or anything other than "production"
+ * (development, test, etc.). Deliberately simple so no env var is required
+ * for debug output while developing.
+ */
+declare function isProductionEnv(env?: NodeJS.ProcessEnv): boolean;
+/**
+ * Default rule (documented for operators):
+ * explicit `PASEO_PLUGIN_LOG_LEVEL`/`PASEO_LOG_LEVEL`/`PASEO_DEBUG` always wins;
+ * otherwise debug when developing (non-production NODE_ENV), info in production.
+ * So `PASEO_DEBUG=1` is never required in dev — set an explicit level only to
+ * override (e.g. silence a noisy dev loop or debug a production plugin).
+ */
+declare function resolveDefaultMinLevel(env?: NodeJS.ProcessEnv): LogLevel;
 interface PluginLoggerOptions {
     /**
      * Version of the plugin.
@@ -278,7 +299,8 @@ interface PluginLoggerOptions {
      */
     subsystem?: string;
     /**
-     * Minimum log level to print. Defaults to "info" ("debug" logs will be suppressed).
+     * Minimum log level to print. Defaults to resolveDefaultMinLevel():
+     * debug when developing (non-production NODE_ENV), info in production.
      */
     minLevel?: LogLevel;
     /**
@@ -291,6 +313,8 @@ interface PluginLogger {
     info(message: string, data?: unknown): void;
     warn(message: string, data?: unknown): void;
     error(message: string, data?: unknown): void;
+    /** Surfaces a caught/suppressed error at debug level so it reaches the plugin log. */
+    suppressed(context: string, error: unknown): void;
     child(subsystemOrOptions: string | Partial<PluginLoggerOptions>): PluginLogger;
 }
 /**
@@ -819,4 +843,4 @@ declare class WorkspaceBeacon {
 }
 declare function createWorkspaceBeacon(options?: WorkspaceBeaconOptions): WorkspaceBeacon;
 
-export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, isProductionEnv, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolveDefaultMinLevel, resolveMinLevelFromEnv, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };

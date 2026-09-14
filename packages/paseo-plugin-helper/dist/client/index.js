@@ -3586,6 +3586,8 @@ function ModalBody({
   contentContainerStyle,
   header,
   headerStyle,
+  headerMode = "scroll",
+  debugTag,
   extraBottomInset = 0,
   refreshing = false,
   onRefresh,
@@ -3616,6 +3618,10 @@ function ModalBody({
       colors: [colors.accent]
     }
   ) : void 0;
+  const log = debugTag ? (kind, v) => (
+    // eslint-disable-next-line no-console
+    console.log(`[ModalBody:${debugTag}] ${kind}`, JSON.stringify(v))
+  ) : void 0;
   const body = /* @__PURE__ */ jsx(
     ResolvedScrollView,
     {
@@ -3625,7 +3631,11 @@ function ModalBody({
       keyboardShouldPersistTaps: "handled",
       showsVerticalScrollIndicator: true,
       refreshControl,
-      onContentSizeChange: stickToEnd ? () => innerRef.current?.scrollToEnd({ animated: true }) : void 0,
+      onLayout: log ? (e) => log("viewport", e.nativeEvent.layout) : void 0,
+      onContentSizeChange: (w, h) => {
+        log?.("content", { width: w, height: h });
+        if (stickToEnd) innerRef.current?.scrollToEnd({ animated: true });
+      },
       contentContainerStyle: [
         styles21.content,
         {
@@ -3640,6 +3650,38 @@ function ModalBody({
     }
   );
   if (!header) return body;
+  if (headerMode === "scroll") {
+    return /* @__PURE__ */ jsxs(
+      ResolvedScrollView,
+      {
+        ref: setRefs,
+        style: [{ backgroundColor: colors.surface0 }, styles21.container, style],
+        nestedScrollEnabled: true,
+        keyboardShouldPersistTaps: "handled",
+        showsVerticalScrollIndicator: true,
+        refreshControl,
+        onLayout: log ? (e) => log("viewport", e.nativeEvent.layout) : void 0,
+        onContentSizeChange: (w, h) => {
+          log?.("content", { width: w, height: h });
+          if (stickToEnd) innerRef.current?.scrollToEnd({ animated: true });
+        },
+        contentContainerStyle: [
+          styles21.content,
+          {
+            paddingHorizontal: padding.horizontal,
+            paddingTop: padding.vertical,
+            paddingBottom: bottomPadding,
+            gap: padding.gap
+          },
+          contentContainerStyle
+        ],
+        children: [
+          /* @__PURE__ */ jsx(View, { style: [styles21.header, headerStyle], children: header }),
+          children
+        ]
+      }
+    );
+  }
   return /* @__PURE__ */ jsxs(View, { style: styles21.screen, children: [
     /* @__PURE__ */ jsx(View, { style: [styles21.header, headerStyle], children: header }),
     body
@@ -3749,6 +3791,7 @@ function registerComposerPill(client, options) {
   const openers = /* @__PURE__ */ new Map();
   const pills = /* @__PURE__ */ new Map();
   let detectedShape = null;
+  let disposed = false;
   function PillPopoverContent(props) {
     const pillProps = {
       agentId: props.agentId,
@@ -3899,7 +3942,7 @@ function registerComposerPill(client, options) {
     }
   }
   function addPill(agentId, workspaceId) {
-    if (pills.has(agentId)) return;
+    if (disposed || pills.has(agentId)) return;
     try {
       if (!detectedShape) {
         detectedShape = detectShape(agentId, workspaceId);
@@ -3962,6 +4005,7 @@ function registerComposerPill(client, options) {
     openers.delete(agentId);
   }
   const unsubscribe = client.paseo.agents.subscribe((update) => {
+    if (disposed) return;
     if ("agentId" in update && update.kind === "remove") {
       removePill(update.agentId);
       return;
@@ -3972,12 +4016,15 @@ function registerComposerPill(client, options) {
     }
   });
   client.paseo.agents.list().then((result) => {
+    if (disposed) return;
     for (const { agent } of result.entries) {
       if (agent.workspaceId) addPill(agent.id, agent.workspaceId);
     }
   }).catch(() => {
   });
   return () => {
+    if (disposed) return;
+    disposed = true;
     unsubscribe();
     for (const entry of pills.values()) {
       if (entry.timer) clearInterval(entry.timer);
@@ -4713,7 +4760,20 @@ var styles25 = StyleSheet.create({
     fontSize: 11
   }
 });
+var warnedIconNames = /* @__PURE__ */ new Set();
+function reportUnknownIcon(name) {
+  const key = name.trim();
+  if (warnedIconNames.has(key)) return;
+  warnedIconNames.add(key);
+  console.warn(
+    `[paseo-plugin-helper Icon] unknown icon name "${name}" \u2014 renders nothing; check the Lucide name`
+  );
+}
 function Icon(props) {
+  const rawName = typeof props.name === "string" ? props.name : "";
+  if (!rawName.trim()) {
+    reportUnknownIcon(String(props.name));
+  }
   const { Icon: HostIconComponent } = getClientHost();
   return /* @__PURE__ */ jsx(HostIconComponent, { ...props });
 }
