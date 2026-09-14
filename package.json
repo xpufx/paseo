@@ -5,7 +5,7 @@
   "private": true,
   "type": "module",
   "workspaces": [
-    "packages/paseo-plugin-helper"
+    "plugins/top"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
