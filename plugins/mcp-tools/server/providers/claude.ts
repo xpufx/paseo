@@ -1,12 +1,13 @@
 import os from "node:os";
 import path from "node:path";
+import { matchesFamily } from "./family";
 import { discoverFromCandidates } from "../discovery/extract";
 import type { McpProbe, ProbeContext } from "../discovery/types";
 
 export const claudeProbe: McpProbe = {
   id: "claude",
   label: "claude · live",
-  matches: (provider) => provider === "claude",
+  matches: (provider) => matchesFamily(provider, "claude"),
   async probe(ctx: ProbeContext) {
     const home = os.homedir();
     return discoverFromCandidates("claude", [

@@ -50,6 +50,29 @@ describe("provider contract verification (black-box guarantee)", () => {
     });
   }
 
+  describe("family-affix resolution (issue #87)", () => {
+    it("resolves opencode variants by id or label, reusing the opencode probe", () => {
+      expect(probeForProvider("opencode-pufaysokt")?.id).toBe("opencode");
+      expect(probeForProvider("opencode-oktaya")?.id).toBe("opencode");
+      expect(probeForProvider("pufaysokt")?.id).toBe("opencode");
+      expect(probeForProvider("pufaysokt", "opencode-pufaysokt")?.id).toBe("opencode");
+      expect(probeForProvider("other-id", "opencode-pufaysokt")?.id).toBe("opencode");
+    });
+
+    it("resolves antigravity variants by family affix", () => {
+      expect(probeForProvider("antigravity-acp")?.id).toBe("antigravity");
+      expect(probeForProvider("antigravity_acp")?.id).toBe("antigravity");
+    });
+
+    it("keeps base families resolving and unknown providers null", () => {
+      for (const id of ["antigravity", "claude", "codex", "opencode", "paseo", "pi"]) {
+        expect(probeForProvider(id)?.id).toBe(id);
+      }
+      expect(probeForProvider("unknown-provider")).toBeNull();
+      expect(probeForProvider("unknown-provider", "unknown-label")).toBeNull();
+    });
+  });
+
   describe("catalog resolution", () => {
     it("ensures unique probe IDs", () => {
       const ids = probes.map((p: McpProbe) => p.id);

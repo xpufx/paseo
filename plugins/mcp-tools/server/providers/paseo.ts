@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
+import { matchesFamily } from "./family";
 import type { McpProbe, ProbeContext, ProbeResult, DiagnosticStep } from "../discovery/types";
 import type { McpServer } from "../../shared/mcp";
 
@@ -28,7 +29,7 @@ export async function findStoredAgentRecord(agentId: string): Promise<Record<str
 export const paseoProbe: McpProbe = {
   id: "paseo",
   label: "Paseo · Built-in",
-  matches: (provider) => provider === "paseo",
+  matches: (provider) => matchesFamily(provider, "paseo"),
   async probe(ctx: ProbeContext): Promise<ProbeResult> {
     const steps: DiagnosticStep[] = [];
     const record = await findStoredAgentRecord(ctx.agentId);

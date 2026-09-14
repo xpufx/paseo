@@ -1,8 +1,9 @@
 import os from "node:os";
 import path from "node:path";
-import { safeSpawn } from "paseo-plugin-helper/server";
-import { stripAnsi } from "paseo-plugin-helper/shared";
+import { safeSpawn } from "../vendor/paseo-plugin-helper/index";
+import { stripAnsi } from "../../shared/vendor/paseo-plugin-helper/index";
 import type { McpProbe, ProbeContext, McpServer } from "../discovery/types";
+import { matchesOpencodeFamily } from "./family";
 import { redact } from "../discovery/extract";
 
 function parseOpencodeMcpList(output: string, cfgPath: string): McpServer[] {
@@ -40,7 +41,7 @@ function parseOpencodeMcpList(output: string, cfgPath: string): McpServer[] {
 export const opencodeProbe: McpProbe = {
   id: "opencode",
   label: "opencode · live",
-  matches: (provider) => provider.startsWith("opencode"),
+  matches: (provider) => matchesOpencodeFamily(provider),
   async probe(ctx: ProbeContext) {
     const globalCfg = path.join(os.homedir(), ".config", "opencode", "opencode.jsonc");
     const localCfg = path.join(ctx.cwd, "opencode.json");
