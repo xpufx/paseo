@@ -146,13 +146,23 @@ const ISSUE_URL_PATTERN =
 /**
  * Extract issue URLs (host/owner/repo/issues/N) from chat text for the
  * timeline linkifier. Returns one entry per match, in order.
+ *
+ * Fenced code blocks, inline code spans, and Markdown pipe-table rows are
+ * ignored: URLs there are quoted content, not references, and unfurling
+ * them duplicates the message body into link cards (#143).
  */
 export function extractForgejoIssueUrls(text: string | undefined | null): ForgejoIssueLink[] {
   if (!text || typeof text !== "string") return [];
+  const prose = text
+    .replace(/```[\s\S]*?(?:```|$)/g, "")
+    .replace(/`[^`\n]*`/g, "")
+    .split("\n")
+    .filter((line) => !/^\s*\|/.test(line))
+    .join("\n");
   const links: ForgejoIssueLink[] = [];
   ISSUE_URL_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = ISSUE_URL_PATTERN.exec(text)) !== null) {
+  while ((match = ISSUE_URL_PATTERN.exec(prose)) !== null) {
     links.push({
       host: match[1],
       owner: match[2],
