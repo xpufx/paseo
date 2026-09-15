@@ -11,7 +11,8 @@
     "plugins/x-comms",
     "plugins/forges",
     "plugins/demo",
-    "plugins/slash"
+    "plugins/slash",
+    "plugins/plugin-updates"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
