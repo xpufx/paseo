@@ -122,7 +122,7 @@ export interface StampVersionOptions extends ResolveVersionOptions {
 
 /**
  * Build-time utility to stamp the resolved version into a TypeScript file (e.g. `version.ts`),
- * allowing client code (React Native / Hermes) to import `PLUGIN_VERSION` directly without
+ * allowing client code (React Native) to import `PLUGIN_VERSION` directly without
  * needing `node:fs` or `process.cwd()` at runtime.
  */
 export function stampVersion(options: StampVersionOptions = {}): {

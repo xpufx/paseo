@@ -145,8 +145,8 @@ const version = resolvePluginVersion(); // e.g. "0.1.0" or "0.1.0+bfe901a"
 export const log = createPluginLogger("top");
 ```
 
-### Build-Time Stamping for Client Code (React Native / Hermes)
-Because client code runs in Hermes and cannot access `node:fs` or `process.cwd()`, use `stampVersion` during your build step:
+### Build-Time Stamping for Client Code (React Native)
+Because client code runs on the client and cannot access `node:fs` or `process.cwd()`, use `stampVersion` during your build step:
 
 ```ts
 // scripts/version.mjs or build step

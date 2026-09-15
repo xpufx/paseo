@@ -17,7 +17,7 @@
 ## Features
 
 - **Structured Logging & Identity**: `createPluginLogger` automatically prints an informative startup banner with plugin identity/version in Paseo GUI logs and keeps log lines unfragmented.
-- **Version Resolution & Stamping**: Auto-extracts plugin version from `package.json` + Git tags (`resolvePluginVersion`) and generates static TypeScript versions for Hermes client bundles (`stampVersion`).
+- **Version Resolution & Stamping**: Auto-extracts plugin version from `package.json` + Git tags (`resolvePluginVersion`) and generates static TypeScript versions for client bundles (`stampVersion`).
 - **Mobile & Desktop First**: Automatically scales touch targets (min 44pt on iOS/Android or narrow panes), avoids bottom-bar clipping, and reflows layouts between desktop and mobile.
 - **Mobile Modal Gesture Architecture**: Solves nested horizontal scrolling and double-scroll issues inside Paseo mobile bottom sheets implicitly using `ModalBody` non-nested rendering and `Tabs` edge navigation.
 - **Configurable Visual Flair**: Authors can customize corner radii (`sharp`, `rounded`, `pill`), information density, surface treatments, and brand accents while honoring Paseo's light/dark themes.
@@ -43,7 +43,7 @@ To guarantee compliance with Paseo's bundler and compiler rules (no Node builtin
 
 | Subpath | Target Platform | Description | Docs |
 | :--- | :--- | :--- | :--- |
-| `paseo-plugin-helper/client` | React Native / Hermes | UI components, visual flair provider, pill engine, panels, React Query hooks | [docs/client.md](docs/client.md) |
+| `paseo-plugin-helper/client` | React Native | UI components, visual flair provider, pill engine, panels, React Query hooks | [docs/client.md](docs/client.md) |
 | `paseo-plugin-helper/server` | Node.js 20+ | `createPluginLogger`, `resolvePluginVersion`, `stampVersion`, `getSystemMetrics`, `PluginStorage`, `safeSpawn`, `redactSecrets` | [docs/server.md](docs/server.md) |
 | `paseo-plugin-helper/mcp` | Node.js 20+ | Zero-dependency stdio `McpClient`, ring buffer, process tree killer | [docs/mcp.md](docs/mcp.md) |
 | `paseo-plugin-helper/cli` | Node.js 20+ | `auditProject` programmatic scanner and reporting | [docs/cli.md](docs/cli.md) |
@@ -293,49 +293,6 @@ const tabs: TabItem[] = [
 ## Interactive Showcase Demo
 
 Live Showcase coverage lives in the monorepo's `plugins/demo` conformance testbed (all components, responsive behaviors, Flair Studio, `AboutSection` branding). The legacy `demo/` reference tree was removed.
-
----
-
-## Issues-Centered Workflow
-
-Day-to-day coordination runs on Forgejo issues, not chat. Agents work in
-silence, report via issue comments, and move their own cards through labels.
-Chat is for decisions, approvals, and escalations only.
-
-The [`fgjx` wrapper](https://forge.mrs.aager.de/xpufx/paseo-plugin-helper/issues/23)
-fills gaps in the `fgj` CLI that matter for this flow: labeled issue
-listings and views, query flags (`--not-by`, `--sort`, `--since`), and
-`--help` patched so agents discover the extensions. Everything else passes
-straight through to `fgj`.
-
-```bash
-fgjx issue list --sort updated --not-by xpufx   # what moved without you
-fgjx issue view 12                              # labels, body, comments
-```
-
-### Scoped Label Taxonomy
-
-All repository workflows use two-tone exclusive scoped labels (`scope/name`):
-
-| Scope | Labels | Purpose & Lifecycle |
-| :--- | :--- | :--- |
-| **Priority** | `priority/0-SOS`, `priority/1-high`, `priority/2-normal`, `priority/3-low`, `priority/4-backburner` | Urgency tier (`0-SOS` preempts all tasks immediately). |
-| **State** | `state/0-triage`, `state/1-wip`, `state/2-review`, `state/3-verify`, `state/4-done` | Execution stage lifecycle. |
-| **Spec** | `spec/0-needed`, `spec/1-checklist`, `spec/2-approved` | Shaping gate (`spec/2-approved` allows autonomous coding). |
-| **Format** | `format/0-needed`, `format/1-ok` | Presentation and markdown quality check. |
-| **Size** | `size/0-cheap`, `size/1-medium`, `size/2-expensive`, `size/3-chunk` | Cognitive effort; `size/3-chunk` halts implementation to slice PRs. |
-| **Linked** | `linked/0-needs-split`, `linked/1-peer`, `linked/2-done` | Cluster coordination (`0-needs-split` splits domain; `1-peer` syncs via `Linked: #...`). |
-| **Dep** | `dep/blocker`, `dep/blocked` | Hard issue dependencies. |
-| **Review** | `review/0-needed`, `review/1-changes-requested`, `review/2-approved` | Formal diff and architectural signoff gate. |
-| **Verify** | `verify/automated-ok`, `verify/needs-device` | Automated suites pass vs physical desktop/hardware verification needed. |
-| **Upstream** | `upstream/0-explore`, `upstream/1-blocked`, `upstream/2-aligned` | Upstream Paseo core tracking and alignment. |
-| **Attention** | `attention/0-orchestrator`, `attention/1-agent`, `attention/2-user`, `attention/3-ignore` | Signal target (`0-orchestrator` requests triage; `1-agent` requests worker claim). |
-| **Flags** | `flag/evergreen`, `flag/security`, `flag/stop-work`, `flag/wont-do`, `flag/audit` | Behavioral flags (`stop-work` is a hard circuit breaker). |
-| **Target** | `target/helper`, `target/top`, `target/x-comms`, `target/mcp-tools`, `target/forgejo`, `target/monorepo`, `target/daemon`, `target/paseo-plugin` | Domain or package boundary. |
-
-Label combinations steer autonomous agents deterministically: an issue requires `state/0-triage` + `spec/2-approved` (or `attention/1-agent`) without blocking labels (`dep/blocked`, `flag/stop-work`, `size/3-chunk`, `linked/0-needs-split`, `attention/0-orchestrator`) to qualify for autonomous claim.
-
----
 
 ## Documentation
 

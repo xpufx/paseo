@@ -133,7 +133,7 @@ amortized by the polling cache (§3.2).
 ## 4. Data models
 
 All schemas are Zod, defined in `plugins/forgejo/shared/` (importable by both
-server and Hermes client), built with `defineContract` from
+server and client), built with `defineContract` from
 `paseo-plugin-helper/shared`.
 
 ### 4.1 Scoped label vocabularies (verified against the live board)
@@ -363,7 +363,7 @@ export const issueDetailContract = defineContract({
 
 - Unknown number → `{ issue: null, error: "Issue #N not found in <repo>" }`
   (typed null, never a throw — the modal renders `EmptyState`).
-- Envelopes are parsed server-side (Node regex) so the Hermes client receives
+- Envelopes are parsed server-side (Node regex) so the client receives
   structured cards with zero parsing logic.
 
 ### 5.3 `forgejo.set-label` (write)
@@ -539,7 +539,7 @@ Layout (shared `<BoardView>` used by both, responsive via `useResponsive()`):
 
 - Markdown rendering: plain React Native `Text` + `CodeBlock` for fenced
   sections + pressable link spans for issue URLs / `paseo://` / SHAs. No new
-  markdown dependency (Hermes-safe, zero native modules).
+  markdown dependency (zero native modules).
 - Optimistic label UI: the tapped button shows `loading` until the mutation
   settles, then query invalidation repaints the group from server truth — no
   client-side label prediction (exclusivity edge cases stay server-side).
@@ -741,7 +741,7 @@ No code touched.
 - [ ] Agent ID taps resolve to `paseo://` sessions (clipboard fallback);
       SHA taps open the web commit view (long-press copies).
 - [ ] Built only from documented helper primitives; `initClientHelpers`
-      shape unchanged; zero new SDK imports; Hermes-safe client (no Node
-      built-ins).
+      shape unchanged; zero new SDK imports; client uses no Node
+      built-ins.
 - [ ] `forgejo.open-issues` contract and current pill behavior preserved
       throughout migration.

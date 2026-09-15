@@ -189,7 +189,7 @@ export function requestApproval(
    The promise is a poll/subscription over the `list` contract, not a toast
    callback — there is no callback to wire because toasts have no actions.
 4. **Idempotency key.** Defaults to a generated UUID (`crypto.randomUUID()`
-   with a `Math.random` fallback for Hermes). A caller-supplied
+   with a `Math.random` fallback for clients without `crypto.randomUUID`). A caller-supplied
    `idempotencyKey` is passed through to the `decide` mutation. Retried
    `requestApproval` calls for the same `id` reuse the stored record; they
    must not create duplicates (server enforces, §5.4).
