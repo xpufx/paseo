@@ -6,6 +6,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import {
+  AttentionBeacon,
   Badge,
   Button,
   Card,
@@ -25,7 +26,7 @@ import {
 } from "./vendor/paseo-plugin-helper/index.ts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import { Text, View, Animated, Easing } from "react-native";
+import { Easing, Text, View } from "react-native";
 import { ErrorBoundary } from "./error-boundary";
 import {
   approvalAck,
@@ -160,32 +161,6 @@ function ApprovalHeaderIconInner(props: PluginButtonIconProps) {
 
   const prevCountRef = useRef<number | null>(null);
   const prevDownRef = useRef<boolean | null>(null);
-  const pulse = useRef(new Animated.Value(1)).current;
-
-  useEffect(() => {
-    if (down || count === 0) {
-      pulse.setValue(1);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 0.45,
-          duration: 900,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 900,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [count, down, pulse]);
 
   useEffect(() => {
     if (prevCountRef.current === count && prevDownRef.current === down) return;
@@ -237,13 +212,21 @@ function ApprovalHeaderIconInner(props: PluginButtonIconProps) {
 
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }}>
-      <Animated.View style={{ width: size, height: size, alignItems: "center", justifyContent: "center", opacity: pulse }}>
-        <Icon
-          name="ShieldCheck"
-          size={size}
-          color={activeColor}
-        />
-      </Animated.View>
+      <AttentionBeacon
+        mode="pulse"
+        tone={down || hasConfirm ? "danger" : "warning"}
+        active={!down && count > 0}
+        easing={Easing.inOut(Easing.ease)}
+        accessibilityLabel={count > 0 ? `${count} pending approvals` : "No pending approvals"}
+      >
+        <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+          <Icon
+            name="ShieldCheck"
+            size={size}
+            color={activeColor}
+          />
+        </View>
+      </AttentionBeacon>
     </PluginThemeProvider>
   );
 }
