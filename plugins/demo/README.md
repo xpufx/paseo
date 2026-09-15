@@ -1,7 +1,7 @@
 # paseo-demo
 
 This plugin is a demo for showcasing some of the capabilities of
-[`paseo-plugin-helper`](https://www.npmjs.com/package/paseo-plugin-helper),
+[`paseo-plugin-helper`](https://github.com/xpufx/paseo-plugin-helper) ([npm](https://www.npmjs.com/package/paseo-plugin-helper)),
 namely the UI design system, lifecycle primitives, and daemon utilities for
 building Paseo plugins. It does not necessarily do anything useful to end
 users. So if you arrived from [paseo.cafe](https://paseo.cafe), **the helper
