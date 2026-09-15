@@ -446,6 +446,33 @@ Placeholder view for empty lists or zero-state panels.
 />
 ```
 
+### `<AttentionBeacon>`
+Wraps any child and animates it to draw attention. Modes:
+`radar` (expanding halo, default), `ring` (alias of `radar`), `glow`
+(breathing halo behind the child), `badge` (pulsing corner pip, optional
+`badgeIcon` string or node), `bounce` (vertical nudge), and `pulse`
+(opacity animated directly on the child — no halo, so the wrapped icon
+keeps its own shape).
+
+`pulse` is the mode to use when the attention target is itself an icon
+whose shape must not change (e.g. a header icon gated on a pending count
+or health state). `glow` renders a halo *behind* the child and `StatusDot`
+is dot-only, so neither fits that case. `tone`/`color` resolve from the
+same theme tokens as every other mode; `duration` (default `900`ms) and
+`easing` (default linear) tune the pulse loop; `active={false}` renders
+the child inert with no animation.
+```tsx
+<AttentionBeacon
+  mode="pulse"
+  tone="warning" // "warning" | "accent" | "danger", or color="#eab308"
+  active={pendingCount > 0}
+  duration={900}
+  testID="header-beacon"
+>
+  <Icon name="Bell" size={16} color={colors.foreground} />
+</AttentionBeacon>
+```
+
 ---
 
 ## 4. Layout Primitives

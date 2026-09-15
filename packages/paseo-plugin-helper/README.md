@@ -312,7 +312,7 @@ Plugins powered by `paseo-plugin-helper`:
 
 - [**`paseo-top`**](https://github.com/xpufx/paseo/tree/main/plugins/top) – Real-time system resource monitor (CPU, memory, load average) for Paseo composers with responsive charts, cards, and warning thresholds.
 - [**`paseo-helper-demo`**](https://github.com/xpufx/paseo-helper-demo) – Interactive showcase and reference implementation for the helper: live pill, metrics, typed RPC actions, and persisted settings.
-- [**`paseo-forgejo`**](https://github.com/xpufx/paseo-forgejo) (coming soon) – Work with Forgejo issues from inside Paseo via the embedded fetch API client.
+- [**`paseo-forges`**](https://github.com/xpufx/paseo-forges) (coming soon) – Work with Forge/Gitea-family issues from inside Paseo via the embedded fetch API client.
 - [**`paseo-mcp-tools`**](https://github.com/xpufx/paseo-mcp-tools) – Inline UI for checking MCP servers available to an agent session, with live probes verifying actual session inclusion.
 - [**`paseo-slash`**](https://github.com/xpufx/paseo-slash) (coming soon) – Slash commands and macros with an interactive console, registered straight into the composer.
 - [**`paseo-x-comms`**](https://github.com/xpufx/paseo-x-comms) – Cross-daemon agent conversations over Paseo Relay, bundling its own MCP server.

@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import React from "react";
+import TestRenderer, { act } from "react-test-renderer";
+import { Text } from "react-native";
+import { initClientHelpers } from "../client/host.js";
+import * as themeProvider from "../client/theme/provider.js";
 import {
   AttentionBeacon,
   normalizeBeaconMode,
@@ -34,6 +38,7 @@ describe("AttentionBeacon", () => {
     expect(normalizeBeaconMode("glow")).toBe("glow");
     expect(normalizeBeaconMode("badge")).toBe("badge");
     expect(normalizeBeaconMode("bounce")).toBe("bounce");
+    expect(normalizeBeaconMode("pulse")).toBe("pulse");
   });
 
   it("resolves tone colors from theme tokens", () => {
@@ -47,8 +52,7 @@ describe("AttentionBeacon", () => {
     expect(resolveBeaconToneColor(colors, "warning", "#123456")).toBe("#123456");
   });
 
-  it("accepts badgeIcon as string and ReactNode", () => {
-    const withString = React.createElement(AttentionBeacon, {
+  it("accepts badgeIcon as string and ReactNode", () => {    const withString = React.createElement(AttentionBeacon, {
       mode: "badge",
       badgeIcon: "bell",
       children: null,
@@ -63,6 +67,70 @@ describe("AttentionBeacon", () => {
     expect(withNode.props.badgeIcon).toBe(node);
     const without = React.createElement(AttentionBeacon, { mode: "badge", children: null });
     expect(without.props.badgeIcon).toBeUndefined();
+  });
+});
+
+describe("AttentionBeacon pulse mode", () => {
+  function installStubs() {
+    initClientHelpers({
+      Icon: () => null,
+      Modal: Object.assign(() => null, { Content: () => null }),
+      useRpc: () => async () => ({}),
+      useToast: () => ({}),
+    } as any);
+    vi.spyOn(themeProvider, "usePluginTheme").mockReturnValue({ colors } as any);
+  }
+
+  function render(el: React.ReactElement) {
+    let renderer: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(el);
+    });
+    return renderer!;
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("wraps children in an opacity-animated pulse node with no halo", () => {
+    installStubs();
+    const r = render(
+      <AttentionBeacon mode="pulse" testID="beacon">
+        <Text>icon</Text>
+      </AttentionBeacon>,
+    );
+    const pulse = r.root.findByProps({ testID: "beacon-pulse" });
+    expect(pulse.props.style).toHaveProperty("opacity");
+    expect(r.root.findAllByProps({ testID: "beacon-glow" })).toHaveLength(0);
+    expect(r.root.findAllByProps({ testID: "beacon-halo" })).toHaveLength(0);
+    expect(r.root.findAllByProps({ testID: "beacon-badge" })).toHaveLength(0);
+    expect(pulse.findByType(Text).props.children).toBe("icon");
+  });
+
+  it("renders children inert when inactive", () => {
+    installStubs();
+    const r = render(
+      <AttentionBeacon mode="pulse" active={false} testID="beacon">
+        <Text>icon</Text>
+      </AttentionBeacon>,
+    );
+    expect(r.root.findAllByProps({ testID: "beacon-pulse" })).toHaveLength(0);
+    expect(r.root.findByType(Text).props.children).toBe("icon");
+  });
+
+  it("accepts duration and easing overrides", () => {
+    installStubs();
+    const easing = (v: number) => v;
+    const el = (
+      <AttentionBeacon mode="pulse" duration={500} easing={easing} testID="beacon">
+        <Text>icon</Text>
+      </AttentionBeacon>
+    );
+    expect(el.props.duration).toBe(500);
+    expect(el.props.easing).toBe(easing);
+    const r = render(el);
+    expect(r.root.findByProps({ testID: "beacon-pulse" })).toBeDefined();
   });
 });
 
