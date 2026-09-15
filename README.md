@@ -39,6 +39,10 @@ make doctor     # Freshness diagnostic for helper build and running daemons
 make reload     # Auto-rebuild helper, stamp git versions, and reload daemons
 ```
 
+## Deepwiki Link
+
+[xpufx/paseo](https://deepwiki.com/xpufx/paseo)
+
 ### Granular Workspace Commands
 
 ```sh
