@@ -11,6 +11,12 @@ The helper package and demo are together a demonstration of an idea: that
 the plugin ecosystem can benefit from a common library, not necessarily this
 common library, rather than solving the same issues again and again.
 
+[![Visual Flair Studio](screenshots/helper-visual-flair.png)](screenshots/helper-visual-flair.png)
+
+| System Metrics | About Plugin |
+| :---: | :---: |
+| [![System Metrics](screenshots/helper-metric-gauges.png)](screenshots/helper-metric-gauges.png) | [![About Plugin](screenshots/helper-about.png)](screenshots/helper-about.png) |
+
 > [!NOTE]
 > **Prerequisites & Platform Support**:
 > - Zero install requirements: the helper runtime is vendored (`client|server|shared/vendor/paseo-plugin-helper/`, pinned helper 0.4.0-beta.12), so Paseo installs this plugin with no build step and no npm/registry access. For local development (`typecheck`/`test`), Node.js (v18+) is enough.
@@ -44,11 +50,3 @@ The modal navbar renders two ways, switchable in the Settings tab (`navigationSt
 - `helper-demo-v8.agent-identity`: active agent identity/session for self-inspection.
 - `helper-demo-v8.beacon-set` / `beacon-blink` / `beacon-clear`: workspace status beacon control.
 - `helper-demo-v8.settings`: persisted settings (`showCpuUsage`, `accentPillLabel`, `pollingRate`, `navigationStyle`, `highCpuThreshold`, flair fields).
-
-## Screenshots
-
-[![Visual Flair Studio](images/helper-visual-flair.png)](images/helper-visual-flair.png)
-
-| System Metrics | About Plugin |
-| :---: | :---: |
-| [![System Metrics](images/helper-metric-gauges.png)](images/helper-metric-gauges.png) | [![About Plugin](images/helper-about.png)](images/helper-about.png) |
