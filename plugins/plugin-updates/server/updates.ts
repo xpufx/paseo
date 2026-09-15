@@ -760,8 +760,6 @@ function emptyRow(plugin: PaseoPluginInfo, identity: PluginIdentity, resolution:
     error: null,
     detail: null,
     latestChange: null,
-    sharedVerdict: null,
-    sharedWith: null,
   };
 }
 
@@ -786,8 +784,6 @@ function notARepoRow(plugin: PaseoPluginInfo): PluginUpdate {
     error: null,
     detail: "Not a git repository — no git update possible",
     latestChange: null,
-    sharedVerdict: null,
-    sharedWith: null,
   };
 }
 
@@ -795,7 +791,6 @@ interface ProbeContext {
   runner: CommandRunner;
   deps: ProbeDeps;
   cache: RemoteCache;
-  sharedWith: Map<PluginUpdate["id"], string[]>;
 }
 
 async function probeOne(
@@ -807,9 +802,6 @@ async function probeOne(
   if (!identity.repoRoot) return notARepoRow(plugin);
 
   const row = emptyRow(plugin, identity, resolution);
-  const shared = context.sharedWith.get(plugin.id) ?? [];
-  row.sharedWith = shared.length > 0 ? shared : null;
-  row.sharedVerdict = shared.length > 0;
 
   const local = await readLocalState(identity, context.runner);
   row.localCommit = local.localCommit;
@@ -882,26 +874,8 @@ async function probeInstalled(
     resolutions.push(await resolveRef(identity, runner));
   }
 
-  const members = new Map<string, string[]>();
-  identities.forEach((identity, index) => {
-    if (!identity.repoRoot) return;
-    const resolution = resolutions[index]!;
-    const key = `${identity.repoRoot}\0${resolution.ref ?? ""}`;
-    const list = members.get(key) ?? [];
-    list.push(identity.plugin.id);
-    members.set(key, list);
-  });
-  const sharedWith = new Map<string, string[]>();
-  identities.forEach((identity, index) => {
-    if (!identity.repoRoot) return;
-    const resolution = resolutions[index]!;
-    const key = `${identity.repoRoot}\0${resolution.ref ?? ""}`;
-    const peers = (members.get(key) ?? []).filter((id) => id !== identity.plugin.id);
-    if (peers.length > 0) sharedWith.set(identity.plugin.id, peers);
-  });
-
   const cache: RemoteCache = { states: new Map(), cacheRoot };
-  const context: ProbeContext = { runner, deps, cache, sharedWith };
+  const context: ProbeContext = { runner, deps, cache };
 
   const rows: PluginUpdate[] = [];
   for (let index = 0; index < identities.length; index += 1) {
@@ -957,8 +931,6 @@ export async function checkInstalledPlugins(
           error: `Unable to list installed plugins: ${errorOf(error)}`,
           detail: null,
           latestChange: null,
-          sharedVerdict: null,
-          sharedWith: null,
         },
       ],
     };
@@ -1011,8 +983,6 @@ async function scanOrphanedDirs(
       error: null,
       detail: "Leftover managed directory from an uninstalled or failed install — not probed",
       latestChange: null,
-      sharedVerdict: null,
-      sharedWith: null,
     });
   }
   rows.sort((a, b) => a.id.localeCompare(b.id));

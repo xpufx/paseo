@@ -499,8 +499,8 @@ test("fetches once per (remote, ref) for plugins sharing a repo and ref", async 
   assert.equal(fetches.length, 1);
   assert.equal(inits.length, 1);
   for (const row of checked.plugins) {
-    assert.equal(row.sharedVerdict, true);
-    assert.deepEqual(row.sharedWith?.sort(), row.id === "demo" ? ["slash"] : ["demo"]);
+    assert.equal(row.status, "behind");
+    assert.equal(row.updateAvailable, true);
   }
 });
 
@@ -571,7 +571,6 @@ test("emits one unbundled row per plugin with independent subdir verdicts", asyn
     "plugins/slash",
     "plugins/top",
   ]);
-  assert.ok(checked.plugins.every((row) => row.sharedVerdict === true));
 });
 
 // ---------------------------------------------------------------------------

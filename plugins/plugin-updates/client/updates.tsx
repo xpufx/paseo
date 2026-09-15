@@ -95,17 +95,16 @@ function PluginRow({
   forceNeeded: boolean;
   onUpdate: (pluginId: string, force: boolean) => void;
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, typography } = usePluginTheme();
   const detail = fallbackDetail(plugin);
   const note = reportOnlyNote(plugin.status);
   const version = plugin.workingTree ?? plugin.localTree;
-  const shared = plugin.sharedWith ?? [];
   return (
     <Card variant="elevated" noPadding>
       <View style={{ padding: 10, gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
-          <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }}>{plugin.id}</Text>
+          <Text style={{ color: colors.foreground, ...typography.bodyStrong, flex: 1 }}>{plugin.id}</Text>
           {plugin.dirty === true ? <Badge label="dirty" variant="warning" dot /> : null}
           {plugin.updateAvailable ? (
             <Button
@@ -118,11 +117,11 @@ function PluginRow({
             />
           ) : null}
         </View>
-        <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+        <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, ...typography.caption }}>
           {detail}
         </Text>
         {note ? (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{note}</Text>
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>{note}</Text>
         ) : null}
         <KeyValueGroup columns={2} gap={8}>
           <KeyValue
@@ -138,14 +137,9 @@ function PluginRow({
           <KeyValue label="Subdir" value={plugin.subdir === "" ? "(repo root)" : plugin.subdir} truncate="path" />
         </KeyValueGroup>
         {plugin.latestChange?.subject ? (
-          <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+          <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, ...typography.caption }}>
             Latest remote change: {plugin.latestChange.subject}
             {plugin.latestChange.date ? ` (${plugin.latestChange.date})` : ""}
-          </Text>
-        ) : null}
-        {shared.length > 0 ? (
-          <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-            Shared verdict — {plugin.repoRoot} @ {plugin.ref ?? "?"} also covers {shared.join(", ")}
           </Text>
         ) : null}
       </View>
@@ -202,7 +196,7 @@ interface Failure {
 }
 
 function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
-  const { colors } = usePluginTheme();
+  const { colors, typography } = usePluginTheme();
   const toast = useToast();
   const queryClient = useQueryClient();
   const query = usePluginUpdates(props.workspaceId);
@@ -301,8 +295,8 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
       <ScrollView contentContainerStyle={{ padding: 12, gap: 10 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "800" }}>Plugin updates</Text>
-            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+            <Text style={{ color: colors.foreground, ...typography.heading }}>Plugin updates</Text>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
               {query.isFetching ? "Checking installed plugins…" : `${staleCount} update${staleCount === 1 ? "" : "s"} available`}
             </Text>
           </View>
@@ -339,7 +333,7 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
             <View style={{ padding: 10, gap: 6 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <StatusDot variant="danger" />
-                <Text style={{ color: colors.statusDanger || "#ef4444", fontWeight: "700", flex: 1 }}>
+                <Text style={{ color: colors.statusDanger, ...typography.bodyStrong, flex: 1 }}>
                   {failure.pluginId} update failed
                 </Text>
                 {failure.requiresForce ? (
@@ -353,7 +347,7 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
                   />
                 ) : null}
               </View>
-              <Text selectable style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+              <Text selectable style={{ color: colors.foregroundMuted, ...typography.caption }}>
                 {failure.error}
               </Text>
             </View>

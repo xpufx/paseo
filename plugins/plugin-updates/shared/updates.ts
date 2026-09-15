@@ -44,8 +44,6 @@ export const PluginUpdateSchema = z.object({
   error: z.string().nullable(),
   detail: z.string().nullable(),
   latestChange: PluginUpdateChangeSchema.nullable(),
-  sharedVerdict: z.boolean().nullable(),
-  sharedWith: z.array(z.string()).nullable(),
 });
 export type PluginUpdate = z.infer<typeof PluginUpdateSchema>;
 
