@@ -146,23 +146,61 @@ const ISSUE_URL_PATTERN =
 /**
  * Extract issue URLs (host/owner/repo/issues/N) from chat text for the
  * timeline linkifier. Returns one entry per match, in order.
- *
- * Fenced code blocks, inline code spans, and Markdown pipe-table rows are
- * ignored: URLs there are quoted content, not references, and unfurling
- * them duplicates the message body into link cards (#143).
  */
 export function extractForgejoIssueUrls(text: string | undefined | null): ForgejoIssueLink[] {
   if (!text || typeof text !== "string") return [];
-  const prose = text
-    .replace(/```[\s\S]*?(?:```|$)/g, "")
-    .replace(/`[^`\n]*`/g, "")
-    .split("\n")
-    .filter((line) => !/^\s*\|/.test(line))
-    .join("\n");
   const links: ForgejoIssueLink[] = [];
   ISSUE_URL_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
-  while ((match = ISSUE_URL_PATTERN.exec(prose)) !== null) {
+  while ((match = ISSUE_URL_PATTERN.exec(text)) !== null) {
+    links.push({
+      host: match[1],
+      owner: match[2],
+      repo: match[3],
+      number: Number(match[4]),
+      url: match[0],
+    });
+  }
+  return links;
+}
+
+/** Ranges of quoted content where bare-URL extraction must not match. */
+function quotedRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const push = (start: number, end: number) => {
+    if (end > start) ranges.push({ start, end });
+  };
+  const fencePattern = /```[\s\S]*?(?:```|$)/g;
+  let fence: RegExpExecArray | null;
+  while ((fence = fencePattern.exec(text)) !== null) push(fence.index, fence.index + fence[0].length);
+  const inFence = (index: number) => ranges.some((range) => index >= range.start && index < range.end);
+  const codePattern = /`[^`\n]+`/g;
+  let code: RegExpExecArray | null;
+  while ((code = codePattern.exec(text)) !== null) {
+    if (!inFence(code.index)) push(code.index, code.index + code[0].length);
+  }
+  const linkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  let link: RegExpExecArray | null;
+  while ((link = linkPattern.exec(text)) !== null) {
+    if (!inFence(link.index)) push(link.index, link.index + link[0].length);
+  }
+  return ranges;
+}
+
+/**
+ * Extract only bare issue URLs: markdown-linked `[text](url)` targets and
+ * quoted code are skipped because the card renders them inline instead of
+ * duplicating them as rows (#143).
+ */
+export function extractBareForgejoIssueUrls(text: string | undefined | null): ForgejoIssueLink[] {
+  if (!text || typeof text !== "string") return [];
+  const quoted = quotedRanges(text);
+  const inQuoted = (index: number) => quoted.some((range) => index >= range.start && index < range.end);
+  const links: ForgejoIssueLink[] = [];
+  ISSUE_URL_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = ISSUE_URL_PATTERN.exec(text)) !== null) {
+    if (inQuoted(match.index)) continue;
     links.push({
       host: match[1],
       owner: match[2],

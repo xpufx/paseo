@@ -10,8 +10,10 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { copyToClipboard } from "./vendor/paseo-plugin-helper/index.ts";
 import {
-  extractForgejoIssueUrls,
+  extractBareForgejoIssueUrls,
+  parseMarkdownLite,
   type ForgejoIssueLink,
+  type MarkdownLiteSpan,
 } from "../shared/issues.js";
 
 const ForgejoIssueLinkSchema = z.object({
@@ -29,7 +31,7 @@ const ForgejoIssueLinkSchema = z.object({
 type ForgejoIssueLinkData = z.infer<typeof ForgejoIssueLinkSchema>;
 
 function transformTextItem<T extends { text: string }>(item: T) {
-  const links = extractForgejoIssueUrls(item.text);
+  const links = extractBareForgejoIssueUrls(item.text);
   if (links.length === 0) return undefined;
   return {
     items: [
@@ -98,12 +100,85 @@ function IssueLinkRow({ theme, link }: { theme: PluginTheme; link: ForgejoIssueL
   );
 }
 
+function FormattedSpans({ theme, spans }: { theme: PluginTheme; spans: MarkdownLiteSpan[] }) {
+  return (
+    <Text style={[styles.bodyText, { color: theme.colors.foreground }]}>
+      {spans.map((span, index) => {
+        if (span.kind === "link") {
+          return (
+            <Text
+              key={index}
+              style={{ color: theme.colors.accent, fontWeight: "600" }}
+              onPress={() => Linking.openURL(span.url).catch(() => {})}
+            >
+              {span.text}
+            </Text>
+          );
+        }
+        if (span.kind === "code") {
+          return (
+            <Text key={index} style={{ fontFamily: "monospace" }}>
+              {span.text}
+            </Text>
+          );
+        }
+        if (span.kind === "bold") {
+          return (
+            <Text key={index} style={{ fontWeight: "700" }}>
+              {span.text}
+            </Text>
+          );
+        }
+        if (span.kind === "italic") {
+          return (
+            <Text key={index} style={{ fontStyle: "italic" }}>
+              {span.text}
+            </Text>
+          );
+        }
+        return <Text key={index}>{span.text}</Text>;
+      })}
+    </Text>
+  );
+}
+
 function ForgejoIssueLinks({ theme, item }: PluginTimelineItemProps<ForgejoIssueLinkData>) {
+  const blocks = parseMarkdownLite(item.data.text);
   return (
     <View style={styles.card}>
-      <Text style={[styles.bodyText, { color: theme.colors.foreground }]}>
-        {item.data.text}
-      </Text>
+      {blocks.map((block, index) => {
+        if (block.kind === "code") {
+          return (
+            <Text
+              key={index}
+              selectable
+              style={[styles.bodyText, { color: theme.colors.foregroundMuted, fontFamily: "monospace" }]}
+            >
+              {block.text}
+            </Text>
+          );
+        }
+        if (block.kind === "heading") {
+          return <FormattedSpans key={index} theme={theme} spans={block.spans} />;
+        }
+        if (block.kind === "list") {
+          return (
+            <View key={index} style={{ gap: 2 }}>
+              {block.items.map((spans, itemIndex) => (
+                <View key={itemIndex} style={{ flexDirection: "row", gap: 6 }}>
+                  <Text style={[styles.bodyText, { color: theme.colors.foregroundMuted }]}>
+                    {block.ordered ? `${itemIndex + 1}.` : "•"}
+                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <FormattedSpans theme={theme} spans={spans} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          );
+        }
+        return <FormattedSpans key={index} theme={theme} spans={block.spans} />;
+      })}
       <View style={styles.header}>
         <Icon name="GitPullRequest" size={13} color={theme.colors.foregroundMuted} />
         <Text style={[styles.headerText, { color: theme.colors.foregroundMuted }]}>

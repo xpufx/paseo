@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { extractForgejoIssueUrls, isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
+import { extractBareForgejoIssueUrls, isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -183,23 +183,27 @@ describe("live label sync + ranking (issue #122)", () => {
   });
 });
 
-describe("extractForgejoIssueUrls quoted-content guard (issue #143)", () => {
+describe("extractBareForgejoIssueUrls quoted-content guard (issue #143)", () => {
   const url = (n: number) => `https://${REAL_HOST}/oktay/2fado/issues/${n}`;
-  it("extracts prose links", () => {
-    const links = extractForgejoIssueUrls(`See ${url(33)} for details`);
+  it("extracts bare prose links", () => {
+    const links = extractBareForgejoIssueUrls(`See ${url(33)} for details`);
     assert.deepEqual(links.map((link) => link.number), [33]);
   });
+  it("skips markdown-linked URLs rendered inline by the card", () => {
+    const links = extractBareForgejoIssueUrls(`Pulse explore: [Issue #144 (forge.mrs)](${url(144)}) — done`);
+    assert.deepEqual(links, []);
+  });
   it("ignores fenced code blocks", () => {
-    const links = extractForgejoIssueUrls(`Example:\n\`\`\`\n${url(33)}\n\`\`\`\nDone`);
+    const links = extractBareForgejoIssueUrls(`Example:\n\`\`\`\n${url(33)}\n\`\`\`\nDone`);
     assert.deepEqual(links, []);
   });
   it("ignores inline code spans", () => {
-    const links = extractForgejoIssueUrls(`Run \`${url(33)}\` to fetch`);
+    const links = extractBareForgejoIssueUrls(`Run \`${url(33)}\` to fetch`);
     assert.deepEqual(links, []);
   });
-  it("ignores pipe-table rows but keeps surrounding prose links", () => {
-    const links = extractForgejoIssueUrls(
-      `See ${url(42)} first\n\n| # | Title |\n| --- | --- |\n| [#33](${url(33)}) | mirror readiness |\n`,
+  it("keeps bare prose links next to tables and markdown links", () => {
+    const links = extractBareForgejoIssueUrls(
+      `See ${url(42)} first\n\n| [#33](${url(33)}) | mirror readiness |\n`,
     );
     assert.deepEqual(links.map((link) => link.number), [42]);
   });
