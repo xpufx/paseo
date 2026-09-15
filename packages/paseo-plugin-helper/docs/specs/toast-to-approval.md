@@ -1,6 +1,6 @@
 # Toast-to-Approval Flow Primitive
 
-**Status:** specification (implements [Issue #48 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/48))
+**Status:** specification (unimplemented — see below)
 **Scope:** `paseo-plugin-helper/client` + `paseo-plugin-helper/server` + docs
 **Constraint:** No Paseo host/SDK changes. Provider-agnostic (gateway approvals,
 destructive actions, pairing requests).
