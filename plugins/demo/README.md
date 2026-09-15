@@ -4,11 +4,10 @@ This plugin is a demo for showcasing some of the capabilities of
 [`paseo-plugin-helper`](https://github.com/xpufx/paseo-plugin-helper) ([npm](https://www.npmjs.com/package/paseo-plugin-helper)),
 namely the UI design system, lifecycle primitives, and daemon utilities for
 building Paseo plugins. It does not necessarily do anything useful to end
-users. **The helper is the thing to take home**, not this plugin. Install
-this one to see every pattern running live; depend on the helper to build
-your own.
+users. Install this one to see every pattern running live; depend on the
+helper to build your own.
 
-The helper package and demo are together a demonstration of an idea — that
+The helper package and demo are together a demonstration of an idea: that
 the plugin ecosystem can benefit from a common library, not necessarily this
 common library, rather than solving the same issues again and again.
 
@@ -40,11 +39,11 @@ The modal navbar renders two ways, switchable in the Settings tab (`navigationSt
 
 ## RPC contracts (`shared/demo.ts`)
 
-- `helper-demo-v8.get-data` — hostname, platform, CPU model/usage, memory, load averages, uptime, daemon port, background ticks, service items.
-- `helper-demo-v8.trigger-action` — background action demo with success/error toast + haptic feedback.
-- `helper-demo-v8.agent-identity` — active agent identity/session for self-inspection.
-- `helper-demo-v8.beacon-set` / `beacon-blink` / `beacon-clear` — workspace status beacon control.
-- `helper-demo-v8.settings` — persisted settings (`showCpuUsage`, `accentPillLabel`, `pollingRate`, `navigationStyle`, `highCpuThreshold`, flair fields).
+- `helper-demo-v8.get-data`: hostname, platform, CPU model/usage, memory, load averages, uptime, daemon port, background ticks, service items.
+- `helper-demo-v8.trigger-action`: background action demo with success/error toast + haptic feedback.
+- `helper-demo-v8.agent-identity`: active agent identity/session for self-inspection.
+- `helper-demo-v8.beacon-set` / `beacon-blink` / `beacon-clear`: workspace status beacon control.
+- `helper-demo-v8.settings`: persisted settings (`showCpuUsage`, `accentPillLabel`, `pollingRate`, `navigationStyle`, `highCpuThreshold`, flair fields).
 
 ## Screenshots
 
