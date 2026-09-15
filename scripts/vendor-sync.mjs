@@ -23,9 +23,10 @@ const PLUGINS = {
   "top": ["client", "server", "shared"],
   "mcp-tools": ["client", "server", "shared", "mcp"],
   "demo": ["client", "server", "shared"],
-  "forgejo": ["client", "server", "shared"],
+  "forges": ["client", "server", "shared"],
   "slash": ["client", "server", "shared"],
   "x-comms": ["client", "server", "shared", "mcp"],
+  "twofado": ["client", "server", "shared"],
 };
 const TREES = ["client", "server", "shared", "mcp"];
 const DEST_ROOT = "vendor/paseo-plugin-helper";
@@ -38,7 +39,7 @@ function srcDir(srcTree) {
 }
 
 // The shared vendor README has no helper-src counterpart, so a --link pass
-// would delete it (and per-plugin copies differ, e.g. forgejo's issue ref).
+// would delete it (and per-plugin copies may differ).
 // Stash it next to the link as <name>.link-bak (gitignored, dev-only) and
 // restore it on materialize.
 const README_BAK_SUFFIX = ".link-bak";

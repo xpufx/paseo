@@ -12,7 +12,8 @@
     "plugins/forges",
     "plugins/demo",
     "plugins/slash",
-    "plugins/plugin-updates"
+    "plugins/plugin-updates",
+    "plugins/twofado"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
