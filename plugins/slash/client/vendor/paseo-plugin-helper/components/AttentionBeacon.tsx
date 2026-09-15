@@ -12,7 +12,7 @@ import { usePluginTheme } from "../theme/provider";
 import { FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens";
 import type { ThemeColors } from "../../../../shared/vendor/paseo-plugin-helper/types";
 
-export type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce";
+export type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce" | "pulse";
 export type AttentionBeaconTone = "warning" | "accent" | "danger";
 
 export interface AttentionBeaconProps {
@@ -27,11 +27,13 @@ export interface AttentionBeaconProps {
   accessibilityLabel?: string;
   testID?: string;
   badgeIcon?: string | ReactNode;
+  duration?: number;
+  easing?: (value: number) => number;
 }
 
-export function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce" {
+export function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce" | "pulse" {
   if (mode === "ring") return "radar";
-  if (mode === "glow" || mode === "badge" || mode === "bounce" || mode === "radar") return mode;
+  if (mode === "glow" || mode === "badge" || mode === "bounce" || mode === "pulse" || mode === "radar") return mode;
   return "radar";
 }
 
@@ -61,19 +63,24 @@ function useLoop(driver: Animated.Value, toValue: number, duration: number, acti
   }, [driver, toValue, duration, active]);
 }
 
-function usePingPong(driver: Animated.Value, duration: number, active: boolean): void {
+function usePingPong(
+  driver: Animated.Value,
+  duration: number,
+  active: boolean,
+  easing: (value: number) => number = Easing.linear,
+): void {
   useEffect(() => {
     if (!active) return;
     driver.setValue(0);
     const animation = Animated.loop(
       Animated.sequence([
-        Animated.timing(driver, { toValue: 1, duration, easing: Easing.linear, useNativeDriver: true }),
-        Animated.timing(driver, { toValue: 0, duration, easing: Easing.linear, useNativeDriver: true }),
+        Animated.timing(driver, { toValue: 1, duration, easing, useNativeDriver: true }),
+        Animated.timing(driver, { toValue: 0, duration, easing, useNativeDriver: true }),
       ]),
     );
     animation.start();
     return () => animation.stop();
-  }, [driver, duration, active]);
+  }, [driver, duration, active, easing]);
 }
 
 export function AttentionBeacon({
@@ -88,6 +95,8 @@ export function AttentionBeacon({
   accessibilityLabel,
   testID,
   badgeIcon,
+  duration = 900,
+  easing = Easing.linear,
 }: AttentionBeaconProps) {
   const { Icon } = getClientHost();
   const { colors } = usePluginTheme();
@@ -98,16 +107,19 @@ export function AttentionBeacon({
   const breath = useRef(new Animated.Value(0)).current;
   const pip = useRef(new Animated.Value(0)).current;
   const jiggle = useRef(new Animated.Value(0)).current;
+  const pulse = useRef(new Animated.Value(0)).current;
 
   const isRadar = resolved === "radar" && active;
   const isGlow = resolved === "glow" && active;
   const isBadge = resolved === "badge" && active;
   const isBounce = resolved === "bounce" && active;
+  const isPulse = resolved === "pulse" && active;
 
   useLoop(radar, 1, 1600, isRadar);
   usePingPong(breath, 900, isGlow);
   usePingPong(pip, 900, isBadge);
   usePingPong(jiggle, 350, isBounce);
+  usePingPong(pulse, duration, isPulse, easing);
 
   if (!active) {
     return <View style={[styles.wrapper, style]}>{children}</View>;
@@ -162,6 +174,20 @@ export function AttentionBeacon({
     return (
       <View style={[styles.wrapper, style]} accessibilityLabel={accessibilityLabel} testID={testID}>
         <Animated.View style={{ transform: [{ translateY }] }}>{children}</Animated.View>
+      </View>
+    );
+  }
+
+  if (resolved === "pulse") {
+    const opacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] });
+    return (
+      <View style={[styles.wrapper, style]} accessibilityLabel={accessibilityLabel} testID={testID}>
+        <Animated.View
+          testID={testID ? `${testID}-pulse` : undefined}
+          style={{ opacity }}
+        >
+          {children}
+        </Animated.View>
       </View>
     );
   }
