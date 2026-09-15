@@ -1,10 +1,17 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { listPlugins, safeSpawn, type PaseoPluginInfo, type SafeSpawnResult } from "paseo-plugin-helper/server";
-import type { PluginUpdate, PluginUpdateActionResult, PluginUpdateStatus } from "../shared/updates";
+import type {
+  PluginUpdate,
+  PluginUpdateActionResult,
+  PluginUpdateChange,
+  RefKind,
+} from "../shared/updates";
 
 const PROBE_TIMEOUT_MS = 10_000;
+const FETCH_TIMEOUT_MS = 30_000;
 const UPDATE_TIMEOUT_MS = 120_000;
 const RELOAD_TIMEOUT_MS = 60_000;
 
@@ -15,15 +22,25 @@ type CommandRunner = (
 ) => Promise<SafeSpawnResult>;
 
 type ReadDir = (dir: string) => Promise<Array<{ name: string; isDirectory(): boolean }>>;
+type ReadFile = (file: string) => Promise<string>;
+type Mkdir = (dir: string) => Promise<void>;
 
 const runCommand: CommandRunner = (command, args, options) =>
   safeSpawn(command, args, { cwd: options.cwd, timeoutMs: options.timeoutMs });
 
 const defaultReadDir: ReadDir = (dir) => fs.promises.readdir(dir, { withFileTypes: true });
+const defaultReadFile: ReadFile = (file) => fs.promises.readFile(file, "utf8");
+const defaultMkdir: Mkdir = async (dir) => {
+  await fs.promises.mkdir(dir, { recursive: true });
+};
 
 export interface ProbeDeps {
   pluginsRoot?: string;
+  homeDir?: string;
+  cacheRoot?: string;
   readDir?: ReadDir;
+  readFile?: ReadFile;
+  mkdir?: Mkdir;
   scanOrphans?: boolean;
 }
 
@@ -39,271 +56,811 @@ function errorOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function parseRef(output: string): string | null {
-  const line = output
-    .split(/\r?\n/)
-    .map((value) => value.trim())
-    .find(Boolean);
-  if (!line) return null;
-  const commit = line.split(/\s+/)[0];
-  return /^[0-9a-f]{40}$/i.test(commit) ? commit : null;
-}
-
 function normalizeDir(value: string): string {
   return path.resolve(value.trim().replace(/\/+$/, ""));
 }
 
-interface RepoProbe {
-  remote: string | null;
-  branch: string | null;
-  localCommit: string | null;
-  remoteCommit: string | null;
-  status: PluginUpdateStatus;
-  error: string | null;
-  detail: string | null;
+function toPosix(value: string): string {
+  return value.split(path.sep).join("/");
 }
 
-function probeError(
-  partial: Partial<RepoProbe>,
-  error: string,
-): RepoProbe {
+function parseCommit(output: string): string | null {
+  const value = output.trim();
+  return /^[0-9a-f]{40,64}$/i.test(value) ? value : null;
+}
+
+function short(commit: string | null): string {
+  return commit ? commit.slice(0, 7) : "unknown";
+}
+
+function treeExpr(commit: string, subdir: string): string {
+  return subdir ? `${commit}:${subdir}` : `${commit}^{tree}`;
+}
+
+function scopeLabel(subdir: string | null): string {
+  if (subdir === null) return "the plugin";
+  return subdir === "" ? "the repository root" : subdir;
+}
+
+async function git(
+  runner: CommandRunner,
+  args: string[],
+  cwd: string | undefined,
+  timeoutMs: number = PROBE_TIMEOUT_MS,
+): Promise<SafeSpawnResult> {
+  try {
+    return await runner("git", args, { cwd, timeoutMs });
+  } catch (error) {
+    return { stdout: "", stderr: errorOf(error), code: null, signal: null, durationMs: 0 };
+  }
+}
+
+interface LsRemoteLine {
+  sha: string;
+  ref: string;
+}
+
+function parseLsRemote(output: string): LsRemoteLine[] {
+  const lines: LsRemoteLine[] = [];
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const [sha, ref] = line.split(/\s+/);
+    if (sha && ref && /^[0-9a-f]{40,64}$/i.test(sha)) lines.push({ sha, ref });
+  }
+  return lines;
+}
+
+interface SemverTag {
+  name: string;
+  commit: string;
+  version: [number, number, number] | null;
+}
+
+function parseTagList(output: string): SemverTag[] {
+  const byName = new Map<string, { direct?: string; peeled?: string }>();
+  for (const line of parseLsRemote(output)) {
+    const match = /^refs\/tags\/(.+?)(\^\{\})?$/.exec(line.ref);
+    if (!match) continue;
+    const name = match[1]!;
+    const entry = byName.get(name) ?? {};
+    if (match[2]) entry.peeled = line.sha;
+    else entry.direct = line.sha;
+    byName.set(name, entry);
+  }
+  return [...byName.entries()].map(([name, entry]) => ({
+    name,
+    commit: entry.peeled ?? entry.direct!,
+    version: parseSemver(name),
+  }));
+}
+
+function parseSemver(name: string): [number, number, number] | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(name);
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareSemver(a: [number, number, number], b: [number, number, number]): number {
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i]! !== b[i]!) return a[i]! - b[i]!;
+  }
+  return 0;
+}
+
+function findNewerSemver(tags: SemverTag[], current: SemverTag): SemverTag | null {
+  if (!current.version) return null;
+  let best: SemverTag | null = null;
+  for (const tag of tags) {
+    if (!tag.version) continue;
+    if (compareSemver(tag.version, current.version) <= 0) continue;
+    if (!best || !best.version || compareSemver(tag.version, best.version) > 0) best = tag;
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------
+// Managed install metadata (~/.paseo/plugins/sources.json + config fallback)
+// ---------------------------------------------------------------------------
+
+interface ManagedRecord {
+  remote: string;
+  requestedRef: string | null;
+  trackingBranch: string | null;
+  commit: string | null;
+  pluginPath: string | null;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function toManagedRecord(value: unknown): ManagedRecord | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const remote = asString(record.remote);
+  if (!remote) return null;
+  const commit = asString(record.commit);
   return {
-    remote: partial.remote ?? null,
-    branch: partial.branch ?? null,
-    localCommit: partial.localCommit ?? null,
-    remoteCommit: null,
-    status: "error",
-    error,
-    detail: null,
+    remote,
+    requestedRef: asString(record.requestedRef) ?? asString(record.ref),
+    trackingBranch: asString(record.trackingBranch),
+    commit: commit && /^[0-9a-f]{40,64}$/i.test(commit) ? commit : null,
+    pluginPath: asString(record.pluginPath),
   };
 }
 
-async function resolveRepoRoot(pluginPath: string, runner: CommandRunner): Promise<string | null> {
+async function readJson(
+  readFile: ReadFile,
+  file: string,
+): Promise<Record<string, unknown> | null> {
   try {
-    const toplevel = await runner("git", ["rev-parse", "--show-toplevel"], {
-      cwd: pluginPath,
-      timeoutMs: PROBE_TIMEOUT_MS,
-    });
-    if (toplevel.code === 0 && toplevel.stdout.trim()) {
-      return normalizeDir(toplevel.stdout);
-    }
+    const parsed: unknown = JSON.parse(await readFile(file));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
   } catch {
-    // Fall through to null below.
+    return null;
   }
+}
+
+async function loadManagedRecords(deps: ProbeDeps): Promise<Map<string, ManagedRecord>> {
+  const home = deps.homeDir ?? homedir();
+  const pluginsRoot = deps.pluginsRoot ?? path.join(home, ".paseo", "plugins");
+  const readFile = deps.readFile ?? defaultReadFile;
+  const records = new Map<string, ManagedRecord>();
+
+  const sources = await readJson(readFile, path.join(pluginsRoot, "sources.json"));
+  if (sources) {
+    for (const [id, value] of Object.entries(sources)) {
+      const record = toManagedRecord(value);
+      if (record) records.set(id, record);
+    }
+  }
+
+  const config = await readJson(readFile, path.join(home, ".paseo", "config.json"));
+  const configPlugins = config?.plugins;
+  if (configPlugins && typeof configPlugins === "object") {
+    for (const [id, value] of Object.entries(configPlugins as Record<string, unknown>)) {
+      if (records.has(id)) continue;
+      const record = toManagedRecord(value);
+      if (record) records.set(id, record);
+    }
+  }
+  return records;
+}
+
+// ---------------------------------------------------------------------------
+// Identity: (repo root, ref, subdir)
+// ---------------------------------------------------------------------------
+
+interface PluginIdentity {
+  plugin: PaseoPluginInfo;
+  repoRoot: string | null;
+  subdir: string | null;
+  managed: ManagedRecord | null;
+}
+
+async function resolveRepoRoot(pluginPath: string, runner: CommandRunner): Promise<string | null> {
+  const result = await git(runner, ["rev-parse", "--show-toplevel"], pluginPath);
+  if (result.code === 0 && result.stdout.trim()) return normalizeDir(result.stdout);
   return null;
 }
 
-/**
- * Probes a repo root without fetching: resolves the upstream ref, then compares
- * `git ls-remote <remote> <branch>` to local HEAD. Equal => current, otherwise
- * behind. No ahead/behind counts are computed.
- */
-async function probeRepoRoot(
-  root: string,
-  pinnedRemote: string | null,
-  pinnedRef: string | null,
+async function resolveIdentity(
+  plugin: PaseoPluginInfo,
+  managed: ManagedRecord | null,
   runner: CommandRunner,
-): Promise<RepoProbe> {
-  try {
-    const headResult = await runner("git", ["rev-parse", "HEAD"], {
-      cwd: root,
-      timeoutMs: PROBE_TIMEOUT_MS,
-    });
-    const localCommit =
-      headResult.code === 0 && /^[0-9a-f]{40}$/i.test(headResult.stdout.trim())
-        ? headResult.stdout.trim()
-        : null;
+): Promise<PluginIdentity> {
+  if (!plugin.path) return { plugin, repoRoot: null, subdir: null, managed };
+  const repoRoot = await resolveRepoRoot(plugin.path, runner);
+  if (!repoRoot) return { plugin, repoRoot: null, subdir: null, managed };
+  let subdir = toPosix(path.relative(repoRoot, normalizeDir(plugin.path)));
+  if (subdir === ".") subdir = "";
+  if (managed?.pluginPath !== null && managed?.pluginPath !== undefined) {
+    subdir = managed.pluginPath === "." ? "" : toPosix(managed.pluginPath);
+  }
+  return { plugin, repoRoot, subdir, managed };
+}
 
-    let remote = pinnedRemote;
-    let branch = pinnedRef;
+// ---------------------------------------------------------------------------
+// Ref resolution
+// ---------------------------------------------------------------------------
 
-    if (!remote || !branch) {
-      const branchResult = await runner("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-        cwd: root,
-        timeoutMs: PROBE_TIMEOUT_MS,
-      });
-      const current = branchResult.code === 0 ? branchResult.stdout.trim() : "";
-      if (!branch) {
-        if (!current || current === "HEAD") {
-          return {
-            remote,
-            branch: null,
-            localCommit,
-            remoteCommit: null,
-            status: "unpinned",
-            error: null,
-            detail: "Detached HEAD — no upstream to compare; report only",
-          };
-        }
-        branch = current;
-      }
-      if (!remote) {
-        const upstreamResult = await runner(
-          "git",
-          ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
-          { cwd: root, timeoutMs: PROBE_TIMEOUT_MS },
-        );
-        const upstream = upstreamResult.code === 0 ? upstreamResult.stdout.trim() : "";
-        if (!upstream) {
-          return {
-            remote: null,
-            branch,
-            localCommit,
-            remoteCommit: null,
-            status: "no-upstream",
-            error: null,
-            detail: "Branch has no upstream remote; report only",
-          };
-        }
-        const separator = upstream.indexOf("/");
-        remote = separator > 0 ? upstream.slice(0, separator) : upstream;
-        if (!pinnedRef && separator > 0) branch = upstream.slice(separator + 1);
-      }
-    }
+type ReportOnly = "pinned" | "unpinned" | "no-upstream";
 
-    if (!localCommit || !remote || !branch) {
-      return probeError({ remote, branch, localCommit }, "Unable to determine local HEAD or comparison ref");
-    }
+interface RefResolution {
+  remote: string | null;
+  remoteUrl: string | null;
+  ref: string | null;
+  refKind: RefKind | null;
+  reportOnly: ReportOnly | null;
+  detail: string | null;
+}
 
-    const lsRemote = await runner("git", ["ls-remote", remote, branch], {
-      cwd: root,
-      timeoutMs: PROBE_TIMEOUT_MS,
-    });
-    if (lsRemote.code !== 0) {
-      return probeError({ remote, branch, localCommit }, outputOf(lsRemote) || "git ls-remote failed");
+function pinnedResolution(remote: string, ref: string | null): RefResolution {
+  return {
+    remote,
+    remoteUrl: remote,
+    ref,
+    refKind: "sha",
+    reportOnly: "pinned",
+    detail: ref ? `Pinned to immutable commit ${short(ref)} — report only` : "Pinned to an immutable commit — report only",
+  };
+}
+
+async function resolveRef(
+  identity: PluginIdentity,
+  runner: CommandRunner,
+): Promise<RefResolution> {
+  const managed = identity.managed;
+  if (managed) {
+    if (managed.commit && !managed.trackingBranch && !managed.requestedRef) {
+      return pinnedResolution(managed.remote, managed.commit);
     }
-    const remoteCommit = parseRef(lsRemote.stdout);
-    if (!remoteCommit) {
-      return probeError(
-        { remote, branch, localCommit },
-        `Remote ${remote}/${branch} has no matching ref`,
-      );
-    }
-    if (remoteCommit === localCommit) {
+    const requested = managed.requestedRef ?? managed.trackingBranch ?? managed.commit;
+    if (!requested) {
       return {
-        remote,
-        branch,
-        localCommit,
-        remoteCommit,
-        status: "current",
-        error: null,
-        detail: `Up to date with ${remote}/${branch}`,
+        remote: managed.remote,
+        remoteUrl: managed.remote,
+        ref: null,
+        refKind: null,
+        reportOnly: "unpinned",
+        detail: "No ref recorded for this git-managed install — report only",
+      };
+    }
+    if (/^[0-9a-f]{40,64}$/i.test(requested)) return pinnedResolution(managed.remote, requested);
+    return {
+      remote: managed.remote,
+      remoteUrl: managed.remote,
+      ref: requested,
+      refKind: managed.trackingBranch ? "branch" : "tag",
+      reportOnly: null,
+      detail: null,
+    };
+  }
+
+  if (identity.plugin.source === "git" && identity.plugin.remote && identity.plugin.ref) {
+    if (/^[0-9a-f]{40,64}$/i.test(identity.plugin.ref)) {
+      return pinnedResolution(identity.plugin.remote, identity.plugin.ref);
+    }
+    return {
+      remote: identity.plugin.remote,
+      remoteUrl: identity.plugin.remote,
+      ref: identity.plugin.ref,
+      refKind: "branch",
+      reportOnly: null,
+      detail: null,
+    };
+  }
+
+  if (!identity.repoRoot) {
+    return { remote: null, remoteUrl: null, ref: null, refKind: null, reportOnly: "unpinned", detail: "Not a git repository" };
+  }
+
+  const upstream = await git(
+    runner,
+    ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    identity.repoRoot,
+  );
+  const upstreamName = upstream.code === 0 ? upstream.stdout.trim() : "";
+  if (upstreamName && upstreamName !== "HEAD") {
+    const separator = upstreamName.indexOf("/");
+    const remoteName = separator > 0 ? upstreamName.slice(0, separator) : upstreamName;
+    const ref = separator > 0 ? upstreamName.slice(separator + 1) : null;
+    const urlResult = await git(runner, ["remote", "get-url", remoteName], identity.repoRoot);
+    const remoteUrl = urlResult.code === 0 ? urlResult.stdout.trim() : null;
+    if (!ref) {
+      return {
+        remote: remoteName,
+        remoteUrl: remoteUrl,
+        ref: null,
+        refKind: null,
+        reportOnly: "unpinned",
+        detail: "Unable to resolve the upstream branch name — report only",
       };
     }
     return {
-      remote,
-      branch,
-      localCommit,
-      remoteCommit,
-      status: "behind",
-      error: null,
-      detail: `Remote ${remote}/${branch} is ahead of local HEAD — update available`,
+      remote: remoteName,
+      remoteUrl: remoteUrl ?? remoteName,
+      ref,
+      refKind: "branch",
+      reportOnly: null,
+      detail: null,
     };
-  } catch (error) {
-    return probeError({ remote: pinnedRemote, branch: pinnedRef }, errorOf(error));
   }
+
+  const branchResult = await git(runner, ["rev-parse", "--abbrev-ref", "HEAD"], identity.repoRoot);
+  const current = branchResult.code === 0 ? branchResult.stdout.trim() : "";
+  if (!current || current === "HEAD") {
+    return {
+      remote: null,
+      remoteUrl: null,
+      ref: null,
+      refKind: "detached",
+      reportOnly: "unpinned",
+      detail: "Detached HEAD — no upstream to compare; report only",
+    };
+  }
+  return {
+    remote: null,
+    remoteUrl: null,
+    ref: current,
+    refKind: "branch",
+    reportOnly: "no-upstream",
+    detail: `Branch '${current}' has no upstream remote; report only`,
+  };
 }
 
-function firstPinned(plugins: PaseoPluginInfo[], field: "remote" | "ref"): string | null {
-  for (const plugin of plugins) {
-    const value = plugin[field]?.trim();
-    if (value) return value;
+// ---------------------------------------------------------------------------
+// Remote cache + per-remote state (deduped per (remote, ref))
+// ---------------------------------------------------------------------------
+
+interface RemoteRefState {
+  commit: string | null;
+  refKind: RefKind | null;
+  refExists: boolean;
+  cacheDir: string;
+  shallow: boolean;
+  error: string | null;
+}
+
+interface RemoteCache {
+  states: Map<string, Promise<RemoteRefState>>;
+  cacheRoot: string;
+}
+
+function remoteKey(remoteUrl: string, ref: string): string {
+  return `${remoteUrl}\0${ref}`;
+}
+
+function cacheDirFor(cacheRoot: string, remoteUrl: string, ref: string): string {
+  const hash = createHash("sha256").update(remoteKey(remoteUrl, ref)).digest("hex").slice(0, 24);
+  return path.join(cacheRoot, hash);
+}
+
+async function fetchIntoCache(
+  cacheDir: string,
+  remoteUrl: string,
+  resolution: RefResolution,
+  filtered: boolean,
+  runner: CommandRunner,
+  deps: ProbeDeps,
+): Promise<string | null> {
+  const mkdir = deps.mkdir ?? defaultMkdir;
+  try {
+    await mkdir(path.dirname(cacheDir));
+  } catch {
+    // git init below will surface a real failure if the directory is unusable.
+  }
+  const init = await git(runner, ["init", "--bare", "-q", cacheDir], undefined);
+  if (init.code !== 0) {
+    return outputOf(init) || "git init of the update cache failed";
+  }
+  const refArg =
+    resolution.refKind === "tag" ? `refs/tags/${resolution.ref}` : (resolution.ref as string);
+  const args = ["-C", cacheDir, "fetch", "--depth=1", "--no-tags"];
+  if (filtered) args.push("--filter=tree:0");
+  args.push(remoteUrl, refArg);
+  const fetch = await git(runner, args, undefined, FETCH_TIMEOUT_MS);
+  if (fetch.code !== 0) {
+    return outputOf(fetch) || `git fetch ${remoteUrl} failed`;
   }
   return null;
 }
 
-function baseRow(plugin: PaseoPluginInfo): Omit<PluginUpdate, "status" | "error" | "detail"> {
+async function resolveRemoteState(
+  resolution: RefResolution,
+  cache: RemoteCache,
+  runner: CommandRunner,
+  deps: ProbeDeps,
+): Promise<RemoteRefState> {
+  const remoteUrl = resolution.remoteUrl!;
+  const ref = resolution.ref!;
+  const cacheDir = cacheDirFor(cache.cacheRoot, remoteUrl, ref);
+
+  const ls = await git(runner, ["ls-remote", remoteUrl, ref], undefined);
+  if (ls.code !== 0) {
+    return { commit: null, refKind: resolution.refKind, refExists: false, cacheDir, shallow: false, error: outputOf(ls) || "git ls-remote failed" };
+  }
+  const lines = parseLsRemote(ls.stdout);
+  const heads = lines.filter((line) => line.ref.startsWith("refs/heads/"));
+  const tags = lines.filter((line) => line.ref.startsWith("refs/tags/"));
+
+  let commit: string | null = null;
+  let refKind: RefKind | null = resolution.refKind;
+  if (heads.length > 0) {
+    commit = (heads.find((line) => line.ref === `refs/heads/${ref}`) ?? heads[0]!).sha;
+    refKind = "branch";
+  } else if (tags.length > 0) {
+    const peeled = tags.find((line) => line.ref === `refs/tags/${ref}^{}`);
+    const direct = tags.find((line) => line.ref === `refs/tags/${ref}`);
+    commit = (peeled ?? direct ?? tags[0]!).sha;
+    refKind = "tag";
+  }
+  if (!commit) {
+    return { commit: null, refKind, refExists: false, cacheDir, shallow: false, error: `Remote has no ref matching '${ref}'` };
+  }
+
+  const resolved: RefResolution = { ...resolution, refKind };
+  const fetchError = await fetchIntoCache(cacheDir, remoteUrl, resolved, true, runner, deps);
+  if (fetchError) {
+    return { commit, refKind, refExists: true, cacheDir, shallow: false, error: fetchError };
+  }
+  const shallowResult = await git(runner, ["-C", cacheDir, "rev-parse", "--is-shallow-repository"], undefined);
+  const shallow = shallowResult.code === 0 && shallowResult.stdout.trim() === "true";
+  return { commit, refKind, refExists: true, cacheDir, shallow, error: null };
+}
+
+async function getRemoteState(
+  resolution: RefResolution,
+  cache: RemoteCache,
+  runner: CommandRunner,
+  deps: ProbeDeps,
+): Promise<RemoteRefState> {
+  const key = remoteKey(resolution.remoteUrl!, resolution.ref!);
+  let promise = cache.states.get(key);
+  if (!promise) {
+    promise = resolveRemoteState(resolution, cache, runner, deps);
+    cache.states.set(key, promise);
+  }
+  return promise;
+}
+
+interface RemoteTree {
+  tree: string | null;
+  absent: boolean;
+  error: string | null;
+}
+
+async function readRemoteTree(
+  state: RemoteRefState,
+  resolution: RefResolution,
+  subdir: string,
+  runner: CommandRunner,
+  deps: ProbeDeps,
+): Promise<RemoteTree> {
+  let result = await git(runner, ["-C", state.cacheDir, "rev-parse", treeExpr(state.commit!, subdir)], undefined);
+  if (result.code !== 0) {
+    const message = outputOf(result);
+    if (/not a valid object name|bad object|missing/i.test(message)) {
+      const refetched = await fetchIntoCache(
+        state.cacheDir,
+        resolution.remoteUrl!,
+        { ...resolution, refKind: state.refKind },
+        false,
+        runner,
+        deps,
+      );
+      if (refetched) return { tree: null, absent: false, error: refetched };
+      result = await git(runner, ["-C", state.cacheDir, "rev-parse", treeExpr(state.commit!, subdir)], undefined);
+    }
+  }
+  if (result.code === 0) return { tree: parseCommit(result.stdout), absent: false, error: null };
+  const message = outputOf(result);
+  if (/does not exist|exists on disk, but not in/i.test(message)) {
+    return { tree: null, absent: true, error: null };
+  }
+  return { tree: null, absent: false, error: message || "Unable to read the remote subdirectory tree" };
+}
+
+async function readLatestChange(
+  cacheDir: string,
+  commit: string,
+  subdir: string,
+  runner: CommandRunner,
+  shallow: boolean,
+): Promise<PluginUpdateChange> {
+  if (shallow) return { commit, date: null, subject: null };
+  const result = await git(
+    runner,
+    ["-C", cacheDir, "log", "-1", "--format=%H%x1f%cI%x1f%s", commit, "--", subdir || "."],
+    undefined,
+  );
+  if (result.code === 0 && result.stdout.trim()) {
+    const [changeCommit, date, subject] = result.stdout.trim().split("\x1f");
+    if (changeCommit) return { commit: changeCommit, date: date ?? null, subject: subject ?? null };
+  }
+  return { commit, date: null, subject: null };
+}
+
+// ---------------------------------------------------------------------------
+// Local side
+// ---------------------------------------------------------------------------
+
+interface LocalState {
+  localCommit: string | null;
+  localTree: string | null;
+  dirty: boolean | null;
+  workingTree: string | null;
+}
+
+async function revParseTree(
+  runner: CommandRunner,
+  repoRoot: string,
+  commit: string,
+  subdir: string,
+): Promise<string | null> {
+  const result = await git(runner, ["rev-parse", treeExpr(commit, subdir)], repoRoot);
+  return result.code === 0 ? parseCommit(result.stdout) : null;
+}
+
+async function workingTreeHash(
+  repoRoot: string,
+  subdir: string,
+  runner: CommandRunner,
+): Promise<string | null> {
+  const stash = await git(runner, ["stash", "create"], repoRoot);
+  if (stash.code !== 0) return null;
+  const commit = parseCommit(stash.stdout);
+  if (!commit) return null;
+  return revParseTree(runner, repoRoot, commit, subdir);
+}
+
+async function readLocalState(
+  identity: PluginIdentity,
+  runner: CommandRunner,
+): Promise<LocalState> {
+  const head = await git(runner, ["rev-parse", "HEAD"], identity.repoRoot!);
+  const localCommit = parseCommit(head.stdout);
+  const localTree = localCommit
+    ? await revParseTree(runner, identity.repoRoot!, localCommit, identity.subdir ?? "")
+    : null;
+
+  let dirty: boolean | null = null;
+  let workingTree: string | null = null;
+  if (identity.plugin.source !== "git") {
+    const status = await git(runner, ["status", "--porcelain", "--", identity.subdir || "."], identity.repoRoot!);
+    if (status.code === 0) {
+      dirty = status.stdout.trim().length > 0;
+      if (dirty) workingTree = await workingTreeHash(identity.repoRoot!, identity.subdir ?? "", runner);
+    }
+  }
+  return { localCommit, localTree, dirty, workingTree };
+}
+
+// ---------------------------------------------------------------------------
+// Verdicts
+// ---------------------------------------------------------------------------
+
+interface Verdict {
+  status: PluginUpdate["status"];
+  updateAvailable: boolean;
+  detail: string;
+}
+
+async function isAncestor(
+  runner: CommandRunner,
+  repoRoot: string,
+  ancestor: string,
+  descendant: string,
+): Promise<boolean | null> {
+  const result = await git(runner, ["merge-base", "--is-ancestor", ancestor, descendant], repoRoot);
+  if (result.code === 0) return true;
+  if (result.code === 1) return false;
+  return null;
+}
+
+async function mergeBaseCommit(
+  runner: CommandRunner,
+  repoRoot: string,
+  a: string,
+  b: string,
+): Promise<string | null> {
+  const result = await git(runner, ["merge-base", a, b], repoRoot);
+  return result.code === 0 ? parseCommit(result.stdout) : null;
+}
+
+async function classifyBranch(
+  identity: PluginIdentity,
+  resolution: RefResolution,
+  local: LocalState,
+  state: RemoteRefState,
+  remote: RemoteTree,
+  runner: CommandRunner,
+): Promise<Verdict> {
+  const scope = scopeLabel(identity.subdir);
+  if (remote.absent) {
+    return {
+      status: "current",
+      updateAvailable: false,
+      detail: `Remote ${resolution.ref} has no ${scope} — local-only plugin, nothing to pull`,
+    };
+  }
+  const localCommit = local.localCommit;
+  const remoteCommit = state.commit;
+  if (localCommit && remoteCommit && localCommit === remoteCommit) {
+    return { status: "current", updateAvailable: false, detail: `Up to date with ${resolution.ref} (${short(remoteCommit)})` };
+  }
+  if (local.localTree && remote.tree && local.localTree === remote.tree) {
+    return { status: "current", updateAvailable: false, detail: `Subdirectory tree matches remote ${resolution.ref}` };
+  }
+
+  if (localCommit && remoteCommit) {
+    const localBehind = await isAncestor(runner, identity.repoRoot!, localCommit, remoteCommit);
+    if (localBehind === true) {
+      return { status: "behind", updateAvailable: true, detail: `Remote ${resolution.ref} is ahead (${short(remoteCommit)}); update available` };
+    }
+    const remoteBehind = await isAncestor(runner, identity.repoRoot!, remoteCommit, localCommit);
+    if (remoteBehind === true) {
+      return { status: "current", updateAvailable: false, detail: `Local is ahead of remote ${resolution.ref}; nothing to pull` };
+    }
+    const base = await mergeBaseCommit(runner, identity.repoRoot!, localCommit, remoteCommit);
+    if (base) {
+      const baseTree = await revParseTree(runner, identity.repoRoot!, base, identity.subdir ?? "");
+      if (baseTree !== null && baseTree === remote.tree) {
+        return {
+          status: "current",
+          updateAvailable: false,
+          detail: `Local is ahead; remote ${resolution.ref} did not change ${scope} — nothing to pull`,
+        };
+      }
+      if (baseTree === local.localTree) {
+        return { status: "behind", updateAvailable: true, detail: `Remote ${resolution.ref} changed ${scope}; update available` };
+      }
+      return { status: "behind", updateAvailable: true, detail: `Both local and remote ${resolution.ref} changed ${scope}; update may conflict` };
+    }
+  }
+  return { status: "behind", updateAvailable: true, detail: `Subdirectory tree differs from remote ${resolution.ref}; update available` };
+}
+
+async function classifyTag(
+  identity: PluginIdentity,
+  resolution: RefResolution,
+  state: RemoteRefState,
+  runner: CommandRunner,
+): Promise<Verdict> {
+  const localTagCommit = identity.managed?.commit ?? null;
+  const remoteCommit = state.commit!;
+  if (localTagCommit && localTagCommit !== remoteCommit) {
+    return {
+      status: "behind",
+      updateAvailable: true,
+      detail: `Tag ${resolution.ref} moved to ${short(remoteCommit)} (was ${short(localTagCommit)}) — update available`,
+    };
+  }
+  const lsTags = await git(runner, ["ls-remote", "--tags", resolution.remoteUrl!], undefined);
+  if (lsTags.code === 0) {
+    const tags = parseTagList(lsTags.stdout);
+    const current = tags.find((tag) => tag.name === resolution.ref);
+    if (current) {
+      const newer = findNewerSemver(tags, current);
+      if (newer) {
+        return {
+          status: "behind",
+          updateAvailable: true,
+          detail: `Newer release tag ${newer.name} available (pinned to ${resolution.ref})`,
+        };
+      }
+    }
+  }
+  return { status: "current", updateAvailable: false, detail: `Tag ${resolution.ref} is unchanged` };
+}
+
+// ---------------------------------------------------------------------------
+// Rows
+// ---------------------------------------------------------------------------
+
+function emptyRow(plugin: PaseoPluginInfo, identity: PluginIdentity, resolution: RefResolution): PluginUpdate {
   return {
     id: plugin.id,
     path: plugin.path,
-    remote: null,
-    branch: null,
+    source: plugin.source ?? null,
+    repoRoot: identity.repoRoot,
+    subdir: identity.subdir,
+    ref: resolution.ref,
+    refKind: resolution.refKind,
+    remote: resolution.remote,
     localCommit: null,
     remoteCommit: null,
-    sharedRepo: null,
-    repoRoot: null,
-    repoPlugins: null,
-    source: plugin.source ?? null,
+    localTree: null,
+    remoteTree: null,
+    workingTree: null,
+    dirty: null,
+    updateAvailable: false,
+    status: "current",
+    error: null,
+    detail: null,
+    latestChange: null,
+    sharedVerdict: null,
+    sharedWith: null,
   };
 }
 
 function notARepoRow(plugin: PaseoPluginInfo): PluginUpdate {
   return {
-    ...baseRow(plugin),
+    id: plugin.id,
+    path: plugin.path,
+    source: plugin.source ?? null,
+    repoRoot: null,
+    subdir: null,
+    ref: null,
+    refKind: null,
+    remote: null,
+    localCommit: null,
+    remoteCommit: null,
+    localTree: null,
+    remoteTree: null,
+    workingTree: null,
+    dirty: null,
+    updateAvailable: false,
     status: "not-a-repo",
     error: null,
     detail: "Not a git repository — no git update possible",
+    latestChange: null,
+    sharedVerdict: null,
+    sharedWith: null,
   };
 }
 
-function rowFromProbe(
-  plugin: PaseoPluginInfo,
-  root: string,
-  probe: RepoProbe,
-  sharedRepo: boolean | null,
-  ids: string[],
-): PluginUpdate {
-  const detail =
-    sharedRepo && probe.detail
-      ? `${probe.detail} (shared repo; compares monorepo HEAD)`
-      : probe.detail;
-  return {
-    id: plugin.id,
-    path: plugin.path,
-    remote: probe.remote,
-    branch: probe.branch,
-    localCommit: probe.localCommit,
-    remoteCommit: probe.remoteCommit,
-    status: probe.status,
-    error: probe.error,
-    detail,
-    sharedRepo,
-    repoRoot: root,
-    repoPlugins: ids.length > 1 ? ids : null,
-    source: plugin.source ?? null,
-  };
+interface ProbeContext {
+  runner: CommandRunner;
+  deps: ProbeDeps;
+  cache: RemoteCache;
+  sharedWith: Map<PluginUpdate["id"], string[]>;
 }
 
-async function scanOrphanedDirs(
-  installed: PaseoPluginInfo[],
-  deps: ProbeDeps,
-): Promise<PluginUpdate[]> {
-  const pluginsRoot = deps.pluginsRoot ?? defaultPluginsRoot();
-  const readDir = deps.readDir ?? defaultReadDir;
-  let entries: Array<{ name: string; isDirectory(): boolean }>;
-  try {
-    entries = await readDir(pluginsRoot);
-  } catch {
-    return [];
+async function probeOne(
+  identity: PluginIdentity,
+  resolution: RefResolution,
+  context: ProbeContext,
+): Promise<PluginUpdate> {
+  const plugin = identity.plugin;
+  if (!identity.repoRoot) return notARepoRow(plugin);
+
+  const row = emptyRow(plugin, identity, resolution);
+  const shared = context.sharedWith.get(plugin.id) ?? [];
+  row.sharedWith = shared.length > 0 ? shared : null;
+  row.sharedVerdict = shared.length > 0;
+
+  const local = await readLocalState(identity, context.runner);
+  row.localCommit = local.localCommit;
+  row.localTree = local.localTree;
+  row.workingTree = local.workingTree;
+  row.dirty = local.dirty;
+
+  if (resolution.reportOnly) {
+    row.status = resolution.reportOnly;
+    row.detail = resolution.detail;
+    return row;
   }
-  const livePaths = installed
-    .map((plugin) => plugin.path)
-    .filter((value): value is string => Boolean(value))
-    .map(normalizeDir);
-  const rows: PluginUpdate[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
-    const dir = normalizeDir(path.join(pluginsRoot, entry.name));
-    const live = livePaths.some((livePath) => livePath === dir || livePath.startsWith(`${dir}${path.sep}`));
-    if (live) continue;
-    rows.push({
-      id: `orphaned:${entry.name}`,
-      path: dir,
-      remote: null,
-      branch: null,
-      localCommit: null,
-      remoteCommit: null,
-      status: "orphaned",
-      error: null,
-      detail: "Leftover managed directory from an uninstalled or failed install — not probed",
-      sharedRepo: null,
-      repoRoot: null,
-      repoPlugins: null,
-      source: null,
-    });
+  if (!resolution.remoteUrl || !resolution.ref) {
+    row.status = "error";
+    row.error = "Unable to resolve a remote/ref for this plugin";
+    return row;
   }
-  rows.sort((a, b) => a.id.localeCompare(b.id));
-  return rows;
+
+  const state = await getRemoteState(resolution, context.cache, context.runner, context.deps);
+  if (state.error) {
+    row.status = "error";
+    row.error = state.error;
+    return row;
+  }
+  row.remoteCommit = state.commit;
+  row.refKind = state.refKind ?? resolution.refKind;
+
+  if (!state.refExists || !state.commit) {
+    row.status = "error";
+    row.error = `Remote has no ref matching '${resolution.ref}'`;
+    return row;
+  }
+
+  const remote = await readRemoteTree(state, resolution, identity.subdir ?? "", context.runner, context.deps);
+  if (remote.error) {
+    row.status = "error";
+    row.error = remote.error;
+    return row;
+  }
+  row.remoteTree = remote.tree;
+  row.latestChange = await readLatestChange(state.cacheDir, state.commit, identity.subdir ?? "", context.runner, state.shallow);
+
+  const verdict =
+    row.refKind === "tag"
+      ? await classifyTag(identity, resolution, state, context.runner)
+      : await classifyBranch(identity, resolution, local, state, remote, context.runner);
+
+  row.status = verdict.status;
+  row.updateAvailable = verdict.updateAvailable;
+  row.detail = verdict.detail;
+  return row;
 }
 
 async function probeInstalled(
@@ -311,44 +868,44 @@ async function probeInstalled(
   runner: CommandRunner,
   deps: ProbeDeps = {},
 ): Promise<PluginUpdate[]> {
-  const resolved = await Promise.all(
-    installed.map(async (plugin) => ({
-      plugin,
-      root: plugin.path ? await resolveRepoRoot(plugin.path, runner) : null,
-    })),
-  );
+  const records = await loadManagedRecords(deps);
+  const home = deps.homeDir ?? homedir();
+  const cacheRoot = deps.cacheRoot ?? path.join(home, ".paseo", "plugins", ".cache", "plugin-updates");
 
-  const order: string[] = [];
-  const groups = new Map<string, { root: string | null; plugins: PaseoPluginInfo[] }>();
-  for (const item of resolved) {
-    const key = item.root ?? `\0${item.plugin.id}`;
-    let group = groups.get(key);
-    if (!group) {
-      group = { root: item.root, plugins: [] };
-      groups.set(key, group);
-      order.push(key);
-    }
-    group.plugins.push(item.plugin);
+  const identities: PluginIdentity[] = [];
+  for (const plugin of installed) {
+    identities.push(await resolveIdentity(plugin, records.get(plugin.id) ?? null, runner));
   }
 
+  const resolutions: RefResolution[] = [];
+  for (const identity of identities) {
+    resolutions.push(await resolveRef(identity, runner));
+  }
+
+  const members = new Map<string, string[]>();
+  identities.forEach((identity, index) => {
+    if (!identity.repoRoot) return;
+    const resolution = resolutions[index]!;
+    const key = `${identity.repoRoot}\0${resolution.ref ?? ""}`;
+    const list = members.get(key) ?? [];
+    list.push(identity.plugin.id);
+    members.set(key, list);
+  });
+  const sharedWith = new Map<string, string[]>();
+  identities.forEach((identity, index) => {
+    if (!identity.repoRoot) return;
+    const resolution = resolutions[index]!;
+    const key = `${identity.repoRoot}\0${resolution.ref ?? ""}`;
+    const peers = (members.get(key) ?? []).filter((id) => id !== identity.plugin.id);
+    if (peers.length > 0) sharedWith.set(identity.plugin.id, peers);
+  });
+
+  const cache: RemoteCache = { states: new Map(), cacheRoot };
+  const context: ProbeContext = { runner, deps, cache, sharedWith };
+
   const rows: PluginUpdate[] = [];
-  for (const key of order) {
-    const group = groups.get(key)!;
-    if (!group.root) {
-      for (const plugin of group.plugins) rows.push(notARepoRow(plugin));
-      continue;
-    }
-    const probe = await probeRepoRoot(
-      group.root,
-      firstPinned(group.plugins, "remote"),
-      firstPinned(group.plugins, "ref"),
-      runner,
-    );
-    const ids = group.plugins.map((plugin) => plugin.id);
-    for (const plugin of group.plugins) {
-      const sharedRepo = plugin.path ? normalizeDir(plugin.path) !== group.root : null;
-      rows.push(rowFromProbe(plugin, group.root, probe, sharedRepo, ids));
-    }
+  for (let index = 0; index < identities.length; index += 1) {
+    rows.push(await probeOne(identities[index]!, resolutions[index]!, context));
   }
 
   if (deps.scanOrphans !== false) {
@@ -383,22 +940,88 @@ export async function checkInstalledPlugins(
         {
           id: "plugin-manager",
           path: "",
+          source: null,
+          repoRoot: null,
+          subdir: null,
+          ref: null,
+          refKind: null,
           remote: null,
-          branch: null,
           localCommit: null,
           remoteCommit: null,
+          localTree: null,
+          remoteTree: null,
+          workingTree: null,
+          dirty: null,
+          updateAvailable: false,
           status: "error",
           error: `Unable to list installed plugins: ${errorOf(error)}`,
           detail: null,
-          sharedRepo: null,
-          repoRoot: null,
-          repoPlugins: null,
-          source: null,
+          latestChange: null,
+          sharedVerdict: null,
+          sharedWith: null,
         },
       ],
     };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Orphans
+// ---------------------------------------------------------------------------
+
+async function scanOrphanedDirs(
+  installed: PaseoPluginInfo[],
+  deps: ProbeDeps,
+): Promise<PluginUpdate[]> {
+  const pluginsRoot = deps.pluginsRoot ?? defaultPluginsRoot();
+  const readDir = deps.readDir ?? defaultReadDir;
+  let entries: Array<{ name: string; isDirectory(): boolean }>;
+  try {
+    entries = await readDir(pluginsRoot);
+  } catch {
+    return [];
+  }
+  const livePaths = installed
+    .map((plugin) => plugin.path)
+    .filter((value): value is string => Boolean(value))
+    .map(normalizeDir);
+  const rows: PluginUpdate[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    const dir = normalizeDir(path.join(pluginsRoot, entry.name));
+    const live = livePaths.some((livePath) => livePath === dir || livePath.startsWith(`${dir}${path.sep}`));
+    if (live) continue;
+    rows.push({
+      id: `orphaned:${entry.name}`,
+      path: dir,
+      source: null,
+      repoRoot: null,
+      subdir: null,
+      ref: null,
+      refKind: null,
+      remote: null,
+      localCommit: null,
+      remoteCommit: null,
+      localTree: null,
+      remoteTree: null,
+      workingTree: null,
+      dirty: null,
+      updateAvailable: false,
+      status: "orphaned",
+      error: null,
+      detail: "Leftover managed directory from an uninstalled or failed install — not probed",
+      latestChange: null,
+      sharedVerdict: null,
+      sharedWith: null,
+    });
+  }
+  rows.sort((a, b) => a.id.localeCompare(b.id));
+  return rows;
+}
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
 
 function actionResult(
   pluginId: string,
@@ -455,52 +1078,66 @@ interface PullOutcome {
   error: string | null;
 }
 
+async function checkDirty(root: string, runner: CommandRunner): Promise<boolean | null> {
+  const statusResult = await git(runner, ["status", "--porcelain"], root);
+  if (statusResult.code !== 0) return null;
+  return statusResult.stdout.trim().length > 0;
+}
+
 async function pullRoot(root: string, force: boolean, runner: CommandRunner): Promise<PullOutcome> {
-  try {
-    if (!force) {
-      const statusResult = await runner("git", ["status", "--porcelain"], {
-        cwd: root,
-        timeoutMs: PROBE_TIMEOUT_MS,
-      });
-      if (statusResult.code !== 0) {
-        const message = outputOf(statusResult) || "git status failed";
-        return { ok: false, requiresForce: false, output: outputOf(statusResult) || null, error: message };
-      }
-      if (statusResult.stdout.trim()) {
+  const dirty = await checkDirty(root, runner);
+  if (dirty === null) {
+    return { ok: false, requiresForce: false, output: null, error: "git status failed for the plugin repository" };
+  }
+  if (dirty && !force) {
+    return {
+      ok: false,
+      requiresForce: true,
+      output: null,
+      error: "Working tree is dirty — refusing to pull. Re-run with force to override.",
+    };
+  }
+
+  const head = parseCommit((await git(runner, ["rev-parse", "HEAD"], root)).stdout);
+  const upstream = await git(runner, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], root);
+  const upstreamName = upstream.code === 0 ? upstream.stdout.trim() : "";
+  if (head && upstreamName && upstreamName !== "HEAD") {
+    const upstreamCommit = parseCommit((await git(runner, ["rev-parse", upstreamName], root)).stdout);
+    if (upstreamCommit) {
+      const remoteBehind = await isAncestor(runner, root, upstreamCommit, head);
+      const localBehind = await isAncestor(runner, root, head, upstreamCommit);
+      if (remoteBehind === false && localBehind === false) {
         return {
           ok: false,
-          requiresForce: true,
+          requiresForce: false,
           output: null,
-          error: "Working tree is dirty — refusing to pull. Re-run with force to override.",
+          error: `Branch has diverged from ${upstreamName} — refusing to pull. Reconcile manually.`,
         };
       }
     }
-    const pull = await runner("git", ["pull", "--ff-only"], {
-      cwd: root,
-      timeoutMs: UPDATE_TIMEOUT_MS,
-    });
-    const output = outputOf(pull) || null;
-    if (pull.code !== 0) {
-      return { ok: false, requiresForce: false, output, error: output || `git pull --ff-only exited with code ${pull.code}` };
-    }
-    return { ok: true, requiresForce: false, output, error: null };
-  } catch (error) {
-    return { ok: false, requiresForce: false, output: null, error: errorOf(error) };
   }
+
+  const pull = await git(runner, ["pull", "--ff-only"], root, UPDATE_TIMEOUT_MS);
+  const output = outputOf(pull) || null;
+  if (pull.code !== 0) {
+    return { ok: false, requiresForce: false, output, error: output || `git pull --ff-only exited with code ${pull.code}` };
+  }
+  return { ok: true, requiresForce: false, output, error: null };
 }
 
 async function idsSharingRoot(
   installed: PaseoPluginInfo[],
+  records: Map<string, ManagedRecord>,
   root: string,
   runner: CommandRunner,
 ): Promise<string[]> {
-  const roots = await Promise.all(
+  const resolved = await Promise.all(
     installed.map(async (plugin) => ({
       id: plugin.id,
-      root: plugin.path ? await resolveRepoRoot(plugin.path, runner) : null,
+      root: plugin.path ? (await resolveIdentity(plugin, records.get(plugin.id) ?? null, runner)).repoRoot : null,
     })),
   );
-  return roots.filter((entry) => entry.root === root).map((entry) => entry.id);
+  return resolved.filter((entry) => entry.root === root).map((entry) => entry.id);
 }
 
 export interface UpdateOptions {
@@ -516,6 +1153,7 @@ export async function updatePlugin(
   options: UpdateOptions = {},
 ): Promise<PluginUpdateActionResult> {
   const runner = options.runner ?? runCommand;
+  const deps = options.deps ?? {};
   let installed: PaseoPluginInfo[];
   try {
     installed = options.installedOverride ?? (await listPlugins({ forceRefresh: true }));
@@ -531,22 +1169,23 @@ export async function updatePlugin(
     return actionResult(pluginId, result.status, result.error, result.output);
   }
 
-  const root = await resolveRepoRoot(info.path, runner);
-  if (!root) {
+  const records = await loadManagedRecords(deps);
+  const identity = await resolveIdentity(info, records.get(pluginId) ?? null, runner);
+  if (!identity.repoRoot) {
     return actionResult(pluginId, "error", `Plugin '${pluginId}' is not a git repository — no git update possible`);
   }
-  const pull = await pullRoot(root, options.force ?? false, runner);
+  const pull = await pullRoot(identity.repoRoot, options.force ?? false, runner);
   if (!pull.ok) {
     return actionResult(pluginId, "error", pull.error, pull.output, pull.requiresForce);
   }
 
-  const ids = await idsSharingRoot(installed, root, runner);
+  const ids = await idsSharingRoot(installed, records, identity.repoRoot, runner);
   const reloadFailures: string[] = [];
   for (const id of ids) {
     const reload = await reloadPlugin(id, runner);
     if (!reload.ok) reloadFailures.push(`${id}: ${reload.error}`);
   }
-  const output = pull.output ?? `Pulled ${root}`;
+  const output = pull.output ?? `Pulled ${identity.repoRoot}`;
   if (reloadFailures.length > 0) {
     return actionResult(pluginId, "error", `Pulled but failed to reload: ${reloadFailures.join("; ")}`, output);
   }
@@ -558,6 +1197,7 @@ export async function updateAllPlugins(
   options: UpdateOptions = {},
 ): Promise<{ results: PluginUpdateActionResult[] }> {
   const runner = options.runner ?? runCommand;
+  const deps = options.deps ?? {};
   let installed: PaseoPluginInfo[];
   try {
     installed = options.installedOverride ?? (await listPlugins({ forceRefresh: true }));
@@ -567,25 +1207,28 @@ export async function updateAllPlugins(
     };
   }
 
-  const rows = await probeInstalled(installed, runner, options.deps ?? { scanOrphans: false });
-  const groups = new Map<string, PluginUpdate[]>();
+  const rows = await probeInstalled(installed, runner, { ...deps, scanOrphans: false });
+  const directoryGroups = new Map<string, PluginUpdate[]>();
+  const gitRows: PluginUpdate[] = [];
   for (const row of rows) {
-    if (row.status !== "behind" || !row.repoRoot) continue;
-    const group = groups.get(row.repoRoot) ?? [];
+    if (!row.updateAvailable) continue;
+    if (row.source === "git") {
+      gitRows.push(row);
+      continue;
+    }
+    if (!row.repoRoot) continue;
+    const group = directoryGroups.get(row.repoRoot) ?? [];
     group.push(row);
-    groups.set(row.repoRoot, group);
+    directoryGroups.set(row.repoRoot, group);
   }
 
   const results: PluginUpdateActionResult[] = [];
-  for (const [root, group] of groups) {
+  for (const row of gitRows) {
+    const result = await invokePaseoUpdate([row.id], runner);
+    results.push(actionResult(row.id, result.status, result.error, result.output));
+  }
+  for (const [root, group] of directoryGroups) {
     const ids = group.map((row) => row.id);
-    if (group[0]?.source === "git") {
-      for (const id of ids) {
-        const result = await invokePaseoUpdate([id], runner);
-        results.push(actionResult(id, result.status, result.error, result.output));
-      }
-      continue;
-    }
     const pull = await pullRoot(root, options.force ?? false, runner);
     if (!pull.ok) {
       for (const id of ids) {
@@ -612,13 +1255,19 @@ export async function updateAllPlugins(
 export const testing = {
   probePlugin,
   probeInstalled,
-  probeRepoRoot,
-  resolveRepoRoot,
   pullRoot,
   scanOrphanedDirs,
   checkInstalledPlugins,
   updatePlugin,
   updateAllPlugins,
+  loadManagedRecords,
+  resolveIdentity,
+  resolveRef,
+  classifyBranch,
+  classifyTag,
+  parseTagList,
+  findNewerSemver,
   PROBE_TIMEOUT_MS,
+  FETCH_TIMEOUT_MS,
   UPDATE_TIMEOUT_MS,
 };

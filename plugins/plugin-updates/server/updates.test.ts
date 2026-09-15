@@ -7,11 +7,21 @@ function result(stdout = "", code = 0, stderr = ""): SafeSpawnResult {
   return { stdout, stderr, code, signal: null, durationMs: 1 };
 }
 
-const LOCAL = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const REMOTE = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+function hex(char: string): string {
+  return char.repeat(40);
+}
 
-function plugin(id = "demo", pluginPath = "/plugins/demo"): PaseoPluginInfo {
-  return { id, path: pluginPath, enabled: true, status: "running" };
+const LOCAL = hex("a");
+const REMOTE = hex("b");
+const BASE = hex("c");
+const UPSTREAM = hex("d");
+const TREE_LOCAL = hex("1");
+const TREE_REMOTE = hex("2");
+const TREE_WORK = hex("3");
+const TREE_TAG = hex("4");
+
+function plugin(id = "demo", pluginPath = "/repo/plugins/demo", extra: Partial<PaseoPluginInfo> = {}): PaseoPluginInfo {
+  return { id, path: pluginPath, enabled: true, status: "running", ...extra };
 }
 
 type Runner = Parameters<typeof testing.probePlugin>[1];
@@ -23,16 +33,27 @@ interface Call {
   cwd?: string;
 }
 
-interface RunnerOptions {
-  toplevel?: string | null | ((cwd?: string) => string | null);
-  head?: string;
+interface MockOptions {
+  toplevel?: string | null | ((cwd: string | undefined) => string | null);
+  head?: string | ((cwd: string | undefined) => string);
   currentBranch?: string;
   upstream?: string | null;
-  remoteRef?: string;
+  remoteUrl?: string;
+  trees?: Record<string, string>;
+  refs?: Record<string, string>;
+  revParseStderr?: (expr: string) => string;
+  lsRemote?: (ref: string) => string;
+  lsRemoteTags?: string;
   lsRemoteCode?: number;
   lsRemoteStderr?: string;
   lsRemoteThrows?: Error;
   statusPorcelain?: string;
+  stashCreate?: string;
+  isAncestor?: (a: string, b: string) => 0 | 1 | 128;
+  mergeBase?: (a: string, b: string) => string | null;
+  log?: string;
+  fetchCode?: number;
+  fetchStderr?: string;
   pullCode?: number;
   pullOutput?: string;
   pullStderr?: string;
@@ -41,7 +62,7 @@ interface RunnerOptions {
   calls?: Call[];
 }
 
-function makeRunner(opts: RunnerOptions): Runner {
+function makeRunner(opts: MockOptions): Runner {
   return async (command, args, options) => {
     opts.calls?.push({ command, args, timeoutMs: options.timeoutMs, cwd: options.cwd });
 
@@ -51,40 +72,85 @@ function makeRunner(opts: RunnerOptions): Runner {
     if (command === "paseo" && args[0] === "plugin" && args[1] === "update") {
       return result("updated", opts.paseoUpdateCode ?? 0, opts.paseoUpdateCode ? "update failed" : "");
     }
+    if (command !== "git") return result("", 1, "unexpected command");
 
-    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
-      const top = typeof opts.toplevel === "function" ? opts.toplevel(options.cwd) : opts.toplevel;
-      if (top === null) return result("", 128, "fatal: not a git repository");
-      return result(`${top ?? "/plugins/demo"}\n`);
+    const inCache = args[0] === "-C";
+    const gitArgs = inCache ? args.slice(2) : args;
+    const cmd = gitArgs[0];
+
+    if (cmd === "rev-parse") {
+      if (!inCache) {
+        if (gitArgs[1] === "--show-toplevel") {
+          const top = typeof opts.toplevel === "function" ? opts.toplevel(options.cwd) : opts.toplevel;
+          if (top === null) return result("", 128, "fatal: not a git repository");
+          return result(`${top ?? "/repo"}\n`);
+        }
+        if (gitArgs[1] === "--abbrev-ref" && gitArgs[2] === "--symbolic-full-name") {
+          if (opts.upstream === null) return result("", 128, "fatal: no upstream configured for branch 'main'");
+          return result(`${opts.upstream ?? "origin/main"}\n`);
+        }
+        if (gitArgs[1] === "--abbrev-ref") return result(`${opts.currentBranch ?? "main"}\n`);
+        if (gitArgs[1] === "HEAD") {
+          const head = typeof opts.head === "function" ? opts.head(options.cwd) : (opts.head ?? LOCAL);
+          return result(`${head}\n`);
+        }
+      }
+      const expr = gitArgs[1]!;
+      const value = opts.trees?.[expr] ?? opts.refs?.[expr];
+      if (value) return result(`${value}\n`);
+      return result("", 128, opts.revParseStderr?.(expr) ?? `fatal: path '${expr}' does not exist in the repository`);
     }
-    if (args[0] === "rev-parse" && args[1] === "--abbrev-ref" && args[2] === "--symbolic-full-name") {
-      if (opts.upstream === null) return result("", 128, "fatal: no upstream configured for branch 'main'");
-      return result(`${opts.upstream ?? "origin/main"}\n`);
-    }
-    if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") {
-      return result(`${opts.currentBranch ?? "main"}\n`);
-    }
-    if (args[0] === "rev-parse" && args[1] === "HEAD") return result(`${opts.head ?? LOCAL}\n`);
-    if (args[0] === "ls-remote") {
+
+    if (cmd === "ls-remote") {
       if (opts.lsRemoteThrows) throw opts.lsRemoteThrows;
+      if (gitArgs[1] === "--tags") return result(opts.lsRemoteTags ?? "");
       if ((opts.lsRemoteCode ?? 0) !== 0) {
         return result("", opts.lsRemoteCode ?? 128, opts.lsRemoteStderr ?? "fatal: unable to access remote");
       }
-      return result(`${opts.remoteRef ?? REMOTE}\trefs/heads/main`);
+      return result(opts.lsRemote?.(gitArgs[2]!) ?? "");
     }
-    if (args[0] === "status") return result(opts.statusPorcelain ?? "");
-    if (args[0] === "pull") {
+
+    if (cmd === "init") return result("");
+    if (cmd === "fetch") {
+      if ((opts.fetchCode ?? 0) !== 0) return result("", opts.fetchCode ?? 128, opts.fetchStderr ?? "fatal: fetch failed");
+      return result("");
+    }
+    if (cmd === "log") return result(opts.log ?? "");
+    if (cmd === "status") return result(opts.statusPorcelain ?? "");
+    if (cmd === "stash") return result(opts.stashCreate ?? "");
+    if (cmd === "remote") return result(`${opts.remoteUrl ?? "https://example.test/repo.git"}\n`);
+    if (cmd === "merge-base") {
+      if (gitArgs[1] === "--is-ancestor") {
+        const code = opts.isAncestor?.(gitArgs[2]!, gitArgs[3]!) ?? 1;
+        return result("", code);
+      }
+      const base = opts.mergeBase?.(gitArgs[1]!, gitArgs[2]!);
+      return base ? result(`${base}\n`) : result("", 1);
+    }
+    if (cmd === "pull") {
       if ((opts.pullCode ?? 0) !== 0) {
         return result("", opts.pullCode ?? 1, opts.pullStderr ?? "fatal: not possible to fast-forward");
       }
       return result(opts.pullOutput ?? "Already up to date", 0);
     }
-    return result("", 1, "unexpected command");
+    return result("", 1, `unexpected git command: ${gitArgs.join(" ")}`);
   };
 }
 
+const NO_FILES = async (): Promise<string> => {
+  throw new Error("missing file");
+};
+
+function branchRemote(commit = REMOTE): string {
+  return `${commit}\trefs/heads/main\n`;
+}
+
+// ---------------------------------------------------------------------------
+// Identity / ref semantics
+// ---------------------------------------------------------------------------
+
 test("reports not-a-repo when the toplevel cannot be resolved", async () => {
-  const probe = await testing.probePlugin(plugin(), makeRunner({ toplevel: null }));
+  const probe = await testing.probePlugin(plugin(), makeRunner({ toplevel: null }), { readFile: NO_FILES });
 
   assert.equal(probe.status, "not-a-repo");
   assert.equal(probe.error, null);
@@ -95,96 +161,362 @@ test("reports unpinned on detached HEAD and never probes a remote", async () => 
   const calls: Call[] = [];
   const probe = await testing.probePlugin(
     plugin(),
-    makeRunner({ toplevel: "/plugins/demo", currentBranch: "HEAD", calls }),
+    makeRunner({ toplevel: "/repo", currentBranch: "HEAD", upstream: null, calls }),
+    { readFile: NO_FILES },
   );
 
   assert.equal(probe.status, "unpinned");
-  assert.equal(calls.some((call) => call.args[0] === "ls-remote"), false);
+  assert.equal(calls.some((call) => call.args.includes("ls-remote")), false);
 });
 
 test("reports no-upstream and stays report-only", async () => {
   const calls: Call[] = [];
   const probe = await testing.probePlugin(
     plugin(),
-    makeRunner({ toplevel: "/plugins/demo", upstream: null, calls }),
+    makeRunner({ toplevel: "/repo", upstream: null, calls }),
+    { readFile: NO_FILES },
   );
 
   assert.equal(probe.status, "no-upstream");
-  assert.equal(probe.branch, "main");
-  assert.equal(calls.some((call) => call.args[0] === "ls-remote"), false);
+  assert.equal(probe.ref, "main");
+  assert.equal(calls.some((call) => call.args.includes("ls-remote")), false);
 });
 
-test("compares ls-remote to local HEAD as a boolean without fetching", async () => {
+test("derives (repo, ref, subdir) and reports the committed subdir tree", async () => {
+  const probe = await testing.probePlugin(
+    plugin("demo", "/repo/plugins/demo"),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      upstream: "origin/main",
+      lsRemote: () => branchRemote(REMOTE),
+      trees: { [`${LOCAL}:plugins/demo`]: TREE_LOCAL, [`${REMOTE}:plugins/demo`]: TREE_REMOTE },
+      isAncestor: () => 0,
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.repoRoot, "/repo");
+  assert.equal(probe.subdir, "plugins/demo");
+  assert.equal(probe.ref, "main");
+  assert.equal(probe.refKind, "branch");
+  assert.equal(probe.localTree, TREE_LOCAL);
+  assert.equal(probe.remoteTree, TREE_REMOTE);
+});
+
+// ---------------------------------------------------------------------------
+// Subdir-scoped comparison
+// ---------------------------------------------------------------------------
+
+test("equal subdir trees suppress an update despite a repo-level remote change", async () => {
   const calls: Call[] = [];
   const probe = await testing.probePlugin(
     plugin(),
-    makeRunner({ toplevel: "/plugins/demo", head: LOCAL, remoteRef: LOCAL, calls }),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      lsRemote: () => branchRemote(REMOTE),
+      trees: { [`${LOCAL}:plugins/demo`]: TREE_LOCAL, [`${REMOTE}:plugins/demo`]: TREE_LOCAL },
+      calls,
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
+  );
+
+  assert.notEqual(probe.localCommit, probe.remoteCommit);
+  assert.equal(probe.localTree, probe.remoteTree);
+  assert.equal(probe.status, "current");
+  assert.equal(probe.updateAvailable, false);
+  // No ancestry probing is needed once the subdir trees match.
+  assert.equal(calls.some((call) => call.args.includes("merge-base")), false);
+});
+
+test("does not fabricate a subdir change subject from a shallow cache", async () => {
+  const probe = await testing.probePlugin(
+    plugin(),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      lsRemote: () => branchRemote(REMOTE),
+      trees: {
+        [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+        [`${REMOTE}:plugins/demo`]: TREE_LOCAL,
+      },
+      refs: { "--is-shallow-repository": "true" },
+      log: `${hex("7")}\t2026-01-01T00:00:00Z\tunrelated README change`,
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.latestChange?.commit, REMOTE);
+  assert.equal(probe.latestChange?.subject, null);
+});
+
+test("reports behind when the remote subdir is ahead", async () => {
+  const probe = await testing.probePlugin(
+    plugin(),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      lsRemote: () => branchRemote(REMOTE),
+      trees: { [`${LOCAL}:plugins/demo`]: TREE_LOCAL, [`${REMOTE}:plugins/demo`]: TREE_REMOTE },
+      isAncestor: (a, b) => (a === LOCAL && b === REMOTE ? 0 : 1),
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.status, "behind");
+  assert.equal(probe.updateAvailable, true);
+  assert.match(probe.detail ?? "", /ahead/i);
+});
+
+test("does not flag an update when only the local side changed the subdir", async () => {
+  const probe = await testing.probePlugin(
+    plugin(),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      lsRemote: () => branchRemote(REMOTE),
+      trees: { [`${LOCAL}:plugins/demo`]: TREE_LOCAL, [`${REMOTE}:plugins/demo`]: TREE_REMOTE },
+      isAncestor: (a, b) => (a === REMOTE && b === LOCAL ? 0 : 1),
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
   );
 
   assert.equal(probe.status, "current");
-  assert.equal(probe.localCommit, LOCAL);
-  assert.equal(probe.remoteCommit, LOCAL);
-  assert.match(probe.detail ?? "", /Up to date/);
-
-  const lsRemote = calls.find((call) => call.args[0] === "ls-remote");
-  assert.deepEqual(lsRemote?.args, ["ls-remote", "origin", "main"]);
-  assert.equal(lsRemote?.timeoutMs, testing.PROBE_TIMEOUT_MS);
-  assert.equal(calls.some((call) => call.args[0] === "fetch"), false);
-  assert.equal(calls.some((call) => call.args[0] === "rev-list"), false);
+  assert.equal(probe.updateAvailable, false);
+  assert.match(probe.detail ?? "", /local is ahead/i);
 });
 
-test("reports behind when the remote tip differs from local HEAD", async () => {
-  const calls: Call[] = [];
+test("a README-only remote commit does not flag a diverged subdir that it never touched", async () => {
   const probe = await testing.probePlugin(
     plugin(),
-    makeRunner({ toplevel: "/plugins/demo", head: LOCAL, remoteRef: REMOTE, calls }),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      lsRemote: () => branchRemote(REMOTE),
+      trees: {
+        [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+        [`${REMOTE}:plugins/demo`]: TREE_REMOTE,
+        [`${BASE}:plugins/demo`]: TREE_REMOTE,
+      },
+      isAncestor: () => 1,
+      mergeBase: () => BASE,
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
   );
 
-  assert.equal(probe.status, "behind");
-  assert.equal(probe.localCommit, LOCAL);
-  assert.equal(probe.remoteCommit, REMOTE);
-  assert.match(probe.detail ?? "", /update available/i);
-  assert.equal(calls.some((call) => call.args[0] === "rev-list"), false);
+  assert.equal(probe.status, "current");
+  assert.equal(probe.updateAvailable, false);
+  assert.match(probe.detail ?? "", /did not change/i);
 });
 
-test("honors a pinned install remote and ref for git-source plugins", async () => {
-  const calls: Call[] = [];
-  const pinned: PaseoPluginInfo = {
-    id: "thirdparty",
-    path: "/plugins/thirdparty",
-    enabled: true,
-    status: "running",
-    source: "git",
-    remote: "https://example.test/thirdparty.git",
-    ref: "release",
-  };
+test("treats a subdir absent on the remote as a local-only plugin, not an update", async () => {
   const probe = await testing.probePlugin(
-    pinned,
-    makeRunner({ toplevel: "/plugins/thirdparty", head: LOCAL, remoteRef: REMOTE, calls }),
+    plugin("plugin-updates", "/repo/plugins/plugin-updates"),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      lsRemote: () => branchRemote(REMOTE),
+      trees: { [`${LOCAL}:plugins/plugin-updates`]: TREE_LOCAL },
+      revParseStderr: (expr) => `fatal: path 'plugins/plugin-updates' does not exist in '${expr.split(":")[0]}'`,
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.status, "current");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.remoteTree, null);
+  assert.match(probe.detail ?? "", /local-only/i);
+});
+
+// ---------------------------------------------------------------------------
+// Tags and pins
+// ---------------------------------------------------------------------------
+
+function gitInstall(id: string, record: Record<string, unknown>): PaseoPluginInfo {
+  return { id, path: `/managed/${id}`, enabled: true, status: "running", source: "git" };
+}
+
+function sourcesFile(records: Record<string, unknown>) {
+  return async (file: string): Promise<string> => {
+    if (file.endsWith("sources.json")) return JSON.stringify(records);
+    throw new Error("missing file");
+  };
+}
+
+test("reports a moved tag as an update", async () => {
+  const tagObject = hex("e");
+  const remoteTagCommit = hex("f");
+  const localTagCommit = hex("0");
+  const past = JSON.stringify({
+    gitty: {
+      remote: "https://example.test/gitty.git",
+      requestedRef: "v1.0.0",
+      trackingBranch: null,
+      commit: localTagCommit,
+      pluginPath: "",
+    },
+  });
+  const probe = await testing.probePlugin(
+    gitInstall("gitty", {}),
+    makeRunner({
+      toplevel: "/managed/gitty",
+      head: localTagCommit,
+      lsRemote: () => `${tagObject}\trefs/tags/v1.0.0\n${remoteTagCommit}\trefs/tags/v1.0.0^{}\n`,
+      lsRemoteTags: "",
+      trees: { [`${remoteTagCommit}^{tree}`]: TREE_TAG },
+    }),
+    {
+      readFile: async (file) => (file.endsWith("sources.json") ? past : (() => { throw new Error("missing"); })()),
+      cacheRoot: "/cache",
+    },
+  );
+
+  assert.equal(probe.refKind, "tag");
+  assert.equal(probe.remoteCommit, remoteTagCommit);
+  assert.equal(probe.status, "behind");
+  assert.equal(probe.updateAvailable, true);
+  assert.match(probe.detail ?? "", /moved/i);
+});
+
+test("reports a newer semver tag as an update without treating the tag as a branch", async () => {
+  const remoteTagCommit = hex("f");
+  const v2 = hex("9");
+  const past = JSON.stringify({
+    gitty: {
+      remote: "https://example.test/gitty.git",
+      requestedRef: "v1.0.0",
+      trackingBranch: null,
+      commit: remoteTagCommit,
+      pluginPath: "",
+    },
+  });
+  const calls: Call[] = [];
+  const probe = await testing.probePlugin(
+    gitInstall("gitty", {}),
+    makeRunner({
+      toplevel: "/managed/gitty",
+      head: remoteTagCommit,
+      lsRemote: () => `${remoteTagCommit}\trefs/tags/v1.0.0\n`,
+      lsRemoteTags: `${remoteTagCommit}\trefs/tags/v1.0.0\n${v2}\trefs/tags/v2.0.0\n`,
+      trees: { [`${remoteTagCommit}^{tree}`]: TREE_TAG },
+      calls,
+    }),
+    {
+      readFile: async (file) => (file.endsWith("sources.json") ? past : (() => { throw new Error("missing"); })()),
+      cacheRoot: "/cache",
+    },
   );
 
   assert.equal(probe.status, "behind");
-  assert.equal(probe.remote, "https://example.test/thirdparty.git");
-  assert.equal(probe.branch, "release");
-  const lsRemote = calls.find((call) => call.args[0] === "ls-remote");
-  assert.deepEqual(lsRemote?.args, [
-    "ls-remote",
-    "https://example.test/thirdparty.git",
-    "release",
-  ]);
+  assert.equal(probe.updateAvailable, true);
+  assert.match(probe.detail ?? "", /v2\.0\.0/);
+  assert.equal(calls.some((call) => call.args[0] === "merge-base"), false);
+});
+
+test("treats a SHA pin as immutable and never probes the remote", async () => {
+  const calls: Call[] = [];
+  const past = JSON.stringify({
+    pinned: {
+      remote: "https://example.test/pinned.git",
+      requestedRef: null,
+      trackingBranch: null,
+      commit: LOCAL,
+      pluginPath: "",
+    },
+  });
+  const probe = await testing.probePlugin(
+    gitInstall("pinned", {}),
+    makeRunner({ toplevel: "/managed/pinned", head: LOCAL, trees: { "LOCAL^{tree}": TREE_LOCAL }, calls }),
+    {
+      readFile: async (file) => (file.endsWith("sources.json") ? past : (() => { throw new Error("missing"); })()),
+      cacheRoot: "/cache",
+    },
+  );
+
+  assert.equal(probe.status, "pinned");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(calls.some((call) => call.args.includes("ls-remote")), false);
+  assert.equal(calls.some((call) => call.args.includes("fetch")), false);
+});
+
+// ---------------------------------------------------------------------------
+// Dirty working tree
+// ---------------------------------------------------------------------------
+
+test("flags a dirty subdir and reports a working-tree version hash", async () => {
+  const probe = await testing.probePlugin(
+    plugin(),
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      lsRemote: () => branchRemote(REMOTE),
+      trees: {
+        [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+        [`${REMOTE}:plugins/demo`]: TREE_LOCAL,
+        [`${TREE_WORK}:plugins/demo`]: TREE_WORK,
+      },
+      stashCreate: TREE_WORK,
+      statusPorcelain: " M plugins/demo/a.ts\n",
+    }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.dirty, true);
+  assert.equal(probe.workingTree, TREE_WORK);
+  assert.equal(probe.status, "current");
+});
+
+// ---------------------------------------------------------------------------
+// Cache / fetch semantics
+// ---------------------------------------------------------------------------
+
+test("fetches once per (remote, ref) for plugins sharing a repo and ref", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    head: LOCAL,
+    lsRemote: () => branchRemote(REMOTE),
+    trees: {
+      [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/demo`]: TREE_REMOTE,
+      [`${LOCAL}:plugins/slash`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/slash`]: TREE_REMOTE,
+    },
+    isAncestor: () => 0,
+    calls,
+  });
+  const checked = await testing.checkInstalledPlugins(
+    undefined,
+    runner,
+    [plugin("demo", "/repo/plugins/demo"), plugin("slash", "/repo/plugins/slash")],
+    { scanOrphans: false, readFile: NO_FILES, cacheRoot: "/cache" },
+  );
+
+  assert.equal(checked.plugins.length, 2);
+  const fetches = calls.filter((call) => call.args[0] === "-C" && call.args[2] === "fetch");
+  const inits = calls.filter((call) => call.args[0] === "init");
+  assert.equal(fetches.length, 1);
+  assert.equal(inits.length, 1);
+  for (const row of checked.plugins) {
+    assert.equal(row.sharedVerdict, true);
+    assert.deepEqual(row.sharedWith?.sort(), row.id === "demo" ? ["slash"] : ["demo"]);
+  }
 });
 
 test("surfaces git ls-remote failures instead of treating them as current", async () => {
   const probe = await testing.probePlugin(
-    plugin("broken", "/plugins/broken"),
+    plugin("broken", "/repo/plugins/broken"),
     makeRunner({
-      toplevel: "/plugins/broken",
+      toplevel: "/repo",
       lsRemoteCode: 128,
       lsRemoteStderr: "fatal: unable to access remote",
     }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
   );
 
   assert.equal(probe.status, "error");
+  assert.equal(probe.updateAvailable, false);
   assert.match(probe.error ?? "", /unable to access remote/);
 });
 
@@ -192,50 +524,71 @@ test("surfaces a ls-remote timeout as an error rather than hanging", async () =>
   const probe = await testing.probePlugin(
     plugin(),
     makeRunner({
-      toplevel: "/plugins/demo",
+      toplevel: "/repo",
       lsRemoteThrows: new Error(`Command 'git' timed out after ${testing.PROBE_TIMEOUT_MS}ms`),
     }),
+    { readFile: NO_FILES, cacheRoot: "/cache" },
   );
 
   assert.equal(probe.status, "error");
   assert.match(probe.error ?? "", /timed out/);
 });
 
-test("probes a shared repo root once and fans out grouped rows", async () => {
-  const calls: Call[] = [];
+// ---------------------------------------------------------------------------
+// Unbundled rows
+// ---------------------------------------------------------------------------
+
+test("emits one unbundled row per plugin with independent subdir verdicts", async () => {
   const runner = makeRunner({
-    toplevel: () => "/repo",
+    toplevel: "/repo",
     head: LOCAL,
-    remoteRef: REMOTE,
-    calls,
+    lsRemote: () => branchRemote(REMOTE),
+    trees: {
+      [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/demo`]: TREE_LOCAL,
+      [`${LOCAL}:plugins/slash`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/slash`]: TREE_REMOTE,
+      [`${LOCAL}:plugins/top`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/top`]: TREE_REMOTE,
+    },
+    isAncestor: (a, b) => (a === LOCAL && b === REMOTE ? 0 : 1),
   });
   const checked = await testing.checkInstalledPlugins(
     undefined,
     runner,
-    [plugin("demo", "/repo/plugins/demo"), plugin("slash", "/repo/plugins/slash")],
-    { scanOrphans: false },
+    [
+      plugin("demo", "/repo/plugins/demo"),
+      plugin("slash", "/repo/plugins/slash"),
+      plugin("top", "/repo/plugins/top"),
+    ],
+    { scanOrphans: false, readFile: NO_FILES, cacheRoot: "/cache" },
   );
 
-  assert.equal(checked.plugins.length, 2);
-  assert.equal(calls.filter((call) => call.args[0] === "ls-remote").length, 1);
-  for (const row of checked.plugins) {
-    assert.equal(row.status, "behind");
-    assert.equal(row.repoRoot, "/repo");
-    assert.deepEqual(row.repoPlugins, ["demo", "slash"]);
-    assert.equal(row.sharedRepo, true);
-  }
+  assert.deepEqual(checked.plugins.map((row) => row.id), ["demo", "slash", "top"]);
+  assert.deepEqual(checked.plugins.map((row) => row.status), ["current", "behind", "behind"]);
+  assert.deepEqual(checked.plugins.map((row) => row.subdir), [
+    "plugins/demo",
+    "plugins/slash",
+    "plugins/top",
+  ]);
+  assert.ok(checked.plugins.every((row) => row.sharedVerdict === true));
 });
+
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
 
 test("refuses to pull a dirty tree and surfaces the refusal", async () => {
   const calls: Call[] = [];
   const runner = makeRunner({
-    toplevel: "/plugins/demo",
+    toplevel: "/repo",
     statusPorcelain: " M server/updates.ts",
     calls,
   });
   const action = await testing.updatePlugin("demo", undefined, {
     runner,
     installedOverride: [plugin()],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
   });
 
   assert.equal(action.status, "error");
@@ -245,11 +598,33 @@ test("refuses to pull a dirty tree and surfaces the refusal", async () => {
   assert.equal(calls.some((call) => call.command === "paseo"), false);
 });
 
+test("refuses a diverged branch before attempting a pull", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    statusPorcelain: "",
+    refs: { "origin/main": UPSTREAM },
+    isAncestor: () => 1,
+    calls,
+  });
+  const action = await testing.updatePlugin("demo", undefined, {
+    runner,
+    installedOverride: [plugin()],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(action.status, "error");
+  assert.match(action.error ?? "", /diverged/i);
+  assert.equal(calls.some((call) => call.args[0] === "pull"), false);
+});
+
 test("force pulls a dirty tree then reloads every plugin sharing the root", async () => {
   const calls: Call[] = [];
   const runner = makeRunner({
     toplevel: () => "/repo",
     statusPorcelain: " M server/updates.ts",
+    refs: { "origin/main": UPSTREAM },
+    isAncestor: (a) => (a === UPSTREAM ? 0 : 1),
     pullOutput: "Updating aaaaaaa..bbbbbbb",
     calls,
   });
@@ -257,6 +632,7 @@ test("force pulls a dirty tree then reloads every plugin sharing the root", asyn
     runner,
     force: true,
     installedOverride: [plugin("demo", "/repo/plugins/demo"), plugin("slash", "/repo/plugins/slash")],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
   });
 
   assert.equal(action.status, "updated");
@@ -269,10 +645,17 @@ test("force pulls a dirty tree then reloads every plugin sharing the root", asyn
 
 test("pulls a clean tree with the update timeout and reloads the plugin", async () => {
   const calls: Call[] = [];
-  const runner = makeRunner({ toplevel: "/plugins/demo", statusPorcelain: "", calls });
+  const runner = makeRunner({
+    toplevel: "/repo",
+    statusPorcelain: "",
+    refs: { "origin/main": UPSTREAM },
+    isAncestor: (a) => (a === UPSTREAM ? 0 : 1),
+    calls,
+  });
   const action = await testing.updatePlugin("demo", undefined, {
     runner,
     installedOverride: [plugin()],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
   });
 
   assert.equal(action.status, "updated");
@@ -284,12 +667,13 @@ test("pulls a clean tree with the update timeout and reloads the plugin", async 
 
 test("routes git-managed installs through paseo plugin update", async () => {
   const calls: Call[] = [];
-  const runner = makeRunner({ toplevel: "/plugins/gitty", calls });
+  const runner = makeRunner({ toplevel: "/managed/gitty", calls });
   const action = await testing.updatePlugin("gitty", undefined, {
     runner,
     installedOverride: [
-      { id: "gitty", path: "/plugins/gitty", enabled: true, status: "running", source: "git" },
+      { id: "gitty", path: "/managed/gitty", enabled: true, status: "running", source: "git" },
     ],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
   });
 
   assert.equal(action.status, "updated");
@@ -297,6 +681,39 @@ test("routes git-managed installs through paseo plugin update", async () => {
   assert.deepEqual(update?.args, ["plugin", "update", "gitty"]);
   assert.equal(calls.some((call) => call.args[0] === "pull"), false);
 });
+
+test("update-all pulls each affected directory root once and reloads its plugins", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    head: LOCAL,
+    lsRemote: () => branchRemote(REMOTE),
+    trees: {
+      [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/demo`]: TREE_REMOTE,
+      [`${LOCAL}:plugins/slash`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/slash`]: TREE_REMOTE,
+    },
+    isAncestor: (a, b) => (a === LOCAL && b === REMOTE ? 0 : a === UPSTREAM ? 0 : 1),
+    refs: { "origin/main": UPSTREAM },
+    calls,
+  });
+  const result = await testing.updateAllPlugins(undefined, {
+    runner,
+    installedOverride: [plugin("demo", "/repo/plugins/demo"), plugin("slash", "/repo/plugins/slash")],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(calls.filter((call) => call.args[0] === "pull").length, 1);
+  assert.deepEqual(
+    result.results.map((item) => item.pluginId).sort(),
+    ["demo", "slash"],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Orphans
+// ---------------------------------------------------------------------------
 
 test("flags leftover managed directories instead of probing them", async () => {
   const checked = await testing.checkInstalledPlugins(
@@ -306,6 +723,8 @@ test("flags leftover managed directories instead of probing them", async () => {
     {
       scanOrphans: true,
       pluginsRoot: "/managed",
+      readFile: NO_FILES,
+      cacheRoot: "/cache",
       readDir: async () => [
         { name: "history", isDirectory: () => true },
         { name: ".staging", isDirectory: () => true },
@@ -322,6 +741,7 @@ test("flags leftover managed directories instead of probing them", async () => {
 test("does not flag a managed directory that holds a live install", async () => {
   const rows = await testing.scanOrphanedDirs([plugin("live", "/managed/live")], {
     pluginsRoot: "/managed",
+    readFile: NO_FILES,
     readDir: async () => [{ name: "live", isDirectory: () => true }],
   });
 

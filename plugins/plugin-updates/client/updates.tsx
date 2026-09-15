@@ -6,16 +6,19 @@ import type {
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import {
+  Badge,
   Button,
   Card,
   EmptyState,
+  KeyValue,
+  KeyValueGroup,
   PluginThemeProvider,
   ProgressBar,
   StatusDot,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import {
   pluginUpdatesCheckRpc,
@@ -44,10 +47,6 @@ function statusVariant(status: PluginUpdate["status"]): "success" | "warning" | 
   return "neutral";
 }
 
-function isUpdateAvailable(status: PluginUpdate["status"]): boolean {
-  return status === "behind";
-}
-
 function fallbackDetail(plugin: PluginUpdate): string {
   if (plugin.detail) return plugin.detail;
   switch (plugin.status) {
@@ -55,6 +54,8 @@ function fallbackDetail(plugin: PluginUpdate): string {
       return "Update available";
     case "current":
       return "Up to date";
+    case "pinned":
+      return "Pinned to an immutable commit — report only";
     case "not-a-repo":
       return "Not a git repository — no git update possible";
     case "unpinned":
@@ -73,8 +74,14 @@ function fallbackDetail(plugin: PluginUpdate): string {
 function reportOnlyNote(status: PluginUpdate["status"]): string | null {
   if (status === "not-a-repo") return "Not a git checkout — update it from the workspace instead.";
   if (status === "orphaned") return "Orphaned managed directory — safe to remove if unused.";
+  if (status === "pinned") return "Pinned by commit — immutable, no update is ever offered.";
   if (status === "unpinned" || status === "no-upstream") return "Report only — no upstream remote to update from.";
   return null;
+}
+
+function refLabel(plugin: PluginUpdate): string {
+  if (!plugin.ref) return "-";
+  return plugin.refKind ? `${plugin.refKind} · ${plugin.ref}` : plugin.ref;
 }
 
 function PluginRow({
@@ -82,24 +89,25 @@ function PluginRow({
   updating,
   forceNeeded,
   onUpdate,
-  hideRemote,
 }: {
   plugin: PluginUpdate;
   updating: boolean;
   forceNeeded: boolean;
   onUpdate: (pluginId: string, force: boolean) => void;
-  hideRemote?: boolean;
 }) {
   const { colors } = usePluginTheme();
   const detail = fallbackDetail(plugin);
   const note = reportOnlyNote(plugin.status);
+  const version = plugin.workingTree ?? plugin.localTree;
+  const shared = plugin.sharedWith ?? [];
   return (
     <Card variant="elevated" noPadding>
-      <View style={{ padding: 10, gap: 6 }}>
+      <View style={{ padding: 10, gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
           <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }}>{plugin.id}</Text>
-          {isUpdateAvailable(plugin.status) ? (
+          {plugin.dirty === true ? <Badge label="dirty" variant="warning" dot /> : null}
+          {plugin.updateAvailable ? (
             <Button
               label={forceNeeded ? "Force update" : "Update"}
               variant={forceNeeded ? "primary" : "secondary"}
@@ -116,9 +124,28 @@ function PluginRow({
         {note ? (
           <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{note}</Text>
         ) : null}
-        {plugin.branch || (plugin.remote && !hideRemote) ? (
-          <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-            {[plugin.branch, hideRemote ? null : plugin.remote].filter(Boolean).join(" · ")}
+        <KeyValueGroup columns={2} gap={8}>
+          <KeyValue
+            label="Version"
+            value={version}
+            subValue={plugin.workingTree ? "working tree" : undefined}
+            mono
+            truncate="middle"
+            copyable
+          />
+          <KeyValue label="Remote" value={plugin.remoteTree} mono truncate="middle" copyable />
+          <KeyValue label="Ref" value={refLabel(plugin)} truncate="end" />
+          <KeyValue label="Subdir" value={plugin.subdir === "" ? "(repo root)" : plugin.subdir} truncate="path" />
+        </KeyValueGroup>
+        {plugin.latestChange?.subject ? (
+          <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            Latest remote change: {plugin.latestChange.subject}
+            {plugin.latestChange.date ? ` (${plugin.latestChange.date})` : ""}
+          </Text>
+        ) : null}
+        {shared.length > 0 ? (
+          <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            Shared verdict — {plugin.repoRoot} @ {plugin.ref ?? "?"} also covers {shared.join(", ")}
           </Text>
         ) : null}
       </View>
@@ -128,7 +155,7 @@ function PluginRow({
 
 function PluginUpdatesIconInner(props: PluginButtonIconProps) {
   const { data, isFetching, isError } = usePluginUpdates(props.workspaceId);
-  const stale = data?.plugins.some((plugin) => isUpdateAvailable(plugin.status)) ?? false;
+  const stale = data?.plugins.some((plugin) => plugin.updateAvailable) ?? false;
   const failed = isError || data?.plugins.some((plugin) => plugin.status === "error") === true;
   const color = failed
     ? props.theme.colors.statusDanger || "#ef4444"
@@ -186,24 +213,8 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
   const [failures, setFailures] = useState<Failure[]>([]);
 
   const plugins = query.data?.plugins ?? [];
-  const groups = useMemo(() => {
-    const ordered = new Map<string, PluginUpdate[]>();
-    for (const plugin of plugins) {
-      const key = plugin.repoRoot ?? `\0${plugin.id}`;
-      const group = ordered.get(key);
-      if (group) group.push(plugin);
-      else ordered.set(key, [plugin]);
-    }
-    return [...ordered.values()];
-  }, [plugins]);
-  const staleCount = useMemo(
-    () => plugins.filter((plugin) => isUpdateAvailable(plugin.status)).length,
-    [plugins],
-  );
-  const forceCount = useMemo(
-    () => failures.filter((failure) => failure.requiresForce).length,
-    [failures],
-  );
+  const staleCount = plugins.filter((plugin) => plugin.updateAvailable).length;
+  const forceCount = failures.filter((failure) => failure.requiresForce).length;
 
   const refresh = async () => {
     try {
@@ -313,29 +324,15 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
         ) : plugins.length === 0 ? (
           <EmptyState title="No installed plugins" description="Paseo did not report any installed plugins." />
         ) : (
-          groups.map((group) => {
-            const [head] = group;
-            const grouped = group.length > 1 && head;
-            return (
-              <View key={grouped ? (head.repoRoot ?? head.id) : head.id} style={{ gap: 10 }}>
-                {grouped ? (
-                  <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-                    {[head.branch, head.remote].filter(Boolean).join(" · ")}
-                  </Text>
-                ) : null}
-                {group.map((plugin) => (
-                  <PluginRow
-                    key={plugin.id}
-                    plugin={plugin}
-                    updating={activeUpdate === plugin.id}
-                    forceNeeded={failures.some((failure) => failure.pluginId === plugin.id && failure.requiresForce)}
-                    onUpdate={runUpdate}
-                    hideRemote={Boolean(grouped)}
-                  />
-                ))}
-              </View>
-            );
-          })
+          plugins.map((plugin) => (
+            <PluginRow
+              key={plugin.id}
+              plugin={plugin}
+              updating={activeUpdate === plugin.id}
+              forceNeeded={failures.some((failure) => failure.pluginId === plugin.id && failure.requiresForce)}
+              onUpdate={runUpdate}
+            />
+          ))
         )}
         {failures.map((failure) => (
           <Card key={`failure-${failure.pluginId}`} variant="elevated" noPadding>

@@ -5,34 +5,53 @@ export const PluginUpdateStatusSchema = z.enum([
   "checking",
   "current",
   "behind",
-  "not-a-repo",
+  "pinned",
   "unpinned",
   "no-upstream",
+  "not-a-repo",
   "orphaned",
   "error",
 ]);
 export type PluginUpdateStatus = z.infer<typeof PluginUpdateStatusSchema>;
 
+export const RefKindSchema = z.enum(["branch", "tag", "sha", "detached"]);
+export type RefKind = z.infer<typeof RefKindSchema>;
+
+export const PluginUpdateChangeSchema = z.object({
+  commit: z.string(),
+  date: z.string().nullable(),
+  subject: z.string().nullable(),
+});
+export type PluginUpdateChange = z.infer<typeof PluginUpdateChangeSchema>;
+
 export const PluginUpdateSchema = z.object({
   id: z.string(),
   path: z.string(),
+  source: z.string().nullable(),
+  repoRoot: z.string().nullable(),
+  subdir: z.string().nullable(),
+  ref: z.string().nullable(),
+  refKind: RefKindSchema.nullable(),
   remote: z.string().nullable(),
-  branch: z.string().nullable(),
   localCommit: z.string().nullable(),
   remoteCommit: z.string().nullable(),
+  localTree: z.string().nullable(),
+  remoteTree: z.string().nullable(),
+  workingTree: z.string().nullable(),
+  dirty: z.boolean().nullable(),
+  updateAvailable: z.boolean(),
   status: PluginUpdateStatusSchema,
   error: z.string().nullable(),
   detail: z.string().nullable(),
-  sharedRepo: z.boolean().nullable(),
-  repoRoot: z.string().nullable().optional(),
-  repoPlugins: z.array(z.string()).nullable().optional(),
-  source: z.string().nullable().optional(),
+  latestChange: PluginUpdateChangeSchema.nullable(),
+  sharedVerdict: z.boolean().nullable(),
+  sharedWith: z.array(z.string()).nullable(),
 });
 export type PluginUpdate = z.infer<typeof PluginUpdateSchema>;
 
 export const pluginUpdatesCheckRpc = defineContract({
   name: "plugin-updates.check",
-  description: "Checks installed plugin git remotes for available updates",
+  description: "Checks installed plugins for per-subdirectory git updates",
   input: z.object({ workspaceId: z.string().optional() }),
   output: z.object({
     checkedAt: z.string(),
