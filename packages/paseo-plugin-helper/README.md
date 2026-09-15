@@ -50,6 +50,24 @@ To guarantee compliance with Paseo's bundler and compiler rules (no Node builtin
 | `paseo-plugin-helper/shared` | Universal | `defineContract`, formatters (`formatBytes`, `formatUptime`, `resolveMetricStatus`) | [docs/shared.md](docs/shared.md) |
 | `paseo-plugin-helper/testing` | Universal | Mock client and server contexts for unit and integration testing | [docs/testing.md](docs/testing.md) |
 
+## Capability Map
+
+One picture of what the library gives you — scan down, spot the verb you need, grep the docs for it:
+
+```mermaid
+flowchart TB
+    H["paseo-plugin-helper\nwhat you get"]
+
+    H --> RPC["RPC contracts\ndefineContract • defineSettingsContract\nuseRpcQuery • useRpcMutation\nuseAutoRefreshQuery"]
+    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nToggle • TextInput • FormRow\nModalBody • ActionBar\nAboutSection • EmptyState\nStatusDot • AttentionBeacon"]
+    H --> PILL["Surfaces\nregisterComposerPill\nregisterSidebarSurface\nregisterWorkspacePanel\nregisterAgentPanel"]
+    H --> SET["Settings\nusePluginSettings\nuseSharedPluginSettings\nuseSuiteSettings"]
+    H --> SRV["Daemon utilities\ncreatePluginLogger • PluginStorage\nregisterSettingsRpc\ngetSystemMetrics • safeSpawn\nredactSecrets • guardRpcHandler"]
+    H --> MCP["MCP\nMcpClient • upsertMcpServer\nremoveMcpServer"]
+    H --> FMT["Formatters\nformatBytes • formatUptime\nformatDuration • truncate"]
+    H --> CLI["CLI\naudit • conformance"]
+```
+
 ---
 
 ## Bundle Posture (Tree-Shaking & Minification)

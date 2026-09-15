@@ -34,6 +34,10 @@ build:
 vendor-sync:
 	@node scripts/vendor-sync.mjs
 
+## stamp: Refresh plugin version stamps explicitly (typecheck/test no longer stamp)
+stamp:
+	@for p in demo top mcp-tools; do npm run stamp --prefix plugins/$$p; done
+
 ## vendor-link: Symlink plugin vendor trees to live helper src for dev (never commit)
 vendor-link:
 	@node scripts/vendor-sync.mjs --link

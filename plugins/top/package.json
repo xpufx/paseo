@@ -3,8 +3,7 @@
   "private": true,
   "version": "0.4.0",
   "scripts": {
-    "build": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
-    "pretypecheck": "npm run build",
+    "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npx tsx --test server/telemetry.test.ts client/pill-labels.test.ts"
   },
