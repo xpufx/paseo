@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineContract } from "paseo-plugin-helper/shared";
 
-export const PluginUpdateStatusSchema = z.enum(["checking", "fresh", "stale", "error"]);
+export const PluginUpdateStatusSchema = z.enum(["checking", "fresh", "stale", "ahead", "diverged", "error"]);
 export type PluginUpdateStatus = z.infer<typeof PluginUpdateStatusSchema>;
 
 export const PluginUpdateSchema = z.object({
@@ -13,6 +13,10 @@ export const PluginUpdateSchema = z.object({
   remoteCommit: z.string().nullable(),
   status: PluginUpdateStatusSchema,
   error: z.string().nullable(),
+  ahead: z.number().nullable(),
+  behind: z.number().nullable(),
+  detail: z.string().nullable(),
+  sharedRepo: z.boolean().nullable(),
 });
 export type PluginUpdate = z.infer<typeof PluginUpdateSchema>;
 

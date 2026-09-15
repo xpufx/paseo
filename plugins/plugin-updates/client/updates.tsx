@@ -38,15 +38,19 @@ function usePluginUpdates(workspaceId: string) {
 }
 
 function statusVariant(status: PluginUpdate["status"]): "success" | "warning" | "danger" | "neutral" {
-  if (status === "stale") return "warning";
+  if (status === "stale" || status === "diverged") return "warning";
   if (status === "error") return "danger";
   if (status === "fresh") return "success";
   return "neutral";
 }
 
+function isUpdateAvailable(status: PluginUpdate["status"]): boolean {
+  return status === "stale" || status === "diverged";
+}
+
 function PluginUpdatesIconInner(props: PluginButtonIconProps) {
   const { data, isFetching, isError } = usePluginUpdates(props.workspaceId);
-  const stale = data?.plugins.some((plugin) => plugin.status === "stale") ?? false;
+  const stale = data?.plugins.some((plugin) => isUpdateAvailable(plugin.status)) ?? false;
   const failed = isError || data?.plugins.some((plugin) => plugin.status === "error") === true;
   const color = failed
     ? props.theme.colors.statusDanger || "#ef4444"
@@ -97,20 +101,25 @@ function PluginRow({
 }) {
   const { colors } = usePluginTheme();
   const detail =
-    plugin.status === "stale"
+    plugin.detail ??
+    (plugin.status === "stale"
       ? "Update available"
-      : plugin.status === "fresh"
-        ? "Up to date"
-        : plugin.status === "checking"
-          ? "Checking…"
-          : plugin.error || "Check failed";
+      : plugin.status === "diverged"
+        ? "Diverged: remote updates available"
+        : plugin.status === "ahead"
+          ? "Local commits not pushed"
+          : plugin.status === "fresh"
+            ? "Up to date"
+            : plugin.status === "checking"
+              ? "Checking…"
+              : plugin.error || "Check failed");
   return (
     <Card variant="elevated" noPadding>
       <View style={{ padding: 10, gap: 6 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
           <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }}>{plugin.id}</Text>
-          {plugin.status === "stale" ? (
+          {isUpdateAvailable(plugin.status) ? (
             <Button
               label="Update"
               variant="secondary"
@@ -147,7 +156,7 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
 
   const plugins = query.data?.plugins ?? [];
   const staleCount = useMemo(
-    () => plugins.filter((plugin) => plugin.status === "stale").length,
+    () => plugins.filter((plugin) => isUpdateAvailable(plugin.status)).length,
     [plugins],
   );
 

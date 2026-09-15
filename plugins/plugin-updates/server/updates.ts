@@ -1,5 +1,6 @@
+import path from "node:path";
 import { listPlugins, safeSpawn, type PaseoPluginInfo, type SafeSpawnResult } from "paseo-plugin-helper/server";
-import type { PluginUpdate, PluginUpdateActionResult } from "../shared/updates";
+import type { PluginUpdate, PluginUpdateActionResult, PluginUpdateStatus } from "../shared/updates";
 
 const PROBE_TIMEOUT_MS = 10_000;
 const UPDATE_TIMEOUT_MS = 120_000;
@@ -31,6 +32,58 @@ function parseRef(output: string): string | null {
   return /^[0-9a-f]{40}$/i.test(commit) ? commit : null;
 }
 
+function parseAheadBehind(output: string): { ahead: number; behind: number } | null {
+  const match = output.trim().split(/\s+/);
+  if (match.length < 2) return null;
+  const ahead = Number.parseInt(match[0] ?? "", 10);
+  const behind = Number.parseInt(match[1] ?? "", 10);
+  if (!Number.isInteger(ahead) || !Number.isInteger(behind) || ahead < 0 || behind < 0) return null;
+  return { ahead, behind };
+}
+
+function normalizeDir(value: string): string {
+  return path.resolve(value.trim().replace(/\/+$/, ""));
+}
+
+function detectSharedRepo(pluginPath: string, toplevelOutput: string | null): boolean | null {
+  if (toplevelOutput == null) return null;
+  const toplevel = toplevelOutput.trim();
+  if (!toplevel) return null;
+  try {
+    return normalizeDir(toplevel) !== normalizeDir(pluginPath);
+  } catch {
+    return null;
+  }
+}
+
+function sharedSuffix(sharedRepo: boolean | null): string {
+  return sharedRepo ? " (shared repo; compares monorepo HEAD)" : "";
+}
+
+function detailFor(
+  status: PluginUpdateStatus,
+  ahead: number | null,
+  behind: number | null,
+  sharedRepo: boolean | null,
+): string {
+  const suffix = sharedSuffix(sharedRepo);
+  if (status === "fresh") return `Up to date${suffix}`;
+  if (status === "stale") {
+    return behind != null ? `Update available · ${behind} behind${suffix}` : `Update available${suffix}`;
+  }
+  if (status === "ahead") {
+    return ahead != null
+      ? `Local ahead · ${ahead} unpushed, no update available${suffix}`
+      : `Local ahead, no update available${suffix}`;
+  }
+  if (status === "diverged") {
+    return ahead != null && behind != null
+      ? `Diverged · ${ahead} ahead, ${behind} behind${suffix}`
+      : `Diverged${suffix}`;
+  }
+  return status;
+}
+
 async function probePlugin(
   plugin: PaseoPluginInfo,
   runner: CommandRunner = runCommand,
@@ -38,10 +91,14 @@ async function probePlugin(
   const base = {
     id: plugin.id,
     path: plugin.path,
-    remote: null,
-    branch: null,
-    localCommit: null,
-    remoteCommit: null,
+    remote: null as string | null,
+    branch: null as string | null,
+    localCommit: null as string | null,
+    remoteCommit: null as string | null,
+    ahead: null as number | null,
+    behind: null as number | null,
+    detail: null as string | null,
+    sharedRepo: null as boolean | null,
   };
   if (!plugin.path) {
     return { ...base, status: "error", error: "Installed plugin has no directory path" };
@@ -56,18 +113,21 @@ async function probePlugin(
       return { ...base, status: "error", error: outputOf(gitCheck) || "Directory is not a git repository" };
     }
 
-    const [remoteResult, branchResult, localResult] = await Promise.all([
+    const [remoteResult, branchResult, localResult, toplevelResult] = await Promise.all([
       runner("git", ["remote", "get-url", "origin"], { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS }),
       runner("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
         cwd: plugin.path,
         timeoutMs: PROBE_TIMEOUT_MS,
       }),
       runner("git", ["rev-parse", "HEAD"], { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS }),
+      runner("git", ["rev-parse", "--show-toplevel"], { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS }),
     ]);
     if (remoteResult.code !== 0) {
       return {
         ...base,
-        localCommit: localResult.code === 0 ? localResult.stdout : null,
+        localCommit: localResult.code === 0 ? localResult.stdout.trim() : null,
+        sharedRepo:
+          toplevelResult.code === 0 ? detectSharedRepo(plugin.path, toplevelResult.stdout) : null,
         status: "error",
         error: outputOf(remoteResult) || "No origin remote configured",
       };
@@ -75,6 +135,8 @@ async function probePlugin(
     const remote = remoteResult.stdout.trim();
     const branch = branchResult.code === 0 ? branchResult.stdout.trim() : null;
     const localCommit = localResult.code === 0 ? localResult.stdout.trim() : null;
+    const sharedRepo =
+      toplevelResult.code === 0 ? detectSharedRepo(plugin.path, toplevelResult.stdout) : null;
     const remoteArgs = branch
       ? ["ls-remote", "--heads", remote, branch]
       : ["ls-remote", remote, "HEAD"];
@@ -88,6 +150,7 @@ async function probePlugin(
         remote,
         branch,
         localCommit,
+        sharedRepo,
         status: "error",
         error: outputOf(remoteResultProbe) || "git ls-remote failed",
       };
@@ -99,17 +162,91 @@ async function probePlugin(
         remote,
         branch,
         localCommit,
+        sharedRepo,
         status: "error",
         error: "git ls-remote returned no commit for the current branch",
       };
     }
+    if (!localCommit) {
+      return {
+        ...base,
+        remote,
+        branch,
+        localCommit,
+        remoteCommit,
+        sharedRepo,
+        status: "error",
+        error: "Unable to determine local commit",
+      };
+    }
+    if (localCommit === remoteCommit) {
+      return {
+        ...base,
+        remote,
+        branch,
+        localCommit,
+        remoteCommit,
+        ahead: 0,
+        behind: 0,
+        sharedRepo,
+        detail: detailFor("fresh", 0, 0, sharedRepo),
+        status: "fresh",
+        error: null,
+      };
+    }
+    const countsResult = await runner(
+      "git",
+      ["rev-list", "--left-right", "--count", `${localCommit}...${remoteCommit}`],
+      { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS },
+    );
+    if (countsResult.code !== 0) {
+      const detail = `Remote differs; relationship unknown (remote commit not present locally)${sharedSuffix(sharedRepo)}`;
+      return {
+        ...base,
+        remote,
+        branch,
+        localCommit,
+        remoteCommit,
+        sharedRepo,
+        detail,
+        status: "stale",
+        error: null,
+      };
+    }
+    const counts = parseAheadBehind(countsResult.stdout);
+    if (!counts) {
+      return {
+        ...base,
+        remote,
+        branch,
+        localCommit,
+        remoteCommit,
+        sharedRepo,
+        detail: `Remote differs${sharedSuffix(sharedRepo)}`,
+        status: "stale",
+        error: null,
+      };
+    }
+    const { ahead, behind } = counts;
+    const status: PluginUpdateStatus =
+      ahead === 0 && behind === 0
+        ? "fresh"
+        : behind > 0 && ahead === 0
+          ? "stale"
+          : ahead > 0 && behind === 0
+            ? "ahead"
+            : "diverged";
     return {
       ...base,
       remote,
       branch,
       localCommit,
       remoteCommit,
-      status: localCommit === remoteCommit ? "fresh" : "stale",
+      ahead,
+      behind,
+      sharedRepo,
+      detail: detailFor(status, ahead, behind, sharedRepo),
+      status,
       error: null,
     };
   } catch (error) {
@@ -136,6 +273,10 @@ export async function checkInstalledPlugins(
           branch: null,
           localCommit: null,
           remoteCommit: null,
+          ahead: null,
+          behind: null,
+          detail: null,
+          sharedRepo: null,
           status: "error",
           error: `Unable to list installed plugins: ${errorOf(error)}`,
         },
