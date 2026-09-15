@@ -1,11 +1,12 @@
-# paseo-demo — a showroom, not a tool
+# paseo-demo
 
-This plugin does nothing useful on purpose. It exists to showcase
-[`paseo-plugin-helper`](https://www.npmjs.com/package/paseo-plugin-helper) —
-the UI design system, lifecycle primitives, and daemon utilities for building
-Paseo plugins — so if you arrived from [paseo.cafe](https://paseo.cafe),
-**the helper is the thing to take home**, not this plugin. Install this one to
-see every pattern running live; depend on the helper to build your own.
+This plugin is a demo for showcasing some of the capabilities of
+[`paseo-plugin-helper`](https://www.npmjs.com/package/paseo-plugin-helper),
+namely the UI design system, lifecycle primitives, and daemon utilities for
+building Paseo plugins. It does not necessarily do anything useful to end
+users. So if you arrived from [paseo.cafe](https://paseo.cafe), **the helper
+is the thing to take home**, not this plugin. Install this one to see every
+pattern running live; depend on the helper to build your own.
 
 One composer pill, one modal, one typed RPC action, one persisted settings
 section — every tab below teaches a single preferred helper pattern instead
@@ -48,4 +49,8 @@ The modal navbar renders two ways, switchable in the Settings tab (`navigationSt
 
 ## Screenshots
 
-Screenshots live in `screenshots/` (to be added).
+[![Visual Flair Studio](images/helper-visual-flair.png)](images/helper-visual-flair.png)
+
+| System Metrics | About Plugin |
+| :---: | :---: |
+| [![System Metrics](images/helper-metric-gauges.png)](images/helper-metric-gauges.png) | [![About Plugin](images/helper-about.png)](images/helper-about.png) |
