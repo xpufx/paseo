@@ -16,24 +16,24 @@
 
 ## Features
 
-- 📝 **Structured Logging & Identity**: `createPluginLogger` automatically prints an informative startup banner with plugin identity/version in Paseo GUI logs and keeps log lines unfragmented.
-- 🏷️ **Version Resolution & Stamping**: Auto-extracts plugin version from `package.json` + Git tags (`resolvePluginVersion`) and generates static TypeScript versions for Hermes client bundles (`stampVersion`).
-- 📱 **Mobile & Desktop First**: Automatically scales touch targets (min 44pt on iOS/Android or narrow panes), avoids bottom-bar clipping, and reflows layouts between desktop and mobile.
-- 📐 **Mobile Modal Gesture Architecture**: Solves nested horizontal scrolling and double-scroll issues inside Paseo mobile bottom sheets implicitly using `ModalBody` non-nested rendering and `Tabs` edge navigation.
-- 🎨 **Configurable Visual Flair**: Authors can customize corner radii (`sharp`, `rounded`, `pill`), information density, surface treatments, and brand accents while honoring Paseo's light/dark themes.
-- 🔗 **Inline Actions**: `InlineButton` provides an accessible, compact link/action primitive for timeline cards and dense inline content without bespoke `Pressable` implementations.
+- **Structured Logging & Identity**: `createPluginLogger` automatically prints an informative startup banner with plugin identity/version in Paseo GUI logs and keeps log lines unfragmented.
+- **Version Resolution & Stamping**: Auto-extracts plugin version from `package.json` + Git tags (`resolvePluginVersion`) and generates static TypeScript versions for Hermes client bundles (`stampVersion`).
+- **Mobile & Desktop First**: Automatically scales touch targets (min 44pt on iOS/Android or narrow panes), avoids bottom-bar clipping, and reflows layouts between desktop and mobile.
+- **Mobile Modal Gesture Architecture**: Solves nested horizontal scrolling and double-scroll issues inside Paseo mobile bottom sheets implicitly using `ModalBody` non-nested rendering and `Tabs` edge navigation.
+- **Configurable Visual Flair**: Authors can customize corner radii (`sharp`, `rounded`, `pill`), information density, surface treatments, and brand accents while honoring Paseo's light/dark themes.
+- **Inline Actions**: `InlineButton` provides an accessible, compact link/action primitive for timeline cards and dense inline content without bespoke `Pressable` implementations.
 - ℹ️ **Plugin About & Diagnostics Card**: `<AboutSection>` standardizes plugin branding, license tags, version badges, external navigation buttons, 1-tap "Copy Diagnostics" for issue triage, and auto-resolves official GitHub logos from author or repository URLs.
-- 💊 **Composer Pill Lifecycle Engine**: Complete management of agent subscriptions, pill contributions, and modal states in one function call (`registerComposerPill`).
-- 🖥️ **Panels & Surfaces**: One-line registration for sidebar surfaces (`registerSidebarSurface`) and panels (`registerWorkspacePanel`, `registerAgentPanel`) with automatic theme and flair propagation.
-- 🔌 **Zero-Dependency MCP Client**: Built-in stdio client (`McpClient`) with stderr ring buffering, non-JSON stdout line filtering, cross-platform process tree cleanup, and fallback ping readiness checks.
-- 🛠️ **Agent MCP Config Writer**: `upsertMcpServer` and `removeMcpServer` safely register plugin or Gateway MCP servers into Claude Desktop, Claude Code, OpenCode, Cursor, and Gemini configs with JSONC parsing, atomic writes, deep-equality idempotency, and automated backups.
-- ⚡ **React Query RPC Bridge**: `useRpcQuery` & `useRpcMutation` with automatic caching, refetching, and input hashing.
-- 🔌 **Plugin Query & Lifecycle Helpers**: `listPlugins`, `getPluginInfo`, `isPluginRunning`, and `isPluginInstalled` inspect active daemon state and cross-plugin availability with status filtering and built-in TTL caching.
-- ⚙️ **End-to-End Settings System**: Type-safe settings flow from Zod schema (`defineSettingsContract`) to atomic daemon storage (`registerSettingsRpc`) and optimistic React Native UI state (`usePluginSettings`).
-- 💾 **Daemon State & File Storage**: Atomic, temporary-swap file storage (`PluginStorage`) preventing corruption during power cuts or crashes.
-- 🔒 **Security & Redaction**: Deep secret masking for Bearer tokens, API keys, and connection credentials (`redactSecrets`).
-- 🔍 **Deterministic Plugin Audit CLI**: `npx paseo-plugin-helper audit` scans plugin codebases to detect raw bespoke patterns (manual subscriptions, raw filesystem writes, unformatted console logs, raw MCP spawns) and recommends drop-in helper replacements.
-- 🧪 **Mock Testing Harness**: In-memory mocks for `PluginClientContext` and `PluginContext` for testing plugins in Vitest / Jest.
+- **Composer Pill Lifecycle Engine**: Complete management of agent subscriptions, pill contributions, and modal states in one function call (`registerComposerPill`).
+- **Panels & Surfaces**: One-line registration for sidebar surfaces (`registerSidebarSurface`) and panels (`registerWorkspacePanel`, `registerAgentPanel`) with automatic theme and flair propagation.
+- **Zero-Dependency MCP Client**: Built-in stdio client (`McpClient`) with stderr ring buffering, non-JSON stdout line filtering, cross-platform process tree cleanup, and fallback ping readiness checks.
+- **Agent MCP Config Writer**: `upsertMcpServer` and `removeMcpServer` safely register plugin or Gateway MCP servers into Claude Desktop, Claude Code, OpenCode, Cursor, and Gemini configs with JSONC parsing, atomic writes, deep-equality idempotency, and automated backups.
+- **React Query RPC Bridge**: `useRpcQuery` & `useRpcMutation` with automatic caching, refetching, and input hashing.
+- **Plugin Query & Lifecycle Helpers**: `listPlugins`, `getPluginInfo`, `isPluginRunning`, and `isPluginInstalled` inspect active daemon state and cross-plugin availability with status filtering and built-in TTL caching.
+- **End-to-End Settings System**: Type-safe settings flow from Zod schema (`defineSettingsContract`) to atomic daemon storage (`registerSettingsRpc`) and optimistic React Native UI state (`usePluginSettings`).
+- **Daemon State & File Storage**: Atomic, temporary-swap file storage (`PluginStorage`) preventing corruption during power cuts or crashes.
+- **Security & Redaction**: Deep secret masking for Bearer tokens, API keys, and connection credentials (`redactSecrets`).
+- **Deterministic Plugin Audit CLI**: `npx paseo-plugin-helper audit` scans plugin codebases to detect raw bespoke patterns (manual subscriptions, raw filesystem writes, unformatted console logs, raw MCP spawns) and recommends drop-in helper replacements.
+- **Mock Testing Harness**: In-memory mocks for `PluginClientContext` and `PluginContext` for testing plugins in Vitest / Jest.
 
 ---
 
@@ -341,11 +341,11 @@ Label combinations steer autonomous agents deterministically: an issue requires 
 
 Comprehensive API and module documentation:
 
-- 📖 [Client Design System & Lifecycles (`docs/client.md`)](docs/client.md)
-- 📖 [Server Daemon Utilities (`docs/server.md`)](docs/server.md)
-- 📖 [MCP Client & Transports (`docs/mcp.md`)](docs/mcp.md)
-- 📖 [Shared Types & Formatters (`docs/shared.md`)](docs/shared.md)
-- 📖 [Testing Harness (`docs/testing.md`)](docs/testing.md)
+- [Client Design System & Lifecycles (`docs/client.md`)](docs/client.md)
+- [Server Daemon Utilities (`docs/server.md`)](docs/server.md)
+- [MCP Client & Transports (`docs/mcp.md`)](docs/mcp.md)
+- [Shared Types & Formatters (`docs/shared.md`)](docs/shared.md)
+- [Testing Harness (`docs/testing.md`)](docs/testing.md)
 
 ---
 
@@ -353,7 +353,14 @@ Comprehensive API and module documentation:
 
 Plugins powered by `paseo-plugin-helper`:
 
-- 📊 [**`paseo-top`**](https://github.com/xpufx/paseo-top) – Real-time system resource monitor (CPU, memory, load average) for Paseo composers with responsive charts, cards, and warning thresholds.
+- [**`paseo-top`**](https://github.com/xpufx/paseo/tree/main/plugins/top) – Real-time system resource monitor (CPU, memory, load average) for Paseo composers with responsive charts, cards, and warning thresholds.
+- [**`paseo-demo`**](https://github.com/xpufx/paseo-demo) – Interactive showcase and reference implementation for the helper: live pill, metrics, typed RPC actions, and persisted settings.
+- [**`paseo-plugin-helper`**](https://github.com/xpufx/paseo-plugin-helper) – The library itself: UI design system, lifecycle primitives, and daemon utilities for Paseo plugins.
+- [**`paseo-forgejo`**](https://github.com/xpufx/paseo-forgejo) (coming soon) – Work with Forgejo issues from inside Paseo via the embedded fetch API client.
+- [**`paseo-mcp-tools`**](https://github.com/xpufx/paseo-mcp-tools) – Inline UI for checking MCP servers available to an agent session, with live probes verifying actual session inclusion.
+- [**`paseo-slash`**](https://github.com/xpufx/paseo-slash) (coming soon) – Slash commands and macros with an interactive console, registered straight into the composer.
+- [**`paseo-x-comms`**](https://github.com/xpufx/paseo-x-comms) – Cross-daemon agent conversations over Paseo Relay, bundling its own MCP server.
+- [**`twofado`**](https://github.com/xpufx/twofado) (coming soon) – 2FA and one-time-password helpers for Paseo agent workflows.
 
 ---
 
