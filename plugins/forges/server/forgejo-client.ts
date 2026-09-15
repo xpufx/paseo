@@ -141,21 +141,53 @@ export class ForgejoClient {
     }
   }
 
-  async listIssues(repo: string): Promise<ForgejoIssue[] | null> {
-    const rows: unknown[] = [];
-    let page = 1;
-    for (;;) {
-      const payload = await this.request(
-        `/repos/${repo}/issues?state=open&type=issues&limit=50&page=${page}`,
-      );
-      if (!Array.isArray(payload)) return null;
-      if (payload.length === 0) break;
-      rows.push(...payload);
-      if (payload.length < 50 || page >= 10) break;
-      page += 1;
+  /**
+   * Anonymous repo probe: true when the repo answers without credentials
+   * (public), false when it 404/403s anonymously (private or missing),
+   * null on network failure.
+   */
+  async repoIsPublic(repo: string): Promise<boolean | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(`${this.baseUrl}/repos/${repo}`, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (res.ok) return true;
+      if (res.status === 404 || res.status === 403) return false;
+      return null;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
+  }
+
+  /**
+   * Token validity probe: null when no token is configured, otherwise true
+   * when /user answers with it.
+   */
+  async tokenIsValid(): Promise<boolean | null> {
+    if (!this.token) return null;
+    const payload = await this.request("/user");
+    return payload ? true : false;
+  }
+
+  async openIssueCount(repo: string): Promise<number | null> {
+    const payload = await this.request(`/repos/${repo}`);
+    if (!payload || typeof payload !== "object") return null;
+    const count = (payload as Record<string, unknown>).open_issues_count;
+    return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : null;
+  }
+
+  async listIssues(repo: string, page = 1, limit = 50): Promise<{ issues: ForgejoIssue[]; hasMore: boolean } | null> {
+    const payload = await this.request(
+      `/repos/${repo}/issues?state=open&type=issues&limit=${limit}&page=${page}`,
+    );
+    if (!Array.isArray(payload)) return null;
     const issues: ForgejoIssue[] = [];
-    for (const row of rows) {
+    for (const row of payload) {
       if (!row || typeof row !== "object") continue;
       const record = row as Record<string, unknown>;
       const candidate = {
@@ -168,7 +200,7 @@ export class ForgejoClient {
       const parsed = ForgejoIssueSchema.safeParse(candidate);
       if (parsed.success && parsed.data.state === "open") issues.push(parsed.data);
     }
-    return issues;
+    return { issues, hasMore: payload.length >= limit };
   }
 
   async listComments(repo: string, issueNumber: number): Promise<ForgejoComment[] | null> {

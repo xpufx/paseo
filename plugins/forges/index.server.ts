@@ -15,7 +15,7 @@ import {
 } from "./server/issues.js";
 import { settingsHandlers } from "./server/settings.js";
 
-const log = createPluginLogger("paseo-forgejo");
+const log = createPluginLogger("forges");
 
 export default function contribute(server: PluginServerContext) {
   server.handle(openIssuesContract, handleOpenIssues);
@@ -25,6 +25,6 @@ export default function contribute(server: PluginServerContext) {
   server.handle(forgejoSettingsContract.get, settingsHandlers.get);
   server.handle(forgejoSettingsContract.update, settingsHandlers.update);
   server.handle(forgejoSettingsContract.reset, settingsHandlers.reset);
-  log.info("paseo-forgejo server handlers registered");
+  log.info("forges server handlers registered");
   return () => {};
 }

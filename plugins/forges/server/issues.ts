@@ -7,8 +7,8 @@ import {
   liveScopesFromLabels,
   normalizeIssueNumber,
   parseAgentEnvelope,
+  parseForgejoRemote,
   rankIssues,
-  resolveForgejoRepo,
   scopeOfLabel,
   type AddCommentInput,
   type AddCommentOutput,
@@ -23,7 +23,7 @@ import {
 import type { RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
 import { ForgejoClient, type ForgejoIssueDetail } from "./forgejo-client.js";
 
-const log = createPluginLogger("paseo-forgejo");
+const log = createPluginLogger("forges");
 
 type OpenIssuesResult = RpcOutput<typeof openIssuesContract>;
 import { openIssuesContract } from "../shared/issues.js";
@@ -89,15 +89,53 @@ async function gitOriginForDirectory(directory: string): Promise<string | null> 
   }
 }
 
+type ResolvedRepo =
+  | { ok: true; host: string; repo: string; derivedRemote: string | null; remoteSource: "explicit" | "derived" }
+  | { ok: false; derivedRemote: string | null; error: string };
+
+/**
+ * Single remote resolution for the whole plugin. Explicit settings remote
+ * wins absolutely: when present it is used as-is and never falls back to
+ * git derivation (garbage fails loudly). Git origin is only consulted when
+ * no explicit remote is set, or to supply the host for a bare owner/repo.
+ */
 async function resolveRepo(
   directory?: string,
   explicitRemote?: string,
-): Promise<{ host: string; repo: string } | null> {
+): Promise<ResolvedRepo> {
   const stored = await storedRemoteForDirectory(directory);
-  const explicit = explicitRemote?.trim() ? explicitRemote : stored;
-  if (!directory && !explicit) return null;
+  const explicit = explicitRemote?.trim() ? explicitRemote.trim() : stored?.trim();
   const remoteUrl = directory ? await gitOriginForDirectory(directory) : null;
-  return resolveForgejoRepo(explicit, remoteUrl);
+  if (explicit) {
+    const parsed = parseForgejoRemote(explicit);
+    if (parsed) {
+      return {
+        ok: true,
+        host: parsed.host,
+        repo: `${parsed.owner}/${parsed.repo}`,
+        derivedRemote: remoteUrl,
+        remoteSource: "explicit",
+      };
+    }
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(explicit)) {
+      const git = parseForgejoRemote(remoteUrl);
+      if (git) {
+        return { ok: true, host: git.host, repo: explicit, derivedRemote: remoteUrl, remoteSource: "explicit" };
+      }
+      return { ok: false, derivedRemote: remoteUrl, error: `Saved remote "${explicit}" needs a git origin remote to supply its host` };
+    }
+    return { ok: false, derivedRemote: remoteUrl, error: `Saved remote "${explicit}" is not a valid remote URL or owner/repo` };
+  }
+  if (!remoteUrl) return { ok: false, derivedRemote: null, error: "No Forgejo repo found for this workspace" };
+  const git = parseForgejoRemote(remoteUrl);
+  if (!git) return { ok: false, derivedRemote: remoteUrl, error: "No Forgejo repo found for this workspace" };
+  return {
+    ok: true,
+    host: git.host,
+    repo: `${git.owner}/${git.repo}`,
+    derivedRemote: remoteUrl,
+    remoteSource: "derived",
+  };
 }
 
 async function clientFor(host: string): Promise<ForgejoClient> {
@@ -112,14 +150,22 @@ async function clientFor(host: string): Promise<ForgejoClient> {
  */
 export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssuesOutput> {
   const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
-  if (!resolved) {
+  if (!resolved.ok) {
     return {
       repo: null,
+      host: null,
       issues: [],
-      error: "No Forgejo repo found for this workspace",
+      openIssueCount: null,
+      derivedRemote: resolved.derivedRemote,
+      remoteSource: null,
+      repoPublic: null,
+      tokenValid: null,
+      page: 1,
+      hasMore: false,
+      error: resolved.error,
     };
   }
-  const { host, repo } = resolved;
+  const { host, repo, derivedRemote, remoteSource } = resolved;
   if (!(await probeForgejoHost(host))) {
     if (!quietHostLogged.has(host)) {
       quietHostLogged.add(host);
@@ -127,22 +173,29 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     } else {
       log.debug("skipping non-Forgejo remote", { repo, host });
     }
-    return { repo, issues: [], error: "Not a Forgejo repo for this workspace" };
+    return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenValid: null, error: "Not a Forgejo repo for this workspace" };
   }
   const client = await clientFor(host);
-  const rows = await client.listIssues(repo);
-  if (!rows) {
+  const anonClient = new ForgejoClient({ host });
+  const page = input?.page ?? 1;
+  const [paged, openIssueCount, repoPublic, tokenValid] = await Promise.all([
+    client.listIssues(repo, page),
+    client.openIssueCount(repo),
+    anonClient.repoIsPublic(repo),
+    client.tokenIsValid(),
+  ]);
+  if (!paged) {
     if (noteListFailure(host, repo)) {
       log.warn("issue list failed", { repo, host });
     } else {
       log.debug("issue list failed", { repo, host });
     }
-    return { repo, issues: [], error: "Issue list unavailable" };
+    return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenValid, error: "Issue list unavailable" };
   }
   noteListSuccess(host, repo);
-  const issues: OpenIssuesResult["issues"] = rankIssues(rows);
+  const issues: OpenIssuesResult["issues"] = rankIssues(paged.issues);
   void liveScopesFromIssues(issues);
-  return { repo, issues };
+  return { repo, host, issues, openIssueCount, page, hasMore: paged.hasMore, derivedRemote, remoteSource, repoPublic, tokenValid };
 }
 
 // ---------------------------------------------------------------------------
@@ -216,31 +269,40 @@ export async function handleIssueDetail(
   try {
     const issueNumber = normalizeIssueNumber(input ?? {});
     if (issueNumber == null) {
-      return { repo: null, issue: null, fetchedAt, error: "issueNumber is required" };
+      return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenValid: null, error: "issueNumber is required" };
     }
     const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
-    if (!resolved) {
+    if (!resolved.ok) {
       return {
         repo: null,
         issue: null,
         fetchedAt,
-        error: "No Forgejo repo found for this workspace",
+        repoPublic: null,
+        tokenValid: null,
+        error: resolved.error,
       };
     }
     const { host, repo } = resolved;
-    const issue = await fetchIssueDetail(repo, host, issueNumber);
+    const client = await clientFor(host);
+    const [issue, repoPublic, tokenValid] = await Promise.all([
+      fetchIssueDetail(repo, host, issueNumber),
+      new ForgejoClient({ host }).repoIsPublic(repo),
+      client.tokenIsValid(),
+    ]);
     if (!issue) {
       return {
         repo,
         issue: null,
         fetchedAt,
+        repoPublic,
+        tokenValid,
         error: `Issue #${issueNumber} not found in ${repo}`,
       };
     }
-    return { repo, issue, fetchedAt };
+    return { repo, issue, fetchedAt, repoPublic, tokenValid };
   } catch (error) {
     log.warn("issue detail failed", { error: String(error) });
-    return { repo: null, issue: null, fetchedAt, error: "Issue detail unavailable" };
+    return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenValid: null, error: "Issue detail unavailable" };
   }
 }
 
@@ -251,11 +313,11 @@ export async function handleSetLabel(input: SetLabelInput): Promise<SetLabelOutp
       return { number: 0, labels: [], error: "issueNumber is required" };
     }
     const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
-    if (!resolved) {
+    if (!resolved.ok) {
       return {
         number: issueNumber,
         labels: [],
-        error: "No Forgejo repo found for this workspace",
+        error: resolved.error,
       };
     }
     const { host, repo } = resolved;
@@ -313,11 +375,11 @@ export async function handleAddComment(
       return { number: issueNumber, commentId: null, error: "Comment body is too long" };
     }
     const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
-    if (!resolved) {
+    if (!resolved.ok) {
       return {
         number: issueNumber,
         commentId: null,
-        error: "No Forgejo repo found for this workspace",
+        error: resolved.error,
       };
     }
     const { host, repo } = resolved;

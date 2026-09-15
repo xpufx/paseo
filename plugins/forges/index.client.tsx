@@ -47,7 +47,7 @@ export default function contribute(client: PluginClientContext) {
   });
 
   const removePanel = client.addWorkspacePanel({
-    id: "forgejo-issues",
+    id: "forges-issues",
     title: "Forgejo Issues",
     icon: "GitPullRequest",
     context: "workspace",

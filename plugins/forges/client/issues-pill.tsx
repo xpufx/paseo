@@ -35,11 +35,15 @@ import {
   addCommentContract,
   currentPriorityLabel,
   currentStateLabel,
+  displayNameForDirectory,
+  displayRemoteForApi,
   formatIssueCountLabel,
   forgejoSettingsContract,
+  type ForgejoSettings,
   issueDetailContract,
   nextStateLabel,
   openIssuesContract,
+  parseForgejoRemote,
   parseMarkdownLite,
   setLabelContract,
   shortLabelName,
@@ -50,7 +54,7 @@ import {
   type MarkdownLiteSpan,
 } from "../shared/issues.js";
 
-export const ISSUES_PILL_ID = "forgejo-issues";
+export const ISSUES_PILL_ID = "forges-issues";
 
 interface IssueCountCache {
   directory?: string;
@@ -81,11 +85,20 @@ function useDirectory(workspaceId: string): string | undefined {
   ) as string | undefined;
 }
 
+/** Workspace display name everywhere: explicit label, else resolved repo. */
+function useDisplayName(workspaceId: string, inferredRepo: string | null | undefined): string | null {
+  const directory = useDirectory(workspaceId);
+  const { settings } = usePluginSettings(forgejoSettingsContract);
+  return displayNameForDirectory(settings, directory, inferredRepo);
+}
+
 function useOpenIssues(workspaceId: string, agentId?: string) {
   const directory = useDirectory(workspaceId);
+  const { settings } = usePluginSettings(forgejoSettingsContract);
+  const storedRemote = directory ? (settings.remotesByDirectory?.[directory] ?? "") : "";
   const query = useRpcQuery(
     openIssuesContract,
-    { directory: directory ?? undefined },
+    { directory: directory ?? undefined, remoteUrl: storedRemote || undefined },
     { refetchInterval: 30000 },
   );
   const data = query.data;
@@ -102,16 +115,21 @@ export function ForgejoPill({ agentId, workspaceId, isOpen }: RenderPillProps) {
   const { isCompact } = useResponsive();
   const { Icon } = getClientHost();
   const { data, isLoading } = useOpenIssues(workspaceId, agentId);
-  const count = data && !data.error ? data.issues.length : null;
+  const count = data && !data.error ? (data.openIssueCount ?? data.issues.length) : null;
+  const countLabel = formatIssueCountLabel(count);
+  const displayName = useDisplayName(workspaceId, data?.repo);
+  const fullLabel = displayName
+    ? (count == null ? displayName : `${displayName} · ${count}`)
+    : countLabel;
   const label =
     isLoading && !data
       ? "..."
       : isCompact
-        ? (count == null ? "iss" : `${count}`)
-        : formatIssueCountLabel(count);
+        ? (count == null ? "iss" : fullLabel)
+        : fullLabel;
   return (
     <View
-      accessibilityLabel={`Forgejo ${formatIssueCountLabel(count)}`}
+      accessibilityLabel={`Forgejo ${fullLabel}`}
       style={styles.pillContainer}
     >
       <Icon name="GitPullRequest" size={13} color={colors.foreground} />
@@ -129,7 +147,8 @@ export function ForgejoPill({ agentId, workspaceId, isOpen }: RenderPillProps) {
 function issueMatchesQuery(issue: ForgejoIssue, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  if (String(issue.number) === q || `#${issue.number}` === q) return true;
+  const digits = q.startsWith("#") ? q.slice(1) : q;
+  if (/^\d+$/.test(digits) && String(issue.number).startsWith(digits)) return true;
   return (
     issue.title.toLowerCase().includes(q) ||
     issue.labels.some((label) => label.toLowerCase().includes(q))
@@ -140,10 +159,10 @@ function issueMatchesQuery(issue: ForgejoIssue, query: string): boolean {
  * Markdown reference for pasting into chat, e.g. `[#30 Turn count](url)`.
  * The repo web URL is derived from the RPC repo when available.
  */
-function issueMarkdownRef(issue: ForgejoIssue, repo: string | null): string {
+function issueMarkdownRef(issue: ForgejoIssue, repo: string | null, host: string | null): string {
   const ref = `#${issue.number}: ${issue.title}`;
-  if (!repo) return ref;
-  return `[${ref}](https://forge.mrs.aager.de/${repo}/issues/${issue.number})`;
+  if (!repo || !host) return ref;
+  return `[${ref}](https://${host}/${repo}/issues/${issue.number})`;
 }
 
 function formatTimestamp(value: string | undefined | null): string {
@@ -153,8 +172,14 @@ function formatTimestamp(value: string | undefined | null): string {
   return parsed.toLocaleString();
 }
 
-function badgeVariantForLabel(label: string): "danger" | "warning" | "info" | "success" | "neutral" {
-  if (label === "priority/0-SOS") return "danger";
+function RepoVisibilityBadge({ visible }: { visible: boolean | null | undefined }) {
+  if (visible == null) return null;
+  return visible
+    ? <Badge variant="success" label="public" icon="Globe" />
+    : <Badge variant="neutral" label="private" icon="Lock" />;
+}
+
+function badgeVariantForLabel(label: string): "danger" | "warning" | "info" | "success" | "neutral" {  if (label === "priority/0-SOS") return "danger";
   if (label === "state/3-verify") return "warning";
   if (label === "state/1-wip") return "info";
   if (label === "state/4-done" || label === "spec/2-approved") return "success";
@@ -273,6 +298,7 @@ function IssueRow({
   state,
   labels,
   repo,
+  host,
   onSelect,
 }: {
   number: number;
@@ -280,12 +306,13 @@ function IssueRow({
   state: string;
   labels: string[];
   repo: string | null;
+  host: string | null;
   onSelect: (issueNumber: number) => void;
 }) {
   const { colors } = usePluginTheme();
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    copyToClipboard(issueMarkdownRef({ number, title, state, labels }, repo))
+    copyToClipboard(issueMarkdownRef({ number, title, state, labels }, repo, host))
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -431,6 +458,7 @@ function IssueDetailView({
     { refetchInterval: 30000 },
   );
   const [draft, setDraft] = useState("");
+  const displayName = useDisplayName(workspaceId, detail.data?.repo);
   const issue = detail.data && !detail.data.error ? detail.data.issue : null;
   const failed = Boolean(detail.data?.error) || detail.isError;
 
@@ -489,7 +517,7 @@ function IssueDetailView({
         <EmptyState
           icon="AlertCircle"
           title={`Issue #${issueNumber} unavailable`}
-          description={detail.data?.error ?? "Could not reach Forgejo for this workspace."}
+          description={detail.data?.error ?? "Could not reach the forge."}
           actionLabel="Retry"
           onAction={() => detail.refetch()}
         />
@@ -499,7 +527,8 @@ function IssueDetailView({
           <Card variant="elevated">
             <Card.Header
               title={`#${issue.number} ${issue.title}`}
-              subtitle={`by ${issue.author} · ${formatTimestamp(issue.updatedAt)}`}
+              subtitle={`${displayName ? `${displayName} · ` : ""}by ${issue.author} · ${formatTimestamp(issue.updatedAt)}`}
+              badge={<RepoVisibilityBadge visible={detail.data?.repoPublic} />}
             />
             <View style={styles.badgeRow}>
               {state ? <Badge variant={badgeVariantForLabel(state)} label={shortLabelName(state)} /> : null}
@@ -516,6 +545,12 @@ function IssueDetailView({
 
           <Card>
             <Card.Header title="Labels" subtitle="One tap applies; scope evicts the rest" icon="Tags" />
+            {detail.data?.tokenValid !== true ? (
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                Read-only — labeling needs a valid token (see Settings).
+              </Text>
+            ) : (
+            <>
             {next ? (
               <Button
                 variant="primary"
@@ -554,6 +589,8 @@ function IssueDetailView({
               pending={labelPending}
               onSelect={(label) => setLabel.mutate({ issueNumber, directory: directory ?? undefined, label })}
             />
+            </>
+            )}
           </Card>
 
           <Card>
@@ -575,6 +612,11 @@ function IssueDetailView({
             ) : (
               issue.comments.map((comment) => <CommentCard key={comment.id} comment={comment} />)
             )}
+            {detail.data?.tokenValid !== true ? (
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                Read-only — commenting needs a valid token (see Settings).
+              </Text>
+            ) : (
             <View style={styles.composer}>
               <TextInput
                 value={draft}
@@ -596,6 +638,7 @@ function IssueDetailView({
                 }}
               />
             </View>
+            )}
           </Card>
         </>
       ) : null}
@@ -617,35 +660,98 @@ export function ForgejoIssuesView({
   const directory = useDirectory(workspaceId);
   const { settings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
   const [remoteDraft, setRemoteDraft] = useState<string | null>(null);
-  const [remoteSaving, setRemoteSaving] = useState(false);
-  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [tokenDraft, setTokenDraft] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [formSaving, setFormSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const storedRemote = directory ? (settings.remotesByDirectory?.[directory] ?? "") : "";
+  const storedName = directory ? (settings.namesByDirectory?.[directory] ?? "") : "";
+  const nameValue = nameDraft ?? storedName;
   const remoteValue = remoteDraft ?? storedRemote;
-  const saveRemote = async () => {
+  const trimmedRemote = remoteValue.trim();
+  const isBareRemote = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(trimmedRemote);
+  const derivedHost = parseForgejoRemote(data?.derivedRemote)?.host ?? null;
+  const effectiveHost = trimmedRemote
+    ? (parseForgejoRemote(trimmedRemote)?.host ?? (isBareRemote ? derivedHost : null))
+    : derivedHost;
+  const remoteInvalid = Boolean(trimmedRemote && !parseForgejoRemote(trimmedRemote) && !isBareRemote);
+  const storedToken = effectiveHost ? (settings.tokensByHost?.[effectiveHost] ?? "") : "";
+  const tokenValue = tokenDraft ?? storedToken;
+  const saveSettings = async () => {
     if (!directory) return;
-    setRemoteSaving(true);
-    setRemoteError(null);
+    setFormSaving(true);
+    setFormError(null);
     try {
-      const next = { ...(settings.remotesByDirectory ?? {}) };
-      if (remoteValue.trim()) next[directory] = remoteValue.trim();
-      else delete next[directory];
-      await updateSettingsAsync({ remotesByDirectory: next });
+      const updates: Partial<ForgejoSettings> = {};
+      if (remoteValue !== storedRemote) {
+        const next = { ...(settings.remotesByDirectory ?? {}) };
+        if (trimmedRemote) next[directory] = trimmedRemote;
+        else delete next[directory];
+        updates.remotesByDirectory = next;
+      }
+      if (tokenDraft != null && effectiveHost) {
+        const next = { ...(settings.tokensByHost ?? {}) };
+        if (tokenDraft.trim()) next[effectiveHost] = tokenDraft.trim();
+        else delete next[effectiveHost];
+        updates.tokensByHost = next;
+      }
+      if (nameValue !== storedName) {
+        const next = { ...(settings.namesByDirectory ?? {}) };
+        if (nameValue.trim()) next[directory] = nameValue.trim();
+        else delete next[directory];
+        updates.namesByDirectory = next;
+      }
+      await updateSettingsAsync(updates);
       setRemoteDraft(null);
+      setTokenDraft(null);
+      setNameDraft(null);
       refetch();
     } catch (error) {
-      setRemoteError(error instanceof Error ? error.message : "Could not save remote URL");
+      setFormError(error instanceof Error ? error.message : "Could not save settings");
     } finally {
-      setRemoteSaving(false);
+      setFormSaving(false);
     }
   };
   const repo = data?.repo ?? null;
+  const displayName = useDisplayName(workspaceId, repo);
   const [activeTab, setActiveTab] = useState("issues");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
-  const issues = useMemo(
-    () => (data && !data.error ? data.issues.filter((issue: ForgejoIssue) => issueMatchesQuery(issue, query)) : []),
-    [data, query],
+  const [extraIssues, setExtraIssues] = useState<ForgejoIssue[]>([]);
+  const [nextPage, setNextPage] = useState(2);
+  const [extraHasMore, setExtraHasMore] = useState(false);
+  const [moreError, setMoreError] = useState<string | null>(null);
+  const resetPages = () => {
+    setExtraIssues([]);
+    setNextPage(2);
+    setExtraHasMore(false);
+    setMoreError(null);
+  };
+  React.useEffect(() => { resetPages(); }, [data?.repo]);
+  const loadMore = useRpcMutation(openIssuesContract, {
+    onSuccess: (result) => {
+      if (result.error) {
+        setMoreError(result.error);
+        return;
+      }
+      setExtraIssues((prev) => [...prev, ...result.issues.filter((issue: ForgejoIssue) => !prev.some((p) => p.number === issue.number))]);
+      setNextPage(result.page + 1);
+      setExtraHasMore(result.hasMore);
+      setMoreError(null);
+    },
+    onError: (error) => {
+      setMoreError(error instanceof Error ? error.message : "Could not load more issues");
+    },
+  });
+  const pool = useMemo(
+    () => (data && !data.error ? [...data.issues, ...extraIssues] : [...extraIssues]),
+    [data, extraIssues],
   );
+  const issues = useMemo(
+    () => pool.filter((issue: ForgejoIssue) => issueMatchesQuery(issue, query)),
+    [pool, query],
+  );
+  const hasMore = extraHasMore || (data && !data.error ? data.hasMore : false);
   const failed = Boolean(data?.error) || isError;
   return (
     <ModalBody
@@ -653,8 +759,7 @@ export function ForgejoIssuesView({
         <Tabs
           tabs={[
             { id: "issues", label: "Open Issues", shortLabel: "Issues" },
-            { id: "search", label: "Search", shortLabel: "Search" },
-            { id: "remote", label: "Remote", shortLabel: "Remote" },
+            { id: "settings", label: "Settings", shortLabel: "Settings" },
           ]}
           activeTab={activeTab}
           onTabChange={setActiveTab}
@@ -685,54 +790,99 @@ export function ForgejoIssuesView({
         </>
       ) : (
         <>
-          {activeTab === "remote" ? (
+          {activeTab === "settings" ? (
             <Card>
               <Card.Header
-                title="Forgejo remote"
-                subtitle="Explicit override beats git-remote derivation"
+                title={displayName ? `Forgejo settings · ${displayName}` : "Forgejo settings"}
+                subtitle={storedRemote.trim() ? "Explicit override active" : "Derived from git origin remote"}
+                badge={<RepoVisibilityBadge visible={data?.repoPublic} />}
                 icon="Settings"
               />
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-                Accepts owner/repo, scp-like (git@host:owner/repo.git), ssh:// and https:// URLs.
+                Remote accepts owner/repo, scp-like (git@host:owner/repo.git), ssh:// and https:// URLs.
                 Leave empty to derive from the git origin remote.
+                {data?.derivedRemote && !storedRemote.trim() ? ` Derived: ${displayRemoteForApi(data.derivedRemote)}` : null}
               </Text>
               <TextInput
                 value={remoteValue}
                 onChangeText={(text) => setRemoteDraft(text)}
-                placeholder="e.g. https://forge.mrs.aager.de/xpufx/paseo"
+                placeholder={displayRemoteForApi(data?.derivedRemote) ?? "e.g. https://forge.mrs.aager.de/xpufx/paseo"}
+                autoCapitalize="none"
+                autoCorrect={false}
               />
-              {remoteError ? (
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                {effectiveHost
+                  ? `API token for ${effectiveHost}. Leave empty to remove it.`
+                  : "API token — needs a resolvable host from the remote above."}
+              </Text>
+              <TextInput
+                value={tokenValue}
+                onChangeText={setTokenDraft}
+                placeholder="Forgejo API token"
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                Name for this workspace on the pill. Leave empty to use the repo.
+              </Text>
+              <TextInput
+                value={nameValue}
+                onChangeText={setNameDraft}
+                placeholder={data?.repo ?? "e.g. tea"}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {remoteInvalid ? (
                 <Text style={[styles.hint, { color: colors.foreground }]}>
-                  {remoteError}
+                  Remote is not a valid remote URL or owner/repo.
+                </Text>
+              ) : null}
+              {data && !isLoading ? (
+                <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                  {data.repoPublic == null
+                    ? "Repo visibility unknown (could not reach host)."
+                    : data.repoPublic
+                      ? "Repo is public — anonymous reads work."
+                      : "Repo is private — a valid token is required."}
+                  {data.tokenValid == null
+                    ? " No token saved."
+                    : data.tokenValid
+                      ? " Token is valid."
+                      : " Saved token was rejected."}
+                </Text>
+              ) : null}
+              {formError ? (
+                <Text style={[styles.hint, { color: colors.foreground }]}>
+                  {formError}
                 </Text>
               ) : null}
               <View style={styles.actions}>
                 <Button
-                  label={remoteSaving ? "Saving…" : "Save"}
+                  label={formSaving ? "Saving…" : "Save"}
                   variant="primary"
-                  disabled={remoteSaving || !directory || remoteValue === storedRemote}
-                  loading={remoteSaving}
-                  onPress={() => { void saveRemote(); }}
+                  disabled={formSaving || !directory || remoteInvalid || (remoteValue === storedRemote && tokenDraft == null && nameValue === storedName) || (tokenDraft != null && !effectiveHost)}
+                  loading={formSaving}
+                  onPress={() => { void saveSettings(); }}
                 />
               </View>
             </Card>
           ) : (
           <>
-          {activeTab === "search" ? (
-            <SearchInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Filter by keyword or #number…"
-            />
-          ) : null}
+          <SearchInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Filter by keyword or #number…"
+          />
           <Card variant="elevated">
             <Card.Header
-              title={data?.repo ? `Issues · ${data.repo}` : "Forgejo Issues"}
+              title={displayName ? `Issues · ${displayName}` : "Forgejo Issues"}
+              badge={<RepoVisibilityBadge visible={data?.repoPublic} />}
               subtitle={
                 data && !data.error
-                  ? activeTab === "search" && query.trim()
-                    ? `${issues.length} of ${data.issues.length} match`
-                    : `${data.issues.length} open`
+                  ? query.trim()
+                    ? `${issues.length} of ${data.openIssueCount ?? pool.length} match`
+                    : `${data.openIssueCount ?? pool.length} open`
                   : "Open issues for this workspace repo"
               }
             />
@@ -743,7 +893,7 @@ export function ForgejoIssuesView({
               <EmptyState
                 icon="AlertCircle"
                 title="Issues unavailable"
-                description={data?.error ?? "Could not reach Forgejo for this workspace."}
+                description={data?.error ?? "Could not reach the forge."}
                 actionLabel="Retry"
                 onAction={() => refetch()}
               />
@@ -764,10 +914,25 @@ export function ForgejoIssuesView({
                     state={issue.state}
                     labels={issue.labels}
                     repo={repo}
+                    host={data?.host ?? null}
                     onSelect={setSelected}
                   />
                 ))
               : null}
+            {!failed && hasMore && !query.trim() ? (
+              <View style={styles.actions}>
+                <Button
+                  label={loadMore.isPending ? "Loading…" : "Load more"}
+                  variant="secondary"
+                  disabled={loadMore.isPending}
+                  loading={loadMore.isPending}
+                  onPress={() => { loadMore.mutate({ directory: directory ?? undefined, remoteUrl: storedRemote || undefined, page: nextPage }); }}
+                />
+              </View>
+            ) : null}
+            {moreError ? (
+              <Text style={[styles.hint, { color: colors.foreground }]}>{moreError}</Text>
+            ) : null}
           </Card>
           <Text style={[styles.note, { color: colors.foregroundMuted }]}>
             Tap an issue to open its detail view. Push-to-composer is
@@ -775,7 +940,7 @@ export function ForgejoIssuesView({
             the reference and paste it into chat.
           </Text>
           <View style={styles.actions}>
-            <Button label="Refresh" variant="secondary" onPress={() => { refetch(); }} />
+            <Button label="Refresh" variant="secondary" onPress={() => { resetPages(); refetch(); }} />
             {onClose ? <Button label="Close" variant="ghost" onPress={onClose} /> : null}
           </View>
           </>

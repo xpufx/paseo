@@ -1,4 +1,4 @@
 {
-  "id": "paseo-forgejo",
+  "id": "forges",
   "requirements": { "paseo": ">=0.8.0" }
 }

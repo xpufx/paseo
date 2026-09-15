@@ -9,7 +9,7 @@
     "plugins/top",
     "plugins/mcp-tools",
     "plugins/x-comms",
-    "plugins/forgejo",
+    "plugins/forges",
     "plugins/demo",
     "plugins/slash"
   ],

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineContract, defineSettingsContract } from "./vendor/paseo-plugin-helper/index.ts";
 
-export const FORGEJO_PLUGIN_ID = "paseo-forgejo";
+export const FORGEJO_PLUGIN_ID = "forges";
 
 export const ForgejoIssueSchema = z.object({
   number: z.number(),
@@ -15,12 +15,21 @@ export type ForgejoIssue = z.infer<typeof ForgejoIssueSchema>;
 export const OpenIssuesInputSchema = z.object({
   directory: z.string().optional(),
   remoteUrl: z.string().optional(),
+  page: z.number().int().positive().default(1),
 });
 export type OpenIssuesInput = z.infer<typeof OpenIssuesInputSchema>;
 
 export const OpenIssuesOutputSchema = z.object({
   repo: z.string().nullable(),
+  host: z.string().nullable().default(null),
   issues: z.array(ForgejoIssueSchema),
+  openIssueCount: z.number().int().nonnegative().nullable().default(null),
+  page: z.number().int().positive().default(1),
+  hasMore: z.boolean().default(false),
+  derivedRemote: z.string().nullable().default(null),
+  remoteSource: z.enum(["explicit", "derived"]).nullable().default(null),
+  repoPublic: z.boolean().nullable().default(null),
+  tokenValid: z.boolean().nullable().default(null),
   error: z.string().optional(),
 });
 export type OpenIssuesOutput = z.infer<typeof OpenIssuesOutputSchema>;
@@ -77,7 +86,7 @@ export function parseForgejoRemote(url: string | undefined | null): ForgejoRemot
 // Explicit remote URL override (issue #109 operator redirect).
 // A workspace may pin its Forgejo coordinates via the settings screen
 // instead of relying on the git origin remote (which can carry SSH
-// aliases fgjx does not know). Precedence: explicit config > git remote.
+// aliases unknown to the API client). Precedence: explicit config > git remote.
 // ---------------------------------------------------------------------------
 
 const BARE_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
@@ -85,13 +94,14 @@ const BARE_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 export const ForgejoSettingsSchema = z.object({
   remotesByDirectory: z.record(z.string(), z.string()).default({}),
   tokensByHost: z.record(z.string(), z.string()).default({}),
+  namesByDirectory: z.record(z.string(), z.string()).default({}),
 });
 export type ForgejoSettings = z.infer<typeof ForgejoSettingsSchema>;
 
 export const forgejoSettingsContract = defineSettingsContract({
-  name: "paseo-forgejo.settings",
+  name: "forges.settings",
   schema: ForgejoSettingsSchema,
-  description: "Forgejo plugin settings: per-workspace remote URL overrides",
+  description: "Forgejo plugin settings: remote overrides and host tokens",
 });
 
 export interface ResolvedForgejoRepo {
@@ -155,12 +165,41 @@ export function extractForgejoIssueUrls(text: string | undefined | null): Forgej
 }
 
 /**
+ * Display form of a remote URL: the API speaks HTTPS, so scp-like and
+ * ssh:// remotes render as `https://host/owner/repo`. Unparseable input
+ * passes through untouched.
+ */
+export function displayRemoteForApi(url: string | undefined | null): string | null {
+  if (!url || typeof url !== "string" || !url.trim()) return null;
+  const parsed = parseForgejoRemote(url);
+  if (!parsed) return url.trim();
+  return `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
+}
+
+/**
  * Pill label for an issue count. Null (unknown) renders a placeholder,
  * never a false zero.
  */
 export function formatIssueCountLabel(count: number | null | undefined): string {
   if (count == null) return "issues --";
   return count === 1 ? "1 issue" : `${count} issues`;
+}
+
+/**
+ * Display name for a workspace: explicit user label wins, otherwise the
+ * resolved repo (owner/repo) is inferred. Null when neither exists.
+ */
+export function displayNameForDirectory(
+  settings: Pick<ForgejoSettings, "namesByDirectory"> | undefined | null,
+  directory: string | undefined | null,
+  inferredRepo: string | undefined | null,
+): string | null {
+  if (directory) {
+    const stored = settings?.namesByDirectory?.[directory];
+    if (typeof stored === "string" && stored.trim()) return stored.trim();
+  }
+  if (typeof inferredRepo === "string" && inferredRepo.trim()) return inferredRepo.trim();
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,8 +391,7 @@ export function paseoLabelSet(): LabelDefinition[] {
 
 // ---------------------------------------------------------------------------
 // Agent Envelope (parsed telemetry, spec §4.4).
-// Every agent comment ends with the footer stamped by
-// `fgjx issue comment --envelope`:
+// Every agent comment ends with the stamped envelope footer:
 //   <sub>🤖 **<SessionTitle>** (`<shortId>`) · `<model>` ·
 //   `<repo>:<branch>` · _<UTC timestamp>_</sub>
 // ---------------------------------------------------------------------------
@@ -508,6 +546,8 @@ export const IssueDetailOutputSchema = z.object({
   repo: z.string().nullable(),
   issue: IssueDetailSchema.nullable(),
   fetchedAt: z.string().datetime(),
+  repoPublic: z.boolean().nullable().default(null),
+  tokenValid: z.boolean().nullable().default(null),
   error: z.string().optional(),
 });
 export type IssueDetailOutput = z.infer<typeof IssueDetailOutputSchema>;
