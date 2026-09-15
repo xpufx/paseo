@@ -38,23 +38,97 @@ function usePluginUpdates(workspaceId: string) {
 }
 
 function statusVariant(status: PluginUpdate["status"]): "success" | "warning" | "danger" | "neutral" {
-  if (status === "stale" || status === "diverged") return "warning";
+  if (status === "behind") return "warning";
   if (status === "error") return "danger";
-  if (status === "fresh") return "success";
+  if (status === "current") return "success";
   return "neutral";
 }
 
 function isUpdateAvailable(status: PluginUpdate["status"]): boolean {
-  return status === "stale" || status === "diverged";
+  return status === "behind";
 }
 
-function isUpdatable(plugin: PluginUpdate): boolean {
-  return plugin.source == null || plugin.source === "git";
+function fallbackDetail(plugin: PluginUpdate): string {
+  if (plugin.detail) return plugin.detail;
+  switch (plugin.status) {
+    case "behind":
+      return "Update available";
+    case "current":
+      return "Up to date";
+    case "not-a-repo":
+      return "Not a git repository — no git update possible";
+    case "unpinned":
+      return "Detached HEAD — no upstream to compare (report only)";
+    case "no-upstream":
+      return "No upstream remote configured (report only)";
+    case "orphaned":
+      return "Leftover managed directory from a failed install — not probed";
+    case "checking":
+      return "Checking…";
+    default:
+      return plugin.error || "Check failed";
+  }
+}
+
+function reportOnlyNote(status: PluginUpdate["status"]): string | null {
+  if (status === "not-a-repo") return "Not a git checkout — update it from the workspace instead.";
+  if (status === "orphaned") return "Orphaned managed directory — safe to remove if unused.";
+  if (status === "unpinned" || status === "no-upstream") return "Report only — no upstream remote to update from.";
+  return null;
+}
+
+function PluginRow({
+  plugin,
+  updating,
+  forceNeeded,
+  onUpdate,
+  hideRemote,
+}: {
+  plugin: PluginUpdate;
+  updating: boolean;
+  forceNeeded: boolean;
+  onUpdate: (pluginId: string, force: boolean) => void;
+  hideRemote?: boolean;
+}) {
+  const { colors } = usePluginTheme();
+  const detail = fallbackDetail(plugin);
+  const note = reportOnlyNote(plugin.status);
+  return (
+    <Card variant="elevated" noPadding>
+      <View style={{ padding: 10, gap: 6 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
+          <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }}>{plugin.id}</Text>
+          {isUpdateAvailable(plugin.status) ? (
+            <Button
+              label={forceNeeded ? "Force update" : "Update"}
+              variant={forceNeeded ? "primary" : "secondary"}
+              size="sm"
+              loading={updating}
+              disabled={updating}
+              onPress={() => onUpdate(plugin.id, forceNeeded)}
+            />
+          ) : null}
+        </View>
+        <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+          {detail}
+        </Text>
+        {note ? (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{note}</Text>
+        ) : null}
+        {plugin.branch || (plugin.remote && !hideRemote) ? (
+          <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            {[plugin.branch, hideRemote ? null : plugin.remote].filter(Boolean).join(" · ")}
+          </Text>
+        ) : null}
+      </View>
+    </Card>
+  );
 }
 
 function PluginUpdatesIconInner(props: PluginButtonIconProps) {
   const { data, isFetching, isError } = usePluginUpdates(props.workspaceId);
-  const stale = data?.plugins.some((plugin) => isUpdateAvailable(plugin.status) && isUpdatable(plugin)) ?? false;
+  const stale = data?.plugins.some((plugin) => isUpdateAvailable(plugin.status)) ?? false;
   const failed = isError || data?.plugins.some((plugin) => plugin.status === "error") === true;
   const color = failed
     ? props.theme.colors.statusDanger || "#ef4444"
@@ -94,65 +168,10 @@ export function PluginUpdatesIcon(props: PluginButtonIconProps) {
   );
 }
 
-function PluginRow({
-  plugin,
-  updating,
-  onUpdate,
-  hideRemote,
-}: {
-  plugin: PluginUpdate;
-  updating: boolean;
-  onUpdate: (pluginId: string) => void;
-  hideRemote?: boolean;
-}) {
-  const { colors } = usePluginTheme();
-  const detail =
-    plugin.detail ??
-    (plugin.status === "stale"
-      ? "Update available"
-      : plugin.status === "diverged"
-        ? "Diverged: remote updates available"
-        : plugin.status === "ahead"
-          ? "Local commits not pushed"
-          : plugin.status === "fresh"
-            ? "Up to date"
-            : plugin.status === "checking"
-              ? "Checking…"
-              : plugin.error || "Check failed");
-  const updatable = isUpdatable(plugin);
-  return (
-    <Card variant="elevated" noPadding>
-      <View style={{ padding: 10, gap: 6 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
-          <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }}>{plugin.id}</Text>
-          {isUpdateAvailable(plugin.status) && updatable ? (
-            <Button
-              label="Update"
-              variant="secondary"
-              size="sm"
-              loading={updating}
-              disabled={updating}
-              onPress={() => onUpdate(plugin.id)}
-            />
-          ) : null}
-        </View>
-        <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          {detail}
-        </Text>
-        {isUpdateAvailable(plugin.status) && !updatable ? (
-          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-            Directory install — update via the workspace checkout, not here.
-          </Text>
-        ) : null}
-        {plugin.branch || (plugin.remote && !hideRemote) ? (
-          <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-            {[plugin.branch, hideRemote ? null : plugin.remote].filter(Boolean).join(" · ")}
-          </Text>
-        ) : null}
-      </View>
-    </Card>
-  );
+interface Failure {
+  pluginId: string;
+  error: string;
+  requiresForce: boolean;
 }
 
 function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
@@ -164,7 +183,7 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
   const updateAll = useRpc(pluginUpdatesUpdateAllRpc);
   const [activeUpdate, setActiveUpdate] = useState<string | "all" | null>(null);
   const [progress, setProgress] = useState(0);
-  const [failures, setFailures] = useState<Array<{ pluginId: string; error: string }>>([]);
+  const [failures, setFailures] = useState<Failure[]>([]);
 
   const plugins = query.data?.plugins ?? [];
   const groups = useMemo(() => {
@@ -178,8 +197,12 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
     return [...ordered.values()];
   }, [plugins]);
   const staleCount = useMemo(
-    () => plugins.filter((plugin) => isUpdateAvailable(plugin.status) && isUpdatable(plugin)).length,
+    () => plugins.filter((plugin) => isUpdateAvailable(plugin.status)).length,
     [plugins],
+  );
+  const forceCount = useMemo(
+    () => failures.filter((failure) => failure.requiresForce).length,
+    [failures],
   );
 
   const refresh = async () => {
@@ -191,19 +214,31 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
     }
   };
 
-  const runUpdate = async (pluginId: string) => {
+  const recordFailure = (failure: Failure) => {
+    setFailures((current) => [
+      ...current.filter((item) => item.pluginId !== failure.pluginId),
+      failure,
+    ]);
+  };
+
+  const clearFailure = (pluginId: string) => {
+    setFailures((current) => current.filter((failure) => failure.pluginId !== pluginId));
+  };
+
+  const runUpdate = async (pluginId: string, force = false) => {
     setActiveUpdate(pluginId);
     setProgress(0.25);
     try {
-      const result = await update({ workspaceId: props.workspaceId, pluginId });
+      const result = await update({ workspaceId: props.workspaceId, pluginId, force });
       if (result.status === "error") {
-        setFailures((current) => [
-          ...current.filter((failure) => failure.pluginId !== pluginId),
-          { pluginId, error: result.error || "Update failed" },
-        ]);
+        recordFailure({
+          pluginId,
+          error: result.error || "Update failed",
+          requiresForce: result.requiresForce === true,
+        });
         toast.show(result.error || `Failed to update ${pluginId}`, { variant: "error" });
       } else {
-        setFailures((current) => current.filter((failure) => failure.pluginId !== pluginId));
+        clearFailure(pluginId);
         toast.show(`${pluginId} updated`, { variant: "success" });
       }
       setProgress(1);
@@ -215,16 +250,17 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
     }
   };
 
-  const runUpdateAll = async () => {
+  const runUpdateAll = async (force = false) => {
     setActiveUpdate("all");
     setProgress(0.1);
     try {
-      const result = await updateAll({ workspaceId: props.workspaceId });
+      const result = await updateAll({ workspaceId: props.workspaceId, force });
       const failed = result.results.filter((item) => item.status === "error");
       setFailures(
         failed.map((item) => ({
           pluginId: item.pluginId,
           error: item.error || "Update failed",
+          requiresForce: item.requiresForce === true,
         })),
       );
       setProgress(1);
@@ -292,6 +328,7 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
                     key={plugin.id}
                     plugin={plugin}
                     updating={activeUpdate === plugin.id}
+                    forceNeeded={failures.some((failure) => failure.pluginId === plugin.id && failure.requiresForce)}
                     onUpdate={runUpdate}
                     hideRemote={Boolean(grouped)}
                   />
@@ -302,12 +339,22 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
         )}
         {failures.map((failure) => (
           <Card key={`failure-${failure.pluginId}`} variant="elevated" noPadding>
-            <View style={{ padding: 10, gap: 4 }}>
+            <View style={{ padding: 10, gap: 6 }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <StatusDot variant="danger" />
-                <Text style={{ color: colors.statusDanger || "#ef4444", fontWeight: "700" }}>
+                <Text style={{ color: colors.statusDanger || "#ef4444", fontWeight: "700", flex: 1 }}>
                   {failure.pluginId} update failed
                 </Text>
+                {failure.requiresForce ? (
+                  <Button
+                    label="Force"
+                    variant="secondary"
+                    size="sm"
+                    loading={activeUpdate === failure.pluginId}
+                    disabled={activeUpdate !== null}
+                    onPress={() => runUpdate(failure.pluginId, true)}
+                  />
+                ) : null}
               </View>
               <Text selectable style={{ color: colors.foregroundMuted, fontSize: 12 }}>
                 {failure.error}
@@ -315,14 +362,23 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
             </View>
           </Card>
         ))}
-        {staleCount > 1 ? (
+        {forceCount > 0 ? (
+          <Button
+            label="Force update all"
+            variant="secondary"
+            icon="AlertTriangle"
+            loading={activeUpdate === "all"}
+            disabled={activeUpdate !== null}
+            onPress={() => runUpdateAll(true)}
+          />
+        ) : staleCount > 1 ? (
           <Button
             label={`Update all (${staleCount})`}
             variant="primary"
             icon="DownloadCloud"
             loading={activeUpdate === "all"}
             disabled={activeUpdate !== null}
-            onPress={runUpdateAll}
+            onPress={() => runUpdateAll(false)}
           />
         ) : null}
       </ScrollView>

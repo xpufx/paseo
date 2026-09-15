@@ -1,7 +1,16 @@
 import { z } from "zod";
 import { defineContract } from "paseo-plugin-helper/shared";
 
-export const PluginUpdateStatusSchema = z.enum(["checking", "fresh", "stale", "ahead", "diverged", "error"]);
+export const PluginUpdateStatusSchema = z.enum([
+  "checking",
+  "current",
+  "behind",
+  "not-a-repo",
+  "unpinned",
+  "no-upstream",
+  "orphaned",
+  "error",
+]);
 export type PluginUpdateStatus = z.infer<typeof PluginUpdateStatusSchema>;
 
 export const PluginUpdateSchema = z.object({
@@ -13,8 +22,6 @@ export const PluginUpdateSchema = z.object({
   remoteCommit: z.string().nullable(),
   status: PluginUpdateStatusSchema,
   error: z.string().nullable(),
-  ahead: z.number().nullable(),
-  behind: z.number().nullable(),
   detail: z.string().nullable(),
   sharedRepo: z.boolean().nullable(),
   repoRoot: z.string().nullable().optional(),
@@ -33,37 +40,34 @@ export const pluginUpdatesCheckRpc = defineContract({
   }),
 });
 
+export const PluginUpdateActionSchema = z.object({
+  pluginId: z.string(),
+  status: z.enum(["updated", "error"]),
+  output: z.string().nullable(),
+  error: z.string().nullable(),
+  requiresForce: z.boolean().optional(),
+});
+export type PluginUpdateActionResult = z.infer<typeof PluginUpdateActionSchema>;
+
 export const pluginUpdatesUpdateRpc = defineContract({
   name: "plugin-updates.update",
-  description: "Updates one installed plugin through the Paseo CLI",
-  input: z.object({ workspaceId: z.string().optional(), pluginId: z.string() }),
-  output: z.object({
+  description: "Pulls and reloads one installed plugin in place",
+  input: z.object({
+    workspaceId: z.string().optional(),
     pluginId: z.string(),
-    status: z.enum(["updated", "error"]),
-    output: z.string().nullable(),
-    error: z.string().nullable(),
+    force: z.boolean().optional(),
   }),
+  output: PluginUpdateActionSchema,
 });
 
 export const pluginUpdatesUpdateAllRpc = defineContract({
   name: "plugin-updates.update-all",
-  description: "Updates all installed plugins through the Paseo CLI",
-  input: z.object({ workspaceId: z.string().optional() }),
+  description: "Pulls and reloads every installed plugin with a remote update",
+  input: z.object({
+    workspaceId: z.string().optional(),
+    force: z.boolean().optional(),
+  }),
   output: z.object({
-    results: z.array(
-      z.object({
-        pluginId: z.string(),
-        status: z.enum(["updated", "error"]),
-        output: z.string().nullable(),
-        error: z.string().nullable(),
-      }),
-    ),
+    results: z.array(PluginUpdateActionSchema),
   }),
 });
-
-export type PluginUpdateActionResult = {
-  pluginId: string;
-  status: "updated" | "error";
-  output: string | null;
-  error: string | null;
-};

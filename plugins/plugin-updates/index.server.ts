@@ -12,9 +12,11 @@ import {
 
 export default function contribute(server: PluginServerContext) {
   server.handle(pluginUpdatesCheckRpc, ({ workspaceId }) => checkInstalledPlugins(workspaceId));
-  server.handle(pluginUpdatesUpdateRpc, ({ workspaceId, pluginId }) =>
-    updatePlugin(pluginId, workspaceId),
+  server.handle(pluginUpdatesUpdateRpc, ({ workspaceId, pluginId, force }) =>
+    updatePlugin(pluginId, workspaceId, { force }),
   );
-  server.handle(pluginUpdatesUpdateAllRpc, ({ workspaceId }) => updateAllPlugins(workspaceId));
+  server.handle(pluginUpdatesUpdateAllRpc, ({ workspaceId, force }) =>
+    updateAllPlugins(workspaceId, { force }),
+  );
   return () => {};
 }
