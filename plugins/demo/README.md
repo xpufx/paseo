@@ -8,10 +8,9 @@ users. **The helper is the thing to take home**, not this plugin. Install
 this one to see every pattern running live; depend on the helper to build
 your own.
 
-One composer pill, one modal, one typed RPC action, one persisted settings
-section — every tab below teaches a single preferred helper pattern instead
-of cataloguing primitives. Built for [Paseo](https://github.com/getpaseo/paseo)
-(v0.8+).
+The helper package and demo are together a demonstration of an idea — that
+the plugin ecosystem can benefit from a common library, not necessarily this
+common library, rather than solving the same issues again and again.
 
 > [!NOTE]
 > **Prerequisites & Platform Support**:
