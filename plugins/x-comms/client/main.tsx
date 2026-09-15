@@ -1,11 +1,23 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { type PluginSurfaceProps, useRpc } from "@getpaseo/plugin/client";
 import React, { useCallback, useMemo, useState } from "react";
-import { Clipboard, Pressable, Text, View } from "react-native";
-import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
-import { truncate } from "../shared/vendor/paseo-plugin-helper/index";
-import { Badge, EmptyState, StatusDot, Tabs, TextInput } from "./vendor/paseo-plugin-helper/index";
-import { SettingsPrototype } from "./settings-prototype";
+import { Text, View } from "react-native";
+import { Modal } from "@getpaseo/plugin/client/react-native";
+import {
+  ActionBar,
+  Badge,
+  Button,
+  Card,
+  Collapsible,
+  EmptyState,
+  FormRow,
+  KeyValue,
+  KeyValueGroup,
+  ModalBody,
+  SectionHeader,
+  TextInput,
+  usePluginTheme,
+} from "./vendor/paseo-plugin-helper/index";
 import { formatPeerDisplay } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 import {
@@ -30,14 +42,51 @@ import {
 const HOST_FORM_HINT =
   "Full pairing link (https://app.paseo.sh/#offer=…) or a direct daemon host (host:port, tcp://…, unix://…).";
 
-// Display form for host values: relay offers are long, so show head...tail.
-// The copy icon next to the value always copies the full string.
-function displayHost(value: string): string {
-  if (value.length <= 40) return value;
-  return truncate(value, 36);
+// Raw View/Text are kept only for plain content and layout composition
+// (headings, error notices, debug dump lines, modal footers). Every
+// interactive control, card, form row, status indicator, key/value display
+// and empty/loading state uses a paseo-plugin-helper primitive.
+function Notice({
+  children,
+  tone = "danger",
+}: {
+  children: React.ReactNode;
+  tone?: "danger" | "muted";
+}) {
+  const { colors } = usePluginTheme();
+  return (
+    <Text
+      selectable
+      style={{
+        color: tone === "danger" ? colors.statusDanger : colors.foregroundMuted,
+        fontSize: 12,
+      }}
+    >
+      {children}
+    </Text>
+  );
 }
 
-export function MainSurface({ theme, layout }: PluginSurfaceProps) {
+function HealthBadge({
+  health,
+}: {
+  health?: { reachable: boolean; agentCount: number | null } | null;
+}) {
+  if (!health) return <Badge label="checking…" variant="neutral" dot />;
+  if (health.reachable) {
+    return (
+      <Badge
+        label={health.agentCount !== null ? `reachable (${health.agentCount} agents)` : "reachable"}
+        variant="success"
+        dot
+      />
+    );
+  }
+  return <Badge label="unreachable" variant="danger" dot />;
+}
+
+export function MainSurface({ theme }: PluginSurfaceProps) {
+  const { colors } = usePluginTheme();
   const callRead = useRpc(registryReadRpc);
   const callAdd = useRpc(daemonAddRpc);
   const callUpdate = useRpc(daemonUpdateRpc);
@@ -55,9 +104,6 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
   const callIntroduce = useRpc(introduceAgentsRpc);
   const [newName, setNewName] = useState("");
   const [newValue, setNewValue] = useState("");
-  // Issue #97: prototype surface coexists with the current page behind tabs.
-  const [settingsTab, setSettingsTab] = useState("current");
-  const [actionResult, setActionResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [prereqsCollapsed, setPrereqsCollapsed] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
@@ -71,99 +117,6 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
   const [introSecond, setIntroSecond] = useState<{ daemon: string; agentId: string; shortId: string; name: string } | null>(null);
   const [introMessage, setIntroMessage] = useState(
     "Hello! I was asked to introduce you. This daemon can communicate with you directly via paseo-x-comms.",
-  );
-
-  const styles = useMemo(
-    () => ({
-      screen: {
-        flex: 1,
-        backgroundColor: theme.colors.surface0,
-      },
-      screenContent: {
-        // The host's surface body extends under the Android nav bar, so pad the
-        // content container (not the viewport) to let the last element scroll
-        // clear of it on compact form factors.
-        padding: layout.compact ? 16 : 24,
-        paddingBottom: layout.compact ? 64 : 24,
-      },
-      title: { color: theme.colors.foreground, fontSize: layout.compact ? 20 : 24, fontWeight: "700" as const },
-      titleRow: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const },
-      refreshBtn: { padding: 8, borderRadius: 6, borderWidth: 1.5, borderColor: theme.colors.foregroundMuted, minWidth: 44, minHeight: 44, justifyContent: "center" as const, alignItems: "center" as const },
-      refreshText: { color: theme.colors.accent, fontSize: 16 },
-      section: { color: theme.colors.foreground, fontSize: 16, fontWeight: "600" as const, marginTop: 20 },
-      sectionRow: { flexDirection: "row" as const, alignItems: "center" as const, marginTop: 20 },
-      sectionHeader: { flexDirection: "row" as const, alignItems: "center" as const, marginTop: 20 },
-      sectionHeaderRow: { flexDirection: "row" as const, alignItems: "center" as const, justifyContent: "space-between" as const, marginTop: 20 },
-      chevron: { color: theme.colors.accent, fontSize: 14, marginRight: 8 },
-      detail: { color: theme.colors.foregroundMuted, fontSize: 13 },
-      detailOk: { color: theme.colors.statusSuccess, fontSize: 13 },
-      detailWarn: { color: theme.colors.statusWarning, fontSize: 13 },
-      mono: { color: theme.colors.foregroundMuted, fontFamily: "monospace", fontSize: 12 },
-      ok: { color: theme.colors.statusSuccess, fontSize: 12 },
-      error: { color: theme.colors.statusDanger, fontSize: 13 },
-      errorMuted: { color: theme.colors.statusDanger, fontSize: 12 },
-      expandLink: { color: theme.colors.accent, fontSize: 12, marginTop: 2 },
-      errorDetail: { color: theme.colors.statusDanger, fontSize: 11, fontFamily: "monospace" as const, marginTop: 4 },
-      button: { padding: 10, borderRadius: 6, borderWidth: 1.5, borderColor: theme.colors.accent, marginTop: 8, alignSelf: "flex-start" as const, minHeight: 44, justifyContent: "center" as const },
-      buttonPressed: { opacity: 0.7 },
-      buttonSmall: { padding: 10, borderRadius: 6, borderWidth: 1.5, borderColor: theme.colors.accent, marginTop: 4, alignSelf: "flex-start" as const, minWidth: 44, minHeight: 44, justifyContent: "center" as const },
-      buttonDanger: { padding: 10, borderRadius: 6, borderWidth: 1.5, borderColor: theme.colors.statusDanger, marginTop: 8, alignSelf: "flex-start" as const, minHeight: 44, justifyContent: "center" as const },
-      buttonText: { color: theme.colors.accent, textAlign: "center" as const, fontWeight: "600" as const },
-      buttonTextSmall: { color: theme.colors.accent, textAlign: "center" as const, fontSize: 12, fontWeight: "600" as const },
-      buttonTextDanger: { color: theme.colors.statusDanger, textAlign: "center" as const, fontSize: 12 },
-      row: {
-        flexDirection: "row" as const,
-        alignItems: "center" as const,
-        justifyContent: "space-between" as const,
-        flexWrap: "wrap" as const,
-        rowGap: 8,
-        borderBottomWidth: 1,
-        borderBottomColor: theme.colors.foregroundMuted,
-        paddingVertical: layout.compact ? 12 : 6,
-      },
-      pickerSection: { marginTop: 8 },
-      pickerButton: { borderWidth: 1, borderColor: theme.colors.foregroundMuted, borderRadius: 8, padding: 10, marginTop: 6 },
-      pickerLabel: { color: theme.colors.foreground, fontSize: 13 },
-      pickerGroup: { color: theme.colors.accent, fontSize: 12, fontWeight: "700" as const, marginTop: 10, textTransform: "uppercase" as const, letterSpacing: 0.5 },
-      pickerProject: { color: theme.colors.foregroundMuted, fontSize: 11, marginTop: 6, paddingLeft: 10, textTransform: "uppercase" as const, letterSpacing: 0.4 },
-      pickerWorkspace: { color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4, paddingLeft: 20 },
-      pickerRow: { flexDirection: "row" as const, alignItems: "center" as const, paddingVertical: 5, paddingLeft: 30, paddingRight: 4 },
-      pickerRowSelected: { backgroundColor: theme.colors.accent, borderRadius: 6 },
-      pickerRadio: { color: theme.colors.foregroundMuted, fontSize: 16, width: 18 },
-      pickerRadioSelected: { color: theme.colors.accent, fontSize: 16, width: 18 },
-      pickerAgentText: { color: theme.colors.foreground, fontSize: 13, flexShrink: 1 },
-      pickerScroll: { maxHeight: 420 },
-      backdrop: {
-        position: "absolute" as const,
-        left: 0, right: 0, top: 0, bottom: 0,
-      },
-      pickerRowText: { color: theme.colors.foreground, fontSize: 13 },
-      pickerRowMeta: { color: theme.colors.foregroundMuted, fontSize: 11 },
-      cardRow: {
-        borderWidth: 1,
-        borderColor: theme.colors.foregroundMuted,
-        borderRadius: 8,
-        padding: 10,
-        marginTop: 8,
-      },
-      rowName: { color: theme.colors.foreground, fontFamily: "monospace" as const, fontSize: 13, flexShrink: 1 },
-      rowMeta: { color: theme.colors.foregroundMuted, fontFamily: "monospace" as const, fontSize: 10 },
-      rowValue: { color: theme.colors.foregroundMuted, fontFamily: "monospace" as const, fontSize: 11 },
-      copyIcon: { color: theme.colors.accent, fontSize: 16, paddingHorizontal: 8, paddingVertical: 10, minWidth: 44, minHeight: 44, textAlign: "center" as const },
-      label: { color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 8 },
-      input: {
-        color: theme.colors.foreground,
-        fontFamily: "monospace" as const,
-        fontSize: 12,
-        borderWidth: 1,
-        borderColor: theme.colors.foregroundMuted,
-        borderRadius: 8,
-        padding: 8,
-        marginTop: 4,
-        width: "100%" as const,
-      },
-    }),
-    [theme, layout.compact],
   );
 
   const read = useQuery({ queryKey: ["registry-read"], queryFn: () => callRead({}) });
@@ -230,8 +183,6 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
     [read, health],
   );
 
-  // Probe a candidate host value. Returns true when the save should proceed
-  // (reachable, or the user confirms an unreachable daemon), false otherwise.
   // Probe a candidate. Returns "ok" (reachable), "unreachable" (show inline
   // confirm), or "invalid" (format error). No modal; the caller renders the
   // result at the row.
@@ -368,7 +319,6 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
 
   const canAdd = newName.trim().length > 0 && newValue.trim().length > 0;
 
-
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     void identitySync
@@ -377,21 +327,13 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
       .catch(() => snapshotRefresh.mutate());
   }, [identitySync, snapshotRefresh]);
 
-  const togglePrereqs = useCallback(() => {
-    setPrereqsCollapsed((prev) => {
-      const next = !prev;
-      prefsSet.mutate({ prereqsCollapsed: next });
-      return next;
-    });
-  }, [prefsSet]);
-
-  const handleCopy = useCallback((value: string) => {
-    void Clipboard.setString(value);
-  }, []);
-
-  const handleCopyPath = useCallback(() => {
-    if (read.data?.registryPath) void Clipboard.setString(read.data.registryPath);
-  }, [read.data?.registryPath]);
+  const setPrereqs = useCallback(
+    (collapsed: boolean) => {
+      setPrereqsCollapsed(collapsed);
+      prefsSet.mutate({ prereqsCollapsed: collapsed });
+    },
+    [prefsSet],
+  );
 
   const healthByName = useMemo(() => {
     const map: Record<string, { reachable: boolean; error: string | null; agentCount: number | null }> = {};
@@ -428,213 +370,369 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
     [aliasByServerId, serverIdByName],
   );
 
+  const addMismatch =
+    newName.trim().length > 0 && newValue.trim().length > 0 && !newValue.includes("#offer=")
+      ? directHostMismatch(newName.trim(), newValue.trim())
+      : null;
+
+  const daemonCount = read.data?.daemons.length ?? 0;
+
+  const renderAgentPicker = (slot: 1 | 2) => {
+    const selected = slot === 1 ? introFirst : introSecond;
+    return (
+      <Modal
+        title={`Select agent ${slot}`}
+        open={expandedPicker === slot}
+        onOpenChange={(open) => { if (!open) setExpandedPicker(null); }}
+      >
+        <Modal.Content>
+          {introspect.isPending ? <Notice tone="muted">Loading agents…</Notice> : null}
+          {introspect.error ? <Notice>{introspect.error.message}</Notice> : null}
+          {(introspect.data?.daemons ?? []).map((daemon) => (
+            <View key={daemon.name}>
+              <SectionHeader
+                title={daemon.reachable ? peerLabelForName(daemon.name) : `${peerLabelForName(daemon.name)} (unreachable)`}
+                badgeVariant={daemon.reachable ? "success" : "danger"}
+              />
+              {daemon.projects.map((project) => (
+                <View key={`${daemon.name}-${project.project}`}>
+                  <Notice tone="muted">{project.project}</Notice>
+                  {project.workspaces.map((workspace) => (
+                    <View key={`${daemon.name}-${project.project}-${workspace.name}`}>
+                      <Notice tone="muted">⌂ {workspace.name}</Notice>
+                      {workspace.agents.map((agent) => {
+                        const active = selected?.agentId === agent.agentId;
+                        return (
+                          <Button
+                            key={agent.agentId}
+                            size="sm"
+                            variant={active ? "primary" : "secondary"}
+                            icon={active ? "Check" : "Bot"}
+                            label={`${agent.name} (${agent.shortId}) · ${agent.status}`}
+                            style={{ alignSelf: "stretch", marginTop: 2 }}
+                            onPress={() => {
+                              const setSelected = slot === 1 ? setIntroFirst : setIntroSecond;
+                              setSelected({ daemon: daemon.name, agentId: agent.agentId, shortId: agent.shortId, name: agent.name });
+                              setExpandedPicker(null);
+                            }}
+                          />
+                        );
+                      })}
+                    </View>
+                  ))}
+                </View>
+              ))}
+            </View>
+          ))}
+          <ViaXComms theme={theme} />
+        </Modal.Content>
+      </Modal>
+    );
+  };
+
+  const snapshot = dumpState as any;
+
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.screenContent}
-      keyboardShouldPersistTaps="handled"
-    >
-      <Tabs
-        tabs={[
-          { id: "current", label: "Current" },
-          { id: "prototype", label: "Prototype", badge: "new" },
-        ]}
-        activeTab={settingsTab}
-        onTabChange={setSettingsTab}
-      />
-      {settingsTab === "prototype" ? (
-        <SettingsPrototype />
-      ) : (
-      <>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>X-comms</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Refresh daemon data"
-          onPress={handleRefresh}
-          disabled={refreshing}
-          style={({ pressed }) => [styles.refreshBtn, pressed && styles.buttonPressed]}
-          android_ripple={{ color: "rgba(255,255,255,0.2)" }}
+    <View style={{ flex: 1, minHeight: 0, width: "100%", backgroundColor: colors.surface0 }}>
+      <ModalBody
+        headerMode="pinned"
+        header={
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <Text style={{ color: colors.foreground, fontSize: 20, fontWeight: "700" }}>X-comms</Text>
+            <Button
+              label="Refresh"
+              size="sm"
+              variant="secondary"
+              icon="RefreshCw"
+              loading={refreshing}
+              disabled={refreshing}
+              onPress={handleRefresh}
+            />
+          </View>
+        }
+        headerStyle={{ backgroundColor: colors.surface0, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 }}
+        contentContainerStyle={{ gap: 12, paddingHorizontal: 12, paddingBottom: 24, paddingTop: 6 }}
+        refreshing={refreshing}
+        onRefresh={handleRefresh}
+      >
+        {refreshedAt ? <Notice tone="muted">Last refresh: {refreshedAt}</Notice> : null}
+
+        <Collapsible
+          title="Server"
+          icon="Server"
+          isExpanded={!prereqsCollapsed}
+          onToggle={(expanded) => setPrereqs(!expanded)}
         >
-          <Text style={styles.refreshText}>{refreshing ? "⟳" : "↻"}</Text>
-        </Pressable>
-      </View>
-      {refreshedAt ? (
-        <Text style={styles.detail}>Last refresh: {refreshedAt}</Text>
-      ) : null}
+          <KeyValueGroup>
+            <KeyValue
+              label="Bundled server"
+              value={status.data ? status.data.installPath : "bundled server"}
+              mono
+              copyable={Boolean(status.data)}
+              truncate="path"
+            />
+            <KeyValue
+              label="Server check"
+              value={
+                check.data
+                  ? check.data.error
+                    ? `failed: ${check.data.error}`
+                    : check.data.match
+                      ? `v${check.data.version} (matches plugin v${check.data.expected})`
+                      : `v${check.data.version}, plugin expects v${check.data.expected}`
+                  : "pending…"
+              }
+              valueStyle={
+                check.data && !check.data.error && !check.data.match
+                  ? { color: colors.statusWarning }
+                  : check.data?.match
+                    ? { color: colors.statusSuccess }
+                    : undefined
+              }
+            />
+          </KeyValueGroup>
+        </Collapsible>
 
-      <Pressable accessibilityRole="button" onPress={togglePrereqs} style={styles.sectionHeader}>
-        <Text style={styles.chevron}>{prereqsCollapsed ? "▸" : "▾"}</Text>
-        <Text style={styles.section}>Server</Text>
-      </Pressable>
-      {!prereqsCollapsed ? (
-        <>
-          <Text style={styles.detail} selectable>
-            {status.data ? `bundled server at ${status.data.installPath}` : "bundled server"}
-          </Text>
-          {check.data ? (
-            <Text style={[styles.detail, check.data.match ? styles.detailOk : styles.detailWarn]} selectable>
-              {check.data.error
-                ? `server check failed: ${check.data.error}`
-                : check.data.match
-                  ? `server reports v${check.data.version} (matches plugin v${check.data.expected})`
-                  : `server reports v${check.data.version}, plugin expects v${check.data.expected}`}
-            </Text>
-          ) : null}
-        </>
-      ) : null}
+        <SectionHeader title="Registered daemons" count={daemonCount} />
+        {read.data?.registryPath ? (
+          <KeyValue label="Registry path" value={read.data.registryPath} mono copyable truncate="path" />
+        ) : null}
+        {read.isPending ? (
+          <Card>
+            <Card.Header title="Loading…" subtitle="Reading the daemon registry." />
+          </Card>
+        ) : null}
+        {!read.isPending && !read.data?.exists ? (
+          <EmptyState title="No registry file yet." description="Add your first daemon below." />
+        ) : null}
+        {read.data && !read.data.validJson ? (
+          <Card variant="elevated">
+            <Card.Header
+              title="Registry is not valid JSON"
+              subtitle={read.data.parseError ?? undefined}
+              badge={<Badge label="error" variant="danger" dot />}
+            />
+          </Card>
+        ) : null}
+        {health.isPending ? <Notice tone="muted">Checking health…</Notice> : null}
 
-      <View style={styles.sectionHeaderRow}>
-        <Text style={styles.section}>Registered daemons</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Copy registry path" onPress={handleCopyPath} hitSlop={10}>
-          <Text style={styles.copyIcon}>⧉</Text>
-        </Pressable>
-      </View>
-      {read.isPending ? <Text style={styles.detail}>Loading…</Text> : null}
-      {!read.data?.exists ? <EmptyState title="No registry file yet." description="Add your first daemon below." /> : null}
-      {read.data && !read.data.validJson ? (
-        <Text style={styles.error}>Registry is not valid JSON: {read.data.parseError}</Text>
-      ) : null}
-      {health.isPending ? <Text style={styles.detail}>Checking health…</Text> : null}
-
-      {read.data?.daemons.map((daemon) => {
-        const draft = edits[daemon.name] ?? { name: daemon.name, value: daemon.value };
-        const dirty = draft.name !== daemon.name || draft.value !== daemon.value;
-        const h = healthByName[daemon.name];
-        const probeState = rowProbe[daemon.name];
-        const probeDetail =
-          probeState && probeState !== "pending" ? probeState : null;
-        return (
-          <View key={daemon.name}>
-            {editing.has(daemon.name) ? (
-              <View style={styles.cardRow}>
-                <Text style={styles.label}>Name</Text>
-                <TextInput
-                  mono
-                  inputStyle={styles.input}
-                  value={draft.name}
-                  onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: text, value: draft.value } }))}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <Text style={styles.label}>Host value</Text>
-                <TextInput
-                  mono
-                  inputStyle={styles.input}
-                  value={draft.value}
-                  onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: draft.name, value: text } }))}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-                <Pressable accessibilityRole="button" onPress={() => handleSave(daemon.name)} style={styles.buttonSmall}>
-                  <Text style={styles.buttonTextSmall}>Save</Text>
-                </Pressable>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => {
-                    setEdits((prev) => { const next = { ...prev }; delete next[daemon.name]; return next; });
-                    setEditing((prev) => { const next = new Set(prev); next.delete(daemon.name); return next; });
-                  }}
-                  style={styles.buttonSmall}
-                >
-                  <Text style={styles.buttonTextDanger}>Cancel</Text>
-                </Pressable>
-                {probeState === "pending" ? (
-                  <Text style={styles.detail}>Probing host…</Text>
-                ) : null}
+        {read.data?.daemons.map((daemon) => {
+          const draft = edits[daemon.name] ?? { name: daemon.name, value: daemon.value };
+          const h = healthByName[daemon.name];
+          const probeState = rowProbe[daemon.name];
+          const probeDetail = probeState && probeState !== "pending" ? probeState : null;
+          if (editing.has(daemon.name)) {
+            return (
+              <Card key={daemon.name} variant="elevated">
+                <Card.Header title={`Edit ${peerLabelForName(daemon.name)}`} subtitle="Probe runs before saving." />
+                <FormRow label="Name" description="The daemon's real name; derived for relay links.">
+                  <TextInput
+                    mono
+                    value={draft.name}
+                    onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: text, value: draft.value } }))}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </FormRow>
+                <FormRow label="Host value" description={HOST_FORM_HINT}>
+                  <TextInput
+                    mono
+                    value={draft.value}
+                    onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: draft.name, value: text } }))}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                </FormRow>
+                {probeState === "pending" ? <Notice tone="muted">Probing host…</Notice> : null}
                 {probeDetail ? (
-                  <Text style={styles.error}>
-                    {probeDetail.error ?? `unreachable now: ${probeDetail.value}`}
-                  </Text>
+                  <Notice>{probeDetail.error ?? `unreachable now: ${probeDetail.value}`}</Notice>
                 ) : null}
                 {probeDetail && !probeDetail.saved ? (
-                  <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-                    <Pressable accessibilityRole="button" onPress={() => confirmEditAnyway(daemon.name)} style={styles.buttonSmall}>
-                      <Text style={styles.buttonTextDanger}>Save anyway</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
+                  <ActionBar align="flex-start">
+                    <Button label="Save anyway" size="sm" variant="danger" onPress={() => confirmEditAnyway(daemon.name)} />
+                    <Button
+                      label="Dismiss"
+                      size="sm"
+                      variant="secondary"
                       onPress={() => setRowProbe((prev) => { const next = { ...prev }; delete next[daemon.name]; return next; })}
-                      style={styles.buttonSmall}
-                    >
-                      <Text style={styles.buttonTextSmall}>Dismiss</Text>
-                    </Pressable>
-                  </View>
+                    />
+                  </ActionBar>
                 ) : null}
-              </View>
-            ) : (
-              <View style={styles.row}>
-                <View style={{ flexShrink: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "baseline", flexWrap: "wrap", columnGap: 8 }}>
-                    <Text style={styles.rowName} selectable>{formatPeerDisplay(daemon.name, daemon.serverId)}</Text>
-                    {daemon.hostname && daemon.hostname !== daemon.name ? (
-                      <Text style={styles.rowMeta} selectable>{daemon.hostname}</Text>
-                    ) : null}
-                  </View>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={styles.rowValue}>{displayHost(daemon.value)}</Text>
-                    <Pressable accessibilityRole="button" accessibilityLabel={`Copy host value for ${daemon.name}`} onPress={() => handleCopy(daemon.value)} hitSlop={10}>
-                      <Text style={styles.copyIcon}>⧉</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Debug daemon ${daemon.name}`}
-                      onPress={() => { setDumpOpen(true); setDumpDaemon(daemon.name); dump.mutate({ daemon: daemon.name }); }}
-                      hitSlop={10}
-                    >
-                      <Text style={styles.copyIcon}>{dumpDaemon === daemon.name && dump.isPending ? "…" : "🐞"}</Text>
-                    </Pressable>
-                  </View>
-                  {h ? (
-                    h.reachable ? (
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        <StatusDot variant="success" size="sm" />
-                        <Badge label={h.agentCount !== null ? `reachable (${h.agentCount} agents)` : "reachable"} variant="success" />
-                      </View>
-                    ) : (
-                      <View>
-                        <Text style={styles.errorMuted} selectable>
-                          ✗ unreachable
-                          <Text style={styles.expandLink} accessibilityRole="button" onPress={() => setExpandedError((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(daemon.name)) next.delete(daemon.name); else next.add(daemon.name);
-                            return next;
-                          })}>
-                            {" "}(details)
-                          </Text>
-                          <Text accessibilityRole="button" onPress={() => void Clipboard.setString(h.error ?? "")}>
-                            {" "}⧉
-                          </Text>
-                        </Text>
-                        {expandedError.has(daemon.name) ? (
-                          <Text style={styles.errorDetail} selectable>{h.error ?? "unreachable"}</Text>
-                        ) : null}
-                      </View>
-                    )
-                  ) : (
-                    <Text style={styles.detail}>…</Text>
-                  )}
-                </View>
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginLeft: 8 }}>
-                  <Pressable
-                    accessibilityRole="button"
+                <ActionBar align="flex-start">
+                  <Button label="Save" size="sm" variant="primary" onPress={() => handleSave(daemon.name)} />
+                  <Button
+                    label="Cancel"
+                    size="sm"
+                    variant="ghost"
                     onPress={() => {
-                      setEdits((prev) => ({ ...prev, [daemon.name]: { name: daemon.name, value: daemon.value } }));
-                      setEditing((prev) => new Set(prev).add(daemon.name));
+                      setEdits((prev) => { const next = { ...prev }; delete next[daemon.name]; return next; });
+                      setEditing((prev) => { const next = new Set(prev); next.delete(daemon.name); return next; });
                     }}
-                    style={styles.buttonSmall}
-                  >
-                    <Text style={styles.buttonTextSmall}>Edit</Text>
-                  </Pressable>
-                  <Pressable accessibilityRole="button" onPress={() => handleRemove(daemon.name)} style={styles.buttonSmall}>
-                    <Text style={styles.buttonTextDanger}>Remove</Text>
-                  </Pressable>
-                </View>
-              </View>
-            )}
-          </View>
-        );
-      })}
+                  />
+                </ActionBar>
+              </Card>
+            );
+          }
+          return (
+            <Card key={daemon.name} variant="elevated">
+              <Card.Header
+                title={peerLabelForName(daemon.name)}
+                subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
+                badge={<HealthBadge health={h} />}
+              />
+              <KeyValue label="Host value" value={daemon.value} mono copyable truncate="end" truncateMaxLength={36} />
+              {h && !h.reachable ? (
+                <>
+                  <Notice>{h.error ?? "unreachable"}</Notice>
+                  <ActionBar align="flex-start">
+                    <Button
+                      label={expandedError.has(daemon.name) ? "Hide details" : "Details"}
+                      size="sm"
+                      variant="ghost"
+                      onPress={() => setExpandedError((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(daemon.name)) next.delete(daemon.name); else next.add(daemon.name);
+                        return next;
+                      })}
+                    />
+                  </ActionBar>
+                  {expandedError.has(daemon.name) ? (
+                    <KeyValue label="Error detail" value={h.error ?? "unreachable"} mono copyable />
+                  ) : null}
+                </>
+              ) : null}
+              <ActionBar align="flex-start">
+                <Button
+                  label="Edit"
+                  size="sm"
+                  variant="secondary"
+                  onPress={() => {
+                    setEdits((prev) => ({ ...prev, [daemon.name]: { name: daemon.name, value: daemon.value } }));
+                    setEditing((prev) => new Set(prev).add(daemon.name));
+                  }}
+                />
+                <Button
+                  label="Debug"
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => { setDumpOpen(true); setDumpDaemon(daemon.name); dump.mutate({ daemon: daemon.name }); }}
+                />
+                <Button label="Remove" size="sm" variant="danger" onPress={() => handleRemove(daemon.name)} />
+              </ActionBar>
+            </Card>
+          );
+        })}
+
+        <SectionHeader title="Add daemon" />
+        <Card>
+          <FormRow label="Name" description="The daemon's real name; derived automatically for relay links.">
+            <TextInput value={newName} onChangeText={setNewName} autoCapitalize="none" autoCorrect={false} />
+          </FormRow>
+          <FormRow label="Host value" description={HOST_FORM_HINT}>
+            <TextInput
+              mono
+              value={newValue}
+              onChangeText={(text) => { setNewValue(text); deriveHost(text); }}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder={HOST_FORM_HINT}
+              errorText={addMismatch ?? undefined}
+            />
+          </FormRow>
+          {add.error ? <Notice>{add.error.message}</Notice> : null}
+          {adding ? <Notice tone="muted">Probing host…</Notice> : null}
+          {addProbe ? (
+            <>
+              <Notice>{addProbe.error ?? `unreachable now: ${addProbe.value}`}</Notice>
+              <ActionBar align="flex-start">
+                <Button label="Add anyway" size="sm" variant="danger" onPress={confirmAddAnyway} />
+                <Button label="Dismiss" size="sm" variant="secondary" onPress={() => setAddProbe(null)} />
+              </ActionBar>
+            </>
+          ) : null}
+          <ActionBar align="flex-start">
+            <Button
+              label="Add daemon"
+              variant="primary"
+              loading={add.isPending || adding}
+              disabled={!canAdd || add.isPending || adding}
+              onPress={handleAdd}
+            />
+          </ActionBar>
+        </Card>
+        {update.error ? <Notice>{update.error.message}</Notice> : null}
+        {remove.error ? <Notice>{remove.error.message}</Notice> : null}
+
+        <SectionHeader title="Introduce agents" />
+        <Card>
+          <FormRow label="Agents" description="Pick two agents on reachable daemons; a message is sent to both.">
+            {([1, 2] as const).map((slot) => {
+              const selected = slot === 1 ? introFirst : introSecond;
+              return (
+                <Button
+                  key={`intro-${slot}`}
+                  size="sm"
+                  variant="secondary"
+                  icon="Bot"
+                  style={{ marginTop: 4, alignSelf: "stretch" }}
+                  label={
+                    selected
+                      ? `${selected.name} (${selected.shortId}) on ${selected.daemon}`
+                      : `Select agent ${slot}…`
+                  }
+                  onPress={() => setExpandedPicker(slot)}
+                />
+              );
+            })}
+          </FormRow>
+          <FormRow label="Message">
+            <TextInput
+              mono
+              multiline
+              numberOfLines={4}
+              value={introMessage}
+              onChangeText={setIntroMessage}
+              autoCapitalize="none"
+              autoCorrect={false}
+              inputStyle={{ minHeight: 90, textAlignVertical: "top" }}
+            />
+          </FormRow>
+          {introduce.error ? <Notice>{introduce.error.message}</Notice> : null}
+          {!introFirst || !introSecond ? (
+            <Notice tone="muted">Select both agents above to enable sending.</Notice>
+          ) : null}
+          <ActionBar align="flex-start">
+            <Button
+              label="Send introductions"
+              variant="primary"
+              loading={introduce.isPending}
+              disabled={!introFirst || !introSecond || introMessage.trim().length === 0 || introduce.isPending}
+              onPress={() =>
+                introduce.mutate({
+                  first: { daemon: introFirst!.daemon, agentId: introFirst!.agentId, shortId: introFirst!.shortId, name: introFirst!.name },
+                  second: { daemon: introSecond!.daemon, agentId: introSecond!.agentId, shortId: introSecond!.shortId, name: introSecond!.name },
+                  message: introMessage,
+                })
+              }
+            />
+          </ActionBar>
+          {introduce.data ? (
+            <KeyValueGroup columns={1}>
+              {introduce.data.sends.map((send) => (
+                <KeyValue
+                  key={send.agentId}
+                  label={send.ok ? "Sent" : "Failed"}
+                  value={`${sendTargetLabel(send.daemon)}/${send.agentId}${send.ok ? "" : `: ${send.error}`}`}
+                  valueStyle={{ color: send.ok ? colors.statusSuccess : colors.statusDanger }}
+                  mono
+                />
+              ))}
+            </KeyValueGroup>
+          ) : null}
+        </Card>
+
+        <ViaXComms theme={theme} />
+      </ModalBody>
 
       <Modal
         title={`Debug: ${dumpDaemon ?? ""}`}
@@ -642,250 +740,121 @@ export function MainSurface({ theme, layout }: PluginSurfaceProps) {
         onOpenChange={(open) => { if (!open) { setDumpOpen(false); setDumpState(null); } }}
       >
         <Modal.Content>
-          <View style={styles.cardRow}>
-          {dump.isPending && !dumpState ? (
-            <Text style={styles.detail}>Loading…</Text>
-          ) : (() => {
-            const d = dumpState as any;
-            if (!d) return null;
-            return (
+          <Card variant="elevated">
+            {dump.isPending && !dumpState ? (
+              <Card.Header title="Loading…" subtitle="Fetching daemon snapshot." />
+            ) : snapshot ? (
               <>
-                <Text style={styles.mono} selectable>{formatPeerDisplay(d.name, d.serverId)}{d.reached ? " (reached)" : " (unreachable)"} · transport: {String(d.transport ?? "-")}</Text>
-                {d.error ? <Text style={styles.error}>{d.error}</Text> : null}
-                {d.hostname ? <Text style={styles.mono} selectable>hostname: {d.hostname}</Text> : null}
-                {d.version ? <Text style={styles.mono} selectable>version: {d.version}{d.desktopManaged ? " (desktop-managed)" : ""}</Text> : null}
-                {d.listen ? <Text style={styles.mono} selectable>listen: {d.listen}</Text> : null}
-                {d.pid ? <Text style={styles.mono} selectable>pid: {d.pid}{d.nodePath ? ` · node: ${d.nodePath}` : ""}</Text> : null}
-                {d.startedAt ? <Text style={styles.mono} selectable>startedAt: {d.startedAt}</Text> : null}
-                {d.relayEndpoints ? <Text style={styles.mono} selectable>relay: {d.relayEnabled ? "enabled" : "disabled"} {d.relayEndpoints.join(", ")}</Text> : null}
-                {d.features ? (
+                <Card.Header
+                  title={formatPeerDisplay(snapshot.name, snapshot.serverId)}
+                  subtitle={`transport: ${String(snapshot.transport ?? "-")}`}
+                  badge={<Badge label={snapshot.reached ? "reached" : "unreachable"} variant={snapshot.reached ? "success" : "danger"} dot />}
+                />
+                <KeyValueGroup>
+                  {snapshot.error ? <KeyValue label="Error" value={snapshot.error} copyable mono /> : null}
+                  {snapshot.hostname ? <KeyValue label="Hostname" value={snapshot.hostname} copyable mono /> : null}
+                  {snapshot.version ? <KeyValue label="Version" value={`${snapshot.version}${snapshot.desktopManaged ? " (desktop-managed)" : ""}`} mono /> : null}
+                  {snapshot.listen ? <KeyValue label="Listen" value={snapshot.listen} copyable mono /> : null}
+                  {snapshot.pid ? <KeyValue label="PID" value={`${snapshot.pid}${snapshot.nodePath ? ` · node: ${snapshot.nodePath}` : ""}`} mono /> : null}
+                  {snapshot.startedAt ? <KeyValue label="Started" value={snapshot.startedAt} mono /> : null}
+                  {snapshot.relayEndpoints ? (
+                    <KeyValue label="Relay" value={`${snapshot.relayEnabled ? "enabled" : "disabled"} ${snapshot.relayEndpoints.join(", ")}`} mono />
+                  ) : null}
+                </KeyValueGroup>
+                {snapshot.features ? (
                   <>
-                    <Text style={styles.detail}>features:</Text>
-                    {Object.entries(d.features).filter(([, v]) => v).map(([k]) => (
-                      <Text key={k} style={styles.mono} selectable>  {k}</Text>
-                    ))}
+                    <SectionHeader title="Features" count={Object.entries(snapshot.features).filter(([, v]) => v).length} />
+                    <KeyValueGroup columns={1}>
+                      {Object.entries(snapshot.features).filter(([, v]) => v).map(([k]) => (
+                        <KeyValue key={k} label={k} value="enabled" mono />
+                      ))}
+                    </KeyValueGroup>
                   </>
                 ) : null}
-                {d.capabilities ? (
+                {snapshot.capabilities ? (
                   <>
-                    <Text style={styles.detail}>capabilities:</Text>
-                    {Object.entries(d.capabilities).map(([k, v]) => (
-                      <Text key={k} style={styles.mono} selectable>  {k}: {String(v)}</Text>
-                    ))}
+                    <SectionHeader title="Capabilities" />
+                    <KeyValueGroup columns={1}>
+                      {Object.entries(snapshot.capabilities).map(([k, v]) => (
+                        <KeyValue key={k} label={k} value={String(v)} mono />
+                      ))}
+                    </KeyValueGroup>
                   </>
                 ) : null}
-                <Text style={styles.detail}>agents: {d.agents?.length ?? 0}</Text>
-                {d.agents?.map((a: any) => (
-                  <Text key={a.agentId} style={styles.mono} selectable>
-                    {"  "}{a.status} {a.name} ({a.shortId}) {a.provider}{a.model ? `/${a.model}` : ""}{a.archived ? " [archived]" : ""}{a.cwd ? ` · ${a.cwd}` : ""}
-                  </Text>
-                ))}
-                <Text style={styles.detail}>workspaces: {d.workspaces?.length ?? 0}</Text>
-                {d.workspaces?.map((w: any) => (
-                  <Text key={w.id ?? w.name} style={styles.mono} selectable>  {w.project}/{w.name} ({w.isolation}){w.cwd ? ` · ${w.cwd}` : ""}</Text>
-                ))}
-                <Text style={styles.detail}>projects: {d.projects?.length ?? 0}</Text>
-                {d.projects?.map((p: any) => (
-                  <Text key={p.id ?? p.name} style={styles.mono} selectable>  {p.name}{p.source ? ` · ${p.source}` : ""}</Text>
-                ))}
-                <Text style={styles.detail}>providers: {d.providerCount ?? d.providers?.length ?? 0}</Text>
-                {d.providers?.map((p: any) => (
-                  <Text key={String(p.provider)} style={styles.mono} selectable>  {p.available ? "ok" : "x"} {String(p.provider)}{p.error ? ` · ${String(p.error)}` : ""}</Text>
-                ))}
-                <Text style={styles.detail}>terminals: {d.terminals?.length ?? 0}</Text>
-                {d.terminals?.map((t: any) => (
-                  <Text key={String(t.id ?? t.name)} style={styles.mono} selectable>  {String(t.name ?? t.id)}{t.status ? ` · ${String(t.status)}` : ""}{t.cwd ? ` · ${String(t.cwd)}` : ""}</Text>
-                ))}
-                <Text style={styles.detail}>schedules: {d.schedules?.length ?? 0}</Text>
-                {d.schedules?.map((sched: any) => (
-                  <Text key={String(sched.id ?? sched.name)} style={styles.mono} selectable>  {String(sched.state)} {String(sched.name)}</Text>
-                ))}
-                <Text style={styles.detail}>permissions: {d.permissions?.length ?? 0}</Text>
-                {d.permissions?.map((p: any) => (
-                  <Text key={String(p.id)} style={styles.mono} selectable>  {String(p.name)} ({String(p.agentId).slice(0, 8)})</Text>
-                ))}
+                <SectionHeader title="Agents" count={snapshot.agents?.length ?? 0} />
+                <KeyValueGroup columns={1}>
+                  {(snapshot.agents ?? []).map((a: any) => (
+                    <KeyValue
+                      key={a.agentId}
+                      label={`${a.status} ${a.name}`}
+                      value={`(${a.shortId}) ${a.provider}${a.model ? `/${a.model}` : ""}${a.archived ? " [archived]" : ""}${a.cwd ? ` · ${a.cwd}` : ""}`}
+                      mono
+                    />
+                  ))}
+                </KeyValueGroup>
+                <SectionHeader title="Workspaces" count={snapshot.workspaces?.length ?? 0} />
+                <KeyValueGroup columns={1}>
+                  {(snapshot.workspaces ?? []).map((w: any) => (
+                    <KeyValue key={w.id ?? w.name} label={`${w.project}/${w.name}`} value={`${w.isolation}${w.cwd ? ` · ${w.cwd}` : ""}`} mono />
+                  ))}
+                </KeyValueGroup>
+                <SectionHeader title="Projects" count={snapshot.projects?.length ?? 0} />
+                <KeyValueGroup columns={1}>
+                  {(snapshot.projects ?? []).map((p: any) => (
+                    <KeyValue key={p.id ?? p.name} label={p.name} value={p.source ? String(p.source) : "-"} mono />
+                  ))}
+                </KeyValueGroup>
+                <SectionHeader title="Providers" count={snapshot.providerCount ?? snapshot.providers?.length ?? 0} />
+                <KeyValueGroup columns={1}>
+                  {(snapshot.providers ?? []).map((p: any) => (
+                    <KeyValue key={String(p.provider)} label={String(p.provider)} value={p.available ? "ok" : `x${p.error ? ` · ${String(p.error)}` : ""}`} mono />
+                  ))}
+                </KeyValueGroup>
+                <SectionHeader title="Terminals" count={snapshot.terminals?.length ?? 0} />
+                <KeyValueGroup columns={1}>
+                  {(snapshot.terminals ?? []).map((t: any) => (
+                    <KeyValue key={String(t.id ?? t.name)} label={String(t.name ?? t.id)} value={`${t.status ? String(t.status) : "-"}${t.cwd ? ` · ${String(t.cwd)}` : ""}`} mono />
+                  ))}
+                </KeyValueGroup>
+                <SectionHeader title="Schedules" count={snapshot.schedules?.length ?? 0} />
+                <KeyValueGroup columns={1}>
+                  {(snapshot.schedules ?? []).map((sched: any) => (
+                    <KeyValue key={String(sched.id ?? sched.name)} label={String(sched.name)} value={String(sched.state)} mono />
+                  ))}
+                </KeyValueGroup>
+                <SectionHeader title="Permissions" count={snapshot.permissions?.length ?? 0} />
+                <KeyValueGroup columns={1}>
+                  {(snapshot.permissions ?? []).map((p: any) => (
+                    <KeyValue key={String(p.id)} label={String(p.name)} value={`(${String(p.agentId).slice(0, 8)})`} mono />
+                  ))}
+                </KeyValueGroup>
               </>
-            );
-          })()}
-            </View>
+            ) : null}
+          </Card>
           <ViaXComms theme={theme} />
         </Modal.Content>
       </Modal>
 
-      <Text style={styles.section}>Add daemon</Text>
-      <Text style={styles.label}>Host (the daemon's real name; derived for relay links)</Text>
-      <TextInput
-        mono
-        inputStyle={styles.input}
-        value={newName}
-        onChangeText={setNewName}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      <Text style={styles.label}>Host value</Text>
-      {newName.trim().length > 0 && newValue.trim().length > 0 && !newValue.includes("#offer=") ? (() => {
-        const mismatch = directHostMismatch(newName.trim(), newValue.trim());
-        return mismatch ? <Text style={styles.error}>{mismatch}</Text> : null;
-      })() : null}
-      <TextInput
-        mono
-        inputStyle={styles.input}
-        value={newValue}
-        onChangeText={(text) => { setNewValue(text); deriveHost(text); }}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder={HOST_FORM_HINT}
-      />
-      {add.error ? <Text style={styles.error}>{add.error.message}</Text> : null}
-      {adding ? <Text style={styles.detail}>Probing host…</Text> : null}
-      {addProbe ? (
-        <>
-          <Text style={styles.error}>
-            {addProbe.error ?? `unreachable now: ${addProbe.value}`}
-          </Text>
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
-            <Pressable accessibilityRole="button" onPress={confirmAddAnyway} style={styles.buttonSmall}>
-              <Text style={styles.buttonTextDanger}>Add anyway</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => setAddProbe(null)} style={styles.buttonSmall}>
-              <Text style={styles.buttonTextSmall}>Dismiss</Text>
-            </Pressable>
-          </View>
-        </>
-      ) : null}
-      <Pressable accessibilityRole="button" onPress={handleAdd} disabled={!canAdd || add.isPending || adding} style={styles.button}>
-        <Text style={styles.buttonText}>{add.isPending ? "Adding…" : adding ? "Probing…" : "Add daemon"}</Text>
-      </Pressable>
-      {update.error ? <Text style={styles.error}>{update.error.message}</Text> : null}
-      {remove.error ? <Text style={styles.error}>{remove.error.message}</Text> : null}
+      {renderAgentPicker(1)}
+      {renderAgentPicker(2)}
 
-      <Text style={styles.section}>Introduce agents</Text>
-      <Text style={styles.detail}>
-        Pick two agents on reachable daemons; a message is sent to both.
-      </Text>
-
-      {([1, 2] as const).map((slot) => {
-        const selected = slot === 1 ? introFirst : introSecond;
-        const setSelected = slot === 1 ? setIntroFirst : setIntroSecond;
-        return (
-          <View key={`intro-${slot}`} style={styles.pickerSection}>
-            <Pressable accessibilityRole="button" onPress={() => setExpandedPicker(expandedPicker === slot ? null : slot)} style={styles.pickerButton}>
-              <Text style={styles.pickerLabel}>
-                {selected
-                  ? `${selected.name} (${selected.shortId}) on ${selected.daemon}`
-                  : `Select agent ${slot}…`}
-              </Text>
-            </Pressable>
-            <Modal
-              title={`Select agent ${slot}`}
-              open={expandedPicker === slot}
-              onOpenChange={(open) => { if (!open) setExpandedPicker(null); }}
-            >
-              <Modal.Content>
-                  {introspect.isPending ? <Text style={styles.pickerRowText}>Loading agents…</Text> : null}
-                  {introspect.error ? <Text style={styles.error}>{introspect.error.message}</Text> : null}
-                  <ScrollView style={styles.pickerScroll}>
-                    {introspect.data?.daemons.map((daemon) => (
-                      <View key={daemon.name}>
-                        <Text style={styles.pickerGroup}>
-                          {daemon.reachable ? peerLabelForName(daemon.name) : `${peerLabelForName(daemon.name)} (unreachable)`}
-                        </Text>
-                        {daemon.projects.map((project) => (
-                          <View key={`${daemon.name}-${project.project}`}>
-                            <Text style={styles.pickerProject}>{project.project}</Text>
-                            {project.workspaces.map((workspace) => (
-                              <View key={`${daemon.name}-${project.project}-${workspace.name}`}>
-                                <Text style={styles.pickerWorkspace}>⌂ {workspace.name}</Text>
-                                {workspace.agents.map((agent) => {
-                                  const active = selected?.agentId === agent.agentId;
-                                  return (
-                                    <Pressable
-                                      key={agent.agentId}
-                                      accessibilityRole="button"
-                                      onPress={() => {
-                                        setSelected({ daemon: daemon.name, agentId: agent.agentId, shortId: agent.shortId, name: agent.name });
-                                        setExpandedPicker(null);
-                                      }}
-                                      style={[styles.pickerRow, active ? styles.pickerRowSelected : null]}
-                                    >
-                                      <Text style={active ? styles.pickerRadioSelected : styles.pickerRadio}>{active ? "●" : "○"}</Text>
-                                      <Text style={styles.pickerAgentText}>
-                                        {agent.name} ({agent.shortId}) · {agent.status}
-                                      </Text>
-                                    </Pressable>
-                                  );
-                                })}
-                              </View>
-                            ))}
-                          </View>
-                        ))}
-                      </View>
-                    ))}
-                  </ScrollView>
-              </Modal.Content>
-            </Modal>
-          </View>
-        );
-      })}
-
-      <Text style={styles.label}>Message</Text>
-      <TextInput
-        mono
-        inputStyle={[styles.input, { minHeight: 90, textAlignVertical: "top" }]}
-        multiline
-        numberOfLines={4}
-        value={introMessage}
-        onChangeText={setIntroMessage}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-      {introduce.error ? <Text style={styles.error}>{introduce.error.message}</Text> : null}
-      {!introFirst || !introSecond ? (
-        <Text style={styles.detail}>Select both agents above to enable sending.</Text>
-      ) : null}
-      <Pressable
-        accessibilityRole="button"
-        onPress={() =>
-          introduce.mutate({
-            first: { daemon: introFirst!.daemon, agentId: introFirst!.agentId, shortId: introFirst!.shortId, name: introFirst!.name },
-            second: { daemon: introSecond!.daemon, agentId: introSecond!.agentId, shortId: introSecond!.shortId, name: introSecond!.name },
-            message: introMessage,
-          })
-        }
-        disabled={!introFirst || !introSecond || introMessage.trim().length === 0 || introduce.isPending}
-        style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}
-        android_ripple={{ color: "rgba(255,255,255,0.25)" }}
-      >
-        <Text style={styles.buttonText}>{introduce.isPending ? "Sending…" : "Send introductions"}</Text>
-      </Pressable>
-      {introduce.data ? (
-        introduce.data.sends.map((send) => (
-          <Text key={send.agentId} style={send.ok ? styles.ok : styles.error}>
-            {send.ok ? `sent to ${sendTargetLabel(send.daemon)}/${send.agentId}` : `failed ${sendTargetLabel(send.daemon)}/${send.agentId}: ${send.error}`}
-          </Text>
-        ))
-      ) : null}
       <Modal
         title="Remove daemon"
         open={pendingRemove !== null}
         onOpenChange={(open) => { if (!open) setPendingRemove(null); }}
       >
         <Modal.Content>
-          <Text style={styles.detail} selectable>Remove '{pendingRemove}' from the registry?</Text>
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
-            <Pressable accessibilityRole="button" onPress={confirmRemove} style={styles.buttonDanger}>
-              <Text style={styles.buttonTextDanger}>Remove</Text>
-            </Pressable>
-            <Pressable accessibilityRole="button" onPress={() => setPendingRemove(null)} style={styles.buttonSmall}>
-              <Text style={styles.buttonTextSmall}>Cancel</Text>
-            </Pressable>
-          </View>
+          <Text selectable style={{ color: colors.foreground, fontSize: 13 }}>
+            Remove '{pendingRemove}' from the registry?
+          </Text>
+          <ActionBar align="flex-start">
+            <Button label="Remove" variant="danger" onPress={confirmRemove} />
+            <Button label="Cancel" variant="secondary" onPress={() => setPendingRemove(null)} />
+          </ActionBar>
           <ViaXComms theme={theme} />
         </Modal.Content>
       </Modal>
-      <ViaXComms theme={theme} />
-      </>
-      )}
-    </ScrollView>
+
+    </View>
   );
 }

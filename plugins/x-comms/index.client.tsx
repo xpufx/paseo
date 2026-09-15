@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers, type ComposerPillRegistrar } from "./client/vendor/paseo-plugin-helper/index";
+import { initClientHelpers, registerSidebarSurface, type ComposerPillRegistrar } from "./client/vendor/paseo-plugin-helper/index";
 import { MainSurface } from "./client/main";
 import { crossDaemonTransformer, crossDaemonRenderer } from "./client/x-comms-timeline";
 import { crossDaemonToolCallTransformer, crossDaemonToolCallRenderer } from "./client/x-comms-tool-call";
@@ -22,12 +22,13 @@ export default function contribute(client: PluginClientContext) {
     context: "agent",
     Component: CrossDaemonPanel,
   });
-  client.addSurface("main", MainSurface);
-  client.addSidebarItem({
+  // registerSidebarSurface injects <PluginThemeProvider> so the surface's
+  // helper primitives resolve the host theme/layout (compact + mobile).
+  registerSidebarSurface(client, {
     id: "main",
     title: "X-comms",
     icon: "PhoneOutgoing",
-    surface: "main",
+    Component: MainSurface,
   });
   const headerButtons = new Map<string, () => void>();
   const addHeaderButtonForWorkspace = (workspaceId: string) => {
