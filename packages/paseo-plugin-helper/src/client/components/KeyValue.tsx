@@ -55,7 +55,7 @@ export function KeyValue({
   valueStyle,
 }: KeyValueProps) {
   const { Icon, useToast } = getClientHost();
-  const { colors, flair, isCompact, touchTargetMin, fonts } = usePluginTheme();
+  const { colors, flair, isCompact, touchTargetMin, fonts, typography } = usePluginTheme();
   const toast = useToast();
   const [copied, setCopied] = useState(false);
 
@@ -129,7 +129,7 @@ export function KeyValue({
               styles.label,
               {
                 color: colors.foregroundMuted,
-                fontSize: 11,
+                ...typography.label,
                 textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
               },
               labelStyle,
@@ -146,8 +146,7 @@ export function KeyValue({
             styles.stackedValueText,
             {
               color: colors.foreground,
-              fontSize: 13,
-              lineHeight: 19,
+              ...typography.bodyStrong,
               fontFamily,
             },
             valueStyle,
@@ -162,8 +161,7 @@ export function KeyValue({
               styles.subValue,
               {
                 color: colors.foregroundMuted,
-                fontSize: 11,
-                lineHeight: 15,
+                ...typography.caption,
               },
             ]}
           >
@@ -189,7 +187,7 @@ export function KeyValue({
           styles.label,
           {
             color: colors.foregroundMuted,
-            fontSize: 12,
+            ...typography.label,
             textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
           },
           labelStyle,
@@ -199,28 +197,38 @@ export function KeyValue({
       </Text>
 
       <View style={styles.rowValueWrapper}>
-        <Text
-          selectable
-          style={[
-            styles.rowValueText,
-            {
-              color: colors.foreground,
-              fontSize: 13,
-              fontFamily,
-            },
-            valueStyle,
-          ]}
-        >
-          {displayValue}
-        </Text>
+        <View style={styles.rowValueLine}>
+          <Text
+            selectable
+            style={[
+              styles.rowValueText,
+              {
+                color: colors.foreground,
+                ...typography.bodyStrong,
+                fontFamily,
+              },
+              valueStyle,
+            ]}
+          >
+            {displayValue}
+          </Text>
 
-        {subValue && (
-          <Text style={[styles.subValue, { color: colors.foregroundMuted, fontSize: 11 }]}>
+          {copyButton}
+        </View>
+
+        {subValue ? (
+          <Text
+            style={[
+              styles.subValue,
+              {
+                color: colors.foregroundMuted,
+                ...typography.caption,
+              },
+            ]}
+          >
             {subValue}
           </Text>
-        )}
-
-        {copyButton}
+        ) : null}
       </View>
     </View>
   );
@@ -268,7 +276,7 @@ const styles = StyleSheet.create({
   },
   rowContainer: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
   },
@@ -284,20 +292,29 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   stackedValueText: {
-    fontWeight: "600",
     width: "100%",
   },
   rowValueWrapper: {
+    flexDirection: "column",
+    alignItems: "flex-end",
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  rowValueLine: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    flexGrow: 1,
-    flexShrink: 1,
     gap: 6,
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: "100%",
   },
   rowValueText: {
-    fontWeight: "600",
     flexShrink: 1,
+    minWidth: 0,
+    textAlign: "right",
   },
   groupContainer: {
     flexDirection: "row",
@@ -305,11 +322,12 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   label: {
-    fontWeight: "500",
     flexShrink: 1,
+    minWidth: 0,
   },
   subValue: {
-    fontWeight: "400",
+    flexShrink: 1,
+    minWidth: 0,
   },
   copyBtn: {
     padding: 3,

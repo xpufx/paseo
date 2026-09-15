@@ -295,7 +295,7 @@ interface UseResponsiveResult {
  */
 declare function useResponsive(): UseResponsiveResult;
 
-type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce";
+type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce" | "pulse";
 type AttentionBeaconTone = "warning" | "accent" | "danger";
 interface AttentionBeaconProps {
     children: ReactNode;
@@ -309,10 +309,12 @@ interface AttentionBeaconProps {
     accessibilityLabel?: string;
     testID?: string;
     badgeIcon?: string | ReactNode;
+    duration?: number;
+    easing?: (value: number) => number;
 }
-declare function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce";
+declare function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce" | "pulse";
 declare function resolveBeaconToneColor(colors: ThemeColors, tone?: AttentionBeaconTone, customColor?: string): string;
-declare function AttentionBeacon({ children, mode, tone, color, active, style, haloStyle, badgeStyle, accessibilityLabel, testID, badgeIcon, }: AttentionBeaconProps): React__default.JSX.Element;
+declare function AttentionBeacon({ children, mode, tone, color, active, style, haloStyle, badgeStyle, accessibilityLabel, testID, badgeIcon, duration, easing, }: AttentionBeaconProps): React__default.JSX.Element;
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 type ButtonSize = "sm" | "md" | "lg";
@@ -1433,7 +1435,7 @@ interface CopyToClipboardOptions {
 }
 /**
  * Robust cross-platform clipboard copy helper for Paseo plugins.
- * Works seamlessly across React Native (Hermes / mobile), web, and desktop.
+ * Works seamlessly across React Native (mobile), web, and desktop.
  *
  * Precedence:
  * 1. Host copyText from initClientHelpers (Paseo v0.8, optional)
