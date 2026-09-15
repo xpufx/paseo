@@ -11,11 +11,15 @@ The helper package and demo are together a demonstration of an idea: that
 the plugin ecosystem can benefit from a common library, not necessarily this
 common library, rather than solving the same issues again and again.
 
-[![Visual Flair Studio](screenshots/helper-visual-flair.png)](screenshots/helper-visual-flair.png)
+<p align="center">
+  <a href="screenshots/helper-visual-flair.png">
+    <img src="screenshots/helper-visual-flair.png" alt="Visual Flair Studio" />
+  </a>
+</p>
 
 | System Metrics | About Plugin |
 | :---: | :---: |
-| [![System Metrics](screenshots/helper-metric-gauges.png)](screenshots/helper-metric-gauges.png) | [![About Plugin](screenshots/helper-about.png)](screenshots/helper-about.png) |
+| <a href="screenshots/helper-metric-gauges.png"><img src="screenshots/helper-metric-gauges.png" alt="System Metrics" /></a> | <a href="screenshots/helper-about.png"><img src="screenshots/helper-about.png" alt="About Plugin" /></a> |
 
 > [!NOTE]
 > **Prerequisites & Platform Support**:
