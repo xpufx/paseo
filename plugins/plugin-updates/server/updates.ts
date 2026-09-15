@@ -338,6 +338,7 @@ async function probeGroup(plugins: PaseoPluginInfo[], runner: CommandRunner): Pr
       sharedRepo,
       repoRoot: toplevel,
       repoPlugins: ids.length > 1 ? ids : null,
+      source: plugin.source ?? null,
       status: probe.status,
       error: probe.error,
     };
@@ -390,6 +391,7 @@ export async function checkInstalledPlugins(
           sharedRepo: null,
           repoRoot: null,
           repoPlugins: null,
+          source: null,
           status: "error",
           error: `Unable to list installed plugins: ${errorOf(error)}`,
         },
@@ -421,12 +423,21 @@ export async function updatePlugin(
 ): Promise<PluginUpdateActionResult> {
   try {
     const installed = await listPlugins({ forceRefresh: true });
-    if (!installed.some((plugin) => plugin.id === pluginId)) {
+    const info = installed.find((plugin) => plugin.id === pluginId);
+    if (!info) {
       return {
         pluginId,
         status: "error",
         output: null,
         error: `Plugin '${pluginId}' is not installed`,
+      };
+    }
+    if (info.source != null && info.source !== "git") {
+      return {
+        pluginId,
+        status: "error",
+        output: null,
+        error: `Plugin '${pluginId}' is a directory install, not managed by Git — update it via the workspace checkout`,
       };
     }
   } catch (error) {

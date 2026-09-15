@@ -48,9 +48,13 @@ function isUpdateAvailable(status: PluginUpdate["status"]): boolean {
   return status === "stale" || status === "diverged";
 }
 
+function isUpdatable(plugin: PluginUpdate): boolean {
+  return plugin.source == null || plugin.source === "git";
+}
+
 function PluginUpdatesIconInner(props: PluginButtonIconProps) {
   const { data, isFetching, isError } = usePluginUpdates(props.workspaceId);
-  const stale = data?.plugins.some((plugin) => isUpdateAvailable(plugin.status)) ?? false;
+  const stale = data?.plugins.some((plugin) => isUpdateAvailable(plugin.status) && isUpdatable(plugin)) ?? false;
   const failed = isError || data?.plugins.some((plugin) => plugin.status === "error") === true;
   const color = failed
     ? props.theme.colors.statusDanger || "#ef4444"
@@ -115,13 +119,14 @@ function PluginRow({
             : plugin.status === "checking"
               ? "Checking…"
               : plugin.error || "Check failed");
+  const updatable = isUpdatable(plugin);
   return (
     <Card variant="elevated" noPadding>
       <View style={{ padding: 10, gap: 6 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
           <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }}>{plugin.id}</Text>
-          {isUpdateAvailable(plugin.status) ? (
+          {isUpdateAvailable(plugin.status) && updatable ? (
             <Button
               label="Update"
               variant="secondary"
@@ -135,6 +140,11 @@ function PluginRow({
         <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 12 }}>
           {detail}
         </Text>
+        {isUpdateAvailable(plugin.status) && !updatable ? (
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+            Directory install — update via the workspace checkout, not here.
+          </Text>
+        ) : null}
         {plugin.branch || (plugin.remote && !hideRemote) ? (
           <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
             {[plugin.branch, hideRemote ? null : plugin.remote].filter(Boolean).join(" · ")}
@@ -168,7 +178,7 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
     return [...ordered.values()];
   }, [plugins]);
   const staleCount = useMemo(
-    () => plugins.filter((plugin) => isUpdateAvailable(plugin.status)).length,
+    () => plugins.filter((plugin) => isUpdateAvailable(plugin.status) && isUpdatable(plugin)).length,
     [plugins],
   );
 
