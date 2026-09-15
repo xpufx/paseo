@@ -312,12 +312,11 @@ Plugins powered by `paseo-plugin-helper`:
 
 - [**`paseo-top`**](https://github.com/xpufx/paseo/tree/main/plugins/top) – Real-time system resource monitor (CPU, memory, load average) for Paseo composers with responsive charts, cards, and warning thresholds.
 - [**`paseo-demo`**](https://github.com/xpufx/paseo-demo) – Interactive showcase and reference implementation for the helper: live pill, metrics, typed RPC actions, and persisted settings.
-- [**`paseo-plugin-helper`**](https://github.com/xpufx/paseo-plugin-helper) – The library itself: UI design system, lifecycle primitives, and daemon utilities for Paseo plugins.
 - [**`paseo-forgejo`**](https://github.com/xpufx/paseo-forgejo) (coming soon) – Work with Forgejo issues from inside Paseo via the embedded fetch API client.
 - [**`paseo-mcp-tools`**](https://github.com/xpufx/paseo-mcp-tools) – Inline UI for checking MCP servers available to an agent session, with live probes verifying actual session inclusion.
 - [**`paseo-slash`**](https://github.com/xpufx/paseo-slash) (coming soon) – Slash commands and macros with an interactive console, registered straight into the composer.
 - [**`paseo-x-comms`**](https://github.com/xpufx/paseo-x-comms) – Cross-daemon agent conversations over Paseo Relay, bundling its own MCP server.
-- [**`twofado`**](https://github.com/xpufx/twofado) (coming soon) – 2FA and one-time-password helpers for Paseo agent workflows.
+- [**`twofado`**](https://github.com/xpufx/twofado) (coming soon) – Out-of-band human approval for agent command execution: the agent petitions, your phone buzzes over Telegram, you tap, it runs.
 
 ---
 
