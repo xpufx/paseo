@@ -8,13 +8,18 @@ import {
 } from "../shared/resources";
 
 async function fetchCommands(rpc: PluginClientContext["rpc"]): Promise<SlashCommand[]> {
-  const prefix = "";
-  void prefix;
   const res = await (rpc as unknown as (contract: unknown, input: unknown) => Promise<{ commands: SlashCommand[] }>)(
     listCommandsRpc as unknown,
     {},
   );
   return res.commands;
+}
+
+function report(where: string, err: unknown): void {
+  try {
+    // Visible in Paseo GUI logs; never throws back into registration.
+    console.error(`[slash.commands] ${where}: ${err instanceof Error ? err.message : String(err)}`);
+  } catch {}
 }
 
 export function registerSlashCommands(client: PluginClientContext): () => void {
@@ -23,10 +28,15 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
 
   async function sync() {
     if (disposed) return;
+    if (typeof client.rpc !== "function") {
+      report("sync", `client.rpc unavailable (${typeof client.rpc}); retrying on interval`);
+      return;
+    }
     let commands: SlashCommand[] = [];
     try {
       commands = await fetchCommands(client.rpc);
-    } catch {
+    } catch (err) {
+      report("list-commands", err);
       return;
     }
     for (const remove of removers.splice(0)) {
@@ -42,7 +52,9 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
         {},
       );
       prefix = settings.prefix ?? "";
-    } catch {}
+    } catch (err) {
+      report("get-prefix", err);
+    }
     for (const command of commands) {
       const name = withPrefix(prefix, command.name);
       if (command.action.verb === "send") {
@@ -67,7 +79,7 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
             argumentHint: "",
             context: "agent",
             async onSubmit(ctx) {
-              ctx.openSettings(target);
+              ctx.openSurface(target);
             },
           }),
         );
