@@ -1,10 +1,9 @@
 {
-  "name": "@xpufx/paseo-demo",
+  "name": "@xpufx/paseo-helper-demo",
   "private": true,
   "version": "0.2.0",
   "scripts": {
-    "build": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
-    "pretypecheck": "npm run build",
+    "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

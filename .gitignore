@@ -34,6 +34,12 @@ dist/
 !packages/paseo-plugin-helper/dist/
 plugins/*/dist/
 
+# Local agent guidance (per-machine, never committed)
+packages/paseo-plugin-helper/AGENTS.md
+
+# Vendor link-mode stash (dev-only, never committed — materialize before publish)
+*.link-bak/
+
 # Local opencode config (per-machine, never committed)
 opencode.jsonc
 

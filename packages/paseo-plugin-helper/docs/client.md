@@ -2,7 +2,7 @@
 
 The `client` module provides React Native UI primitives, layout containers, and lifecycle registration engines designed to integrate natively into Paseo's mobile and desktop environments.
 
-It guarantees zero Node built-in imports, ensuring compliance with Hermes and Paseo's client plugin compiler.
+It guarantees zero Node built-in imports, ensuring compliance with Paseo's client plugin compiler.
 
 ---
 
@@ -692,7 +692,7 @@ with `~/...`) rather than as a raw absolute path.
 ## 7. Utilities
 
 ### `copyToClipboard(text, options?)`
-Universal cross-platform copy function for Paseo plugins. Works reliably across React Native (Hermes / mobile webviews / touch events), desktop, and modern secure browsers.
+Universal cross-platform copy function for Paseo plugins. Works reliably across React Native (mobile webviews / touch events), desktop, and modern secure browsers.
 Automatically integrates with Paseo's `useToast()` to display a toast notification on success.
 Tier order: host `copyText` from `initClientHelpers` (Paseo 0.8, when supplied), then React Native Clipboard, then `navigator.clipboard`, then an `execCommand` fallback.
 

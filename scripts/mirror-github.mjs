@@ -43,6 +43,25 @@ if (isDryRun) {
   console.log(`[mirror-github] DRY-RUN MODE: No changes will be pushed to remote.`);
 }
 
+// 0. Refuse linked dev state: vendor symlinks must be materialized copies.
+const linkedVendors = [];
+for (const p of selectedTargets) {
+  for (const tree of ["client", "server", "shared"]) {
+    const v = path.join("plugins", p, tree, "vendor", "paseo-plugin-helper");
+    try {
+      if (fs.lstatSync(v).isSymbolicLink()) linkedVendors.push(v);
+    } catch {
+      // Missing vendor dir — not this check's problem.
+    }
+  }
+}
+if (linkedVendors.length > 0) {
+  console.error(`[mirror-github] error: linked dev state under publish paths — materialize first:`);
+  for (const v of linkedVendors) console.error(`  - ${v}`);
+  console.error(`[mirror-github] run: node scripts/vendor-sync.mjs`);
+  process.exit(1);
+}
+
 // 1. Ensure remote is recognized
 let remoteDestination = targetRemote;
 try {
