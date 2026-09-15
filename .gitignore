@@ -34,6 +34,9 @@ dist/
 !packages/paseo-plugin-helper/dist/
 plugins/*/dist/
 
+# Vendor link-mode stash (dev-only, never committed — materialize before publish)
+*.link-bak/
+
 # Local opencode config (per-machine, never committed)
 opencode.jsonc
 

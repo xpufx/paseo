@@ -9,7 +9,7 @@ export const DemoSettingsSchema = z.object({
   showCpuUsage: z.boolean().default(true),
   accentPillLabel: z.string().default("demo"),
   pollingRate: z.enum(["1s", "2s", "5s", "paused"]).default("2s"),
-  navigationStyle: z.enum(["tabs", "dropdown"]).default("dropdown"),
+  navigationStyle: z.enum(["tabs", "dropdown"]).default("tabs"),
   highCpuThreshold: z.number().default(80),
   // Visual Flair Customization Studio (Persisted)
   flairRadius: z.enum(["sharp", "rounded", "pill"]).default("rounded"),

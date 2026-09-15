@@ -6,8 +6,11 @@
 // the workspace package at runtime.
 // See plugins/top/shared/vendor/paseo-plugin-helper/README.md (Track B, #71).
 //
-// Usage: node scripts/vendor-sync.mjs [--check]
+// Usage: node scripts/vendor-sync.mjs [--check] [--link]
 //   --check: exit non-zero if the vendor trees differ from a fresh copy.
+//   --link: replace vendor dirs with symlinks to helper src for live dev
+//     (helper edits reflect instantly, no sync step). Never commit or mirror
+//     the linked state: run plain vendor-sync to materialize copies first.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -27,6 +30,105 @@ const PLUGINS = {
 const TREES = ["client", "server", "shared", "mcp"];
 const DEST_ROOT = "vendor/paseo-plugin-helper";
 const CHECK = process.argv.includes("--check");
+const LINK = process.argv.includes("--link");
+
+// Source dir for a helper src tree.
+function srcDir(srcTree) {
+  return path.join(HELPER_SRC, srcTree);
+}
+
+// The shared vendor README has no helper-src counterpart, so a --link pass
+// would delete it (and per-plugin copies differ, e.g. forgejo's issue ref).
+// Stash it next to the link as <name>.link-bak (gitignored, dev-only) and
+// restore it on materialize.
+const README_BAK_SUFFIX = ".link-bak";
+
+function readmeBackupPath(dest) {
+  return `${dest}${README_BAK_SUFFIX}/README.md`;
+}
+
+function isLink(dir) {
+  try {
+    return fs.lstatSync(dir).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+// The mcp vendor path nests inside the server vendor dir, so it cannot be
+// linked independently: linking server first would make an mcp link land
+// inside helper src. Instead helper src carries a committed server/mcp ->
+// ../mcp symlink, and linked server trees expose mcp through it. Only the
+// materialized copy needs a real mcp dir (filled by the mcp tree pass).
+function ensureSrcMcpLink() {
+  const link = path.join(HELPER_SRC, "server", "mcp");
+  try {
+    if (fs.readlinkSync(link) === "../mcp") return;
+    fs.unlinkSync(link);
+  } catch {
+    // Missing or not a link — create below.
+  }
+  fs.symlinkSync("../mcp", link, "dir");
+}
+
+// Dev mode: point each vendor dir at live helper src. New/edited helper
+// files reflect in plugins immediately; nothing is copied.
+function linkOnce() {
+  let changed = 0;
+  for (const [plugin, trees] of Object.entries(PLUGINS)) {
+    const pluginRoot = path.join(ROOT, "plugins", plugin);
+    for (const tree of trees) {
+      if (tree === "mcp") {
+        ensureSrcMcpLink();
+        continue;
+      }
+      const dest = destDir(pluginRoot, tree);
+      if (isLink(dest) && fs.readlinkSync(dest) === path.relative(path.dirname(dest), srcDir(tree))) {
+        continue;
+      }
+      if (tree === "shared") {
+        const readme = path.join(dest, "README.md");
+        if (!isLink(dest) && fs.existsSync(readme)) {
+          const bak = readmeBackupPath(dest);
+          fs.mkdirSync(path.dirname(bak), { recursive: true });
+          fs.renameSync(readme, bak);
+        }
+      }
+      fs.rmSync(dest, { recursive: true, force: true });
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.symlinkSync(path.relative(path.dirname(dest), srcDir(tree)), dest, "dir");
+      console.log(`  linked: ${path.relative(ROOT, dest)} -> ${path.relative(ROOT, srcDir(tree))}`);
+      changed++;
+    }
+  }
+  console.log(changed === 0 ? "vendor trees already linked" : `vendor trees linked (${changed} dir(s)) — dev only, do not commit`);
+}
+
+// Publish mode: replace linked dirs with transformed copies, restoring the
+// stashed shared README.
+function materializeLinks() {
+  let changed = 0;
+  for (const [plugin, trees] of Object.entries(PLUGINS)) {
+    const pluginRoot = path.join(ROOT, "plugins", plugin);
+    for (const tree of trees) {
+      const dest = destDir(pluginRoot, tree);
+      if (!isLink(dest)) continue;
+      fs.unlinkSync(dest);
+      fs.mkdirSync(dest, { recursive: true });
+      const bak = readmeBackupPath(dest);
+      if (fs.existsSync(bak)) {
+        fs.renameSync(bak, path.join(dest, "README.md"));
+        try {
+          fs.rmdirSync(path.dirname(bak));
+        } catch {
+          // Non-empty (shouldn't happen) — leave it.
+        }
+      }
+      changed++;
+    }
+  }
+  return changed;
+}
 
 // Destination dir for a helper src tree inside a plugin.
 function destDir(pluginRoot, srcTree) {
@@ -74,6 +176,9 @@ function copyTree(pluginRoot, tree) {
   let changed = 0;
   const walk = (dir) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      // Never follow the committed src/server/mcp symlink here: the mcp
+      // tree has its own copy pass with cross-tree specifier rewriting.
+      if (e.isSymbolicLink()) continue;
       const s = path.join(dir, e.name);
       const rel = path.relative(srcDir, s);
       const d = path.join(dstDir, rel);
@@ -130,12 +235,45 @@ function prune(pluginRoot, tree) {
   return removed;
 }
 
+if (LINK) {
+  if (CHECK) {
+    console.error("error: --link and --check are mutually exclusive");
+    process.exit(2);
+  }
+  linkOnce();
+} else {
+  syncOnce();
+}
+
+function syncOnce() {
 let dirty = 0;
 for (const [plugin, trees] of Object.entries(PLUGINS)) {
   const pluginRoot = path.join(ROOT, "plugins", plugin);
   for (const tree of trees) {
+    const dest = destDir(pluginRoot, tree);
+    // Linked dev state (or a leftover README stash) is never publishable.
+    if (isLink(dest) || fs.existsSync(readmeBackupPath(dest))) {
+      console.log(`  drift: ${path.relative(ROOT, dest)} (linked dev state — run node scripts/vendor-sync.mjs)`);
+      dirty++;
+      continue;
+    }
+    if (CHECK) {
+      dirty += copyTree(pluginRoot, tree);
+      dirty += prune(pluginRoot, tree);
+      continue;
+    }
     dirty += copyTree(pluginRoot, tree);
     dirty += prune(pluginRoot, tree);
+  }
+}
+if (!CHECK) {
+  dirty += materializeLinks();
+  for (const [plugin, trees] of Object.entries(PLUGINS)) {
+    const pluginRoot = path.join(ROOT, "plugins", plugin);
+    for (const tree of trees) {
+      dirty += copyTree(pluginRoot, tree);
+      dirty += prune(pluginRoot, tree);
+    }
   }
 }
 
@@ -163,3 +301,4 @@ if (CHECK && dirty > 0) {
   process.exit(1);
 }
 console.log(dirty === 0 ? "vendor trees in sync" : `vendor trees updated (${dirty} file(s))`);
+}

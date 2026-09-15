@@ -34,6 +34,10 @@ build:
 vendor-sync:
 	@node scripts/vendor-sync.mjs
 
+## vendor-link: Symlink plugin vendor trees to live helper src for dev (never commit)
+vendor-link:
+	@node scripts/vendor-sync.mjs --link
+
 ## vendor-check: Fail if vendor trees drifted from helper src
 vendor-check:
 	@node scripts/vendor-sync.mjs --check
