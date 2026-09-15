@@ -136,6 +136,58 @@ test("falls back to stale when rev-list cannot resolve the remote commit", async
   assert.match(probe.detail ?? "", /relationship unknown/i);
 });
 
+test("honors pinned install remote and ref for git-source plugins", async () => {
+  const calls: Array<{ command: string; args: string[]; timeoutMs: number }> = [];
+  const pinned: PaseoPluginInfo = {
+    id: "thirdparty",
+    path: "/plugins/thirdparty",
+    enabled: true,
+    status: "running",
+    source: "git",
+    remote: "https://example.test/thirdparty.git",
+    ref: "release",
+  };
+  const probe = await testing.probePlugin(
+    pinned,
+    makeRunner({ toplevel: "/plugins/thirdparty", revList: "0\t1", calls }),
+  );
+
+  assert.equal(probe.status, "stale");
+  assert.equal(probe.remote, "https://example.test/thirdparty.git");
+  assert.equal(probe.branch, "release");
+  const lsRemote = calls.find((call) => call.args[0] === "ls-remote");
+  assert.deepEqual(lsRemote?.args, ["ls-remote", "--heads", "https://example.test/thirdparty.git", "release"]);
+});
+
+test("probes a shared repo root once and fans out grouped rows", async () => {
+  let lsRemoteCalls = 0;
+  const runner: Runner = async (command, args) => {
+    if (args[0] === "rev-parse" && args[1] === "--git-dir") return result(".git");
+    if (args[0] === "remote") return result("https://example.test/monorepo.git");
+    if (args[0] === "symbolic-ref") return result("main");
+    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return result("/repo");
+    if (args[0] === "rev-parse") return result(LOCAL);
+    if (args[0] === "rev-list") return result("0\t2");
+    if (args[0] === "ls-remote") {
+      lsRemoteCalls += 1;
+      return result(`${REMOTE}\trefs/heads/main`);
+    }
+    return result("", 1, "unexpected command");
+  };
+  const checked = await testing.checkInstalledPlugins(undefined, runner, [
+    plugin("demo", "/repo/plugins/demo"),
+    plugin("slash", "/repo/plugins/slash"),
+  ]);
+
+  assert.equal(checked.plugins.length, 2);
+  assert.equal(lsRemoteCalls, 1);
+  for (const row of checked.plugins) {
+    assert.equal(row.status, "stale");
+    assert.equal(row.repoRoot, "/repo");
+    assert.deepEqual(row.repoPlugins, ["demo", "slash"]);
+    assert.equal(row.sharedRepo, true);
+  }
+});
 test("surfaces git ls-remote failures instead of treating them as fresh", async () => {
   const broken: PaseoPluginInfo = {
     id: "broken",

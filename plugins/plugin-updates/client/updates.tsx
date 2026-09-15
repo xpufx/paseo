@@ -94,10 +94,12 @@ function PluginRow({
   plugin,
   updating,
   onUpdate,
+  hideRemote,
 }: {
   plugin: PluginUpdate;
   updating: boolean;
   onUpdate: (pluginId: string) => void;
+  hideRemote?: boolean;
 }) {
   const { colors } = usePluginTheme();
   const detail =
@@ -133,9 +135,9 @@ function PluginRow({
         <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 12 }}>
           {detail}
         </Text>
-        {plugin.branch || plugin.remote ? (
+        {plugin.branch || (plugin.remote && !hideRemote) ? (
           <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-            {[plugin.branch, plugin.remote].filter(Boolean).join(" · ")}
+            {[plugin.branch, hideRemote ? null : plugin.remote].filter(Boolean).join(" · ")}
           </Text>
         ) : null}
       </View>
@@ -155,6 +157,16 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
   const [failures, setFailures] = useState<Array<{ pluginId: string; error: string }>>([]);
 
   const plugins = query.data?.plugins ?? [];
+  const groups = useMemo(() => {
+    const ordered = new Map<string, PluginUpdate[]>();
+    for (const plugin of plugins) {
+      const key = plugin.repoRoot ?? `\0${plugin.id}`;
+      const group = ordered.get(key);
+      if (group) group.push(plugin);
+      else ordered.set(key, [plugin]);
+    }
+    return [...ordered.values()];
+  }, [plugins]);
   const staleCount = useMemo(
     () => plugins.filter((plugin) => isUpdateAvailable(plugin.status)).length,
     [plugins],
@@ -255,14 +267,28 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
         ) : plugins.length === 0 ? (
           <EmptyState title="No installed plugins" description="Paseo did not report any installed plugins." />
         ) : (
-          plugins.map((plugin) => (
-            <PluginRow
-              key={plugin.id}
-              plugin={plugin}
-              updating={activeUpdate === plugin.id}
-              onUpdate={runUpdate}
-            />
-          ))
+          groups.map((group) => {
+            const [head] = group;
+            const grouped = group.length > 1 && head;
+            return (
+              <View key={grouped ? (head.repoRoot ?? head.id) : head.id} style={{ gap: 10 }}>
+                {grouped ? (
+                  <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+                    {[head.branch, head.remote].filter(Boolean).join(" · ")}
+                  </Text>
+                ) : null}
+                {group.map((plugin) => (
+                  <PluginRow
+                    key={plugin.id}
+                    plugin={plugin}
+                    updating={activeUpdate === plugin.id}
+                    onUpdate={runUpdate}
+                    hideRemote={Boolean(grouped)}
+                  />
+                ))}
+              </View>
+            );
+          })
         )}
         {failures.map((failure) => (
           <Card key={`failure-${failure.pluginId}`} variant="elevated" noPadding>

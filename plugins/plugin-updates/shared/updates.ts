@@ -17,6 +17,8 @@ export const PluginUpdateSchema = z.object({
   behind: z.number().nullable(),
   detail: z.string().nullable(),
   sharedRepo: z.boolean().nullable(),
+  repoRoot: z.string().nullable().optional(),
+  repoPlugins: z.array(z.string()).nullable().optional(),
 });
 export type PluginUpdate = z.infer<typeof PluginUpdateSchema>;
 

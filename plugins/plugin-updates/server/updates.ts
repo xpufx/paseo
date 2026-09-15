@@ -84,184 +84,295 @@ function detailFor(
   return status;
 }
 
-async function probePlugin(
-  plugin: PaseoPluginInfo,
-  runner: CommandRunner = runCommand,
-): Promise<PluginUpdate> {
-  const base = {
-    id: plugin.id,
-    path: plugin.path,
-    remote: null as string | null,
-    branch: null as string | null,
-    localCommit: null as string | null,
-    remoteCommit: null as string | null,
-    ahead: null as number | null,
-    behind: null as number | null,
-    detail: null as string | null,
-    sharedRepo: null as boolean | null,
-  };
-  if (!plugin.path) {
-    return { ...base, status: "error", error: "Installed plugin has no directory path" };
+interface GroupProbe {
+  remote: string | null;
+  branch: string | null;
+  localCommit: string | null;
+  remoteCommit: string | null;
+  ahead: number | null;
+  behind: number | null;
+  status: PluginUpdateStatus;
+  error: string | null;
+  detail: string | null;
+}
+
+async function resolveToplevel(pluginPath: string, runner: CommandRunner): Promise<string | null> {
+  try {
+    const toplevelResult = await runner("git", ["rev-parse", "--show-toplevel"], {
+      cwd: pluginPath,
+      timeoutMs: PROBE_TIMEOUT_MS,
+    });
+    if (toplevelResult.code === 0 && toplevelResult.stdout.trim()) {
+      return normalizeDir(toplevelResult.stdout);
+    }
+  } catch {
+    // Fall through to null below.
+  }
+  return null;
+}
+
+async function probeRoot(
+  cwd: string,
+  remoteOverride: string | null,
+  refOverride: string | null,
+  runner: CommandRunner,
+): Promise<GroupProbe> {
+  const gitCheck = await runner("git", ["rev-parse", "--git-dir"], {
+    cwd,
+    timeoutMs: PROBE_TIMEOUT_MS,
+  });
+  if (gitCheck.code !== 0) {
+    return {
+      remote: remoteOverride,
+      branch: refOverride,
+      localCommit: null,
+      remoteCommit: null,
+      ahead: null,
+      behind: null,
+      status: "error",
+      error: outputOf(gitCheck) || "Directory is not a git repository",
+      detail: null,
+    };
   }
 
-  try {
-    const gitCheck = await runner("git", ["rev-parse", "--git-dir"], {
-      cwd: plugin.path,
-      timeoutMs: PROBE_TIMEOUT_MS,
-    });
-    if (gitCheck.code !== 0) {
-      return { ...base, status: "error", error: outputOf(gitCheck) || "Directory is not a git repository" };
-    }
-
-    const [remoteResult, branchResult, localResult, toplevelResult] = await Promise.all([
-      runner("git", ["remote", "get-url", "origin"], { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS }),
-      runner("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
-        cwd: plugin.path,
-        timeoutMs: PROBE_TIMEOUT_MS,
-      }),
-      runner("git", ["rev-parse", "HEAD"], { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS }),
-      runner("git", ["rev-parse", "--show-toplevel"], { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS }),
-    ]);
-    if (remoteResult.code !== 0) {
-      return {
-        ...base,
-        localCommit: localResult.code === 0 ? localResult.stdout.trim() : null,
-        sharedRepo:
-          toplevelResult.code === 0 ? detectSharedRepo(plugin.path, toplevelResult.stdout) : null,
-        status: "error",
-        error: outputOf(remoteResult) || "No origin remote configured",
-      };
-    }
-    const remote = remoteResult.stdout.trim();
-    const branch = branchResult.code === 0 ? branchResult.stdout.trim() : null;
-    const localCommit = localResult.code === 0 ? localResult.stdout.trim() : null;
-    const sharedRepo =
-      toplevelResult.code === 0 ? detectSharedRepo(plugin.path, toplevelResult.stdout) : null;
-    const remoteArgs = branch
-      ? ["ls-remote", "--heads", remote, branch]
-      : ["ls-remote", remote, "HEAD"];
-    const remoteResultProbe = await runner("git", remoteArgs, {
-      cwd: plugin.path,
-      timeoutMs: PROBE_TIMEOUT_MS,
-    });
-    if (remoteResultProbe.code !== 0) {
-      return {
-        ...base,
-        remote,
-        branch,
-        localCommit,
-        sharedRepo,
-        status: "error",
-        error: outputOf(remoteResultProbe) || "git ls-remote failed",
-      };
-    }
-    const remoteCommit = parseRef(remoteResultProbe.stdout);
-    if (!remoteCommit) {
-      return {
-        ...base,
-        remote,
-        branch,
-        localCommit,
-        sharedRepo,
-        status: "error",
-        error: "git ls-remote returned no commit for the current branch",
-      };
-    }
-    if (!localCommit) {
-      return {
-        ...base,
-        remote,
-        branch,
-        localCommit,
-        remoteCommit,
-        sharedRepo,
-        status: "error",
-        error: "Unable to determine local commit",
-      };
-    }
-    if (localCommit === remoteCommit) {
-      return {
-        ...base,
-        remote,
-        branch,
-        localCommit,
-        remoteCommit,
-        ahead: 0,
-        behind: 0,
-        sharedRepo,
-        detail: detailFor("fresh", 0, 0, sharedRepo),
-        status: "fresh",
-        error: null,
-      };
-    }
-    const countsResult = await runner(
-      "git",
-      ["rev-list", "--left-right", "--count", `${localCommit}...${remoteCommit}`],
-      { cwd: plugin.path, timeoutMs: PROBE_TIMEOUT_MS },
-    );
-    if (countsResult.code !== 0) {
-      const detail = `Remote differs; relationship unknown (remote commit not present locally)${sharedSuffix(sharedRepo)}`;
-      return {
-        ...base,
-        remote,
-        branch,
-        localCommit,
-        remoteCommit,
-        sharedRepo,
-        detail,
-        status: "stale",
-        error: null,
-      };
-    }
-    const counts = parseAheadBehind(countsResult.stdout);
-    if (!counts) {
-      return {
-        ...base,
-        remote,
-        branch,
-        localCommit,
-        remoteCommit,
-        sharedRepo,
-        detail: `Remote differs${sharedSuffix(sharedRepo)}`,
-        status: "stale",
-        error: null,
-      };
-    }
-    const { ahead, behind } = counts;
-    const status: PluginUpdateStatus =
-      ahead === 0 && behind === 0
-        ? "fresh"
-        : behind > 0 && ahead === 0
-          ? "stale"
-          : ahead > 0 && behind === 0
-            ? "ahead"
-            : "diverged";
+  const [remoteResult, branchResult, localResult] = await Promise.all([
+    remoteOverride != null
+      ? null
+      : runner("git", ["remote", "get-url", "origin"], { cwd, timeoutMs: PROBE_TIMEOUT_MS }),
+    refOverride != null
+      ? null
+      : runner("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], {
+          cwd,
+          timeoutMs: PROBE_TIMEOUT_MS,
+        }),
+    runner("git", ["rev-parse", "HEAD"], { cwd, timeoutMs: PROBE_TIMEOUT_MS }),
+  ]);
+  if (remoteResult != null && remoteResult.code !== 0) {
     return {
-      ...base,
+      remote: null,
+      branch: refOverride,
+      localCommit: localResult.code === 0 ? localResult.stdout.trim() : null,
+      remoteCommit: null,
+      ahead: null,
+      behind: null,
+      status: "error",
+      error: outputOf(remoteResult) || "No origin remote configured",
+      detail: null,
+    };
+  }
+  const remote = remoteOverride ?? remoteResult!.stdout.trim();
+  const branch = refOverride ?? (branchResult != null && branchResult.code === 0 ? branchResult.stdout.trim() : null);
+  const localCommit = localResult.code === 0 ? localResult.stdout.trim() : null;
+  const remoteArgs = branch ? ["ls-remote", "--heads", remote, branch] : ["ls-remote", remote, "HEAD"];
+  const remoteResultProbe = await runner("git", remoteArgs, {
+    cwd,
+    timeoutMs: PROBE_TIMEOUT_MS,
+  });
+  if (remoteResultProbe.code !== 0) {
+    return {
+      remote,
+      branch,
+      localCommit,
+      remoteCommit: null,
+      ahead: null,
+      behind: null,
+      status: "error",
+      error: outputOf(remoteResultProbe) || "git ls-remote failed",
+      detail: null,
+    };
+  }
+  const remoteCommit = parseRef(remoteResultProbe.stdout);
+  if (!remoteCommit) {
+    return {
+      remote,
+      branch,
+      localCommit,
+      remoteCommit: null,
+      ahead: null,
+      behind: null,
+      status: "error",
+      error: "git ls-remote returned no commit for the current branch",
+      detail: null,
+    };
+  }
+  if (!localCommit) {
+    return {
       remote,
       branch,
       localCommit,
       remoteCommit,
-      ahead,
-      behind,
-      sharedRepo,
-      detail: detailFor(status, ahead, behind, sharedRepo),
-      status,
-      error: null,
+      ahead: null,
+      behind: null,
+      status: "error",
+      error: "Unable to determine local commit",
+      detail: null,
     };
-  } catch (error) {
-    return { ...base, status: "error", error: errorOf(error) };
   }
+  if (localCommit === remoteCommit) {
+    return {
+      remote,
+      branch,
+      localCommit,
+      remoteCommit,
+      ahead: 0,
+      behind: 0,
+      status: "fresh",
+      error: null,
+      detail: detailFor("fresh", 0, 0, null),
+    };
+  }
+  const countsResult = await runner(
+    "git",
+    ["rev-list", "--left-right", "--count", `${localCommit}...${remoteCommit}`],
+    { cwd, timeoutMs: PROBE_TIMEOUT_MS },
+  );
+  if (countsResult.code !== 0) {
+    return {
+      remote,
+      branch,
+      localCommit,
+      remoteCommit,
+      ahead: null,
+      behind: null,
+      status: "stale",
+      error: null,
+      detail: "Remote differs; relationship unknown (remote commit not present locally)",
+    };
+  }
+  const counts = parseAheadBehind(countsResult.stdout);
+  if (!counts) {
+    return {
+      remote,
+      branch,
+      localCommit,
+      remoteCommit,
+      ahead: null,
+      behind: null,
+      status: "stale",
+      error: null,
+      detail: "Remote differs",
+    };
+  }
+  const { ahead, behind } = counts;
+  const status: PluginUpdateStatus =
+    ahead === 0 && behind === 0
+      ? "fresh"
+      : behind > 0 && ahead === 0
+        ? "stale"
+        : ahead > 0 && behind === 0
+          ? "ahead"
+          : "diverged";
+  return {
+    remote,
+    branch,
+    localCommit,
+    remoteCommit,
+    ahead,
+    behind,
+    status,
+    error: null,
+    detail: detailFor(status, ahead, behind, null),
+  };
+}
+
+function pinnedRemote(plugin: PaseoPluginInfo): string | null {
+  const remote = plugin.remote?.trim();
+  return remote ? remote : null;
+}
+
+function pinnedRef(plugin: PaseoPluginInfo): string | null {
+  const ref = plugin.ref?.trim();
+  return ref ? ref : null;
+}
+
+async function probeGroup(plugins: PaseoPluginInfo[], runner: CommandRunner): Promise<PluginUpdate[]> {
+  const [first, ...rest] = plugins;
+  if (!first) return [];
+  if (!first.path) {
+    return plugins.map((plugin) => ({
+      id: plugin.id,
+      path: plugin.path,
+      remote: pinnedRemote(plugin),
+      branch: pinnedRef(plugin),
+      localCommit: null,
+      remoteCommit: null,
+      ahead: null,
+      behind: null,
+      detail: null,
+      sharedRepo: null,
+      repoRoot: null,
+      repoPlugins: null,
+      status: "error" as const,
+      error: "Installed plugin has no directory path",
+    }));
+  }
+  const toplevel = (await resolveToplevel(first.path, runner)) ?? normalizeDir(first.path);
+  for (const plugin of rest) {
+    if (!plugin.path) continue;
+    const siblingTop = (await resolveToplevel(plugin.path, runner)) ?? normalizeDir(plugin.path);
+    if (siblingTop !== toplevel) {
+      return (await Promise.all(plugins.map((single) => probeGroup([single], runner)))).flat();
+    }
+  }
+  const remoteOverride = pinnedRemote(first) ?? rest.map(pinnedRemote).find(Boolean) ?? null;
+  const refOverride = pinnedRef(first) ?? rest.map(pinnedRef).find(Boolean) ?? null;
+  const probe = await probeRoot(toplevel, remoteOverride, refOverride, runner);
+  const ids = plugins.map((plugin) => plugin.id);
+  return plugins.map((plugin) => {
+    const sharedRepo = detectSharedRepo(plugin.path, toplevel);
+    const suffix = sharedSuffix(sharedRepo);
+    const detail =
+      probe.detail != null && sharedRepo && !probe.detail.includes("shared repo")
+        ? `${probe.detail}${suffix}`
+        : probe.detail;
+    return {
+      id: plugin.id,
+      path: plugin.path,
+      remote: probe.remote,
+      branch: probe.branch,
+      localCommit: probe.localCommit,
+      remoteCommit: probe.remoteCommit,
+      ahead: probe.ahead,
+      behind: probe.behind,
+      detail,
+      sharedRepo,
+      repoRoot: toplevel,
+      repoPlugins: ids.length > 1 ? ids : null,
+      status: probe.status,
+      error: probe.error,
+    };
+  });
+}
+
+async function probePlugin(
+  plugin: PaseoPluginInfo,
+  runner: CommandRunner = runCommand,
+): Promise<PluginUpdate> {
+  const rows = await probeGroup([plugin], runner);
+  return rows[0]!;
 }
 
 export async function checkInstalledPlugins(
   _workspaceId?: string,
   runner: CommandRunner = runCommand,
+  installedOverride?: PaseoPluginInfo[],
 ): Promise<{ checkedAt: string; plugins: PluginUpdate[] }> {
   try {
-    const installed = await listPlugins({ forceRefresh: true });
-    const plugins = await Promise.all(installed.map((plugin) => probePlugin(plugin, runner)));
-    return { checkedAt: new Date().toISOString(), plugins };
+    const installed = installedOverride ?? (await listPlugins({ forceRefresh: true }));
+    const toplevels = await Promise.all(
+      installed.map(async (plugin) =>
+        plugin.path ? ((await resolveToplevel(plugin.path, runner)) ?? normalizeDir(plugin.path)) : "",
+      ),
+    );
+    const groups = new Map<string, PaseoPluginInfo[]>();
+    installed.forEach((plugin, index) => {
+      const key = toplevels[index] ?? "";
+      const group = groups.get(key);
+      if (group) group.push(plugin);
+      else groups.set(key, [plugin]);
+    });
+    const grouped = await Promise.all([...groups.values()].map((group) => probeGroup(group, runner)));
+    return { checkedAt: new Date().toISOString(), plugins: grouped.flat() };
   } catch (error) {
     return {
       checkedAt: new Date().toISOString(),
@@ -277,6 +388,8 @@ export async function checkInstalledPlugins(
           behind: null,
           detail: null,
           sharedRepo: null,
+          repoRoot: null,
+          repoPlugins: null,
           status: "error",
           error: `Unable to list installed plugins: ${errorOf(error)}`,
         },
@@ -350,4 +463,4 @@ export async function updateAllPlugins(
   };
 }
 
-export const testing = { probePlugin };
+export const testing = { probePlugin, probeGroup, checkInstalledPlugins };
