@@ -1,4 +1,4 @@
-# paseo-demo
+# paseo-helper-demo
 
 This plugin is a demo for showcasing some of the capabilities of
 [`paseo-plugin-helper`](https://github.com/xpufx/paseo-plugin-helper) ([npm](https://www.npmjs.com/package/paseo-plugin-helper)),
