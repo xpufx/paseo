@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
+import { isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -107,6 +107,48 @@ FORGEJO BOARD ACTIONABLE DELTA DETECTED
   });
   it("returns null without issues", () => {
     assert.equal(parseBoardAlert("Forgejo Board Alert: nothing"), null);
+  });
+});
+
+describe("markdown-lite parser (issue #136)", () => {
+  it("parses headings, emphasis, links, and inline code", () => {
+    const blocks = parseMarkdownLite(
+      "## Fix it\n\nUse **bold** and *italic* with `code` and [label](https://example.com/x).",
+    );
+    assert.equal(blocks[0]?.kind, "heading");
+    assert.equal((blocks[0] as { level: number }).level, 2);
+    const para = blocks[1];
+    assert.equal(para?.kind, "paragraph");
+    const kinds = (para as { spans: { kind: string }[] }).spans.map((span) => span.kind);
+    assert.deepEqual(kinds, ["text", "bold", "text", "italic", "text", "code", "text", "link", "text"]);
+    const link = (para as { spans: { kind: string }[] }).spans.find((span) => span.kind === "link") as unknown as { text: string; url: string };
+    assert.equal(link.text, "label");
+    assert.equal(link.url, "https://example.com/x");
+  });
+
+  it("groups unordered and ordered list lines", () => {
+    const blocks = parseMarkdownLite("- [a](https://example.com/a)\n- plain\n\n1. first\n2. second");
+    assert.equal(blocks.length, 2);
+    assert.deepEqual([blocks[0]?.kind, blocks[1]?.kind], ["list", "list"]);
+    const first = blocks[0] as unknown as { ordered: boolean; items: unknown[][] };
+    const second = blocks[1] as unknown as { ordered: boolean; items: unknown[][] };
+    assert.equal(first.ordered, false);
+    assert.equal(first.items.length, 2);
+    assert.equal(second.ordered, true);
+    assert.equal(second.items.length, 2);
+  });
+
+  it("keeps fenced code blocks with language intact", () => {
+    const blocks = parseMarkdownLite("before\n\n```ts\nconst x = 1;\n```\n\nafter");
+    assert.deepEqual(blocks.map((block) => block.kind), ["paragraph", "code", "paragraph"]);
+    const code = blocks[1] as unknown as { text: string; language?: string };
+    assert.equal(code.language, "ts");
+    assert.ok(code.text.includes("const x = 1;"));
+  });
+
+  it("leaves unmatched markers as plain text", () => {
+    const spans = parseMarkdownLiteInline("a **broken and `x");
+    assert.ok(spans.every((span) => span.kind === "text"));
   });
 });
 

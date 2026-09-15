@@ -40,12 +40,14 @@ import {
   issueDetailContract,
   nextStateLabel,
   openIssuesContract,
+  parseMarkdownLite,
   setLabelContract,
   shortLabelName,
   stripAgentEnvelopeFooter,
   type AgentEnvelope,
   type ForgejoIssue,
   type IssueComment,
+  type MarkdownLiteSpan,
 } from "../shared/issues.js";
 
 export const ISSUES_PILL_ID = "forgejo-issues";
@@ -159,36 +161,108 @@ function badgeVariantForLabel(label: string): "danger" | "warning" | "info" | "s
   return "neutral";
 }
 
-/** Render markdown-lite: fenced blocks via CodeBlock, the rest as plain text. */
+function renderInlineSpans(
+  spans: MarkdownLiteSpan[],
+  colors: { foreground: string; accent: string },
+  keyPrefix: string,
+) {
+  return spans.map((span, index) => {
+    const key = `${keyPrefix}-${index}`;
+    if (span.kind === "bold") {
+      return (
+        <Text key={key} style={styles.bold}>
+          {span.text}
+        </Text>
+      );
+    }
+    if (span.kind === "italic") {
+      return (
+        <Text key={key} style={styles.italic}>
+          {span.text}
+        </Text>
+      );
+    }
+    if (span.kind === "code") {
+      return (
+        <Text key={key} style={styles.inlineCode}>
+          {span.text}
+        </Text>
+      );
+    }
+    if (span.kind === "link") {
+      return (
+        <Text
+          key={key}
+          style={[styles.link, { color: colors.accent }]}
+          onPress={() => {
+            Linking.openURL(span.url).catch(() => {
+              copyToClipboard(span.url).catch(() => {});
+            });
+          }}
+        >
+          {span.text}
+        </Text>
+      );
+    }
+    return <Text key={key}>{span.text}</Text>;
+  });
+}
+
+/**
+ * Markdown-lite for Forgejo bodies: headings, paragraphs, lists, links,
+ * inline code/emphasis, and fenced code blocks. Outer Text stays
+ * selectable; links open on tap with copy fallback.
+ */
 function MarkdownLite({ body }: { body: string }) {
   const { colors } = usePluginTheme();
-  const segments = useMemo(() => {
-    const parts = body.split(/```/);
-    return parts.map((part, index) => {
-      if (index % 2 === 1) {
-        const newline = part.indexOf("\n");
-        const language = newline > 0 ? part.slice(0, newline).trim() : undefined;
-        const code = newline > 0 ? part.slice(newline + 1) : part;
-        return { kind: "code" as const, text: code.replace(/\n$/, ""), language };
-      }
-      return { kind: "text" as const, text: part };
-    });
-  }, [body]);
+  const blocks = useMemo(() => parseMarkdownLite(body), [body]);
   return (
     <View style={styles.markdown}>
-      {segments.map((segment, index) =>
-        segment.kind === "code" ? (
-          <CodeBlock key={index} code={segment.text} language={segment.language} />
-        ) : segment.text.trim() ? (
+      {blocks.map((block, index) => {
+        if (block.kind === "code") {
+          return <CodeBlock key={index} code={block.text} language={block.language} />;
+        }
+        if (block.kind === "heading") {
+          return (
+            <Text
+              key={index}
+              selectable
+              style={[
+                styles.bodyText,
+                block.level === 1 ? styles.heading1 : block.level === 2 ? styles.heading2 : styles.heading3,
+                { color: colors.foreground },
+              ]}
+            >
+              {renderInlineSpans(block.spans, colors, `h${index}`)}
+            </Text>
+          );
+        }
+        if (block.kind === "list") {
+          return (
+            <View key={index} style={styles.list}>
+              {block.items.map((item, itemIndex) => (
+                <View key={itemIndex} style={styles.listRow}>
+                  <Text selectable style={[styles.bullet, { color: colors.foreground }]}>
+                    {block.ordered ? `${itemIndex + 1}.` : "•"}
+                  </Text>
+                  <Text selectable style={[styles.listText, { color: colors.foreground }]}>
+                    {renderInlineSpans(item, colors, `li${index}-${itemIndex}`)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          );
+        }
+        return (
           <Text
             key={index}
             selectable
             style={[styles.bodyText, { color: colors.foreground }]}
           >
-            {segment.text.trim()}
+            {renderInlineSpans(block.spans, colors, `p${index}`)}
           </Text>
-        ) : null,
-      )}
+        );
+      })}
     </View>
   );
 }
@@ -797,6 +871,53 @@ const styles = StyleSheet.create({
   bodyText: {
     fontSize: 13,
     lineHeight: 19,
+  },
+  bold: {
+    fontWeight: "700",
+  },
+  italic: {
+    fontStyle: "italic",
+  },
+  inlineCode: {
+    fontFamily: "monospace",
+    fontSize: 12,
+  },
+  link: {
+    fontSize: 13,
+    textDecorationLine: "underline",
+  },
+  heading1: {
+    fontSize: 16,
+    fontWeight: "700",
+    lineHeight: 22,
+  },
+  heading2: {
+    fontSize: 14,
+    fontWeight: "700",
+    lineHeight: 20,
+  },
+  heading3: {
+    fontSize: 13,
+    fontWeight: "700",
+    lineHeight: 19,
+  },
+  list: {
+    gap: 4,
+  },
+  listRow: {
+    flexDirection: "row",
+    gap: 6,
+    alignItems: "flex-start",
+  },
+  bullet: {
+    fontSize: 13,
+    lineHeight: 19,
+    minWidth: 14,
+  },
+  listText: {
+    fontSize: 13,
+    lineHeight: 19,
+    flex: 1,
   },
   envelopeCard: {
     gap: 8,
