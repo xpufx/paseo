@@ -1,5 +1,5 @@
 {
-  "id": "paseo-plugin-demo",
+  "id": "paseo-helper-demo",
   "requirements": {
     "paseo": ">=0.8.0"
   }
