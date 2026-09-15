@@ -3,6 +3,7 @@ import {
   interpolateTemplate,
   listCommandsRpc,
   runCommandRpc,
+  slashSettingsContract,
   withPrefix,
   type SlashCommand,
 } from "../shared/resources";
@@ -48,7 +49,7 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
     let prefix = "";
     try {
       const settings = await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<{ prefix?: string }>)(
-        { name: "slash.settings.get" } as unknown,
+        slashSettingsContract.get as unknown,
         {},
       );
       prefix = settings.prefix ?? "";
