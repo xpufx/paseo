@@ -10,6 +10,7 @@ import { Badge, ForgeIcon, Icon } from "paseo-plugin-helper/client";
 import {
   forgejoWebhookCardSchema,
   forgejoWebhookItem,
+  subjectLinkUrl,
   type ForgejoSubject,
   type ForgejoWebhookCardData,
 } from "../shared/webhook.js";
@@ -19,6 +20,11 @@ import {
  * `forgejo-webhook` items so the composer renders the event card below instead
  * of a raw chat line. Registered before the linkifier because hook messages
  * carry a bare issue URL the linkifier would otherwise claim first.
+ *
+ * Presentation-only: `PluginTimelineTransformerContribution.transform` returns
+ * `PluginTimelineItem[]`, a client-side render target. It has no reference to
+ * mutate the source `AgentTimelineItem`, so the raw envelope + human line stays
+ * verbatim in the agent's context. Nothing below may echo that text.
  */
 export const forgejoWebhookUserTransformer: PluginTimelineTransformerContribution<"user_message"> = {
   id: "forgejo-webhook",
@@ -33,7 +39,8 @@ function openUrl(url: string) {
 }
 
 function SubjectRow({ theme, subject }: { theme: PluginTheme; subject: ForgejoSubject }) {
-  const onPress = subject.url ? () => openUrl(subject.url as string) : undefined;
+  const link = subjectLinkUrl(subject);
+  const onPress = link ? () => openUrl(link) : undefined;
   const isPush = subject.kind === "push";
   return (
     <View style={styles.subjectRow}>
@@ -72,10 +79,10 @@ function SubjectRow({ theme, subject }: { theme: PluginTheme; subject: ForgejoSu
             comment #{subject.commentId}
           </Text>
         ) : null}
-        {subject.url ? (
+        {link ? (
           <Pressable onPress={onPress} hitSlop={8} accessibilityRole="link">
             <Text style={[styles.subjectUrl, styles.link, { color: theme.colors.accent }]}>
-              {subject.url}
+              {link}
             </Text>
           </Pressable>
         ) : null}
@@ -86,6 +93,7 @@ function SubjectRow({ theme, subject }: { theme: PluginTheme; subject: ForgejoSu
 
 export function ForgejoWebhookCard({ item, theme }: PluginTimelineItemProps<ForgejoWebhookCardData>) {
   const data = item.data;
+  const repoLink = data.repoUrl ? () => openUrl(data.repoUrl as string) : undefined;
   return (
     <View
       style={[
@@ -101,17 +109,26 @@ export function ForgejoWebhookCard({ item, theme }: PluginTimelineItemProps<Forg
           label={data.action ? `${data.event}:${data.action}` : data.event}
         />
       </View>
-      <Text style={[styles.meta, { color: theme.colors.foregroundMuted }]}>
-        {data.repo}
-        {data.sender ? ` · by ${data.sender}` : ""}
-      </Text>
+      <View style={styles.metaRow}>
+        {repoLink ? (
+          <Pressable onPress={repoLink} hitSlop={8} accessibilityRole="link">
+            <Text style={[styles.meta, styles.link, { color: theme.colors.accent }]}>
+              {data.repo}
+            </Text>
+          </Pressable>
+        ) : (
+          <Text style={[styles.meta, { color: theme.colors.foregroundMuted }]}>{data.repo}</Text>
+        )}
+        {data.sender ? (
+          <Text style={[styles.meta, { color: theme.colors.foregroundMuted }]}>
+            · by {data.sender}
+          </Text>
+        ) : null}
+      </View>
       {data.subject ? <SubjectRow theme={theme} subject={data.subject} /> : null}
-      {data.body ? (
-        <Text style={[styles.bodyText, { color: theme.colors.foreground }]} selectable>
-          {data.body}
-        </Text>
-      ) : null}
-      <Text style={[styles.footer, { color: theme.colors.foregroundMuted }]}>via forgejo</Text>
+      <Text style={[styles.footer, { color: theme.colors.foregroundMuted }]}>
+        {data.version != null ? `via forgejo v${data.version}` : "via forgejo"}
+      </Text>
     </View>
   );
 }
@@ -143,6 +160,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     flex: 1,
   },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 4,
+  },
   meta: {
     fontSize: 11,
   },
@@ -167,9 +190,6 @@ const styles = StyleSheet.create({
   },
   link: {
     textDecorationLine: "underline",
-  },
-  bodyText: {
-    fontSize: 12,
   },
   footer: {
     fontSize: 10,

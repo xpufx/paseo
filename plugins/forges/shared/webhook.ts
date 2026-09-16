@@ -35,7 +35,13 @@ export const ForgejoEnvelopeSchema = z.object({
 export type ForgejoEnvelope = z.infer<typeof ForgejoEnvelopeSchema>;
 export type ForgejoSubject = z.infer<typeof ForgejoSubjectSchema>;
 
-/** Normalized card data shared by the envelope and summary-line paths. */
+/**
+ * Normalized card data shared by the envelope and summary-line paths. This is a
+ * display-only shape: every field the wire envelope carries is mapped here, and
+ * the raw message text is deliberately absent. The transformer never rewrites
+ * the source `AgentTimelineItem`, so the human line stays in the agent's
+ * context (see `PluginTimelineTransformerContribution`).
+ */
 export const forgejoWebhookCardSchema = z.object({
   event: z.string(),
   action: z.string(),
@@ -43,10 +49,23 @@ export const forgejoWebhookCardSchema = z.object({
   repoUrl: z.string().optional(),
   sender: z.string(),
   subject: ForgejoSubjectSchema.nullable(),
-  body: z.string(),
+  version: z.number().optional(),
 });
 
 export type ForgejoWebhookCardData = z.infer<typeof forgejoWebhookCardSchema>;
+
+/**
+ * The exact target a subject title should link to. Issue/PR comments arrive
+ * with the anchor in the URL from the summary line but as a separate
+ * `commentId` in the envelope, so append the anchor when it is missing.
+ */
+export function subjectLinkUrl(subject: ForgejoSubject): string | undefined {
+  if (!subject.url) return undefined;
+  if (subject.commentId != null && !subject.url.includes(`#issuecomment-${subject.commentId}`)) {
+    return `${subject.url}#issuecomment-${subject.commentId}`;
+  }
+  return subject.url;
+}
 
 /**
  * Splits an envelope-stamped message into its structured envelope and the
@@ -107,7 +126,6 @@ export function parseForgejoWebhookSummary(text: string): ForgejoWebhookCardData
       repo: ping[1].trim(),
       sender: ping[2].trim(),
       subject: null,
-      body: trimmed,
     };
   }
 
@@ -117,7 +135,7 @@ export function parseForgejoWebhookSummary(text: string): ForgejoWebhookCardData
   const action = (bracket[2] ?? "").trim();
   const tail = bracket[3].trim();
 
-  const base = { event, action, sender: "", subject: null as ForgejoSubject | null, body: trimmed };
+  const base = { event, action, sender: "", subject: null as ForgejoSubject | null };
 
   if (event === "push") {
     const push = /^(.*?)\s+(\d+)\s+commit\(s\)\s+by\s+(.+?)(?:\s+(\S+))?$/.exec(tail);
@@ -172,7 +190,7 @@ export function parseForgejoWebhookSummary(text: string): ForgejoWebhookCardData
   };
 }
 
-function envelopeToCard(envelope: ForgejoEnvelope, body: string): ForgejoWebhookCardData {
+function envelopeToCard(envelope: ForgejoEnvelope): ForgejoWebhookCardData {
   const { forgejo } = envelope;
   return {
     event: forgejo.event,
@@ -181,14 +199,14 @@ function envelopeToCard(envelope: ForgejoEnvelope, body: string): ForgejoWebhook
     ...(forgejo.repoUrl ? { repoUrl: forgejo.repoUrl } : {}),
     sender: forgejo.sender,
     subject: forgejo.subject ?? null,
-    body,
+    version: forgejo.version,
   };
 }
 
 /** Normalize either the v1 envelope or today's summary line to card data. */
 export function parseForgejoWebhookCard(text: string): ForgejoWebhookCardData | null {
   const stamped = parseForgejoWebhookEnvelope(text);
-  if (stamped) return envelopeToCard(stamped.envelope, stamped.body);
+  if (stamped) return envelopeToCard(stamped.envelope);
   return parseForgejoWebhookSummary(text);
 }
 
