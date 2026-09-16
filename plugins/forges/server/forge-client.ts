@@ -33,6 +33,14 @@ function asLogin(value: unknown): string {
   return "unknown";
 }
 
+export interface ForgejoLabel {
+  id: number;
+  name: string;
+  color?: string;
+  exclusive?: boolean;
+  description?: string;
+}
+
 export interface ForgejoComment {
   id: number;
   author: string;
@@ -40,6 +48,19 @@ export interface ForgejoComment {
   updatedAt: string;
   body: string;
   url: string;
+}
+
+function toLabel(entry: unknown): ForgejoLabel | null {
+  if (!entry || typeof entry !== "object") return null;
+  const record = entry as Record<string, unknown>;
+  if (typeof record.name !== "string" || !record.name) return null;
+  return {
+    id: typeof record.id === "number" ? record.id : 0,
+    name: record.name,
+    color: typeof record.color === "string" ? record.color : undefined,
+    exclusive: typeof record.exclusive === "boolean" ? record.exclusive : undefined,
+    description: typeof record.description === "string" ? record.description : undefined,
+  };
 }
 
 export interface ForgejoIssueDetail {
@@ -230,6 +251,39 @@ export class ForgejoClient {
     const comments = await this.listComments(repo, issueNumber);
     if (comments) detail.comments = comments;
     return detail;
+  }
+
+  /** All labels defined on the repo, following Forgejo's page window. */
+  async listLabels(repo: string): Promise<ForgejoLabel[] | null> {
+    const labels: ForgejoLabel[] = [];
+    for (let page = 1; page <= 10; page += 1) {
+      const payload = await this.request(`/repos/${repo}/labels?limit=100&page=${page}`);
+      if (!Array.isArray(payload)) return null;
+      for (const entry of payload) {
+        const label = toLabel(entry);
+        if (label) labels.push(label);
+      }
+      if (payload.length < 100) break;
+    }
+    return labels;
+  }
+
+  /** Create one repo label; false when the API rejects it (e.g. 409 duplicate). */
+  async createLabel(
+    repo: string,
+    label: { name: string; color: string; exclusive: boolean; description: string },
+  ): Promise<boolean> {
+    const created = await this.request(`/repos/${repo}/labels`, {
+      method: "POST",
+      body: JSON.stringify(label),
+    });
+    return created !== null;
+  }
+
+  /** Delete one repo label by id; false when the API rejects the delete. */
+  async deleteLabel(repo: string, id: number): Promise<boolean> {
+    const removed = await this.request(`/repos/${repo}/labels/${id}`, { method: "DELETE" });
+    return removed !== null;
   }
 
   async setLabels(

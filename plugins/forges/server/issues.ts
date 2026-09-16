@@ -2,12 +2,15 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createPluginLogger } from "./vendor/paseo-plugin-helper/index.ts";
 import {
+  INSTALL_LABEL_MODES,
   IssueDetailSchema,
+  PASEO_LABEL_SCOPES,
   liveScopesFromIssues,
   liveScopesFromLabels,
   normalizeIssueNumber,
   parseAgentEnvelope,
   parseForgejoRemote,
+  planLabelSetInstall,
   rankIssues,
   resolveForgeTarget,
   scopeOfLabel,
@@ -15,6 +18,8 @@ import {
   type AddCommentOutput,
   type ForgeContextInput,
   type ForgeContextOutput,
+  type InstallLabelsInput,
+  type InstallLabelsOutput,
   type IssueDetail,
   type IssueDetailInput,
   type IssueDetailOutput,
@@ -264,18 +269,7 @@ function validateSetLabel(label: string, boardLabels: string[]): string | null {
   const scope = scopeOfLabel(trimmed);
   if (scope) {
     const live = new Set(liveScopesFromLabels(boardLabels));
-    const fallback = new Set([
-      "state",
-      "priority",
-      "attention",
-      "spec",
-      "kind",
-      "target",
-      "format",
-      "size",
-      "dep",
-      "flag",
-    ]);
+    const fallback = new Set<string>(PASEO_LABEL_SCOPES);
     if (!live.has(scope) && !fallback.has(scope)) {
       return `Unknown label scope: ${trimmed}`;
     }
@@ -421,5 +415,86 @@ export async function handleAddComment(
   } catch (error) {
     log.warn("add-comment failed", { error: String(error) });
     return { number: 0, commentId: null, error: "Could not post comment" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Optional label-set install (decision #121.3). A user-invoked action, never
+// automatic: the client sends an explicit `mode`, the server resolves the
+// configured forge and only ever writes repo labels for that target. `merge`
+// adds our missing labels; `replace` additionally removes the target's labels
+// that share a scope with our taxonomy. Unrelated boards are never touched
+// silently, and a missing token fails closed.
+// ---------------------------------------------------------------------------
+
+export async function handleInstallLabels(
+  input: InstallLabelsInput,
+): Promise<InstallLabelsOutput> {
+  const rawMode = (input as { mode?: unknown }).mode;
+  const mode = INSTALL_LABEL_MODES.find((candidate) => candidate === rawMode);
+  if (!mode) {
+    return {
+      host: null,
+      repo: null,
+      mode: null,
+      created: [],
+      skipped: [],
+      removed: [],
+      error: "An explicit install mode (merge or replace) is required",
+    };
+  }
+  try {
+    const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+    if (!resolved.ok) {
+      return { host: null, repo: null, mode, created: [], skipped: [], removed: [], error: resolved.error };
+    }
+    const { host, repo } = resolved;
+    const result: InstallLabelsOutput = {
+      host,
+      repo,
+      mode,
+      created: [],
+      skipped: [],
+      removed: [],
+    };
+    const client = await clientFor(host);
+    if (!client.hasToken()) {
+      result.error = "A valid API token is required to install labels";
+      return result;
+    }
+    const existing = await client.listLabels(repo);
+    if (!existing) {
+      result.error = `Could not read labels for ${host}/${repo}`;
+      return result;
+    }
+    const plan = planLabelSetInstall(existing, mode);
+    result.skipped = [...plan.skip];
+    for (const label of plan.remove) {
+      if (typeof label.id !== "number") continue;
+      if (!(await client.deleteLabel(repo, label.id))) {
+        result.error = `Could not remove label ${label.name}`;
+        return result;
+      }
+      result.removed.push(label.name);
+    }
+    for (const definition of plan.create) {
+      if (await client.createLabel(repo, definition)) {
+        result.created.push(definition.name);
+        continue;
+      }
+      // A concurrent install (or a page-window miss) returns 409 for a label
+      // that now exists; treat that as skipped rather than a hard failure.
+      const refreshed = await client.listLabels(repo);
+      if (refreshed?.some((label) => label.name === definition.name)) {
+        result.skipped.push(definition.name);
+        continue;
+      }
+      result.error = `Could not create label ${definition.name}`;
+      return result;
+    }
+    return result;
+  } catch (error) {
+    log.warn("install-labels failed", { error: String(error) });
+    return { host: null, repo: null, mode, created: [], skipped: [], removed: [], error: "Could not install labels" };
   }
 }

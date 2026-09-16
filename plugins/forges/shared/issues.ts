@@ -711,8 +711,9 @@ export function rankIssues<T extends Pick<ForgejoIssue, "labels" | "updatedAt">>
 
 // ---------------------------------------------------------------------------
 // Optional label-set install (issue #122, decision #121.3): ships our board
-// taxonomy as data a foreign board may install (keeping or replacing theirs
-// via the editor/API). Never applied automatically.
+// taxonomy as data a foreign board may install. Never applied automatically:
+// the client requires an explicit action plus a keep/replace choice, and the
+// server only ever writes after resolving an explicit forge target.
 // ---------------------------------------------------------------------------
 
 export interface LabelDefinition {
@@ -722,16 +723,37 @@ export interface LabelDefinition {
   description: string;
 }
 
+/**
+ * Scope prefixes our workflow understands. Used as the fallback vocabulary
+ * when validating a set-label against a board, and to decide which existing
+ * labels an install may replace (see `planLabelSetInstall`).
+ */
+export const PASEO_LABEL_SCOPES = [
+  "state",
+  "priority",
+  "attention",
+  "spec",
+  "kind",
+  "target",
+  "format",
+  "size",
+  "dep",
+  "flag",
+] as const;
+
+const STATE_COLORS = ["#1d76db", "#0e7c6b", "#a6700b", "#6e40c9", "#1a7f37"];
+const PRIORITY_COLORS = ["#d1242f", "#e85d04", "#1d76db", "#59636e", "#8c959f"];
+
 const LABEL_DEFS: LabelDefinition[] = [
   ...STATE_ORDER.map((name, i): LabelDefinition => ({
     name,
-    color: ["#1d76db", "#0e7c6b", "#a6700b", "#6e40c9", "#1a7f37"][i] ?? "#59636e",
+    color: STATE_COLORS[i] ?? "#59636e",
     exclusive: true,
     description: `Workflow state ${i}`,
   })),
   ...PRIORITY_ORDER.map((name, i): LabelDefinition => ({
     name,
-    color: ["#d1242f", "#e85d04", "#1d76db", "#59636e", "#8c959f"][i] ?? "#59636e",
+    color: PRIORITY_COLORS[i] ?? "#59636e",
     exclusive: true,
     description: `Priority ${i}`,
   })),
@@ -747,18 +769,97 @@ const LABEL_DEFS: LabelDefinition[] = [
     exclusive: true,
     description: "Spec readiness",
   })),
-  ...["kind", "target", "format", "size", "dep", "flag"].map((scope): LabelDefinition => ({
-    name: `${scope}/`,
-    color: "#59636e",
-    exclusive: scope !== "flag",
-    description: `${scope} scope prefix`,
-  })),
 ];
 
 /** Our board taxonomy as installable data (see decision #121.3). */
 export function paseoLabelSet(): LabelDefinition[] {
   return LABEL_DEFS.map((def) => ({ ...def }));
 }
+
+/** Scopes our installable set occupies; a `replace` removes only these. */
+export function paseoLabelScopes(): string[] {
+  const scopes: string[] = [];
+  for (const def of LABEL_DEFS) {
+    const scope = scopeOfLabel(def.name);
+    if (scope && !scopes.includes(scope)) scopes.push(scope);
+  }
+  return scopes;
+}
+
+export const INSTALL_LABEL_MODES = ["merge", "replace"] as const;
+export type InstallLabelMode = (typeof INSTALL_LABEL_MODES)[number];
+
+export interface ForgejoLabelRef {
+  id?: number;
+  name: string;
+}
+
+export interface LabelSetPlan {
+  mode: InstallLabelMode;
+  /** Our labels the target is missing; safe to POST. */
+  create: LabelDefinition[];
+  /** Target labels to DELETE, scoped to what our taxonomy replaces. */
+  remove: ForgejoLabelRef[];
+  /** Our labels the target already carries; left untouched. */
+  skip: string[];
+}
+
+/**
+ * Diff our taxonomy against a board's current labels.
+ *
+ * `merge` only creates missing labels. `replace` additionally removes the
+ * target's labels that share a scope with our installable set but are not
+ * part of it (e.g. a foreign `state/ready-for-review`); labels in unrelated
+ * scopes — and our own already-present labels — are never touched, so an
+ * install cannot silently destroy an unrelated vocabulary.
+ */
+export function planLabelSetInstall(
+  existing: ForgejoLabelRef[],
+  mode: InstallLabelMode,
+): LabelSetPlan {
+  const desired = paseoLabelSet();
+  const desiredNames = new Set(desired.map((def) => def.name));
+  const existingNames = new Set(
+    existing.map((label) => label.name).filter((name): name is string => typeof name === "string"),
+  );
+  const ownScopes = new Set(paseoLabelScopes());
+  const remove =
+    mode === "replace"
+      ? existing.filter((label) => {
+          const scope = scopeOfLabel(label.name);
+          return scope !== null && ownScopes.has(scope) && !desiredNames.has(label.name);
+        })
+      : [];
+  const create = desired.filter((def) => !existingNames.has(def.name));
+  const skip = desired.filter((def) => existingNames.has(def.name)).map((def) => def.name);
+  return { mode, create, remove, skip };
+}
+
+export const InstallLabelsInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  // Required, no default: the keep/replace choice must never be implicit.
+  mode: z.enum(INSTALL_LABEL_MODES),
+});
+export type InstallLabelsInput = z.infer<typeof InstallLabelsInputSchema>;
+
+export const InstallLabelsOutputSchema = z.object({
+  host: z.string().nullable().default(null),
+  repo: z.string().nullable().default(null),
+  mode: z.enum(INSTALL_LABEL_MODES).nullable().default(null),
+  created: z.array(z.string()).default([]),
+  skipped: z.array(z.string()).default([]),
+  removed: z.array(z.string()).default([]),
+  error: z.string().optional(),
+});
+export type InstallLabelsOutput = z.infer<typeof InstallLabelsOutputSchema>;
+
+export const installLabelsContract = defineContract({
+  name: "forgejo.install-labels",
+  description: "Copy the Paseo label taxonomy onto the configured forge repo after an explicit user choice",
+  input: InstallLabelsInputSchema,
+  output: InstallLabelsOutputSchema,
+});
 
 // ---------------------------------------------------------------------------
 // Agent Envelope (parsed telemetry, spec §4.4).

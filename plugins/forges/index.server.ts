@@ -4,6 +4,7 @@ import {
   addCommentContract,
   forgeContextContract,
   forgejoSettingsContract,
+  installLabelsContract,
   issueDetailContract,
   openIssuesContract,
   setLabelContract,
@@ -11,6 +12,7 @@ import {
 import {
   handleAddComment,
   handleForgeContext,
+  handleInstallLabels,
   handleIssueDetail,
   handleOpenIssues,
   handleSetLabel,
@@ -25,6 +27,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(issueDetailContract, handleIssueDetail);
   server.handle(setLabelContract, handleSetLabel);
   server.handle(addCommentContract, handleAddComment);
+  server.handle(installLabelsContract, handleInstallLabels);
   server.handle(forgejoSettingsContract.get, settingsHandlers.get);
   server.handle(forgejoSettingsContract.update, settingsHandlers.update);
   server.handle(forgejoSettingsContract.reset, settingsHandlers.reset);

@@ -1,32 +1,32 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, forgejoIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, forgejoIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
 
-const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
-const REAL_HOST = "forge.mrs.aager.de";
+const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
+const REAL_HOST = "forge.example.com";
 
 describe("parseForgejoRemote accepted forms", () => {
   it("parses scp-like SSH-alias remotes", () => {
     assert.deepEqual(parseForgejoRemote(ALIAS_REMOTE), {
-      host: "mrs-forge",
-      owner: "xpufx",
-      repo: "paseo",
+      host: "forge-alias",
+      owner: "your-org",
+      repo: "your-repo",
     });
   });
 
   it("parses full ssh:// URLs", () => {
-    assert.deepEqual(parseForgejoRemote(`ssh://git@${REAL_HOST}:222/xpufx/paseo.git`), {
+    assert.deepEqual(parseForgejoRemote(`ssh://git@${REAL_HOST}:222/your-org/your-repo.git`), {
       host: REAL_HOST,
-      owner: "xpufx",
-      repo: "paseo",
+      owner: "your-org",
+      repo: "your-repo",
     });
   });
 
   it("parses https URLs", () => {
-    assert.deepEqual(parseForgejoRemote(`https://${REAL_HOST}/xpufx/paseo.git`), {
+    assert.deepEqual(parseForgejoRemote(`https://${REAL_HOST}/your-org/your-repo.git`), {
       host: REAL_HOST,
-      owner: "xpufx",
-      repo: "paseo",
+      owner: "your-org",
+      repo: "your-repo",
     });
   });
 
@@ -40,8 +40,8 @@ describe("parseForgejoRemote accepted forms", () => {
 describe("resolveForgejoRepo precedence", () => {
   it("explicit full URL beats the git remote", () => {
     assert.deepEqual(
-      resolveForgejoRepo(`https://${REAL_HOST}/xpufx/paseo.git`, ALIAS_REMOTE),
-      { host: REAL_HOST, repo: "xpufx/paseo" },
+      resolveForgejoRepo(`https://${REAL_HOST}/your-org/your-repo.git`, ALIAS_REMOTE),
+      { host: REAL_HOST, repo: "your-org/your-repo" },
     );
   });
 
@@ -53,52 +53,52 @@ describe("resolveForgejoRepo precedence", () => {
   });
 
   it("explicit bare owner/repo borrows the git-remote host", () => {
-    assert.deepEqual(resolveForgejoRepo("xpufx/paseo", ALIAS_REMOTE), {
-      host: "mrs-forge",
-      repo: "xpufx/paseo",
+    assert.deepEqual(resolveForgejoRepo("your-org/your-repo", ALIAS_REMOTE), {
+      host: "forge-alias",
+      repo: "your-org/your-repo",
     });
   });
 
   it("falls back to the git remote when no explicit value", () => {
     assert.deepEqual(resolveForgejoRepo(undefined, ALIAS_REMOTE), {
-      host: "mrs-forge",
-      repo: "xpufx/paseo",
+      host: "forge-alias",
+      repo: "your-org/your-repo",
     });
     assert.deepEqual(resolveForgejoRepo("  ", ALIAS_REMOTE), {
-      host: "mrs-forge",
-      repo: "xpufx/paseo",
+      host: "forge-alias",
+      repo: "your-org/your-repo",
     });
   });
 
   it("explicit wins even without a git remote", () => {
     assert.deepEqual(
-      resolveForgejoRepo(`https://${REAL_HOST}/xpufx/paseo`, null),
-      { host: REAL_HOST, repo: "xpufx/paseo" },
+      resolveForgejoRepo(`https://${REAL_HOST}/your-org/your-repo`, null),
+      { host: REAL_HOST, repo: "your-org/your-repo" },
     );
   });
 
   it("returns null when nothing resolves", () => {
     assert.equal(resolveForgejoRepo(null, null), null);
     assert.equal(resolveForgejoRepo("garbage!!!", undefined), null);
-    assert.equal(resolveForgejoRepo("xpufx/paseo", null), null);
+    assert.equal(resolveForgejoRepo("your-org/your-repo", null), null);
   });
 });
 
 describe("multi-forge selection (issue #137)", () => {
   const DIR = "/work/paseo";
-  const codeberg = "https://codeberg.org/xpufx/paseo";
-  const forge = `https://${REAL_HOST}/xpufx/paseo`;
+  const codeberg = "https://codeberg.org/your-org/your-repo";
+  const forge = `https://${REAL_HOST}/your-org/your-repo`;
 
   it("lists configured targets plus the legacy remote, deduped and trimmed", () => {
     assert.deepEqual(
       forgeTargetsForWorkspace(
         {
-          forgesByDirectory: { [DIR]: [codeberg, codeberg, "  xpufx/other  "] },
+          forgesByDirectory: { [DIR]: [codeberg, codeberg, "  your-org/other  "] },
           remotesByDirectory: { [DIR]: forge },
         },
         DIR,
       ),
-      [codeberg, "xpufx/other", forge],
+      [codeberg, "your-org/other", forge],
     );
   });
 
@@ -169,13 +169,13 @@ describe("multi-forge selection (issue #137)", () => {
     assert.deepEqual(resolveForgeTarget(codeberg, ALIAS_REMOTE), {
       ok: true,
       host: "codeberg.org",
-      repo: "xpufx/paseo",
+      repo: "your-org/your-repo",
       source: "explicit",
     });
-    assert.deepEqual(resolveForgeTarget("xpufx/paseo", ALIAS_REMOTE), {
+    assert.deepEqual(resolveForgeTarget("your-org/your-repo", ALIAS_REMOTE), {
       ok: true,
-      host: "mrs-forge",
-      repo: "xpufx/paseo",
+      host: "forge-alias",
+      repo: "your-org/your-repo",
       source: "explicit",
     });
   });
@@ -184,21 +184,21 @@ describe("multi-forge selection (issue #137)", () => {
     const resolved = resolveForgeTarget("garbage!!!", ALIAS_REMOTE);
     assert.equal(resolved.ok, false);
     assert.match((resolved as { error: string }).error, /not a valid forge remote/);
-    const bareWithoutHost = resolveForgeTarget("xpufx/paseo", null);
+    const bareWithoutHost = resolveForgeTarget("your-org/your-repo", null);
     assert.equal(bareWithoutHost.ok, false);
   });
 
   it("only derives from git when nothing is explicitly selected", () => {
     assert.deepEqual(resolveForgeTarget(undefined, ALIAS_REMOTE), {
       ok: true,
-      host: "mrs-forge",
-      repo: "xpufx/paseo",
+      host: "forge-alias",
+      repo: "your-org/your-repo",
       source: "derived",
     });
     assert.deepEqual(resolveForgeTarget("  ", ALIAS_REMOTE), {
       ok: true,
-      host: "mrs-forge",
-      repo: "xpufx/paseo",
+      host: "forge-alias",
+      repo: "your-org/your-repo",
       source: "derived",
     });
     const nothing = resolveForgeTarget(null, null);
@@ -207,8 +207,8 @@ describe("multi-forge selection (issue #137)", () => {
 
   it("validates forge targets (remote URL or bare owner/repo)", () => {
     assert.equal(isValidForgeTarget(codeberg), true);
-    assert.equal(isValidForgeTarget("xpufx/paseo"), true);
-    assert.equal(isValidForgeTarget("git@codeberg.org:xpufx/paseo.git"), true);
+    assert.equal(isValidForgeTarget("your-org/your-repo"), true);
+    assert.equal(isValidForgeTarget("git@codeberg.org:your-org/your-repo.git"), true);
     assert.equal(isValidForgeTarget("garbage!!!"), false);
     assert.equal(isValidForgeTarget(""), false);
     assert.equal(isValidForgeTarget(undefined), false);
@@ -216,9 +216,9 @@ describe("multi-forge selection (issue #137)", () => {
 });
 
 describe("settings display regression (issue #152)", () => {
-  const DIR = "/home/xpufx/code/paseo";
-  const gitRemote = `ssh://git@${REAL_HOST}:222/xpufx/paseo.git`;
-  const codeberg = "https://codeberg.org/xpufx/paseo";
+  const DIR = "/work/project";
+  const gitRemote = `ssh://git@${REAL_HOST}:222/your-org/your-repo.git`;
+  const codeberg = "https://codeberg.org/your-org/your-repo";
 
   it("resolves the derived host in Auto mode without any issues payload", () => {
     // The persisted token is keyed by this host; it must not depend on the
@@ -233,7 +233,7 @@ describe("settings display regression (issue #152)", () => {
   });
 
   it("borrows the derived host for a bare owner/repo selection", () => {
-    assert.equal(effectiveForgeHost("xpufx/paseo", gitRemote), REAL_HOST);
+    assert.equal(effectiveForgeHost("your-org/your-repo", gitRemote), REAL_HOST);
   });
 
   it("falls back to the derived host when the selection is unparseable", () => {
@@ -242,7 +242,7 @@ describe("settings display regression (issue #152)", () => {
 
   it("returns null only when neither the selection nor the remote yields a host", () => {
     assert.equal(effectiveForgeHost("", null), null);
-    assert.equal(effectiveForgeHost("xpufx/paseo", null), null);
+    assert.equal(effectiveForgeHost("your-org/your-repo", null), null);
   });
 
   it("looks the stored name up by the exact workspace directory key", () => {
@@ -250,7 +250,7 @@ describe("settings display regression (issue #152)", () => {
     assert.equal(displayNameForDirectory(settings, DIR, null), "pas");
     // No issues payload: the stored name still wins over a missing repo.
     assert.equal(displayNameForDirectory(settings, DIR, undefined), "pas");
-    assert.equal(displayNameForDirectory(settings, "/other/workspace", "xpufx/paseo"), "xpufx/paseo");
+    assert.equal(displayNameForDirectory(settings, "/other/workspace", "your-org/your-repo"), "your-org/your-repo");
     assert.equal(displayNameForDirectory({ namesByDirectory: {} }, DIR, null), null);
   });
 });
@@ -351,6 +351,51 @@ describe("live label sync + ranking (issue #122)", () => {
     const set = paseoLabelSet();
     assert.ok(set.some((def) => def.name === "state/1-wip" && def.exclusive));
     assert.ok(set.some((def) => def.name === "attention/1-agent"));
+    assert.deepEqual(paseoLabelScopes(), ["state", "priority", "attention", "spec"]);
+  });
+});
+
+describe("optional label-set install planning (issue #121.3)", () => {
+  const names = (labels: { name: string }[]) => labels.map((label) => label.name);
+
+  it("merge creates every missing label and skips the ones present", () => {
+    const plan = planLabelSetInstall(
+      [{ id: 1, name: "state/1-wip" }, { id: 2, name: "bug" }],
+      "merge",
+    );
+    assert.deepEqual(plan.remove, []);
+    assert.ok(plan.skip.includes("state/1-wip"));
+    assert.ok(names(plan.create).includes("state/0-triage"));
+    assert.ok(names(plan.create).includes("spec/2-approved"));
+    assert.ok(!names(plan.create).includes("state/1-wip"));
+  });
+
+  it("replace removes only conflicting labels in our scopes", () => {
+    const plan = planLabelSetInstall(
+      [
+        { id: 5, name: "state/ready-for-review" },
+        { id: 6, name: "state/1-wip" },
+        { id: 7, name: "priority/urgent" },
+        { id: 8, name: "bug" },
+        { id: 9, name: "kind/feature" },
+      ],
+      "replace",
+    );
+    assert.deepEqual(
+      plan.remove.map((label) => label.name).sort(),
+      ["priority/urgent", "state/ready-for-review"],
+    );
+    // Our own already-present label is kept, not deleted and recreated.
+    assert.ok(plan.skip.includes("state/1-wip"));
+    // Unrelated scopes and unscoped labels are never touched.
+    assert.ok(!plan.remove.some((label) => label.name === "bug"));
+    assert.ok(!plan.remove.some((label) => label.name === "kind/feature"));
+  });
+
+  it("merge never deletes a foreign conflicting label", () => {
+    const plan = planLabelSetInstall([{ id: 1, name: "state/ready-for-review" }], "merge");
+    assert.deepEqual(plan.remove, []);
+    assert.ok(names(plan.create).includes("state/1-wip"));
   });
 });
 
@@ -461,7 +506,7 @@ describe("extractBareForgejoIssueUrls quoted-content guard (issue #143)", () => 
     assert.deepEqual(links.map((link) => link.number), [33]);
   });
   it("skips markdown-linked URLs rendered inline by the card", () => {
-    const links = extractBareForgejoIssueUrls(`Pulse explore: [Issue #144 (forge.mrs)](${url(144)}) — done`);
+    const links = extractBareForgejoIssueUrls(`Pulse explore: [Issue #144 (forge.example.com)](${url(144)}) — done`);
     assert.deepEqual(links, []);
   });
   it("ignores fenced code blocks", () => {
@@ -481,7 +526,7 @@ describe("extractBareForgejoIssueUrls quoted-content guard (issue #143)", () => 
 });
 
 describe("extractForgejoIssueUrls comment anchors (issue #154)", () => {
-  const url = (n: number) => `https://${REAL_HOST}/xpufx/paseo/issues/${n}`;
+  const url = (n: number) => `https://${REAL_HOST}/your-org/your-repo/issues/${n}`;
 
   it("keeps the #issuecomment anchor in the url and exposes its id", () => {
     const links = extractBareForgejoIssueUrls(`See ${url(152)}#issuecomment-99001 for details`);
@@ -511,12 +556,12 @@ describe("extractForgejoIssueUrls comment anchors (issue #154)", () => {
 });
 
 describe("cross-repo link classification (issue #108)", () => {
-  const active = { host: REAL_HOST, repo: "xpufx/paseo" };
+  const active = { host: REAL_HOST, repo: "your-org/your-repo" };
   const link = (host: string, owner: string, repo: string) => ({ host, owner, repo });
-  const urlFor = (n: number) => `https://${REAL_HOST}/xpufx/paseo/issues/${n}`;
+  const urlFor = (n: number) => `https://${REAL_HOST}/your-org/your-repo/issues/${n}`;
 
   it("marks a link local when host and owner/repo match the active forge", () => {
-    assert.equal(classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), active), "local");
+    assert.equal(classifyForgeLink(link(REAL_HOST, "your-org", "your-repo"), active), "local");
   });
 
   it("marks a different repo on the same host foreign (foreign-by-repo)", () => {
@@ -524,26 +569,26 @@ describe("cross-repo link classification (issue #108)", () => {
   });
 
   it("marks the same repo on a different host foreign (foreign-by-host)", () => {
-    assert.equal(classifyForgeLink(link("codeberg.org", "xpufx", "paseo"), active), "foreign");
+    assert.equal(classifyForgeLink(link("codeberg.org", "your-org", "your-repo"), active), "foreign");
   });
 
   it("marks an unknown host foreign even when the repo path matches", () => {
-    assert.equal(classifyForgeLink(link("unknown.forge", "xpufx", "paseo"), active), "foreign");
+    assert.equal(classifyForgeLink(link("unknown.forge", "your-org", "your-repo"), active), "foreign");
   });
 
   it("treats an unresolvable active target as foreign rather than local", () => {
-    assert.equal(classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), null), "foreign");
+    assert.equal(classifyForgeLink(link(REAL_HOST, "your-org", "your-repo"), null), "foreign");
     assert.equal(
-      classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), { host: null, repo: null }),
+      classifyForgeLink(link(REAL_HOST, "your-org", "your-repo"), { host: null, repo: null }),
       "foreign",
     );
-    assert.equal(classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), { repo: "xpufx/paseo" }), "foreign");
+    assert.equal(classifyForgeLink(link(REAL_HOST, "your-org", "your-repo"), { repo: "your-org/your-repo" }), "foreign");
   });
 
   it("matches host and repo case-insensitively and ignores a host port", () => {
-    assert.equal(classifyForgeLink(link(REAL_HOST.toUpperCase(), "XPUFX", "Paseo"), active), "local");
+    assert.equal(classifyForgeLink(link(REAL_HOST.toUpperCase(), "YOUR-ORG", "Your-Repo"), active), "local");
     assert.equal(
-      classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), { host: `${REAL_HOST}:3000`, repo: "xpufx/paseo" }),
+      classifyForgeLink(link(REAL_HOST, "your-org", "your-repo"), { host: `${REAL_HOST}:3000`, repo: "your-org/your-repo" }),
       "local",
     );
   });

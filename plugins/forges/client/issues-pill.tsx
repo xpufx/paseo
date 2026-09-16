@@ -48,9 +48,11 @@ import {
   formatIssueCountLabel,
   isValidForgeTarget,
   forgejoSettingsContract,
+  installLabelsContract,
   type ForgejoAccessInput,
   type ForgejoAccessState,
   type ForgejoSettings,
+  type InstallLabelMode,
   issueDetailContract,
   nextStateLabel,
   openIssuesContract,
@@ -896,6 +898,32 @@ export function ForgejoIssuesView({
   };
   const repo = data?.repo ?? null;
   const displayName = useDisplayName(workspaceId, repo);
+  const [installChoiceOpen, setInstallChoiceOpen] = useState(false);
+  const [installSummary, setInstallSummary] = useState<string | null>(null);
+  const installLabels = useRpcMutation(installLabelsContract, {
+    onSuccess: (result) => {
+      if (result.error) {
+        setInstallSummary(result.error);
+        return;
+      }
+      setInstallChoiceOpen(false);
+      setInstallSummary(
+        `Installed: ${result.created.length} created, ${result.removed.length} removed, ${result.skipped.length} already present.`,
+      );
+      refetch();
+    },
+    onError: (error) => {
+      setInstallSummary(error instanceof Error ? error.message : "Could not install labels");
+    },
+  });
+  const runInstall = (mode: InstallLabelMode) => {
+    setInstallSummary(null);
+    installLabels.mutate({
+      directory: directory ?? undefined,
+      remoteUrl: forgeTarget || undefined,
+      mode,
+    });
+  };
   const [activeTab, setActiveTab] = useState("issues");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
@@ -979,6 +1007,7 @@ export function ForgejoIssuesView({
       ) : (
         <>
           {activeTab === "settings" ? (
+            <>
             <Card>
               <Card.Header
                 title={displayName ? `Forge settings · ${displayName}` : "Forge settings"}
@@ -1104,6 +1133,79 @@ export function ForgejoIssuesView({
                 />
               </View>
             </Card>
+            <Card>
+              <Card.Header
+                title="Paseo label set"
+                subtitle="Optional — copy our workflow taxonomy onto this repo"
+                icon="Tags"
+              />
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                Installs our state/, priority/, attention/ and spec/ labels.
+                Nothing is written until you pick an option below. Labels in
+                other scopes — yours or a foreign board's — are never touched.
+              </Text>
+              {!access.canEdit ? (
+                <Text style={[styles.hint, { color: colors.foreground }]}>
+                  A valid API token is required to install labels. Add one above and save.
+                </Text>
+              ) : null}
+              {installChoiceOpen ? (
+                <>
+                  <Text style={[styles.hint, { color: colors.foreground }]}>
+                    Keep existing labels, or replace the labels in our scopes —
+                    removes any conflicting state/, priority/, attention/ or
+                    spec/ label, then installs ours.
+                  </Text>
+                  <View style={styles.actions}>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      icon="Plus"
+                      label="Keep existing"
+                      disabled={!directory || installLabels.isPending}
+                      loading={installLabels.isPending}
+                      onPress={() => runInstall("merge")}
+                    />
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      icon="Trash2"
+                      label="Replace our scopes"
+                      disabled={!directory || installLabels.isPending}
+                      onPress={() => runInstall("replace")}
+                    />
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      label="Cancel"
+                      disabled={installLabels.isPending}
+                      onPress={() => {
+                        setInstallChoiceOpen(false);
+                        setInstallSummary(null);
+                      }}
+                    />
+                  </View>
+                </>
+              ) : (
+                <View style={styles.actions}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="Tags"
+                    label="Install label set…"
+                    disabled={!directory || !access.canEdit || installLabels.isPending}
+                    onPress={() => {
+                      setInstallChoiceOpen(true);
+                      setInstallSummary(null);
+                    }}
+                  />
+                </View>
+              )}
+              {installSummary ? (
+                <Text style={[styles.hint, { color: colors.foregroundMuted }]}>{installSummary}</Text>
+              ) : null}
+            </Card>
+            </>
           ) : (
           <>
           <SearchInput

@@ -1,11 +1,16 @@
 # Native Forgejo Workflow GUI Plugin for Paseo
 
-**Status:** specification (implements [Issue #56 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/56))
+**Status:** specification (implements [Issue #56 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/56));
+the auth/data-path, label, and install sections below track the shipped
+implementation as of the standalone-release pass for [Issue #121 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/121)
 **Scope:** `plugins/forges` (`paseo-forges`) server + client, built only on
 `paseo-plugin-helper` primitives — no Paseo host/SDK changes
-**Constraint:** Strictly pre-code shaping. No implementation files are modified
-by this spec; it defines data models, RPC interfaces, component layouts, and a
-phased roadmap only.
+**Auth model:** daemon-side token in plugin settings; all forge access goes
+through the embedded TypeScript `fetch` client (`server/forge-client.ts`).
+There is no `fgj`/`fgjx` subprocess dependency and no host dotfile coupling.
+
+> Historical note: an earlier revision specified a `fgjx`/`fgj` subprocess
+> data path. That design is superseded — see §3.
 
 ---
 
@@ -29,7 +34,7 @@ toggles, and quick comments all live in plugin surfaces powered by
 
 - Server: `forgejo.open-issues` contract (`shared/issues.ts`) + `handleOpenIssues`
   (`server/issues.ts`) — resolves owner/repo from the workspace directory's
-  git `origin` remote, shells out to `fgjx` (falling back to `fgj`), never
+  git `origin` remote, calls the embedded Forgejo/Gitea fetch client, and never
   throws (failures surface as an `error` field so the pill renders a
   placeholder).
 - Shared: `parseForgejoRemote`, `extractForgejoIssueUrls` (timeline
@@ -62,8 +67,9 @@ surfaces. All shared parsing helpers (`parseForgejoRemote`,
    calls).
 4. **Quick comments from the client.** Operator steering posted straight into
    the issue thread without leaving Paseo.
-5. **Zero-config auth.** Reuse the host's existing `~/.config/fgj/config.yaml`
-   token; the plugin never asks the user for credentials.
+5. **Token-in-settings auth.** The daemon stores a per-host API token in
+   plugin settings; the client never sees it and no host CLI/dotfile is
+   required.
 6. **Deep links.** Agent IDs resolve to `paseo://h/<serverId>/agent/<agentId>`
    sessions; commit SHAs resolve to local `git log` / web viewer.
 
@@ -86,47 +92,52 @@ surfaces. All shared parsing helpers (`parseForgejoRemote`,
 
 ## 3. Authentication & data path
 
-### 3.1 Token source (zero extra user config)
+### 3.1 Token source (daemon-side plugin settings)
 
-The daemon reuses the existing `fgj` credential store, exactly as
-`handleOpenIssues` already does: the server shells out to `fgjx` (fallback
-`fgj`) via `safeSpawn` (no shell, 15 s timeout, `SIGTERM`→`SIGKILL`
-escalation). `fgj` reads `~/.config/fgj/config.yaml` itself, so the plugin
-never handles, stores, or logs the token:
+All forge access goes through the embedded TypeScript client
+(`server/forge-client.ts`), which speaks the Gitea-family `/api/v1` over
+`fetch` with a 15 s abort timeout. There is no subprocess and no host
+CLI/dotfile dependency: the plugin works on a machine that has never had
+`fgj`/`fgjx` or `~/.config/fgj`.
 
-1. Resolve repo coordinates: `git -C <directory> remote get-url origin` →
-   existing `parseForgejoRemote` (handles `git@host:owner/repo`,
-   `https://host/owner/repo`, `ssh://git@host/...`).
-2. Run `fgjx issue list -R <owner/repo> --hostname <host> --json`
-   (fallback `fgj ...`); run `fgjx api repos/<owner/repo>/issues/<N>[...]`
-   (fallback `fgj api ...`) for detail, labels, and comments.
-3. All outbound data passes through `redactSecrets()` before logging
-   (existing `createPluginLogger` behavior); issue bodies may quote tokens in
-   exotic cases, so redaction is applied to cached payloads too.
+The token lives in daemon-side plugin settings, keyed by host
+(`ForgejoSettings.tokensByHost`), and is read by `tokenForHost(host)` in
+`server/settings.ts`:
+
+1. Resolve repo coordinates without shelling: read `<directory>/.git/config`
+   directly and parse the `origin` URL with `parseForgejoRemote` (handles
+   `git@host:owner/repo`, `https://host/owner/repo`, `ssh://git@host/...`);
+   an explicit per-workspace forge target wins absolutely (issue #109/#137).
+2. Construct `new ForgejoClient({ host, token: await tokenForHost(host) })`.
+   The token is attached only as an `Authorization: token <t>` header on
+   `fetch` calls that run in the daemon; it is never serialized into an RPC
+   payload and never reaches the client.
+3. Endpoints: `GET /repos/{owner}/{repo}/issues` (list),
+   `GET /repos/{owner}/{repo}/issues/{n}` + `/comments` (detail/labels),
+   `PATCH /repos/{owner}/{repo}/issues/{n}` (label writes), and
+   `POST /repos/{owner}/{repo}/issues/{n}/comments` (comments). Repo labels
+   (`GET`/`POST/DELETE /repos/{owner}/{repo}/labels`) back the optional label
+   install (§5.5).
 4. Handlers never throw: failures return a typed `error` field and the client
    renders `EmptyState` + Retry (per `docs/surfaces.md` — data absent with a
-   live source renders the empty state, never a crash).
+   live source renders the empty state, never a crash). Unauthenticated public
+   repos stay readable; writes require an accepted token on both public and
+   private repos (issue #152).
 
-Why subprocess over direct HTTPS: zero credential handling (the token never
-enters plugin memory), automatic support for every host the user already
-configured, and battle-tested parity with `fgjx` display semantics (label
-columns, envelope footers). Cost is one short-lived process per fetch —
-amortized by the polling cache (§3.2).
+Why embedded fetch over a subprocess: the plugin needs no preinstalled CLI or
+credential store, auth is explicit and daemon-scoped, and the API surface is
+versioned with the plugin instead of tracking a host binary.
 
 ### 3.2 Caching & polling
 
-- Daemon-side: `PluginStorage("paseo-forges", "board-cache.json", { schema })`
-  holds the last good board snapshot + per-issue detail cache with `fetchedAt`
-  timestamps. Atomic temp-file + rename writes; Zod-validated reads with
-  defaults — same guarantees as all helper server state.
-- Refresh loop: `createPeriodicTask` (existing server helper, exponential
-  backoff on consecutive failures) polls the board every 60 s; detail entries
-  refresh on open + every 60 s while the inspection modal is open.
-- Client-side: `useRpcQuery` for reads (30 s `refetchInterval`, matching the
-  current issues modal), `useAutoRefreshQuery` with `isOpen` gating for the
-  inspection modal so background polling halts when it closes (battery-safe,
-  existing helper behavior). Writes go through `useRpcMutation` and
-  invalidate the board/detail query keys on success.
+- There is no daemon-side board cache: reads are served live from the API.
+- Client-side: `useRpcQuery` for reads with a 30 s `refetchInterval` (the
+  issues list), plus a manual Refresh; the settings form queries
+  `forgejo.forge-context` independently so the token/host fields render while
+  issues load or fail (regression #152). Writes go through `useRpcMutation`
+  and refetch the board/detail on success.
+- Handlers stay cheap because each query is one or two API calls; a failed
+  list is logged once per host/repo, then demoted to debug to avoid log spam.
 
 ---
 
@@ -136,11 +147,17 @@ All schemas are Zod, defined in `plugins/forges/shared/` (importable by both
 server and client), built with `defineContract` from
 `paseo-plugin-helper/shared`.
 
-### 4.1 Scoped label vocabularies (verified against the live board)
+### 4.1 Scoped label vocabularies (fallback + display data)
 
 Forgejo scoped labels are exclusive: applying one label in a scope evicts the
-previous label in that scope at the DB level. The client therefore only ever
-sends "add", never "remove". Canonical scopes and ranks:
+previous label in that scope at the DB level. The board is the source of truth
+for which scopes exist (decision #121.2): the client derives live scopes from
+the labels actually present on the returned issues (`liveScopesFromIssues`),
+and the canonical lists below are used only as fallback vocabulary and for
+display aliases. On a write, `handleSetLabel` sends the new label plus an
+explicit removal of any existing label in the same scope, so the result is
+correct even for boards whose scope names differ from ours. Canonical scopes
+and ranks:
 
 ```ts
 export const StateRank = {
@@ -223,8 +240,8 @@ badges but do **not** enter the sort key in v1 (open question §10.3).
 
 ### 4.4 Agent Envelope (parsed telemetry)
 
-Every agent comment ends with the envelope footer stamped by
-`fgjx issue comment --envelope` (see coding-agent skill):
+Every agent comment ends with the envelope footer stamped by the team's
+issue-comment tool (see the coding-agent example skill):
 
 ```markdown
 ---
@@ -385,13 +402,18 @@ export const setLabelContract = defineContract({
 });
 ```
 
-- Implemented as `fgjx issue edit <N> -R <repo> --add-label <label>` — no
-  `--remove-label`, ever: exclusivity evicts the prior scope mate at the DB
-  level (verified behavior for `state/`, `priority/`, `attention/`, `spec/`).
-- `label` is validated against the known scope vocabularies (§4.1) before
-  spawning; unknown scopes return `{ error }` without touching the API.
-- On success returns the fresh label list and invalidates the board/detail
-  query keys client-side.
+- Implemented by fetching the issue, computing the current label list, and
+  `PATCH`ing the issue with the new label added plus any same-scope mate
+  removed (the embedded client's `setLabels`). Forgejo exclusivity alone would
+  also evict a scope mate, but the explicit remove keeps the write correct on
+  boards with non-canonical scope names.
+- `label` is validated against the live board scopes (fallback: the known
+  vocabularies in §4.1) before any API call; unknown scopes return `{ error }`
+  without touching the API.
+- On success returns the fresh label list and refetches the board/detail
+  client-side.
+- Input accepts `issueNumber` (primary) with `number` as a deprecated alias;
+  handlers normalize via `normalizeIssueNumber`.
 
 ### 5.4 `forgejo.add-comment` (write)
 
@@ -412,12 +434,49 @@ export const addCommentContract = defineContract({
 });
 ```
 
-- Implemented as `fgjx issue comment <N> -R <repo> -b <body>` (100-col wrap
-  is applied by `fgjx`, not the plugin). The plugin does **not** append an
-  agent envelope — quick comments are operator steering, stamped with the
-  operator's identity by the host.
+- Implemented with `POST /repos/{owner}/{repo}/issues/{n}/comments` via the
+  embedded client (`addComment`). The plugin does **not** append an agent
+  envelope — quick comments are operator steering, stamped with the sender's
+  identity by the API.
 - Empty/whitespace-only bodies are rejected client-side (button disabled) and
   server-side (`min(1)` after trim).
+- Input accepts `issueNumber` (primary) with `number` as a deprecated alias.
+
+### 5.5 `forgejo.install-labels` (write, explicit action)
+
+```ts
+export const installLabelsContract = defineContract({
+  name: "forgejo.install-labels",
+  description: "Copy the Paseo label taxonomy onto the configured forge repo after an explicit user choice",
+  input: z.object({
+    directory: z.string().optional(),
+    remoteUrl: z.string().optional(),
+    mode: z.enum(["merge", "replace"]),
+  }),
+  output: z.object({
+    host: z.string().nullable(),
+    repo: z.string().nullable(),
+    mode: z.enum(["merge", "replace"]).nullable(),
+    created: z.array(z.string()),
+    skipped: z.array(z.string()),
+    removed: z.array(z.string()),
+    error: z.string().optional(),
+  }),
+});
+```
+
+- Ships our taxonomy as installable data (`paseoLabelSet()`): `state/`,
+  `priority/`, `attention/`, `spec/`. The install is **never automatic** — the
+  client's Settings tab requires an explicit action plus a keep/replace choice,
+  and the server only writes after resolving an explicit forge target.
+- `mode` is required with no default so the choice can never be implicit.
+  `merge` only creates missing labels. `replace` additionally deletes the
+  target's labels that share a scope with our set but are not in it (e.g. a
+  foreign `state/ready-for-review`); labels in other scopes and unscoped
+  labels are never touched. See `planLabelSetInstall` in `shared/issues.ts`.
+- Requires a saved daemon-side token; a missing token fails closed
+  (`{ error }`) without any write. Results are reported as created/removed/
+  skipped name lists.
 
 ---
 
@@ -623,7 +682,7 @@ Invariants:
 | Situation | Behavior |
 |---|---|
 | No git remote / unparseable origin | `{ repo: null, error }` → `EmptyState` "No Forgejo repo for this workspace" (existing behavior, kept) |
-| `fgjx`/`fgj` missing or non-zero exit | `{ error: "Issue list unavailable" }` → `EmptyState` + Retry; pill falls back to `"issues --"` placeholder |
+| API unreachable / no token for a private repo | `{ error: "Issue list unavailable" }` → `EmptyState` + Retry; pill falls back to `"issues --"` placeholder |
 | Unknown issue number | `{ issue: null, error }` → `EmptyState` "Issue #N not found in repo" |
 | `set-label` with out-of-vocabulary label | Rejected before spawn; `{ error }` surfaced via mutation `onError`; toggle group re-enables |
 | `set-label` race (two operators, same scope) | Last write wins at Forgejo; query invalidation repaints from server truth — no client prediction to unwind |
@@ -643,19 +702,19 @@ Spec file + board review. Labels advance `spec/1-checklist` →
 `spec/2-approved`, `state/1-wip` → `state/2-review` on the tracking issue.
 No code touched.
 
-### Phase 1 — Architecture & data path
+### Phase 1 — Architecture & data path (shipped)
 
-- [ ] `shared/forgejo-board.ts`: label vocabularies + ranks, `BoardIssueSchema`,
-      `IssueDetailSchema`, `AgentEnvelopeSchema`, envelope parser, sort-tuple
-      comparator, four contracts (§4–§5).
-- [ ] `server/board.ts`: `resolveRepo` reuse, `listIssuesJson` reuse, detail
-      fetch (`.../issues/<N>` + `.../issues/<N>/comments`), `set-label` /
-      `add-comment` runners via `safeSpawn(fgjx→fgj)`, `PluginStorage`
-      board-cache, `createPeriodicTask` 60 s refresh.
-- [ ] Unit tests: envelope parser (live `#77` footer + link/SHA variants),
-      sort tuple (SOS-first, verify-before-wip, recency tiebreak),
-      scope-vocabulary guard, query matcher (`#N` / title / label).
-- [ ] Keep `forgejo.open-issues` untouched; new contracts register alongside.
+- [x] `shared/issues.ts`: label vocabularies + ranks, issue/detail/envelope
+      schemas, envelope parser, sort-tuple comparator, contracts (§4–§5).
+- [x] `server/forge-client.ts`: embedded Gitea-family `/api/v1` fetch client
+      (list/detail/comments/labels, repo probe, token probe).
+- [x] `server/issues.ts` + `server/settings.ts`: repo resolution (`.git/config`
+      parse, explicit-target precedence), host-keyed daemon-side tokens,
+      `set-label` / `add-comment` / `install-labels` handlers. No subprocess.
+- [x] Unit tests: envelope parser, sort tuple (SOS-first, verify-before-wip,
+      recency tiebreak), scope-vocabulary guard, link classification, label-set
+      planning.
+- [x] Keep `forgejo.open-issues` contract; new contracts register alongside.
 
 ### Phase 2 — Client UI surfaces
 
@@ -704,10 +763,11 @@ No code touched.
 
 ## 11. Testing plan
 
-- **Server:** temp-dir `PluginStorage`; mocked `safeSpawn` returning canned
-  `fgjx --json` payloads. Assert board sort order, scope-vocabulary rejection,
-  detail null-form for unknown numbers, comment/commentId passthrough, cache
-  fallback serving stale snapshot on spawn failure.
+- **Server:** pure shared functions unit-tested directly (`node --test` via
+  `esbuild`); the fetch client is exercised through its parsing helpers.
+  Assert board sort order, live scope derivation, scope-vocabulary rejection,
+  label-set planning (`merge` vs `replace`), detail null-form for unknown
+  numbers, and comment/commentId passthrough.
 - **Parser:** envelope footer fixtures (live `#77` footer, multi-SHA body,
   `paseo://` body, malformed footer → skipped, no footer → `null`).
 - **Client:** mock `useRpc` doubles. Assert pill label variants
@@ -728,13 +788,15 @@ No code touched.
 - [ ] Issue detail shows body, comment thread, and structured Agent Envelope
       cards (agent id, model, branch, SHAs, `paseo://` link) in-client.
 - [ ] Scoped label toggles advance `state/`–`priority/`–`attention/`–`spec/`
-      with single taps and no client-side remove calls; UI repaints from
-      server truth after each mutation.
+      with single taps; the write adds the label and removes any same-scope
+      mate, and the UI repaints from server truth after each mutation.
 - [ ] Quick comments post operator steering into the thread; composer text
       survives failures.
-- [ ] Auth uses the existing `fgj` config with zero user-facing setup; the
-      token never enters plugin memory or logs (`redactSecrets` on all
-      cached payloads).
+- [ ] Auth uses a daemon-side token saved per host in plugin settings; the
+      token never reaches the client and no `fgj` config or host CLI is
+      required.
+- [ ] The optional label-set install is explicit-only, offers keep vs replace,
+      and never mutates a board without the user's action.
 - [ ] Pill shows verify-first counts (`"3 verify · 12 open"` / `"3v"`) and
       deep-opens the pre-filtered dashboard; zero-verify hides the verify
       chip (never `0 verify`).
