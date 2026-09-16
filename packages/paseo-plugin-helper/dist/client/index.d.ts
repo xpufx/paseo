@@ -1,11 +1,11 @@
 import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, c as PluginTheme, a as SettingsContract, b as CustomPillState } from '../custom-pills-BRMMkgfE.js';
 import * as React from 'react';
 import React__default, { ReactNode, Ref, ComponentType } from 'react';
-import { c as HostLayout, d as HostPillProps, e as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, f as HostAgentPanelProps, g as HostWorkspacePanelProps, h as HostToast, i as HostIconProps } from '../host-ByMrX8Ua.js';
-export { j as ClientHostDeps, k as ComposerPillButtonContribution, l as ComposerPillButtonDescriptor, m as ComposerPillButtonIcon, C as ComposerPillContribution, n as ComposerPillRegistration, o as ComposerPillRegistrationHandle, p as ComposerPillSdkContribution, H as HostAgentRef, b as HostAgentUpdate, q as HostAgentsApi, r as HostCopyText, s as HostFlatList, t as HostIcon, u as HostModal, v as HostModalContentProps, w as HostModalProps, x as HostRpcContract, y as HostScrollView, z as HostTextInput, A as HostTheme, B as HostThemeColors, D as HostUseRpc, E as HostUseToast, F as getClientHost, G as getOptionalClientHost, I as initClientHelpers, J as isClientHostInitialized, K as selectHostScrollView } from '../host-ByMrX8Ua.js';
+import { d as HostLayout, e as HostPillProps, f as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, g as HostAgentPanelProps, h as HostWorkspacePanelProps, i as HostToast, j as HostIconProps } from '../command-center-DxDAF0Vp.js';
+export { k as ClientHostDeps, l as CommandCenterCapabilities, m as CommandCenterContext, b as CommandCenterItemContribution, n as CommandCenterItemRegistrar, o as ComposerPillButtonContribution, p as ComposerPillButtonDescriptor, q as ComposerPillButtonIcon, C as ComposerPillContribution, r as ComposerPillRegistration, s as ComposerPillRegistrationHandle, t as ComposerPillSdkContribution, H as HostAgentRef, c as HostAgentUpdate, u as HostAgentsApi, v as HostCopyText, w as HostFlatList, x as HostIcon, y as HostModal, z as HostModalContentProps, A as HostModalProps, B as HostRpcContract, D as HostScrollView, E as HostTextInput, F as HostTheme, G as HostThemeColors, I as HostUseRpc, J as HostUseToast, K as getClientHost, L as getOptionalClientHost, M as initClientHelpers, N as isClientHostInitialized, O as registerCommandCenterItem, Q as selectHostScrollView } from '../command-center-DxDAF0Vp.js';
 import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView, ImageStyle } from 'react-native';
-import { M as MetricThresholds, T as TruncatePathOptions, S as SuiteSettings, F as ForgeMarkInput, a as ForgeKind } from '../forge-QZDQDGph.js';
-export { R as ResolvedForgeMark, f as forgeKindFromHost, i as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark } from '../forge-QZDQDGph.js';
+import { M as MetricThresholds, T as TruncatePathOptions, S as SuiteSettings, F as ForgeMarkInput, a as ForgeKind } from '../forge-CRHP7iRo.js';
+export { R as ResolvedForgeMark, f as forgeKindFromHost, i as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark } from '../forge-CRHP7iRo.js';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.js';
 import { UseMutationOptions, UseQueryOptions, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import * as _tanstack_query_core from '@tanstack/query-core';
@@ -419,16 +419,18 @@ interface InlineButtonProps {
 declare function InlineButton({ label, onPress, icon, disabled, accessibilityLabel, style, textStyle, }: InlineButtonProps): React__default.JSX.Element;
 
 type BadgeStyle = "tinted" | "outline" | "solid";
+type BadgeSize = "sm" | "md";
 interface BadgeProps {
     label: string;
     variant?: StatusVariant;
     styleVariant?: BadgeStyle;
+    size?: BadgeSize;
     icon?: string | ReactNode;
     dot?: boolean;
     style?: StyleProp<ViewStyle>;
     textStyle?: StyleProp<TextStyle>;
 }
-declare function Badge({ label, variant, styleVariant, icon, dot, style, textStyle, }: BadgeProps): React__default.JSX.Element;
+declare function Badge({ label, variant, styleVariant, size, icon, dot, style, textStyle, }: BadgeProps): React__default.JSX.Element;
 
 interface StatusDotProps {
     variant?: StatusVariant;
@@ -1133,6 +1135,19 @@ interface RegisterComposerPillOptions<TPayload = any> {
      */
     refreshIntervalMs?: number;
     /**
+     * Fixed width, in pixels, for the anchored popover on non-compact hosts.
+     *
+     * Without it the popover is sized from its content, so any content that
+     * reflows (a measured table, a responsive group, a gauge that settles) can
+     * resize the surface under the pointer. Pinning the width makes the frame the
+     * authority and lets the content overflow into its own scroll/clip instead.
+     *
+     * Ignored on compact hosts, where the same content renders in a full-bleed
+     * bottom sheet. Clamped to the window width so a fixed width cannot overflow
+     * a narrow viewport.
+     */
+    popoverWidth?: number;
+    /**
       * Renders the content inside the controlled modal.
      * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
       * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
@@ -1141,7 +1156,25 @@ interface RegisterComposerPillOptions<TPayload = any> {
       * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
       * popovers, so live pill text comes from `resolveLabel` instead.
      */
-    renderModal: (props: RenderModalProps<TPayload>) => ReactNode;
+    renderModal?: (props: RenderModalProps<TPayload>) => ReactNode;
+    /**
+     * Makes the pill an action button instead of a tethered popover: pressing it
+     * calls this and the host never mounts a popover. Use it to open a plugin
+     * surface (`openSurface(id)`), which the host renders outside the composer —
+     * an agent-stream re-render of the composer then cannot remount it. Ignored
+     * when unset, in which case `renderModal` renders the popover.
+     */
+    onPress?: () => void | Promise<void>;
+    /**
+     * How an open pill presents.
+     * - `"popover"` (default): the host anchors `renderModal` to the pill. The
+     *   host may remount that subtree on every composer re-render, which can tear
+     *   an open popover down.
+     * - `"centered"`: the host `Modal` is rendered from the pill's always-mounted
+     *   icon and toggled by the pill press, so the surface is not a child of the
+     *   composer popover and a composer re-render does not unmount it.
+     */
+    presentation?: "popover" | "centered";
     /**
      * Called when a pill cannot be registered on the current host (for example
      * a host API mismatch). Reporting instead of throwing keeps the rest of the
@@ -1737,4 +1770,4 @@ interface ForgeIconProps extends ForgeMarkInput {
  */
 declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, normalizeSnapshotScope, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, normalizeSnapshotScope, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };

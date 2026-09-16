@@ -1,5 +1,5 @@
 import { ComponentType } from 'react';
-import { H as HostAgentRef, C as ComposerPillContribution, a as HostSurfaceProps, P as PluginCleanup, b as HostAgentUpdate } from '../host-ByMrX8Ua.js';
+import { H as HostAgentRef, C as ComposerPillContribution, a as HostSurfaceProps, b as CommandCenterItemContribution, P as PluginCleanup, c as HostAgentUpdate } from '../command-center-DxDAF0Vp.js';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.js';
 import 'react-native';
 import 'zod';
@@ -20,6 +20,7 @@ interface MockClientContext {
         Component: ComponentType<HostSurfaceProps>;
     }>;
     registeredSettingsScreens: MockSettingsScreenContribution[];
+    registeredCommandCenterItems: CommandCenterItemContribution[];
     addComposerPill(contribution: ComposerPillContribution): PluginCleanup;
     openPanel(id: string, options?: unknown): void;
     rpc(contract: {
