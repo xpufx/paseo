@@ -22,7 +22,10 @@ import {
   customPillPoller,
   collectTurnTelemetry,
   collectGitDiffStat,
+  countTurns,
   getLastLiveUsage,
+  isInterruptEcho,
+  isStaleTurnEnd,
   setLastLiveUsage,
   log,
 } from "./server/resources";
@@ -73,26 +76,20 @@ export default function contribute(server: PluginServerContext) {
 
   const turnStartTimes = new Map<string, number>();
   const turnGitBefore = new Map<string, { insertions: number; deletions: number; filesChanged: number }>();
-  // Interrupt fires turn_ended twice for the same turnId (canceled +
-  // follow-up): coalesce both into ONE card. First event is held briefly;
-  // a second event with the same turnId merges into it instead of
-  // appending a second card. The merged card keeps the canceled outcome
-  // with reason text at the bottom where errors render.
-  const MERGE_WINDOW_MS = 750;
-  interface PendingTurn {
-    timer: ReturnType<typeof setTimeout>;
-    firstOutcome: { kind: string; error?: { message: string }; reason?: string };
-    startTime: number | undefined;
-    gitBefore: { insertions: number; deletions: number; filesChanged: number } | undefined;
-    turnIndex: number;
-  }
-  const pendingTurns = new Map<string, PendingTurn>();
+  // Live turn per agent, set on turn_started and consumed by its terminal, used
+  // to drop terminals that cannot belong to it (see isStaleTurnEnd).
+  const activeTurnIds = new Map<string, string | null>();
+  // Time and timeline user_message count of the last canceled terminal, used to
+  // drop the daemon's extra interrupt terminal (see isInterruptEcho).
+  const lastCanceledAt = new Map<string, number>();
+  const lastCanceledUserMessages = new Map<string, number>();
   // Per-agent turn counter for the timeline cadence option (0 = never,
   // 1 = every turn, N>1 = every Nth turn). Counts deduped turn_ended events.
   const turnCounters = new Map<string, number>();
 
   const unsubscribeTurnStarted = server.on("agent.turn_started", (event, context) => {
     turnStartTimes.set(event.agent.id, Date.now());
+    activeTurnIds.set(event.agent.id, event.turnId ?? null);
     if ((event.agent as any)?.lastUsage) {
       setLastLiveUsage((event.agent as any).lastUsage);
     }
@@ -125,36 +122,12 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  function mergeOutcomes(
-    first: { kind: string; error?: { message: string }; reason?: string },
-    second: { kind: string; error?: { message: string }; reason?: string },
-  ): { kind: "completed" | "failed" | "canceled"; error?: { message: string }; reason?: string } {
-    const kinds = [first.kind, second.kind];
-    const kind = (kinds.includes("canceled") ? "canceled" : kinds.includes("failed") ? "failed" : "completed") as
-      "completed" | "failed" | "canceled";
-    const parts = [first.reason ?? first.error?.message, second.reason ?? second.error?.message].filter(
-      (p): p is string => !!p,
-    );
-    const merged: { kind: "completed" | "failed" | "canceled"; error?: { message: string }; reason?: string } = {
-      kind,
-    };
-    if (kind === "canceled" && parts.length > 0) {
-      merged.reason = [...new Set(parts)].join(" / ");
-    } else if (kind === "failed" && parts.length > 0) {
-      merged.error = { message: [...new Set(parts)].join(" / ") };
-    } else if (first.error ?? second.error) {
-      merged.error = second.error ?? first.error;
-    }
-    return merged;
-  }
-
   async function appendTurnCard(
     event: any,
     context: any,
     startTime: number | undefined,
     gitBefore: { insertions: number; deletions: number; filesChanged: number } | undefined,
     turnIndex: number,
-    mergedOutcome?: { kind: "completed" | "failed" | "canceled"; error?: { message: string }; reason?: string },
   ): Promise<void> {
     try {
       const settings = await handleGetSettings();
@@ -209,7 +182,7 @@ export default function contribute(server: PluginServerContext) {
       const telemetry = await collectTurnTelemetry(
         event.turnId,
         event.agent.id,
-        mergedOutcome ?? event.outcome,
+        event.outcome,
         durationMs,
         {
           cwd: event.agent.cwd,
@@ -233,7 +206,7 @@ export default function contribute(server: PluginServerContext) {
       log.info("Appended turn telemetry to timeline", {
         agentId: event.agent.id,
         turnId: event.turnId,
-        outcome: (mergedOutcome ?? event.outcome).kind,
+        outcome: event.outcome.kind,
         durationMs,
         cpuPercent: telemetry.cpuPercent,
         memPercent: telemetry.memPercent,
@@ -253,28 +226,40 @@ export default function contribute(server: PluginServerContext) {
       if (settings.recordTurnTelemetry === false) {
         turnStartTimes.delete(event.agent.id);
         turnGitBefore.delete(event.agent.id);
+        activeTurnIds.delete(event.agent.id);
+        lastCanceledAt.delete(event.agent.id);
+        lastCanceledUserMessages.delete(event.agent.id);
         return;
       }
 
-      // Events without a turnId cannot be merged; append immediately.
-      if (!event.turnId) {
-        const startTime = turnStartTimes.get(event.agent.id);
-        turnStartTimes.delete(event.agent.id);
-        const gitBefore = turnGitBefore.get(event.agent.id);
-        turnGitBefore.delete(event.agent.id);
-        const turnIndex = (turnCounters.get(event.agent.id) ?? 0) + 1;
-        turnCounters.set(event.agent.id, turnIndex);
-        void appendTurnCard(event, context, startTime, gitBefore, turnIndex);
+      // On interrupt the daemon emits a second terminal for the turn the cancel
+      // already ended. Skip it so the interrupt renders as one card.
+      const activeTurnId = activeTurnIds.get(event.agent.id);
+      const eventTurnId = event.turnId ?? null;
+      const eventUserMessages = countTurns(event.timeline) ?? 0;
+      const duplicate =
+        isStaleTurnEnd(activeTurnId, eventTurnId) ||
+        isInterruptEcho({
+          lastCanceledAt: lastCanceledAt.get(event.agent.id) ?? null,
+          lastCanceledUserMessages: lastCanceledUserMessages.get(event.agent.id) ?? null,
+          eventUserMessages,
+          now: Date.now(),
+        });
+      if (duplicate) {
+        log.info("Skipped duplicate turn-end telemetry", {
+          agentId: event.agent.id,
+          turnId: event.turnId,
+          activeTurnId: activeTurnId ?? null,
+        });
         return;
       }
-
-      const pending = pendingTurns.get(event.turnId);
-      if (pending) {
-        clearTimeout(pending.timer);
-        pendingTurns.delete(event.turnId);
-        const mergedOutcome = mergeOutcomes(pending.firstOutcome, event.outcome);
-        void appendTurnCard(event, context, pending.startTime, pending.gitBefore, pending.turnIndex, mergedOutcome);
-        return;
+      activeTurnIds.delete(event.agent.id);
+      if (event.outcome.kind === "canceled") {
+        lastCanceledAt.set(event.agent.id, Date.now());
+        lastCanceledUserMessages.set(event.agent.id, eventUserMessages);
+      } else {
+        lastCanceledAt.delete(event.agent.id);
+        lastCanceledUserMessages.delete(event.agent.id);
       }
 
       const startTime = turnStartTimes.get(event.agent.id);
@@ -283,19 +268,7 @@ export default function contribute(server: PluginServerContext) {
       turnGitBefore.delete(event.agent.id);
       const turnIndex = (turnCounters.get(event.agent.id) ?? 0) + 1;
       turnCounters.set(event.agent.id, turnIndex);
-      const firstOutcome = event.outcome;
-      const holdTurnId: string = event.turnId;
-      // Hold the first event briefly so a follow-up for the same turnId
-      // merges into one card instead of appending a second.
-      const timer = setTimeout(() => {
-        pendingTurns.delete(holdTurnId);
-        void appendTurnCard(event, context, startTime, gitBefore, turnIndex);
-      }, MERGE_WINDOW_MS);
-      if (pendingTurns.size > 1000) {
-        const oldest = pendingTurns.keys().next();
-        if (!oldest.done) pendingTurns.delete(oldest.value);
-      }
-      pendingTurns.set(event.turnId, { timer, firstOutcome, startTime, gitBefore, turnIndex });
+      void appendTurnCard(event, context, startTime, gitBefore, turnIndex);
     }).catch((err) => {
       log.warn("Failed to record turn telemetry", {
         agentId: event.agent.id,
@@ -306,8 +279,9 @@ export default function contribute(server: PluginServerContext) {
   });
 
   return () => {
-    for (const pending of pendingTurns.values()) clearTimeout(pending.timer);
-    pendingTurns.clear();
+    activeTurnIds.clear();
+    lastCanceledAt.clear();
+    lastCanceledUserMessages.clear();
     customPillPoller.stop();
     unsubscribeTurnStarted();
     unsubscribeAgentCreated();

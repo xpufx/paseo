@@ -22,7 +22,7 @@ import {
   shouldAppendTimelineForTurn,
   type McpStatusSnapshot,
 } from "../shared/resources";
-import { collectTurnTelemetry, countTurns, customPillPoller, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline } from "./resources";
+import { collectTurnTelemetry, countTurns, customPillPoller, isInterruptEcho, isStaleTurnEnd, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline } from "./resources";
 
 after(() => {
   customPillPoller.stop();
@@ -519,6 +519,73 @@ test("custom pill effective state follows master, overrides, then file default",
   assert.equal(customPillEffectiveEnabled(true, { other: false }, pill), true);
   assert.equal(
     customPillEffectiveEnabled(true, undefined, { id: "x", enabled: false }),
+    false,
+  );
+});
+
+test("stale terminal for a live turn is dropped, real terminals kept", () => {
+  // Rescue echo after a newer turn opened: no turnId, so it cannot be that turn.
+  assert.equal(isStaleTurnEnd("opencode-turn-5", null), true);
+  // Terminal carrying another turn's id.
+  assert.equal(isStaleTurnEnd("opencode-turn-5", "opencode-turn-4"), true);
+  // The live turn's own terminal is kept.
+  assert.equal(isStaleTurnEnd("opencode-turn-5", "opencode-turn-5"), false);
+  // Providers without turn ids (codex/pi) end an opened null-id turn normally.
+  assert.equal(isStaleTurnEnd(null, null), false);
+  // No turn_started observed (e.g. plugin reload mid-turn): keep the terminal.
+  assert.equal(isStaleTurnEnd(undefined, "opencode-turn-9"), false);
+});
+
+test("interrupt echo is dropped by matching the cancel's user_message count", () => {
+  const canceledAt = 1_000;
+  // 0-duration completed follow-up on a fresh turnId, no new user message.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 7,
+      now: canceledAt + 900,
+    }),
+    true,
+  );
+  // null-turnId echo arriving ~2s later.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 7,
+      now: canceledAt + 2_100,
+    }),
+    true,
+  );
+  // A real follow-up carries a new user message.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 8,
+      now: canceledAt + 900,
+    }),
+    false,
+  );
+  // No cancel recorded: nothing to echo.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: null,
+      lastCanceledUserMessages: null,
+      eventUserMessages: 0,
+      now: canceledAt,
+    }),
+    false,
+  );
+  // Beyond the rescue window the recorded state no longer applies.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 7,
+      now: canceledAt + 6_000,
+    }),
     false,
   );
 });
