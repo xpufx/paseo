@@ -1,5 +1,6 @@
 import { PluginStorage, createPluginLogger } from "paseo-plugin-helper/server";
 import {
+  KNOWN_OPEN_TARGETS,
   SEED_COMMANDS,
   interpolateTemplate,
   slashSettingsContract,
@@ -49,6 +50,10 @@ export async function handleListCommands(): Promise<{ commands: SlashCommand[] }
 
 export function handleListCatalog(): { commands: SlashCommand[] } {
   return { commands: SEED_COMMANDS };
+}
+
+export function handleListOperations(): { rpc: string[]; open: string[] } {
+  return { rpc: allowedOperations(), open: [...KNOWN_OPEN_TARGETS] };
 }
 
 export interface OperationContext {

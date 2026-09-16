@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  KNOWN_OPEN_TARGETS,
   SEED_COMMANDS,
   actionSummary,
   draftFromCommand,
   emptyCommandDraft,
   missingCatalogCommands,
+  operationsListRpc,
   removeCommandByName,
   upsertCommand,
   validateCommandDraft,
@@ -91,5 +93,56 @@ describe("actionSummary", () => {
     expect(actionSummary({ verb: "send", template: "x" })).toBe("send");
     expect(actionSummary({ verb: "open", target: "slash-console" })).toBe("open → slash-console");
     expect(actionSummary({ verb: "rpc", operation: "slash.ping", params: {} })).toBe("rpc → slash.ping");
+  });
+});
+
+describe("operation catalog validation", () => {
+  const catalog = { rpc: ["slash.ping", "slash.echo"], open: ["slash-console", "approvals"] };
+
+  it("blocks unknown rpc operations", () => {
+    const result = validateCommandDraft(
+      draft({ name: "oops", title: "Oops", verb: "rpc", operation: "slash.nope" }),
+      [],
+      catalog,
+    );
+    expect(result.command).toBeUndefined();
+    expect(result.errors.action).toMatch(/Unknown RPC operation/);
+    expect(result.errors.action).toContain("slash.ping");
+  });
+
+  it("allows allowlisted rpc operations", () => {
+    const result = validateCommandDraft(
+      draft({ name: "ping", title: "Ping", verb: "rpc", operation: "slash.ping" }),
+      [],
+      catalog,
+    );
+    expect(result.errors).toEqual({});
+    expect(result.command).toBeDefined();
+  });
+
+  it("warns on unknown open targets without blocking the save", () => {
+    const result = validateCommandDraft(
+      draft({ name: "go", title: "Go", verb: "open", target: "not-a-surface" }),
+      [],
+      catalog,
+    );
+    expect(result.command).toBeDefined();
+    expect(result.warnings.action).toMatch(/Unknown surface id/);
+  });
+
+  it("stays silent when no catalog is supplied", () => {
+    expect(validateCommandDraft(draft({ name: "ping", title: "Ping", verb: "rpc", operation: "slash.nope" })).command).toBeDefined();
+    expect(validateCommandDraft(draft({ name: "go", title: "Go", verb: "open", target: "not-a-surface" })).warnings).toEqual({});
+  });
+});
+
+describe("slash.operations.list contract", () => {
+  it("exposes the list shape and the slash console surface", () => {
+    expect(operationsListRpc.name).toBe("slash.operations.list");
+    expect(operationsListRpc.output.parse({ rpc: ["slash.ping"], open: ["slash-console"] })).toEqual({
+      rpc: ["slash.ping"],
+      open: ["slash-console"],
+    });
+    expect(KNOWN_OPEN_TARGETS).toContain("slash-console");
   });
 });

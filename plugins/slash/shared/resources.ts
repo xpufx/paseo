@@ -8,6 +8,11 @@ export const SLASH_VERSION = "0.1.0";
 
 export const SUGGESTED_PREFIX = "xpufx-";
 
+// The host owns the surface registry and exposes no enumeration to plugins, so
+// this list is maintained by hand from in-repo surface registrations and can
+// drift as plugins add surfaces (issue #186).
+export const KNOWN_OPEN_TARGETS: string[] = ["slash-console", "main", "approvals", "paseo-top-dashboard"];
+
 export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 export const COMMAND_NAME_HINT =
@@ -126,6 +131,15 @@ export interface SlashCommandDraft {
 export type CommandDraftErrorField = "name" | "title" | "description" | "action";
 export type CommandDraftErrors = Partial<Record<CommandDraftErrorField, string>>;
 
+export type CommandDraftWarningField = "action";
+export type CommandDraftWarnings = Partial<Record<CommandDraftWarningField, string>>;
+
+/** Allowlisted rpc operations and known open-surface ids used for live validation. */
+export interface OperationCatalog {
+  rpc?: readonly string[];
+  open?: readonly string[];
+}
+
 export function emptyCommandDraft(): SlashCommandDraft {
   return {
     name: "",
@@ -169,7 +183,8 @@ export function commandFromDraft(draft: SlashCommandDraft): SlashCommand {
 export function validateCommandDraft(
   draft: SlashCommandDraft,
   takenNames: readonly string[] = [],
-): { errors: CommandDraftErrors; command?: SlashCommand } {
+  catalog: OperationCatalog = {},
+): { errors: CommandDraftErrors; warnings: CommandDraftWarnings; command?: SlashCommand } {
   const parsed = SlashCommandSchema.safeParse(commandFromDraft(draft));
   if (!parsed.success) {
     const errors: CommandDraftErrors = {};
@@ -181,12 +196,22 @@ export function validateCommandDraft(
         errors.action ??= issue.message;
       }
     }
-    return { errors };
+    return { errors, warnings: {} };
   }
   if (takenNames.includes(parsed.data.name)) {
-    return { errors: { name: "A command with this name already exists" } };
+    return { errors: { name: "A command with this name already exists" }, warnings: {} };
   }
-  return { errors: {}, command: parsed.data };
+  const warnings: CommandDraftWarnings = {};
+  if (draft.verb === "rpc" && catalog.rpc?.length && !catalog.rpc.includes(draft.operation.trim())) {
+    return {
+      errors: { action: `Unknown RPC operation; allowlisted: ${catalog.rpc.join(", ")}` },
+      warnings,
+    };
+  }
+  if (draft.verb === "open" && catalog.open?.length && !catalog.open.includes(draft.target.trim())) {
+    warnings.action = `Unknown surface id; the host does not expose its registry. Known: ${catalog.open.join(", ")}`;
+  }
+  return { errors: {}, warnings, command: parsed.data };
 }
 
 export function upsertCommand(
@@ -228,6 +253,13 @@ export const catalogRpc = defineContract({
   description: "List the shipped seed command catalog without touching settings",
   input: z.object({}).default({}),
   output: z.object({ commands: z.array(SlashCommandSchema) }),
+});
+
+export const operationsListRpc = defineContract({
+  name: "slash.operations.list",
+  description: "List allowlisted rpc operations and the curated known open-surface ids",
+  input: z.object({}).default({}),
+  output: z.object({ rpc: z.array(z.string()), open: z.array(z.string()) }),
 });
 
 export const runCommandRpc = defineContract({

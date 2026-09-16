@@ -28,11 +28,14 @@ import {
   exportBundleRpc,
   importBundleRpc,
   missingCatalogCommands,
+  operationsListRpc,
   removeCommandByName,
   slashSettingsContract,
   upsertCommand,
   validateCommandDraft,
   type CommandDraftErrors,
+  type CommandDraftWarnings,
+  type OperationCatalog,
   type SlashCommandDraft,
   type SlashVerb,
 } from "../shared/resources";
@@ -46,10 +49,17 @@ const ACTION_TABS: TabItem[] = [
 interface CommandFormProps {
   draft: SlashCommandDraft;
   errors: CommandDraftErrors;
+  warnings: CommandDraftWarnings;
+  catalog: OperationCatalog;
   onChange: (patch: Partial<SlashCommandDraft>) => void;
 }
 
-function CommandForm({ draft, errors, onChange }: CommandFormProps) {
+function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandFormProps) {
+  const rpcOptions = catalog.rpc ?? [];
+  const openOptions = catalog.open ?? [];
+  const rpcTabs: TabItem[] = rpcOptions.map((operation) => ({ id: operation, label: operation }));
+  const openTabs: TabItem[] = openOptions.map((target) => ({ id: target, label: target }));
+
   return (
     <>
       <FormRow label="Name" description={`Command is invoked as /${draft.name || "name"}. ${COMMAND_NAME_HINT}`}>
@@ -100,24 +110,60 @@ function CommandForm({ draft, errors, onChange }: CommandFormProps) {
           />
         </FormRow>
       ) : draft.verb === "open" ? (
-        <FormRow label="Target surface" description="Surface id opened when the command runs (max 200 chars)">
-          <TextInput
-            value={draft.target}
-            errorText={errors.action}
-            placeholder="slash-console"
-            onChangeText={(target) => onChange({ target })}
-          />
-        </FormRow>
+        <>
+          {openOptions.length > 0 ? (
+            <FormRow
+              label="Target surface"
+              description="Surface id opened when the command runs; pick a known surface or enter it below"
+            >
+              <Tabs
+                tabs={openTabs}
+                activeTab={draft.target}
+                onTabChange={(target) => onChange({ target })}
+              />
+            </FormRow>
+          ) : null}
+          <FormRow
+            label={openOptions.length > 0 ? "Surface id (advanced)" : "Target surface"}
+            description="Surface id opened when the command runs (max 200 chars)"
+          >
+            <TextInput
+              value={draft.target}
+              errorText={errors.action}
+              helperText={warnings.action}
+              placeholder="slash-console"
+              onChangeText={(target) => onChange({ target })}
+            />
+          </FormRow>
+        </>
       ) : (
-        <FormRow label="RPC operation" description="Allowlisted backend operation (max 200 chars)">
-          <TextInput
-            value={draft.operation}
-            errorText={errors.action}
-            placeholder="slash.ping"
-            mono
-            onChangeText={(operation) => onChange({ operation })}
-          />
-        </FormRow>
+        <>
+          {rpcOptions.length > 0 ? (
+            <FormRow
+              label="RPC operation"
+              description="Allowlisted backend operation; pick one or type an advanced value below"
+            >
+              <Tabs
+                tabs={rpcTabs}
+                activeTab={draft.operation}
+                onTabChange={(operation) => onChange({ operation })}
+              />
+            </FormRow>
+          ) : null}
+          <FormRow
+            label={rpcOptions.length > 0 ? "RPC operation (advanced)" : "RPC operation"}
+            description="Allowlisted backend operation (max 200 chars)"
+          >
+            <TextInput
+              value={draft.operation}
+              errorText={errors.action}
+              helperText={warnings.action}
+              placeholder="slash.ping"
+              mono
+              onChangeText={(operation) => onChange({ operation })}
+            />
+          </FormRow>
+        </>
       )}
       <FormRow label="Enabled" description="Disabled commands stay configured but are not registered">
         <Toggle value={draft.enabled} onValueChange={(enabled) => onChange({ enabled })} />
@@ -129,6 +175,7 @@ function CommandForm({ draft, errors, onChange }: CommandFormProps) {
 export function SlashConsole() {
   const { settings, updateSettings, resetSettings } = usePluginSettings(slashSettingsContract);
   const catalog = useRpcQuery(catalogRpc, {});
+  const operations = useRpcQuery(operationsListRpc, {});
   const exportBundle = useRpcMutation(exportBundleRpc);
   const importBundle = useRpcMutation(importBundleRpc);
   const [form, setForm] = useState<{ originalName: string | null; draft: SlashCommandDraft } | null>(null);
@@ -136,11 +183,14 @@ export function SlashConsole() {
   const [bundleError, setBundleError] = useState("");
   const prefix = settings.prefix ?? "";
   const commands = settings.commands ?? [];
+  const operationCatalog: OperationCatalog = operations.data ?? {};
 
   const takenNames = commands
     .filter((command) => command.name !== form?.originalName)
     .map((command) => command.name);
-  const validation = form ? validateCommandDraft(form.draft, takenNames) : { errors: {} as CommandDraftErrors };
+  const validation = form
+    ? validateCommandDraft(form.draft, takenNames, operationCatalog)
+    : { errors: {} as CommandDraftErrors, warnings: {} as CommandDraftWarnings };
   const catalogCommands = catalog.data?.commands ?? [];
   const missingFromCatalog = missingCatalogCommands(commands, catalogCommands);
 
@@ -195,7 +245,13 @@ export function SlashConsole() {
               title={form.originalName ? `Edit /${prefix}${form.originalName}` : "New command"}
               subtitle="Name, description, and action"
             />
-            <CommandForm draft={form.draft} errors={validation.errors} onChange={updateDraft} />
+            <CommandForm
+              draft={form.draft}
+              errors={validation.errors}
+              warnings={validation.warnings}
+              catalog={operationCatalog}
+              onChange={updateDraft}
+            />
             <ActionBar align="flex-end">
               <Button label="Cancel" variant="ghost" onPress={() => setForm(null)} />
               <Button
