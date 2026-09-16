@@ -54,7 +54,7 @@ export type SlashSettings = z.infer<typeof SlashSettingsSchema>;
 export const slashSettingsContract = defineSettingsContract({
   name: "slash.settings",
   schema: SlashSettingsSchema,
-  description: "Slash command repository and custom command facilities",
+  description: "S/ash command repository and custom command facilities",
 });
 
 export const CommandBundleSchema = z.object({
@@ -87,7 +87,7 @@ export const SEED_COMMANDS: SlashCommand[] = [
   {
     name: "console",
     title: "Console",
-    description: "Open the slash output console",
+    description: "Open the S/ash output console",
     enabled: true,
     action: { verb: "open", target: "slash-console" },
   },

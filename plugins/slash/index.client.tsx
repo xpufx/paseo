@@ -10,7 +10,7 @@ initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatLis
 export default function contribute(client: PluginClientContext) {
   registerSidebarSurface(client, {
     id: "slash-console",
-    title: "Slash console",
+    title: "S/ash console",
     icon: "Terminal",
     Component: SlashConsole,
   });
