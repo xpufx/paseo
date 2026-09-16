@@ -44,8 +44,8 @@ common library, rather than solving the same issues again and again.
 
 The modal navbar renders two ways, switchable in the Settings tab (`navigationStyle`):
 
-- **Tabs** (default): sliding single-row `<Tabs mode="scroll">`, pinned above the scroller (`headerMode="pinned"`).
-- **Dropdown**: in-flow dropdown trigger + menu inside the `ModalBody` header, scrolling with the content (`headerMode="scroll"`, see `resolveDemoHeaderMode` in `shared/demo.ts`). The open menu resets on navigation-style switches and on pull-to-refresh.
+- **Tabs**: sliding single-row `<Tabs mode="scroll">`, pinned above the scroller (`headerMode="pinned"`).
+- **Dropdown** (default): in-flow dropdown trigger + menu inside the `ModalBody` header, scrolling with the content (`headerMode="scroll"`, see `resolveDemoHeaderMode` in `shared/demo.ts`). The open menu resets on navigation-style switches and on pull-to-refresh.
 
 ## RPC contracts (`shared/demo.ts`)
 

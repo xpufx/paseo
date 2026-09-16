@@ -5,8 +5,8 @@ import {
 } from "./demo.js";
 
 describe("Demo navigation scroll ownership", () => {
-  it("keeps tabs as the default with dropdown as an option", () => {
-    expect(DemoSettingsSchema.parse({}).navigationStyle).toBe("tabs");
+  it("defaults to dropdown with tabs still selectable", () => {
+    expect(DemoSettingsSchema.parse({}).navigationStyle).toBe("dropdown");
     expect(
       DemoSettingsSchema.parse({ navigationStyle: "tabs" }).navigationStyle,
     ).toBe("tabs");
