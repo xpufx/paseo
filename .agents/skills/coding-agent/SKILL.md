@@ -10,6 +10,9 @@ This skill defines the operational workflow, tool usage, issue conventions, and 
 > [!IMPORTANT]
 > **Token Economy Rule**: If you explained or documented something in a Forgejo issue comment, **keep conversation responses in the agent/user harness strictly brief and low-token**. Point directly to the issue number/link; do not duplicate long explanations into chat.
 
+> [!IMPORTANT]
+> **Comment Budget**: Keep issue comments to **one screen (~15 lines)**. Lead with what changed + commit SHA + test result; put analysis/checklists/design detail in the issue **body** (or a linked child issue), not a comment. Never paste diffs, full test output, or re-explain referenced code. One comment per handoff — no per-step play-by-step narration.
+
 ---
 
 ## 1. Primary Tool: `fgjx` (Always use `fgjx`, NEVER `fgj` directly)

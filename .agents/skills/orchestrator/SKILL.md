@@ -88,3 +88,12 @@ routine webhook or dismiss it because it lacks a conventional command verb.
   unknown label name and silently ignored. Repeat the flag instead:
   `--add-label 'a' --add-label 'b'` (same for `--remove-label`).
 - Always read back with `fgjx issue view` and confirm the label set changed.
+
+## 10. Comment & chat budget (keep the board readable)
+
+- Issue comments and pre-flight/presentation posts: **one screen (~15 lines)**. Summary first — what changed, commit SHA, test result, what's left.
+- Analysis, checklists, and design detail go in the issue **body** or a linked child issue, not a comment.
+- Never paste diffs, full test logs, or restate code/refs already in the body.
+- One comment per handoff; no per-step play-by-step narration.
+- Chat: one line pointing at the ticket; never duplicate the substance.
+- Comment length is not a status signal. A short, complete comment beats a long one.
