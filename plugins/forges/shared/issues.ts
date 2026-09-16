@@ -681,6 +681,7 @@ export const IssueCommentSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   body: z.string(),
+  url: z.string(),
   envelope: AgentEnvelopeSchema.nullable().default(null),
 });
 export type IssueComment = z.infer<typeof IssueCommentSchema>;

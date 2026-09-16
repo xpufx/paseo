@@ -422,8 +422,17 @@ function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
   );
 }
 
-function CommentCard({ comment }: { comment: IssueComment }) {
+function CommentCard({ comment, issueUrl }: { comment: IssueComment; issueUrl: string }) {
+  const { colors } = usePluginTheme();
+  const { Icon } = getClientHost();
   const body = stripAgentEnvelopeFooter(comment.body) || comment.body;
+  const target = comment.url || issueUrl;
+  const open = () => {
+    Linking.openURL(target).catch(() => {});
+  };
+  const copy = () => {
+    copyToClipboard(target).catch(() => {});
+  };
   return (
     <Card style={styles.commentCard}>
       <Card.Header
@@ -431,7 +440,26 @@ function CommentCard({ comment }: { comment: IssueComment }) {
         subtitle={formatTimestamp(comment.createdAt)}
         icon="MessageSquare"
       />
-      <MarkdownLite body={body} />
+      <View style={styles.commentRow}>
+        <Icon name="ExternalLink" size={13} color={colors.accent} />
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={`Open comment by ${comment.author}`}
+          style={styles.commentBody}
+          onPress={open}
+          hitSlop={8}
+        >
+          <MarkdownLite body={body} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Copy comment link"
+          onPress={copy}
+          hitSlop={10}
+        >
+          <Text style={[styles.copyText, { color: colors.foregroundMuted }]}>⧉</Text>
+        </Pressable>
+      </View>
       {comment.envelope ? <AgentEnvelopeCard envelope={comment.envelope} /> : null}
     </Card>
   );
@@ -682,7 +710,9 @@ function IssueDetailView({
             {issue.comments.length === 0 ? (
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>No comments yet.</Text>
             ) : (
-              issue.comments.map((comment) => <CommentCard key={comment.id} comment={comment} />)
+              issue.comments.map((comment) => (
+                <CommentCard key={comment.id} comment={comment} issueUrl={issue.webUrl} />
+              ))
             )}
             {!access.canEdit ? (
               <ReadOnlyNotice access={access} capability="commenting" onAction={onOpenSettings} />
@@ -1288,6 +1318,17 @@ const styles = StyleSheet.create({
   },
   commentCard: {
     gap: 8,
+  },
+  commentRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
+  },
+  commentBody: {
+    flex: 1,
+  },
+  copyText: {
+    fontSize: 14,
   },
   composer: {
     gap: 8,

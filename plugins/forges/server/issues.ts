@@ -202,6 +202,7 @@ function toIssueDetail(detail: ForgejoIssueDetail): IssueDetail | null {
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
     body: comment.body,
+    url: comment.url,
     envelope: parseAgentEnvelope(comment.id, comment.body),
   }));
   const candidate = {

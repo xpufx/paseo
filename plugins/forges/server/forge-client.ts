@@ -39,6 +39,7 @@ export interface ForgejoComment {
   createdAt: string;
   updatedAt: string;
   body: string;
+  url: string;
 }
 
 export interface ForgejoIssueDetail {
@@ -65,6 +66,7 @@ function toComment(entry: unknown): ForgejoComment | null {
     createdAt: asText(record.created_at),
     updatedAt: asText(record.updated_at, asText(record.created_at)),
     body,
+    url: asText(record.html_url),
   };
 }
 
