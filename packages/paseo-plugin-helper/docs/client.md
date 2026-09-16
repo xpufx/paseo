@@ -600,6 +600,12 @@ it. The helper enforces the contract, so plugins never size their own frame:
 Because the host allocates the size, a plugin cannot request a different dialog
 frame from plugin code - content simply flows into whatever the host gives it.
 
+Scroll ownership defaults to `scrollMode="auto"`: the helper scrolls on
+compact/mobile surfaces and defers to the host on desktop. Pass
+`scrollMode="always"` only when the host supplies no scroller because the content
+view is bounded (`ModalContent` does this for its bound `<Modal.Content>`); it
+makes the helper own the desktop scroller so nothing is clipped.
+
 #### Requesting a wider dialog: `size`
 
 When a genuinely data-dense modal/surface needs more room, use the single
@@ -629,12 +635,16 @@ final size, so `large` is a request for room, not a hardcoded frame. Do not add
 ```
 
 ```tsx
-<Modal.Content>
-  <ModalBody refreshing={isRefetching} onRefresh={refetch}>
-    {/* controls and cards */}
-  </ModalBody>
-</Modal.Content>
+// Inside a host-provided modal (registerComposerPill `renderModal`), the helper
+// already owns `<Modal.Content scrollable={false}>` — just render `ModalBody`:
+<ModalBody refreshing={isRefetching} onRefresh={refetch}>
+  {/* controls and cards */}
+</ModalBody>
 ```
+
+When the plugin opens its own host `<Modal>`, render `<ModalContent>` (next
+section) instead of a raw `<Modal.Content>`, so the host content view gets the
+same bounded allocation.
 
 For composer popovers, do not add another `ScrollView` around `ModalBody`.
 `registerComposerPill` marks the popover subtree with
@@ -654,6 +664,37 @@ imperative scrolling:
   ))}
 </ModalBody>
 ```
+
+### `<ModalContent>`
+Helper-owned replacement for the raw host `<Modal.Content>` when a plugin
+renders its own host `<Modal>`. It always passes `scrollable={false}` to the
+host content view and renders the shared `<ModalBody>` contract inside it, so
+the dialog always takes the host-allocated size and can never end up
+content-sized.
+
+Why this exists: Paseo's host maps the default `<Modal.Content scrollable>` to a
+desktop card with no explicit height, so a plugin using the raw host content
+view gets a dialog that resizes/redraws with its children. `scrollable={false}`
+makes the host allocate a bounded dialog (`desktopHeight: "85%"`). Because that
+bounded host content view supplies no scroller, `ModalContent` also forces
+`ModalBody scrollMode="always"`, so the helper owns the single scroll region on
+every surface (desktop included) and long content scrolls instead of clipping.
+
+```tsx
+import { Modal } from "@getpaseo/plugin/client/react-native";
+import { ModalContent } from "paseo-plugin-helper/client";
+
+<Modal title="My modal" open={open} onOpenChange={setOpen}>
+  <ModalContent header={<Tabs … />} headerMode="pinned">
+    {/* content */}
+  </ModalContent>
+</Modal>;
+```
+
+`ModalContent` accepts every `ModalBody` prop (`header`, `headerMode`,
+`refreshing`, `onRefresh`, `stickToEnd`, `scrollRef`, `debugTag`, `style`,
+`contentContainerStyle`, …), so `size?: "default" | "large"` remains the only
+size escape hatch. Do not put a raw `<Modal.Content>` in plugin client code.
 
 ### `<ActionBar>`
 Toolbar container that renders buttons in a row with spacing on desktop, and automatically stacks them vertically with full width on mobile or compact panels.

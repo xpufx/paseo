@@ -43,6 +43,14 @@ export interface ModalBodyProps {
    */
   headerMode?: "pinned" | "scroll";
   /**
+   * Scroll ownership override. "auto" (default) renders the helper-owned
+   * scroller only on compact/mobile surfaces and defers to the host elsewhere.
+   * "always" makes the helper the scroll owner on every surface; use it when
+   * the host supplies no scroller because the content view is bounded
+   * (`ModalContent` passes it for `<Modal.Content scrollable={false}>`).
+   */
+  scrollMode?: "auto" | "always";
+  /**
    * When set, ModalBody logs measured layout values (viewport height,
    * content height) via onLayout/onContentSizeChange under this tag, e.g.
    * `[ModalBody:mcp] viewport=… content=…`. Use on-device to see which
@@ -84,7 +92,9 @@ const LARGE_DIALOG_MIN_WIDTH = 640;
  * scroller. A 0.8 composer popover is different: Paseo's MenuSurface already
  * supplies the sole outer scroller, and registerComposerPill marks that
  * subtree through ModalBodyScrollOwnerContext so this component renders plain
- * content instead.
+ * content instead. Pass `scrollMode="always"` when the host content view is
+ * bounded and supplies no scroller (`ModalContent` does this), so the helper
+ * scrolls on desktop too instead of clipping the bounded dialog.
  * "pinned" is opt-in. Desktop surfaces retain host-owned scrolling so they do
  * not create a second scrollbar; web hosts pin the header with sticky layout.
  * Automatically calculates responsive bottom padding so controls are not cut off
@@ -107,6 +117,7 @@ export function ModalBody({
   headerStyle,
   headerMode = "scroll",
   size = "default",
+  scrollMode = "auto",
   debugTag,
   extraBottomInset = 0,
   refreshing = false,
@@ -116,7 +127,8 @@ export function ModalBody({
 }: ModalBodyProps) {
   const { isCompact, isMobile, layout, padding, colors } = usePluginTheme();
   const hostOwnsScroll = useContext(ModalBodyScrollOwnerContext) === "host";
-  const helperOwnsScroll = !hostOwnsScroll && (isCompact || isMobile);
+  const helperOwnsScroll =
+    !hostOwnsScroll && (scrollMode === "always" || isCompact || isMobile);
   // The large preset is the ONE documented place a plugin can ask for a wide
   // dialog frame. It is a desktop-only content minimum: the mobile sheet is
   // already full-bleed, and a composer popover viewport is host-owned and

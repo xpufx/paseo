@@ -255,7 +255,8 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
       layout={layout}
       flair={activeFlair}
     >
-      <ModalBody
+      <View style={{ flex: 1, minHeight: 0, width: "100%" }}>
+        <ModalBody
         header={
           settings.navigationStyle === "dropdown" ? (
             // Dropdown navigation is composed from helper primitives: the
@@ -1212,7 +1213,8 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
           helper-demo v{data?.version ?? PLUGIN_VERSION} (tick #{data?.backgroundTicks ?? 0})
         </Text>
       </View>
-    </ModalBody>
+        </ModalBody>
+      </View>
     </PluginThemeProvider>
   );
 }

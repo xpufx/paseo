@@ -323,6 +323,35 @@ sheets and composer popovers) instead of adding a per-plugin width literal. See
 [`docs/client.md`](docs/client.md) for the full contract and the `ModalBody`
 API.
 
+### Opening your own `<Modal>`: use `<ModalContent>`, not `<Modal.Content>`
+
+Plugins that render their own host `<Modal>` must not hand it the raw host
+`<Modal.Content>`. Paseo's host defaults `Modal.Content` to `scrollable`, which
+renders a **content-sized** desktop card — so the dialog resizes on every data
+change (the inconsistency between `top` and the other surfaces).
+
+`ModalContent` is the helper-owned replacement: it always passes
+`scrollable={false}` (the host then allocates a bounded dialog) and renders the
+shared `ModalBody` contract inside it, so a plugin using it cannot end up
+content-sized.
+
+```tsx
+import { Modal } from "@getpaseo/plugin/client/react-native";
+import { ModalContent } from "paseo-plugin-helper/client";
+
+<Modal title="My modal" open={open} onOpenChange={setOpen}>
+  <ModalContent>{/* content */}</ModalContent>
+</Modal>;
+```
+
+`ModalContent` accepts every `ModalBody` prop, so `size?: "default" | "large"`
+stays the only size escape hatch. Raw `<Modal.Content>` is only for non-plugin
+surfaces; plugin client code should use `ModalContent`.
+
+The bounded host content view supplies no scroller, so `ModalContent` forces
+`ModalBody scrollMode="always"`: the helper owns the one scroll region on every
+surface (desktop included) and the bounded dialog scrolls instead of clipping.
+
 ## Mobile Modal Gesture Architecture & `<Tabs>`
 
 ### The Challenge with Nested Scrolling in Paseo Modals

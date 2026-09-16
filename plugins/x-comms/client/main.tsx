@@ -14,6 +14,7 @@ import {
   KeyValue,
   KeyValueGroup,
   ModalBody,
+  ModalContent,
   SectionHeader,
   TextInput,
   usePluginTheme,
@@ -385,7 +386,7 @@ export function MainSurface({ theme }: PluginSurfaceProps) {
         open={expandedPicker === slot}
         onOpenChange={(open) => { if (!open) setExpandedPicker(null); }}
       >
-        <Modal.Content>
+        <ModalContent>
           {introspect.isPending ? <Notice tone="muted">Loading agents…</Notice> : null}
           {introspect.error ? <Notice>{introspect.error.message}</Notice> : null}
           {(introspect.data?.daemons ?? []).map((daemon) => (
@@ -425,7 +426,7 @@ export function MainSurface({ theme }: PluginSurfaceProps) {
             </View>
           ))}
           <ViaXComms theme={theme} />
-        </Modal.Content>
+        </ModalContent>
       </Modal>
     );
   };
@@ -739,7 +740,7 @@ export function MainSurface({ theme }: PluginSurfaceProps) {
         open={dumpOpen}
         onOpenChange={(open) => { if (!open) { setDumpOpen(false); setDumpState(null); } }}
       >
-        <Modal.Content>
+        <ModalContent>
           <Card variant="elevated">
             {dump.isPending && !dumpState ? (
               <Card.Header title="Loading…" subtitle="Fetching daemon snapshot." />
@@ -832,7 +833,7 @@ export function MainSurface({ theme }: PluginSurfaceProps) {
             ) : null}
           </Card>
           <ViaXComms theme={theme} />
-        </Modal.Content>
+        </ModalContent>
       </Modal>
 
       {renderAgentPicker(1)}
@@ -843,7 +844,7 @@ export function MainSurface({ theme }: PluginSurfaceProps) {
         open={pendingRemove !== null}
         onOpenChange={(open) => { if (!open) setPendingRemove(null); }}
       >
-        <Modal.Content>
+        <ModalContent>
           <Text selectable style={{ color: colors.foreground, fontSize: 13 }}>
             Remove '{pendingRemove}' from the registry?
           </Text>
@@ -852,7 +853,7 @@ export function MainSurface({ theme }: PluginSurfaceProps) {
             <Button label="Cancel" variant="secondary" onPress={() => setPendingRemove(null)} />
           </ActionBar>
           <ViaXComms theme={theme} />
-        </Modal.Content>
+        </ModalContent>
       </Modal>
 
     </View>

@@ -1,4 +1,5 @@
 export * from "./ModalBody.js";
+export * from "./ModalContent.js";
 export * from "./ActionBar.js";
 export * from "./FormRow.js";
 export * from "./Row.js";
