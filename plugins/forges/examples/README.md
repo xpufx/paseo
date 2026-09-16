@@ -62,6 +62,26 @@ The operator may apply **no labels at all**; that is the normal starting state,
 not an error. Automation must treat missing labels as advisory and bootstrap the
 taxonomy on first touch (see `docs/workflow.md` §3).
 
+## Paged reads (issue / search / label / comment lists)
+
+Every list either skill set reads is **paged**. A Gitea-family collection
+endpoint returns one page per call, and the default page size is
+**server-defined and can change** — on both the plugin's embedded `/api/v1`
+client and the `fgj`/`fgjx` CLI. This applies to the **issue list, search
+results, label list, and comment list**.
+
+- **Always page**, then aggregate: pass `limit`/`page` and keep going while a
+  full page comes back, or follow the `Link` header / `X-Total-Count` when the
+  server sends them.
+- **Never treat page 1 as complete**, and never conclude "no results" — or
+  "labels not found" — from one unpaged call.
+- If a forges UI surface lists results, it should **page internally** rather
+  than render a truncated set (#189).
+
+Worked example: an unpaged `fgj label list` returned **30 of 59** labels, which
+surfaced as false "labels not found" errors (#197). Both skill sets carry the
+same caveat at their list paths.
+
 ## Two skill sets, and what they need
 
 The plugin itself assumes no CLI. The Skills come in two variants so you can

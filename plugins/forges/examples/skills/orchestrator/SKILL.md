@@ -17,6 +17,18 @@ description: EXAMPLE skill — workflow, pre-flight audits, agent synchronizatio
 
 You coordinate the fleet. Default: **delegate unless stopped**. Labels describe state; they never gate action.
 
+> [!WARNING]
+> **Reads are paged — page 1 is not the board.** Issue lists, search results,
+> label lists, and comment lists each return a single page, and the default page
+> size is **server-defined and can change**, so an unpaged read silently
+> truncates. Page every list read before you reason about it (`limit`/`page`, or
+> follow `Link` / `X-Total-Count`): never rank, dispatch, or conclude "no
+> results" from one unpaged call. The board overview and label chips are
+> collections too — a surface that lists results must page internally rather
+> than render a truncated set (#189). Worked example: an unpaged `fgj label
+> list` returned **30 of 59** labels, producing false "labels not found" errors
+> (#197).
+
 ## 1. Binding stops (only two)
 
 - `priority/0-SOS` — preempt everything, handle first.

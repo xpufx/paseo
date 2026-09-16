@@ -25,6 +25,18 @@ You coordinate the fleet. Default: **delegate unless stopped**. Labels describe 
 > pointed at their own forge; the envelope tool is optional. See
 > [`../../tools/README.md`](../../tools/README.md).
 
+> [!WARNING]
+> **Reads are paged — page 1 is not the board.** Issue lists, search results,
+> label lists, and comment lists each return a single page, and the default page
+> size is **server-defined and can change**, so an unpaged read silently
+> truncates. Page every list read before you reason about it — increment
+> `limit`/`page` and follow `Link` / `X-Total-Count`, or use
+> `fgjx api '<path>?limit=50&page=N'` when a verb exposes no paging flags.
+> Never rank, dispatch, or conclude "no results" from one unpaged call. A
+> surface that lists results must page internally rather than render a truncated
+> set (#189). Worked example: an unpaged `fgj label list` returned **30 of 59**
+> labels, producing false "labels not found" errors (#197).
+
 ## 1. Binding stops (only two)
 
 - `priority/0-SOS` — preempt everything, handle first.

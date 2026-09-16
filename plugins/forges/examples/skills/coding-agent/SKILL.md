@@ -53,18 +53,37 @@ FORGE=https://forge.example.com
 REPO=your-org/your-repo
 TOKEN="$FORGE_TOKEN"   # read:repository, write:issue
 
-# List / filter issues
+# List / filter issues — page explicitly, never assume one call is complete
 curl -s -H "Authorization: token $TOKEN" \
-  "$FORGE/api/v1/repos/$REPO/issues?state=open&type=issues&limit=50"
+  "$FORGE/api/v1/repos/$REPO/issues?state=open&type=issues&limit=50&page=1"
 
-# Issue detail + comments
+# Issue detail + comments (comments are a collection too: pass limit/page)
 curl -s -H "Authorization: token $TOKEN" "$FORGE/api/v1/repos/$REPO/issues/<NUMBER>"
-curl -s -H "Authorization: token $TOKEN" "$FORGE/api/v1/repos/$REPO/issues/<NUMBER>/comments"
+curl -s -H "Authorization: token $TOKEN" \
+  "$FORGE/api/v1/repos/$REPO/issues/<NUMBER>/comments?limit=50&page=1"
+
+# Labels are a collection as well
+curl -s -H "Authorization: token $TOKEN" "$FORGE/api/v1/repos/$REPO/labels?limit=50&page=1"
 
 # Post a comment
 curl -s -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
   -d '{"body":"..."}' "$FORGE/api/v1/repos/$REPO/issues/<NUMBER>/comments"
 ```
+
+> [!WARNING]
+> **List and search calls are paged — one call is never the whole set.** Every
+> Gitea-family collection endpoint returns a single page, and the default page
+> size is **server-defined and can change**, so an unpaged call silently
+> truncates. This binds the **issue list, search results, label list, and
+> comment list** — `GET .../issues`, `.../issues?q=`, `.../labels`, and
+> `.../issues/<n>/comments`. Always page: pass `limit` and increment `page`
+> until a short page comes back, or follow the `Link` header / `X-Total-Count`
+> when the server sends them. Never treat page 1 as complete, and never
+> conclude "no results" (or "labels not found") from one unpaged call. Worked
+> example: an unpaged `fgj label list` returned **30 of 59** labels and produced
+> false "labels not found" errors (#197). The same rule binds the plugin's own
+> surfaces: a list UI must page internally rather than render a truncated set
+> (see #189).
 
 > [!NOTE]
 > Forgejo (`forge.example.com`) is the **primary git remote (`origin`) and

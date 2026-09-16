@@ -20,6 +20,13 @@ GitLab would need a separate API client.
 - **Live label vocabulary.** Scopes are derived from the labels actually on the
   board, so a foreign board degrades gracefully instead of failing on an
   unknown scope.
+- **Paged reads.** Issue list, keyword search, label list, and comment list are
+  all collections: each call returns **one page**, and the default page size is
+  **server-defined and can change**. Treat every list as paged
+  (`limit`/`page`, or follow `Link`/`X-Total-Count`) instead of assuming a
+  single call is complete — one unpaged call is never evidence of "no results".
+  A surface that lists results should page internally rather than render a
+  truncated set (#189).
 - **Example skills.** Our agent workflow ships under `examples/` as a starting
   point to adapt — see [`examples/README.md`](./examples/README.md).
 

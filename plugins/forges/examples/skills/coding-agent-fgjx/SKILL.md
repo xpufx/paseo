@@ -69,7 +69,29 @@ fgjx issue comment <NUMBER> --hostname forge.example.com -R your-org/your-repo -
 
 # Call raw API via fgjx (never use bare fgj api)
 fgjx api repos/your-org/your-repo/issues/<NUMBER> --hostname forge.example.com
+
+# Page a collection explicitly — `fgj api` is the raw transport, so limit/page
+# are always available even when a CLI verb does not expose them
+fgjx api 'repos/your-org/your-repo/issues?state=open&type=issues&limit=50&page=2' \
+  --hostname forge.example.com
+fgjx api 'repos/your-org/your-repo/labels?limit=50&page=2' \
+  --hostname forge.example.com
 ```
+
+> [!WARNING]
+> **List and search calls are paged — one call is never the whole set.** Every
+> Gitea-family collection endpoint returns a single page, and the default page
+> size is **server-defined and can change**, so an unpaged call silently
+> truncates. This binds the **issue list, search results, label list, and
+> comment list** — `fgjx issue list`, `issue view`'s comment history, label
+> lookups, and anything backed by `.../issues`, `.../issues?q=`, `.../labels`,
+> or `.../issues/<n>/comments`. Always page: pass `limit` and increment `page`
+> until a short page comes back, or follow the `Link` header / `X-Total-Count`
+> when the server sends them — `fgjx api '<path>?limit=50&page=N'` always
+> works whether or not the verb exposes paging flags. Never treat page 1 as
+> complete, and never conclude "no results" (or "labels not found") from one
+> unpaged call. Worked example: an unpaged `fgj label list` returned **30 of
+> 59** labels and produced false "labels not found" errors (#197).
 
 > [!NOTE]
 > `fgjx issue edit --add-label` splits comma-joined names (`--add-label 'a,b'`)

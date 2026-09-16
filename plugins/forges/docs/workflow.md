@@ -223,6 +223,15 @@ separate is what stops a fleet from colliding.
 - **Discover and claim.** Read the *entire* ticket and *entire* comment thread
   first — scope is often amended in comments. Verify no peer already claimed it,
   then post a claim comment and set `state/1-wip`.
+- **Page every list read.** Issue lists, search results, label lists, and
+  comment lists are collections: each call returns one page, and the default
+  page size is **server-defined and can change**. Pass `limit`/`page` — or follow
+  `Link`/`X-Total-Count` — until a short page comes back before concluding "no
+  results" or claiming you have read the whole thread. One unpaged call is never
+  the full set; a plugin surface that lists results should page internally
+  rather than render a truncated set (#189). See the worked example in the
+  [examples README](../examples/README.md#paged-reads-issue--search--label--comment-lists)
+  (unpaged `fgj label list` returned 30 of 59 labels, #197).
 - **Implement.** Work quietly in your own checkout. Stage explicit paths only;
   never `git add -A` in a shared tree.
 - **Hand off.** Run tests/typecheck, commit, push to the forge, then post a
