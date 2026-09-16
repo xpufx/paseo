@@ -108,35 +108,53 @@ export function darkenLabelColor(color: string | undefined | null): string | nul
 }
 
 /**
- * How a label renders: a neutral theme pill when the color is unusable, a
- * single solid pill for an unscoped name, or a two-tone pill (`scope` in the
- * darker shade, `value` in the base color) for a scoped name.
+ * One segment of a label pill: the whole name of an unscoped label, or one
+ * side of a scoped name. Colors are absent when the forge gave none, in which
+ * case the segment falls back to the neutral theme chip.
+ */
+export interface LabelChipHalf {
+  text: string;
+  background?: string;
+  textColor?: string;
+}
+
+/**
+ * How a label renders: a single-segment pill for an unscoped name, or a
+ * two-segment pill for a scoped name. A scoped name is always split, so the
+ * raw `scope/value` slash form is never rendered even when no color is known.
  */
 export type LabelChipPlan =
-  | { kind: "neutral"; label: string }
-  | { kind: "solid"; label: string; background: string; textColor: string }
-  | {
-      kind: "scoped";
-      scope: string;
-      value: string;
-      scopeBackground: string;
-      valueBackground: string;
-      textColor: string;
-    };
+  | { kind: "single"; half: LabelChipHalf }
+  | { kind: "scoped"; scope: LabelChipHalf; value: LabelChipHalf };
 
 export function planLabelChip(label: ForgeLabel): LabelChipPlan {
   const background = normalizeLabelColor(label.color);
   const textColor = labelTextColor(label.color);
-  if (!background || !textColor) return { kind: "neutral", label: label.name };
   const parts = splitScopedLabel(label.name);
-  if (!parts) return { kind: "solid", label: label.name, background, textColor };
+  if (!parts) {
+    return {
+      kind: "single",
+      half:
+        background && textColor
+          ? { text: label.name, background, textColor }
+          : { text: label.name },
+    };
+  }
+  if (!background || !textColor) {
+    return {
+      kind: "scoped",
+      scope: { text: parts.scope },
+      value: { text: parts.value },
+    };
+  }
   return {
     kind: "scoped",
-    scope: parts.scope,
-    value: parts.value,
-    scopeBackground: darkenLabelColor(label.color) ?? background,
-    valueBackground: background,
-    textColor,
+    scope: {
+      text: parts.scope,
+      background: darkenLabelColor(label.color) ?? background,
+      textColor,
+    },
+    value: { text: parts.value, background, textColor },
   };
 }
 

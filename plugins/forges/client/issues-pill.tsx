@@ -73,7 +73,7 @@ import {
 import { useActiveForgeIdentity } from "./active-forge.js";
 import { forgePillLabel } from "./pill-label.js";
 import { ForeignInlineMark } from "./foreign-link.js";
-import { LabelChip } from "./label-chip.js";
+import { LabelChip, LabelChipList } from "./label-chip.js";
 
 export const ISSUES_PILL_ID = "forges-issues";
 
@@ -390,7 +390,7 @@ function IssueRow({
   number,
   title,
   state,
-  labelDetails,
+  labels,
   repo,
   host,
   onSelect,
@@ -398,7 +398,7 @@ function IssueRow({
   number: number;
   title: string;
   state: string;
-  labelDetails: ForgeLabel[];
+  labels: ForgeLabel[];
   repo: string | null;
   host: string | null;
   onSelect: (issueNumber: number) => void;
@@ -426,13 +426,7 @@ function IssueRow({
       />
       <Pressable style={styles.rowBody} onPress={() => onSelect(number)} hitSlop={4}>
         <Text style={[styles.rowTitle, { color: colors.foreground }]}>{title}</Text>
-        {labelDetails.length > 0 ? (
-          <View style={styles.rowLabels}>
-            {labelDetails.map((label) => (
-              <LabelChip key={label.name} label={label} />
-            ))}
-          </View>
-        ) : null}
+        <LabelChipList labels={labels} style={styles.rowLabels} />
       </Pressable>
       <Button
         size="sm"
@@ -725,11 +719,7 @@ function IssueDetailView({
               subtitle={`${displayName ? `${displayName} · ` : ""}by ${issue.author} · ${formatTimestamp(issue.updatedAt)}`}
               badge={<ForgeCardChips host={activeForge?.host} access={access} />}
             />
-            <View style={styles.badgeRow}>
-              {issueLabelChips(issue).map((label) => (
-                <LabelChip key={label.name} label={label} />
-              ))}
-            </View>
+            <LabelChipList labels={issueLabelChips(issue)} style={styles.badgeRow} />
           </Card>
 
           <Card>
@@ -1406,7 +1396,7 @@ export function ForgeIssuesView({
                     number={issue.number}
                     title={issue.title}
                     state={issue.state}
-                    labelDetails={issue.labelDetails}
+                    labels={issueLabelChips(issue)}
                     repo={repo}
                     host={data?.host ?? null}
                     onSelect={setSelected}

@@ -1,5 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, ForgeIssueSchema, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, splitScopedLabel, workspaceNameKey, type ForgeIssue } from "./issues.ts";
 import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
@@ -954,31 +956,88 @@ describe("label color metadata (issue #182)", () => {
   it("plans a two-tone pill for a scoped label with a usable color", () => {
     assert.deepEqual(planLabelChip({ name: "attention/2-user", color: "b60205" }), {
       kind: "scoped",
-      scope: "attention",
-      value: "2-user",
-      scopeBackground: "#a50205",
-      valueBackground: "#b60205",
-      textColor: "#ffffff",
+      scope: { text: "attention", background: "#a50205", textColor: "#ffffff" },
+      value: { text: "2-user", background: "#b60205", textColor: "#ffffff" },
+    });
+  });
+
+  it("splits scoped names unconditionally, with or without a usable color", () => {
+    assert.deepEqual(planLabelChip({ name: "state/3-verify" }), {
+      kind: "scoped",
+      scope: { text: "state" },
+      value: { text: "3-verify" },
+    });
+    assert.deepEqual(planLabelChip({ name: "state/3-verify", color: "nope" }), {
+      kind: "scoped",
+      scope: { text: "state" },
+      value: { text: "3-verify" },
     });
   });
 
   it("plans a single solid pill for an unscoped label", () => {
     assert.deepEqual(planLabelChip({ name: "bug", color: "f9d0c4" }), {
-      kind: "solid",
-      label: "bug",
-      background: "#f9d0c4",
-      textColor: "#000000",
+      kind: "single",
+      half: { text: "bug", background: "#f9d0c4", textColor: "#000000" },
     });
   });
 
   it("falls back to the neutral chip without a usable color", () => {
-    assert.deepEqual(planLabelChip({ name: "attention/2-user" }), {
-      kind: "neutral",
-      label: "attention/2-user",
+    assert.deepEqual(planLabelChip({ name: "bug" }), {
+      kind: "single",
+      half: { text: "bug" },
     });
-    assert.deepEqual(planLabelChip({ name: "attention/2-user", color: "nope" }), {
-      kind: "neutral",
-      label: "attention/2-user",
+    assert.deepEqual(planLabelChip({ name: "bug", color: "nope" }), {
+      kind: "single",
+      half: { text: "bug" },
     });
+  });
+
+  it("never leaves a slash in a planned pill", () => {
+    for (const name of ["state/3-verify", "attention/2-user", "kind"]) {
+      const plan = planLabelChip({ name });
+      const halves = plan.kind === "scoped" ? [plan.scope, plan.value] : [plan.half];
+      for (const half of halves) {
+        assert.ok(!half.text.includes("/"), `${name} planned a raw slash segment`);
+      }
+    }
+  });
+});
+
+// The pill module is the single render path: every label surface routes through
+// LabelChip/LabelChipList, and no site splits or prints a raw label name.
+describe("label render path", () => {
+  const clientDir = [
+    join(process.cwd(), "client"),
+    join(process.cwd(), "plugins", "forges", "client"),
+  ].find((dir) => existsSync(dir));
+  assert.ok(clientDir, "forges client directory not found");
+  const sources = new Map(
+    readdirSync(clientDir)
+      .filter((file) => file.endsWith(".tsx") || file.endsWith(".ts"))
+      .map((file) => [file, readFileSync(join(clientDir, file), "utf8")]),
+  );
+
+  it("splits scoped names only inside the pill module", () => {
+    for (const [file, source] of sources) {
+      if (file === "label-chip.tsx") continue;
+      assert.doesNotMatch(source, /splitScopedLabel/, `${file} splits labels itself`);
+    }
+  });
+
+  it("routes every label list through LabelChip", () => {
+    for (const file of ["issues-pill.tsx", "board-alert.tsx"]) {
+      assert.match(sources.get(file) ?? "", /LabelChip/, `${file} must render labels via LabelChip`);
+    }
+  });
+
+  it("never renders a raw label name", () => {
+    for (const [file, source] of sources) {
+      assert.doesNotMatch(source, />\s*\{label\.name\}\s*</, `${file} renders a raw label name`);
+      assert.doesNotMatch(
+        source,
+        /<Badge[^>]*label=\{[^}]*label\.name[^}]*\}/,
+        `${file} badges a raw label name`,
+      );
+    }
   });
 });
