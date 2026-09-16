@@ -36,7 +36,7 @@ The `forges` plugin can copy this scoped label set onto a repo (Settings tab →
 | `attention/`| `0-orchestrator`, `1-agent`, `2-user`, `3-ignore`             |
 | `spec/`     | `0-needed`, `1-checklist`, `2-approved`                       |
 
-Forgejo scoped labels are exclusive per scope, so applying one evicts the
+Gitea-family scoped labels are exclusive per scope, so applying one evicts the
 previous mate in the same scope. **Keep existing** only adds missing labels.
 **Replace our scopes** additionally deletes the repo's labels that share one of
 these scopes but are not part of the set (for example a foreign

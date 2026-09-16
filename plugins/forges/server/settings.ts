@@ -4,29 +4,29 @@ import {
   createSettingsHandlers,
 } from "./vendor/paseo-plugin-helper/index.ts";
 import {
-  FORGEJO_PLUGIN_ID,
+  FORGES_PLUGIN_ID,
   activeForgeForDirectory,
-  forgejoSettingsContract,
-  type ForgejoSettings,
+  forgeSettingsContract,
+  type ForgeSettings,
 } from "../shared/issues.js";
 
-export const log = createPluginLogger(FORGEJO_PLUGIN_ID);
+export const log = createPluginLogger(FORGES_PLUGIN_ID);
 
-export const forgejoStorage = new PluginStorage<ForgejoSettings>(
-  FORGEJO_PLUGIN_ID,
+export const forgeStorage = new PluginStorage<ForgeSettings>(
+  FORGES_PLUGIN_ID,
   "settings.json",
-  { schema: forgejoSettingsContract.schema },
+  { schema: forgeSettingsContract.schema },
 );
 
 export const settingsHandlers = createSettingsHandlers(
-  forgejoSettingsContract,
-  forgejoStorage,
+  forgeSettingsContract,
+  forgeStorage,
   {
     onUpdate: (newSettings) => {
-      log.info("Forgejo settings updated via RPC:", newSettings);
+      log.info("Forge settings updated via RPC:", newSettings);
     },
     onReset: () => {
-      log.info("Forgejo settings reset to default values");
+      log.info("Forge settings reset to default values");
     },
   },
 );
@@ -40,13 +40,13 @@ export async function storedForgeSelection(
   directory: string | undefined,
 ): Promise<string | undefined> {
   if (!directory) return undefined;
-  const settings = await forgejoStorage.readAsync();
+  const settings = await forgeStorage.readAsync();
   return activeForgeForDirectory(settings, directory) ?? undefined;
 }
 
-/** Daemon-side API token for a Forgejo host. Never leaves the server. */
+/** Daemon-side API token for a forge host. Never leaves the server. */
 export async function tokenForHost(host: string): Promise<string | undefined> {
-  const settings = await forgejoStorage.readAsync();
+  const settings = await forgeStorage.readAsync();
   const token = settings.tokensByHost?.[host];
   return typeof token === "string" && token.trim() ? token.trim() : undefined;
 }

@@ -41,17 +41,17 @@ import {
   currentStateLabel,
   displayNameForDirectory,
   displayRemoteForApi,
-  deriveForgejoAccess,
+  deriveForgeAccess,
   effectiveForgeHost,
   forgeContextContract,
   forgeTargetsForWorkspace,
   formatIssueCountLabel,
   isValidForgeTarget,
-  forgejoSettingsContract,
+  forgeSettingsContract,
   installLabelsContract,
-  type ForgejoAccessInput,
-  type ForgejoAccessState,
-  type ForgejoSettings,
+  type ForgeAccessInput,
+  type ForgeAccessState,
+  type ForgeSettings,
   type InstallLabelMode,
   issueDetailContract,
   nextStateLabel,
@@ -62,7 +62,7 @@ import {
   stripAgentEnvelopeFooter,
   type AgentEnvelope,
   type ForgeRepoIdentity,
-  type ForgejoIssue,
+  type ForgeIssue,
   type IssueComment,
   type MarkdownLiteSpan,
   workspaceNameKey,
@@ -86,7 +86,7 @@ function readCachedLabel(ctx: PillLiveContext): string {
   return `${cached.count}`;
 }
 
-export function resolveForgejoLabel(ctx: PillLiveContext): string {
+export function resolveForgeLabel(ctx: PillLiveContext): string {
   return readCachedLabel(ctx);
 }
 
@@ -117,13 +117,13 @@ function useWorkspaceNameKey(workspaceId: string): string {
 /** Workspace display name everywhere: explicit label, else resolved repo. */
 function useDisplayName(workspaceId: string, inferredRepo: string | null | undefined): string | null {
   const nameKey = useWorkspaceNameKey(workspaceId);
-  const { settings } = usePluginSettings(forgejoSettingsContract);
+  const { settings } = usePluginSettings(forgeSettingsContract);
   return displayNameForDirectory(settings, nameKey, inferredRepo);
 }
 
 function useOpenIssues(workspaceId: string, agentId?: string) {
   const directory = useDirectory(workspaceId);
-  const { settings } = usePluginSettings(forgejoSettingsContract);
+  const { settings } = usePluginSettings(forgeSettingsContract);
   const forgeTarget = activeForgeForDirectory(settings, directory) ?? "";
   const query = useRpcQuery(
     openIssuesContract,
@@ -139,7 +139,7 @@ function useOpenIssues(workspaceId: string, agentId?: string) {
   return { directory, ...query };
 }
 
-export function ForgejoPill({ agentId, workspaceId, isOpen }: RenderPillProps) {
+export function ForgePill({ agentId, workspaceId, isOpen }: RenderPillProps) {
   const { colors } = usePluginTheme();
   const { isCompact } = useResponsive();
   const { Icon } = getClientHost();
@@ -158,7 +158,7 @@ export function ForgejoPill({ agentId, workspaceId, isOpen }: RenderPillProps) {
         : fullLabel;
   return (
     <View
-      accessibilityLabel={`Forgejo ${fullLabel}`}
+      accessibilityLabel={`Forge ${fullLabel}`}
       style={styles.pillContainer}
     >
       <Icon name="GitPullRequest" size={13} color={colors.foreground} />
@@ -173,7 +173,7 @@ export function ForgejoPill({ agentId, workspaceId, isOpen }: RenderPillProps) {
   );
 }
 
-function issueMatchesQuery(issue: ForgejoIssue, query: string): boolean {
+function issueMatchesQuery(issue: ForgeIssue, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   const digits = q.startsWith("#") ? q.slice(1) : q;
@@ -188,7 +188,7 @@ function issueMatchesQuery(issue: ForgejoIssue, query: string): boolean {
  * Markdown reference for pasting into chat, e.g. `[#30 Turn count](url)`.
  * The repo web URL is derived from the RPC repo when available.
  */
-function issueMarkdownRef(issue: ForgejoIssue, repo: string | null, host: string | null): string {
+function issueMarkdownRef(issue: ForgeIssue, repo: string | null, host: string | null): string {
   const ref = `#${issue.number}: ${issue.title}`;
   if (!repo || !host) return ref;
   return `[${ref}](https://${host}/${repo}/issues/${issue.number})`;
@@ -206,7 +206,7 @@ function formatTimestamp(value: string | undefined | null): string {
  * both the issues and settings pages (issue #152). The auth chip is what
  * tells the user whether edits are enabled on a public repo.
  */
-function RepoAccessChips({ access }: { access: ForgejoAccessState }) {
+function RepoAccessChips({ access }: { access: ForgeAccessState }) {
   return (
     <View style={styles.accessChips}>
       {access.visibilityLabel ? (
@@ -226,9 +226,9 @@ function RepoAccessChips({ access }: { access: ForgejoAccessState }) {
 }
 
 /** Single derivation both pages render from: visibility × token state. */
-function useRepoAccess(input: ForgejoAccessInput): ForgejoAccessState {
+function useRepoAccess(input: ForgeAccessInput): ForgeAccessState {
   return useMemo(
-    () => deriveForgejoAccess(input),
+    () => deriveForgeAccess(input),
     [input.repoPublic, input.tokenPresent, input.tokenValid],
   );
 }
@@ -291,7 +291,7 @@ function renderInlineSpans(
 }
 
 /**
- * Markdown-lite for Forgejo bodies: headings, paragraphs, lists, links,
+ * Markdown-lite for forge bodies: headings, paragraphs, lists, links,
  * inline code/emphasis, and fenced code blocks. Outer Text stays
  * selectable; links open on tap with copy fallback. Forge issue links that
  * point outside the active repo get an inline `foreign` marker.
@@ -510,7 +510,7 @@ function ReadOnlyNotice({
   capability,
   onAction,
 }: {
-  access: ForgejoAccessState;
+  access: ForgeAccessState;
   capability: string;
   onAction: () => void;
 }) {
@@ -792,7 +792,7 @@ function IssueDetailView({
   );
 }
 
-export function ForgejoIssuesView({
+export function ForgeIssuesView({
   agentId,
   workspaceId,
   onClose,
@@ -812,7 +812,7 @@ export function ForgejoIssuesView({
   const projectRootPath = useWorkspaceRoot(workspaceId);
   const nameKey = workspaceNameKey(directory, projectRootPath);
   const activeForge = useActiveForgeIdentity(directory);
-  const { settings, updateSettings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
+  const { settings, updateSettings, updateSettingsAsync } = usePluginSettings(forgeSettingsContract);
   // Git-origin context queried separately so the token/name fields render from
   // persisted settings even while the issues query is loading or unavailable.
   const forgeContext = useRpcQuery(forgeContextContract, { directory: directory ?? undefined });
@@ -889,7 +889,7 @@ export function ForgejoIssuesView({
     setFormSaving(true);
     setFormError(null);
     try {
-      const updates: Partial<ForgejoSettings> = {};
+      const updates: Partial<ForgeSettings> = {};
       if (tokenDraft != null && effectiveHost) {
         const next = { ...(settings.tokensByHost ?? {}) };
         if (tokenDraft.trim()) next[effectiveHost] = tokenDraft.trim();
@@ -943,7 +943,7 @@ export function ForgejoIssuesView({
   const [activeTab, setActiveTab] = useState("issues");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
-  const [extraIssues, setExtraIssues] = useState<ForgejoIssue[]>([]);
+  const [extraIssues, setExtraIssues] = useState<ForgeIssue[]>([]);
   const [nextPage, setNextPage] = useState(2);
   const [extraHasMore, setExtraHasMore] = useState(false);
   const [moreError, setMoreError] = useState<string | null>(null);
@@ -960,7 +960,7 @@ export function ForgejoIssuesView({
         setMoreError(result.error);
         return;
       }
-      setExtraIssues((prev) => [...prev, ...result.issues.filter((issue: ForgejoIssue) => !prev.some((p) => p.number === issue.number))]);
+      setExtraIssues((prev) => [...prev, ...result.issues.filter((issue: ForgeIssue) => !prev.some((p) => p.number === issue.number))]);
       setNextPage(result.page + 1);
       setExtraHasMore(result.hasMore);
       setMoreError(null);
@@ -974,7 +974,7 @@ export function ForgejoIssuesView({
     [data, extraIssues],
   );
   const issues = useMemo(
-    () => pool.filter((issue: ForgejoIssue) => issueMatchesQuery(issue, query)),
+    () => pool.filter((issue: ForgeIssue) => issueMatchesQuery(issue, query)),
     [pool, query],
   );
   const hasMore = extraHasMore || (data && !data.error ? data.hasMore : false);
@@ -1104,7 +1104,7 @@ export function ForgejoIssuesView({
               <TextInput
                 value={tokenValue}
                 onChangeText={setTokenDraft}
-                placeholder="Forgejo API token"
+                placeholder="Forge API token"
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -1231,7 +1231,7 @@ export function ForgejoIssuesView({
           />
           <Card variant="elevated">
             <Card.Header
-              title={displayName ? `Issues · ${displayName}` : "Forgejo Issues"}
+              title={displayName ? `Issues · ${displayName}` : "Forge Issues"}
               badge={<RepoAccessChips access={access} />}
               subtitle={
                 data && !data.error
@@ -1261,7 +1261,7 @@ export function ForgejoIssuesView({
               />
             ) : null}
             {!failed
-              ? issues.map((issue: ForgejoIssue) => (
+              ? issues.map((issue: ForgeIssue) => (
                   <IssueRow
                     key={issue.number}
                     number={issue.number}
@@ -1306,12 +1306,12 @@ export function ForgejoIssuesView({
   );
 }
 
-export function ForgejoIssuesModal({ agentId, workspaceId, close }: RenderModalProps) {
-  return <ForgejoIssuesView agentId={agentId} workspaceId={workspaceId} onClose={close} />;
+export function ForgeIssuesModal({ agentId, workspaceId, close }: RenderModalProps) {
+  return <ForgeIssuesView agentId={agentId} workspaceId={workspaceId} onClose={close} />;
 }
 
-export function ForgejoIssuesPanel({ workspaceId }: { workspaceId: string }) {
-  return <ForgejoIssuesView workspaceId={workspaceId} />;
+export function ForgeIssuesPanel({ workspaceId }: { workspaceId: string }) {
+  return <ForgeIssuesView workspaceId={workspaceId} />;
 }
 
 const styles = StyleSheet.create({

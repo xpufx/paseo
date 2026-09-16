@@ -7,7 +7,7 @@ import {
   liveScopesFromLabels,
   normalizeIssueNumber,
   parseAgentEnvelope,
-  parseForgejoRemote,
+  parseForgeRemote,
   planLabelSetInstall,
   rankIssues,
   resolveForgeTarget,
@@ -27,7 +27,7 @@ import {
   type SetLabelOutput,
 } from "../shared/issues.js";
 import type { RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
-import { ForgejoClient, type ForgejoIssueDetail } from "./forge-client.js";
+import { ForgeClient, type ForgejoIssueDetail } from "./forge-client.js";
 import { gitOriginForDirectory } from "./git-origin.js";
 
 const log = createPluginLogger("forges");
@@ -36,15 +36,15 @@ type OpenIssuesResult = RpcOutput<typeof openIssuesContract>;
 import { openIssuesContract } from "../shared/issues.js";
 
 const listFailureCounts = new Map<string, number>();
-const forgejoHostCache = new Map<string, boolean>();
+const forgeHostCache = new Map<string, boolean>();
 const quietHostLogged = new Set<string>();
 
 function listKey(host: string, repo: string): string {
   return `${host}/${repo}`;
 }
 
-async function probeForgejoHost(host: string): Promise<boolean> {
-  const cached = forgejoHostCache.get(host);
+async function probeForgeHost(host: string): Promise<boolean> {
+  const cached = forgeHostCache.get(host);
   if (cached !== undefined) return cached;
   let speaks = false;
   try {
@@ -67,7 +67,7 @@ async function probeForgejoHost(host: string): Promise<boolean> {
   } catch {
     speaks = false;
   }
-  forgejoHostCache.set(host, speaks);
+  forgeHostCache.set(host, speaks);
   return speaks;
 }
 
@@ -116,8 +116,8 @@ async function resolveRepo(
   };
 }
 
-async function clientFor(host: string): Promise<ForgejoClient> {
-  return new ForgejoClient({ host, token: await tokenForHost(host) });
+async function clientFor(host: string): Promise<ForgeClient> {
+  return new ForgeClient({ host, token: await tokenForHost(host) });
 }
 
 /**
@@ -137,7 +137,7 @@ export async function handleForgeContext(
     return { directory: null, derivedRemote: null, derivedHost: null, derivedRepo: null };
   }
   const derivedRemote = await gitOriginForDirectory(directory);
-  const parsed = parseForgejoRemote(derivedRemote);
+  const parsed = parseForgeRemote(derivedRemote);
   return {
     directory,
     derivedRemote,
@@ -147,7 +147,7 @@ export async function handleForgeContext(
 }
 
 /**
- * List open Forgejo issues for the repo backing a workspace directory.
+ * List open forge issues for the repo backing a workspace directory.
  * Resolves owner/repo from the directory's git origin remote, fetches via
  * the embedded API client, and never throws: failures surface as an
  * error field so the pill renders a placeholder instead of breaking.
@@ -171,20 +171,20 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     };
   }
   const { host, repo, derivedRemote, remoteSource } = resolved;
-  if (!(await probeForgejoHost(host))) {
+  if (!(await probeForgeHost(host))) {
     if (!quietHostLogged.has(host)) {
       quietHostLogged.add(host);
-      log.info("skipping non-Forgejo remote", { repo, host });
+      log.info("skipping non-forge remote", { repo, host });
     } else {
-      log.debug("skipping non-Forgejo remote", { repo, host });
+      log.debug("skipping non-forge remote", { repo, host });
     }
     const message = remoteSource === "explicit"
-      ? `Selected forge ${host}/${repo} is unreachable or not a Forgejo/Gitea API host`
-      : "Not a Forgejo repo for this workspace";
+      ? `Selected forge ${host}/${repo} is unreachable or not a forge API host`
+      : "Not a forge repo for this workspace";
     return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenPresent: false, tokenValid: null, error: message };
   }
   const client = await clientFor(host);
-  const anonClient = new ForgejoClient({ host });
+  const anonClient = new ForgeClient({ host });
   const tokenPresent = client.hasToken();
   const page = input?.page ?? 1;
   const [paged, openIssueCount, repoPublic, tokenValid] = await Promise.all([
@@ -290,7 +290,7 @@ export async function handleIssueDetail(
     const tokenPresent = client.hasToken();
     const [issue, repoPublic, tokenValid] = await Promise.all([
       fetchIssueDetail(repo, host, issueNumber),
-      new ForgejoClient({ host }).repoIsPublic(repo),
+      new ForgeClient({ host }).repoIsPublic(repo),
       client.tokenIsValid(),
     ]);
     if (!issue) {

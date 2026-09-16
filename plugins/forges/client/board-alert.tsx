@@ -30,7 +30,7 @@ function transformTextItem<T extends { text: string }>(item: T) {
     items: [
       {
         type: "plugin" as const,
-        kind: "forgejo-board-alert",
+        kind: "forge-board-alert",
         version: 1,
         data: { ...parsed, text: item.text },
       },
@@ -40,19 +40,19 @@ function transformTextItem<T extends { text: string }>(item: T) {
 
 /**
  * Board-alert timeline transformer: raw autonomous-check dumps become
- * typed `forgejo-board-alert` items so the composer renders the
+ * typed `forge-board-alert` items so the composer renders the
  * structured timeline card below instead of a text wall.
  */
-export const forgejoBoardAlertUserTransformer: PluginTimelineTransformerContribution<"user_message"> = {
-  id: "forgejo-board-alert-user",
+export const forgeBoardAlertUserTransformer: PluginTimelineTransformerContribution<"user_message"> = {
+  id: "forge-board-alert-user",
   query: { itemType: "user_message" },
   transform({ item }) {
     return transformTextItem(item);
   },
 };
 
-export const forgejoBoardAlertAssistantTransformer: PluginTimelineTransformerContribution<"assistant_message"> = {
-  id: "forgejo-board-alert-assistant",
+export const forgeBoardAlertAssistantTransformer: PluginTimelineTransformerContribution<"assistant_message"> = {
+  id: "forge-board-alert-assistant",
   query: { itemType: "assistant_message" },
   transform({ item }) {
     return transformTextItem(item);
@@ -111,7 +111,7 @@ function BoardAlertIssueRow({
   );
 }
 
-export function ForgejoBoardAlertCard({
+export function ForgeBoardAlertCard({
   item,
   theme,
   agentId,
@@ -134,7 +134,7 @@ export function ForgejoBoardAlertCard({
       <View style={styles.header}>
         <Icon name="GitPullRequest" size={14} color={theme.colors.accent} />
         <Text style={[styles.title, { color: theme.colors.foreground }]}>
-          Forgejo Board Alert
+          Forge Board Alert
         </Text>
         <Badge
           variant="warning"
@@ -155,17 +155,17 @@ export function ForgejoBoardAlertCard({
         ))}
       </View>
       <Text style={[styles.footer, { color: theme.colors.foregroundMuted }]}>
-        via forgejo
+        via forge
       </Text>
     </View>
   );
 }
 
-export const forgejoBoardAlertRenderer = {
-  kind: "forgejo-board-alert",
+export const forgeBoardAlertRenderer = {
+  kind: "forge-board-alert",
   version: 1,
   schema: boardAlertCardSchema,
-  Component: ForgejoBoardAlertCard,
+  Component: ForgeBoardAlertCard,
 };
 
 const styles = StyleSheet.create({

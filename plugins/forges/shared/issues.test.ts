@@ -1,13 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, forgejoIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel, workspaceNameKey } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveForgeTarget, scopeOfLabel, workspaceNameKey } from "./issues.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
 const REAL_HOST = "forge.example.com";
 
-describe("parseForgejoRemote accepted forms", () => {
+describe("parseForgeRemote accepted forms", () => {
   it("parses scp-like SSH-alias remotes", () => {
-    assert.deepEqual(parseForgejoRemote(ALIAS_REMOTE), {
+    assert.deepEqual(parseForgeRemote(ALIAS_REMOTE), {
       host: "forge-alias",
       owner: "your-org",
       repo: "your-repo",
@@ -15,7 +15,7 @@ describe("parseForgejoRemote accepted forms", () => {
   });
 
   it("parses full ssh:// URLs", () => {
-    assert.deepEqual(parseForgejoRemote(`ssh://git@${REAL_HOST}:222/your-org/your-repo.git`), {
+    assert.deepEqual(parseForgeRemote(`ssh://git@${REAL_HOST}:222/your-org/your-repo.git`), {
       host: REAL_HOST,
       owner: "your-org",
       repo: "your-repo",
@@ -23,7 +23,7 @@ describe("parseForgejoRemote accepted forms", () => {
   });
 
   it("parses https URLs", () => {
-    assert.deepEqual(parseForgejoRemote(`https://${REAL_HOST}/your-org/your-repo.git`), {
+    assert.deepEqual(parseForgeRemote(`https://${REAL_HOST}/your-org/your-repo.git`), {
       host: REAL_HOST,
       owner: "your-org",
       repo: "your-repo",
@@ -31,40 +31,40 @@ describe("parseForgejoRemote accepted forms", () => {
   });
 
   it("rejects garbage input", () => {
-    assert.equal(parseForgejoRemote(null), null);
-    assert.equal(parseForgejoRemote(""), null);
-    assert.equal(parseForgejoRemote("not-a-remote"), null);
+    assert.equal(parseForgeRemote(null), null);
+    assert.equal(parseForgeRemote(""), null);
+    assert.equal(parseForgeRemote("not-a-remote"), null);
   });
 });
 
-describe("resolveForgejoRepo precedence", () => {
+describe("resolveForgeRepo precedence", () => {
   it("explicit full URL beats the git remote", () => {
     assert.deepEqual(
-      resolveForgejoRepo(`https://${REAL_HOST}/your-org/your-repo.git`, ALIAS_REMOTE),
+      resolveForgeRepo(`https://${REAL_HOST}/your-org/your-repo.git`, ALIAS_REMOTE),
       { host: REAL_HOST, repo: "your-org/your-repo" },
     );
   });
 
   it("explicit scp-like URL beats the git remote", () => {
     assert.deepEqual(
-      resolveForgejoRepo("git@forge.example.com:other/project.git", ALIAS_REMOTE),
+      resolveForgeRepo("git@forge.example.com:other/project.git", ALIAS_REMOTE),
       { host: "forge.example.com", repo: "other/project" },
     );
   });
 
   it("explicit bare owner/repo borrows the git-remote host", () => {
-    assert.deepEqual(resolveForgejoRepo("your-org/your-repo", ALIAS_REMOTE), {
+    assert.deepEqual(resolveForgeRepo("your-org/your-repo", ALIAS_REMOTE), {
       host: "forge-alias",
       repo: "your-org/your-repo",
     });
   });
 
   it("falls back to the git remote when no explicit value", () => {
-    assert.deepEqual(resolveForgejoRepo(undefined, ALIAS_REMOTE), {
+    assert.deepEqual(resolveForgeRepo(undefined, ALIAS_REMOTE), {
       host: "forge-alias",
       repo: "your-org/your-repo",
     });
-    assert.deepEqual(resolveForgejoRepo("  ", ALIAS_REMOTE), {
+    assert.deepEqual(resolveForgeRepo("  ", ALIAS_REMOTE), {
       host: "forge-alias",
       repo: "your-org/your-repo",
     });
@@ -72,15 +72,15 @@ describe("resolveForgejoRepo precedence", () => {
 
   it("explicit wins even without a git remote", () => {
     assert.deepEqual(
-      resolveForgejoRepo(`https://${REAL_HOST}/your-org/your-repo`, null),
+      resolveForgeRepo(`https://${REAL_HOST}/your-org/your-repo`, null),
       { host: REAL_HOST, repo: "your-org/your-repo" },
     );
   });
 
   it("returns null when nothing resolves", () => {
-    assert.equal(resolveForgejoRepo(null, null), null);
-    assert.equal(resolveForgejoRepo("garbage!!!", undefined), null);
-    assert.equal(resolveForgejoRepo("your-org/your-repo", null), null);
+    assert.equal(resolveForgeRepo(null, null), null);
+    assert.equal(resolveForgeRepo("garbage!!!", undefined), null);
+    assert.equal(resolveForgeRepo("your-org/your-repo", null), null);
   });
 });
 
@@ -483,7 +483,7 @@ describe("repo access state matrix (issue #152)", () => {
 
   for (const testCase of cases) {
     it(testCase.name, () => {
-      const access = deriveForgejoAccess(testCase.input);
+      const access = deriveForgeAccess(testCase.input);
       assert.equal(access.visibility, testCase.visibility);
       assert.equal(access.auth, testCase.auth);
       assert.equal(access.canEdit, testCase.canEdit);
@@ -491,7 +491,7 @@ describe("repo access state matrix (issue #152)", () => {
   }
 
   it("enables edits for a public repo holding a valid token (the third state)", () => {
-    const access = deriveForgejoAccess({ repoPublic: true, tokenPresent: true, tokenValid: true });
+    const access = deriveForgeAccess({ repoPublic: true, tokenPresent: true, tokenValid: true });
     assert.equal(access.canEdit, true);
     assert.equal(access.visibilityLabel, "public");
     assert.equal(access.authLabel, "Authenticated");
@@ -499,28 +499,28 @@ describe("repo access state matrix (issue #152)", () => {
   });
 
   it("keeps edit capability when visibility cannot be probed but the token is valid", () => {
-    const access = deriveForgejoAccess({ repoPublic: null, tokenPresent: true, tokenValid: true });
+    const access = deriveForgeAccess({ repoPublic: null, tokenPresent: true, tokenValid: true });
     assert.equal(access.visibility, "unknown");
     assert.equal(access.visibilityLabel, null);
     assert.equal(access.canEdit, true);
   });
 
   it("treats a present-but-unprobed token as unverified and read-only", () => {
-    const access = deriveForgejoAccess({ repoPublic: false, tokenPresent: true, tokenValid: null });
+    const access = deriveForgeAccess({ repoPublic: false, tokenPresent: true, tokenValid: null });
     assert.equal(access.auth, "unknown");
     assert.equal(access.canEdit, false);
     assert.equal(access.authVariant, "warning");
   });
 
   it("stays read-only with no probes at all", () => {
-    const access = deriveForgejoAccess();
+    const access = deriveForgeAccess();
     assert.equal(access.visibility, "unknown");
     assert.equal(access.auth, "anonymous");
     assert.equal(access.canEdit, false);
   });
 
   it("keeps chips and summary consistent for one derived state", () => {
-    const access = deriveForgejoAccess({ repoPublic: true, tokenPresent: true, tokenValid: false });
+    const access = deriveForgeAccess({ repoPublic: true, tokenPresent: true, tokenValid: false });
     assert.equal(access.visibilityLabel, "public");
     assert.equal(access.authLabel, "Token rejected");
     assert.equal(access.authVariant, "danger");
@@ -529,37 +529,37 @@ describe("repo access state matrix (issue #152)", () => {
   });
 });
 
-describe("extractBareForgejoIssueUrls quoted-content guard (issue #143)", () => {
+describe("extractBareForgeIssueUrls quoted-content guard (issue #143)", () => {
   const url = (n: number) => `https://${REAL_HOST}/oktay/2fado/issues/${n}`;
   it("extracts bare prose links", () => {
-    const links = extractBareForgejoIssueUrls(`See ${url(33)} for details`);
+    const links = extractBareForgeIssueUrls(`See ${url(33)} for details`);
     assert.deepEqual(links.map((link) => link.number), [33]);
   });
   it("skips markdown-linked URLs rendered inline by the card", () => {
-    const links = extractBareForgejoIssueUrls(`Pulse explore: [Issue #144 (forge.example.com)](${url(144)}) — done`);
+    const links = extractBareForgeIssueUrls(`Pulse explore: [Issue #144 (forge.example.com)](${url(144)}) — done`);
     assert.deepEqual(links, []);
   });
   it("ignores fenced code blocks", () => {
-    const links = extractBareForgejoIssueUrls(`Example:\n\`\`\`\n${url(33)}\n\`\`\`\nDone`);
+    const links = extractBareForgeIssueUrls(`Example:\n\`\`\`\n${url(33)}\n\`\`\`\nDone`);
     assert.deepEqual(links, []);
   });
   it("ignores inline code spans", () => {
-    const links = extractBareForgejoIssueUrls(`Run \`${url(33)}\` to fetch`);
+    const links = extractBareForgeIssueUrls(`Run \`${url(33)}\` to fetch`);
     assert.deepEqual(links, []);
   });
   it("keeps bare prose links next to tables and markdown links", () => {
-    const links = extractBareForgejoIssueUrls(
+    const links = extractBareForgeIssueUrls(
       `See ${url(42)} first\n\n| [#33](${url(33)}) | mirror readiness |\n`,
     );
     assert.deepEqual(links.map((link) => link.number), [42]);
   });
 });
 
-describe("extractForgejoIssueUrls comment anchors (issue #154)", () => {
+describe("extractForgeIssueUrls comment anchors (issue #154)", () => {
   const url = (n: number) => `https://${REAL_HOST}/your-org/your-repo/issues/${n}`;
 
   it("keeps the #issuecomment anchor in the url and exposes its id", () => {
-    const links = extractBareForgejoIssueUrls(`See ${url(152)}#issuecomment-99001 for details`);
+    const links = extractBareForgeIssueUrls(`See ${url(152)}#issuecomment-99001 for details`);
     assert.equal(links.length, 1);
     assert.equal(links[0].number, 152);
     assert.equal(links[0].commentId, 99001);
@@ -567,20 +567,20 @@ describe("extractForgejoIssueUrls comment anchors (issue #154)", () => {
   });
 
   it("leaves non-anchored urls unchanged without a commentId", () => {
-    const links = extractBareForgejoIssueUrls(`See ${url(152)} for details`);
+    const links = extractBareForgeIssueUrls(`See ${url(152)} for details`);
     assert.equal(links.length, 1);
     assert.equal(links[0].url, url(152));
     assert.equal(links[0].commentId, undefined);
   });
 
   it("populates the anchor through the non-bare extractor too", () => {
-    const links = extractForgejoIssueUrls(`${url(152)}#issuecomment-99001`);
+    const links = extractForgeIssueUrls(`${url(152)}#issuecomment-99001`);
     assert.equal(links[0].commentId, 99001);
     assert.equal(links[0].url, `${url(152)}#issuecomment-99001`);
   });
 
   it("still skips markdown-linked anchored urls as bare rows", () => {
-    const links = extractBareForgejoIssueUrls(`[comment](${url(152)}#issuecomment-99001)`);
+    const links = extractBareForgeIssueUrls(`[comment](${url(152)}#issuecomment-99001)`);
     assert.deepEqual(links, []);
   });
 });
@@ -624,7 +624,7 @@ describe("cross-repo link classification (issue #108)", () => {
   });
 
   it("reuses the extraction, comment anchor and all, without regressing commentId", () => {
-    const anchored = forgejoIssueLinkFromUrl(`${urlFor(152)}#issuecomment-99001`);
+    const anchored = forgeIssueLinkFromUrl(`${urlFor(152)}#issuecomment-99001`);
     assert.ok(anchored);
     assert.equal(anchored.commentId, 99001);
     assert.equal(anchored.url, `${urlFor(152)}#issuecomment-99001`);

@@ -3,7 +3,7 @@ import { createPluginLogger } from "./server/vendor/paseo-plugin-helper/index.ts
 import {
   addCommentContract,
   forgeContextContract,
-  forgejoSettingsContract,
+  forgeSettingsContract,
   installLabelsContract,
   issueDetailContract,
   openIssuesContract,
@@ -28,9 +28,9 @@ export default function contribute(server: PluginServerContext) {
   server.handle(setLabelContract, handleSetLabel);
   server.handle(addCommentContract, handleAddComment);
   server.handle(installLabelsContract, handleInstallLabels);
-  server.handle(forgejoSettingsContract.get, settingsHandlers.get);
-  server.handle(forgejoSettingsContract.update, settingsHandlers.update);
-  server.handle(forgejoSettingsContract.reset, settingsHandlers.reset);
+  server.handle(forgeSettingsContract.get, settingsHandlers.get);
+  server.handle(forgeSettingsContract.update, settingsHandlers.update);
+  server.handle(forgeSettingsContract.reset, settingsHandlers.reset);
   log.info("forges server handlers registered");
   return () => {};
 }

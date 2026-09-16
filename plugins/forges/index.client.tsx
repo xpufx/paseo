@@ -7,52 +7,52 @@ import {
 } from "./client/vendor/paseo-plugin-helper/index.ts";
 import {
   ISSUES_PILL_ID,
-  ForgejoPill,
-  ForgejoIssuesModal,
-  ForgejoIssuesPanel,
-  resolveForgejoLabel,
+  ForgePill,
+  ForgeIssuesModal,
+  ForgeIssuesPanel,
+  resolveForgeLabel,
 } from "./client/issues-pill.js";
 import {
-  forgejoLinkUserTransformer,
-  forgejoLinkAssistantTransformer,
-  forgejoLinkRenderer,
+  forgeLinkUserTransformer,
+  forgeLinkAssistantTransformer,
+  forgeLinkRenderer,
 } from "./client/linkifier.js";
 import {
-  forgejoBoardAlertUserTransformer,
-  forgejoBoardAlertAssistantTransformer,
-  forgejoBoardAlertRenderer,
+  forgeBoardAlertUserTransformer,
+  forgeBoardAlertAssistantTransformer,
+  forgeBoardAlertRenderer,
 } from "./client/board-alert.js";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
 export default function contribute(client: PluginClientContext) {
-  const removeUserLink = client.addTimelineTransformer(forgejoLinkUserTransformer);
-  const removeAssistantLink = client.addTimelineTransformer(forgejoLinkAssistantTransformer);
-  const removeLinkRenderer = client.addTimelineRenderer(forgejoLinkRenderer);
-  const removeBoardAlertUser = client.addTimelineTransformer(forgejoBoardAlertUserTransformer);
-  const removeBoardAlertAssistant = client.addTimelineTransformer(forgejoBoardAlertAssistantTransformer);
-  const removeBoardAlertRenderer = client.addTimelineRenderer(forgejoBoardAlertRenderer);
+  const removeUserLink = client.addTimelineTransformer(forgeLinkUserTransformer);
+  const removeAssistantLink = client.addTimelineTransformer(forgeLinkAssistantTransformer);
+  const removeLinkRenderer = client.addTimelineRenderer(forgeLinkRenderer);
+  const removeBoardAlertUser = client.addTimelineTransformer(forgeBoardAlertUserTransformer);
+  const removeBoardAlertAssistant = client.addTimelineTransformer(forgeBoardAlertAssistantTransformer);
+  const removeBoardAlertRenderer = client.addTimelineRenderer(forgeBoardAlertRenderer);
 
   const removePill = registerComposerPill(client, {
     id: ISSUES_PILL_ID,
     title: "issues",
     compactTitle: "iss",
-    modalTitle: "Forgejo Issues",
+    modalTitle: "Forge Issues",
     modalIcon: "GitPullRequest",
     icon: "GitPullRequest",
-    resolveLabel: (ctx) => resolveForgejoLabel(ctx),
+    resolveLabel: (ctx) => resolveForgeLabel(ctx),
     refreshIntervalMs: 0,
-    renderPill: (props) => <ForgejoPill {...props} />,
-    renderModal: (props) => <ForgejoIssuesModal {...props} />,
+    renderPill: (props) => <ForgePill {...props} />,
+    renderModal: (props) => <ForgeIssuesModal {...props} />,
   });
 
   const removePanel = client.addWorkspacePanel({
     id: "forges-issues",
-    title: "Forgejo Issues",
+    title: "Forge Issues",
     icon: "GitPullRequest",
     context: "workspace",
     locations: ["workspace", "explorer"],
-    Component: ForgejoIssuesPanel,
+    Component: ForgeIssuesPanel,
   });
 
   return () => {

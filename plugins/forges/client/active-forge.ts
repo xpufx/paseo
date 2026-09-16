@@ -4,7 +4,7 @@ import type { PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import {
   activeForgeForDirectory,
   forgeContextContract,
-  forgejoSettingsContract,
+  forgeSettingsContract,
   resolveForgeTarget,
   type ForgeRepoIdentity,
 } from "../shared/issues.js";
@@ -31,7 +31,7 @@ export function useAgentDirectory(agentId: string): string | undefined {
 export function useActiveForgeIdentity(
   directory: string | undefined | null,
 ): ForgeRepoIdentity | null {
-  const { settings } = usePluginSettings(forgejoSettingsContract);
+  const { settings } = usePluginSettings(forgeSettingsContract);
   const context = useRpcQuery(forgeContextContract, { directory: directory ?? undefined });
   const target = activeForgeForDirectory(settings, directory) ?? "";
   const derivedRemote = context.data?.derivedRemote ?? null;

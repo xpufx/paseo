@@ -12,16 +12,16 @@ import { copyToClipboard } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   classifyForgeLink,
   classifyForgeUrl,
-  extractBareForgejoIssueUrls,
+  extractBareForgeIssueUrls,
   parseMarkdownLite,
   type ForgeRepoIdentity,
-  type ForgejoIssueLink,
+  type ForgeIssueLink,
   type MarkdownLiteSpan,
 } from "../shared/issues.js";
 import { useActiveForgeIdentityForAgent } from "./active-forge.js";
 import { FOREIGN_LINK_HINT, ForeignInlineMark, ForeignLinkBadge } from "./foreign-link.js";
 
-const ForgejoIssueLinkSchema = z.object({
+const ForgeIssueLinkSchema = z.object({
   text: z.string(),
   links: z.array(
     z.object({
@@ -34,16 +34,16 @@ const ForgejoIssueLinkSchema = z.object({
     }),
   ),
 });
-type ForgejoIssueLinkData = z.infer<typeof ForgejoIssueLinkSchema>;
+type ForgeIssueLinkData = z.infer<typeof ForgeIssueLinkSchema>;
 
 function transformTextItem<T extends { text: string }>(item: T) {
-  const links = extractBareForgejoIssueUrls(item.text);
+  const links = extractBareForgeIssueUrls(item.text);
   if (links.length === 0) return undefined;
   return {
     items: [
       {
         type: "plugin" as const,
-        kind: "forgejo-issue-link",
+        kind: "forge-issue-link",
         version: 1,
         data: {
           text: item.text,
@@ -62,20 +62,20 @@ function transformTextItem<T extends { text: string }>(item: T) {
 }
 
 /**
- * Timeline linkifier: any chat message carrying Forgejo issue URLs gets a
+ * Timeline linkifier: any chat message carrying forge issue URLs gets a
  * compact link card alongside it. Both user and assistant messages are
  * covered; messages without issue URLs pass through untouched.
  */
-export const forgejoLinkUserTransformer: PluginTimelineTransformerContribution<"user_message"> = {
-  id: "forgejo-issue-link-user",
+export const forgeLinkUserTransformer: PluginTimelineTransformerContribution<"user_message"> = {
+  id: "forge-issue-link-user",
   query: { itemType: "user_message" },
   transform({ item }) {
     return transformTextItem(item);
   },
 };
 
-export const forgejoLinkAssistantTransformer: PluginTimelineTransformerContribution<"assistant_message"> = {
-  id: "forgejo-issue-link-assistant",
+export const forgeLinkAssistantTransformer: PluginTimelineTransformerContribution<"assistant_message"> = {
+  id: "forge-issue-link-assistant",
   query: { itemType: "assistant_message" },
   transform({ item }) {
     return transformTextItem(item);
@@ -88,7 +88,7 @@ function IssueLinkRow({
   foreign,
 }: {
   theme: PluginTheme;
-  link: ForgejoIssueLink;
+  link: ForgeIssueLink;
   foreign: boolean;
 }) {
   const open = () => {
@@ -178,7 +178,7 @@ function FormattedSpans({
   );
 }
 
-function ForgejoIssueLinks({ theme, item, agentId }: PluginTimelineItemProps<ForgejoIssueLinkData>) {
+function ForgeIssueLinks({ theme, item, agentId }: PluginTimelineItemProps<ForgeIssueLinkData>) {
   const activeForge = useActiveForgeIdentityForAgent(agentId);
   const blocks = parseMarkdownLite(item.data.text);
   return (
@@ -234,11 +234,11 @@ function ForgejoIssueLinks({ theme, item, agentId }: PluginTimelineItemProps<For
   );
 }
 
-export const forgejoLinkRenderer: PluginTimelineRendererContribution<typeof ForgejoIssueLinkSchema> = {
-  kind: "forgejo-issue-link",
+export const forgeLinkRenderer: PluginTimelineRendererContribution<typeof ForgeIssueLinkSchema> = {
+  kind: "forge-issue-link",
   version: 1,
-  schema: ForgejoIssueLinkSchema,
-  Component: ForgejoIssueLinks,
+  schema: ForgeIssueLinkSchema,
+  Component: ForgeIssueLinks,
 };
 
 const styles = StyleSheet.create({

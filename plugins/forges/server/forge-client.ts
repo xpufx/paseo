@@ -1,6 +1,6 @@
-import { ForgejoIssueSchema, type ForgejoIssue } from "../shared/issues.js";
+import { ForgeIssueSchema, type ForgeIssue } from "../shared/issues.js";
 
-export interface ForgejoClientOptions {
+export interface ForgeClientOptions {
   host: string;
   token?: string;
   timeoutMs?: number;
@@ -120,12 +120,12 @@ function toDetail(repo: string, host: string, payload: unknown): ForgejoIssueDet
   };
 }
 
-export class ForgejoClient {
+export class ForgeClient {
   private readonly baseUrl: string;
   private readonly token?: string;
   private readonly timeoutMs: number;
 
-  constructor(options: ForgejoClientOptions) {
+  constructor(options: ForgeClientOptions) {
     this.baseUrl = `https://${options.host}/api/v1`;
     this.token = options.token?.trim() ? options.token.trim() : undefined;
     this.timeoutMs = options.timeoutMs ?? 15000;
@@ -209,12 +209,12 @@ export class ForgejoClient {
     return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : null;
   }
 
-  async listIssues(repo: string, page = 1, limit = 50): Promise<{ issues: ForgejoIssue[]; hasMore: boolean } | null> {
+  async listIssues(repo: string, page = 1, limit = 50): Promise<{ issues: ForgeIssue[]; hasMore: boolean } | null> {
     const payload = await this.request(
       `/repos/${repo}/issues?state=open&type=issues&limit=${limit}&page=${page}`,
     );
     if (!Array.isArray(payload)) return null;
-    const issues: ForgejoIssue[] = [];
+    const issues: ForgeIssue[] = [];
     for (const row of payload) {
       if (!row || typeof row !== "object") continue;
       const record = row as Record<string, unknown>;
@@ -225,7 +225,7 @@ export class ForgejoClient {
         labels: labelNames(record.labels),
         updatedAt: typeof record.updated_at === "string" ? record.updated_at : undefined,
       };
-      const parsed = ForgejoIssueSchema.safeParse(candidate);
+      const parsed = ForgeIssueSchema.safeParse(candidate);
       if (parsed.success && parsed.data.state === "open") issues.push(parsed.data);
     }
     return { issues, hasMore: payload.length >= limit };
@@ -253,7 +253,7 @@ export class ForgejoClient {
     return detail;
   }
 
-  /** All labels defined on the repo, following Forgejo's page window. */
+  /** All labels defined on the repo, following the Gitea-family page window. */
   async listLabels(repo: string): Promise<ForgejoLabel[] | null> {
     const labels: ForgejoLabel[] = [];
     for (let page = 1; page <= 10; page += 1) {

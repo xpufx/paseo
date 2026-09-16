@@ -48,7 +48,7 @@ monorepo or on any particular host at runtime.
 Open the plugin's **Settings** tab inside a workspace.
 
 - **Active forge.** Each workspace watches one active forge at a time. The
-  list holds the workspace's forge remotes (any `parseForgejoRemote` form plus
+  list holds the workspace's forge remotes (any `parseForgeRemote` form plus
   a bare `owner/repo`); **Auto** derives the remote from the workspace's git
   `origin`. An explicit selection wins absolutely: an invalid or unreachable
   selection fails loudly instead of silently deriving.
@@ -74,5 +74,5 @@ The helper audit also applies:
 node packages/paseo-plugin-helper/bin/paseo-plugin-helper.js audit plugins/forges
 ```
 
-See [`docs/specs/forgejo-workflow-gui.md`](./docs/specs/forgejo-workflow-gui.md)
+See [`docs/specs/forge-workflow-gui.md`](./docs/specs/forge-workflow-gui.md)
 for the data model, RPC contracts, and UI surfaces.

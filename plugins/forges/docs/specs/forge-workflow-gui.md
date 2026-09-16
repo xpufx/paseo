@@ -1,4 +1,4 @@
-# Native Forgejo Workflow GUI Plugin for Paseo
+# Native Forge Workflow GUI Plugin for Paseo
 
 **Status:** specification (implements [Issue #56 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/56));
 the auth/data-path, label, and install sections below track the shipped
@@ -32,12 +32,12 @@ toggles, and quick comments all live in plugin surfaces powered by
 
 `plugins/forges` (`paseo-forges`) already ships the thin end of this wedge:
 
-- Server: `forgejo.open-issues` contract (`shared/issues.ts`) + `handleOpenIssues`
+- Server: `forge.open-issues` contract (`shared/issues.ts`) + `handleOpenIssues`
   (`server/issues.ts`) — resolves owner/repo from the workspace directory's
-  git `origin` remote, calls the embedded Forgejo/Gitea fetch client, and never
+  git `origin` remote, calls the embedded forge (Gitea-family) fetch client, and never
   throws (failures surface as an `error` field so the pill renders a
   placeholder).
-- Shared: `parseForgejoRemote`, `extractForgejoIssueUrls` (timeline
+- Shared: `parseForgeRemote`, `extractForgeIssueUrls` (timeline
   linkifier), `formatIssueCountLabel` (null count renders `"issues --"`
   placeholder, never a false zero).
 - Client: composer pill (`GitPullRequest` icon, 15 s label poll / 30 s query
@@ -46,8 +46,8 @@ toggles, and quick comments all live in plugin surfaces powered by
   SDK, so copy-and-paste remains the handoff).
 
 This spec extends that plugin with four new RPC contracts and three new UI
-surfaces. All shared parsing helpers (`parseForgejoRemote`,
-`extractForgejoIssueUrls`) are reused as-is.
+surfaces. All shared parsing helpers (`parseForgeRemote`,
+`extractForgeIssueUrls`) are reused as-is.
 
 ---
 
@@ -62,7 +62,7 @@ surfaces. All shared parsing helpers (`parseForgejoRemote`,
    Agent Envelope cards (agent id, provider/model, branch, commit SHAs,
    `paseo://` session link) in one inspection modal.
 3. **One-click label state toggles.** Scoped `state/`–`priority/`–`attention/`–`spec/`
-   selectors that rely on Forgejo native exclusive auto-eviction (apply the new
+   selectors that rely on Gitea-family native exclusive auto-eviction (apply the new
    label; the old one in the same scope evicts itself — zero `--remove-label`
    calls).
 4. **Quick comments from the client.** Operator steering posted straight into
@@ -101,14 +101,14 @@ CLI/dotfile dependency: the plugin works on a machine that has never had
 `fgj`/`fgjx` or `~/.config/fgj`.
 
 The token lives in daemon-side plugin settings, keyed by host
-(`ForgejoSettings.tokensByHost`), and is read by `tokenForHost(host)` in
+(`ForgeSettings.tokensByHost`), and is read by `tokenForHost(host)` in
 `server/settings.ts`:
 
 1. Resolve repo coordinates without shelling: read `<directory>/.git/config`
-   directly and parse the `origin` URL with `parseForgejoRemote` (handles
+   directly and parse the `origin` URL with `parseForgeRemote` (handles
    `git@host:owner/repo`, `https://host/owner/repo`, `ssh://git@host/...`);
    an explicit per-workspace forge target wins absolutely (issue #109/#137).
-2. Construct `new ForgejoClient({ host, token: await tokenForHost(host) })`.
+2. Construct `new ForgeClient({ host, token: await tokenForHost(host) })`.
    The token is attached only as an `Authorization: token <t>` header on
    `fetch` calls that run in the daemon; it is never serialized into an RPC
    payload and never reaches the client.
@@ -133,7 +133,7 @@ versioned with the plugin instead of tracking a host binary.
 - There is no daemon-side board cache: reads are served live from the API.
 - Client-side: `useRpcQuery` for reads with a 30 s `refetchInterval` (the
   issues list), plus a manual Refresh; the settings form queries
-  `forgejo.forge-context` independently so the token/host fields render while
+  `forge.forge-context` independently so the token/host fields render while
   issues load or fail (regression #152). Writes go through `useRpcMutation`
   and refetch the board/detail on success.
 - Handlers stay cheap because each query is one or two API calls; a failed
@@ -149,7 +149,7 @@ server and client), built with `defineContract` from
 
 ### 4.1 Scoped label vocabularies (fallback + display data)
 
-Forgejo scoped labels are exclusive: applying one label in a scope evicts the
+Gitea-family scoped labels are exclusive: applying one label in a scope evicts the
 previous label in that scope at the DB level. The board is the source of truth
 for which scopes exist (decision #121.2): the client derives live scopes from
 the labels actually present on the returned issues (`liveScopesFromIssues`),
@@ -311,8 +311,8 @@ export const IssueDetailSchema = z.object({
 
 ## 5. Server RPC interface
 
-Four contracts, namespaced `forgejo.*`, registered on the daemon
-`PluginContext` next to the existing `forgejo.open-issues` handler (which
+Four contracts, namespaced `forge.*`, registered on the daemon
+`PluginContext` next to the existing `forge.open-issues` handler (which
 stays untouched for backward compatibility — the pill keeps working during
 migration).
 
@@ -321,11 +321,11 @@ import { z } from "zod";
 import { defineContract } from "paseo-plugin-helper/shared";
 ```
 
-### 5.1 `forgejo.board-overview` (read)
+### 5.1 `forge.board-overview` (read)
 
 ```ts
 export const boardOverviewContract = defineContract({
-  name: "forgejo.board-overview",
+  name: "forge.board-overview",
   description: "Open issues sorted by the (priority, state, recency) tuple",
   input: z.object({
     directory: z.string().optional(),
@@ -359,11 +359,11 @@ export const boardOverviewContract = defineContract({
   with `state/1-wip`. Returned on every call so the pill never needs a second
   round-trip.
 
-### 5.2 `forgejo.issue-detail` (read)
+### 5.2 `forge.issue-detail` (read)
 
 ```ts
 export const issueDetailContract = defineContract({
-  name: "forgejo.issue-detail",
+  name: "forge.issue-detail",
   description: "Full body, comments, and parsed Agent Envelopes for one issue",
   input: z.object({
     directory: z.string().optional(),
@@ -383,12 +383,12 @@ export const issueDetailContract = defineContract({
 - Envelopes are parsed server-side (Node regex) so the client receives
   structured cards with zero parsing logic.
 
-### 5.3 `forgejo.set-label` (write)
+### 5.3 `forge.set-label` (write)
 
 ```ts
 export const setLabelContract = defineContract({
-  name: "forgejo.set-label",
-  description: "Apply one scoped label; Forgejo exclusive scope evicts the rest",
+  name: "forge.set-label",
+  description: "Apply one scoped label; an exclusive scope evicts the rest",
   input: z.object({
     directory: z.string().optional(),
     number: z.number().int().positive(),
@@ -404,7 +404,7 @@ export const setLabelContract = defineContract({
 
 - Implemented by fetching the issue, computing the current label list, and
   `PATCH`ing the issue with the new label added plus any same-scope mate
-  removed (the embedded client's `setLabels`). Forgejo exclusivity alone would
+  removed (the embedded client's `setLabels`). Gitea-family exclusivity alone would
   also evict a scope mate, but the explicit remove keeps the write correct on
   boards with non-canonical scope names.
 - `label` is validated against the live board scopes (fallback: the known
@@ -415,11 +415,11 @@ export const setLabelContract = defineContract({
 - Input accepts `issueNumber` (primary) with `number` as a deprecated alias;
   handlers normalize via `normalizeIssueNumber`.
 
-### 5.4 `forgejo.add-comment` (write)
+### 5.4 `forge.add-comment` (write)
 
 ```ts
 export const addCommentContract = defineContract({
-  name: "forgejo.add-comment",
+  name: "forge.add-comment",
   description: "Post a quick comment (or steering note) to the issue thread",
   input: z.object({
     directory: z.string().optional(),
@@ -442,11 +442,11 @@ export const addCommentContract = defineContract({
   server-side (`min(1)` after trim).
 - Input accepts `issueNumber` (primary) with `number` as a deprecated alias.
 
-### 5.5 `forgejo.install-labels` (write, explicit action)
+### 5.5 `forge.install-labels` (write, explicit action)
 
 ```ts
 export const installLabelsContract = defineContract({
-  name: "forgejo.install-labels",
+  name: "forge.install-labels",
   description: "Copy the Paseo label taxonomy onto the configured forge repo after an explicit user choice",
   input: z.object({
     directory: z.string().optional(),
@@ -487,7 +487,7 @@ All components use only documented helper primitives. Entry point calls
 
 ### 6.1 Status count pill (composer trackbar)
 
-Extends the existing `forgejo-issues` pill; no second pill:
+Extends the existing `forges-issues` pill; no second pill:
 
 - Wide label: `"3 verify · 12 open"` (verify-first — the operator's most
   valuable glance). Compact label: `"3v"`.
@@ -504,10 +504,10 @@ Extends the existing `forgejo-issues` pill; no second pill:
 Registered **twice** from one shared component tree:
 
 - Modal: `registerComposerPill(..., { renderModal: (props) =>
-  <ForgejoBoardModal {...props} /> })` — replaces the current
-  `ForgejoIssuesModal` list tab, keeping `SearchInput` + copy-ref behavior.
-- Sidebar: `registerSidebarSurface(plugin, { id: "forgejo-board",
-  title: "Board", icon: "KanbanSquare", Component: ForgejoBoardSurface })` —
+  <ForgeBoardModal {...props} /> })` — replaces the current
+  `ForgeIssuesModal` list tab, keeping `SearchInput` + copy-ref behavior.
+- Sidebar: `registerSidebarSurface(plugin, { id: "forge-board",
+  title: "Board", icon: "KanbanSquare", Component: ForgeBoardSurface })` —
   full-height surface for sustained triage (desktop split-pane friendly).
 
 Layout (shared `<BoardView>` used by both, responsive via `useResponsive()`):
@@ -562,7 +562,7 @@ Layout (shared `<BoardView>` used by both, responsive via `useResponsive()`):
 │ KeyValueGroup(2): Author │ Updated │ State…  │
 │ Markdown body (RN text; fenced blocks via    │
 │   CodeBlock w/ copy; issue URLs linkified    │
-│   via extractForgejoIssueUrls)               │
+│   via extractForgeIssueUrls)                 │
 │ Envelopes preview: latest AgentEnvelopeCard  │
 ├─ Comments ───────────────────────────────────┤
 │ Comment cards (author, timestamp, body)      │
@@ -632,7 +632,7 @@ Tap on a SHA `CommandBox`:
    (coordinates already known from `resolveRepo`).
 2. Long-press (or secondary button): copy the full SHA to clipboard.
 3. v2 (Phase 3): `git -C <directory> show --stat <sha>` via a new
-   `forgejo.commit-stat` read contract — specified but not required for v1.
+   `forge.commit-stat` read contract — specified but not required for v1.
 
 ### 7.3 Worktree / branch display
 
@@ -664,7 +664,7 @@ with the agent harness (open question §10.4).
 
 Invariants:
 
-1. Client sends only `set-label` adds; Forgejo exclusive scopes guarantee
+1. Client sends only `set-label` adds; Gitea-family exclusive scopes guarantee
    single-occupancy per scope — the client never issues removes.
 2. Agents and the Orchestrator never close issues (coding-agent skill §6):
    `state/4-done` is an open label; closing is the human operator's word.
@@ -681,11 +681,11 @@ Invariants:
 
 | Situation | Behavior |
 |---|---|
-| No git remote / unparseable origin | `{ repo: null, error }` → `EmptyState` "No Forgejo repo for this workspace" (existing behavior, kept) |
+| No git remote / unparseable origin | `{ repo: null, error }` → `EmptyState` "No forge repo for this workspace" (existing behavior, kept) |
 | API unreachable / no token for a private repo | `{ error: "Issue list unavailable" }` → `EmptyState` + Retry; pill falls back to `"issues --"` placeholder |
 | Unknown issue number | `{ issue: null, error }` → `EmptyState` "Issue #N not found in repo" |
 | `set-label` with out-of-vocabulary label | Rejected before spawn; `{ error }` surfaced via mutation `onError`; toggle group re-enables |
-| `set-label` race (two operators, same scope) | Last write wins at Forgejo; query invalidation repaints from server truth — no client prediction to unwind |
+| `set-label` race (two operators, same scope) | Last write wins at the host; query invalidation repaints from server truth — no client prediction to unwind |
 | `add-comment` empty body | Button disabled client-side; `min(1)` server-side rejects as typed error |
 | `add-comment` failure (network/auth) | Mutation `onError` → toast; composer text preserved (never cleared on failure) |
 | Envelope footer unparseable | Comment renders as plain markdown; `envelopes` omits it; detail RPC still succeeds |
@@ -714,13 +714,13 @@ No code touched.
 - [x] Unit tests: envelope parser, sort tuple (SOS-first, verify-before-wip,
       recency tiebreak), scope-vocabulary guard, link classification, label-set
       planning.
-- [x] Keep `forgejo.open-issues` contract; new contracts register alongside.
+- [x] Keep `forge.open-issues` contract; new contracts register alongside.
 
 ### Phase 2 — Client UI surfaces
 
 - [ ] `<BoardView>` shared tree (`Card`, `Tabs`, `SearchInput`, `DataTable`,
-      `Badge`, `EmptyState`, `ActionBar`) + `ForgejoBoardModal` (replaces list
-      tab content) + `ForgejoBoardSurface` via `registerSidebarSurface`.
+      `Badge`, `EmptyState`, `ActionBar`) + `ForgeBoardModal` (replaces list
+      tab content) + `ForgeBoardSurface` via `registerSidebarSurface`.
 - [ ] Pill upgrade: verify-first label (`"3 verify · 12 open"` / `"3v"`),
       tap-through to pre-filtered dashboard.
 - [ ] `<IssueDetailModal>` with four tabs + `<AgentEnvelopeCard>` +
@@ -733,7 +733,7 @@ No code touched.
 
 - [ ] `paseo://` tap-through with clipboard fallback (§7.1).
 - [ ] Commit SHA → web commit view + long-press copy (§7.2).
-- [ ] Optional `forgejo.commit-stat` read contract (`git show --stat`) if
+- [ ] Optional `forge.commit-stat` read contract (`git show --stat`) if
       operator review needs diff summaries in-client.
 
 ### Phase 4 — Hardening & parity
@@ -752,7 +752,7 @@ No code touched.
    `paseo-plugin-helper/shared` for reuse by other plugins (e.g. an
    Orchestrator dashboard)? Recommendation: keep in `plugins/forges` until
    a second consumer exists.
-2. Should `forgejo.commit-stat` be part of v1? Recommendation: no — web-view
+2. Should `forge.commit-stat` be part of v1? Recommendation: no — web-view
    link + copy covers review; diff-in-client is Phase 3 stretch.
 3. Should `size/*` (effort) and `dep/blocker` enter the sort key?
    Recommendation: badges only in v1; revisit after operator feedback.
@@ -805,5 +805,5 @@ No code touched.
 - [ ] Built only from documented helper primitives; `initClientHelpers`
       shape unchanged; zero new SDK imports; client uses no Node
       built-ins.
-- [ ] `forgejo.open-issues` contract and current pill behavior preserved
+- [ ] `forge.open-issues` contract and current pill behavior preserved
       throughout migration.

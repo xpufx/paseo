@@ -5,16 +5,16 @@ import {
   normalizeForgeHost,
 } from "./vendor/paseo-plugin-helper/index.ts";
 
-export const FORGEJO_PLUGIN_ID = "forges";
+export const FORGES_PLUGIN_ID = "forges";
 
-export const ForgejoIssueSchema = z.object({
+export const ForgeIssueSchema = z.object({
   number: z.number(),
   title: z.string(),
   state: z.string(),
   labels: z.array(z.string()),
   updatedAt: z.string().optional(),
 });
-export type ForgejoIssue = z.infer<typeof ForgejoIssueSchema>;
+export type ForgeIssue = z.infer<typeof ForgeIssueSchema>;
 
 export const OpenIssuesInputSchema = z.object({
   directory: z.string().optional(),
@@ -26,7 +26,7 @@ export type OpenIssuesInput = z.infer<typeof OpenIssuesInputSchema>;
 export const OpenIssuesOutputSchema = z.object({
   repo: z.string().nullable(),
   host: z.string().nullable().default(null),
-  issues: z.array(ForgejoIssueSchema),
+  issues: z.array(ForgeIssueSchema),
   openIssueCount: z.number().int().nonnegative().nullable().default(null),
   page: z.number().int().positive().default(1),
   hasMore: z.boolean().default(false),
@@ -40,8 +40,8 @@ export const OpenIssuesOutputSchema = z.object({
 export type OpenIssuesOutput = z.infer<typeof OpenIssuesOutputSchema>;
 
 export const openIssuesContract = defineContract({
-  name: "forgejo.open-issues",
-  description: "List open Forgejo issues for the repo backing a workspace directory",
+  name: "forge.open-issues",
+  description: "List open forge issues for the repo backing a workspace directory",
   input: OpenIssuesInputSchema,
   output: OpenIssuesOutputSchema,
 });
@@ -66,25 +66,25 @@ export const ForgeContextOutputSchema = z.object({
 export type ForgeContextOutput = z.infer<typeof ForgeContextOutputSchema>;
 
 export const forgeContextContract = defineContract({
-  name: "forgejo.forge-context",
+  name: "forge.forge-context",
   description: "Git-origin forge coordinates for a workspace, independent of issue queries",
   input: ForgeContextInputSchema,
   output: ForgeContextOutputSchema,
 });
 
-export interface ForgejoRemote {
+export interface ForgeRemote {
   host: string;
   owner: string;
   repo: string;
 }
 
 /**
- * Parse a git remote URL into Forgejo coordinates. Handles
+ * Parse a git remote URL into forge coordinates. Handles
  * git@host:owner/repo(.git), https://host/owner/repo(.git), and
  * ssh://git@host/owner/repo(.git). Returns null when the URL does not
  * carry an owner/repo path.
  */
-export function parseForgejoRemote(url: string | undefined | null): ForgejoRemote | null {
+export function parseForgeRemote(url: string | undefined | null): ForgeRemote | null {
   if (!url || typeof url !== "string") return null;
   const trimmed = url.trim().replace(/\/+$/, "");
   const scp = trimmed.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
@@ -115,14 +115,14 @@ export function parseForgejoRemote(url: string | undefined | null): ForgejoRemot
 
 // ---------------------------------------------------------------------------
 // Explicit remote URL override (issue #109 operator redirect).
-// A workspace may pin its Forgejo coordinates via the settings screen
+// A workspace may pin its forge coordinates via the settings screen
 // instead of relying on the git origin remote (which can carry SSH
 // aliases unknown to the API client). Precedence: explicit config > git remote.
 // ---------------------------------------------------------------------------
 
 const BARE_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
-export const ForgejoSettingsSchema = z.object({
+export const ForgeSettingsSchema = z.object({
   remotesByDirectory: z.record(z.string(), z.string()).default({}),
   tokensByHost: z.record(z.string(), z.string()).default({}),
   namesByDirectory: z.record(z.string(), z.string()).default({}),
@@ -132,33 +132,33 @@ export const ForgejoSettingsSchema = z.object({
   forgesByDirectory: z.record(z.string(), z.array(z.string())).default({}),
   activeForgeByDirectory: z.record(z.string(), z.string()).default({}),
 });
-export type ForgejoSettings = z.infer<typeof ForgejoSettingsSchema>;
+export type ForgeSettings = z.infer<typeof ForgeSettingsSchema>;
 
-export const forgejoSettingsContract = defineSettingsContract({
+export const forgeSettingsContract = defineSettingsContract({
   name: "forges.settings",
-  schema: ForgejoSettingsSchema,
+  schema: ForgeSettingsSchema,
   description: "Forges plugin settings: forge selection, remote overrides and host tokens",
 });
 
-export interface ResolvedForgejoRepo {
+export interface ResolvedForgeRepo {
   host: string;
   repo: string;
 }
 
 /**
- * Resolve Forgejo coordinates with explicit-config-wins precedence.
- * The explicit value accepts every `parseForgejoRemote` form
+ * Resolve forge coordinates with explicit-config-wins precedence.
+ * The explicit value accepts every `parseForgeRemote` form
  * (scp-like, ssh://, https://) plus a bare `owner/repo`, which borrows
  * its host from the git remote. Returns null when neither yields coords.
  */
-export function resolveForgejoRepo(
+export function resolveForgeRepo(
   explicitRemote: string | undefined | null,
   gitRemoteUrl: string | undefined | null,
-): ResolvedForgejoRepo | null {
-  const git = parseForgejoRemote(gitRemoteUrl);
+): ResolvedForgeRepo | null {
+  const git = parseForgeRemote(gitRemoteUrl);
   const explicit = typeof explicitRemote === "string" ? explicitRemote.trim() : "";
   if (explicit) {
-    const parsed = parseForgejoRemote(explicit);
+    const parsed = parseForgeRemote(explicit);
     if (parsed) return { host: parsed.host, repo: `${parsed.owner}/${parsed.repo}` };
     if (BARE_REPO_PATTERN.test(explicit) && git) {
       return { host: git.host, repo: explicit };
@@ -184,9 +184,9 @@ export function resolveForgeTarget(
   gitRemoteUrl: string | undefined | null,
 ): ForgeTargetResolution {
   const explicit = typeof explicitTarget === "string" ? explicitTarget.trim() : "";
-  const git = parseForgejoRemote(gitRemoteUrl);
+  const git = parseForgeRemote(gitRemoteUrl);
   if (explicit) {
-    const parsed = parseForgejoRemote(explicit);
+    const parsed = parseForgeRemote(explicit);
     if (parsed) {
       return { ok: true, host: parsed.host, repo: `${parsed.owner}/${parsed.repo}`, source: "explicit" };
     }
@@ -204,7 +204,7 @@ export function resolveForgeTarget(
 export function isValidForgeTarget(target: string | undefined | null): boolean {
   const value = typeof target === "string" ? target.trim() : "";
   if (!value) return false;
-  return Boolean(parseForgejoRemote(value)) || BARE_REPO_PATTERN.test(value);
+  return Boolean(parseForgeRemote(value)) || BARE_REPO_PATTERN.test(value);
 }
 
 /**
@@ -219,10 +219,10 @@ export function effectiveForgeHost(
   activeTarget: string | undefined | null,
   derivedRemote: string | undefined | null,
 ): string | null {
-  const derived = parseForgejoRemote(derivedRemote)?.host ?? null;
+  const derived = parseForgeRemote(derivedRemote)?.host ?? null;
   const target = typeof activeTarget === "string" ? activeTarget.trim() : "";
   if (!target) return derived;
-  return parseForgejoRemote(target)?.host ?? derived;
+  return parseForgeRemote(target)?.host ?? derived;
 }
 
 /**
@@ -233,7 +233,7 @@ export function effectiveForgeHost(
  */
 export function forgeTargetsForWorkspace(
   settings:
-    | Partial<Pick<ForgejoSettings, "forgesByDirectory" | "remotesByDirectory">>
+    | Partial<Pick<ForgeSettings, "forgesByDirectory" | "remotesByDirectory">>
     | undefined
     | null,
   directory: string | undefined | null,
@@ -263,7 +263,7 @@ export function activeForgeForDirectory(
   settings:
     | Partial<
         Pick<
-          ForgejoSettings,
+          ForgeSettings,
           "activeForgeByDirectory" | "forgesByDirectory" | "remotesByDirectory"
         >
       >
@@ -282,7 +282,7 @@ export function activeForgeForDirectory(
   return typeof legacy === "string" && legacy.trim() ? legacy.trim() : null;
 }
 
-export interface ForgejoIssueLink {
+export interface ForgeIssueLink {
   host: string;
   owner: string;
   repo: string;
@@ -299,9 +299,9 @@ const ISSUE_URL_PATTERN =
  * Extract issue URLs (host/owner/repo/issues/N) from chat text for the
  * timeline linkifier. Returns one entry per match, in order.
  */
-export function extractForgejoIssueUrls(text: string | undefined | null): ForgejoIssueLink[] {
+export function extractForgeIssueUrls(text: string | undefined | null): ForgeIssueLink[] {
   if (!text || typeof text !== "string") return [];
-  const links: ForgejoIssueLink[] = [];
+  const links: ForgeIssueLink[] = [];
   ISSUE_URL_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = ISSUE_URL_PATTERN.exec(text)) !== null) {
@@ -345,11 +345,11 @@ function quotedRanges(text: string): Array<{ start: number; end: number }> {
  * quoted code are skipped because the card renders them inline instead of
  * duplicating them as rows (#143).
  */
-export function extractBareForgejoIssueUrls(text: string | undefined | null): ForgejoIssueLink[] {
+export function extractBareForgeIssueUrls(text: string | undefined | null): ForgeIssueLink[] {
   if (!text || typeof text !== "string") return [];
   const quoted = quotedRanges(text);
   const inQuoted = (index: number) => quoted.some((range) => index >= range.start && index < range.end);
-  const links: ForgejoIssueLink[] = [];
+  const links: ForgeIssueLink[] = [];
   ISSUE_URL_PATTERN.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = ISSUE_URL_PATTERN.exec(text)) !== null) {
@@ -391,7 +391,7 @@ function normalizeForgeRepo(repo: string | null | undefined): string | null {
 
 /** Classify an extracted issue link against the workspace's active forge. */
 export function classifyForgeLink(
-  link: Pick<ForgejoIssueLink, "host" | "owner" | "repo">,
+  link: Pick<ForgeIssueLink, "host" | "owner" | "repo">,
   active: ForgeRepoIdentity | null | undefined,
 ): ForgeLinkScope {
   const linkHost = normalizeForgeHost(link.host);
@@ -403,8 +403,8 @@ export function classifyForgeLink(
 }
 
 /** The issue link a URL points at, or null when it is not a forge issue URL. */
-export function forgejoIssueLinkFromUrl(url: string | undefined | null): ForgejoIssueLink | null {
-  return extractForgejoIssueUrls(url)[0] ?? null;
+export function forgeIssueLinkFromUrl(url: string | undefined | null): ForgeIssueLink | null {
+  return extractForgeIssueUrls(url)[0] ?? null;
 }
 
 /**
@@ -416,7 +416,7 @@ export function classifyForgeUrl(
   url: string | undefined | null,
   active: ForgeRepoIdentity | null | undefined,
 ): ForgeLinkScope | null {
-  const link = forgejoIssueLinkFromUrl(url);
+  const link = forgeIssueLinkFromUrl(url);
   return link ? classifyForgeLink(link, active) : null;
 }
 
@@ -427,7 +427,7 @@ export function classifyForgeUrl(
  */
 export function displayRemoteForApi(url: string | undefined | null): string | null {
   if (!url || typeof url !== "string" || !url.trim()) return null;
-  const parsed = parseForgejoRemote(url);
+  const parsed = parseForgeRemote(url);
   if (!parsed) return url.trim();
   return `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
 }
@@ -448,14 +448,14 @@ export function formatIssueCountLabel(count: number | null | undefined): string 
 // single source of truth both client pages render from.
 // ---------------------------------------------------------------------------
 
-export type ForgejoVisibility = "public" | "private" | "unknown";
-export type ForgejoAuthState =
+export type ForgeVisibility = "public" | "private" | "unknown";
+export type ForgeAuthState =
   | "authenticated"
   | "invalid-token"
   | "anonymous"
   | "unknown";
 
-export interface ForgejoAccessInput {
+export interface ForgeAccessInput {
   /** Anonymous repo probe: true public, false private/missing, null unknown. */
   repoPublic?: boolean | null;
   /** Whether a token is configured for the host at all. */
@@ -464,9 +464,9 @@ export interface ForgejoAccessInput {
   tokenValid?: boolean | null;
 }
 
-export interface ForgejoAccessState {
-  visibility: ForgejoVisibility;
-  auth: ForgejoAuthState;
+export interface ForgeAccessState {
+  visibility: ForgeVisibility;
+  auth: ForgeAuthState;
   /** Labels and comments require an accepted token, public repo or not. */
   canEdit: boolean;
   /** Chip label for visibility, or null when unknown. */
@@ -486,15 +486,15 @@ export interface ForgejoAccessState {
  * `canEdit` is true only for an accepted token: a public repo with a valid
  * token is editable, while a public repo without one stays read-only.
  */
-export function deriveForgejoAccess(input: ForgejoAccessInput = {}): ForgejoAccessState {
-  const visibility: ForgejoVisibility =
+export function deriveForgeAccess(input: ForgeAccessInput = {}): ForgeAccessState {
+  const visibility: ForgeVisibility =
     input.repoPublic === true
       ? "public"
       : input.repoPublic === false
         ? "private"
         : "unknown";
 
-  let auth: ForgejoAuthState;
+  let auth: ForgeAuthState;
   if (input.tokenValid === true) auth = "authenticated";
   else if (input.tokenPresent !== true) auth = "anonymous";
   else if (input.tokenValid === false) auth = "invalid-token";
@@ -506,7 +506,7 @@ export function deriveForgejoAccess(input: ForgejoAccessInput = {}): ForgejoAcce
 
   let authLabel: string;
   let authIcon: string;
-  let authVariant: ForgejoAccessState["authVariant"];
+  let authVariant: ForgeAccessState["authVariant"];
   if (auth === "authenticated") {
     authLabel = "Authenticated";
     authIcon = "KeyRound";
@@ -537,7 +537,7 @@ export function deriveForgejoAccess(input: ForgejoAccessInput = {}): ForgejoAcce
   };
 }
 
-function accessSummary(visibility: ForgejoVisibility, auth: ForgejoAuthState): string {
+function accessSummary(visibility: ForgeVisibility, auth: ForgeAuthState): string {
   const authClause =
     auth === "authenticated"
       ? "Token accepted — reads and edits enabled."
@@ -577,7 +577,7 @@ export function workspaceNameKey(
  * passes the same key `workspaceNameKey` produces on write.
  */
 export function displayNameForDirectory(
-  settings: Pick<ForgejoSettings, "namesByDirectory"> | undefined | null,
+  settings: Pick<ForgeSettings, "namesByDirectory"> | undefined | null,
   nameKey: string | undefined | null,
   inferredRepo: string | undefined | null,
 ): string | null {
@@ -591,7 +591,7 @@ export function displayNameForDirectory(
 
 // ---------------------------------------------------------------------------
 // Scoped label vocabularies (verified against the live board; see spec §4.1).
-// Forgejo scoped labels are exclusive: applying one label in a scope evicts
+// Gitea-family scoped labels are exclusive: applying one label in a scope evicts
 // the previous label in that scope at the DB level, so the client only ever
 // sends "add", never "remove".
 // ---------------------------------------------------------------------------
@@ -699,7 +699,7 @@ export function liveScopesFromLabels(allLabels: string[]): string[] {
 }
 
 /** Distinct scopes observed across a list of issues. */
-export function liveScopesFromIssues(issues: Pick<ForgejoIssue, "labels">[]): string[] {
+export function liveScopesFromIssues(issues: Pick<ForgeIssue, "labels">[]): string[] {
   return liveScopesFromLabels(issues.flatMap((issue) => issue.labels));
 }
 
@@ -713,7 +713,7 @@ function rankOf(label: string | null, order: readonly string[]): number {
  * Rank open issues for display: priority first (SOS..backburner, unknown
  * last), then state order (triage..done), then most recently updated.
  */
-export function rankIssues<T extends Pick<ForgejoIssue, "labels" | "updatedAt">>(issues: T[]): T[] {
+export function rankIssues<T extends Pick<ForgeIssue, "labels" | "updatedAt">>(issues: T[]): T[] {
   return [...issues].sort((a, b) => {
     const pri = rankOf(currentPriorityLabel(a.labels), PRIORITY_ORDER) -
       rankOf(currentPriorityLabel(b.labels), PRIORITY_ORDER);
@@ -805,7 +805,7 @@ export function paseoLabelScopes(): string[] {
 export const INSTALL_LABEL_MODES = ["merge", "replace"] as const;
 export type InstallLabelMode = (typeof INSTALL_LABEL_MODES)[number];
 
-export interface ForgejoLabelRef {
+export interface ForgeLabelRef {
   id?: number;
   name: string;
 }
@@ -815,7 +815,7 @@ export interface LabelSetPlan {
   /** Our labels the target is missing; safe to POST. */
   create: LabelDefinition[];
   /** Target labels to DELETE, scoped to what our taxonomy replaces. */
-  remove: ForgejoLabelRef[];
+  remove: ForgeLabelRef[];
   /** Our labels the target already carries; left untouched. */
   skip: string[];
 }
@@ -830,7 +830,7 @@ export interface LabelSetPlan {
  * install cannot silently destroy an unrelated vocabulary.
  */
 export function planLabelSetInstall(
-  existing: ForgejoLabelRef[],
+  existing: ForgeLabelRef[],
   mode: InstallLabelMode,
 ): LabelSetPlan {
   const desired = paseoLabelSet();
@@ -871,7 +871,7 @@ export const InstallLabelsOutputSchema = z.object({
 export type InstallLabelsOutput = z.infer<typeof InstallLabelsOutputSchema>;
 
 export const installLabelsContract = defineContract({
-  name: "forgejo.install-labels",
+  name: "forge.install-labels",
   description: "Copy the Paseo label taxonomy onto the configured forge repo after an explicit user choice",
   input: InstallLabelsInputSchema,
   output: InstallLabelsOutputSchema,
@@ -1043,7 +1043,7 @@ export const IssueDetailOutputSchema = z.object({
 export type IssueDetailOutput = z.infer<typeof IssueDetailOutputSchema>;
 
 export const issueDetailContract = defineContract({
-  name: "forgejo.issue-detail",
+  name: "forge.issue-detail",
   description: "Full body, comments, and parsed Agent Envelopes for one issue",
   input: IssueDetailInputSchema,
   output: IssueDetailOutputSchema,
@@ -1062,8 +1062,8 @@ export const SetLabelOutputSchema = z.object({
 export type SetLabelOutput = z.infer<typeof SetLabelOutputSchema>;
 
 export const setLabelContract = defineContract({
-  name: "forgejo.set-label",
-  description: "Apply one scoped label; Forgejo exclusive scope evicts the rest",
+  name: "forge.set-label",
+  description: "Apply one scoped label; an exclusive scope evicts the rest",
   input: SetLabelInputSchema,
   output: SetLabelOutputSchema,
 });
@@ -1081,14 +1081,14 @@ export const AddCommentOutputSchema = z.object({
 export type AddCommentOutput = z.infer<typeof AddCommentOutputSchema>;
 
 export const addCommentContract = defineContract({
-  name: "forgejo.add-comment",
+  name: "forge.add-comment",
   description: "Post a quick comment (or steering note) to the issue thread",
   input: AddCommentInputSchema,
   output: AddCommentOutputSchema,
 });
 
 // ---------------------------------------------------------------------------
-// Markdown-lite (issue #136): focused renderer input for Forgejo issue
+// Markdown-lite (issue #136): focused renderer input for forge issue
 // descriptions/comments. Covers paragraphs, headings, unordered/ordered
 // list lines, Markdown links, inline code, bold/italic, and fenced code
 // blocks. Pure string parsing: no RPC, no side effects, no dependencies.
@@ -1290,7 +1290,7 @@ export function parseBoardAlert(text: string | undefined | null): BoardAlert | n
   if (!isBoardAlertText(text)) return null;
   const body = text as string;
   const linksByNumber = new Map<number, string>();
-  for (const link of extractForgejoIssueUrls(body)) {
+  for (const link of extractForgeIssueUrls(body)) {
     if (!linksByNumber.has(link.number)) linksByNumber.set(link.number, link.url);
   }
   const lines = body.split(/\r?\n/);
@@ -1309,7 +1309,7 @@ export function parseBoardAlert(text: string | undefined | null): BoardAlert | n
       flush();
       const number = Number(issueMatch[1]);
       const rawTitle = issueMatch[2].trim();
-      const urlInTitle = extractForgejoIssueUrls(rawTitle)[0]?.url;
+      const urlInTitle = extractForgeIssueUrls(rawTitle)[0]?.url;
       const title = urlInTitle ? rawTitle.replace(urlInTitle, "").replace(/\s{2,}/g, " ").trim() : rawTitle;
       current = {
         number,
