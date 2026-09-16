@@ -15,3 +15,13 @@ export * from "./utils/haptics.js";
 export * from "./custom-pills.js";
 export * from "./host.js";
 export { Icon } from "./icon.js";
+export { ForgeIcon, forgeMarkSource, type ForgeIconProps } from "./forge-icon.js";
+export {
+  forgeKindFromHost,
+  isForgeKind,
+  normalizeForgeHost,
+  resolveForgeMark,
+  type ForgeKind,
+  type ForgeMarkInput,
+  type ResolvedForgeMark,
+} from "../shared/forge.js";

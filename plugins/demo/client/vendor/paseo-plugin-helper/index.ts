@@ -15,3 +15,13 @@ export * from "./utils/haptics";
 export * from "./custom-pills";
 export * from "./host";
 export { Icon } from "./icon";
+export { ForgeIcon, forgeMarkSource, type ForgeIconProps } from "./forge-icon";
+export {
+  forgeKindFromHost,
+  isForgeKind,
+  normalizeForgeHost,
+  resolveForgeMark,
+  type ForgeKind,
+  type ForgeMarkInput,
+  type ResolvedForgeMark,
+} from "../../../shared/vendor/paseo-plugin-helper/forge";

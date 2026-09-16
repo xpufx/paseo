@@ -22,6 +22,7 @@
 - **Mobile Modal Gesture Architecture**: Solves nested horizontal scrolling and double-scroll issues inside Paseo mobile bottom sheets implicitly using `ModalBody` non-nested rendering and `Tabs` edge navigation.
 - **Configurable Visual Flair**: Authors can customize corner radii (`sharp`, `rounded`, `pill`), information density, surface treatments, and brand accents while honoring Paseo's light/dark themes.
 - **Inline Actions**: `InlineButton` provides an accessible, compact link/action primitive for timeline cards and dense inline content without bespoke `Pressable` implementations.
+- **Shared Forge Marks**: `<ForgeIcon>` resolves a host/kind to one brand mark — Lucide `Github`/`Gitlab`, helper-drawn official mono marks for `Codeberg`/`Forgejo`/`Gitea`, and a generic fallback — so plugins stop duplicating per-forge icon tables.
 - **Layout Vocabulary**: `Row`, `Stack`/`VStack`, and `Grid` replace hand-rolled flexbox `View` styles with theme-derived gaps and width-aware wrapping, while `KeyValueGroup` gains `collapse`/`minColumnWidth` so compact surfaces stay multi-column when there is room.
 - ℹ️ **Plugin About & Diagnostics Card**: `<AboutSection>` standardizes plugin branding, license tags, version badges, external navigation buttons, 1-tap "Copy Diagnostics" for issue triage, and auto-resolves official GitHub logos from author or repository URLs.
 - **Composer Pill Lifecycle Engine**: Complete management of agent subscriptions, pill contributions, and modal states in one function call (`registerComposerPill`).
@@ -60,7 +61,7 @@ flowchart TB
     H["paseo-plugin-helper\nwhat you get"]
 
     H --> RPC["RPC contracts\ndefineContract • defineSettingsContract\nuseRpcQuery • useRpcMutation\nuseAutoRefreshQuery"]
-    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nToggle • TextInput • FormRow\nModalBody • ActionBar\nRow • Stack • Grid\nAboutSection • EmptyState\nStatusDot • AttentionBeacon"]
+    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nToggle • TextInput • FormRow\nModalBody • ActionBar\nRow • Stack • Grid\nAboutSection • EmptyState\nStatusDot • ForgeIcon • AttentionBeacon"]
     H --> PILL["Surfaces\nregisterComposerPill\nregisterSidebarSurface\nregisterWorkspacePanel\nregisterAgentPanel"]
     H --> SET["Settings\nusePluginSettings\nuseSharedPluginSettings\nuseSuiteSettings"]
     H --> SRV["Daemon utilities\ncreatePluginLogger • PluginStorage\nregisterSettingsRpc\ngetSystemMetrics • safeSpawn\nredactSecrets • guardRpcHandler"]

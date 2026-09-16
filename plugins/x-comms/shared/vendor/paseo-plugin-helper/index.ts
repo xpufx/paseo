@@ -6,3 +6,4 @@ export * from "./suite-settings";
 export * from "./async";
 export * from "./suppressed";
 export * from "./custom-pills";
+export * from "./forge";

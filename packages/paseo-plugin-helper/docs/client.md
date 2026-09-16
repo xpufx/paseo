@@ -465,6 +465,37 @@ Placeholder view for empty lists or zero-state panels.
 />
 ```
 
+### `<ForgeIcon>`
+One shared forge brand mark so plugins never carry their own per-forge icon
+tables. Pass a forge `host` and/or an explicit `kind`; the resolver decides
+which mark to draw.
+
+GitHub and GitLab stay on the host Lucide set (`Github`, `Gitlab`), and any
+unrecognised host falls back to `Globe`. Codeberg, Forgejo and Gitea have no
+Lucide equivalent, so the helper draws their official mono marks inline as an
+SVG data URI on web/Electron. On native — where Paseo plugin bundles cannot
+render SVG — those three fall back to a distinct Lucide glyph
+(`Mountain`/`Hammer`/`Coffee`) so forges stay distinguishable.
+
+```tsx
+import { ForgeIcon, resolveForgeMark } from "paseo-plugin-helper/client";
+
+// host-driven (e.g. parsed from a remote URL)
+<ForgeIcon host="codeberg.org" size={16} color={colors.foreground} />
+
+// explicit forge identity when the host is a self-hosted unknown
+<ForgeIcon host="forge.mrs.aager.de" kind="forgejo" size={16} />
+
+// pure, testable resolution for shared/server code
+const mark = resolveForgeMark({ host: "gitea.com" });
+// { kind: "gitea", label: "Gitea", lucideName: "Coffee", custom: true }
+```
+
+The pure resolver is also exported from `paseo-plugin-helper/shared` as
+`resolveForgeMark`, `forgeKindFromHost`, `normalizeForgeHost` and `isForgeKind`
+(plus the `ForgeKind` / `ResolvedForgeMark` types), so host→mark logic can live
+in a plugin's shared layer without importing React.
+
 ### `<AttentionBeacon>`
 Wraps any child and animates it to draw attention. Modes:
 `radar` (expanding halo, default), `ring` (alias of `radar`), `glow`
