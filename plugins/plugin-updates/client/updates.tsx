@@ -109,14 +109,14 @@ function PluginRow({
   forceNeeded: boolean;
   onUpdate: (pluginId: string, force: boolean) => void;
 }) {
-  const { colors, typography } = usePluginTheme();
+  const { colors, typography, padding } = usePluginTheme();
   const detail = fallbackDetail(plugin);
   const note = reportOnlyNote(plugin);
   const isOrphan = plugin.status === "orphaned";
   const version = hashValue(plugin.workingTree ?? plugin.localTree);
   return (
-    <Card variant="elevated" noPadding>
-      <View style={{ padding: 10, gap: 8 }}>
+    <Card variant="elevated">
+      <View style={{ gap: padding.gap }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
           <Text style={{ color: colors.foreground, ...typography.bodyStrong, flex: 1 }}>{plugin.id}</Text>
@@ -140,7 +140,7 @@ function PluginRow({
         ) : null}
         {isOrphan ? null : (
           <>
-            <KeyValueGroup columns={2} gap={8}>
+            <KeyValueGroup columns={2} gap={padding.gap}>
               <KeyValue
                 label="Version"
                 value={version}
@@ -236,7 +236,7 @@ interface Failure {
 }
 
 function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
-  const { colors, typography } = usePluginTheme();
+  const { colors, typography, padding } = usePluginTheme();
   const toast = useToast();
   const queryClient = useQueryClient();
   const query = usePluginUpdates(props.workspaceId);
@@ -334,7 +334,13 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
 
   return (
     <PluginThemeProvider theme={props.theme} layout={props.layout}>
-      <ScrollView contentContainerStyle={{ padding: 12, gap: 10 }}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingHorizontal: padding.horizontal,
+          paddingVertical: padding.vertical,
+          gap: padding.gap,
+        }}
+      >
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.foreground, ...typography.heading }}>Plugin updates</Text>
@@ -354,7 +360,7 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
         </View>
         {activeUpdate ? <ProgressBar value={progress} autoStatusColor label="Updating plugins" showValueText /> : null}
         {query.isLoading && !query.data ? (
-          <View style={{ alignItems: "center", padding: 18 }}>
+          <View style={{ alignItems: "center", paddingVertical: padding.vertical * 2 }}>
             <ActivityIndicator color={colors.foregroundMuted} />
           </View>
         ) : plugins.length === 0 ? (
@@ -374,8 +380,8 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
           </>
         )}
         {failures.map((failure) => (
-          <Card key={`failure-${failure.pluginId}`} variant="elevated" noPadding>
-            <View style={{ padding: 10, gap: 6 }}>
+          <Card key={`failure-${failure.pluginId}`} variant="elevated">
+            <View style={{ gap: padding.gap }}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <StatusDot variant="danger" />
                 <Text style={{ color: colors.statusDanger, ...typography.bodyStrong, flex: 1 }}>
