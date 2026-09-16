@@ -122,6 +122,36 @@ declare function resolvePadding(layout: ResponsiveLayout, density: DensityStyle)
     vertical: number;
     gap: number;
 };
+interface GridColumnOptions {
+    /** Requested (and maximum) column count. */
+    columns: number;
+    /** Horizontal gap between cells, in px. Default: 0. */
+    gap?: number;
+    /** Measured container width, when the host reports one. */
+    width?: number;
+    /**
+     * Minimum width each column should keep before wrapping to fewer columns.
+     * Only applied when a positive container width is known; `columns` stays the
+     * upper bound.
+     */
+    minColumnWidth?: number;
+    /**
+     * How a compact surface treats the requested column count.
+     * - "never" (default): keep the requested columns; flexbox wraps as needed.
+     * - "compact": collapse to a single column on a compact surface.
+     */
+    collapse?: "compact" | "never";
+    /** Whether the current surface is compact. */
+    isCompact?: boolean;
+}
+/**
+ * Resolves the effective column count for a responsive grid.
+ *
+ * A `minColumnWidth` plus a known container width yields as many columns as
+ * fit, capped at the requested count — so a narrow container wraps down to
+ * fewer columns instead of the requested count being forced through.
+ */
+declare function resolveGridColumns(options: GridColumnOptions): number;
 interface ResponsiveSelectOptions<T> {
     /**
      * Default fallback value, used on desktop/wide viewports if no more specific option matches.
@@ -167,6 +197,16 @@ declare const spacing: {
     readonly xl: 24;
 };
 type SpacingKey = keyof typeof spacing;
+/**
+ * A gap/size value: either a named spacing token or a raw px number. Layout
+ * primitives accept this so callers never have to invent their own scale.
+ */
+type SpacingValue = SpacingKey | number;
+/**
+ * Resolves a {@link SpacingValue} to px, falling back to the theme-derived
+ * value when the caller did not specify one.
+ */
+declare function resolveSpacing(value: SpacingValue | undefined, fallback: number): number;
 interface TypographyToken {
     fontSize: number;
     lineHeight: number;
@@ -597,9 +637,23 @@ interface KeyValueGroupProps {
     children: ReactNode;
     columns?: 1 | 2 | 3 | 4;
     gap?: number;
+    /**
+     * How a compact surface treats the column count.
+     * - "compact" (default): collapse to a single column on a compact surface —
+     *   the historical behavior.
+     * - "never": keep the requested column count on a compact surface.
+     */
+    collapse?: "compact" | "never";
+    /**
+     * Minimum width a column should keep. When set and the container width is
+     * known, the effective column count is capped so each column stays at least
+     * this wide, wrapping to fewer columns rather than collapsing to one.
+     * `columns` remains the upper bound.
+     */
+    minColumnWidth?: number;
     style?: StyleProp<ViewStyle>;
 }
-declare function KeyValueGroup({ children, columns, gap, style, }: KeyValueGroupProps): React__default.JSX.Element;
+declare function KeyValueGroup({ children, columns, gap, collapse, minColumnWidth, style, }: KeyValueGroupProps): React__default.JSX.Element;
 
 interface EmptyStateProps {
     icon?: string | ReactNode;
@@ -850,6 +904,62 @@ interface FormRowProps {
     style?: StyleProp<ViewStyle>;
 }
 declare function FormRow({ label, description, children, style }: FormRowProps): React__default.JSX.Element;
+
+interface RowProps {
+    children?: ReactNode;
+    /** Gap between children: a spacing token or raw px. Defaults to the theme gap. */
+    gap?: SpacingValue;
+    /** Allow children to wrap onto the next line. Default: false. */
+    wrap?: boolean;
+    align?: ViewStyle["alignItems"];
+    justify?: ViewStyle["justifyContent"];
+    style?: StyleProp<ViewStyle>;
+    testID?: string;
+}
+/**
+ * Horizontal flexbox row with theme-derived gap. A thin vocabulary wrapper so
+ * plugins stop hand-rolling `<View style={{ flexDirection: "row", gap }}>`.
+ */
+declare function Row({ children, gap, wrap, align, justify, style, testID }: RowProps): React__default.JSX.Element;
+
+interface StackProps {
+    children?: ReactNode;
+    /** Gap between children: a spacing token or raw px. Defaults to the theme gap. */
+    gap?: SpacingValue;
+    align?: ViewStyle["alignItems"];
+    justify?: ViewStyle["justifyContent"];
+    style?: StyleProp<ViewStyle>;
+    testID?: string;
+}
+/**
+ * Vertical flexbox stack with theme-derived gap. The deliberate column default,
+ * named so it composes visually alongside {@link Row}.
+ */
+declare function Stack({ children, gap, align, justify, style, testID }: StackProps): React__default.JSX.Element;
+/** Explicit vertical-stack alias; identical to {@link Stack}. */
+declare const VStack: typeof Stack;
+
+interface GridProps {
+    children?: ReactNode;
+    /** Maximum column count. Default: 2. */
+    columns?: number;
+    /**
+     * Minimum width a column should keep. When set and the container width is
+     * known, the grid uses as many columns as fit (up to `columns`) and wraps
+     * down instead of collapsing to one.
+     */
+    minColumnWidth?: number;
+    /** Gap between cells: a spacing token or raw px. Defaults to the theme gap. */
+    gap?: SpacingValue;
+    style?: StyleProp<ViewStyle>;
+    testID?: string;
+}
+/**
+ * Width-aware wrapping grid. Cells keep a percentage basis driven by the
+ * effective column count, so they reflow across rows rather than stacking
+ * one-per-line or collapsing to a single column.
+ */
+declare function Grid({ children, columns, minColumnWidth, gap, style, testID }: GridProps): React__default.JSX.Element;
 
 interface RenderPillProps<TPayload = any> extends HostPillProps {
     isOpen: boolean;
@@ -1529,4 +1639,4 @@ declare function registerCustomPills(client: ComposerPillRegistrar, options: Reg
 
 declare function Icon(props: HostIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, ModalBodyScrollOwnerContext, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, normalizeSnapshotScope, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveEffectiveCompact, resolveElevation, resolvePadding, resolveRadius, resolveTypography, responsiveSelect, responsiveValue, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, ModalBodyScrollOwnerContext, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, normalizeSnapshotScope, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };

@@ -91,6 +91,54 @@ export function resolvePadding(
   }
 }
 
+export interface GridColumnOptions {
+  /** Requested (and maximum) column count. */
+  columns: number;
+  /** Horizontal gap between cells, in px. Default: 0. */
+  gap?: number;
+  /** Measured container width, when the host reports one. */
+  width?: number;
+  /**
+   * Minimum width each column should keep before wrapping to fewer columns.
+   * Only applied when a positive container width is known; `columns` stays the
+   * upper bound.
+   */
+  minColumnWidth?: number;
+  /**
+   * How a compact surface treats the requested column count.
+   * - "never" (default): keep the requested columns; flexbox wraps as needed.
+   * - "compact": collapse to a single column on a compact surface.
+   */
+  collapse?: "compact" | "never";
+  /** Whether the current surface is compact. */
+  isCompact?: boolean;
+}
+
+/**
+ * Resolves the effective column count for a responsive grid.
+ *
+ * A `minColumnWidth` plus a known container width yields as many columns as
+ * fit, capped at the requested count — so a narrow container wraps down to
+ * fewer columns instead of the requested count being forced through.
+ */
+export function resolveGridColumns(options: GridColumnOptions): number {
+  const requested = Math.max(1, Math.floor(options.columns));
+  if ((options.collapse ?? "never") === "compact" && options.isCompact) return 1;
+
+  const { minColumnWidth, width } = options;
+  const gap = options.gap ?? 0;
+  if (
+    typeof minColumnWidth === "number" &&
+    minColumnWidth > 0 &&
+    typeof width === "number" &&
+    width > 0
+  ) {
+    const fit = Math.floor((width + gap) / (minColumnWidth + gap));
+    return Math.max(1, Math.min(requested, fit));
+  }
+  return requested;
+}
+
 export interface ResponsiveSelectOptions<T> {
   /**
    * Default fallback value, used on desktop/wide viewports if no more specific option matches.

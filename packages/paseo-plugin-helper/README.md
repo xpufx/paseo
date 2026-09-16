@@ -22,6 +22,7 @@
 - **Mobile Modal Gesture Architecture**: Solves nested horizontal scrolling and double-scroll issues inside Paseo mobile bottom sheets implicitly using `ModalBody` non-nested rendering and `Tabs` edge navigation.
 - **Configurable Visual Flair**: Authors can customize corner radii (`sharp`, `rounded`, `pill`), information density, surface treatments, and brand accents while honoring Paseo's light/dark themes.
 - **Inline Actions**: `InlineButton` provides an accessible, compact link/action primitive for timeline cards and dense inline content without bespoke `Pressable` implementations.
+- **Layout Vocabulary**: `Row`, `Stack`/`VStack`, and `Grid` replace hand-rolled flexbox `View` styles with theme-derived gaps and width-aware wrapping, while `KeyValueGroup` gains `collapse`/`minColumnWidth` so compact surfaces stay multi-column when there is room.
 - ℹ️ **Plugin About & Diagnostics Card**: `<AboutSection>` standardizes plugin branding, license tags, version badges, external navigation buttons, 1-tap "Copy Diagnostics" for issue triage, and auto-resolves official GitHub logos from author or repository URLs.
 - **Composer Pill Lifecycle Engine**: Complete management of agent subscriptions, pill contributions, and modal states in one function call (`registerComposerPill`).
 - **Panels & Surfaces**: One-line registration for sidebar surfaces (`registerSidebarSurface`) and panels (`registerWorkspacePanel`, `registerAgentPanel`) with automatic theme and flair propagation.
@@ -59,7 +60,7 @@ flowchart TB
     H["paseo-plugin-helper\nwhat you get"]
 
     H --> RPC["RPC contracts\ndefineContract • defineSettingsContract\nuseRpcQuery • useRpcMutation\nuseAutoRefreshQuery"]
-    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nToggle • TextInput • FormRow\nModalBody • ActionBar\nAboutSection • EmptyState\nStatusDot • AttentionBeacon"]
+    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nToggle • TextInput • FormRow\nModalBody • ActionBar\nRow • Stack • Grid\nAboutSection • EmptyState\nStatusDot • AttentionBeacon"]
     H --> PILL["Surfaces\nregisterComposerPill\nregisterSidebarSurface\nregisterWorkspacePanel\nregisterAgentPanel"]
     H --> SET["Settings\nusePluginSettings\nuseSharedPluginSettings\nuseSuiteSettings"]
     H --> SRV["Daemon utilities\ncreatePluginLogger • PluginStorage\nregisterSettingsRpc\ngetSystemMetrics • safeSpawn\nredactSecrets • guardRpcHandler"]
@@ -182,6 +183,54 @@ merges static defaults, live Paseo 0.8 CSS variables (`--background`,
 `--foreground`, `--muted`, `--accent`, `--border`), and the injected host
 theme in that order, so surfaces track host dark/light switches with no
 plugin code.
+
+### 1c. Composing Layout: `Row`, `Stack`, `Grid`
+
+Stop hand-rolling `<View style={{ flexDirection: "row", gap }}>` and stacking
+everything one-per-line. The three layout primitives are thin flexbox wrappers
+whose default `gap` comes from the active theme
+(`usePluginTheme().padding.gap`), so spacing tracks host density with no
+literals:
+
+```tsx
+import { Button, Grid, MetricGauge, Row, Stack, StatusDot, Text } from "paseo-plugin-helper/client";
+
+// Horizontal: status dot + title + action on one line.
+<Row align="center" gap="sm">
+  <StatusDot variant="success" />
+  <Text>Build passing</Text>
+  <Button label="Retry" variant="ghost" size="sm" onPress={retry} />
+</Row>
+
+// Vertical: the deliberate column default.
+<Stack>
+  <Text>Title</Text>
+  <Text>Subtitle</Text>
+</Stack>
+
+// Width-aware grid: four-up when it fits, wrapping down as the surface narrows.
+<Grid columns={4} minColumnWidth={180}>
+  <MetricGauge value={12} label="CPU" />
+  <MetricGauge value={64} label="RAM" />
+</Grid>
+```
+
+`Row` accepts `wrap`, `align`, and `justify`; `Stack` (alias `VStack`) is the
+column counterpart. `gap` is a spacing token (`"xs" | "sm" | "md" | "lg" | "xl"`)
+or a raw px number, defaulting to the theme gap. `Grid` never collapses to a
+single column: with `minColumnWidth` it uses as many columns as fit (capped by
+`columns`) and wraps the rest.
+
+`<KeyValueGroup>` keeps its compact-aware default (one column on a compact
+surface) for existing consumers, but now exposes `collapse` and `minColumnWidth`:
+
+```tsx
+// Stay 2-up even in a compact popover, as long as each cell has 220px.
+<KeyValueGroup columns={2} collapse="never" minColumnWidth={220}>
+  <KeyValue layout="inline" label="Version" value={sha} mono />
+  <KeyValue layout="inline" label="Remote" value={remote} mono />
+</KeyValueGroup>
+```
 
 ---
 

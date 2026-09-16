@@ -315,3 +315,58 @@ describe("KeyValue inline layout", () => {
     expect(wrapper).toBeTruthy();
   });
 });
+
+describe("KeyValueGroup collapse control", () => {
+  function cellBases(renderer: TestRenderer.ReactTestRenderer): string[] {
+    return renderer.root
+      .findAllByType(View as any)
+      .map((v) => flat(v.props.style).find((s) => s && s.flexBasis !== undefined)?.flexBasis)
+      .filter((basis): basis is string => typeof basis === "string");
+  }
+
+  const compactLayout: HostLayout = { compact: true, platform: "web", width: 300 };
+  const wideLayout: HostLayout = { compact: false, platform: "web", width: 900 };
+
+  function group(props: Omit<React.ComponentProps<typeof KeyValueGroup>, "children">) {
+    return (
+      <KeyValueGroup {...props}>
+        <KeyValue label="A" value="1" />
+        <KeyValue label="B" value="2" />
+      </KeyValueGroup>
+    );
+  }
+
+  it("preserves the default: a compact surface collapses to one column", () => {
+    const r = render(withLayout(compactLayout, group({ columns: 2 })));
+    expect(cellBases(r)).toEqual(["98%", "98%"]);
+  });
+
+  it("keeps the requested columns on compact when collapse is never", () => {
+    const r = render(withLayout(compactLayout, group({ columns: 2, collapse: "never" })));
+    expect(cellBases(r)).toEqual(["48%", "48%"]);
+  });
+
+  it("caps columns by minColumnWidth so compact can keep more than one column", () => {
+    const r = render(
+      withLayout(compactLayout, group({ columns: 3, collapse: "never", minColumnWidth: 180 })),
+    );
+    // floor((300 + 12) / (180 + 12)) = 1 column... too tight; two need ~372px
+    expect(cellBases(r)).toEqual(["98%", "98%"]);
+
+    const roomy = render(
+      withLayout(compactLayout, group({ columns: 3, collapse: "never", minColumnWidth: 120 })),
+    );
+    // floor((300 + 12) / (120 + 12)) = 2
+    expect(cellBases(roomy)).toEqual(["48%", "48%"]);
+  });
+
+  it("caps a wide grid by minColumnWidth without changing the max", () => {
+    const r = render(withLayout(wideLayout, group({ columns: 2, minColumnWidth: 220 })));
+    // floor((900 + 12) / (220 + 12)) = 3, capped at 2
+    expect(cellBases(r)).toEqual(["48%", "48%"]);
+
+    const tight = render(withLayout(wideLayout, group({ columns: 2, minColumnWidth: 800 })));
+    // floor((900 + 12) / (800 + 12)) = 1
+    expect(cellBases(tight)).toEqual(["98%", "98%"]);
+  });
+});

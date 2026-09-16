@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { getClientHost } from "../host";
 import { usePluginTheme } from "../theme/provider";
+import { resolveGridColumns } from "../theme/responsive";
 import { spacing } from "../theme/tokens";
 import { copyToClipboard } from "../utils/clipboard";
 import {
@@ -307,6 +308,20 @@ export interface KeyValueGroupProps {
   children: ReactNode;
   columns?: 1 | 2 | 3 | 4;
   gap?: number;
+  /**
+   * How a compact surface treats the column count.
+   * - "compact" (default): collapse to a single column on a compact surface —
+   *   the historical behavior.
+   * - "never": keep the requested column count on a compact surface.
+   */
+  collapse?: "compact" | "never";
+  /**
+   * Minimum width a column should keep. When set and the container width is
+   * known, the effective column count is capped so each column stays at least
+   * this wide, wrapping to fewer columns rather than collapsing to one.
+   * `columns` remains the upper bound.
+   */
+  minColumnWidth?: number;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -314,10 +329,19 @@ export function KeyValueGroup({
   children,
   columns = 2,
   gap = spacing.md,
+  collapse = "compact",
+  minColumnWidth,
   style,
 }: KeyValueGroupProps) {
-  const { isCompact } = usePluginTheme();
-  const effectiveColumns = isCompact ? 1 : columns;
+  const { isCompact, layout } = usePluginTheme();
+  const effectiveColumns = resolveGridColumns({
+    columns,
+    gap,
+    width: layout.width,
+    minColumnWidth,
+    collapse,
+    isCompact,
+  });
 
   const childArray = React.Children.toArray(children).filter(Boolean);
 

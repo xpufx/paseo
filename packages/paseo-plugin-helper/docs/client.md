@@ -374,6 +374,25 @@ Displays key/value metadata. Automatically stacks vertically on compact/mobile s
 </KeyValueGroup>
 ```
 
+#### Collapse control
+By default a compact surface still collapses the group to a single column (the
+historical behavior, preserved for existing consumers). Two optional props let a
+group keep its columns when there is room:
+
+- `collapse`: `"compact"` (default) collapses to one column on a compact
+  surface; `"never"` keeps the requested `columns`.
+- `minColumnWidth`: when set and the container width is known, the effective
+  column count is capped so each column stays at least this wide — it wraps to
+  fewer columns instead of collapsing to one. `columns` remains the upper bound.
+
+```tsx
+// Stay 2-up in a compact popover as long as each cell has 220px.
+<KeyValueGroup columns={2} collapse="never" minColumnWidth={220}>
+  <KeyValue layout="inline" label="Version" value={sha} mono />
+  <KeyValue layout="inline" label="Remote" value={remote} mono />
+</KeyValueGroup>
+```
+
 ### `<ProgressBar>`
 Visual gauge with automated threshold coloring (<75% green, 75-89% yellow, >=90% red).
 ```tsx
@@ -477,7 +496,40 @@ the child inert with no animation.
 
 ## 4. Layout Primitives
 
-### `<ModalBody>`
+### `<Row>`, `<Stack>` / `<VStack>`, `<Grid>`
+Thin, themed flexbox wrappers. They exist so plugins compose horizontally and
+wrap instead of authoring everything as a vertical stack of hand-rolled
+`<View style={{ flexDirection: "row", gap }}>`. `gap` defaults to the active
+theme's `padding.gap`; pass a spacing token (`"xs" | "sm" | "md" | "lg" | "xl"`)
+or a raw px number to override.
+
+```tsx
+import { Grid, MetricGauge, Row, Stack, StatusDot, Text } from "paseo-plugin-helper/client";
+
+<Row align="center" gap="sm" wrap>
+  <StatusDot variant="success" />
+  <Text>Build passing</Text>
+</Row>
+
+<Stack gap="xs">
+  <Text>Title</Text>
+  <Text>Subtitle</Text>
+</Stack>
+
+<Grid columns={4} minColumnWidth={180}>
+  <MetricGauge value={12} label="CPU" />
+  <MetricGauge value={64} label="RAM" />
+</Grid>
+```
+
+- `Row`: `flexDirection: "row"`; optional `wrap`, `align`, `justify`.
+- `Stack` (alias `VStack`): the deliberate column default; optional `align`,
+  `justify`.
+- `Grid`: wrapping row grid. `columns` caps the count (default `2`);
+  `minColumnWidth` makes it width-aware — as many columns as fit, wrapping the
+  rest. It never collapses to one column on a compact surface.
+
+
 A scrollable container for `<Modal.Content>` that automatically applies bottom padding (`paddingBottom: 48` on mobile) to clear OS home navigation bars and keyboards.
 Supports native pull-to-refresh on mobile via `refreshing` and `onRefresh`.
 Pass `header` with `headerMode="pinned"` for a fixed tab/navigation bar. On

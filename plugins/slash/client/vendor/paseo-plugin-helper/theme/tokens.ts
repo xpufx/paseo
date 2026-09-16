@@ -18,6 +18,21 @@ export const spacing = {
 
 export type SpacingKey = keyof typeof spacing;
 
+/**
+ * A gap/size value: either a named spacing token or a raw px number. Layout
+ * primitives accept this so callers never have to invent their own scale.
+ */
+export type SpacingValue = SpacingKey | number;
+
+/**
+ * Resolves a {@link SpacingValue} to px, falling back to the theme-derived
+ * value when the caller did not specify one.
+ */
+export function resolveSpacing(value: SpacingValue | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  return typeof value === "number" ? value : spacing[value];
+}
+
 export interface TypographyToken {
   fontSize: number;
   lineHeight: number;
