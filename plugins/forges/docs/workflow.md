@@ -237,24 +237,37 @@ Missing labels in no way block either role; see the cold-start gap above.
 
 ## 5. Skills
 
-`plugins/forges/examples/skills/` ships the workflow above as two Paseo Skills,
-adapted for publication:
+`plugins/forges/examples/skills/` ships the workflow above as **two skill
+sets**, adapted for publication. Each set has a coding-agent and an orchestrator
+counterpart, and they differ only in how they touch the board:
 
-- [`examples/skills/coding-agent/SKILL.md`](../examples/skills/coding-agent/SKILL.md)
-  — discovery, claiming, implementation, handoff, and comment-stamping rules.
-- [`examples/skills/orchestrator/SKILL.md`](../examples/skills/orchestrator/SKILL.md)
-  — triage, dispatch, pre-flight, verification, and operator signalling.
+| Zero-dependency (plugin + embedded `/api/v1`) | CLI (`fgjx` over `fgj`)                  |
+| --------------------------------------------- | ---------------------------------------- |
+| [`examples/skills/coding-agent/SKILL.md`](../examples/skills/coding-agent/SKILL.md) | [`examples/skills/coding-agent-fgjx/SKILL.md`](../examples/skills/coding-agent-fgjx/SKILL.md) |
+| [`examples/skills/orchestrator/SKILL.md`](../examples/skills/orchestrator/SKILL.md) | [`examples/skills/orchestrator-fgjx/SKILL.md`](../examples/skills/orchestrator-fgjx/SKILL.md) |
+
+- The **zero-dependency** set drives the board through the plugin's own
+  surfaces and its embedded Gitea-family `/api/v1` client. Nothing needs to be
+  installed; no forge CLI is present.
+- The **CLI** set uses the vendored example wrapper
+  [`examples/tools/fgjx`](../examples/tools/fgjx), which is a thin passthrough
+  shim over **your** `fgj`: `fgj` owns the host URL + token and performs the raw
+  `/api/v1` calls, while `fgjx` adds label resolution, table/view niceties, and
+  optional envelope stamping. See
+  [`examples/tools/README.md`](../examples/tools/README.md). The envelope tool
+  is optional — without one, `fgjx` emits a generic machine-authored footer.
 
 They are **examples, not drop-ins**. Both carry a warning banner and use
 placeholders (`forge.example.com`, `your-org/your-repo`). Before adopting one:
 
 1. Copy it into your skills directory (for Paseo: `.agents/skills/<name>/`).
 2. Rewrite the host, repo, and command/tool names to match your setup. If you
-   don't have an envelope/CLI tool, replace those steps with direct forge API
-   calls or the plugin's own surfaces.
+   choose the CLI set, supply `fgj` and (optionally) an envelope tool; if you
+   can't, use the zero-dependency set and the plugin surfaces / direct forge API
+   calls.
 3. Align the label and slash-command vocabulary with your seed YAML. If you
    only seed the four scopes in §3, drop or define any extra labels a Skill
-   mentions (the Orchestrator example refers to a `flag/stop-work` circuit
+   mentions (the Orchestrator examples refer to a `flag/stop-work` circuit
    breaker).
 4. Cross-link the adapted Skills back to your board conventions so the next
    agent inherits them.
@@ -268,7 +281,8 @@ What the `forges` plugin provides versus what you must supply:
 | Issue list/detail, comments, scoped label chips               | Hook service (systemd unit **or** workspace-scoped service)|
 | Embedded `/api/v1` fetch client; daemon-side per-host tokens  | Label base (seed YAML applied to the repo)                 |
 | Live label vocabulary derived from the board                  | Skills (adapt the examples to your tooling)                |
-| Example Skills + examples README                              | Envelope / attribution tooling for comment stamps          |
+| Two example skill sets (plugin/`/api/v1` and `fgjx`) + README | `fgj`, only if you adopt the CLI skill set                 |
+| Bundled, sanitized `examples/tools/fgjx` wrapper              | Envelope tool for comment stamps (optional, CLI set only)  |
 | `forge.set-label` / `forge.add-comment` write RPCs            | The forge itself (Forgejo/Gitea-family host + repo)        |
 | Webhook timeline card parser (`shared/webhook.ts`)            | Webhook secret/config on the forge repo                    |
 
@@ -278,11 +292,16 @@ Explicit non-goals (do not expect the plugin to do these):
   register webhooks for you.
 - **No label install.** The optional label-set install is operator-gated and
   excluded from the release surface; seed labels yourself.
-- **No envelope tooling.** Comment attribution/self-stamping is external.
+- **No envelope tooling shipped.** Comment attribution/self-stamping is
+  external. The bundled `examples/tools/fgjx` can call an adopter-supplied
+  envelope tool for `--envelope`, but the plugin ships none and the core
+  workflow never needs one.
 - **No orchestration.** Dispatch, pre-flight, and verify are agent behaviour
   encoded in the example Skills, not plugin features.
-- **No CLI or host dotfile dependency.** The plugin works on a machine that has
-  never had a forge CLI installed.
+- **No CLI dependency in the plugin runtime.** The plugin works on a machine
+  that has never had a forge CLI installed. The `fgjx` wrapper is a bundled
+  *example* under `examples/tools/` for adopters who already run `fgj`; it is
+  never loaded by the plugin.
 
 ### 6.1 Minimum token scopes (write-enabled forges)
 

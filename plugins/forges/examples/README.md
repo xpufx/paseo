@@ -18,19 +18,27 @@ owns — is in [`../docs/workflow.md`](../docs/workflow.md).
   the workflow uses (`state/`, `priority/`, `attention/`, `spec/`, plus an
   optional `flag/stop-work`). Apply it as a Forgejo label template or create
   the labels via the API/UI.
-- `skills/coding-agent/SKILL.md` — workflow, issue conventions, and reporting
-  standards for a coding agent that picks up and delivers issues from the
-  board. Uses the team's `fgjx` Forgejo CLI wrapper and an envelope self-stamp
-  (`envelope-tool`) so comment attribution survives across many agents sharing
-  one account.
-- `skills/orchestrator/SKILL.md` — dispatch, pre-flight, and
-  human-in-the-loop signoff rules for the agent coordinating the others.
+- `tools/fgjx` — a sanitized, vendored copy of one team's `fgjx` wrapper. It is
+  a passthrough shim over the `fgj` CLI (label resolution, table/view niceties,
+  optional envelope stamping) and **requires the adopter's own `fgj`**, pointed
+  at their forge; it fails loudly without it. `tools/README.md` explains the
+  fgj-vs-fgjx split and the optional envelope tool.
+- `skills/coding-agent/SKILL.md` — the **zero-dependency** variant: workflow,
+  issue conventions, and reporting standards, driving the board through the
+  plugin's own surfaces and embedded Gitea-family `/api/v1` client. No forge CLI.
+- `skills/coding-agent-fgjx/SKILL.md` — the **CLI** variant of the same
+  workflow, using the vendored `fgjx` (hence an adopter-supplied `fgj`) and an
+  optional envelope self-stamp so comment attribution survives across many
+  agents sharing one account.
+- `skills/orchestrator/SKILL.md` and `skills/orchestrator-fgjx/SKILL.md` —
+  dispatch, pre-flight, and human-in-the-loop signoff rules for the agent
+  coordinating the others, split the same way (plugin + `/api/v1` vs `fgjx`).
 
 Every file carries an `EXAMPLE` warning at the top. To use the Skills, copy a
 `SKILL.md` into your own skills directory (for Paseo: `.agents/skills/<name>/`)
 and rewrite the placeholders (`forge.example.com`, `your-org/your-repo`,
-`fgj`/`fgjx`, `envelope-tool`) to match your tooling. If you do not have
-equivalent tooling, replace the CLI steps with direct Forgejo API calls.
+`fgj`/`fgjx`, `envelope-tool`) to match your tooling. If you have no forge CLI,
+start from the `coding-agent`/`orchestrator` variants — they need none.
 
 ## The label taxonomy the skills assume
 
@@ -54,10 +62,27 @@ The operator may apply **no labels at all**; that is the normal starting state,
 not an error. Automation must treat missing labels as advisory and bootstrap the
 taxonomy on first touch (see `docs/workflow.md` §3).
 
-## Working without our tooling
+## Two skill sets, and what they need
 
-The skills assume `fgj`/`fgjx` and `envelope-tool` exist. They are not part of
-the plugin. If you use the plugin's own surfaces instead, the equivalent
-operations are: the issues pill/modal for listing and detail, the Labels tab
-for scoped label changes, and the quick-comment composer for steering. Map the
-skill's CLI steps onto those.
+The plugin itself assumes no CLI. The Skills come in two variants so you can
+pick the one that fits your host:
+
+- **Plugin + embedded `/api/v1`** — `skills/coding-agent` and
+  `skills/orchestrator`. Zero external dependencies: list and read issues
+  through the issues pill/modal, change scoped labels through the Labels tab /
+  label chips, post through the quick-comment composer, all backed by the
+  daemon-side `/api/v1` client. Scripting can call the forge API directly with
+  your own token.
+- **`fgjx` CLI** — `skills/coding-agent-fgjx` and `skills/orchestrator-fgjx`.
+  The richer path, using the bundled `tools/fgjx`. That wrapper needs **your**
+  `fgj` (the authenticated transport: it owns the host URL + token and does the
+  raw `/api/v1` calls) and, **optionally**, an envelope tool for comment
+  stamps. Neither ships with the plugin.
+
+Both variants expose the same board: the plugin's equivalents for a CLI step
+are the issues pill/modal (list/detail), the Labels tab (scoped label changes),
+and the quick-comment composer (steering). Map the CLI steps onto those (or the
+plugin's `forge.board-overview` / `forge.issue-detail` / `forge.set-label` /
+`forge.add-comment` RPCs) when you have no CLI. See
+[`../docs/workflow.md`](../docs/workflow.md) §6 for the full includes-vs-excludes
+table.

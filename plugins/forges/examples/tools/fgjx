@@ -1,0 +1,464 @@
+#!/bin/bash
+# fgjx: fills fgj display gaps via `fgj api` and adds agent lifecycle workflow extensions.
+#
+# Vendored example copy of xpufx/platform/scripts/fgjx, sanitized for publication
+# (see tools/README.md). fgjx is only a shim: `fgj` is the authenticated transport
+# that owns the host URL/token and performs the raw /api/v1 calls, so fgj must be
+# available or the wrapper cannot do anything.
+set -u
+
+# Put fgj's off-PATH home on PATH so the wrapper finds it without a global install.
+export PATH="$HOME/bin/.lib:$PATH"
+
+if ! command -v fgj >/dev/null 2>&1; then
+  printf '%s\n' "fgjx: required backend 'fgj' not found on PATH." >&2
+  printf '%s\n' "fgjx only adds board-shaped verbs (labels, tables, envelope); fgj supplies the" >&2
+  printf '%s\n' "host/token config and does the raw /api/v1 calls. Install fgj, put it on PATH" >&2
+  printf '%s\n' "(or in \$HOME/bin/.lib), then retry." >&2
+  exit 127
+fi
+
+# Embedded helper functions for general-purpose Forgejo operations
+_fgjx_parse_repo_name() {
+  local url="${1:-}"
+  [ -z "$url" ] && return 0
+  python3 -c 'import sys, re; m = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", sys.argv[1]); print(m.group(1)) if m else None' "$url"
+}
+
+_fgjx_format_body() {
+  python3 -c '
+import sys, textwrap
+
+def wrap_body(body, width=100):
+    out = []
+    in_fence = False
+    for line in body.split("\n"):
+        s = line
+        if s.strip().startswith("```"):
+            in_fence = not in_fence
+            out.append(s)
+            continue
+        if in_fence or not s.strip() or len(s) <= width or s.startswith(("    ", "\t", "> ", "| ", "- ", "* ", "#")):
+            out.append(s)
+        else:
+            out.append(textwrap.fill(s, width=width))
+    return "\n".join(out).rstrip() + "\n"
+
+sys.stdout.write(wrap_body(sys.stdin.read()))
+'
+}
+
+_fgjx_render_table() {
+  python3 -c '
+import json, os, sys
+
+try:
+    rows = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+notby = os.environ.get("NOTBY") or ""
+sortby = os.environ.get("SORTBY") or ""
+since = os.environ.get("SINCE") or ""
+
+if notby:
+    rows = [i for i in rows if ((i.get("user") or {}).get("login") != notby)]
+if since:
+    rows = [i for i in rows if (i.get("updated_at") or "") >= since]
+if sortby in ("updated", "created"):
+    rows.sort(key=lambda i: i.get(sortby + "_at") or "", reverse=True)
+
+print("%-6s %-38s %-9s %-10s %s" % ("NUMBER", "LABELS", "STATE", "BY", "TITLE"))
+for i in rows:
+    labs = ",".join(l["name"] for l in i.get("labels", []))
+    by = (i.get("user") or {}).get("login", "?")
+    print("%-6d %-38.38s %-9s %-10.10s %s" % (i["number"], labs, i["state"], by, i["title"][:50]))
+'
+}
+
+_fgjx_render_view() {
+  python3 -c '
+import json, os, sys, textwrap
+
+try:
+    raw = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+d = raw.get("issue", raw)
+print("Issue #%d: %s" % (d["number"], d["title"]))
+print("State: %s   Labels: %s" % (d["state"], ", ".join(l["name"] for l in d.get("labels", [])) or "(none)"))
+print("---")
+print(d.get("body") or "(no body)")
+
+comments_raw = os.environ.get("COMMENTS_JSON") or ""
+try:
+    comments = json.loads(comments_raw) if comments_raw.strip().startswith("[") else []
+except Exception:
+    comments = []
+
+def wrap_body(body, width=100):
+    out = []
+    in_fence = False
+    for line in body.split("\n"):
+        s = line
+        if s.strip().startswith("```"):
+            in_fence = not in_fence
+            out.append(s)
+            continue
+        if in_fence or not s.strip() or len(s) <= width or s.startswith(("    ", "\t", "> ", "| ", "- ", "* ", "#")):
+            out.append(s)
+        else:
+            out.append(textwrap.fill(s, width=width))
+    return "\n".join(out).rstrip()
+
+if comments:
+    print("--- Comments (%d) ---" % len(comments))
+    for c in comments:
+        u = c.get("user") or {}
+        name = u.get("full_name") or u.get("login") or "?"
+        login = u.get("login") or "?"
+        who = "%s (@%s)" % (name, login) if name and name != login else login
+        print("")
+        print("[%s | %s]" % (who, (c.get("created_at") or "?")[:19].replace("T", " ")))
+        print(wrap_body(c.get("body") or "(no body)"))
+'
+}
+
+_fgjx_label_edit() {
+  EDIT_REPO="$1" EDIT_NUM="$2" EDIT_HOST_ARG="$3" EDIT_ADDS="$4" EDIT_REMS="$5" python3 -c '
+import json, sys, subprocess, os
+
+repo = os.environ.get("EDIT_REPO")
+num = os.environ.get("EDIT_NUM")
+host_arg = os.environ.get("EDIT_HOST_ARG")
+
+def split_names(raw):
+    # Accept both repeated flags and comma-joined values: "a,b" or "a\nb".
+    out = []
+    for line in (raw or "").split("\n"):
+        for part in line.split(","):
+            part = part.strip()
+            if part:
+                out.append(part)
+    return out
+
+adds = split_names(os.environ.get("EDIT_ADDS"))
+rems = split_names(os.environ.get("EDIT_REMS"))
+h_tokens = host_arg.split() if host_arg else []
+
+# Page the label fetch: repos can have more than one page of labels (#197).
+name_to_id = {}
+page = 1
+while True:
+    cmd = ["fgj", "api", f"repos/{repo}/labels?limit=50&page={page}"] + h_tokens
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if res.returncode != 0:
+        sys.stderr.write(f"fgjx: label fetch failed (page {page}): {res.stderr.strip()}\n")
+        sys.exit(1)
+    try:
+        batch = json.loads(res.stdout)
+    except Exception:
+        sys.stderr.write("fgjx: label fetch returned invalid JSON\n")
+        sys.exit(1)
+    if not batch:
+        break
+    for label in batch:
+        name_to_id[label["name"].lower()] = label["id"]
+    if len(batch) < 50:
+        break
+    page += 1
+
+# Resolve everything before writing: an unknown name is a hard error, not a skip.
+missing = [n for n in (adds + rems) if n.lower() not in name_to_id]
+if missing:
+    sys.stderr.write("fgjx: unknown label(s): %s\n" % ", ".join(missing))
+    sys.exit(1)
+
+for name in adds:
+    lid = name_to_id[name.lower()]
+    p_cmd = ["fgj", "api", "-X", "POST", f"repos/{repo}/issues/{num}/labels"] + h_tokens + ["--input", "-"]
+    p = subprocess.Popen(p_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    p.communicate(json.dumps({"labels": [lid]}).encode("utf-8"))
+
+for name in rems:
+    lid = name_to_id[name.lower()]
+    d_cmd = ["fgj", "api", "-X", "DELETE", f"repos/{repo}/issues/{num}/labels/{lid}"] + h_tokens
+    subprocess.run(d_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+'
+}
+
+# Resolve the optional envelope generator. The core wrapper never needs it; only
+# `--envelope` does. Override the binary with $ENVELOPE_TOOL.
+_fgjx_envelope() {
+  if [ -n "${ENVELOPE_TOOL:-}" ] && command -v "$ENVELOPE_TOOL" >/dev/null 2>&1; then
+    "$ENVELOPE_TOOL" envelope
+  elif command -v envelope-tool >/dev/null 2>&1; then
+    envelope-tool envelope
+  elif [ -x "$HOME/bin/envelope-tool" ]; then
+    "$HOME/bin/envelope-tool" envelope
+  else
+    printf '<sub>🤖 agent · %s</sub>' "$(date -u +%FT%TZ)"
+  fi
+}
+
+# Parse leading global flags so flags like `--hostname` or `-R` can appear before or after subcommands
+GLOBAL_PRE_FLAGS=()
+POSITIONAL_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --hostname|-R|--repo|--config)
+      GLOBAL_PRE_FLAGS+=("$1" "$2")
+      shift 2
+      ;;
+    --hostname=*|-R=*|--repo=*|--config=*)
+      GLOBAL_PRE_FLAGS+=("$1")
+      shift
+      ;;
+    *)
+      POSITIONAL_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+set -- "${POSITIONAL_ARGS[@]}" "${GLOBAL_PRE_FLAGS[@]}"
+CMD="${1:-}"
+SUB="${2:-}"
+
+FGJX_NOTE='
+fgjx extensions:
+  issue list        Adds a LABELS column (native table omits labels).
+  issue view        Shows labels header above the body, plus formatted comments.
+  issue create --envelope
+                    Append clean agent envelope badge footer to new issue.
+  issue comment --format
+                    Wrap the -b/--body text at 100 cols before posting.
+  issue comment --agent-envelope (alias --envelope)
+                    Append clean agent envelope badge footer.
+  issue edit --add-label / --remove-label
+                    Add/remove labels via API. Comma-joined values are split,
+                    and an unknown label name fails non-zero.
+  issue list flags  --not-by <login>, --sort updated|created, --since <date>.'
+
+want_help=0
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) want_help=1; break;;
+  esac
+done
+if [ "$want_help" = 1 ]; then
+  fgj "$@"
+  rc=$?
+  case "$*" in
+    *"issue list"*|*"issue view"*|*"issue "*)
+      printf '\n%s\n' "$FGJX_NOTE";;
+    *)
+      if [ -z "$CMD" ] || [ "$CMD" = "-h" ] || [ "$CMD" = "--help" ]; then
+        printf '\nfgjx: display-gap shim over fgj (labels in issue list/view).%s\n' "$FGJX_NOTE"
+      fi;;
+  esac
+  exit $rc
+fi
+
+# 1. issue list
+if [ "$CMD" = "issue" ] && [ "$SUB" = "list" ]; then
+  shift 2
+  if printf '%s\n' "$@" | grep -q -- '--json'; then
+    exec fgj issue list "$@"
+  fi
+  NOTBY=""; SORTBY=""; SINCE=""; FWD=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --not-by) NOTBY="$2"; shift 2;;
+      --sort) SORTBY="$2"; shift 2;;
+      --since) SINCE="$2"; shift 2;;
+      *) FWD+=("$1"); shift;;
+    esac
+  done
+  OUT=$(fgj issue list --json "${FWD[@]}" 2>/dev/null) || { echo "fgjx: fgj call failed" >&2; exit 1; }
+  NOTBY="$NOTBY" SORTBY="$SORTBY" SINCE="$SINCE" echo "$OUT" | _fgjx_render_table
+  exit 0
+fi
+
+# 1b. issue create
+if [ "$CMD" = "issue" ] && [ "$SUB" = "create" ]; then
+  use_format=0; use_envelope=0
+  for a in "$@"; do
+    case "$a" in
+      --format) use_format=1;;
+      --agent-envelope|--envelope) use_envelope=1;;
+    esac
+  done
+  if [ "$use_format" = 0 ] && [ "$use_envelope" = 0 ]; then
+    exec fgj "$@"
+  fi
+  shift 2
+  BODY=""; BODYPENDING=""; REST=()
+  for a in "$@"; do
+    if [ -n "$BODYPENDING" ]; then
+      BODY="$a"; BODYPENDING=""
+    else
+      case "$a" in
+        -b|--body) BODYPENDING=1;;
+        --body=*) BODY="${a#--body=}";;
+        --format|--agent-envelope|--envelope) ;;
+        *) REST+=("$a");;
+      esac
+    fi
+  done
+  if [ -z "$BODY" ]; then
+    exec fgj issue create "${REST[@]}"
+  fi
+  if [ "$use_format" = 1 ]; then
+    BODY=$(printf '%s' "$BODY" | _fgjx_format_body)
+  fi
+  if [ "$use_envelope" = 1 ]; then
+    ENVELOPE=$(_fgjx_envelope)
+    BODY=$(printf '%s
+
+---
+%s' "$BODY" "$ENVELOPE")
+  fi
+  exec fgj issue create -b "$BODY" "${REST[@]}"
+fi
+
+# 2. issue comment
+if [ "$CMD" = "issue" ] && [ "$SUB" = "comment" ]; then
+  use_format=0; use_envelope=0
+  for a in "$@"; do
+    case "$a" in
+      --format) use_format=1;;
+      --agent-envelope|--envelope) use_envelope=1;;
+    esac
+  done
+  if [ "$use_format" = 0 ] && [ "$use_envelope" = 0 ]; then
+    exec fgj "$@"
+  fi
+  shift 2
+  NUM=""; BODY=""; BODYPENDING=""; REST=()
+  for a in "$@"; do
+    if [ -n "$BODYPENDING" ]; then
+      BODY="$a"; BODYPENDING=""
+    else
+      case "$a" in
+        -b|--body) BODYPENDING=1;;
+        --body=*) BODY="${a#--body=}";;
+        --format|--agent-envelope|--envelope) ;;
+        [0-9]*) [ -z "$NUM" ] && NUM="$a" || REST+=("$a");;
+        *) REST+=("$a");;
+      esac
+    fi
+  done
+  if [ -z "$BODY" ]; then
+    exec fgj issue comment "$NUM" "${REST[@]}"
+  fi
+  if [ "$use_format" = 1 ]; then
+    BODY=$(printf '%s' "$BODY" | _fgjx_format_body)
+  fi
+  if [ "$use_envelope" = 1 ]; then
+    ENVELOPE=$(_fgjx_envelope)
+    BODY=$(printf '%s\n\n---\n%s' "$BODY" "$ENVELOPE")
+  fi
+  exec fgj issue comment "$NUM" -b "$BODY" "${REST[@]}"
+fi
+
+# 3. issue edit
+if [ "$CMD" = "issue" ] && [ "$SUB" = "edit" ]; then
+  shift 2
+  NUM=""
+  ADD_LABELS=()
+  REM_LABELS=()
+  REST_FLAGS=()
+  REPO=""
+  HOST=""
+  prev=""
+  for a in "$@"; do
+    if [ -n "$prev" ]; then
+      case "$prev" in
+        --add-label) ADD_LABELS+=("$a"); prev=""; continue ;;
+        --remove-label) REM_LABELS+=("$a"); prev=""; continue ;;
+        -R|--repo) REPO="$a"; REST_FLAGS+=("-R" "$a"); prev=""; continue ;;
+        --hostname) HOST="$a"; REST_FLAGS+=("--hostname" "$a"); prev=""; continue ;;
+      esac
+    fi
+    case "$a" in
+      --add-label|--remove-label|-R|--repo|--hostname) prev="$a" ;;
+      --add-label=*) ADD_LABELS+=("${a#--add-label=}") ;;
+      --remove-label=*) REM_LABELS+=("${a#--remove-label=}") ;;
+      -R=*|--repo=*) REPO="${a#*=}"; REST_FLAGS+=("$a") ;;
+      --hostname=*) HOST="${a#*=}"; REST_FLAGS+=("$a") ;;
+      [0-9]*) [ -z "$NUM" ] && NUM="$a" || REST_FLAGS+=("$a") ;;
+      *) REST_FLAGS+=("$a") ;;
+    esac
+  done
+
+  if [ -z "$REPO" ]; then
+    origin_url=$(git remote get-url origin 2>/dev/null || true)
+    REPO=$(_fgjx_parse_repo_name "$origin_url")
+  fi
+
+  if [ -n "$NUM" ] && [ -n "$REPO" ] && { [ ${#ADD_LABELS[@]} -gt 0 ] || [ ${#REM_LABELS[@]} -gt 0 ]; }; then
+    api_host_arg=""
+    [ -n "$HOST" ] && api_host_arg="--hostname $HOST"
+    if ! _fgjx_label_edit "$REPO" "$NUM" "$api_host_arg" "$(printf '%s\n' "${ADD_LABELS[@]}")" "$(printf '%s\n' "${REM_LABELS[@]}")"; then
+      echo "fgjx: label update failed; no labels were changed" >&2
+      exit 1
+    fi
+  fi
+
+  HAS_REAL_EDITS=0
+  for f in "${REST_FLAGS[@]}"; do
+    case "$f" in
+      --title*|--body*|--state*) HAS_REAL_EDITS=1 ;;
+    esac
+  done
+  if [ "$HAS_REAL_EDITS" = 1 ]; then
+    exec fgj issue edit "$NUM" "${REST_FLAGS[@]}"
+  else
+    echo "Issue #$NUM updated"
+    exit 0
+  fi
+fi
+
+# 4. issue view
+if [ "$CMD" = "issue" ] && [ "$SUB" = "view" ]; then
+  shift 2
+  NUM=""
+  REST=()
+  for a in "$@"; do
+    case "$a" in
+      [0-9]*) [ -z "$NUM" ] && NUM="$a" || REST+=("$a");;
+      *) REST+=("$a");;
+    esac
+  done
+  if printf '%s\n' "${REST[@]}" | grep -q -- '--json'; then
+    exec fgj issue view "$NUM" "${REST[@]}"
+  fi
+  OUT=$(fgj issue view "$NUM" --json "${REST[@]}" 2>/dev/null) || { echo "fgjx: fgj call failed" >&2; exit 1; }
+  REPO=""; HOST=""; prev=""
+  for a in "${REST[@]}"; do
+    case "$prev" in
+      -R|--repo) REPO="$a";;
+      --hostname) HOST="$a";;
+    esac
+    prev="$a"
+  done
+  if [ -z "$REPO" ]; then
+    origin_url=$(git remote get-url origin 2>/dev/null || true)
+    REPO=$(_fgjx_parse_repo_name "$origin_url")
+  fi
+  COMMENTS_JSON=""
+  if [ -n "$REPO" ] && [ -n "$NUM" ]; then
+    if [ -n "$HOST" ]; then
+      COMMENTS_JSON=$(fgj api "repos/$REPO/issues/$NUM/comments" --hostname "$HOST" 2>/dev/null || true)
+    else
+      COMMENTS_JSON=$(fgj api "repos/$REPO/issues/$NUM/comments" 2>/dev/null || true)
+    fi
+  fi
+  export COMMENTS_JSON
+  echo "$OUT" | _fgjx_render_view
+  exit 0
+fi
+
+exec fgj "$@"

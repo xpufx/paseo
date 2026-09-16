@@ -1,21 +1,29 @@
 ---
-name: orchestrator
-description: EXAMPLE skill — workflow, pre-flight audits, agent synchronization, and human-in-the-loop signoff protocols for the orchestrating agent
+name: orchestrator-fgjx
+description: EXAMPLE skill — CLI variant of the orchestrator workflow, dispatching and verifying through the fgjx wrapper over fgj
 ---
 
 > [!WARNING]
-> **This is an example, not a drop-in.** It encodes one team's board
-> conventions (labels, slash commands, issue-link format) built on the
-> scoped label seed in `../../labels/label-base.yaml`. This variant operates
-> through the `forges` plugin's own surfaces and embedded `/api/v1` client and
-> needs no forge CLI; the richer CLI twin is
-> [`../orchestrator-fgjx/SKILL.md`](../orchestrator-fgjx/SKILL.md). Adapt the
-> labels, commands, and escalation rules to your own workflow before use. See
-> `../../README.md` and `../../docs/workflow.md`.
+> **This is an example, not a drop-in.** It is the CLI variant of the
+> `orchestrator` skill: board operations go through a `fgjx` wrapper, which
+> needs the `fgj` CLI. Neither is part of the plugin. It encodes one team's
+> board conventions (labels, slash commands, issue-link format) built on the
+> scoped label seed in `../../labels/label-base.yaml`. If you have no forge CLI,
+> use the zero-dependency [`../orchestrator/SKILL.md`](../orchestrator/SKILL.md)
+> variant instead. See `../../README.md`, `../../tools/README.md`, and
+> `../../docs/workflow.md`.
 
-# Orchestrator Skill
+# Orchestrator Skill (fgjx CLI)
 
 You coordinate the fleet. Default: **delegate unless stopped**. Labels describe state; they never gate action.
+
+> [!NOTE]
+> **Prerequisite — `fgjx` needs `fgj`.** `fgj` is the authenticated transport
+> (host URL + token; performs the raw `/api/v1` calls). `fgjx` only adds
+> board-shaped verbs (label resolution, table/view niceties, optional envelope
+> stamping), so it fails loudly (exit 127) without `fgj`. Adopters supply `fgj`,
+> pointed at their own forge; the envelope tool is optional. See
+> [`../../tools/README.md`](../../tools/README.md).
 
 ## 1. Binding stops (only two)
 
@@ -92,15 +100,13 @@ routine webhook or dismiss it because it lacks a conventional command verb.
 
 - Every issue number in chat responses and issue comments MUST be a clickable Markdown link to `https://forge.example.com/your-org/your-repo/issues/<n>` (e.g. [#98](https://forge.example.com/your-org/your-repo/issues/98)). Never emit a bare `#nnn`.
 
-## 9. Forgejo labels: one scoped label at a time
+## 9. Forgejo labels via `fgjx`
 
-- Label writes go through the plugin (`forge.set-label` via the Labels tab /
-  label chips). It adds the new label **and** explicitly removes any same-scope
-  mate, so the result is correct even on boards whose scope names differ from
-  the canonical set — never rely on DB-level exclusivity alone.
-- Verify the set changed by re-reading the issue (plugin detail view or
-  `GET /repos/{owner}/{repo}/issues/{n}`).
-- Unknown scopes are rejected before any API call. No label CLI is required.
+- `fgjx issue edit --add-label` resolves each name to an id and writes it.
+  Comma-joined values are split, and an **unknown name fails non-zero** with
+  nothing written. Repeating the flag is the most portable form:
+  `--add-label 'a' --add-label 'b'` (same for `--remove-label`).
+- Always read back with `fgjx issue view` and confirm the label set changed.
 
 ## 10. Comment & chat budget (keep the board readable)
 

@@ -1,78 +1,87 @@
 ---
-name: coding-agent
-description: EXAMPLE skill — workflow, board conventions, and task lifecycle for coding agents using the forges plugin's embedded /api/v1 client (no CLI dependency)
+name: coding-agent-fgjx
+description: EXAMPLE skill — richer CLI variant: board workflow and task lifecycle for coding agents driving Forgejo through the fgjx wrapper over fgj
 ---
 
 > [!WARNING]
-> **This is an example, not a drop-in.** It describes one team's Forgejo +
-> Paseo workflow, label taxonomy, and board conventions, adapted for
-> publication. This variant is **zero-dependency**: it drives the board through
-> the `forges` plugin's own surfaces and embedded Gitea-family `/api/v1` client
-> and needs no forge CLI on the host. If you already run a CLI wrapper, the
-> richer [`../coding-agent-fgjx/SKILL.md`](../coding-agent-fgjx/SKILL.md)
-> variant may fit better. Adapt hosts, repo, labels, and conventions to your own
-> workflow. See [`../../README.md`](../../README.md) and
-> [`../../docs/workflow.md`](../../docs/workflow.md).
+> **This is an example, not a drop-in.** It is the CLI variant of the
+> `coding-agent` skill: it drives the board through a `fgjx` wrapper, which in
+> turn needs the `fgj` CLI. Neither tool is part of the plugin. Adapt the host,
+> repo, tooling, labels, and envelope format to your own workflow before use.
+> If you have no forge CLI, use the zero-dependency
+> [`../coding-agent/SKILL.md`](../coding-agent/SKILL.md) variant instead. See
+> [`../../README.md`](../../README.md), [`../../tools/README.md`](../../tools/README.md),
+> and [`../../docs/workflow.md`](../../docs/workflow.md).
 
-# Coding Agent Skill (embedded API)
+# Coding Agent Skill (fgjx CLI)
 
-This skill defines the operational workflow, board operations, issue
-conventions, and reporting standards for **coding agents** operating behind a
-shared forge user identity, using only what the `forges` plugin ships.
+This skill defines the operational workflow, CLI usage, issue conventions, and
+reporting standards for **coding agents** operating behind a shared forge user
+identity, using the `fgjx` wrapper.
 
 > [!IMPORTANT]
 > **Token Economy Rule**: If you explained or documented something in a Forgejo issue comment, **keep conversation responses in the agent/user harness strictly brief and low-token**. Point directly to the issue number/link; do not duplicate long explanations into chat.
 
 ---
 
-## 1. Primary Surfaces: the plugin + embedded `/api/v1`
+## 0. Prerequisites: `fgjx` needs `fgj`
 
-The `forges` plugin embeds a Gitea-family `/api/v1` `fetch` client on the
-daemon side (`plugins/forges/server/forge-client.ts`). The daemon holds a
-per-host token from Settings, so **no forge CLI is required on the machine**.
-Two ways to operate the board:
+`fgjx` is a display/label shim, **not** a standalone client. It only wraps
+`fgj`:
 
-**Interactive — the plugin's surfaces.** Use these when a human or the Paseo
-client is driving:
-- the issues pill + modal for listing, filtering, and issue detail;
-- the Labels tab / label chips for scoped label changes (they add the new label
-  and remove any same-scope mate);
-- the quick-comment composer for steering notes.
+- **`fgj` is the authenticated transport.** It owns the host URL and the token
+  (its `config.yaml`, or `--hostname` / `--config` flags) and performs the raw
+  Gitea-family `/api/v1` HTTP calls. Every `fgjx` action bottom out in
+  `fgj api ...`.
+- **`fgjx` adds board-shaped verbs** on top: a `LABELS` column and sort filters
+  for `issue list`, a labels header + formatted comments for `issue view`,
+  label-name → id resolution for `issue edit`, `--format` body wrapping, and
+  `--envelope` attribution stamping.
 
-**Programmatic — the plugin's write/read RPCs** (same operations, from a Paseo
-client): `forge.board-overview`, `forge.issue-detail`, `forge.set-label`,
-`forge.add-comment`. The plugin never appends an agent envelope; it stamps the
-comment with the shared account identity only.
+So **you must supply `fgj`**, pointed at *your* forge, or `fgjx` cannot run — it
+fails loudly (exit 127) when `fgj` is missing. The wrapper is vendored at
+[`../../tools/fgjx`](../../tools/fgjx); copy it onto `PATH` and read
+[`../../tools/README.md`](../../tools/README.md) for the split and the optional
+envelope tool. The envelope generator is **optional** — the core workflow does
+not need it.
 
-**Scripted — direct `/api/v1`** when an agent needs a shell call and has no
-CLI. Point at your forge with a personal access token (adopter-supplied; keep it
-out of the repo):
+---
+
+## 1. Primary Tool: `fgjx` (Always use `fgjx`, NEVER `fgj` directly)
+
+Interact with the Forgejo task board using `fgjx` (available in `$PATH`).
+**Rule**: Always invoke `fgjx`, never bare `fgj`. `fgjx` is a complete passthrough wrapper over `fgj` (including `fgjx api ...`) while adding display enhancements (labels, formatting, envelope stamping).
+
+- **Host**: `forge.example.com` (via `--hostname`, or your `fgj` config)
+- **Repo**: `your-org/your-repo` (or target repo in `owner/repo` format)
+
+### Essential Commands
 
 ```bash
-FORGE=https://forge.example.com
-REPO=your-org/your-repo
-TOKEN="$FORGE_TOKEN"   # read:repository, write:issue
+# List open issues with labels
+fgjx --hostname forge.example.com -R your-org/your-repo issue list
 
-# List / filter issues
-curl -s -H "Authorization: token $TOKEN" \
-  "$FORGE/api/v1/repos/$REPO/issues?state=open&type=issues&limit=50"
+# View issue details, labels, and formatted comment history
+fgjx --hostname forge.example.com -R your-org/your-repo issue view <NUMBER>
 
-# Issue detail + comments
-curl -s -H "Authorization: token $TOKEN" "$FORGE/api/v1/repos/$REPO/issues/<NUMBER>"
-curl -s -H "Authorization: token $TOKEN" "$FORGE/api/v1/repos/$REPO/issues/<NUMBER>/comments"
+# Post a comment with auto agent-envelope self-stamp (optional envelope tool)
+fgjx issue comment <NUMBER> --hostname forge.example.com -R your-org/your-repo --envelope -b "Comment text"
 
-# Post a comment
-curl -s -X POST -H "Authorization: token $TOKEN" -H "Content-Type: application/json" \
-  -d '{"body":"..."}' "$FORGE/api/v1/repos/$REPO/issues/<NUMBER>/comments"
+# Call raw API via fgjx (never use bare fgj api)
+fgjx api repos/your-org/your-repo/issues/<NUMBER> --hostname forge.example.com
 ```
 
 > [!NOTE]
-> Forgejo (`forge.example.com`) is the **primary git remote (`origin`) and
-> issues tracker**. All agent code pushes go to `origin` on Forgejo. Pushes to
-> public GitHub are strictly manual and gated by human review.
+> `fgjx issue edit --add-label` splits comma-joined names (`--add-label 'a,b'`)
+> and resolves each name to an id before writing. An **unknown label name fails
+> non-zero** and nothing is written. Repeating the flag (`--add-label a
+> --add-label b`) remains the most portable form.
 
 > [!IMPORTANT]
 > **Clean Markdown & Backticks**: When posting comments via shell or heredocs, do NOT double-escape backticks with backslashes (e.g. avoid `\`\`\`` or `\`code\``). Backslashes display literally on the Forgejo web UI. Use unescaped single quotes, heredocs (`cat << 'EOF'`), or raw file input (`-F file` or python) to preserve clean triple backticks (` ``` `).
+
+> [!NOTE]
+> Forgejo (`forge.example.com`) is the **primary git remote (`origin`) and issues tracker**. All agent code pushes go to `origin` on Forgejo. Pushes to public GitHub are strictly manual and gated by human review.
 
 ---
 
@@ -95,14 +104,21 @@ If an issue fix includes a code commit:
 
 ---
 
-## 4. Comment Attribution (optional self-stamp)
+## 4. Mandatory: Self-Stamping with Agent Envelope
 
-When several agents share one forge account, a plain comment carries no
-provenance. The plugin does **not** append one — quick comments are operator
-steering, stamped with the shared identity by the API.
+When several agents share one forge account, stamp every issue comment and
+status update so attribution survives (`fgjx issue comment <id> --envelope -b ...`).
 
-If you want attribution, append a footer to your own comment body. This is a
-convention, not a plugin feature, and needs no tooling:
+The envelope generator is **optional** and resolved by `fgjx` in this order:
+`$ENVELOPE_TOOL`, then `envelope-tool` on `$PATH`, then `$HOME/bin/envelope-tool`,
+else a generic `<sub>🤖 agent · <timestamp></sub>` fallback. If you have no such
+tool, the fallback still marks the comment as machine-authored; the core
+workflow does not depend on it.
+
+### Envelope Template
+
+Actual comment text comes first. The footer is appended as a clean, single-line
+markdown badge:
 
 ```markdown
 <Your actual comment / progress report / deliverable here>
@@ -112,15 +128,7 @@ convention, not a plugin feature, and needs no tooling:
 ```
 
 > [!CAUTION]
-> **Stamps are convention-only, unverified**: a display name resolved
-> best-effort from a daemon/provider lookup, an environment variable, or a
-> session DB can disagree with what the Paseo UI shows, and nothing records who
-> set a title. Never treat a stamp as proof of which agent acted. If a stamp
-> looks wrong, check your agent inventory (`paseo ls` / `paseo inspect <id>` in
-> Paseo) before assuming attribution.
-
-The example [`../coding-agent-fgjx/SKILL.md`](../coding-agent-fgjx/SKILL.md)
-shows how a CLI wrapper can generate this footer for you.
+> **Stamps are convention-only, unverified**: the envelope name is resolved best-effort (daemon snapshot title when reachable, else env / provider session DB). The daemon title, the provider session title, and transient retitles can disagree, and nothing records who set a title — so a stamp may disagree with what the Paseo UI shows. Never treat a stamp as proof of which agent acted. If a stamp looks wrong, check `paseo ls` / `paseo inspect <id>` before assuming attribution.
 
 ---
 
@@ -128,8 +136,7 @@ shows how a CLI wrapper can generate this footer for you.
 
 Understand the intent of board labels:
 
-- **`attention/1-agent`**: Dispatch signal — this task is available and open
-  for an agent to inspect, claim, or act upon.
+- **`attention/1-agent`**: Dispatch signal — this task is available and open for an agent to inspect, claim, or act upon.
 - **Precedence Rule (Recent Updates Over Labels)**: If an issue has a recent update (`updated_at` delta), **recent comments and feedback ALWAYS take precedence over static labels**. Never rely on an existing label and move on without inspecting recent activity. **Read the 3 latest comments first** to understand the current state; if that context is inconclusive or references earlier requirements, read a few more comments backwards. If a human or peer agent posted new feedback or instructions after the last agent completion, that issue is active work: strip the finished marker, claim it, and execute.
 - **Aging Attention Heuristic**: If an issue has an attention signal, has no work-blocking labels (`state/1-wip`, `flag/stop-work`, `blockee`, `upstream`), and has had no action for a reasonable window (> 15-30m or oldest updated), the Orchestrator hands it out or an idle agent claims it.
 - **`state/` lifecycle**: `0-triage` → `1-wip` → `2-review` → `3-verify` → `4-done`.
@@ -148,17 +155,13 @@ Understand the intent of board labels:
 Seed these labels from [`../../labels/label-base.yaml`](../../labels/label-base.yaml).
 When scoped labels (`scope/name`) with `exclusive: true` are present, applying a
 new label in a scope automatically evicts any existing label sharing that scope
-at the Forgejo DB level:
+at the Forgejo DB level, so no `--remove-label` is needed for the happy path:
 
 - **`format/`**: `format/0-needed` ↔ `format/1-ok`.
 - **`spec/`**: `spec/0-needed` → `spec/1-checklist` → `spec/2-approved`.
 - **`state/`**: `state/0-triage` → `state/1-wip` → `state/2-review` → `state/3-verify` → `state/4-done`.
 - **`attention/`**: `attention/0-orchestrator` ↔ `attention/1-agent` ↔ `attention/2-user` ↔ `attention/3-ignore`.
 - **`priority/`**: `priority/0-SOS` ↔ `priority/1-high` ↔ `priority/2-normal` ↔ `priority/3-low` ↔ `priority/4-backburner`.
-
-The plugin's own label write (Labels tab / `forge.set-label`) adds the new
-label **and** explicitly removes any same-scope mate, so it stays correct on
-boards whose scope names differ from the canonical set.
 
 ### Missing labels are advisory (cold start)
 
@@ -170,18 +173,13 @@ or `priority/` is absent.
 
 ### Board Prioritization & Intelligence Model
 
-Rank the board yourself from the plugin's board overview / issues list:
-
-1. **Deterministic baseline**: order by the sort tuple the plugin uses —
-   `priorityRank`, then `stateRank`, then recency. Surface unlabeled issues as
-   normal priority with no state rank; never hide them.
-2. **Agent reasoning**: labels and comment deltas cannot express unstated
-   context. Check discussions for operator guidance (`spec/0-needed` →
-   `spec/1-checklist`), tickets unblocked by recent commits or sibling issues,
-   and tickets parked on a clarifying question. A comment containing
-   `/orchestrator <text>` is a direct routing signal to the Orchestrator — even
-   terse free text must be surfaced as an instruction, not dismissed as webhook
-   noise.
+1. **Deterministic baseline**: order by the plugin's sort tuple —
+   `priorityRank`, then `stateRank`, then recency.
+2. **Agent reasoning**: labels cannot express unstated context. Check
+   discussions (`spec/0-needed` → `spec/1-checklist`), tickets unblocked by
+   recent commits or siblings, and tickets parked on a question. A comment with
+   `/orchestrator <text>` is a direct routing signal — even terse free text must
+   be surfaced as an instruction, not dismissed as webhook noise.
 
 ---
 
@@ -192,11 +190,13 @@ Rank the board yourself from the plugin's board overview / issues list:
 2. **Mandatory Full Ticket & History Audit**:
    - **Read the entire ticket**: Never assume you know the scope from the title or prior memory. The issue body may have been rewritten, amended, or contain crucial boundary constraints.
    - **Read the ENTIRE comment thread**: Human operators frequently modify scope (e.g. *"SKIP step 2"*, *"Do not touch X"*, *"Focus only on Y"*), or another agent might have added crucial context or warnings. Blindly executing a plan without verifying the latest comment thread is a critical protocol violation.
-3. Check issue comments to verify no other agent has already claimed it.
-4. Post a claim comment (plugin composer / `forge.add-comment` / `POST .../comments`).
-5. **Attach `state/1-wip` immediately** — via the Labels tab / `forge.set-label`,
-   or `PATCH .../issues/<n>` with the label set. Because `state/` is an
-   exclusive scope, applying `state/1-wip` clears any prior state.
+3. If the issue has **`upstream-check`**, first audit upstream repositories/docs to inform your approach.
+4. Check issue comments to verify no other agent has already claimed it.
+5. Post a claim comment (`fgjx issue comment <n> --envelope -b ...`).
+6. **Attach `state/1-wip` immediately**:
+   `fgjx issue edit <number> --add-label state/1-wip`.
+   Because `state/` is an exclusive scope, this clears any prior state without
+   needing removal flags.
 
 ### Step 2: Implementation Guidelines
 - **Autonomous Execution**: Work quietly in your designated worktree/checkout without spamming chat.
@@ -226,7 +226,8 @@ When code is implemented and verified locally:
 2. **Live freshness** (if you ship a running artifact): build/sync it and reload
    the consumer per your deployment so the process actually runs HEAD. Never
    present unverified work for testing.
-3. Post a completion comment with a clean footer if you use one (§4).
+3. Post a completion comment with your envelope
+   (`fgjx issue comment <n> --envelope -b ...`).
    - **Strict Formatting Standard**: Never dump an unformatted, narrative wall of text. Use structured markdown with headers, bulleted deliverables, explicit code host/repo/branch/SHA, and test results.
    - **Deployment & Verification Status block**:
      ```markdown
@@ -235,9 +236,14 @@ When code is implemented and verified locally:
      - **Tests**: `<command>` — passed
      - **Client Action**: Re-open the surface (or Ctrl+R / Cmd+R in the client).
      ```
-4. **Transition the state** to `state/2-review` (internal review) or
-   `state/3-verify` (operator testing) via the Labels tab / `forge.set-label` /
-   `PATCH .../issues/<n>`.
-   - Because `state/` is an exclusive scope, this clears the prior state.
+4. **Transition the state**:
+   - `fgjx issue edit <number> --add-label state/2-review` (internal review), or
+   - `fgjx issue edit <number> --add-label state/3-verify` (operator testing).
+   - Because `state/` is an exclusive scope, this clears the prior state
+     automatically.
+
+   > [!CAUTION]
+   > **MANDATORY LABEL UPDATE**: You MUST run the `fgjx issue edit ... --add-label ...`. Merely posting a comment without executing the label update leaves the issue stranded in its old state on the board.
+
 5. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` so the human operator can verify and close it.
 6. Stand by for fast review from the `Orchestrator` or testing by the human operator.
