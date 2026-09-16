@@ -177,7 +177,7 @@ export function SlashConsole() {
 
   return (
     <View style={{ flex: 1, minHeight: 0, width: "100%" }}>
-      <ModalBody>
+      <ModalBody scrollMode="always">
         <FormRow
           label="Command prefix"
           description={`Common prefix applied to every command name. Suggestion (not default): ${SUGGESTED_PREFIX}`}
@@ -233,7 +233,10 @@ export function SlashConsole() {
                 subtitle={command.description || command.title}
                 badge={<Badge label={actionSummary(command.action)} variant="neutral" dot />}
               />
-              <ActionBar align="flex-end">
+              <FormRow
+                label="Enabled"
+                description="Disabled commands stay configured but are not registered"
+              >
                 <Toggle
                   value={command.enabled}
                   onValueChange={(enabled) =>
@@ -242,6 +245,8 @@ export function SlashConsole() {
                     })
                   }
                 />
+              </FormRow>
+              <ActionBar align="flex-end">
                 <Button
                   label="Edit"
                   size="sm"
@@ -273,9 +278,7 @@ export function SlashConsole() {
           }
         >
           {catalog.isLoading ? (
-            <FormRow label="Catalog" description="Loading the shipped command catalog…">
-              {null}
-            </FormRow>
+            <EmptyState icon="Package" title="Loading the shipped catalog…" />
           ) : missingFromCatalog.length === 0 ? (
             <EmptyState icon="PackageCheck" title="All shipped commands are present" />
           ) : (
@@ -321,9 +324,7 @@ export function SlashConsole() {
             />
           </FormRow>
           {bundleError ? (
-            <FormRow label="Bundle error" description={bundleError}>
-              {null}
-            </FormRow>
+            <EmptyState icon="AlertTriangle" title="Bundle error" description={bundleError} />
           ) : null}
           <ActionBar align="flex-end">
             <Button
