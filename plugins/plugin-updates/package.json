@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npx tsx --test server/updates.test.ts"
+    "test": "npm run typecheck && npx tsx --test server/updates.test.ts client/orphans.test.ts"
   },
   "dependencies": {
     "paseo-plugin-helper": "^0.4.0-beta.12"

@@ -14,6 +14,7 @@ import {
   KeyValueGroup,
   PluginThemeProvider,
   ProgressBar,
+  SectionHeader,
   StatusDot,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
@@ -27,6 +28,7 @@ import {
   shortHash,
   type PluginUpdate,
 } from "../shared/updates";
+import { buildOrphanSection, partitionedRows, type OrphanSection } from "./orphans";
 
 const QUERY_KEY = ["plugin-updates"];
 const POLL_MS = 30_000;
@@ -163,6 +165,28 @@ function PluginRow({
   );
 }
 
+function OrphanSection({ section }: { section: OrphanSection }) {
+  const { colors, typography } = usePluginTheme();
+  return (
+    <View style={{ gap: 6 }}>
+      <SectionHeader title={section.title} count={section.items.length} />
+      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>{section.detail}</Text>
+      <View style={{ gap: 6 }}>
+        {section.items.map((item) => (
+          <View key={item.name} style={{ gap: 1 }}>
+            <Text selectable style={{ color: colors.foreground, ...typography.bodyStrong }}>
+              {item.name}
+            </Text>
+            <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, ...typography.caption }}>
+              {item.path}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function PluginUpdatesIconInner(props: PluginButtonIconProps) {
   const { data, isFetching, isError } = usePluginUpdates(props.workspaceId);
   const stale = data?.plugins.some((plugin) => plugin.updateAvailable) ?? false;
@@ -223,6 +247,8 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
   const [failures, setFailures] = useState<Failure[]>([]);
 
   const plugins = query.data?.plugins ?? [];
+  const rows = partitionedRows(plugins);
+  const orphanSection = buildOrphanSection(plugins);
   const staleCount = plugins.filter((plugin) => plugin.updateAvailable).length;
   const forceCount = failures.filter((failure) => failure.requiresForce).length;
 
@@ -334,15 +360,18 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
         ) : plugins.length === 0 ? (
           <EmptyState title="No installed plugins" description="Paseo did not report any installed plugins." />
         ) : (
-          plugins.map((plugin) => (
-            <PluginRow
-              key={plugin.id}
-              plugin={plugin}
-              updating={activeUpdate === plugin.id}
-              forceNeeded={failures.some((failure) => failure.pluginId === plugin.id && failure.requiresForce)}
-              onUpdate={runUpdate}
-            />
-          ))
+          <>
+            {rows.map((plugin) => (
+              <PluginRow
+                key={plugin.id}
+                plugin={plugin}
+                updating={activeUpdate === plugin.id}
+                forceNeeded={failures.some((failure) => failure.pluginId === plugin.id && failure.requiresForce)}
+                onUpdate={runUpdate}
+              />
+            ))}
+            {orphanSection ? <OrphanSection section={orphanSection} /> : null}
+          </>
         )}
         {failures.map((failure) => (
           <Card key={`failure-${failure.pluginId}`} variant="elevated" noPadding>
