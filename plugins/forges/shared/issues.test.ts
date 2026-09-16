@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, FORGE_WRITE_SCOPES, ForgeIssueSchema, forgeCapabilityFromRepo, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, forgeWriteScopeList, isBoardAlertText, isValidForgeTarget, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, splitScopedLabel, workspaceNameKey, type ForgeIssue } from "./issues.ts";import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, FORGE_WRITE_SCOPES, ForgeIssueSchema, forgeCapabilityFromRepo, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, forgeWriteScopeList, isBoardAlertText, isValidForgeTarget, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, createIssueContract, parseLabelList, splitScopedLabel, validateCreateIssueInput, workspaceNameKey, writeGateNotice, type ForgeIssue } from "./issues.ts";import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
 const REAL_HOST = "forge.example.com";
@@ -1150,5 +1150,76 @@ describe("label render path", () => {
         `${file} badges a raw label name`,
       );
     }
+  });
+});
+
+describe("create issue contract + validation (issue #200)", () => {
+  it("requires a non-empty title", () => {
+    assert.equal(validateCreateIssueInput({}), "Issue title must not be empty");
+    assert.equal(validateCreateIssueInput({ title: "" }), "Issue title must not be empty");
+    assert.equal(validateCreateIssueInput({ title: "   " }), "Issue title must not be empty");
+  });
+
+  it("accepts a title with an optional body and labels", () => {
+    assert.equal(validateCreateIssueInput({ title: "Add ticket path" }), null);
+    assert.equal(
+      validateCreateIssueInput({ title: "Add ticket path", body: "why", labels: ["kind/feature"] }),
+      null,
+    );
+  });
+
+  it("rejects an over-long title/body and malformed labels", () => {
+    assert.equal(validateCreateIssueInput({ title: "x".repeat(201) }), "Issue title is too long");
+    assert.equal(
+      validateCreateIssueInput({ title: "ok", body: "x".repeat(10001) }),
+      "Issue description is too long",
+    );
+    assert.equal(validateCreateIssueInput({ title: "ok", labels: [""] }), "Label must not be empty");
+    assert.equal(validateCreateIssueInput({ title: "ok", labels: "kind" }), "Labels must be a list");
+  });
+
+  it("parses the composer's free-text labels into clean, unique names", () => {
+    assert.deepEqual(parseLabelList("kind/feature, target/forges"), ["kind/feature", "target/forges"]);
+    assert.deepEqual(parseLabelList(" a ,, a , b "), ["a", "b"]);
+    assert.deepEqual(parseLabelList(""), []);
+    assert.deepEqual(parseLabelList(null), []);
+  });
+
+  it("registers the write verb under the forge namespace", () => {
+    assert.equal(createIssueContract.name, "forge.create-issue");
+  });
+});
+
+describe("create issue gate (issue #200)", () => {
+  it("enables the composer only for an accepted, write-scoped token", () => {
+    const editable = deriveForgeAccess({ repoPublic: true, tokenPresent: true, tokenValid: true });
+    assert.equal(editable.canEdit, true);
+    const readOnly = deriveForgeAccess({
+      repoPublic: true,
+      tokenPresent: true,
+      tokenValid: true,
+      repoWritePermission: false,
+    });
+    assert.equal(readOnly.canEdit, false);
+    const anonymous = deriveForgeAccess({ repoPublic: true, tokenPresent: false });
+    assert.equal(anonymous.canEdit, false);
+  });
+
+  it("shows the #193 scope hint for an under-scoped token instead of an opaque failure", () => {
+    const access = deriveForgeAccess({
+      repoPublic: true,
+      tokenPresent: true,
+      tokenValid: true,
+      repoWritePermission: false,
+    });
+    const notice = writeGateNotice(access, "creating issues");
+    assert.match(notice, /lacks write scope/);
+    assert.match(notice, /write:issue/);
+    assert.match(notice, /creating issues/);
+  });
+
+  it("falls back to the access summary for every other read-only state", () => {
+    const anonymous = deriveForgeAccess({ repoPublic: true, tokenPresent: false });
+    assert.match(writeGateNotice(anonymous, "creating issues"), /No token saved/);
   });
 });

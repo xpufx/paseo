@@ -14,6 +14,8 @@ import {
   scopeOfLabel,
   type AddCommentInput,
   type AddCommentOutput,
+  type CreateIssueInput,
+  type CreateIssueOutput,
   type ForgeContextInput,
   type ForgeContextOutput,
   type InstallLabelsInput,
@@ -27,6 +29,7 @@ import {
   type SearchIssuesOutput,
   type SetLabelInput,
   type SetLabelOutput,
+  validateCreateIssueInput,
 } from "../shared/issues.js";
 import type { RpcOutput } from "paseo-plugin-helper/shared";
 import { ForgeClient, type ForgejoIssueDetail } from "./forge-client.js";
@@ -416,6 +419,44 @@ export async function handleAddComment(
   } catch (error) {
     log.warn("add-comment failed", { error: String(error) });
     return { number: 0, commentId: null, error: "Could not post comment" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Create issue (issue #200). Same remote resolution and daemon-side token as
+// the other write verbs; the client only ever supplies the payload. Validation
+// mirrors the composer, and an under-scoped/rejected token surfaces as an
+// error rather than a silent no-op.
+// ---------------------------------------------------------------------------
+
+export async function handleCreateIssue(
+  input: CreateIssueInput,
+): Promise<CreateIssueOutput> {
+  try {
+    const validationError = validateCreateIssueInput(input ?? {});
+    if (validationError) {
+      return { repo: null, host: null, number: null, error: validationError };
+    }
+    const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+    if (!resolved.ok) {
+      return { repo: null, host: null, number: null, error: resolved.error };
+    }
+    const { host, repo } = resolved;
+    const title = (input.title as string).trim();
+    const body = typeof input.body === "string" ? input.body.trim() : "";
+    const labels = Array.isArray(input.labels)
+      ? input.labels.map((label) => String(label).trim()).filter(Boolean)
+      : [];
+    const client = await clientFor(host);
+    const number = await client.createIssue(repo, { title, body, labels });
+    if (number == null) {
+      log.warn("create-issue failed", { repo });
+      return { repo, host, number: null, error: "Could not create issue" };
+    }
+    return { repo, host, number };
+  } catch (error) {
+    log.warn("create-issue failed", { error: String(error) });
+    return { repo: null, host: null, number: null, error: "Could not create issue" };
   }
 }
 

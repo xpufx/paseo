@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createPluginLogger } from "paseo-plugin-helper/server";
 import {
   addCommentContract,
+  createIssueContract,
   forgeContextContract,
   forgeSettingsContract,
   issueDetailContract,
@@ -11,6 +12,7 @@ import {
 } from "./shared/issues.js";
 import {
   handleAddComment,
+  handleCreateIssue,
   handleForgeContext,
   handleIssueDetail,
   handleOpenIssues,
@@ -28,6 +30,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(issueDetailContract, handleIssueDetail);
   server.handle(setLabelContract, handleSetLabel);
   server.handle(addCommentContract, handleAddComment);
+  server.handle(createIssueContract, handleCreateIssue);
   // forge.install-labels is operator-only: the optional label-set install is
   // hidden from the release surface (issue #163). handleInstallLabels stays in
   // server/issues.ts for our own board; the RPC is deliberately not registered.
