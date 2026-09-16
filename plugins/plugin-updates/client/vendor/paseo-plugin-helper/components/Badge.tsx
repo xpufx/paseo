@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle 
 import { getClientHost } from "../host";
 import { usePluginTheme } from "../theme/provider";
 import { FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens";
+import { HighlightedText } from "./HighlightedText";
 import type { StatusVariant } from "../../../../shared/vendor/paseo-plugin-helper/types";
 
 export type BadgeStyle = "tinted" | "outline" | "solid";
@@ -17,6 +18,12 @@ export interface BadgeProps {
   dot?: boolean;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
+  /**
+   * When set, every case-insensitive occurrence of the query inside `label` is
+   * painted with the accent highlight. The query is matched literally, never as
+   * a regular expression.
+   */
+  highlightQuery?: string;
 }
 
 export function Badge({
@@ -28,6 +35,7 @@ export function Badge({
   dot = false,
   style,
   textStyle,
+  highlightQuery,
 }: BadgeProps) {
   const { Icon } = getClientHost();
   const { colors, flair, resolveRadius, getVariantPalette, getStatusColor, typography } =
@@ -109,7 +117,7 @@ export function Badge({
           textStyle,
         ]}
       >
-        {label}
+        {highlightQuery ? <HighlightedText text={label} query={highlightQuery} /> : label}
       </Text>
     </View>
   );

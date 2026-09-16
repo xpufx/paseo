@@ -21,3 +21,4 @@ export * from "./AboutSection";
 export * from "./TruncatedText";
 export * from "./CommandBox";
 export * from "./SectionHeader";
+export * from "./HighlightedText";

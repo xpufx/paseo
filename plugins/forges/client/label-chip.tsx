@@ -22,10 +22,12 @@ function ChipHalf({
   half,
   side,
   ring,
+  query,
 }: {
   half: LabelChipHalf;
   side?: "scope" | "value";
   ring?: StyleProp<ViewStyle>;
+  query?: string;
 }) {
   const filled = Boolean(half.background && half.textColor);
   const fillStyle: ViewStyle = filled
@@ -37,6 +39,7 @@ function ChipHalf({
       styleVariant={filled ? "solid" : "tinted"}
       size="sm"
       label={half.text}
+      highlightQuery={query}
       style={[CHIP_WIDTH_STYLE, side ? halfEdgeStyle(side) : undefined, fillStyle, ring]}
       textStyle={filled ? { color: half.textColor } : undefined}
     />
@@ -53,9 +56,11 @@ function ChipHalf({
 export function LabelChip({
   label,
   selected = false,
+  query,
 }: {
   label: ForgeLabel;
   selected?: boolean;
+  query?: string;
 }) {
   const { colors, resolveRadius } = usePluginTheme();
   const ring: StyleProp<ViewStyle> = selected
@@ -63,7 +68,7 @@ export function LabelChip({
     : undefined;
   const plan = planLabelChip(label);
   if (plan.kind === "single") {
-    return <ChipHalf half={plan.half} ring={ring} />;
+    return <ChipHalf half={plan.half} ring={ring} query={query} />;
   }
   return (
     <View
@@ -77,8 +82,8 @@ export function LabelChip({
         ring,
       ]}
     >
-      <ChipHalf half={plan.scope} side="scope" />
-      <ChipHalf half={plan.value} side="value" />
+      <ChipHalf half={plan.scope} side="scope" query={query} />
+      <ChipHalf half={plan.value} side="value" query={query} />
     </View>
   );
 }
@@ -93,15 +98,18 @@ const CHIP_LIST_STYLE: ViewStyle = { flexDirection: "row", flexWrap: "wrap", gap
 export function LabelChipList({
   labels,
   style,
+  query,
 }: {
   labels: readonly ForgeLabel[];
   style?: StyleProp<ViewStyle>;
+  /** Active search query; label names are highlighted when supplied. */
+  query?: string;
 }) {
   if (labels.length === 0) return null;
   return (
     <View style={[CHIP_LIST_STYLE, style]}>
       {labels.map((label) => (
-        <LabelChip key={label.name} label={label} />
+        <LabelChip key={label.name} label={label} query={query} />
       ))}
     </View>
   );

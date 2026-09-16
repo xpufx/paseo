@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Pressable, StyleSheet, Text, View, type ScrollView as ScrollViewInstance } from "react-native";
 import { useWorkspace } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import { SettingsSelect } from "@getpaseo/plugin/client/ui";
@@ -20,6 +20,7 @@ import {
   KeyValueGroup,
   TextInput,
   ForgeIcon,
+  HighlightedText,
   useRpcQuery,
   useRpcMutation,
   usePluginSettings,
@@ -29,6 +30,7 @@ import {
   type RenderModalProps,
   type RenderPillProps,
 } from "paseo-plugin-helper/client";
+import { hasHighlightMatch } from "paseo-plugin-helper/shared";
 import {
   ATTENTION_LABELS,
   PRIORITY_ORDER,
@@ -164,6 +166,45 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 const REMOTE_SEARCH_DEBOUNCE_MS = 300;
 
+/**
+ * Scrolls the helper-owned `ModalBody` scroller to a measured match target the
+ * moment a search trigger changes. `resolveY` is polled briefly so a target
+ * that lays out after the keystroke is still reached. Best-effort: when the
+ * host owns the scroll (`scrollRef` null — desktop dialogs and popovers) there
+ * is no scroller to move and this is a no-op.
+ */
+function useMatchScrollTarget(
+  scrollRef: React.RefObject<ScrollViewInstance | null>,
+  trigger: string,
+  resolveY: () => number | null,
+): void {
+  const scrollTo = React.useCallback(
+    (y: number) => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+    },
+    [scrollRef],
+  );
+  const resolveRef = React.useRef(resolveY);
+  resolveRef.current = resolveY;
+  React.useEffect(() => {
+    if (!trigger.trim()) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let tries = 0;
+    const attempt = () => {
+      const y = resolveRef.current();
+      if (y != null) {
+        scrollTo(y);
+        return;
+      }
+      if (tries++ < 8) timer = setTimeout(attempt, 25);
+    };
+    timer = setTimeout(attempt, 0);
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [trigger, scrollTo]);
+}
+
 // Operator-only surface: the optional label-set install stays wired for our own
 // board but never renders in the release (issue #163). The matching RPC is not
 // registered either, so there is no end-user path to it.
@@ -275,27 +316,28 @@ function renderInlineSpans(
   colors: { foreground: string; accent: string; statusWarning: string },
   keyPrefix: string,
   activeForge: ForgeRepoIdentity | null,
+  query: string,
 ) {
   return spans.map((span, index) => {
     const key = `${keyPrefix}-${index}`;
     if (span.kind === "bold") {
       return (
         <Text key={key} style={styles.bold}>
-          {span.text}
+          <HighlightedText text={span.text} query={query} />
         </Text>
       );
     }
     if (span.kind === "italic") {
       return (
         <Text key={key} style={styles.italic}>
-          {span.text}
+          <HighlightedText text={span.text} query={query} />
         </Text>
       );
     }
     if (span.kind === "code") {
       return (
         <Text key={key} style={styles.inlineCode}>
-          {span.text}
+          <HighlightedText text={span.text} query={query} />
         </Text>
       );
     }
@@ -311,12 +353,12 @@ function renderInlineSpans(
             });
           }}
         >
-          {span.text}
+          <HighlightedText text={span.text} query={query} />
           {foreign ? <ForeignInlineMark color={colors.statusWarning} /> : null}
         </Text>
       );
     }
-    return <Text key={key}>{span.text}</Text>;
+    return <HighlightedText key={key} text={span.text} query={query} />;
   });
 }
 
@@ -329,9 +371,12 @@ function renderInlineSpans(
 function MarkdownLite({
   body,
   activeForge,
+  query = "",
 }: {
   body: string;
   activeForge: ForgeRepoIdentity | null;
+  /** Active search query; matches inside inline spans are highlighted. */
+  query?: string;
 }) {
   const { colors } = usePluginTheme();
   const blocks = useMemo(() => parseMarkdownLite(body), [body]);
@@ -352,7 +397,7 @@ function MarkdownLite({
                 { color: colors.foreground },
               ]}
             >
-              {renderInlineSpans(block.spans, colors, `h${index}`, activeForge)}
+              {renderInlineSpans(block.spans, colors, `h${index}`, activeForge, query)}
             </Text>
           );
         }
@@ -365,7 +410,7 @@ function MarkdownLite({
                     {block.ordered ? `${itemIndex + 1}.` : "•"}
                   </Text>
                   <Text selectable style={[styles.listText, { color: colors.foreground }]}>
-                    {renderInlineSpans(item, colors, `li${index}-${itemIndex}`, activeForge)}
+                    {renderInlineSpans(item, colors, `li${index}-${itemIndex}`, activeForge, query)}
                   </Text>
                 </View>
               ))}
@@ -378,7 +423,7 @@ function MarkdownLite({
             selectable
             style={[styles.bodyText, { color: colors.foreground }]}
           >
-            {renderInlineSpans(block.spans, colors, `p${index}`, activeForge)}
+            {renderInlineSpans(block.spans, colors, `p${index}`, activeForge, query)}
           </Text>
         );
       })}
@@ -394,6 +439,8 @@ function IssueRow({
   repo,
   host,
   onSelect,
+  query,
+  onLayoutY,
 }: {
   number: number;
   title: string;
@@ -402,6 +449,9 @@ function IssueRow({
   repo: string | null;
   host: string | null;
   onSelect: (issueNumber: number) => void;
+  /** Active search query; title and labels highlight their matches. */
+  query?: string;
+  onLayoutY?: (y: number) => void;
 }) {
   const { colors } = usePluginTheme();
   const [copied, setCopied] = useState(false);
@@ -414,7 +464,7 @@ function IssueRow({
       .catch(() => {});
   };
   return (
-    <View style={styles.row}>
+    <View style={styles.row} onLayout={(e) => onLayoutY?.(e.nativeEvent.layout.y)}>
       <ForgeMark host={host} />
       <Badge
         variant={state === "open" ? "success" : "neutral"}
@@ -425,8 +475,12 @@ function IssueRow({
         label={state === "closed" ? "Closed" : "Open"}
       />
       <Pressable style={styles.rowBody} onPress={() => onSelect(number)} hitSlop={4}>
-        <Text style={[styles.rowTitle, { color: colors.foreground }]}>{title}</Text>
-        <LabelChipList labels={labels} style={styles.rowLabels} />
+        <HighlightedText
+          text={title}
+          query={query ?? ""}
+          style={[styles.rowTitle, { color: colors.foreground }]}
+        />
+        <LabelChipList labels={labels} style={styles.rowLabels} query={query} />
       </Pressable>
       <Button
         size="sm"
@@ -488,10 +542,12 @@ function CommentCard({
   comment,
   issueUrl,
   activeForge,
+  query,
 }: {
   comment: IssueComment;
   issueUrl: string;
   activeForge: ForgeRepoIdentity | null;
+  query?: string;
 }) {
   const { colors } = usePluginTheme();
   const { Icon } = getClientHost();
@@ -519,7 +575,7 @@ function CommentCard({
           onPress={open}
           hitSlop={8}
         >
-          <MarkdownLite body={body} activeForge={activeForge} />
+          <MarkdownLite body={body} activeForge={activeForge} query={query} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -605,6 +661,8 @@ function IssueDetailView({
   forgeTarget,
   activeForge,
   boardLabels,
+  query,
+  scrollRef,
   onBack,
   onBoardRefresh,
   onOpenSettings,
@@ -614,6 +672,10 @@ function IssueDetailView({
   forgeTarget: string;
   activeForge: ForgeRepoIdentity | null;
   boardLabels: Map<string, ForgeLabel>;
+  /** Active search query; matched title/label/body/comment text is highlighted. */
+  query: string;
+  /** Helper-owned ModalBody scroller, used for best-effort go-to-match. */
+  scrollRef: React.RefObject<ScrollViewInstance | null>;
   onBack: () => void;
   onBoardRefresh: () => void;
   onOpenSettings: () => void;
@@ -687,9 +749,48 @@ function IssueDetailView({
     tokenPresent: detail.data?.tokenPresent,
     tokenValid: detail.data?.tokenValid,
   });
+  // Go-to-match (issue #190): section offsets reported relative to the detail
+  // root, then resolved to the first section that contains the query. Only the
+  // helper-owned scroller can move; when the host owns it this is a no-op.
+  const detailTop = React.useRef(0);
+  const titleY = React.useRef<number | null>(null);
+  const bodyY = React.useRef<number | null>(null);
+  const commentsY = React.useRef<number | null>(null);
+  const commentYs = React.useRef(new Map<number, number>());
+  const firstCommentMatch = issue
+    ? issue.comments.findIndex((comment) => hasHighlightMatch(comment.body, query))
+    : -1;
+  useMatchScrollTarget(
+    scrollRef,
+    query.trim() && issue ? `${query.trim()}|${issue.number}|${issue.comments.length}` : "",
+    () => {
+      if (!issue) return null;
+      const top = detailTop.current;
+      if (
+        hasHighlightMatch(issue.title, query) ||
+        issue.labels.some((label) => hasHighlightMatch(label, query))
+      ) {
+        return top + (titleY.current ?? 0);
+      }
+      if (hasHighlightMatch(issue.body, query)) {
+        return top + (bodyY.current ?? 0);
+      }
+      if (firstCommentMatch >= 0) {
+        const commentY = commentYs.current.get(issue.comments[firstCommentMatch].id);
+        if (commentY == null) return null;
+        return top + (commentsY.current ?? 0) + commentY;
+      }
+      return null;
+    },
+  );
 
   return (
-    <View style={styles.detail}>
+    <View
+      style={styles.detail}
+      onLayout={(e) => {
+        detailTop.current = e.nativeEvent.layout.y;
+      }}
+    >
       <Button
         size="sm"
         variant="ghost"
@@ -713,14 +814,25 @@ function IssueDetailView({
       ) : null}
       {issue ? (
         <>
-          <Card variant="elevated">
-            <Card.Header
-              title={`#${issue.number} ${issue.title}`}
-              subtitle={`${displayName ? `${displayName} · ` : ""}by ${issue.author} · ${formatTimestamp(issue.updatedAt)}`}
-              badge={<ForgeCardChips host={activeForge?.host} access={access} />}
-            />
-            <LabelChipList labels={issueLabelChips(issue)} style={styles.badgeRow} />
-          </Card>
+          <View
+            onLayout={(e) => {
+              titleY.current = e.nativeEvent.layout.y;
+            }}
+          >
+            <Card variant="elevated">
+              <Card.Header
+                title={`#${issue.number} ${issue.title}`}
+                highlightQuery={query}
+                subtitle={`${displayName ? `${displayName} · ` : ""}by ${issue.author} · ${formatTimestamp(issue.updatedAt)}`}
+                badge={<ForgeCardChips host={activeForge?.host} access={access} />}
+              />
+              <LabelChipList
+                labels={issueLabelChips(issue)}
+                style={styles.badgeRow}
+                query={query}
+              />
+            </Card>
+          </View>
 
           <Card>
             <Card.Header title="Labels" subtitle="One tap applies; scope evicts the rest" icon="Tags" />
@@ -770,32 +882,50 @@ function IssueDetailView({
             )}
           </Card>
 
-          <Card>
-            <Card.Header title="Description" icon="FileText" />
-            {issue.body.trim() ? (
-              <MarkdownLite body={issue.body} activeForge={activeForge} />
-            ) : (
-              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>No description.</Text>
-            )}
-          </Card>
+          <View
+            onLayout={(e) => {
+              bodyY.current = e.nativeEvent.layout.y;
+            }}
+          >
+            <Card>
+              <Card.Header title="Description" icon="FileText" />
+              {issue.body.trim() ? (
+                <MarkdownLite body={issue.body} activeForge={activeForge} query={query} />
+              ) : (
+                <Text style={[styles.hint, { color: colors.foregroundMuted }]}>No description.</Text>
+              )}
+            </Card>
+          </View>
 
-          <Card>
-            <Card.Header
-              title={`Comments (${issue.comments.length})`}
-              icon="MessagesSquare"
-            />
-            {issue.comments.length === 0 ? (
-              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>No comments yet.</Text>
-            ) : (
-              issue.comments.map((comment) => (
-                <CommentCard
-                  key={comment.id}
-                  comment={comment}
-                  issueUrl={issue.webUrl}
-                  activeForge={activeForge}
-                />
-              ))
-            )}
+          <View
+            onLayout={(e) => {
+              commentsY.current = e.nativeEvent.layout.y;
+            }}
+          >
+            <Card>
+              <Card.Header
+                title={`Comments (${issue.comments.length})`}
+                icon="MessagesSquare"
+              />
+              {issue.comments.length === 0 ? (
+                <Text style={[styles.hint, { color: colors.foregroundMuted }]}>No comments yet.</Text>
+              ) : (
+                issue.comments.map((comment) => (
+                  <View
+                    key={comment.id}
+                    onLayout={(e) => {
+                      commentYs.current.set(comment.id, e.nativeEvent.layout.y);
+                    }}
+                  >
+                    <CommentCard
+                      comment={comment}
+                      issueUrl={issue.webUrl}
+                      activeForge={activeForge}
+                      query={query}
+                    />
+                  </View>
+                ))
+              )}
             {!access.canEdit ? (
               <ReadOnlyNotice access={access} capability="commenting" onAction={onOpenSettings} />
             ) : (
@@ -822,6 +952,7 @@ function IssueDetailView({
             </View>
             )}
           </Card>
+          </View>
         </>
       ) : null}
     </View>
@@ -1082,6 +1213,25 @@ export function ForgeIssuesView({
     [query, remoteSearch, remoteQuery, remoteResultQuery, remoteIssues, remoteError, clientIssues],
   );
   const issues = searchLayer.issues;
+  const activeQuery = debouncedQuery.trim();
+  const scrollRef = React.useRef<ScrollViewInstance | null>(null);
+  const listTop = React.useRef(0);
+  const rowTops = React.useRef(new Map<number, number>());
+  const firstMatchNumber = activeQuery && issues.length > 0 ? issues[0].number : null;
+  // Go-to-match (issue #190): scroll the results container to the first match
+  // when the debounced query settles. Disabled while a detail view is open (the
+  // detail runs its own target) and when the helper does not own the scroller.
+  useMatchScrollTarget(
+    scrollRef,
+    selected == null && activeQuery
+      ? `${activeQuery}|${firstMatchNumber ?? ""}|${issues.length}`
+      : "",
+    () => {
+      if (firstMatchNumber == null) return null;
+      const y = rowTops.current.get(firstMatchNumber);
+      return y == null ? null : listTop.current + y;
+    },
+  );
   const hasMore = extraHasMore || (data && !data.error ? data.hasMore : false);
   const failed = Boolean(data?.error) || isError;
   return (
@@ -1105,6 +1255,7 @@ export function ForgeIssuesView({
       }}
       refreshing={isRefetching}
       onRefresh={() => { refetch(); }}
+      scrollRef={scrollRef}
     >
       {selected != null ? (
         <>
@@ -1114,6 +1265,8 @@ export function ForgeIssuesView({
             forgeTarget={forgeTarget}
             activeForge={activeForge}
             boardLabels={boardLabels}
+            query={activeQuery}
+            scrollRef={scrollRef}
             onBack={() => setSelected(null)}
             onBoardRefresh={() => refetch()}
             onOpenSettings={() => {
@@ -1344,6 +1497,11 @@ export function ForgeIssuesView({
           >
             <Toggle value={remoteSearch} onValueChange={setRemoteSearch} />
           </FormRow>
+          <View
+            onLayout={(e) => {
+              listTop.current = e.nativeEvent.layout.y;
+            }}
+          >
           <Card variant="elevated">
             <Card.Header
               title={displayName ? `Issues · ${displayName}` : "Forge Issues"}
@@ -1400,6 +1558,8 @@ export function ForgeIssuesView({
                     repo={repo}
                     host={data?.host ?? null}
                     onSelect={setSelected}
+                    query={activeQuery}
+                    onLayoutY={(y) => rowTops.current.set(issue.number, y)}
                   />
                 ))
               : null}
@@ -1418,6 +1578,7 @@ export function ForgeIssuesView({
               <Text style={[styles.hint, { color: colors.foreground }]}>{moreError}</Text>
             ) : null}
           </Card>
+          </View>
           <Text style={[styles.note, { color: colors.foregroundMuted }]}>
             Tap an issue to open its detail view. Push-to-composer is
             unavailable: the v8 SDK exposes no composer-insert API, so copy

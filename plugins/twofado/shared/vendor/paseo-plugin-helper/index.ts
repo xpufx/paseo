@@ -7,3 +7,4 @@ export * from "./async";
 export * from "./suppressed";
 export * from "./custom-pills";
 export * from "./forge";
+export * from "./highlight";
