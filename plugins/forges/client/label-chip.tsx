@@ -10,6 +10,14 @@ function halfEdgeStyle(side: "scope" | "value"): ViewStyle {
     : { borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeftWidth: 0 };
 }
 
+/**
+ * Width guard shared by every chip. `flexShrink` lets chips surrender space to
+ * their neighbours on a wrap line instead of each claiming its own, and the cap
+ * stops one from spilling past the row. The value half is pre-truncated by
+ * `planLabelChip`, so this is a bound, not the primary compaction.
+ */
+const CHIP_WIDTH_STYLE: ViewStyle = { flexShrink: 1, maxWidth: "100%" };
+
 function ChipHalf({
   half,
   side,
@@ -29,7 +37,7 @@ function ChipHalf({
       styleVariant={filled ? "solid" : "tinted"}
       size="sm"
       label={half.text}
-      style={[side ? halfEdgeStyle(side) : undefined, fillStyle, ring]}
+      style={[CHIP_WIDTH_STYLE, side ? halfEdgeStyle(side) : undefined, fillStyle, ring]}
       textStyle={filled ? { color: half.textColor } : undefined}
     />
   );
@@ -65,6 +73,7 @@ export function LabelChip({
           alignSelf: "flex-start",
           borderRadius: resolveRadius("pill"),
         },
+        CHIP_WIDTH_STYLE,
         ring,
       ]}
     >

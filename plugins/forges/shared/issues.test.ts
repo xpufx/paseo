@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, ForgeIssueSchema, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, splitScopedLabel, workspaceNameKey, type ForgeIssue } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, ForgeIssueSchema, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, splitScopedLabel, workspaceNameKey, type ForgeIssue } from "./issues.ts";
 import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
@@ -989,6 +989,30 @@ describe("label color metadata (issue #182)", () => {
     assert.deepEqual(planLabelChip({ name: "bug", color: "nope" }), {
       kind: "single",
       half: { text: "bug" },
+    });
+  });
+
+  it("compacts a chip half so scoped labels share a wrap line", () => {
+    assert.equal(LABEL_VALUE_MAX_LENGTH, 10);
+    assert.equal(compactLabelValue("0-orchestrator"), "0-orchest…");
+    assert.equal(compactLabelValue("4-backburner"), "4-backbur…");
+    // A value at or under the cap passes through untouched.
+    assert.equal(compactLabelValue("1-wip"), "1-wip");
+    assert.equal(compactLabelValue(""), "");
+  });
+
+  it("ellipsizes the value half while the scope half stays whole", () => {
+    assert.deepEqual(planLabelChip({ name: "attention/0-orchestrator", color: "b60205" }), {
+      kind: "scoped",
+      scope: { text: "attention", background: "#a50205", textColor: "#ffffff" },
+      value: { text: "0-orchest…", background: "#b60205", textColor: "#ffffff" },
+    });
+  });
+
+  it("compacts a long unscoped name as a single pill", () => {
+    assert.deepEqual(planLabelChip({ name: "needs-reproduction" }), {
+      kind: "single",
+      half: { text: "needs-rep…" },
     });
   });
 

@@ -3,6 +3,7 @@ import {
   defineContract,
   defineSettingsContract,
   normalizeForgeHost,
+  truncate,
 } from "paseo-plugin-helper/shared";
 
 export const FORGES_PLUGIN_ID = "forges";
@@ -119,6 +120,23 @@ export interface LabelChipHalf {
 }
 
 /**
+ * Longest value half a chip renders before it is tail-ellipsized. Scoped names
+ * such as `attention/0-orchestrator` are what widen a chip past a wrap line, so
+ * the value is bounded while the scope half stays whole and legible.
+ */
+export const LABEL_VALUE_MAX_LENGTH = 10;
+
+/**
+ * Compact one chip half for the wrapping label rows. A value wider than
+ * `LABEL_VALUE_MAX_LENGTH` is tail-ellipsized, so several chips share a line
+ * instead of one per row. Mirrors `shortLabelName` as a pure, unit-testable
+ * display transform; callers never print the raw label name.
+ */
+export function compactLabelValue(value: string): string {
+  return truncate(value, LABEL_VALUE_MAX_LENGTH);
+}
+
+/**
  * How a label renders: a single-segment pill for an unscoped name, or a
  * two-segment pill for a scoped name. A scoped name is always split, so the
  * raw `scope/value` slash form is never rendered even when no color is known.
@@ -132,19 +150,21 @@ export function planLabelChip(label: ForgeLabel): LabelChipPlan {
   const textColor = labelTextColor(label.color);
   const parts = splitScopedLabel(label.name);
   if (!parts) {
+    const text = compactLabelValue(label.name);
     return {
       kind: "single",
       half:
         background && textColor
-          ? { text: label.name, background, textColor }
-          : { text: label.name },
+          ? { text, background, textColor }
+          : { text },
     };
   }
+  const value = compactLabelValue(parts.value);
   if (!background || !textColor) {
     return {
       kind: "scoped",
       scope: { text: parts.scope },
-      value: { text: parts.value },
+      value: { text: value },
     };
   }
   return {
@@ -154,7 +174,7 @@ export function planLabelChip(label: ForgeLabel): LabelChipPlan {
       background: darkenLabelColor(label.color) ?? background,
       textColor,
     },
-    value: { text: parts.value, background, textColor },
+    value: { text: value, background, textColor },
   };
 }
 
