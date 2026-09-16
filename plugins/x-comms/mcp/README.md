@@ -150,6 +150,12 @@ works, but the older side answers in its older format.
   and `allow_permission`/`deny_permission` answer. The loop:
   `send` → `wait` → on `permission`: `list_permissions` + allow/deny →
   `wait` … → `idle`.
+- **Preflight.** A target alias is resolved before dispatch: an unknown alias
+  fails with the exact string and a `pairing is required` hint, not a generic
+  failure.
+- **Self-message.** Sending to your own agent (`agentId` equals the sender)
+  fails with the fixed `x-comms self-message` label. Same-daemon routing for a
+  *different* agent is the locality rule (#9), which is still open.
 
 ## Host forms
 

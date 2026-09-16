@@ -36503,16 +36503,25 @@ function saveDaemons(daemons) {
   mkdirSync(dirname(REMOTES_FILE), { recursive: true });
   writeFileSync(REMOTES_FILE, JSON.stringify(daemons, null, 2) + "\n", "utf8");
 }
+var PAIRING_HINT = `pairing is required: run \`paseo daemon pair\` on the target and register the offer, or add a direct host, via x_comms_add_daemon (registry: ${REMOTES_FILE})`;
 function hostTargetFor(daemon, daemons) {
   const value = daemons[daemon];
   if (value === void 0) {
-    throw new Error(
-      `unknown daemon '${daemon}' (add it to ${REMOTES_FILE} or via x_comms_add_daemon)`
-    );
+    throw new Error(`unknown daemon '${daemon}' \u2014 ${PAIRING_HINT}`);
   }
   const trimmed = String(value).trim();
   if (!trimmed) throw new Error(`daemon '${daemon}' has an empty host value`);
   return trimmed;
+}
+var SELF_MESSAGE_LABEL = "x-comms self-message";
+async function assertNotSelfMessage(message, signal) {
+  const sender = await gatherSenderMeta(signal);
+  const senderAgentId = message.fromAgentId ?? sender.agentId;
+  if (senderAgentId && message.agentId === senderAgentId) {
+    throw new Error(
+      `${SELF_MESSAGE_LABEL}: target agentId '${senderAgentId}' is your own agent \u2014 choose a different agent.`
+    );
+  }
 }
 function runPaseo(args, { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
   return new Promise((resolve, reject) => {
@@ -36770,6 +36779,7 @@ async function handleSend(input2, signal) {
     { tool: `${PREFIX}send` }
   );
   const target = hostTargetFor(message.daemon, loadDaemons());
+  await assertNotSelfMessage(message, signal);
   const stamped = `${await senderMetaBlock(signal, {
     agentId: message.agentId,
     daemon: message.daemon

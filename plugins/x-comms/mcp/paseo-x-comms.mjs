@@ -63,17 +63,37 @@ function saveDaemons(daemons) {
 
 // `--host` is opaque; paseo classifies it (a value containing `#offer=` is a
 // relay connection, anything else is a direct host target). We pass the value
-// through untouched (no wrapping, no legacy formats.
+// through untouched (no wrapping, no legacy formats).
+//
+// The alias is resolved to a host target up front, so an unknown alias fails
+// before any paseo attempt with the exact string and the reason (pairing).
+const PAIRING_HINT = `pairing is required: run \`paseo daemon pair\` on the target and register the offer, or add a direct host, via x_comms_add_daemon (registry: ${REMOTES_FILE})`;
+
 function hostTargetFor(daemon, daemons) {
   const value = daemons[daemon];
   if (value === undefined) {
-    throw new Error(
-      `unknown daemon '${daemon}' (add it to ${REMOTES_FILE} or via x_comms_add_daemon)`,
-    );
+    throw new Error(`unknown daemon '${daemon}' — ${PAIRING_HINT}`);
   }
   const trimmed = String(value).trim();
   if (!trimmed) throw new Error(`daemon '${daemon}' has an empty host value`);
   return trimmed;
+}
+
+// Sending a message to your own agent is almost always a mistake (the envelope
+// tells the recipient it is from itself). Fixed, labeled error so it is
+// greppable and testable.
+const SELF_MESSAGE_LABEL = "x-comms self-message";
+
+async function assertNotSelfMessage(message, signal) {
+  const sender = await gatherSenderMeta(signal);
+  const senderAgentId = message.fromAgentId ?? sender.agentId;
+  if (senderAgentId && message.agentId === senderAgentId) {
+    throw new Error(
+      `${SELF_MESSAGE_LABEL}: target agentId '${senderAgentId}' is your own agent — choose a different agent.`,
+    );
+  }
+  // TODO(#9): same-daemon-but-different-agent is the locality rule, not self.
+  // Once #9 lands, route those natively instead of via x_comms.
 }
 
 // paseo shell-out with cancellation
@@ -401,6 +421,7 @@ async function handleSend(input, signal) {
     { tool: `${PREFIX}send` },
   );
   const target = hostTargetFor(message.daemon, loadDaemons());
+  await assertNotSelfMessage(message, signal);
   const stamped = `${await senderMetaBlock(signal, {
     agentId: message.agentId,
     daemon: message.daemon,

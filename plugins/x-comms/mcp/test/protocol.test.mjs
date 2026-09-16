@@ -587,3 +587,59 @@ test("extensions: registerTool adds a tool to the same server", async () => {
     await client.close();
   }
 });
+
+// preflight + self-message
+
+test("preflight: unknown daemon names the string and asks for pairing", async () => {
+  const { client } = await startClient({}, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    for (const call of [
+      { name: `${PREFIX}send`, arguments: { daemon: "ghost", agentId: "agent-9", prompt: "hi" } },
+      { name: `${PREFIX}list_agents`, arguments: { daemon: "ghost" } },
+    ]) {
+      const res = await client.callTool(call);
+      assert.equal(res.isError, true, `${call.name} should fail on an unknown daemon`);
+      assert.match(textOf(res), /unknown daemon 'ghost'/);
+      assert.match(textOf(res), /pairing is required/i);
+    }
+  } finally {
+    await client.close();
+  }
+});
+
+test("self-message: sending to your own agent is refused with the fixed label", async () => {
+  const { client } = await startClient({}, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const implicit = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-test-1", prompt: "hi" },
+    });
+    assert.equal(implicit.isError, true);
+    assert.match(textOf(implicit), /x-comms self-message/);
+    assert.match(textOf(implicit), /agent-test-1/);
+
+    const explicit = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-a", fromAgentId: "agent-a", prompt: "hi" },
+    });
+    assert.equal(explicit.isError, true, "fromAgentId must be treated as the sender");
+    assert.match(textOf(explicit), /x-comms self-message/);
+    assert.match(textOf(explicit), /agent-a/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("self-message: a different agent is allowed (same-daemon locality is #9)", async () => {
+  const { client } = await startClient({}, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-other", prompt: "hi" },
+    });
+    assert.equal(res.isError, undefined, "a different agent must not be treated as self");
+    assert.equal(JSON.parse(textOf(res)).to, "agent-other");
+  } finally {
+    await client.close();
+  }
+});

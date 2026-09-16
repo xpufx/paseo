@@ -523,7 +523,7 @@ export async function handleDaemonDump(input: { daemon: string }) {
   const daemons = readRegistry(currentRegistryPath()).daemons;
   const entry = daemons.find((d) => d.name === input.daemon);
   if (!entry) {
-    return notReachedResult(input.daemon, `unknown daemon '${input.daemon}'`, null, "");
+    return notReachedResult(input.daemon, `unknown daemon '${input.daemon}' — pairing is required: add it via x_comms_add_daemon or pair the target daemon first`, null, "");
   }
   const offer = parseOffer(entry.value);
   const transport = offer ? "relay" : "direct";
