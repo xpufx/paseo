@@ -6,11 +6,13 @@ import { FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens.js";
 import type { StatusVariant } from "../../shared/types.js";
 
 export type BadgeStyle = "tinted" | "outline" | "solid";
+export type BadgeSize = "sm" | "md";
 
 export interface BadgeProps {
   label: string;
   variant?: StatusVariant;
   styleVariant?: BadgeStyle;
+  size?: BadgeSize;
   icon?: string | ReactNode;
   dot?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -21,6 +23,7 @@ export function Badge({
   label,
   variant = "neutral",
   styleVariant = "tinted",
+  size = "md",
   icon,
   dot = false,
   style,
@@ -34,6 +37,12 @@ export function Badge({
     lineHeight: 15,
     fontWeight: "400" as const,
   };
+
+  const fontSize = size === "sm" ? 10 : caption.fontSize;
+  const lineHeight = size === "sm" ? 12 : caption.lineHeight;
+  const paddingVertical = size === "sm" ? 1 : Math.max(2, Math.floor(caption.lineHeight / 5));
+  const paddingHorizontal = size === "sm" ? 5 : caption.fontSize < 11 ? 6 : 8;
+  const iconSize = size === "sm" ? 10 : caption.fontSize < 11 ? 10 : 11;
 
   const radius = resolveRadius("pill");
   const palette = getVariantPalette(variant);
@@ -68,13 +77,7 @@ export function Badge({
     }
     if (!icon) return null;
     if (typeof icon === "string") {
-      return (
-        <Icon
-          name={icon}
-          size={caption.fontSize < 11 ? 10 : 11}
-          color={textColor}
-        />
-      );
+      return <Icon name={icon} size={iconSize} color={textColor} />;
     }
     return icon;
   };
@@ -87,8 +90,8 @@ export function Badge({
           backgroundColor: bg,
           borderColor: border,
           borderRadius: radius,
-          paddingVertical: Math.max(2, Math.floor(caption.lineHeight / 5)),
-          paddingHorizontal: caption.fontSize < 11 ? 6 : 8,
+          paddingVertical,
+          paddingHorizontal,
         },
         style,
       ]}
@@ -99,8 +102,8 @@ export function Badge({
           styles.text,
           {
             color: textColor,
-            fontSize: caption.fontSize,
-            lineHeight: caption.lineHeight,
+            fontSize,
+            lineHeight,
             textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
           },
           textStyle,

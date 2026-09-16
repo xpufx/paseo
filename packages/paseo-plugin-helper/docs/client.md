@@ -333,11 +333,22 @@ Accordion container with chevron rotation, badges, and smooth expand/collapse.
 
 ### `<Badge>`
 Status indicator chip with automatic contrast styling.
+
 ```tsx
 <Badge label="Online" variant="success" style="tinted" dot />
 <Badge label="Warning" variant="warning" style="outline" />
 <Badge label="Error" variant="danger" style="solid" />
+<Badge label="bug" variant="neutral" size="sm" />
 ```
+
+#### Properties:
+- `label`: Chip text.
+- `variant`: `StatusVariant` controlling the palette (`neutral` default).
+- `styleVariant`: `"tinted"` (default), `"outline"`, or `"solid"`.
+- `size`: `"md"` (default, theme caption metrics) or `"sm"` — a compact pill with 10/12 type, `paddingVertical: 1`, `paddingHorizontal: 5`, and a 10px icon.
+- `icon`: Lucide icon name or custom node rendered before the label.
+- `dot`: Renders a status dot instead of an icon.
+- `style` / `textStyle`: Escape-hatch overrides layered on top of the size metrics.
 
 ### `<Card>`
 Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips.

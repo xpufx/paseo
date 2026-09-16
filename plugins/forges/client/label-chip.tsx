@@ -1,15 +1,7 @@
 import React from "react";
-import { View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { View, type StyleProp, type ViewStyle } from "react-native";
 import { Badge, usePluginTheme } from "paseo-plugin-helper/client";
 import { planLabelChip, type ForgeLabel, type LabelChipHalf } from "../shared/issues.js";
-
-/**
- * Compact chip metrics. The helper `Badge` exposes no `size` prop, so a label
- * pill narrows through Badge's supported `style`/`textStyle` overrides. Keeping
- * both here shrinks every label surface through this one module.
- */
-const CHIP_TEXT_STYLE: TextStyle = { fontSize: 10, lineHeight: 12, fontWeight: "600" };
-const CHIP_STYLE: ViewStyle = { paddingVertical: 1, paddingHorizontal: 5 };
 
 /** Inner corners join the halves; the scope's right border becomes the divider. */
 function halfEdgeStyle(side: "scope" | "value"): ViewStyle {
@@ -35,9 +27,10 @@ function ChipHalf({
     <Badge
       variant="neutral"
       styleVariant={filled ? "solid" : "tinted"}
+      size="sm"
       label={half.text}
-      style={[CHIP_STYLE, side ? halfEdgeStyle(side) : undefined, fillStyle, ring]}
-      textStyle={filled ? [CHIP_TEXT_STYLE, { color: half.textColor }] : CHIP_TEXT_STYLE}
+      style={[side ? halfEdgeStyle(side) : undefined, fillStyle, ring]}
+      textStyle={filled ? { color: half.textColor } : undefined}
     />
   );
 }
