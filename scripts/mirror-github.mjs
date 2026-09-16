@@ -83,6 +83,9 @@ const allAvailablePackages = fs.existsSync("packages")
 // Determine paths to prune from the isolated index
 const unwantedPaths = [];
 
+// Tracked symlink into the platform checkout; would ship as a dangling link.
+unwantedPaths.push("scripts/forgejo-hook.mjs");
+
 if (!isAll) {
   for (const plugin of allAvailablePlugins) {
     if (!selectedTargets.has(plugin)) {
