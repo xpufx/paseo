@@ -30,6 +30,7 @@ import {
 } from "../shared/issues.js";
 import type { RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
 import { ForgeClient, type ForgejoIssueDetail } from "./forge-client.js";
+import { ForgeGuard, type GuardLogLevel } from "./forge-guard.js";
 import { gitOriginForDirectory } from "./git-origin.js";
 
 const log = createPluginLogger("forges");
@@ -37,51 +38,26 @@ const log = createPluginLogger("forges");
 type OpenIssuesResult = RpcOutput<typeof openIssuesContract>;
 import { openIssuesContract } from "../shared/issues.js";
 
-const listFailureCounts = new Map<string, number>();
-const forgeHostCache = new Map<string, boolean>();
-const quietHostLogged = new Set<string>();
+const guard = new ForgeGuard();
 
-function listKey(host: string, repo: string): string {
-  return `${host}/${repo}`;
+/** Emit at the level the poll guard chose, so repeat noise stays at debug. */
+function logAt(level: GuardLogLevel, message: string, context: Record<string, unknown>): void {
+  if (level === "warn") log.warn(message, context);
+  else if (level === "info") log.info(message, context);
+  else log.debug(message, context);
 }
 
-async function probeForgeHost(host: string): Promise<boolean> {
-  const cached = forgeHostCache.get(host);
-  if (cached !== undefined) return cached;
-  let speaks = false;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    try {
-      const res = await fetch(`https://${host}/api/v1/version`, {
-        signal: controller.signal,
-      });
-      if (res.ok) {
-        const payload = (await res.json()) as unknown;
-        speaks =
-          !!payload &&
-          typeof payload === "object" &&
-          typeof (payload as Record<string, unknown>).version === "string";
-      }
-    } finally {
-      clearTimeout(timer);
-    }
-  } catch {
-    speaks = false;
-  }
-  forgeHostCache.set(host, speaks);
+/**
+ * Confirm the resolved host answers as Forgejo/Gitea before any issue call,
+ * with the configured token, and cache the verdict (issue #114). Non-forge
+ * remotes resolve to a quiet not-a-forge state instead of a per-poll WARN.
+ */
+async function probeForgeHost(client: ForgeClient): Promise<boolean> {
+  const cached = guard.cachedProbe(client.host);
+  if (cached !== null) return cached;
+  const speaks = await client.isForgeHost();
+  guard.recordProbe(client.host, speaks);
   return speaks;
-}
-
-function noteListFailure(host: string, repo: string): boolean {
-  const key = listKey(host, repo);
-  const count = (listFailureCounts.get(key) ?? 0) + 1;
-  listFailureCounts.set(key, count);
-  return count <= 1;
-}
-
-function noteListSuccess(host: string, repo: string): void {
-  listFailureCounts.delete(listKey(host, repo));
 }
 
 import { storedForgeSelection, tokenForHost } from "./settings.js";
@@ -173,19 +149,14 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     };
   }
   const { host, repo, derivedRemote, remoteSource } = resolved;
-  if (!(await probeForgeHost(host))) {
-    if (!quietHostLogged.has(host)) {
-      quietHostLogged.add(host);
-      log.info("skipping non-forge remote", { repo, host });
-    } else {
-      log.debug("skipping non-forge remote", { repo, host });
-    }
+  const client = await clientFor(host);
+  if (!(await probeForgeHost(client))) {
+    logAt(guard.skipLogLevel(host), "skipping non-forge remote", { repo, host });
     const message = remoteSource === "explicit"
       ? `Selected forge ${host}/${repo} is unreachable or not a forge API host`
       : "Not a forge repo for this workspace";
     return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenPresent: false, tokenValid: null, error: message };
   }
-  const client = await clientFor(host);
   const anonClient = new ForgeClient({ host });
   const tokenPresent = client.hasToken();
   const page = input?.page ?? 1;
@@ -196,17 +167,13 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     client.tokenIsValid(),
   ]);
   if (!paged) {
-    if (noteListFailure(host, repo)) {
-      log.warn("issue list failed", { repo, host });
-    } else {
-      log.debug("issue list failed", { repo, host });
-    }
+    logAt(guard.failureLogLevel(host, repo), "issue list failed", { repo, host });
     const message = remoteSource === "explicit"
       ? `Issue list unavailable for ${host}/${repo}`
       : "Issue list unavailable";
     return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid, error: message };
   }
-  noteListSuccess(host, repo);
+  guard.noteSuccess(host, repo);
   const issues: OpenIssuesResult["issues"] = rankIssues(paged.issues);
   void liveScopesFromIssues(issues);
   return { repo, host, issues, openIssueCount, page, hasMore: paged.hasMore, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid };
@@ -230,7 +197,9 @@ export async function handleSearchIssues(input: SearchIssuesInput): Promise<Sear
     return { repo: null, host: null, issues: [], page: 1, hasMore: false, error: resolved.error };
   }
   const { host, repo } = resolved;
-  if (!(await probeForgeHost(host))) {
+  const client = await clientFor(host);
+  if (!(await probeForgeHost(client))) {
+    logAt(guard.skipLogLevel(host), "skipping non-forge remote", { repo, host });
     return {
       repo,
       host,
@@ -240,18 +209,13 @@ export async function handleSearchIssues(input: SearchIssuesInput): Promise<Sear
       error: `Selected forge ${host}/${repo} is unreachable or not a forge API host`,
     };
   }
-  const client = await clientFor(host);
   const page = input?.page ?? 1;
   const result = await client.searchIssues(repo, query, page);
   if (!result) {
-    if (noteListFailure(host, repo)) {
-      log.warn("issue search failed", { repo, host });
-    } else {
-      log.debug("issue search failed", { repo, host });
-    }
+    logAt(guard.failureLogLevel(host, repo), "issue search failed", { repo, host });
     return { repo, host, issues: [], page, hasMore: false, error: `Search unavailable for ${host}/${repo}` };
   }
-  noteListSuccess(host, repo);
+  guard.noteSuccess(host, repo);
   return { repo, host, issues: result.issues, page, hasMore: result.hasMore };
 }
 

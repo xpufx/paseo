@@ -6,6 +6,9 @@ export interface ForgeClientOptions {
   timeoutMs?: number;
 }
 
+/** The identity probe sits on the 30s poll path, so it gets a tighter bound. */
+const FORGE_PROBE_TIMEOUT_MS = 5000;
+
 interface ApiLabel {
   name?: unknown;
 }
@@ -143,19 +146,25 @@ function toDetail(repo: string, host: string, payload: unknown): ForgejoIssueDet
 }
 
 export class ForgeClient {
+  readonly host: string;
   private readonly baseUrl: string;
   private readonly token?: string;
   private readonly timeoutMs: number;
 
   constructor(options: ForgeClientOptions) {
+    this.host = options.host;
     this.baseUrl = `https://${options.host}/api/v1`;
     this.token = options.token?.trim() ? options.token.trim() : undefined;
     this.timeoutMs = options.timeoutMs ?? 15000;
   }
 
-  private async request(path: string, init?: RequestInit): Promise<unknown | null> {
+  private async request(
+    path: string,
+    init?: RequestInit,
+    timeoutMs = this.timeoutMs,
+  ): Promise<unknown | null> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const headers: Record<string, string> = {
         Accept: "application/json",
@@ -207,6 +216,18 @@ export class ForgeClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * Forgejo/Gitea API identity probe (issue #114): only the Gitea family
+   * answers `/api/v1/version` with a `version` string. Runs with the
+   * configured token and fails closed, so a non-forge host (github.com, ...)
+   * is never issued a list or search call.
+   */
+  async isForgeHost(): Promise<boolean> {
+    const payload = await this.request("/version", undefined, FORGE_PROBE_TIMEOUT_MS);
+    if (!payload || typeof payload !== "object") return false;
+    return typeof (payload as Record<string, unknown>).version === "string";
   }
 
   /** Whether a token is configured for this client's host. */
