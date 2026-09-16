@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { StyleSheet, Text, View, Pressable } from "react-native";
+import {
+  StyleSheet,
+  Text,
+  View,
+  Pressable,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 import type {
   PluginWorkspaceSnapshot,
   PluginAgentSnapshot,
@@ -74,7 +81,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { TopDashboardSurface } from "./surface";
-import { useTopResourceQuery } from "./resources-query";
+import { useTopResourceQuery, useCustomPillsQuery } from "./resources-query";
 import {
   buildAllLabel,
   enabledItemsForSettings,
@@ -88,6 +95,8 @@ import {
 } from "./pill-labels";
 
 const EMPTY_PARAMS = {};
+
+const PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 };
 
 function formatWorktreeLocation(dir: string | null | undefined): string {
   if (!dir) return "";
@@ -642,6 +651,130 @@ export function notifySettingsChanged(settings: TopSettings) {
   }
 }
 
+function PillOffline({ onPress }: { onPress: () => void }) {
+  const { colors } = usePluginTheme();
+  return (
+    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={styles.pillContainer}>
+      <Icon name="Ghost" size={13} color={colors.statusDanger} />
+      <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+        Offline
+      </Text>
+    </Pressable>
+  );
+}
+
+function PillLoading({ onPress }: { onPress: () => void }) {
+  const { colors } = usePluginTheme();
+  return (
+    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP}>
+      <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+        top...
+      </Text>
+    </Pressable>
+  );
+}
+
+function PillEmpty({ onPress }: { onPress: () => void }) {
+  const { colors } = usePluginTheme();
+  return (
+    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={styles.pillContainer}>
+      <Icon name="Activity" size={12} color={colors.accent} />
+      <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+        top
+      </Text>
+    </Pressable>
+  );
+}
+
+function McpLoadingPill({ onPress }: { onPress: () => void }) {
+  const { colors } = usePluginTheme();
+  return (
+    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={styles.pillContainer}>
+      <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+        MCP…
+      </Text>
+    </Pressable>
+  );
+}
+
+interface PillSegmentProps {
+  item: PillItemType;
+  data?: SystemResources;
+  agent?: PillItemContentProps["agent"];
+  agentId?: string;
+  worktreeLocationText?: string;
+  isOpen?: boolean;
+  onPress: () => void;
+  pressableStyle?: StyleProp<ViewStyle>;
+}
+
+function PillSegment({
+  item,
+  data,
+  agent,
+  agentId,
+  worktreeLocationText,
+  isOpen,
+  onPress,
+  pressableStyle,
+}: PillSegmentProps) {
+  return (
+    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={pressableStyle}>
+      <PillItemContent
+        item={item}
+        data={data}
+        agent={agent}
+        agentId={agentId}
+        worktreeLocationText={worktreeLocationText}
+        isOpen={isOpen}
+      />
+    </Pressable>
+  );
+}
+
+interface AllInOnePillProps {
+  items: PillItemType[];
+  data?: SystemResources;
+  agent?: PillItemContentProps["agent"];
+  agentId?: string;
+  worktreeLocationText?: string;
+  isOpen?: boolean;
+  onOpenTab: (tab: ModalTab) => void;
+}
+
+function AllInOnePill({
+  items,
+  data,
+  agent,
+  agentId,
+  worktreeLocationText,
+  isOpen,
+  onOpenTab,
+}: AllInOnePillProps) {
+  const { colors } = usePluginTheme();
+  return (
+    <View style={styles.allInOneContainer}>
+      {items.map((item, idx) => (
+        <React.Fragment key={item}>
+          {idx > 0 && (
+            <Text style={[styles.dividerText, { color: colors.foregroundMuted }]}>│</Text>
+          )}
+          <PillSegment
+            item={item}
+            data={data}
+            agent={agent}
+            agentId={agentId}
+            worktreeLocationText={worktreeLocationText}
+            isOpen={isOpen}
+            onPress={() => onOpenTab(getItemTab(item))}
+            pressableStyle={styles.segmentPressable}
+          />
+        </React.Fragment>
+      ))}
+    </View>
+  );
+}
+
 export interface SingleItemPillViewProps extends RenderPillProps<ModalTab> {
   item: PillItemType;
   defaultTab?: ModalTab;
@@ -655,7 +788,6 @@ export function SingleItemPillView({
   isOpen,
   open,
 }: SingleItemPillViewProps) {
-  const { colors, isCompact } = usePluginTheme();
   const workspaceDirectory = useWorkspace(workspaceId, (w: PluginWorkspaceSnapshot) => w?.directory);
   const agent = useAgent(agentId, (a: PluginAgentSnapshot) => ({
     title: a?.title,
@@ -708,68 +840,33 @@ export function SingleItemPillView({
       return null;
     }
     if (isLoading || !data) {
-      return (
-        <Pressable
-          onPress={() => open(targetTab)}
-          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-          style={styles.pillContainer}
-        >
-          <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-            MCP…
-          </Text>
-        </Pressable>
-      );
+      return <McpLoadingPill onPress={() => open(targetTab)} />;
     }
   }
 
   if (shouldPoll && isError) {
-    return (
-      <Pressable
-        onPress={() => open(targetTab)}
-        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-        style={styles.pillContainer}
-      >
-        <Icon name="Ghost" size={13} color={colors.statusDanger} />
-        <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-          Offline
-        </Text>
-      </Pressable>
-    );
+    return <PillOffline onPress={() => open(targetTab)} />;
   }
 
   if (shouldPoll && (isLoading || !data)) {
-    return (
-      <Pressable
-        onPress={() => open(targetTab)}
-        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-      >
-        <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-          top...
-        </Text>
-      </Pressable>
-    );
+    return <PillLoading onPress={() => open(targetTab)} />;
   }
 
   return (
-    <Pressable
+    <PillSegment
+      item={item}
+      data={data}
+      agent={agent}
+      agentId={agentId}
+      worktreeLocationText={worktreeLocationText}
+      isOpen={isOpen}
       onPress={() => open(targetTab)}
-      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-      style={styles.cyclePressable}
-    >
-      <PillItemContent
-        item={item}
-        data={data}
-        agent={agent}
-        agentId={agentId}
-        worktreeLocationText={worktreeLocationText}
-        isOpen={isOpen}
-      />
-    </Pressable>
+      pressableStyle={styles.cyclePressable}
+    />
   );
 }
 
 function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalTab>) {
-  const { colors } = usePluginTheme();
   // No background settings poll here: the hook re-verifies on mount and
   // window focus, and mutations invalidate the shared settings cache.
   // Polling from every mounted pill/modal/surface multiplied daemon reads
@@ -911,92 +1008,42 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
   }, [agentId, activeTab]);
 
   if (shouldPoll && isError) {
-    return (
-      <Pressable
-        onPress={() => open(settings.defaultTab ?? "system")}
-        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-        style={styles.pillContainer}
-      >
-        <Icon name="Ghost" size={13} color={colors.statusDanger} />
-        <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-          Offline
-        </Text>
-      </Pressable>
-    );
+    return <PillOffline onPress={() => open(settings.defaultTab ?? "system")} />;
   }
 
   if (shouldPoll && (isLoading || !data)) {
-    return (
-      <Pressable
-        onPress={() => open(settings.defaultTab ?? "system")}
-        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-      >
-        <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-          top...
-        </Text>
-      </Pressable>
-    );
+    return <PillLoading onPress={() => open(settings.defaultTab ?? "system")} />;
   }
 
   if (items.length === 0) {
-    return (
-      <Pressable
-        onPress={() => open(settings.defaultTab ?? "system")}
-        hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-        style={styles.pillContainer}
-      >
-        <Icon name="Activity" size={12} color={colors.accent} />
-        <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-          top
-        </Text>
-      </Pressable>
-    );
+    return <PillEmpty onPress={() => open(settings.defaultTab ?? "system")} />;
   }
 
   if (settings.pillMode === "all") {
     return (
-      <View style={styles.allInOneContainer}>
-        {items.map((item, idx) => {
-          const segmentTab = getItemTab(item);
-          return (
-            <React.Fragment key={item}>
-              {idx > 0 && <Text style={[styles.dividerText, { color: colors.foregroundMuted }]}>│</Text>}
-              <Pressable
-                onPress={() => open(segmentTab)}
-                hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-                style={styles.segmentPressable}
-              >
-      <PillItemContent
-        item={item}
+      <AllInOnePill
+        items={items}
         data={data}
         agent={agent}
         agentId={agentId}
         worktreeLocationText={worktreeLocationText}
         isOpen={isOpen}
+        onOpenTab={open}
       />
-              </Pressable>
-            </React.Fragment>
-          );
-        })}
-      </View>
     );
   }
 
   return (
-    <Pressable
+    <PillSegment
+      item={activeMode}
+      data={data}
+      agent={agent}
+      agentId={agentId}
+      worktreeLocationText={worktreeLocationText}
+      isOpen={isOpen}
       onPress={() => open(activeTab)}
-      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-      style={styles.cyclePressable}
-    >
-      <PillItemContent
-        item={activeMode}
-        data={data}
-        agent={agent}
-        agentId={agentId}
-        worktreeLocationText={worktreeLocationText}
-        isOpen={isOpen}
-      />
-    </Pressable>
+      pressableStyle={styles.cyclePressable}
+    />
   );
 }
 
@@ -1603,8 +1650,8 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
             />
 
             {tokenMetrics?.contextMaxTokens != null && tokenMetrics.contextMaxTokens > 0 ? (
-              <View style={{ marginVertical: 4 }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+              <View style={styles.contextUsageBlock}>
+                <View style={styles.contextUsageRow}>
                   <Text style={[styles.compactKvLabel, { color: colors.foregroundMuted }]}>Context Utilization</Text>
                   <Text style={[styles.compactKvValue, { color: colors.foreground, fontWeight: "600" }]}>
                     {formatCompactTokens(tokenMetrics.contextUsedTokens ?? 0)} / {formatCompactTokens(tokenMetrics.contextMaxTokens)} ({contextPercent}%)
@@ -1711,11 +1758,11 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                 );
               })}
             </View>
-            <View style={{ marginTop: 12 }}>
+            <View style={styles.settingsSpacer}>
               <Toggle
                 label="Show Composer Pill"
                 description="Hide the composer pill entirely; the dashboard stays available from the sidebar"
-                style={{ width: "100%", alignSelf: "stretch" }}
+                style={styles.toggleFullWidth}
                 value={settings.showComposerPill ?? true}
                 onValueChange={(val) => {
                   const next = { ...settings, showComposerPill: val };
@@ -1776,7 +1823,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               <Toggle
                 label="Show Custom Metric Pills"
                 description="Display pills defined in ~/.paseo/top/pills as standalone composer pills"
-                style={{ width: "100%", alignSelf: "stretch" }}
+                style={styles.toggleFullWidth}
                 labelStyle={styles.compactToggleLabel}
                 value={settings.showCustomPills ?? true}
                 onValueChange={(val) => {
@@ -1796,7 +1843,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                 title="Rotation Speed"
                 icon="Clock"
                 value={
-                  <Text style={{ color: colors.accent, fontWeight: "600" }}>
+                  <Text style={[styles.accentValueText, { color: colors.accent }]}>
                     {`${settings.intervalSeconds}s`}
                   </Text>
                 }
@@ -1845,7 +1892,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               title="Timeline Cadence"
               icon="Clock"
               value={
-                <Text style={{ color: colors.accent, fontWeight: "600" }}>
+                <Text style={[styles.accentValueText, { color: colors.accent }]}>
                   {(settings.timelineCadence ?? 1) === 0
                     ? "Never"
                     : (settings.timelineCadence ?? 1) === 1
@@ -1894,7 +1941,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                 );
               })}
             </View>
-            <View style={[styles.speedRow, { marginTop: 8 }]}>
+            <View style={[styles.speedRow, styles.speedRowSpaced]}>
               {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
                 const isSelected = (settings.timelineCadence ?? 1) === n;
                 return (
@@ -1929,7 +1976,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                 );
               })}
             </View>
-            <Text style={[styles.modeDesc, { color: colors.foregroundMuted, marginTop: 8 }]}>
+            <Text style={[styles.modeDesc, styles.modeDescSpaced, { color: colors.foregroundMuted }]}>
               0 behaves as never; N above 1 stamps every Nth turn
             </Text>
           </Card>
@@ -1940,7 +1987,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               title="Default Modal Tab"
               icon="Sliders"
               value={
-                <Text style={{ color: colors.accent, fontWeight: "600" }}>
+                <Text style={[styles.accentValueText, { color: colors.accent }]}>
                   {TABS.find((t) => t.id === settings.defaultTab)?.label || "System"}
                 </Text>
               }
@@ -2050,7 +2097,7 @@ interface LiveCustomPillViewProps {
 }
 
 function LiveCustomPillView({ pillId, initial }: LiveCustomPillViewProps) {
-  const { data } = useRpcQuery(getCustomPillsRpc, EMPTY_PARAMS, { refetchInterval: 3000 });
+  const { data } = useCustomPillsQuery();
   const liveState = data?.pills.find((p) => p.id === pillId) ?? initial;
   return <CustomPillBody state={liveState} />;
 }
@@ -2064,7 +2111,7 @@ function LiveCustomPillModal({ pillId, initial }: LiveCustomPillModalProps) {
   const { colors } = usePluginTheme();
   const [refreshing, setRefreshing] = useState(false);
   const [outputOverride, setOutputOverride] = useState<string | undefined>(undefined);
-  const { data, refetch } = useRpcQuery(getCustomPillsRpc, EMPTY_PARAMS, { refetchInterval: 3000 });
+  const { data, refetch } = useCustomPillsQuery();
   const liveState = data?.pills.find((p) => p.id === pillId) ?? initial;
   const runModalCommand = useRpc(runCustomPillModalCommandRpc);
 
@@ -2643,6 +2690,24 @@ const styles = StyleSheet.create({
     gap: 8,
     width: "100%",
   },
+  toggleFullWidth: {
+    width: "100%",
+    alignSelf: "stretch",
+  },
+  settingsSpacer: {
+    marginTop: 12,
+  },
+  contextUsageBlock: {
+    marginVertical: 4,
+  },
+  contextUsageRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 4,
+  },
+  accentValueText: {
+    fontWeight: "600",
+  },
   metricMatrix: {
     gap: 0,
     width: "100%",
@@ -2723,6 +2788,9 @@ const styles = StyleSheet.create({
     gap: 8,
     alignItems: "center",
   },
+  speedRowSpaced: {
+    marginTop: 8,
+  },
   speedChip: {
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -2779,6 +2847,9 @@ const styles = StyleSheet.create({
   modeDesc: {
     fontSize: 8,
     lineHeight: 10,
+  },
+  modeDescSpaced: {
+    marginTop: 8,
   },
   mcpList: {
     gap: 8,

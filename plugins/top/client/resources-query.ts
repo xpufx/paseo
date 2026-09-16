@@ -1,17 +1,21 @@
 import {
   useAutoRefreshQuery,
+  useRpcQuery,
   sharedSnapshotKey,
   normalizeSnapshotScope,
   type UseAutoRefreshQueryOptions,
 } from "./vendor/paseo-plugin-helper/index";
 import {
   getSystemResourcesRpc,
+  getCustomPillsRpc,
   type SystemResources,
 } from "../shared/resources";
 
 interface TopResourceQueryInput {
   directory?: string;
 }
+
+const EMPTY_PARAMS = {};
 
 export { normalizeSnapshotScope };
 
@@ -52,4 +56,13 @@ export function useTopResourceQuery(
     isOpen: true,
     ...options,
   });
+}
+
+/**
+ * Custom-pill state snapshot shared by the live pill label and its
+ * drilldown modal. Both poll the same `top.custom-pills.get` payload on the
+ * same cadence, so they read one query instead of registering two pollers.
+ */
+export function useCustomPillsQuery() {
+  return useRpcQuery(getCustomPillsRpc, EMPTY_PARAMS, { refetchInterval: 3000 });
 }
