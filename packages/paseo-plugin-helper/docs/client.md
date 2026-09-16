@@ -310,6 +310,34 @@ Form input with label, placeholder, helper or error text, secure text entry, and
 />
 ```
 
+### `<Select>`
+Compact single-choice picker sized for `<FormRow>`. The closed trigger is one
+line tall; opening reveals a bounded, scrollable option list, so a long list
+degrades to scrolling instead of overflow. Themed through the same tokens as
+`TextInput`/`Badge`; callers supply no styling.
+
+```tsx
+<Select
+  label="RPC operation"
+  value={operation}
+  options={rpcOptions.map((name) => ({ label: name, value: name }))}
+  onValueChange={setOperation}
+  placeholder="Choose an operation…"
+  size="md" // "md" (default, theme caption metrics) | "sm" (10/12 Badge scale)
+  disabled={isLocked}
+/>
+```
+
+#### Properties:
+- `value`: Currently selected value; a free-text value that is not in `options` is surfaced on the trigger instead of the placeholder.
+- `options`: `{ label, value }[]` choices.
+- `onValueChange`: Fired with the new value on selection; the list closes.
+- `label`: Optional accessible label (composed with the current value).
+- `size`: `"md"` (default) or `"sm"`, reusing the `Badge` size scale.
+- `placeholder`: Shown when `value` is empty (default `"Select…"`).
+- `disabled`: Blocks opening and mutes the trigger. A trigger with no options is also inert.
+- `style`: Escape-hatch override for the container.
+
 ### `<Toggle>`
 Accessible boolean switch with minimum 44pt touch boundary and custom visual flair theme support.
 

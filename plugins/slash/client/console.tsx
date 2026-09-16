@@ -11,6 +11,7 @@ import {
   ModalBody,
   Row,
   SectionHeader,
+  Select,
   Stack,
   Tabs,
   TextInput,
@@ -130,8 +131,8 @@ interface CommandFormProps {
 function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandFormProps) {
   const rpcOptions = catalog.rpc ?? [];
   const openOptions = catalog.open ?? [];
-  const rpcTabs: TabItem[] = rpcOptions.map((operation) => ({ id: operation, label: operation }));
-  const openTabs: TabItem[] = openOptions.map((target) => ({ id: target, label: target }));
+  const rpcChoices = rpcOptions.map((operation) => ({ label: operation, value: operation }));
+  const openChoices = openOptions.map((target) => ({ label: target, value: target }));
 
   return (
     <Stack gap="sm">
@@ -183,10 +184,11 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
         <FormRow label="Target surface">
           <Stack gap="xs">
             {openOptions.length > 0 ? (
-              <Tabs
-                tabs={openTabs}
-                activeTab={draft.target}
-                onTabChange={(target) => onChange({ target })}
+              <Select
+                value={draft.target}
+                options={openChoices}
+                placeholder="Choose a shipped surface…"
+                onValueChange={(target) => onChange({ target })}
               />
             ) : null}
             <TextInput
@@ -202,10 +204,11 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
         <FormRow label="RPC operation">
           <Stack gap="xs">
             {rpcOptions.length > 0 ? (
-              <Tabs
-                tabs={rpcTabs}
-                activeTab={draft.operation}
-                onTabChange={(operation) => onChange({ operation })}
+              <Select
+                value={draft.operation}
+                options={rpcChoices}
+                placeholder="Choose a catalog operation…"
+                onValueChange={(operation) => onChange({ operation })}
               />
             ) : null}
             <TextInput

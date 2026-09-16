@@ -8,6 +8,7 @@ export * from "./Tabs";
 export * from "./CodeBlock";
 export * from "./SearchInput";
 export * from "./TextInput";
+export * from "./Select";
 export * from "./Toggle";
 export * from "./Collapsible";
 export * from "./ProgressBar";
