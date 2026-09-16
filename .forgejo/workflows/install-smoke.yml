@@ -1,0 +1,122 @@
+# Clean-environment install smoke: proves a plugin actually INSTALLS from the
+# public GitHub mirror, not merely that it builds in the dev checkout.
+#
+# Catches the #146 class of failure — a tree that compiles locally but is not
+# installable by a third party (symlinked vendor trees, missing deps, stale
+# dist, a mirror that pruned a needed path). The mirror is the third-party
+# install surface; `make vendor-check` is the pre-install gate and
+# `paseo plugin add` + `paseo plugin ls` is the real install path.
+#
+# Runner conventions (runs-on label, registry image) are copied from
+# xpufx/aur-automation/.forgejo/workflows/*.
+name: Install smoke (public mirror)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mirror_url:
+        description: "Public mirror Git URL to install from"
+        required: false
+        default: "https://github.com/xpufx/paseo.git"
+        type: string
+      mirror_ref:
+        description: "Mirror branch, tag, or commit SHA (default: mirror main HEAD)"
+        required: false
+        default: ""
+        type: string
+      plugins:
+        description: "Space-separated plugin directory names under plugins/ (default: top demo)"
+        required: false
+        default: "top demo"
+        type: string
+  push:
+    branches: [main]
+
+jobs:
+  install-smoke:
+    name: Install plugins on a clean runner
+    runs-on: alpine-docker
+    # Clean Ubuntu 24.04 + Node 22 + git/make/jq image. A fresh container per
+    # run is the point: no reused node_modules and no pre-existing daemon state.
+    container:
+      image: forge.mrs.aager.de/oktay/runner-containers/ubuntu-podman-builder:latest
+    env:
+      # Dedicated daemon home, wiped below, so the job never reuses state.
+      PASEO_HOME: /tmp/paseo-install-smoke/home
+      MIRROR_URL_IN: ${{ github.event.inputs.mirror_url }}
+      MIRROR_REF_IN: ${{ github.event.inputs.mirror_ref }}
+      PLUGINS_IN: ${{ github.event.inputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate — vendor trees are publishable (no dev symlinks / drift)
+        run: |
+          set -euo pipefail
+          # Fails on linked vendor trees and on drift from helper src before we
+          # ever install. A linked tree cannot load or install, so this gate
+          # keeps the smoke test meaningful.
+          make vendor-check
+
+      - name: Install published Paseo CLI
+        run: |
+          set -euo pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            npm i -g @getpaseo/cli
+          else
+            sudo npm i -g @getpaseo/cli
+          fi
+          paseo --version
+
+      - name: Bootstrap clean daemon home
+        run: |
+          set -euo pipefail
+          rm -rf "$PASEO_HOME"
+          mkdir -p "$PASEO_HOME"
+          # Trusted plugins sit behind a global switch that defaults to off.
+          # Enable it headlessly (the equivalent of the Paseo UI toggle) so an
+          # installed plugin is actually compiled and started, and its status
+          # becomes observable instead of sitting at "disabled".
+          printf '{\n  "version": 1,\n  "pluginsEnabled": true\n}\n' > "$PASEO_HOME/config.json"
+
+      - name: Start headless daemon and wait for health
+        run: |
+          set -euo pipefail
+          paseo start --listen 127.0.0.1:6767 --no-relay --no-web-ui
+          for _ in $(seq 1 60); do
+            if paseo status --json 2>/dev/null | jq -e '.localDaemon == "running" and .connectedDaemon == "reachable"' >/dev/null; then
+              echo "daemon healthy"
+              paseo status --json
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::daemon did not become healthy within 60s"
+          paseo status --json || true
+          tail -n 200 "$PASEO_HOME/daemon.log" || true
+          exit 1
+
+      - name: Resolve mirror source
+        id: mirror
+        run: |
+          set -euo pipefail
+          MIRROR_URL="${MIRROR_URL_IN:-https://github.com/xpufx/paseo.git}"
+          MIRROR_REF="${MIRROR_REF_IN:-}"
+          if [ -z "$MIRROR_REF" ]; then
+            # Pin the exact mirror commit a third party would resolve today,
+            # rather than a moving branch name.
+            MIRROR_REF="$(git ls-remote "$MIRROR_URL" main | awk 'NR==1{print $1}')"
+          fi
+          if [ -z "$MIRROR_REF" ]; then
+            echo "::error::could not resolve a ref from ${MIRROR_URL} (is the mirror public and reachable?)"
+            exit 1
+          fi
+          echo "installing from ${MIRROR_URL} @ ${MIRROR_REF}"
+          echo "mirror_url=${MIRROR_URL}" >> "$GITHUB_OUTPUT"
+          echo "mirror_ref=${MIRROR_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Install each plugin from the mirror and assert it is running
+        uses: ./.forgejo/actions/install-plugin-smoke
+        with:
+          mirror-url: ${{ steps.mirror.outputs.mirror_url }}
+          mirror-ref: ${{ steps.mirror.outputs.mirror_ref }}
+          plugins: ${{ env.PLUGINS_IN }}

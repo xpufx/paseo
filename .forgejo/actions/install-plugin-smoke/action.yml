@@ -1,0 +1,91 @@
+name: "Install plugin smoke test"
+description: >-
+  Install one or more Git-managed plugins from a public mirror into a running
+  local daemon and assert each reaches status=running (compile + load success).
+  Dumps the install output, plugin state, and daemon log on failure so a red
+  job is actionable from its log alone.
+inputs:
+  mirror-url:
+    description: "Git URL of the public mirror (e.g. https://github.com/xpufx/paseo.git)"
+    required: true
+  mirror-ref:
+    description: "Git branch, tag, or commit to install"
+    required: true
+  plugins:
+    description: "Space-separated plugin directory names under plugins/ (default: top demo)"
+    required: false
+    default: "top demo"
+  host:
+    description: "Daemon host target for paseo plugin commands"
+    required: false
+    default: "127.0.0.1:6767"
+runs:
+  using: "composite"
+  steps:
+    - name: Install and assert plugins
+      shell: bash
+      env:
+        INPUT_MIRROR_URL: ${{ inputs.mirror-url }}
+        INPUT_MIRROR_REF: ${{ inputs.mirror-ref }}
+        INPUT_PLUGINS: ${{ inputs.plugins }}
+        INPUT_HOST: ${{ inputs.host }}
+      run: |
+        set -uo pipefail
+
+        dump_diagnostics() {
+          local plugin="$1" log="$2"
+          echo "::group::diagnostics: ${plugin}"
+          echo "--- paseo plugin add output ---"
+          cat "$log" 2>/dev/null || true
+          echo "--- paseo plugin ls ${plugin} --json ---"
+          paseo plugin ls "${plugin}" --json --host "${INPUT_HOST}" 2>&1 || true
+          echo "--- paseo plugin logs ${plugin} ---"
+          paseo plugin logs "${plugin}" --host "${INPUT_HOST}" 2>&1 || true
+          if [ -n "${PASEO_HOME:-}" ] && [ -f "${PASEO_HOME}/daemon.log" ]; then
+            echo "--- daemon.log (tail) ---"
+            tail -n 200 "${PASEO_HOME}/daemon.log" || true
+          fi
+          echo "::endgroup::"
+        }
+
+        install_and_assert() {
+          local plugin="$1"
+          local log rc status
+          log="$(mktemp)"
+
+          echo "::group::install ${plugin}"
+          paseo plugin add "${INPUT_MIRROR_URL}:plugins/${plugin}" \
+            --ref "${INPUT_MIRROR_REF}" --host "${INPUT_HOST}" 2>&1 | tee "$log"
+          rc="${PIPESTATUS[0]}"
+          echo "::endgroup::"
+
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::paseo plugin add failed for ${plugin} (exit ${rc})"
+            dump_diagnostics "$plugin" "$log"
+            rm -f "$log"
+            return 1
+          fi
+
+          status="$(paseo plugin ls "${plugin}" --json --host "${INPUT_HOST}" | jq -r '.[0].status // "missing"')"
+          echo "${plugin}: status=${status}"
+          if [ "$status" != "running" ]; then
+            echo "::error::plugin ${plugin} installed but status is '${status}', not 'running'"
+            dump_diagnostics "$plugin" "$log"
+            rm -f "$log"
+            return 1
+          fi
+
+          rm -f "$log"
+          echo "${plugin}: OK (running)"
+        }
+
+        plugins="${INPUT_PLUGINS:-top demo}"
+        failed=0
+        for plugin in $plugins; do
+          install_and_assert "$plugin" || failed=1
+        done
+        if [ "$failed" -ne 0 ]; then
+          echo "::error::one or more plugins failed the install smoke test"
+          exit 1
+        fi
+        echo "all plugins installed and running: ${plugins}"
