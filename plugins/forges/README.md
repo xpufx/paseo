@@ -6,12 +6,12 @@ comments, and timeline issue-link cards. Pull requests, releases,
 actions, and everything else are out of scope for now.
 
 No CLI dependency. All forge access goes through the embedded fetch API
-client (`server/forgejo-client.ts`) against the Gitea-family `/api/v1`.
+client (`server/forge-client.ts`) against the Gitea-family `/api/v1`.
 Tokens live in daemon-side plugin settings and never reach the client.
 
 Supported forges (verified live, anonymous reads):
 
-- Forgejo (self-hosted, e.g. forge.mrs.aager.de; Codeberg runs Forgejo)
+- Forge/Gitea-family hosts (including Forgejo, Gitea, and Codeberg)
 - Gitea (e.g. gitea.com)
 
 GitLab is future work and needs a separate API client.

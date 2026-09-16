@@ -16,7 +16,7 @@ Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared ru
 - `packages/paseo-plugin-helper/` — Shared runtime library for Paseo plugins (UI components, server utilities, RPC contracts, settings schema, and testing harness). Published to npm as `paseo-plugin-helper`.
 - `plugins/mcp-tools/` — MCP server fleet management and diagnostic plugin.
 - `plugins/x-comms/` — Cross-daemon agent conversation mesh plugin.
-- `plugins/forgejo/` — Forgejo issue tracker and workflow integration plugin.
+- `plugins/forges/` — Forge/Gitea-family issue tracker and workflow integration plugin.
 - `plugins/demo/` — Conformance testbed and canonical showcase for `paseo-plugin-helper` primitives.
 
 ## Installation

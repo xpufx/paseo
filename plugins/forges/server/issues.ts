@@ -21,7 +21,7 @@ import {
   type SetLabelOutput,
 } from "../shared/issues.js";
 import type { RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
-import { ForgejoClient, type ForgejoIssueDetail } from "./forgejo-client.js";
+import { ForgejoClient, type ForgejoIssueDetail } from "./forge-client.js";
 
 const log = createPluginLogger("forges");
 

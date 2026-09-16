@@ -1,7 +1,7 @@
 # Native Forgejo Workflow GUI Plugin for Paseo
 
 **Status:** specification (implements [Issue #56 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/56))
-**Scope:** `plugins/forgejo` (`paseo-forgejo`) server + client, built only on
+**Scope:** `plugins/forges` (`paseo-forges`) server + client, built only on
 `paseo-plugin-helper` primitives — no Paseo host/SDK changes
 **Constraint:** Strictly pre-code shaping. No implementation files are modified
 by this spec; it defines data models, RPC interfaces, component layouts, and a
@@ -25,7 +25,7 @@ toggles, and quick comments all live in plugin surfaces powered by
 
 ### What already exists (reuse, do not duplicate)
 
-`plugins/forgejo` (`paseo-forgejo`) already ships the thin end of this wedge:
+`plugins/forges` (`paseo-forges`) already ships the thin end of this wedge:
 
 - Server: `forgejo.open-issues` contract (`shared/issues.ts`) + `handleOpenIssues`
   (`server/issues.ts`) — resolves owner/repo from the workspace directory's
@@ -78,7 +78,7 @@ surfaces. All shared parsing helpers (`parseForgejoRemote`,
   approval pattern if a signoff flow is needed later).
 - No plugin-specific logic in `paseo-plugin-helper` — any generally reusable
   parsing (envelope regex, priority-rank comparator) ships in the helper only
-  if a second consumer needs it; until then it lives in `plugins/forgejo`.
+  if a second consumer needs it; until then it lives in `plugins/forges`.
 - No implementation in this spec phase — schemas, method names, and layouts
   only.
 
@@ -115,7 +115,7 @@ amortized by the polling cache (§3.2).
 
 ### 3.2 Caching & polling
 
-- Daemon-side: `PluginStorage("paseo-forgejo", "board-cache.json", { schema })`
+- Daemon-side: `PluginStorage("paseo-forges", "board-cache.json", { schema })`
   holds the last good board snapshot + per-issue detail cache with `fetchedAt`
   timestamps. Atomic temp-file + rename writes; Zod-validated reads with
   defaults — same guarantees as all helper server state.
@@ -132,7 +132,7 @@ amortized by the polling cache (§3.2).
 
 ## 4. Data models
 
-All schemas are Zod, defined in `plugins/forgejo/shared/` (importable by both
+All schemas are Zod, defined in `plugins/forges/shared/` (importable by both
 server and client), built with `defineContract` from
 `paseo-plugin-helper/shared`.
 
@@ -691,7 +691,7 @@ No code touched.
 
 1. Should the envelope parser / sort comparator move into
    `paseo-plugin-helper/shared` for reuse by other plugins (e.g. an
-   Orchestrator dashboard)? Recommendation: keep in `plugins/forgejo` until
+   Orchestrator dashboard)? Recommendation: keep in `plugins/forges` until
    a second consumer exists.
 2. Should `forgejo.commit-stat` be part of v1? Recommendation: no — web-view
    link + copy covers review; diff-in-client is Phase 3 stretch.
