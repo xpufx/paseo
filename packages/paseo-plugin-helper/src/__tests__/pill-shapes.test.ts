@@ -1,14 +1,34 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import React from "react";
+import TestRenderer, { act } from "react-test-renderer";
 import { initClientHelpers, type ComposerPillRegistrar } from "../client/host.js";
 import { registerComposerPill } from "../client/pill.js";
 
+const iconCalls: Array<{ name: string; size?: number; color?: string }> = [];
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
 function installHostStubs() {
+  iconCalls.length = 0;
   initClientHelpers({
-    Icon: () => null,
+    Icon: (props: { name: string; size?: number; color?: string }) => {
+      iconCalls.push(props);
+      return null;
+    },
     Modal: Object.assign(() => null, { Content: () => null }),
     useRpc: () => async () => ({}),
     useToast: () => ({}),
   });
+}
+
+/** Mounts the host-rendered trigger glyph, which is the pill's visibility signal. */
+function mountPillIcon(contribution: any): TestRenderer.ReactTestRenderer {
+  const IconProbe = contribution.button.icon;
+  let renderer: TestRenderer.ReactTestRenderer;
+  act(() => {
+    renderer = TestRenderer.create(React.createElement(IconProbe, { size: 14, color: "#fff" }));
+  });
+  return renderer!;
 }
 
 interface StoredPill {
@@ -133,7 +153,8 @@ describe("registerComposerPill host shapes", () => {
     const contribution = stored.contribution;
     expect(contribution).not.toHaveProperty("Component");
     expect(contribution.button.title).toBe("Modern");
-    expect(contribution.button.icon).toBe("Activity");
+    // The icon is the mount probe, not a static string.
+    expect(typeof contribution.button.icon).toBe("function");
     expect(contribution.button.behavior.kind).toBe("popover");
     expect(typeof contribution.button.behavior.Content).toBe("function");
 
@@ -218,8 +239,32 @@ describe("registerComposerPill host shapes", () => {
     cleanup();
   });
 
-  it("polls resolveLabel on an interval and stops on removal", async () => {
-    const { client, pills, updates } = modernRegistrar();
+  it("does not poll while the pill is unmounted", async () => {
+    const { client } = modernRegistrar();
+    const seen: string[] = [];
+    const cleanup = registerComposerPill(client, {
+      id: "hidden-pill",
+      title: "Hidden",
+      renderModal: () => null,
+      resolveLabel: () => {
+        seen.push("tick");
+        return `v${seen.length}`;
+      },
+      refreshIntervalMs: 10,
+    });
+
+    (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    const afterInitialResolve = seen.length;
+    await new Promise((resolve) => setTimeout(resolve, 45));
+    expect(seen).toHaveLength(afterInitialResolve);
+
+    cleanup();
+  });
+
+  it("polls resolveLabel while the pill is mounted and stops on unmount", async () => {
+    const { client, pills } = modernRegistrar();
     const seen: string[] = [];
     const cleanup = registerComposerPill(client, {
       id: "poll-pill",
@@ -233,15 +278,18 @@ describe("registerComposerPill host shapes", () => {
     });
 
     (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const beforeMount = seen.length;
+    const renderer = mountPillIcon(pills[0].contribution);
     await new Promise((resolve) => setTimeout(resolve, 45));
-    expect(seen.length).toBeGreaterThanOrEqual(2);
-    expect(updates.length).toBeGreaterThanOrEqual(2);
-    expect(updates[updates.length - 1].patch.label).toBe(`v${seen.length}`);
+    expect(seen.length).toBeGreaterThan(beforeMount);
+
+    act(() => renderer.unmount());
+    const frozen = seen.length;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(seen).toHaveLength(frozen);
 
     (client as any).emit({ kind: "remove", agentId: "a1" });
-    const frozen = updates.length;
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(updates).toHaveLength(frozen);
     expect(pills).toHaveLength(0);
 
     cleanup();
@@ -303,8 +351,8 @@ describe("registerComposerPill host shapes", () => {
     cleanup();
   });
 
-  it("pushes both resolved label and icon through update() when resolveLabel returns an object", async () => {
-    const { client, updates } = modernRegistrar();
+  it("routes the resolved icon through the mount probe and the label through update()", async () => {
+    const { client, updates, pills } = modernRegistrar();
     const cleanup = registerComposerPill(client, {
       id: "dynamic-pill",
       title: "Dynamic",
@@ -317,13 +365,17 @@ describe("registerComposerPill host shapes", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(updates).toHaveLength(1);
-    expect(updates[0].patch).toEqual({ label: "12%", icon: "Cpu" });
+    expect(updates[0].patch).toEqual({ label: "12%" });
+
+    const renderer = mountPillIcon(pills[0].contribution);
+    expect(iconCalls[iconCalls.length - 1]).toMatchObject({ name: "Cpu" });
+    act(() => renderer.unmount());
 
     cleanup();
   });
 
   it("supports standalone resolveIcon together with resolveLabel", async () => {
-    const { client, updates } = modernRegistrar();
+    const { client, updates, pills } = modernRegistrar();
     const cleanup = registerComposerPill(client, {
       id: "split-pill",
       title: "Split",
@@ -337,12 +389,16 @@ describe("registerComposerPill host shapes", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(updates).toHaveLength(1);
-    expect(updates[0].patch).toEqual({ label: "main", icon: "GitBranch" });
+    expect(updates[0].patch).toEqual({ label: "main" });
+
+    const renderer = mountPillIcon(pills[0].contribution);
+    expect(iconCalls[iconCalls.length - 1]).toMatchObject({ name: "GitBranch" });
+    act(() => renderer.unmount());
 
     cleanup();
   });
 
-  it("falls back to modalIcon for button initial icon if icon is omitted", () => {
+  it("falls back to modalIcon for the probe icon if icon is omitted", () => {
     const { client, pills } = modernRegistrar();
     const cleanup = registerComposerPill(client, {
       id: "modal-icon-pill",
@@ -353,7 +409,11 @@ describe("registerComposerPill host shapes", () => {
 
     (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
     expect(pills).toHaveLength(1);
-    expect(pills[0].contribution.button.icon).toBe("Server");
+    expect(typeof pills[0].contribution.button.icon).toBe("function");
+
+    const renderer = mountPillIcon(pills[0].contribution);
+    expect(iconCalls[iconCalls.length - 1]).toMatchObject({ name: "Server" });
+    act(() => renderer.unmount());
 
     cleanup();
   });

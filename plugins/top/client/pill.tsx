@@ -260,50 +260,68 @@ interface LiveSnapshot extends SegmentSnapshot {
   updatedAt?: number;
 }
 
+/** Host resources are identical for every agent in a workspace; scope the shared fetch by directory. */
+function resourceScope(directory?: string | null): string {
+  return typeof directory === "string" ? directory.trim() : "";
+}
+
 const liveSnapshots = new Map<string, LiveSnapshot>();
+const sharedResourceSnapshots = new Map<string, { data: SystemResources; at: number }>();
+const liveSnapshotInflight = new Map<string, Promise<SystemResources | null>>();
 let rpcInvoker: ((contract: any, input: any) => Promise<any>) | null = null;
 
 export function updateLiveSnapshot(agentId: string, partial: Partial<LiveSnapshot>) {
   const prev = liveSnapshots.get(agentId) ?? {};
-  liveSnapshots.set(agentId, { ...prev, ...partial, updatedAt: Date.now() });
+  const next = { ...prev, ...partial, updatedAt: Date.now() };
+  liveSnapshots.set(agentId, next);
+  // A mounted pill's fresh query result also fills the workspace-scoped cache,
+  // so every other agent in that workspace reads it instead of fetching again.
+  if (partial.data) {
+    sharedResourceSnapshots.set(resourceScope(next.workspaceDirectory), {
+      data: partial.data,
+      at: Date.now(),
+    });
+  }
 }
 
 const LIVE_SNAPSHOT_TTL_MS = 2500;
-const liveSnapshotInflight = new Map<string, Promise<SystemResources | null>>();
 
 /**
  * Shared full-snapshot fetch for button-host live labels.
- * One in-flight request per agent: per-item field params fragmented this
- * path into a poller per visible pill. Selective `fields` stay supported on
- * the server RPC, but Top label resolvers share the full snapshot so every
- * pill, modal, and surface reads the same data. MCP/plugin detection cost
- * stays bounded by the server's long-lived cache/in-flight guard.
+ *
+ * The snapshot is host/workspace data, and `branch` is the only per-workspace
+ * field in it, so it is cached and single-flighted by workspace directory
+ * rather than by agent. Keying on the agent gave every agent its own copy of
+ * the same resources, so a host with N agents polled `system-resources.get`
+ * N times per refresh.
  */
 async function liveSnapshotFor(ctx: PillLiveContext): Promise<SegmentSnapshot> {
   const cached = liveSnapshots.get(ctx.agentId);
-  let data = cached?.data;
-  const cacheAge = cached?.updatedAt ? Date.now() - cached.updatedAt : Infinity;
+  const scope = resourceScope(cached?.workspaceDirectory);
+  const shared = sharedResourceSnapshots.get(scope);
+  let data = cached?.data ?? shared?.data;
+  const sharedAge = shared ? Date.now() - shared.at : Infinity;
   try {
     if (rpcInvoker) {
       const params: Record<string, unknown> = {};
       if (cached?.workspaceDirectory) params.directory = cached.workspaceDirectory;
-      const cacheKey = ctx.agentId;
-      let inflight = liveSnapshotInflight.get(cacheKey);
-      if (!inflight && cacheAge > LIVE_SNAPSHOT_TTL_MS) {
+      let inflight = liveSnapshotInflight.get(scope);
+      if (!inflight && sharedAge > LIVE_SNAPSHOT_TTL_MS) {
         inflight = (async () => {
           try {
             return (await rpcInvoker!(getSystemResourcesRpc, params)) as SystemResources | null;
           } catch {
             return null;
           } finally {
-            liveSnapshotInflight.delete(cacheKey);
+            liveSnapshotInflight.delete(scope);
           }
         })();
-        liveSnapshotInflight.set(cacheKey, inflight);
+        liveSnapshotInflight.set(scope, inflight);
       }
       const fresh = inflight ? await inflight : null;
       if (fresh) {
         data = { ...(data ?? {}), ...fresh } as SystemResources;
+        sharedResourceSnapshots.set(scope, { data: fresh, at: Date.now() });
         updateLiveSnapshot(ctx.agentId, { data });
       }
     }
@@ -1313,779 +1331,775 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
 
   if (isError && !data) {
     return (
-      <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
-        <ModalBody
-          headerMode="pinned"
-          refreshing={isRefetching}
-          onRefresh={handleRefresh}
-          header={navbar}
-          headerStyle={navbarStyle}
-          contentContainerStyle={[
-            { paddingTop: Math.round(padding.gap / 2) },
-          ]}
-        >
-          <Card variant="elevated">
-            <View style={styles.errorBox}>
-              <Icon name="Ghost" size={24} color={colors.statusDanger} />
-              <Text style={[styles.errorText, { color: colors.statusDanger }]}>
-                {error instanceof Error ? error.message : "Failed to load metrics"}
-              </Text>
-            </View>
-          </Card>
-        </ModalBody>
-      </View>
+      <ModalBody
+        style={{ backgroundColor: colors.surface0 }}
+        headerMode="pinned"
+        refreshing={isRefetching}
+        onRefresh={handleRefresh}
+        header={navbar}
+        headerStyle={navbarStyle}
+        contentContainerStyle={[{ paddingTop: Math.round(padding.gap / 2) }]}
+      >
+        <Card variant="elevated">
+          <View style={styles.errorBox}>
+            <Icon name="Ghost" size={24} color={colors.statusDanger} />
+            <Text style={[styles.errorText, { color: colors.statusDanger }]}>
+              {error instanceof Error ? error.message : "Failed to load metrics"}
+            </Text>
+          </View>
+        </Card>
+      </ModalBody>
     );
   }
 
   const { cpuColor, memColor } = getMetricColors(data, colors);
 
   return (
-    <View style={[styles.modalRoot, { backgroundColor: colors.surface0 }]}>
-      <ModalBody
-        headerMode="pinned"
-        refreshing={isLoading || isRefetching}
-        onRefresh={handleRefresh}
-        header={navbar}
-        headerStyle={navbarStyle}
-        contentContainerStyle={[
-          { paddingTop: Math.round(padding.gap / 2) },
-        ]}
-      >
-        {activeTab === "system" && (
-        <>
-          {/* Dual Metric Gauges Hero */}
-          <Card variant="elevated">
-            <View style={styles.gaugeContainer}>
-              <MetricGauge
-                value={data?.cpuUsagePercent ?? 0}
-                thresholds={CPU_THRESHOLDS}
-                label="CPU Load"
-                size={72}
-              />
-              <MetricGauge
-                value={data?.memoryUsedPercent ?? 0}
-                thresholds={MEM_THRESHOLDS}
-                label="RAM Used"
-                size={72}
-              />
-            </View>
-          </Card>
-
-          {/* Host Meta Card */}
-          <Card variant="elevated">
-            <KeyValueGroup columns={1}>
-              <CompactKeyValue label="Host" value={data?.hostname ?? "Unknown"} copyable />
-              <CompactKeyValue
-                label="Uptime"
-                value={data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "--"}
-              />
-            </KeyValueGroup>
-            <CompactKeyValue
-              label="Processor"
-              value={data?.cpuModel ?? "--"}
-              subValue={data?.cpuCores ? `(${data?.cpuCores} cores)` : undefined}
-            />
-          </Card>
-
-          {/* CPU Utilization Card */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title="CPU Details"
-              value={
-                <Text style={[styles.metricHighlight, { color: cpuColor }]}>
-                  {data?.cpuUsagePercent ?? 0}%
-                </Text>
-              }
-            />
-
-            <ProgressBar
+    <ModalBody
+      style={{ backgroundColor: colors.surface0 }}
+      headerMode="pinned"
+      refreshing={isLoading || isRefetching}
+      onRefresh={handleRefresh}
+      header={navbar}
+      headerStyle={navbarStyle}
+      contentContainerStyle={[
+        { paddingTop: Math.round(padding.gap / 2) },
+      ]}
+    >
+      {activeTab === "system" && (
+      <>
+        {/* Dual Metric Gauges Hero */}
+        <Card variant="elevated">
+          <View style={styles.gaugeContainer}>
+            <MetricGauge
               value={data?.cpuUsagePercent ?? 0}
               thresholds={CPU_THRESHOLDS}
-              height={8}
+              label="CPU Load"
+              size={72}
             />
-
-            <CompactKeyValue
-              label="Load Average (1m, 5m, 15m)"
-              value={data?.loadAvg ? data?.loadAvg.map((n) => n.toFixed(2)).join("  ") : "--  --  --"}
-              mono
-            />
-          </Card>
-
-          {/* Memory Card */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title="Memory Details"
-              value={
-                <Text style={[styles.metricHighlight, { color: memColor }]}>
-                  {data?.memoryUsedPercent ?? 0}%
-                </Text>
-              }
-            />
-
-            <ProgressBar
+            <MetricGauge
               value={data?.memoryUsedPercent ?? 0}
               thresholds={MEM_THRESHOLDS}
-              height={8}
+              label="RAM Used"
+              size={72}
             />
+          </View>
+        </Card>
 
+        {/* Host Meta Card */}
+        <Card variant="elevated">
+          <KeyValueGroup columns={1}>
+            <CompactKeyValue label="Host" value={data?.hostname ?? "Unknown"} copyable />
             <CompactKeyValue
-              label="Used / Total"
-              value={`${formatBytes(data?.memoryUsedBytes ?? 0)} / ${formatBytes(data?.memoryTotalBytes ?? 0)}`}
+              label="Uptime"
+              value={data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "--"}
             />
-          </Card>
+          </KeyValueGroup>
+          <CompactKeyValue
+            label="Processor"
+            value={data?.cpuModel ?? "--"}
+            subValue={data?.cpuCores ? `(${data?.cpuCores} cores)` : undefined}
+          />
+        </Card>
 
-          {/* MCP Servers Card */}
-          {Boolean(data?.mcpInstalled) && (
-            <Card variant="elevated">
-              <CompactCardHeader
-                title="MCP Servers"
-                subtitle="Source: paseo-mcp-tools"
-                icon="Server"
-                value={
-                  data?.mcp ? (
-                    <CompactBadge
-                      label={data?.mcp.isStale ? "Stale Snapshot" : "Live"}
-                      variant={data?.mcp.isStale ? "warning" : "success"}
-                      dot
-                    />
-                  ) : (
-                    <CompactBadge label="No Data" variant="neutral" />
-                  )
-                }
-              />
+        {/* CPU Utilization Card */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="CPU Details"
+            value={
+              <Text style={[styles.metricHighlight, { color: cpuColor }]}>
+                {data?.cpuUsagePercent ?? 0}%
+              </Text>
+            }
+          />
 
-              {data?.mcp ? (
-                <>
-                  <KeyValueGroup columns={1}>
-                    <CompactKeyValue
-                      label="Health"
-                      value={`${data?.mcp.healthy} healthy / ${data?.mcp.total} total`}
-                    />
-                    <CompactKeyValue
-                      label="Snapshot Updated"
-                      value={formatTimeAgo(data?.mcp.updatedAt)}
-                    />
-                    <CompactKeyValue
-                      label="Data Provider"
-                      value="paseo-mcp-tools"
-                    />
-                  </KeyValueGroup>
+          <ProgressBar
+            value={data?.cpuUsagePercent ?? 0}
+            thresholds={CPU_THRESHOLDS}
+            height={8}
+          />
 
-                  {data?.mcp.servers && data?.mcp.servers.length > 0 ? (
-                    <View style={styles.mcpList}>
-                      {data?.mcp.servers.map((srv) => {
-                        const badgeVariant: "success" | "warning" | "danger" | "neutral" =
-                          srv.status === "healthy"
-                            ? "success"
-                            : srv.status === "degraded"
-                              ? "warning"
-                              : srv.status === "down"
-                                ? "danger"
-                                : "neutral";
-                        return (
-                          <View key={srv.name} style={styles.mcpRow}>
-                            <View style={styles.mcpInfo}>
-                              <Text
-                                numberOfLines={1}
-                                style={[styles.mcpName, { color: colors.foreground }]}
-                              >
-                                {srv.name}
-                              </Text>
-                              <Text style={[styles.mcpLatency, { color: colors.foregroundMuted }]}>
-                                {srv.latencyMs >= 0 ? `${srv.latencyMs}ms` : "timeout"}
-                              </Text>
-                            </View>
-                            <CompactBadge label={srv.status} variant={badgeVariant} />
-                          </View>
-                        );
-                      })}
-                    </View>
-                  ) : (
-                    <Text style={[styles.mcpEmpty, { color: colors.foregroundMuted }]}>
-                      No MCP servers configured
-                    </Text>
-                  )}
-                </>
-              ) : (
-                <Text style={[styles.mcpEmpty, { color: colors.foregroundMuted }]}>
-                  Waiting for status snapshot from paseo-mcp-tools...
-                </Text>
-              )}
-            </Card>
-          )}
+          <CompactKeyValue
+            label="Load Average (1m, 5m, 15m)"
+            value={data?.loadAvg ? data?.loadAvg.map((n) => n.toFixed(2)).join("  ") : "--  --  --"}
+            mono
+          />
+        </Card>
 
-          {/* Custom Metric Pills Card */}
-          {Boolean(data?.customPills && data?.customPills.length > 0) && (
-            <Card variant="elevated">
-              <CompactCardHeader
-                title="Custom Metric Pills"
-                subtitle="Discovered from ~/.paseo/top/pills"
-                icon="Sliders"
-                value={
+        {/* Memory Card */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Memory Details"
+            value={
+              <Text style={[styles.metricHighlight, { color: memColor }]}>
+                {data?.memoryUsedPercent ?? 0}%
+              </Text>
+            }
+          />
+
+          <ProgressBar
+            value={data?.memoryUsedPercent ?? 0}
+            thresholds={MEM_THRESHOLDS}
+            height={8}
+          />
+
+          <CompactKeyValue
+            label="Used / Total"
+            value={`${formatBytes(data?.memoryUsedBytes ?? 0)} / ${formatBytes(data?.memoryTotalBytes ?? 0)}`}
+          />
+        </Card>
+
+        {/* MCP Servers Card */}
+        {Boolean(data?.mcpInstalled) && (
+          <Card variant="elevated">
+            <CompactCardHeader
+              title="MCP Servers"
+              subtitle="Source: paseo-mcp-tools"
+              icon="Server"
+              value={
+                data?.mcp ? (
                   <CompactBadge
-                    label={`${data?.customPills?.length ?? 0} active`}
-                    variant="accent"
+                    label={data?.mcp.isStale ? "Stale Snapshot" : "Live"}
+                    variant={data?.mcp.isStale ? "warning" : "success"}
+                    dot
                   />
-                }
-              />
-              <KeyValueGroup columns={1}>
-                {(data?.customPills ?? []).map((cp) => (
+                ) : (
+                  <CompactBadge label="No Data" variant="neutral" />
+                )
+              }
+            />
+
+            {data?.mcp ? (
+              <>
+                <KeyValueGroup columns={1}>
                   <CompactKeyValue
-                    key={cp.id}
-                    label={cp.title}
-                    value={cp.displayValue}
-                    subValue={cp.status !== "neutral" ? `(${cp.status})` : undefined}
+                    label="Health"
+                    value={`${data?.mcp.healthy} healthy / ${data?.mcp.total} total`}
                   />
-                ))}
-              </KeyValueGroup>
-            </Card>
-          )}
-        </>
-      )}
-
-      {activeTab === "context" && (
-        <>
-          {/* Workspace Information */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title="Workspace & Git"
-              icon="GitBranch"
-              value={
-                workspace?.status ? (
-                  <CompactBadge label={workspace.status} variant="info" />
-                ) : undefined
-              }
-            />
-            <KeyValueGroup columns={1}>
-              <CompactKeyValue label="Git Branch" value={data?.branch || "Unknown"} />
-              <CompactKeyValue label="Kind" value={workspace?.kind || "Unknown"} />
-            </KeyValueGroup>
-            {workspace?.directory ? (
-              <CompactKeyValue label="Worktree Location" value={workspace.directory} copyable mono />
-            ) : null}
-            {workspace?.name ? (
-              <CompactKeyValue label="Workspace Name" value={workspace.name} />
-            ) : null}
-            {workspace?.title && workspace.title !== workspace.name ? (
-              <CompactKeyValue label="Workspace Title" value={workspace.title} />
-            ) : null}
-            {workspace?.projectDisplayName ? (
-              <CompactKeyValue label="Project" value={workspace.projectDisplayName} />
-            ) : null}
-            {workspace?.diffStat ? (
-              <CompactKeyValue
-                label="Git Changes"
-                value={`+${workspace.diffStat.additions}  -${workspace.diffStat.deletions}`}
-              />
-            ) : null}
-          </Card>
-
-          {/* Agent Information */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title={agent?.title ? `Agent: ${agent.title}` : "Agent Session"}
-              icon="Bot"
-              value={
-                agent?.status ? (
-                  <CompactBadge
-                    label={agent.status}
-                    variant={agent.status === "running" ? "success" : "info"}
+                  <CompactKeyValue
+                    label="Snapshot Updated"
+                    value={formatTimeAgo(data?.mcp.updatedAt)}
                   />
-                ) : undefined
-              }
-            />
-            {agent?.title ? (
-              <CompactKeyValue label="Agent Tab" value={agent.title} />
-            ) : null}
-            {agentId ? (
-              <CompactKeyValue label="Agent ID" value={agentId} copyable mono />
-            ) : null}
-            <KeyValueGroup columns={1}>
-              <CompactKeyValue label="Model" value={agent?.model || "Standard"} />
-              <CompactKeyValue label="Provider" value={agent?.provider || "Default"} />
-            </KeyValueGroup>
-            <KeyValueGroup columns={1}>
-              <CompactKeyValue
-                label="Last Worked"
-                value={
-                  agent?.status === "running"
-                    ? "Active now"
-                    : formatTimeAgo(agent?.lastActivityAt)
-                }
-              />
-              <CompactKeyValue
-                label="Inactivity"
-                value={
-                  agent?.status === "running"
-                    ? "0s (active)"
-                    : formatIdleDuration(agent?.lastActivityAt)
-                }
-              />
-            </KeyValueGroup>
-            {agent?.cwd ? (
-              <CompactKeyValue label="Working Directory" value={agent.cwd} copyable mono />
-            ) : null}
-          </Card>
-
-          {/* Token Usage & Context Window */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title="Tokens & Context Window"
-              icon="Coins"
-              value={
-                contextPercent != null ? (
-                  <CompactBadge
-                    label={`${contextPercent}% ctx`}
-                    variant={contextPercent >= 85 ? "danger" : contextPercent >= 70 ? "warning" : "success"}
+                  <CompactKeyValue
+                    label="Data Provider"
+                    value="paseo-mcp-tools"
                   />
-                ) : tokenMetrics?.totalTokens != null ? (
-                  <CompactBadge
-                    label={`${formatCompactTokens(tokenMetrics.totalTokens)} tok`}
-                    variant="neutral"
-                  />
-                ) : undefined
-              }
-            />
+                </KeyValueGroup>
 
-            {tokenMetrics?.contextMaxTokens != null && tokenMetrics.contextMaxTokens > 0 ? (
-              <View style={styles.contextUsageBlock}>
-                <View style={styles.contextUsageRow}>
-                  <Text style={[styles.compactKvLabel, { color: colors.foregroundMuted }]}>Context Utilization</Text>
-                  <Text style={[styles.compactKvValue, { color: colors.foreground, fontWeight: "600" }]}>
-                    {formatCompactTokens(tokenMetrics.contextUsedTokens ?? 0)} / {formatCompactTokens(tokenMetrics.contextMaxTokens)} ({contextPercent}%)
+                {data?.mcp.servers && data?.mcp.servers.length > 0 ? (
+                  <View style={styles.mcpList}>
+                    {data?.mcp.servers.map((srv) => {
+                      const badgeVariant: "success" | "warning" | "danger" | "neutral" =
+                        srv.status === "healthy"
+                          ? "success"
+                          : srv.status === "degraded"
+                            ? "warning"
+                            : srv.status === "down"
+                              ? "danger"
+                              : "neutral";
+                      return (
+                        <View key={srv.name} style={styles.mcpRow}>
+                          <View style={styles.mcpInfo}>
+                            <Text
+                              numberOfLines={1}
+                              style={[styles.mcpName, { color: colors.foreground }]}
+                            >
+                              {srv.name}
+                            </Text>
+                            <Text style={[styles.mcpLatency, { color: colors.foregroundMuted }]}>
+                              {srv.latencyMs >= 0 ? `${srv.latencyMs}ms` : "timeout"}
+                            </Text>
+                          </View>
+                          <CompactBadge label={srv.status} variant={badgeVariant} />
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <Text style={[styles.mcpEmpty, { color: colors.foregroundMuted }]}>
+                    No MCP servers configured
                   </Text>
-                </View>
-                <ProgressBar
-                  value={contextPercent ?? 0}
-                  thresholds={{ warning: 70, danger: 85 }}
-                  height={8}
-                />
-              </View>
-            ) : tokenMetrics?.contextUsedTokens != null ? (
-              <CompactKeyValue
-                label="Context Used"
-                value={`${tokenMetrics.contextUsedTokens.toLocaleString()} (${formatCompactTokens(tokenMetrics.contextUsedTokens)})`}
-              />
-            ) : null}
-
-            <KeyValueGroup columns={1}>
-              <CompactKeyValue
-                label="Input Tokens"
-                value={tokenMetrics?.inputTokens != null ? tokenMetrics.inputTokens.toLocaleString() : "--"}
-                subValue={tokenMetrics?.inputTokens != null ? formatCompactTokens(tokenMetrics.inputTokens) : undefined}
-              />
-              <CompactKeyValue
-                label="Output Tokens"
-                value={tokenMetrics?.outputTokens != null ? tokenMetrics.outputTokens.toLocaleString() : "--"}
-                subValue={tokenMetrics?.outputTokens != null ? formatCompactTokens(tokenMetrics.outputTokens) : undefined}
-              />
-              {tokenMetrics?.cachedTokens != null && (
-                <CompactKeyValue
-                  label="Cached Tokens"
-                  value={tokenMetrics.cachedTokens.toLocaleString()}
-                  subValue={formatCompactTokens(tokenMetrics.cachedTokens)}
-                />
-              )}
-              {tokenMetrics?.costUsd != null && (
-                <CompactKeyValue
-                  label="Session / Turn Cost"
-                  value={`$${tokenMetrics.costUsd < 0.01 ? tokenMetrics.costUsd.toFixed(4) : tokenMetrics.costUsd.toFixed(2)}`}
-                />
-              )}
-            </KeyValueGroup>
-            {!tokenMetrics && (
-              <Text style={[styles.mcpEmpty, { color: colors.foregroundMuted, marginTop: 4 }]}>
-                No token usage recorded for this agent session yet
+                )}
+              </>
+            ) : (
+              <Text style={[styles.mcpEmpty, { color: colors.foregroundMuted }]}>
+                Waiting for status snapshot from paseo-mcp-tools...
               </Text>
             )}
           </Card>
-        </>
-      )}
+        )}
 
-      {activeTab === "settings" && (
-        <>
-          {/* Pill Display Mode */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title="Pill Display Mode"
-              icon="LayoutGrid"
-              subtitle="How active items appear in the composer trackbar"
-            />
-            <View style={styles.modeRow}>
-              {[
-                { id: "cycle", label: "Cycle", desc: "Rotate one at a time" },
-                { id: "all", label: "All in One", desc: "Combined into one pill" },
-                { id: "multiple", label: "Multiple", desc: "Dedicated pills" },
-              ].map((modeOption) => {
-                const isSelected = (settings.pillMode ?? "cycle") === modeOption.id;
-                return (
-                  <Pressable
-                    key={modeOption.id}
-                    onPress={() => {
-                      triggerHaptic("light");
-                      const newSettings: TopSettings = {
-                        ...settings,
-                        pillMode: modeOption.id as PillMode,
-                      };
-                      updateSettings({ pillMode: modeOption.id as PillMode });
-                      notifySettingsChanged(newSettings);
-                    }}
-                    style={[
-                      styles.modeCard,
-                      {
-                        backgroundColor: isSelected ? colors.surface1 : colors.surface0,
-                        borderColor: isSelected ? colors.accent : colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.modeTitle,
-                        {
-                          color: isSelected ? colors.accent : colors.foreground,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {modeOption.label}
-                    </Text>
-                    <Text style={[styles.modeDesc, { color: colors.foregroundMuted }]}>
-                      {modeOption.desc}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.settingsSpacer}>
-              <Toggle
-                label="Show Composer Pill"
-                description="Hide the composer pill entirely; the dashboard stays available from the sidebar"
-                style={styles.toggleFullWidth}
-                value={settings.showComposerPill ?? true}
-                onValueChange={(val) => {
-                  const next = { ...settings, showComposerPill: val };
-                  updateSettings({ showComposerPill: val });
-                  notifySettingsChanged(next);
-                }}
-              />
-            </View>
-          </Card>
-
-          {/* Active Pill Items Selectors */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title="Active Pill Items"
-              icon="Sliders"
-              subtitle={
-                !hasAnyPillEnabled
-                  ? "None selected -- automatically showing CPU & RAM"
-                  : (settings.pillMode ?? "cycle") === "multiple"
-                    ? "Choose which items appear as dedicated pills"
-                    : (settings.pillMode ?? "cycle") === "all"
-                      ? "Choose which items appear together in the pill"
-                      : "Choose which items cycle in the composer pill"
-              }
-            />
-            <View style={styles.settingsToggles}>
-              <MetricSurfaceMatrix
-                settings={settings}
-                updateSettings={updateSettings}
-                notifySettingsChanged={notifySettingsChanged}
-                mcpInstalled={Boolean(data?.mcpInstalled)}
-                mcpRunning={data?.mcpRunning ?? null}
-                customPills={(customPillList?.pills ?? []).map((pill) => ({
-                  id: pill.id,
-                  title: pill.title,
-                  sourceFile: pill.sourceFile,
-                  enabled: pill.enabled,
-                }))}
-                customOverrides={settings.customPillEnabled}
-                onCustomToggle={(id, val) => {
-                  const next = { ...settings.customPillEnabled, [id]: val };
-                  const nextSettings = { ...settings, customPillEnabled: next };
-                  updateSettings({ customPillEnabled: next });
-                  notifySettingsChanged(nextSettings);
-                }}
-              />
-            </View>
-          </Card>
-
-          {/* Custom Metric Pills */}
+        {/* Custom Metric Pills Card */}
+        {Boolean(data?.customPills && data?.customPills.length > 0) && (
           <Card variant="elevated">
             <CompactCardHeader
               title="Custom Metric Pills"
+              subtitle="Discovered from ~/.paseo/top/pills"
               icon="Sliders"
-              subtitle="Standalone pills discovered from ~/.paseo/top/pills"
+              value={
+                <CompactBadge
+                  label={`${data?.customPills?.length ?? 0} active`}
+                  variant="accent"
+                />
+              }
             />
-            <View style={styles.settingsToggles}>
-              <Toggle
-                label="Show Custom Metric Pills"
-                description="Display pills defined in ~/.paseo/top/pills as standalone composer pills"
-                style={styles.toggleFullWidth}
-                labelStyle={styles.compactToggleLabel}
-                value={settings.showCustomPills ?? true}
-                onValueChange={(val) => {
-                  const s = { ...settings, showCustomPills: val };
-                  updateSettings({ showCustomPills: val });
-                  notifySettingsChanged(s);
-                }}
-              />
-
-            </View>
+            <KeyValueGroup columns={1}>
+              {(data?.customPills ?? []).map((cp) => (
+                <CompactKeyValue
+                  key={cp.id}
+                  label={cp.title}
+                  value={cp.displayValue}
+                  subValue={cp.status !== "neutral" ? `(${cp.status})` : undefined}
+                />
+              ))}
+            </KeyValueGroup>
           </Card>
+        )}
+      </>
+    )}
 
-          {/* Rotation Speed Setting (Cycle mode only) */}
-          {(settings.pillMode ?? "cycle") === "cycle" && (
-            <Card variant="elevated">
-              <CompactCardHeader
-                title="Rotation Speed"
-                icon="Clock"
-                value={
-                  <Text style={[styles.accentValueText, { color: colors.accent }]}>
-                    {`${settings.intervalSeconds}s`}
-                  </Text>
-                }
+    {activeTab === "context" && (
+      <>
+        {/* Workspace Information */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Workspace & Git"
+            icon="GitBranch"
+            value={
+              workspace?.status ? (
+                <CompactBadge label={workspace.status} variant="info" />
+              ) : undefined
+            }
+          />
+          <KeyValueGroup columns={1}>
+            <CompactKeyValue label="Git Branch" value={data?.branch || "Unknown"} />
+            <CompactKeyValue label="Kind" value={workspace?.kind || "Unknown"} />
+          </KeyValueGroup>
+          {workspace?.directory ? (
+            <CompactKeyValue label="Worktree Location" value={workspace.directory} copyable mono />
+          ) : null}
+          {workspace?.name ? (
+            <CompactKeyValue label="Workspace Name" value={workspace.name} />
+          ) : null}
+          {workspace?.title && workspace.title !== workspace.name ? (
+            <CompactKeyValue label="Workspace Title" value={workspace.title} />
+          ) : null}
+          {workspace?.projectDisplayName ? (
+            <CompactKeyValue label="Project" value={workspace.projectDisplayName} />
+          ) : null}
+          {workspace?.diffStat ? (
+            <CompactKeyValue
+              label="Git Changes"
+              value={`+${workspace.diffStat.additions}  -${workspace.diffStat.deletions}`}
+            />
+          ) : null}
+        </Card>
+
+        {/* Agent Information */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title={agent?.title ? `Agent: ${agent.title}` : "Agent Session"}
+            icon="Bot"
+            value={
+              agent?.status ? (
+                <CompactBadge
+                  label={agent.status}
+                  variant={agent.status === "running" ? "success" : "info"}
+                />
+              ) : undefined
+            }
+          />
+          {agent?.title ? (
+            <CompactKeyValue label="Agent Tab" value={agent.title} />
+          ) : null}
+          {agentId ? (
+            <CompactKeyValue label="Agent ID" value={agentId} copyable mono />
+          ) : null}
+          <KeyValueGroup columns={1}>
+            <CompactKeyValue label="Model" value={agent?.model || "Standard"} />
+            <CompactKeyValue label="Provider" value={agent?.provider || "Default"} />
+          </KeyValueGroup>
+          <KeyValueGroup columns={1}>
+            <CompactKeyValue
+              label="Last Worked"
+              value={
+                agent?.status === "running"
+                  ? "Active now"
+                  : formatTimeAgo(agent?.lastActivityAt)
+              }
+            />
+            <CompactKeyValue
+              label="Inactivity"
+              value={
+                agent?.status === "running"
+                  ? "0s (active)"
+                  : formatIdleDuration(agent?.lastActivityAt)
+              }
+            />
+          </KeyValueGroup>
+          {agent?.cwd ? (
+            <CompactKeyValue label="Working Directory" value={agent.cwd} copyable mono />
+          ) : null}
+        </Card>
+
+        {/* Token Usage & Context Window */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Tokens & Context Window"
+            icon="Coins"
+            value={
+              contextPercent != null ? (
+                <CompactBadge
+                  label={`${contextPercent}% ctx`}
+                  variant={contextPercent >= 85 ? "danger" : contextPercent >= 70 ? "warning" : "success"}
+                />
+              ) : tokenMetrics?.totalTokens != null ? (
+                <CompactBadge
+                  label={`${formatCompactTokens(tokenMetrics.totalTokens)} tok`}
+                  variant="neutral"
+                />
+              ) : undefined
+            }
+          />
+
+          {tokenMetrics?.contextMaxTokens != null && tokenMetrics.contextMaxTokens > 0 ? (
+            <View style={styles.contextUsageBlock}>
+              <View style={styles.contextUsageRow}>
+                <Text style={[styles.compactKvLabel, { color: colors.foregroundMuted }]}>Context Utilization</Text>
+                <Text style={[styles.compactKvValue, { color: colors.foreground, fontWeight: "600" }]}>
+                  {formatCompactTokens(tokenMetrics.contextUsedTokens ?? 0)} / {formatCompactTokens(tokenMetrics.contextMaxTokens)} ({contextPercent}%)
+                </Text>
+              </View>
+              <ProgressBar
+                value={contextPercent ?? 0}
+                thresholds={{ warning: 70, danger: 85 }}
+                height={8}
               />
-              <View style={styles.speedRow}>
-                {[2, 3, 4, 6].map((sec) => (
-                  <View
-                    key={sec}
+            </View>
+          ) : tokenMetrics?.contextUsedTokens != null ? (
+            <CompactKeyValue
+              label="Context Used"
+              value={`${tokenMetrics.contextUsedTokens.toLocaleString()} (${formatCompactTokens(tokenMetrics.contextUsedTokens)})`}
+            />
+          ) : null}
+
+          <KeyValueGroup columns={1}>
+            <CompactKeyValue
+              label="Input Tokens"
+              value={tokenMetrics?.inputTokens != null ? tokenMetrics.inputTokens.toLocaleString() : "--"}
+              subValue={tokenMetrics?.inputTokens != null ? formatCompactTokens(tokenMetrics.inputTokens) : undefined}
+            />
+            <CompactKeyValue
+              label="Output Tokens"
+              value={tokenMetrics?.outputTokens != null ? tokenMetrics.outputTokens.toLocaleString() : "--"}
+              subValue={tokenMetrics?.outputTokens != null ? formatCompactTokens(tokenMetrics.outputTokens) : undefined}
+            />
+            {tokenMetrics?.cachedTokens != null && (
+              <CompactKeyValue
+                label="Cached Tokens"
+                value={tokenMetrics.cachedTokens.toLocaleString()}
+                subValue={formatCompactTokens(tokenMetrics.cachedTokens)}
+              />
+            )}
+            {tokenMetrics?.costUsd != null && (
+              <CompactKeyValue
+                label="Session / Turn Cost"
+                value={`$${tokenMetrics.costUsd < 0.01 ? tokenMetrics.costUsd.toFixed(4) : tokenMetrics.costUsd.toFixed(2)}`}
+              />
+            )}
+          </KeyValueGroup>
+          {!tokenMetrics && (
+            <Text style={[styles.mcpEmpty, { color: colors.foregroundMuted, marginTop: 4 }]}>
+              No token usage recorded for this agent session yet
+            </Text>
+          )}
+        </Card>
+      </>
+    )}
+
+    {activeTab === "settings" && (
+      <>
+        {/* Pill Display Mode */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Pill Display Mode"
+            icon="LayoutGrid"
+            subtitle="How active items appear in the composer trackbar"
+          />
+          <View style={styles.modeRow}>
+            {[
+              { id: "cycle", label: "Cycle", desc: "Rotate one at a time" },
+              { id: "all", label: "All in One", desc: "Combined into one pill" },
+              { id: "multiple", label: "Multiple", desc: "Dedicated pills" },
+            ].map((modeOption) => {
+              const isSelected = (settings.pillMode ?? "cycle") === modeOption.id;
+              return (
+                <Pressable
+                  key={modeOption.id}
+                  onPress={() => {
+                    triggerHaptic("light");
+                    const newSettings: TopSettings = {
+                      ...settings,
+                      pillMode: modeOption.id as PillMode,
+                    };
+                    updateSettings({ pillMode: modeOption.id as PillMode });
+                    notifySettingsChanged(newSettings);
+                  }}
+                  style={[
+                    styles.modeCard,
+                    {
+                      backgroundColor: isSelected ? colors.surface1 : colors.surface0,
+                      borderColor: isSelected ? colors.accent : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
                     style={[
-                      styles.speedChip,
+                      styles.modeTitle,
                       {
-                        backgroundColor:
-                          settings.intervalSeconds === sec ? colors.accent : colors.surface1,
-                        borderColor:
-                          settings.intervalSeconds === sec ? colors.accent : colors.border,
+                        color: isSelected ? colors.accent : colors.foreground,
+                        fontWeight: isSelected ? "700" : "500",
                       },
                     ]}
                   >
-                    <Text
-                      onPress={() => {
-                        triggerHaptic("light");
-                        updateSettings({ intervalSeconds: sec });
-                      }}
-                      style={[
-                        styles.speedChipText,
-                        {
-                          color:
-                            settings.intervalSeconds === sec
-                              ? colors.accentForeground
-                              : colors.foreground,
-                          fontWeight: settings.intervalSeconds === sec ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {`${sec}s`}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            </Card>
-          )}
+                    {modeOption.label}
+                  </Text>
+                  <Text style={[styles.modeDesc, { color: colors.foregroundMuted }]}>
+                    {modeOption.desc}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+          <View style={styles.settingsSpacer}>
+            <Toggle
+              label="Show Composer Pill"
+              description="Hide the composer pill entirely; the dashboard stays available from the sidebar"
+              style={styles.toggleFullWidth}
+              value={settings.showComposerPill ?? true}
+              onValueChange={(val) => {
+                const next = { ...settings, showComposerPill: val };
+                updateSettings({ showComposerPill: val });
+                notifySettingsChanged(next);
+              }}
+            />
+          </View>
+        </Card>
 
-          {/* Timeline Cadence Setting */}
+        {/* Active Pill Items Selectors */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Active Pill Items"
+            icon="Sliders"
+            subtitle={
+              !hasAnyPillEnabled
+                ? "None selected -- automatically showing CPU & RAM"
+                : (settings.pillMode ?? "cycle") === "multiple"
+                  ? "Choose which items appear as dedicated pills"
+                  : (settings.pillMode ?? "cycle") === "all"
+                    ? "Choose which items appear together in the pill"
+                    : "Choose which items cycle in the composer pill"
+            }
+          />
+          <View style={styles.settingsToggles}>
+            <MetricSurfaceMatrix
+              settings={settings}
+              updateSettings={updateSettings}
+              notifySettingsChanged={notifySettingsChanged}
+              mcpInstalled={Boolean(data?.mcpInstalled)}
+              mcpRunning={data?.mcpRunning ?? null}
+              customPills={(customPillList?.pills ?? []).map((pill) => ({
+                id: pill.id,
+                title: pill.title,
+                sourceFile: pill.sourceFile,
+                enabled: pill.enabled,
+              }))}
+              customOverrides={settings.customPillEnabled}
+              onCustomToggle={(id, val) => {
+                const next = { ...settings.customPillEnabled, [id]: val };
+                const nextSettings = { ...settings, customPillEnabled: next };
+                updateSettings({ customPillEnabled: next });
+                notifySettingsChanged(nextSettings);
+              }}
+            />
+          </View>
+        </Card>
+
+        {/* Custom Metric Pills */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Custom Metric Pills"
+            icon="Sliders"
+            subtitle="Standalone pills discovered from ~/.paseo/top/pills"
+          />
+          <View style={styles.settingsToggles}>
+            <Toggle
+              label="Show Custom Metric Pills"
+              description="Display pills defined in ~/.paseo/top/pills as standalone composer pills"
+              style={styles.toggleFullWidth}
+              labelStyle={styles.compactToggleLabel}
+              value={settings.showCustomPills ?? true}
+              onValueChange={(val) => {
+                const s = { ...settings, showCustomPills: val };
+                updateSettings({ showCustomPills: val });
+                notifySettingsChanged(s);
+              }}
+            />
+
+          </View>
+        </Card>
+
+        {/* Rotation Speed Setting (Cycle mode only) */}
+        {(settings.pillMode ?? "cycle") === "cycle" && (
           <Card variant="elevated">
             <CompactCardHeader
-              title="Timeline Cadence"
+              title="Rotation Speed"
               icon="Clock"
               value={
                 <Text style={[styles.accentValueText, { color: colors.accent }]}>
-                  {(settings.timelineCadence ?? 1) === 0
-                    ? "Never"
-                    : (settings.timelineCadence ?? 1) === 1
-                      ? "Every turn"
-                      : `Every ${(settings.timelineCadence ?? 1)} turns`}
-                </Text>
-              }
-              subtitle="How often a card is stamped into the timeline view"
-            />
-            <View style={styles.speedRow}>
-              {[
-                { id: 0, label: "Never" },
-                { id: 1, label: "Every turn" },
-              ].map((cadenceOption) => {
-                const isSelected = (settings.timelineCadence ?? 1) === cadenceOption.id;
-                return (
-                  <View
-                    key={cadenceOption.label}
-                    style={[
-                      styles.speedChip,
-                      {
-                        flex: 1,
-                        backgroundColor: isSelected ? colors.accent : colors.surface1,
-                        borderColor: isSelected ? colors.accent : colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      onPress={() => {
-                        triggerHaptic("light");
-                        const next = { ...settings, timelineCadence: cadenceOption.id };
-                        updateSettings({ timelineCadence: cadenceOption.id });
-                        notifySettingsChanged(next);
-                      }}
-                      style={[
-                        styles.speedChipText,
-                        {
-                          color: isSelected ? colors.accentForeground : colors.foreground,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {cadenceOption.label}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-            <View style={[styles.speedRow, styles.speedRowSpaced]}>
-              {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
-                const isSelected = (settings.timelineCadence ?? 1) === n;
-                return (
-                  <View
-                    key={n}
-                    style={[
-                      styles.speedChip,
-                      {
-                        backgroundColor: isSelected ? colors.accent : colors.surface1,
-                        borderColor: isSelected ? colors.accent : colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      onPress={() => {
-                        triggerHaptic("light");
-                        const next = { ...settings, timelineCadence: n };
-                        updateSettings({ timelineCadence: n });
-                        notifySettingsChanged(next);
-                      }}
-                      style={[
-                        styles.speedChipText,
-                        {
-                          color: isSelected ? colors.accentForeground : colors.foreground,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {`${n}`}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-            <Text style={[styles.modeDesc, styles.modeDescSpaced, { color: colors.foregroundMuted }]}>
-              0 behaves as never; N above 1 stamps every Nth turn
-            </Text>
-          </Card>
-
-          {/* Default Modal Tab Setting */}
-          <Card variant="elevated">
-            <CompactCardHeader
-              title="Default Modal Tab"
-              icon="Sliders"
-              value={
-                <Text style={[styles.accentValueText, { color: colors.accent }]}>
-                  {TABS.find((t) => t.id === settings.defaultTab)?.label || "System"}
+                  {`${settings.intervalSeconds}s`}
                 </Text>
               }
             />
             <View style={styles.speedRow}>
-              {TABS.map((tab) => {
-                const isSelected = (settings.defaultTab || "system") === tab.id;
-                return (
-                  <View
-                    key={tab.id}
+              {[2, 3, 4, 6].map((sec) => (
+                <View
+                  key={sec}
+                  style={[
+                    styles.speedChip,
+                    {
+                      backgroundColor:
+                        settings.intervalSeconds === sec ? colors.accent : colors.surface1,
+                      borderColor:
+                        settings.intervalSeconds === sec ? colors.accent : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    onPress={() => {
+                      triggerHaptic("light");
+                      updateSettings({ intervalSeconds: sec });
+                    }}
                     style={[
-                      styles.speedChip,
+                      styles.speedChipText,
                       {
-                        flex: 1,
-                        backgroundColor: isSelected ? colors.accent : colors.surface1,
-                        borderColor: isSelected ? colors.accent : colors.border,
+                        color:
+                          settings.intervalSeconds === sec
+                            ? colors.accentForeground
+                            : colors.foreground,
+                        fontWeight: settings.intervalSeconds === sec ? "700" : "500",
                       },
                     ]}
                   >
-                    <Text
-                      onPress={() => {
-                        triggerHaptic("light");
-                        updateSettings({
-                          defaultTab: tab.id as "system" | "context" | "settings" | "about",
-                        });
-                      }}
-                      style={[
-                        styles.speedChipText,
-                        {
-                          color: isSelected ? colors.accentForeground : colors.foreground,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {tab.label}
-                    </Text>
-                  </View>
-                );
-              })}
+                    {`${sec}s`}
+                  </Text>
+                </View>
+              ))}
             </View>
           </Card>
+        )}
 
-          <Button
-            label="Reset to Defaults"
-            variant="secondary"
-            size="sm"
-            onPress={() => {
-              triggerHaptic("medium");
-              resetSettings();
-              notifySettingsChanged(topSettingsContract.defaultSettings);
-              setSelectedTab(null);
-            }}
+        {/* Timeline Cadence Setting */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Timeline Cadence"
+            icon="Clock"
+            value={
+              <Text style={[styles.accentValueText, { color: colors.accent }]}>
+                {(settings.timelineCadence ?? 1) === 0
+                  ? "Never"
+                  : (settings.timelineCadence ?? 1) === 1
+                    ? "Every turn"
+                    : `Every ${(settings.timelineCadence ?? 1)} turns`}
+              </Text>
+            }
+            subtitle="How often a card is stamped into the timeline view"
           />
-        </>
-      )}
-
-      {activeTab === "about" && (
-        <AboutSection
-          name="paseo-top"
-          description="Live host system and workspace monitor for Paseo composer trackbar."
-          version={data?.version ?? PLUGIN_VERSION}
-          author="xpufx"
-          repository="https://github.com/xpufx/paseo-top"
-          issues="https://github.com/xpufx/paseo-top/issues"
-          license="MIT"
-          density="tiny"
-          extraItems={[
-            {
-              label: "Host Platform",
-              value: data?.platform ? `${data?.platform} (${data?.arch ?? "unknown"})` : "Linux",
-              copyable: true,
-            },
-            { label: "Host Name", value: data?.hostname ?? "localhost", copyable: true },
-            { label: "CPU Model", value: data?.cpuModel ?? "unknown", copyable: true },
-            {
-              label: "CPU Cores",
-              value: `${data?.cpuCores ?? 0} cores`,
-            },
-            {
-              label: "Total Memory",
-              value: data?.memoryTotalBytes ? formatBytes(data?.memoryTotalBytes) : "unknown",
-            },
-            {
-              label: "Host Uptime",
-              value: data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "unknown",
-            },
-          ]}
-        />
-      )}
-
-      {/* Discrete Version Footer */}
-      {activeTab !== "about" && (
-        <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: colors.foregroundMuted }]}>
-            top v{data?.version ?? PLUGIN_VERSION}
+          <View style={styles.speedRow}>
+            {[
+              { id: 0, label: "Never" },
+              { id: 1, label: "Every turn" },
+            ].map((cadenceOption) => {
+              const isSelected = (settings.timelineCadence ?? 1) === cadenceOption.id;
+              return (
+                <View
+                  key={cadenceOption.label}
+                  style={[
+                    styles.speedChip,
+                    {
+                      flex: 1,
+                      backgroundColor: isSelected ? colors.accent : colors.surface1,
+                      borderColor: isSelected ? colors.accent : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    onPress={() => {
+                      triggerHaptic("light");
+                      const next = { ...settings, timelineCadence: cadenceOption.id };
+                      updateSettings({ timelineCadence: cadenceOption.id });
+                      notifySettingsChanged(next);
+                    }}
+                    style={[
+                      styles.speedChipText,
+                      {
+                        color: isSelected ? colors.accentForeground : colors.foreground,
+                        fontWeight: isSelected ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {cadenceOption.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+          <View style={[styles.speedRow, styles.speedRowSpaced]}>
+            {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+              const isSelected = (settings.timelineCadence ?? 1) === n;
+              return (
+                <View
+                  key={n}
+                  style={[
+                    styles.speedChip,
+                    {
+                      backgroundColor: isSelected ? colors.accent : colors.surface1,
+                      borderColor: isSelected ? colors.accent : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    onPress={() => {
+                      triggerHaptic("light");
+                      const next = { ...settings, timelineCadence: n };
+                      updateSettings({ timelineCadence: n });
+                      notifySettingsChanged(next);
+                    }}
+                    style={[
+                      styles.speedChipText,
+                      {
+                        color: isSelected ? colors.accentForeground : colors.foreground,
+                        fontWeight: isSelected ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {`${n}`}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+          <Text style={[styles.modeDesc, styles.modeDescSpaced, { color: colors.foregroundMuted }]}>
+            0 behaves as never; N above 1 stamps every Nth turn
           </Text>
-        </View>
-      )}
-    </ModalBody>
-    </View>
+        </Card>
+
+        {/* Default Modal Tab Setting */}
+        <Card variant="elevated">
+          <CompactCardHeader
+            title="Default Modal Tab"
+            icon="Sliders"
+            value={
+              <Text style={[styles.accentValueText, { color: colors.accent }]}>
+                {TABS.find((t) => t.id === settings.defaultTab)?.label || "System"}
+              </Text>
+            }
+          />
+          <View style={styles.speedRow}>
+            {TABS.map((tab) => {
+              const isSelected = (settings.defaultTab || "system") === tab.id;
+              return (
+                <View
+                  key={tab.id}
+                  style={[
+                    styles.speedChip,
+                    {
+                      flex: 1,
+                      backgroundColor: isSelected ? colors.accent : colors.surface1,
+                      borderColor: isSelected ? colors.accent : colors.border,
+                    },
+                  ]}
+                >
+                  <Text
+                    onPress={() => {
+                      triggerHaptic("light");
+                      updateSettings({
+                        defaultTab: tab.id as "system" | "context" | "settings" | "about",
+                      });
+                    }}
+                    style={[
+                      styles.speedChipText,
+                      {
+                        color: isSelected ? colors.accentForeground : colors.foreground,
+                        fontWeight: isSelected ? "700" : "500",
+                      },
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </Card>
+
+        <Button
+          label="Reset to Defaults"
+          variant="secondary"
+          size="sm"
+          onPress={() => {
+            triggerHaptic("medium");
+            resetSettings();
+            notifySettingsChanged(topSettingsContract.defaultSettings);
+            setSelectedTab(null);
+          }}
+        />
+      </>
+    )}
+
+    {activeTab === "about" && (
+      <AboutSection
+        name="paseo-top"
+        description="Live host system and workspace monitor for Paseo composer trackbar."
+        version={data?.version ?? PLUGIN_VERSION}
+        author="xpufx"
+        repository="https://github.com/xpufx/paseo-top"
+        issues="https://github.com/xpufx/paseo-top/issues"
+        license="MIT"
+        density="tiny"
+        extraItems={[
+          {
+            label: "Host Platform",
+            value: data?.platform ? `${data?.platform} (${data?.arch ?? "unknown"})` : "Linux",
+            copyable: true,
+          },
+          { label: "Host Name", value: data?.hostname ?? "localhost", copyable: true },
+          { label: "CPU Model", value: data?.cpuModel ?? "unknown", copyable: true },
+          {
+            label: "CPU Cores",
+            value: `${data?.cpuCores ?? 0} cores`,
+          },
+          {
+            label: "Total Memory",
+            value: data?.memoryTotalBytes ? formatBytes(data?.memoryTotalBytes) : "unknown",
+          },
+          {
+            label: "Host Uptime",
+            value: data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "unknown",
+          },
+        ]}
+      />
+    )}
+
+    {/* Discrete Version Footer */}
+    {activeTab !== "about" && (
+      <View style={styles.footer}>
+        <Text style={[styles.footerText, { color: colors.foregroundMuted }]}>
+          top v{data?.version ?? PLUGIN_VERSION}
+        </Text>
+      </View>
+    )}
+  </ModalBody>
   );
 }
 
@@ -2223,6 +2237,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
           modalTitle: "Host System Resources",
           modalIcon: "Activity",
           icon: "Cpu",
+          presentation: "centered",
           resolveDefaultPayload: ({ agentId }) => {
             if (latestSettings.pillMode === "all") {
               return latestSettings.defaultTab;
@@ -2245,6 +2260,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
             };
           },
           refreshIntervalMs: 3000,
+          popoverWidth: 360,
           renderPill: (props) => <PillView {...props} />,
           renderModal: (props) => <ResourceModal {...props} />,
         });
@@ -2450,9 +2466,11 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
             modalTitle: pillDef.modalTitle,
             icon: pillDef.icon,
             modalIcon: pillDef.icon,
+            presentation: "centered",
             resolveDefaultPayload: () => pillDef.defaultTab,
             resolveLabel: singleItemLabelResolver(pillDef.item),
             refreshIntervalMs: 5000,
+            popoverWidth: 360,
             renderPill: (props) => (
               <SingleItemPillView
                 item={pillDef.item}
@@ -2558,6 +2576,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
               return pill.displayValue;
             },
             refreshIntervalMs: 5000,
+            popoverWidth: 360,
             renderPill: () => <LiveCustomPillView pillId={pill.id} initial={pill} />,
             renderModal: () => (
               <LiveCustomPillModal pillId={pill.id} initial={pill} />

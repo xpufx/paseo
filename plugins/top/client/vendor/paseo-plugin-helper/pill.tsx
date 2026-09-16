@@ -1,9 +1,18 @@
-import React, { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ComponentType,
+  type ReactNode,
+} from "react";
+import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import {
   getClientHost,
   type ComposerPillRegistrar,
   type ComposerPillRegistration,
+  type ComposerPillRegistrationHandle,
   type HostLayout,
   type HostPillProps,
   type HostTheme,
@@ -50,6 +59,8 @@ export type PillIconResolver = (
 ) => string | undefined | Promise<string | undefined>;
 
 let probeSequence = 0;
+
+const NOOP_SUBSCRIBE = (): (() => void) => () => {};
 
 export interface RegisterComposerPillOptions<TPayload = any> {
   /**
@@ -142,6 +153,20 @@ export interface RegisterComposerPillOptions<TPayload = any> {
   refreshIntervalMs?: number;
 
   /**
+   * Fixed width, in pixels, for the anchored popover on non-compact hosts.
+   *
+   * Without it the popover is sized from its content, so any content that
+   * reflows (a measured table, a responsive group, a gauge that settles) can
+   * resize the surface under the pointer. Pinning the width makes the frame the
+   * authority and lets the content overflow into its own scroll/clip instead.
+   *
+   * Ignored on compact hosts, where the same content renders in a full-bleed
+   * bottom sheet. Clamped to the window width so a fixed width cannot overflow
+   * a narrow viewport.
+   */
+  popoverWidth?: number;
+
+  /**
     * Renders the content inside the controlled modal.
    * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
     * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
@@ -150,7 +175,27 @@ export interface RegisterComposerPillOptions<TPayload = any> {
     * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
     * popovers, so live pill text comes from `resolveLabel` instead.
    */
-  renderModal: (props: RenderModalProps<TPayload>) => ReactNode;
+  renderModal?: (props: RenderModalProps<TPayload>) => ReactNode;
+
+  /**
+   * Makes the pill an action button instead of a tethered popover: pressing it
+   * calls this and the host never mounts a popover. Use it to open a plugin
+   * surface (`openSurface(id)`), which the host renders outside the composer —
+   * an agent-stream re-render of the composer then cannot remount it. Ignored
+   * when unset, in which case `renderModal` renders the popover.
+   */
+  onPress?: () => void | Promise<void>;
+
+  /**
+   * How an open pill presents.
+   * - `"popover"` (default): the host anchors `renderModal` to the pill. The
+   *   host may remount that subtree on every composer re-render, which can tear
+   *   an open popover down.
+   * - `"centered"`: the host `Modal` is rendered from the pill's always-mounted
+   *   icon and toggled by the pill press, so the surface is not a child of the
+   *   composer popover and a composer re-render does not unmount it.
+   */
+  presentation?: "popover" | "centered";
 
   /**
    * Called when a pill cannot be registered on the current host (for example
@@ -174,10 +219,224 @@ export function registerComposerPill<TPayload = any>(
 ): PluginCleanup {
   const { Icon, Modal } = getClientHost();
   const openers = new Map<string, (payload?: TPayload) => void>();
-  const pills = new Map<string, { dispose: () => void; timer?: ReturnType<typeof setInterval> }>();
+  const pills = new Map<
+    string,
+    {
+      dispose: () => void;
+      workspaceId: string;
+      registration?: ComposerPillRegistrationHandle;
+    }
+  >();
   const pushedDescriptors = new WeakMap<object, { label?: string; icon?: string }>();
+  // A button-shaped pill can only be resolved while the host actually renders
+  // it. The host mounts the pill's custom icon component for every visible
+  // composer pill, and that mount is the plugin's only visibility signal: its
+  // mount/unmount brackets the pill's on-screen lifetime. Polling every
+  // registered agent regardless of that signal ran one ticker per agent in the
+  // install, which stampedes the daemon on a host with many agents.
+  const visiblePillMounts = new Map<string, number>();
+  // Agent ids whose anchored popover is currently mounted. While a popover is
+  // open the host re-renders the whole composer on every agent-stream message;
+  // rewriting the button entry at the same time makes the host remount the open
+  // popover. `mcp-tools` never updates its entry and its popover is stable, so
+  // keep the entry static while the popover is up — the label and icon are
+  // hidden behind it anyway. Updates resume from the next tick after it closes.
+  const openPopoverAgents = new Set<string>();
+  const iconValueByAgent = new Map<string, string>();
+  const iconListenersByAgent = new Map<string, Set<() => void>>();
+  // Open state for `presentation: "centered"`. It lives outside React so the
+  // centered Modal, which is rendered from the pill icon, survives any remount
+  // of the composer subtree the host might do.
+  const centeredOpenAgents = new Set<string>();
+  const centeredListenersByAgent = new Map<string, Set<() => void>>();
+  let sharedLabelTimer: ReturnType<typeof setInterval> | null = null;
   let detectedShape: "button" | "legacy" | null = null;
   let disposed = false;
+
+  function defaultPillIcon(): string {
+    if (typeof options.icon === "string") return options.icon;
+    if (typeof options.modalIcon === "string") return options.modalIcon;
+    return "Activity";
+  }
+
+  function readPillIcon(agentId: string): string {
+    return iconValueByAgent.get(agentId) ?? defaultPillIcon();
+  }
+
+  function subscribePillIcon(agentId: string): (listener: () => void) => () => void {
+    return (listener: () => void) => {
+      let listeners = iconListenersByAgent.get(agentId);
+      if (!listeners) {
+        listeners = new Set();
+        iconListenersByAgent.set(agentId, listeners);
+      }
+      listeners.add(listener);
+      return () => {
+        listeners?.delete(listener);
+        if (listeners && listeners.size === 0) iconListenersByAgent.delete(agentId);
+      };
+    };
+  }
+
+  function setPillIcon(agentId: string, icon: string): void {
+    if (iconValueByAgent.get(agentId) === icon) return;
+    iconValueByAgent.set(agentId, icon);
+    for (const listener of iconListenersByAgent.get(agentId) ?? []) listener();
+  }
+
+  function subscribeCenteredOpen(agentId: string): (listener: () => void) => () => void {
+    return (listener: () => void) => {
+      let listeners = centeredListenersByAgent.get(agentId);
+      if (!listeners) {
+        listeners = new Set();
+        centeredListenersByAgent.set(agentId, listeners);
+      }
+      listeners.add(listener);
+      return () => {
+        listeners?.delete(listener);
+        if (listeners && listeners.size === 0) centeredListenersByAgent.delete(agentId);
+      };
+    };
+  }
+
+  function setCenteredOpen(agentId: string, open: boolean): void {
+    if (centeredOpenAgents.has(agentId) === open) return;
+    if (open) centeredOpenAgents.add(agentId);
+    else centeredOpenAgents.delete(agentId);
+    for (const listener of centeredListenersByAgent.get(agentId) ?? []) listener();
+  }
+
+  function visibleAgentIds(): string[] {
+    const ids: string[] = [];
+    for (const [agentId, count] of visiblePillMounts) {
+      if (count > 0) ids.push(agentId);
+    }
+    return ids;
+  }
+
+  function syncSharedLabelTimer(): void {
+    const intervalMs = options.refreshIntervalMs ?? 5000;
+    const hasPoller = Boolean(options.resolveLabel || options.resolveIcon);
+    const shouldRun =
+      hasPoller && intervalMs > 0 && visibleAgentIds().some((agentId) => pills.has(agentId));
+    if (!shouldRun) {
+      if (sharedLabelTimer) {
+        clearInterval(sharedLabelTimer);
+        sharedLabelTimer = null;
+      }
+      return;
+    }
+    if (sharedLabelTimer) return;
+    sharedLabelTimer = setInterval(() => {
+      for (const agentId of visibleAgentIds()) {
+        const entry = pills.get(agentId);
+        if (entry?.registration) resolveAndPushLabel(agentId, entry.workspaceId, entry.registration);
+      }
+    }, intervalMs);
+  }
+
+  function markPillVisible(agentId: string): void {
+    visiblePillMounts.set(agentId, (visiblePillMounts.get(agentId) ?? 0) + 1);
+    const entry = pills.get(agentId);
+    if (entry?.registration) resolveAndPushLabel(agentId, entry.workspaceId, entry.registration);
+    syncSharedLabelTimer();
+  }
+
+  function markPillHidden(agentId: string): void {
+    const next = (visiblePillMounts.get(agentId) ?? 1) - 1;
+    if (next > 0) visiblePillMounts.set(agentId, next);
+    else visiblePillMounts.delete(agentId);
+    syncSharedLabelTimer();
+  }
+
+  /**
+   * The host-rendered trigger glyph doubles as the pill's visibility probe.
+   * Swapping the live icon is routed through `setPillIcon` rather than
+   * `registration.update({ icon })`, so the probe component never gets
+   * replaced by a plain string and the mount signal survives every icon swap.
+   */
+  function makePillIcon(agentId: string): ComponentType<{
+    size?: number;
+    color?: string;
+    theme?: HostTheme;
+    layout?: HostLayout;
+    host?: { id: string; label: string };
+    workspaceId?: string;
+  }> {
+    return function PillVisibilityIcon(props: {
+      size?: number;
+      color?: string;
+      theme?: HostTheme;
+      layout?: HostLayout;
+      host?: { id: string; label: string };
+      workspaceId?: string;
+    }) {
+      const subscribe = useMemo(() => subscribePillIcon(agentId), [agentId]);
+      const name = useSyncExternalStore(
+        subscribe,
+        () => readPillIcon(agentId),
+        () => readPillIcon(agentId),
+      );
+      const centered = options.presentation === "centered";
+      const subscribeCentered = useMemo(
+        () => (centered ? subscribeCenteredOpen(agentId) : NOOP_SUBSCRIBE),
+        [centered, agentId],
+      );
+      const centeredOpen = useSyncExternalStore(
+        subscribeCentered,
+        () => (centered ? centeredOpenAgents.has(agentId) : false),
+        () => (centered ? centeredOpenAgents.has(agentId) : false),
+      );
+      useEffect(() => {
+        markPillVisible(agentId);
+        return () => markPillHidden(agentId);
+        // agentId is fixed per pill; the icon component identity never changes.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [agentId]);
+
+      const icon = <Icon name={name} size={props.size ?? 14} color={props.color ?? ""} />;
+      const { theme, layout } = props;
+      if (!centered || !options.renderModal || !theme || !layout) return icon;
+
+      const modalIconElement = React.isValidElement(options.modalIcon) ? (
+        options.modalIcon
+      ) : (
+        <Icon
+          name={
+            typeof options.modalIcon === "string" ? options.modalIcon : (options.icon ?? "Activity")
+          }
+          size={16}
+          color={theme.colors.foreground}
+        />
+      );
+      return (
+        <>
+          {icon}
+          <Modal
+            title={options.modalTitle ?? options.title}
+            icon={modalIconElement}
+            open={centeredOpen}
+            onOpenChange={(nextOpen: boolean) => setCenteredOpen(agentId, nextOpen)}
+          >
+            <Modal.Content scrollable={false}>
+              {centeredOpen ? (
+                <PluginThemeProvider theme={theme} layout={layout} flair={options.flair}>
+                  {options.renderModal({
+                    agentId,
+                    workspaceId: props.workspaceId ?? "",
+                    theme,
+                    layout,
+                    host: props.host ?? { id: "", label: "" },
+                    close: () => setCenteredOpen(agentId, false),
+                  })}
+                </PluginThemeProvider>
+              ) : null}
+            </Modal.Content>
+          </Modal>
+        </>
+      );
+    };
+  }
 
   // 0.8 popover scroll ownership: Paseo's MenuSurface/FloatingScrollView or
   // BottomSheetScrollView already owns the viewport. Keep this wrapper plain,
@@ -191,6 +450,25 @@ export function registerComposerPill<TPayload = any>(
     host?: { id: string; label: string };
     close: () => void;
   }) {
+    const { width: windowWidth } = useWindowDimensions();
+    // The anchored popover is otherwise sized from its content, so reflowing
+    // content can move the frame under the pointer. Pin it to an explicit width
+    // (clamped to the viewport) and let children overflow into their own
+    // scroll/clip. Compact hosts present a full-bleed sheet, so this is skipped.
+    const frameWidth =
+      !props.layout.compact && options.popoverWidth
+        ? Math.max(0, Math.min(options.popoverWidth, windowWidth - 24))
+        : undefined;
+    // Layout effect, not effect: the flag must be set in the same commit the
+    // popover mounts, before any label timer can interleave. An effect runs
+    // after paint, leaving a window where one tick can still publish and
+    // remount the popover.
+    useLayoutEffect(() => {
+      openPopoverAgents.add(props.agentId);
+      return () => {
+        openPopoverAgents.delete(props.agentId);
+      };
+    }, [props.agentId]);
     const pillProps: HostPillProps = {
       agentId: props.agentId,
       workspaceId: props.workspaceId,
@@ -200,9 +478,9 @@ export function registerComposerPill<TPayload = any>(
     };
     return (
       <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
-        <View style={styles.popoverContainer}>
+        <View style={[styles.popoverContainer, frameWidth ? { width: frameWidth } : null]}>
           <ModalBodyScrollOwnerContext.Provider value="host">
-            {options.renderModal({ ...pillProps, close: props.close })}
+            {options.renderModal?.({ ...pillProps, close: props.close })}
           </ModalBodyScrollOwnerContext.Provider>
         </View>
       </PluginThemeProvider>
@@ -281,7 +559,7 @@ export function registerComposerPill<TPayload = any>(
           <Modal.Content scrollable={false}>
             {open ? (
               <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
-                {options.renderModal({
+                {options.renderModal?.({
                   ...props,
                   close: () => setOpen(false),
                   payload,
@@ -303,6 +581,7 @@ export function registerComposerPill<TPayload = any>(
   function reportError(agentId: string, workspaceId: string, error: unknown): void {
     pills.set(agentId, {
       dispose: () => {},
+      workspaceId,
     });
     // Surface even when the plugin wired no onError: a swallowed registration
     // failure leaves the pill missing with no trace anywhere.
@@ -328,7 +607,8 @@ export function registerComposerPill<TPayload = any>(
     ])
       .then(([labelResult, iconResult]) => {
         if (!pills.has(agentId)) return;
-        const patch: Record<string, any> = {};
+        if (openPopoverAgents.has(agentId)) return;
+        const patch: { label?: string; icon?: string } = {};
         if (typeof labelResult === "string") {
           patch.label = labelResult;
         } else if (labelResult && typeof labelResult === "object") {
@@ -339,11 +619,13 @@ export function registerComposerPill<TPayload = any>(
           patch.icon = iconResult;
         }
         const previous = pushedDescriptors.get(registration as object) ?? {};
-        const changed =
-          (patch.label !== undefined && patch.label !== previous.label) ||
-          (patch.icon !== undefined && patch.icon !== previous.icon);
-        if (changed) {
-          registration.update(patch);
+        const labelChanged = patch.label !== undefined && patch.label !== previous.label;
+        const iconChanged = patch.icon !== undefined && patch.icon !== previous.icon;
+        // Icon updates go through the mount probe, never `button.icon`: replacing
+        // the probe with a string would unmount it and lose the visibility signal.
+        if (iconChanged) setPillIcon(agentId, patch.icon as string);
+        if (labelChanged) registration.update({ label: patch.label });
+        if (labelChanged || iconChanged) {
           pushedDescriptors.set(registration as object, {
             label: patch.label ?? previous.label,
             icon: patch.icon ?? previous.icon,
@@ -397,37 +679,34 @@ export function registerComposerPill<TPayload = any>(
         detectedShape = detectShape(agentId, workspaceId);
       }
       if (detectedShape === "button") {
-        const initialIcon =
-          (typeof options.icon === "string" ? options.icon : undefined) ??
-          (typeof options.modalIcon === "string" ? options.modalIcon : undefined) ??
-          "Activity";
-
         const registration = client.addComposerPill({
           id: options.id,
           workspaceId,
           agentId,
           button: {
             title: options.title,
-            icon: initialIcon,
+            // The probe is the visibility signal and the live-icon renderer.
+            icon: makePillIcon(agentId),
             label: options.title,
-            behavior: {
-              kind: "popover",
-              Content: PillPopoverContent as ComponentType<any>,
-            },
+            behavior: options.onPress
+              ? { kind: "action", onPress: () => void options.onPress?.() }
+              : options.presentation === "centered"
+                ? {
+                    kind: "action",
+                    onPress: () => setCenteredOpen(agentId, !centeredOpenAgents.has(agentId)),
+                  }
+                : {
+                    kind: "popover",
+                    Content: PillPopoverContent as ComponentType<any>,
+                  },
           },
         });
-        const entry: { dispose: () => void; timer?: ReturnType<typeof setInterval> } = {
-          dispose: toCleanup(registration),
-        };
-        pills.set(agentId, entry);
-        if ((options.resolveLabel || options.resolveIcon) && typeof registration !== "function") {
-          resolveAndPushLabel(agentId, workspaceId, registration);
-          const intervalMs = options.refreshIntervalMs ?? 5000;
-          if (intervalMs > 0) {
-            entry.timer = setInterval(() => {
-              resolveAndPushLabel(agentId, workspaceId, registration);
-            }, intervalMs);
-          }
+        const handle = typeof registration === "function" ? undefined : registration;
+        pills.set(agentId, { dispose: toCleanup(registration), workspaceId, registration: handle });
+        // Resolve once so the label is correct even before the probe mounts;
+        // ongoing polling is owned by the shared, visibility-gated timer.
+        if ((options.resolveLabel || options.resolveIcon) && handle) {
+          resolveAndPushLabel(agentId, workspaceId, handle);
         }
         return;
       }
@@ -445,7 +724,7 @@ export function registerComposerPill<TPayload = any>(
           }
         },
       });
-      pills.set(agentId, { dispose: toCleanup(cleanup) });
+      pills.set(agentId, { dispose: toCleanup(cleanup), workspaceId });
     } catch (error) {
       reportError(agentId, workspaceId, error);
     }
@@ -453,10 +732,13 @@ export function registerComposerPill<TPayload = any>(
 
   function removePill(agentId: string) {
     const entry = pills.get(agentId);
-    if (entry?.timer) clearInterval(entry.timer);
     entry?.dispose();
     pills.delete(agentId);
+    visiblePillMounts.delete(agentId);
+    iconValueByAgent.delete(agentId);
+    iconListenersByAgent.delete(agentId);
     openers.delete(agentId);
+    syncSharedLabelTimer();
   }
 
   const unsubscribe = client.paseo.agents.subscribe((update) => {
@@ -488,11 +770,15 @@ export function registerComposerPill<TPayload = any>(
     if (disposed) return;
     disposed = true;
     unsubscribe();
-    for (const entry of pills.values()) {
-      if (entry.timer) clearInterval(entry.timer);
-      entry.dispose();
+    if (sharedLabelTimer) {
+      clearInterval(sharedLabelTimer);
+      sharedLabelTimer = null;
     }
+    for (const entry of pills.values()) entry.dispose();
     pills.clear();
+    visiblePillMounts.clear();
+    iconValueByAgent.clear();
+    iconListenersByAgent.clear();
     openers.clear();
   };
 }
