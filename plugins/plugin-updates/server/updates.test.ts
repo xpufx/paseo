@@ -203,6 +203,87 @@ test("derives (repo, ref, subdir) and reports the committed subdir tree", async 
 });
 
 // ---------------------------------------------------------------------------
+// Source URL: install source first, package.json only as fallback
+// ---------------------------------------------------------------------------
+
+function packageFile(pkg: Record<string, unknown>, records?: Record<string, unknown>) {
+  return async (file: string): Promise<string> => {
+    if (file.endsWith("package.json")) return JSON.stringify(pkg);
+    if (file.endsWith("sources.json") && records) return JSON.stringify(records);
+    throw new Error("missing file");
+  };
+}
+
+test("derives a directory install's source from its checkout remote, not package.json", async () => {
+  const probe = await testing.probePlugin(
+    { id: "x-comms", path: "/repo/plugins/x-comms", enabled: true, status: "running", source: "directory" },
+    makeRunner({
+      toplevel: "/repo",
+      head: LOCAL,
+      upstream: "origin/main",
+      remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git",
+      lsRemote: () => branchRemote(REMOTE),
+      trees: { [`${LOCAL}:plugins/x-comms`]: TREE_LOCAL, [`${REMOTE}:plugins/x-comms`]: TREE_REMOTE },
+      isAncestor: () => 0,
+    }),
+    {
+      readFile: packageFile({ repository: { url: "https://github.com/xpufx/paseo-cross-daemon-comms.git" } }),
+      cacheRoot: "/cache",
+    },
+  );
+
+  assert.equal(
+    probe.sourceUrl,
+    "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/x-comms",
+  );
+});
+
+test("derives a git install's source from its managed remote, not package.json", async () => {
+  const records = {
+    gitty: {
+      remote: "https://forge.mrs.aager.de/xpufx/paseo.git",
+      requestedRef: "main",
+      trackingBranch: "main",
+      commit: REMOTE,
+      pluginPath: "plugins/gitty",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("gitty", {}),
+    makeRunner({
+      toplevel: "/managed/gitty",
+      head: REMOTE,
+      remoteUrl: "https://github.com/xpufx/declared.git",
+      lsRemote: (ref) => `${REMOTE}\trefs/heads/${ref}\n`,
+      trees: { [`${REMOTE}:plugins/gitty`]: TREE_REMOTE },
+    }),
+    { readFile: packageFile({ repository: "https://github.com/xpufx/declared.git" }, records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(
+    probe.sourceUrl,
+    "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/gitty",
+  );
+});
+
+test("falls back to package.json repository.url when the install has no remote", async () => {
+  const probe = await testing.probePlugin(
+    plugin("demo", "/repo/plugins/demo"),
+    makeRunner({ toplevel: null }),
+    {
+      readFile: packageFile({
+        repository: "git@github.com:xpufx/standalone.git",
+        homepage: "https://example.test/docs",
+      }),
+      cacheRoot: "/cache",
+    },
+  );
+
+  assert.equal(probe.status, "not-a-repo");
+  assert.equal(probe.sourceUrl, "https://github.com/xpufx/standalone");
+});
+
+// ---------------------------------------------------------------------------
 // Subdir-scoped comparison
 // ---------------------------------------------------------------------------
 

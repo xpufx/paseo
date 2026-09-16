@@ -126,24 +126,25 @@ export interface SourceUrlInput {
 }
 
 /**
- * Resolves the plugin's browse URL, preferring `package.json` metadata
- * (`repository.url`, then `homepage`) over the resolved git remote.
+ * Resolves the plugin's browse URL from where it was actually installed: the
+ * resolved git remote (`remoteUrl`) first, falling back to `package.json`
+ * metadata (`repository.url`, then `homepage`) only when no install remote
+ * exists. A plugin's declared repository is often a different, older home than
+ * the remote it is installed from, so it must never override the install source.
  *
- * `subdir` is the plugin's path relative to the checked-out repository root, so
+ * `subdir` is the plugin's path relative to the installed repository root, so
  * it is only meaningful for that repository's browse URL: deep-linking it onto
- * a different repo (e.g. a plugin whose `package.json` points at its own
- * standalone upstream) would 404. When a resolved remote is known and the
- * chosen URL points elsewhere, the repo root is used instead. `null` when
- * nothing yields a URL.
+ * a `package.json` repo that differs from the installed remote would 404, so
+ * the repo root is used instead. `null` when nothing yields a URL.
  */
 export function deriveSourceUrl(input: SourceUrlInput): string | null {
   const remote = normalizeRepoUrl(input.remoteUrl);
-  const base = normalizeRepoUrl(input.repositoryUrl) ?? normalizeRepoUrl(input.homepage) ?? remote;
+  const base = remote ?? normalizeRepoUrl(input.repositoryUrl) ?? normalizeRepoUrl(input.homepage);
   if (!base) return null;
   const subdir = input.subdir?.replace(/^\/+|\/+$/g, "") ?? "";
   const ref = input.ref?.trim() ?? "";
   if (!subdir || !ref) return base;
-  if (remote && remote !== base) return base;
+  if (base !== remote) return base;
   return deepLink(base, ref, subdir);
 }
 

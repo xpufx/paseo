@@ -69,31 +69,42 @@ test("returns null when nothing yields a URL", () => {
   assert.equal(deriveSourceUrl({ repositoryUrl: "", homepage: "", remoteUrl: "not-a-url" }), null);
 });
 
-test("prefers package.json repository.url over homepage and the git remote", () => {
+test("prefers the install remote over package.json repository.url and homepage", () => {
+  // Real case: x-comms declares its own (old) standalone GitHub repo, but the
+  // install remote — the monorepo it is installed from — is Forgejo. The
+  // declared repo must never override the source the plugin was installed from.
   assert.equal(
     deriveSourceUrl({
       repositoryUrl: "git@github.com:xpufx/paseo-cross-daemon-comms.git",
       homepage: "https://example.test/docs",
       remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git",
     }),
-    "https://github.com/xpufx/paseo-cross-daemon-comms",
-  );
-});
-
-test("falls back to homepage then the git remote", () => {
-  assert.equal(
-    deriveSourceUrl({ homepage: "https://example.test/docs", remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git" }),
-    "https://example.test/docs",
-  );
-  assert.equal(
-    deriveSourceUrl({ remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git" }),
     "https://forge.mrs.aager.de/xpufx/paseo",
   );
+  assert.equal(
+    deriveSourceUrl({
+      repositoryUrl: "https://github.com/xpufx/paseo.git",
+      remoteUrl: "https://github.com/xpufx/other.git",
+    }),
+    "https://github.com/xpufx/other",
+  );
 });
 
-test("does not deep-link a subdir onto a package.json repo that differs from the checked-out remote", () => {
-  // Real case: x-comms declares its own standalone repository, while the local
-  // checkout (and its subdir) belongs to the paseo monorepo. The path would 404.
+test("falls back to package.json repository.url then homepage without an install remote", () => {
+  assert.equal(
+    deriveSourceUrl({ repositoryUrl: "git@github.com:xpufx/standalone.git", homepage: "https://example.test/docs" }),
+    "https://github.com/xpufx/standalone",
+  );
+  assert.equal(
+    deriveSourceUrl({ homepage: "https://example.test/docs" }),
+    "https://example.test/docs",
+  );
+  assert.equal(deriveSourceUrl({ remoteUrl: "not-a-url", homepage: "https://example.test/docs" }), "https://example.test/docs");
+});
+
+test("prefers the install remote and deep-links the subdir over a differing package.json repo", () => {
+  // Real case: x-comms is a directory install inside the paseo monorepo
+  // (Forgejo origin) while its package.json points at its old standalone home.
   assert.equal(
     deriveSourceUrl({
       repositoryUrl: "https://github.com/xpufx/paseo-cross-daemon-comms.git",
@@ -101,11 +112,24 @@ test("does not deep-link a subdir onto a package.json repo that differs from the
       ref: "main",
       subdir: "plugins/x-comms",
     }),
+    "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/x-comms",
+  );
+});
+
+test("does not deep-link a subdir onto a package.json repo when there is no install remote", () => {
+  // Without an install remote the ref/subdir come from the local checkout, which
+  // need not be the declared repo; the path would 404, so keep the repo root.
+  assert.equal(
+    deriveSourceUrl({
+      repositoryUrl: "https://github.com/xpufx/paseo-cross-daemon-comms.git",
+      ref: "main",
+      subdir: "plugins/x-comms",
+    }),
     "https://github.com/xpufx/paseo-cross-daemon-comms",
   );
 });
 
-test("deep-links a package.json repo that matches the checked-out remote", () => {
+test("deep-links the install remote even when package.json declares the same repo", () => {
   assert.equal(
     deriveSourceUrl({
       repositoryUrl: "https://github.com/xpufx/paseo.git",
