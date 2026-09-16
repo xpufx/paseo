@@ -24,7 +24,7 @@ const VALID_ENVELOPE = {
     action: "opened",
     repo: "xpufx/paseo",
     repoUrl: "https://forge.mrs.aager.de/xpufx/paseo",
-    sender: "oktay",
+    sender: "octocat",
     subject: {
       kind: "issue",
       number: 178,
@@ -34,7 +34,7 @@ const VALID_ENVELOPE = {
   },
 };
 
-const VALID_BODY = `${HOOK_HEAD} [issues:opened] xpufx/paseo#178 Render the incoming hook (by oktay) https://forge.mrs.aager.de/xpufx/paseo/issues/178`;
+const VALID_BODY = `${HOOK_HEAD} [issues:opened] xpufx/paseo#178 Render the incoming hook (by octocat) https://forge.mrs.aager.de/xpufx/paseo/issues/178`;
 
 describe("parseForgejoWebhookEnvelope", () => {
   it("parses a valid v1 envelope and keeps the human body", () => {
@@ -72,7 +72,7 @@ describe("parseForgejoWebhookSummary (today's plain line)", () => {
     assert.equal(card.event, "issues");
     assert.equal(card.action, "opened");
     assert.equal(card.repo, "xpufx/paseo");
-    assert.equal(card.sender, "oktay");
+    assert.equal(card.sender, "octocat");
     assert.equal(card.subject?.kind, "issue");
     assert.equal(card.subject?.number, 178);
     assert.equal(card.subject?.title, "Render the incoming hook");
