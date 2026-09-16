@@ -9,10 +9,13 @@ import {
   EmptyState,
   FormRow,
   ModalBody,
+  Row,
   SectionHeader,
+  Stack,
   Tabs,
   TextInput,
   Toggle,
+  spacing,
   usePluginSettings,
   useRpcMutation,
   useRpcQuery,
@@ -36,6 +39,7 @@ import {
   type CommandDraftErrors,
   type CommandDraftWarnings,
   type OperationCatalog,
+  type SlashCommand,
   type SlashCommandDraft,
   type SlashVerb,
 } from "../shared/resources";
@@ -45,6 +49,75 @@ const ACTION_TABS: TabItem[] = [
   { id: "open", label: "Open", icon: "ExternalLink" },
   { id: "rpc", label: "RPC", icon: "Zap" },
 ];
+
+const VERB_ICON: Record<SlashVerb, string> = {
+  send: "Send",
+  open: "ExternalLink",
+  rpc: "Zap",
+};
+
+const VERB_VARIANT = {
+  send: "accent",
+  open: "info",
+  rpc: "warning",
+} as const;
+
+// Header-only rows: the helper reserves an 8px bottom margin for content that
+// follows. Command rows have none, so reclaim it and use the token scale for
+// the row's own inset instead of Card's full surface padding.
+const ROW_HEADER_STYLE = {
+  marginBottom: 0,
+  paddingHorizontal: spacing.md,
+  paddingVertical: spacing.sm,
+};
+
+interface CommandRowProps {
+  prefix: string;
+  command: SlashCommand;
+  onToggle: (enabled: boolean) => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}
+
+function CommandRow({ prefix, command, onToggle, onEdit, onRemove }: CommandRowProps) {
+  const label = `/${prefix}${command.name}`;
+  return (
+    <Card variant="elevated" noPadding>
+      <Card.Header
+        icon={VERB_ICON[command.action.verb]}
+        title={label}
+        subtitle={command.description || command.title}
+        badge={
+          <Badge
+            size="sm"
+            label={actionSummary(command.action)}
+            variant={VERB_VARIANT[command.action.verb]}
+          />
+        }
+        action={
+          <Row gap="xs" align="center">
+            <Toggle value={command.enabled} onValueChange={onToggle} />
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="Pencil"
+              accessibilityLabel={`Edit ${label}`}
+              onPress={onEdit}
+            />
+            <Button
+              size="sm"
+              variant="danger"
+              icon="Trash2"
+              accessibilityLabel={`Remove ${label}`}
+              onPress={onRemove}
+            />
+          </Row>
+        }
+        style={ROW_HEADER_STYLE}
+      />
+    </Card>
+  );
+}
 
 interface CommandFormProps {
   draft: SlashCommandDraft;
@@ -61,8 +134,8 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
   const openTabs: TabItem[] = openOptions.map((target) => ({ id: target, label: target }));
 
   return (
-    <>
-      <FormRow label="Name" description={`Command is invoked as /${draft.name || "name"}. ${COMMAND_NAME_HINT}`}>
+    <Stack gap="sm">
+      <FormRow label="Name" description={COMMAND_NAME_HINT}>
         <TextInput
           value={draft.name}
           errorText={errors.name}
@@ -70,7 +143,7 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
           onChangeText={(name) => onChange({ name })}
         />
       </FormRow>
-      <FormRow label="Title" description="Human-readable label shown in the command list (max 120 chars)">
+      <FormRow label="Title">
         <TextInput
           value={draft.title}
           errorText={errors.title}
@@ -78,17 +151,17 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
           onChangeText={(title) => onChange({ title })}
         />
       </FormRow>
-      <FormRow label="Description" description="Optional one-line summary (max 500 chars)">
+      <FormRow label="Description">
         <TextInput
           value={draft.description}
           errorText={errors.description}
-          placeholder="What this command does"
+          placeholder="Optional one-line summary"
           multiline
           numberOfLines={2}
           onChangeText={(description) => onChange({ description })}
         />
       </FormRow>
-      <FormRow label="Action" description="What running the command does">
+      <FormRow label="Action">
         <Tabs
           tabs={ACTION_TABS}
           activeTab={draft.verb}
@@ -96,10 +169,7 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
         />
       </FormRow>
       {draft.verb === "send" ? (
-        <FormRow
-          label="Prompt template"
-          description="Sent to the agent; {args} is replaced with the typed arguments (max 8000 chars)"
-        >
+        <FormRow label="Prompt template">
           <TextInput
             value={draft.template}
             errorText={errors.action}
@@ -110,23 +180,15 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
           />
         </FormRow>
       ) : draft.verb === "open" ? (
-        <>
-          {openOptions.length > 0 ? (
-            <FormRow
-              label="Target surface"
-              description="Surface id opened when the command runs; pick a known surface or enter it below"
-            >
+        <FormRow label="Target surface">
+          <Stack gap="xs">
+            {openOptions.length > 0 ? (
               <Tabs
                 tabs={openTabs}
                 activeTab={draft.target}
                 onTabChange={(target) => onChange({ target })}
               />
-            </FormRow>
-          ) : null}
-          <FormRow
-            label={openOptions.length > 0 ? "Surface id (advanced)" : "Target surface"}
-            description="Surface id opened when the command runs (max 200 chars)"
-          >
+            ) : null}
             <TextInput
               value={draft.target}
               errorText={errors.action}
@@ -134,26 +196,18 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
               placeholder="slash-console"
               onChangeText={(target) => onChange({ target })}
             />
-          </FormRow>
-        </>
+          </Stack>
+        </FormRow>
       ) : (
-        <>
-          {rpcOptions.length > 0 ? (
-            <FormRow
-              label="RPC operation"
-              description="Allowlisted backend operation; pick one or type an advanced value below"
-            >
+        <FormRow label="RPC operation">
+          <Stack gap="xs">
+            {rpcOptions.length > 0 ? (
               <Tabs
                 tabs={rpcTabs}
                 activeTab={draft.operation}
                 onTabChange={(operation) => onChange({ operation })}
               />
-            </FormRow>
-          ) : null}
-          <FormRow
-            label={rpcOptions.length > 0 ? "RPC operation (advanced)" : "RPC operation"}
-            description="Allowlisted backend operation (max 200 chars)"
-          >
+            ) : null}
             <TextInput
               value={draft.operation}
               errorText={errors.action}
@@ -162,13 +216,13 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
               mono
               onChangeText={(operation) => onChange({ operation })}
             />
-          </FormRow>
-        </>
+          </Stack>
+        </FormRow>
       )}
-      <FormRow label="Enabled" description="Disabled commands stay configured but are not registered">
+      <FormRow label="Enabled">
         <Toggle value={draft.enabled} onValueChange={(enabled) => onChange({ enabled })} />
       </FormRow>
-    </>
+    </Stack>
   );
 }
 
@@ -228,22 +282,34 @@ export function SlashConsole() {
   return (
     <View style={{ flex: 1, minHeight: 0, width: "100%" }}>
       <ModalBody scrollMode="always">
-        <FormRow
-          label="Command prefix"
-          description={`Common prefix applied to every command name. Suggestion (not default): ${SUGGESTED_PREFIX}`}
-        >
-          <TextInput
-            value={prefix}
-            placeholder={`${SUGGESTED_PREFIX} (suggestion — leave empty for none)`}
-            onChangeText={(val) => updateSettings({ prefix: val })}
-          />
-        </FormRow>
+        <Card variant="tinted">
+          <FormRow label="Command prefix">
+            <TextInput
+              value={prefix}
+              placeholder={`${SUGGESTED_PREFIX} (suggestion — leave empty for none)`}
+              onChangeText={(val) => updateSettings({ prefix: val })}
+            />
+          </FormRow>
+          {form ? null : (
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: spacing.sm }}>
+              <Button
+                label="Add command"
+                size="sm"
+                variant="primary"
+                icon="Plus"
+                onPress={() => setForm({ originalName: null, draft: emptyCommandDraft() })}
+              />
+            </ActionBar>
+          )}
+        </Card>
 
         {form ? (
-          <Card variant="tinted">
+          <Card variant="elevated">
             <Card.Header
               title={form.originalName ? `Edit /${prefix}${form.originalName}` : "New command"}
-              subtitle="Name, description, and action"
+              badge={
+                <Badge size="sm" label={form.draft.verb} variant={VERB_VARIANT[form.draft.verb]} />
+              }
             />
             <CommandForm
               draft={form.draft}
@@ -252,10 +318,11 @@ export function SlashConsole() {
               catalog={operationCatalog}
               onChange={updateDraft}
             />
-            <ActionBar align="flex-end">
-              <Button label="Cancel" variant="ghost" onPress={() => setForm(null)} />
+            <ActionBar align="flex-end" style={{ marginTop: spacing.sm }}>
+              <Button label="Cancel" size="sm" variant="ghost" onPress={() => setForm(null)} />
               <Button
                 label={form.originalName ? "Save changes" : "Add command"}
+                size="sm"
                 variant="primary"
                 icon="Check"
                 disabled={!validation.command}
@@ -263,16 +330,7 @@ export function SlashConsole() {
               />
             </ActionBar>
           </Card>
-        ) : (
-          <ActionBar align="flex-start">
-            <Button
-              label="Add command"
-              variant="primary"
-              icon="Plus"
-              onPress={() => setForm({ originalName: null, draft: emptyCommandDraft() })}
-            />
-          </ActionBar>
-        )}
+        ) : null}
 
         <SectionHeader title="Commands" count={commands.length} />
         {commands.length === 0 ? (
@@ -282,52 +340,31 @@ export function SlashConsole() {
             description="Add one above or pick a shipped command from the catalog."
           />
         ) : (
-          commands.map((command) => (
-            <Card key={command.name} variant="elevated">
-              <Card.Header
-                title={`/${prefix}${command.name}`}
-                subtitle={command.description || command.title}
-                badge={<Badge label={actionSummary(command.action)} variant="neutral" dot />}
+          <Stack gap="xs">
+            {commands.map((command) => (
+              <CommandRow
+                key={command.name}
+                prefix={prefix}
+                command={command}
+                onToggle={(enabled) =>
+                  updateSettings({
+                    commands: commands.map((c) => (c.name === command.name ? { ...c, enabled } : c)),
+                  })
+                }
+                onEdit={() => setForm({ originalName: command.name, draft: draftFromCommand(command) })}
+                onRemove={() => updateSettings({ commands: removeCommandByName(commands, command.name) })}
               />
-              <FormRow
-                label="Enabled"
-                description="Disabled commands stay configured but are not registered"
-              >
-                <Toggle
-                  value={command.enabled}
-                  onValueChange={(enabled) =>
-                    updateSettings({
-                      commands: commands.map((c) => (c.name === command.name ? { ...c, enabled } : c)),
-                    })
-                  }
-                />
-              </FormRow>
-              <ActionBar align="flex-end">
-                <Button
-                  label="Edit"
-                  size="sm"
-                  variant="ghost"
-                  icon="Pencil"
-                  onPress={() => setForm({ originalName: command.name, draft: draftFromCommand(command) })}
-                />
-                <Button
-                  label="Remove"
-                  size="sm"
-                  variant="danger"
-                  icon="Trash2"
-                  onPress={() => updateSettings({ commands: removeCommandByName(commands, command.name) })}
-                />
-              </ActionBar>
-            </Card>
-          ))
+            ))}
+          </Stack>
         )}
 
         <Collapsible
           title="Shipped catalog"
-          subtitle={`Commands bundled with the plugin (${catalogCommands.length} available)`}
+          subtitle={`${catalogCommands.length} commands bundled with the plugin`}
           icon="Package"
           badge={
             <Badge
+              size="sm"
               label={String(missingFromCatalog.length)}
               variant={missingFromCatalog.length > 0 ? "warning" : "neutral"}
             />
@@ -338,53 +375,58 @@ export function SlashConsole() {
           ) : missingFromCatalog.length === 0 ? (
             <EmptyState icon="PackageCheck" title="All shipped commands are present" />
           ) : (
-            missingFromCatalog.map((command) => (
-              <Card key={command.name} variant="tinted">
-                <Card.Header
-                  title={`/${command.name}`}
-                  subtitle={command.description || command.title}
-                  badge={<Badge label={actionSummary(command.action)} variant="neutral" />}
-                />
-                <ActionBar align="flex-end">
-                  <Button
-                    label="Add"
-                    size="sm"
-                    variant="secondary"
-                    icon="Plus"
-                    onPress={() => updateSettings({ commands: [...commands, command] })}
+            <Stack gap="xs">
+              {missingFromCatalog.map((command) => (
+                <Card key={command.name} variant="tinted" noPadding>
+                  <Card.Header
+                    title={`/${command.name}`}
+                    subtitle={command.description || command.title}
+                    badge={
+                      <Badge
+                        size="sm"
+                        label={actionSummary(command.action)}
+                        variant={VERB_VARIANT[command.action.verb]}
+                      />
+                    }
+                    action={
+                      <Button
+                        label="Add"
+                        size="sm"
+                        variant="secondary"
+                        icon="Plus"
+                        onPress={() => updateSettings({ commands: [...commands, command] })}
+                      />
+                    }
+                    style={ROW_HEADER_STYLE}
                   />
-                </ActionBar>
-              </Card>
-            ))
+                </Card>
+              ))}
+            </Stack>
           )}
         </Collapsible>
 
         <Collapsible
           title="Advanced"
-          subtitle="Bundle import/export and reset — kept out of the primary console"
+          subtitle="Bundle import/export and reset"
           icon="Wrench"
         >
-          <FormRow
-            label="Bundle JSON"
-            description="Exported bundle of enabled commands; paste one here to import (validated server-side)"
-          >
+          <FormRow label="Bundle JSON" description="Paste an exported bundle to import (validated server-side)">
             <TextInput
               value={bundleJson}
               placeholder='{"bundle":"slash-commands","version":1,"commands":[…]}'
               multiline
               numberOfLines={3}
+              errorText={bundleError || undefined}
               onChangeText={(val) => {
                 setBundleJson(val);
                 setBundleError("");
               }}
             />
           </FormRow>
-          {bundleError ? (
-            <EmptyState icon="AlertTriangle" title="Bundle error" description={bundleError} />
-          ) : null}
-          <ActionBar align="flex-end">
+          <ActionBar align="flex-end" style={{ marginTop: spacing.sm }}>
             <Button
               label="Export"
+              size="sm"
               variant="secondary"
               icon="Download"
               loading={exportBundle.isPending}
@@ -392,12 +434,19 @@ export function SlashConsole() {
             />
             <Button
               label="Import"
+              size="sm"
               variant="secondary"
               icon="Upload"
               loading={importBundle.isPending}
               onPress={handleImport}
             />
-            <Button label="Reset to seeds" variant="danger" icon="RotateCcw" onPress={() => void resetSettings()} />
+            <Button
+              label="Reset to seeds"
+              size="sm"
+              variant="danger"
+              icon="RotateCcw"
+              onPress={() => void resetSettings()}
+            />
           </ActionBar>
         </Collapsible>
       </ModalBody>
