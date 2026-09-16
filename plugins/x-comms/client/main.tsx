@@ -758,9 +758,13 @@ export function MainSurface({ theme }: PluginSurfaceProps) {
                   {snapshot.listen ? <KeyValue label="Listen" value={snapshot.listen} copyable mono /> : null}
                   {snapshot.pid ? <KeyValue label="PID" value={`${snapshot.pid}${snapshot.nodePath ? ` · node: ${snapshot.nodePath}` : ""}`} mono /> : null}
                   {snapshot.startedAt ? <KeyValue label="Started" value={snapshot.startedAt} mono /> : null}
-                  {snapshot.relayEndpoints ? (
-                    <KeyValue label="Relay" value={`${snapshot.relayEnabled ? "enabled" : "disabled"} ${snapshot.relayEndpoints.join(", ")}`} mono />
-                  ) : null}
+                  <KeyValue
+                    label="Relay"
+                    value={snapshot.relayEnabled && snapshot.relayEndpoints?.length
+                      ? `enabled ${snapshot.relayEndpoints.join(", ")}`
+                      : "disabled"}
+                    mono
+                  />
                 </KeyValueGroup>
                 {snapshot.features ? (
                   <>

@@ -21,6 +21,7 @@ import {
   deriveHostFromValue,
 } from "./registry";
 import { serverPath } from "./server-status";
+import { readRelayStatus } from "./relay-status";
 
 // Startup check: validate whatever is already in the registry as soon as the
 // plugin backend loads, so a corrupt or invalid config is caught early and
@@ -562,6 +563,7 @@ export async function handleDaemonDump(input: { daemon: string }) {
     const serverId = str(field(p, "serverId") ?? offer?.serverId ?? "");
     const hostname = str(field(p, "hostname") ?? "");
     const version  = str(field(p, "daemonVersion", "version") ?? "");
+    const relay    = readRelayStatus(field(p, "relay"));
 
     const reached = status !== null || agentsRes !== null || workspacesRes !== null;
     if (!reached) throw new Error("all peer probes failed");
@@ -580,10 +582,8 @@ export async function handleDaemonDump(input: { daemon: string }) {
       pid: (field(p, "pid") as number | null) ?? null,
       nodePath: str(field(p, "daemonNode", "nodePath") ?? ""),
       startedAt: str(field(p, "startedAt") ?? ""),
-      relayEndpoints: field(p, "relay")
-        ? [str((p?.relay as Record<string, unknown>)?.endpoint ?? ""), str((p?.relay as Record<string, unknown>)?.publicEndpoint ?? "")]
-        : null,
-      relayEnabled: ((p?.relay as Record<string, unknown> | undefined)?.enabled as boolean | null) ?? null,
+      relayEndpoints: relay.endpoints,
+      relayEnabled: relay.enabled,
       transport,
       agents: agentsEntries.map((a) => {
         // ls entries are sometimes { agent: { ... }, project: { ... } }, sometimes flat.

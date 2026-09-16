@@ -10,7 +10,7 @@
   "scripts": {
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit",
-    "test": "node --import ./mcp/test/register-ts-hooks.mjs --test mcp/test/protocol.test.mjs server/presence.test.ts server/injection.test.ts server/settings.test.ts server/conversations-snapshot.test.ts client/tool-call.test.ts client/conversation-threads.test.ts client/attribution.test.ts client/message-direction.test.ts"
+    "test": "node --import ./mcp/test/register-ts-hooks.mjs --test mcp/test/protocol.test.mjs server/presence.test.ts server/injection.test.ts server/settings.test.ts server/relay-status.test.ts server/conversations-snapshot.test.ts client/tool-call.test.ts client/conversation-threads.test.ts client/attribution.test.ts client/message-direction.test.ts"
   },
   "keywords": [
     "paseo",
