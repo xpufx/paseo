@@ -581,12 +581,18 @@ interface KeyValueProps {
     truncateMaxLength?: number;
     /** Custom options when truncate="path" */
     truncatePathOptions?: TruncatePathOptions;
+    /**
+     * "stacked" (default) keeps the existing label-above-value layout.
+     * "inline" renders label and value on one line, with the value truncating
+     * middle so the row stays a single text line.
+     */
+    layout?: "stacked" | "inline";
     stackOnCompact?: boolean;
     style?: StyleProp<ViewStyle>;
     labelStyle?: StyleProp<TextStyle>;
     valueStyle?: StyleProp<TextStyle>;
 }
-declare function KeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, truncatePathOptions, stackOnCompact, style, labelStyle, valueStyle, }: KeyValueProps): React__default.JSX.Element;
+declare function KeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, truncatePathOptions, layout, stackOnCompact, style, labelStyle, valueStyle, }: KeyValueProps): React__default.JSX.Element;
 interface KeyValueGroupProps {
     children: ReactNode;
     columns?: 1 | 2 | 3 | 4;

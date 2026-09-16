@@ -34,6 +34,12 @@ export interface KeyValueProps {
   truncateMaxLength?: number;
   /** Custom options when truncate="path" */
   truncatePathOptions?: TruncatePathOptions;
+  /**
+   * "stacked" (default) keeps the existing label-above-value layout.
+   * "inline" renders label and value on one line, with the value truncating
+   * middle so the row stays a single text line.
+   */
+  layout?: "stacked" | "inline";
   stackOnCompact?: boolean;
   style?: StyleProp<ViewStyle>;
   labelStyle?: StyleProp<TextStyle>;
@@ -49,6 +55,7 @@ export function KeyValue({
   truncate: truncateProp = false,
   truncateMaxLength = 32,
   truncatePathOptions,
+  layout = "stacked",
   stackOnCompact = true,
   style,
   labelStyle,
@@ -112,6 +119,68 @@ export function KeyValue({
       />
     </Pressable>
   ) : null;
+
+  if (layout === "inline") {
+    return (
+      <View
+        style={[
+          styles.container,
+          styles.inlineContainer,
+          { paddingVertical: isCompact ? spacing.xs : spacing.sm },
+          style,
+        ]}
+      >
+        <Text
+          style={[
+            styles.inlineLabel,
+            {
+              color: colors.foregroundMuted,
+              ...typography.label,
+              textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
+            },
+            labelStyle,
+          ]}
+        >
+          {label}
+        </Text>
+
+        <Text
+          selectable
+          numberOfLines={1}
+          ellipsizeMode="middle"
+          style={[
+            styles.inlineValueText,
+            {
+              color: colors.foreground,
+              ...typography.bodySmall,
+              fontFamily,
+            },
+            valueStyle,
+          ]}
+        >
+          {displayValue}
+        </Text>
+
+        {subValue ? (
+          <Text
+            selectable
+            numberOfLines={1}
+            style={[
+              styles.inlineSubValue,
+              {
+                color: colors.foregroundMuted,
+                ...typography.caption,
+              },
+            ]}
+          >
+            {subValue}
+          </Text>
+        ) : null}
+
+        {copyButton}
+      </View>
+    );
+  }
 
   if (shouldStack) {
     return (
@@ -293,6 +362,22 @@ const styles = StyleSheet.create({
   },
   stackedValueText: {
     width: "100%",
+  },
+  inlineContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  inlineLabel: {
+    flexShrink: 0,
+  },
+  inlineValueText: {
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  inlineSubValue: {
+    flexShrink: 0,
   },
   rowValueWrapper: {
     flexDirection: "column",

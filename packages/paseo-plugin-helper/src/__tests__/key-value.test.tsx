@@ -231,3 +231,87 @@ describe("KeyValue row layout", () => {
     ).toBe(false);
   });
 });
+
+describe("KeyValue inline layout", () => {
+  it("keeps label and value on one row with a single-line truncating value", () => {
+    const layout: HostLayout = { compact: true, platform: "web" };
+    const scale = resolveTypography(layout, "comfortable");
+
+    const r = render(
+      withLayout(
+        layout,
+        <KeyValue
+          layout="inline"
+          label="Version"
+          value="c97cb0a664f2"
+          subValue="working tree"
+          mono
+          copyable
+        />,
+      ),
+    );
+
+    const value = r.root
+      .findAllByType(Text as any)
+      .find((t) => textContent(t) === "c97cb0a664f2")!;
+    const label = r.root.findAllByType(Text as any).find((t) => textContent(t) === "Version")!;
+    const subValue = r.root
+      .findAllByType(Text as any)
+      .find((t) => textContent(t) === "working tree")!;
+
+    // label, value and subValue share one flexDirection:row container
+    expect(label.parent).toBe(value.parent);
+    expect(label.parent).toBe(subValue.parent);
+    expect(flat(label.parent!.props.style).some((s) => s?.flexDirection === "row")).toBe(true);
+
+    // the value collapses to a single text line, ellipsized in the middle
+    expect(value.props.numberOfLines).toBe(1);
+    expect(value.props.ellipsizeMode).toBe("middle");
+
+    expect(flat(label.props.style).some((s) => s?.fontSize === scale.label.fontSize)).toBe(true);
+    expect(flat(value.props.style).some((s) => s?.fontSize === scale.bodySmall.fontSize)).toBe(true);
+    expect(flat(value.props.style).some((s) => s?.fontFamily === "monospace")).toBe(true);
+  });
+
+  it("does not change stacked: the default still stacks label above value", () => {
+    const layout: HostLayout = { compact: true, platform: "web" };
+    const r = render(withLayout(layout, <KeyValue label="Ref" value="branch · main" />));
+
+    const container = r.root
+      .findAllByType(View as any)
+      .find((v) => flat(v.props.style).some((s) => s?.flexDirection === "column"))!;
+    expect(container).toBeTruthy();
+
+    const headerRow = r.root
+      .findAllByType(View as any)
+      .find((v) => flat(v.props.style).some((s) => s?.flexDirection === "row"))!;
+    expect(
+      headerRow
+        .findAllByType(Text as any)
+        .map((t) => textContent(t))
+        .includes("Ref"),
+    ).toBe(true);
+
+    const value = r.root
+      .findAllByType(Text as any)
+      .find((t) => textContent(t) === "branch · main")!;
+    expect(value.props.numberOfLines).toBeUndefined();
+  });
+
+  it("keeps the wide (non-compact) default horizontal layout untouched", () => {
+    const layout: HostLayout = { compact: false, platform: "web" };
+    const r = render(withLayout(layout, <KeyValue label="Remote" value="abcd1234" />));
+
+    const container = r.root
+      .findAllByType(View as any)
+      .find((v) => flat(v.props.style).some((s) => s?.justifyContent === "space-between"))!;
+    expect(container).toBeTruthy();
+    expect(flat(container.props.style).some((s) => s?.flexDirection === "row")).toBe(true);
+
+    // the horizontal branch wraps the value in its own right-aligned wrapper
+    const wrapper = r.root
+      .findAllByType(View as any)
+      .find((v) => flat(v.props.style).some((s) => s?.alignItems === "flex-end"));
+    expect(wrapper).toBeTruthy();
+  });
+});

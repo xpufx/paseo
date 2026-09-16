@@ -114,6 +114,8 @@ function PluginRow({
   const note = reportOnlyNote(plugin);
   const isOrphan = plugin.status === "orphaned";
   const version = hashValue(plugin.workingTree ?? plugin.localTree);
+  // Errors carry actionable text; clamp only the one-line status sentences.
+  const detailLines = plugin.error ? undefined : 1;
   return (
     <Card variant="elevated">
       <View style={{ gap: padding.gap }}>
@@ -132,7 +134,7 @@ function PluginRow({
             />
           ) : null}
         </View>
-        <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, ...typography.caption }}>
+        <Text selectable numberOfLines={detailLines} style={{ color: colors.foregroundMuted, ...typography.caption }}>
           {detail}
         </Text>
         {note ? (
@@ -140,20 +142,26 @@ function PluginRow({
         ) : null}
         {isOrphan ? null : (
           <>
-            <KeyValueGroup columns={2} gap={padding.gap}>
+            <KeyValueGroup columns={1} gap={0}>
               <KeyValue
+                layout="inline"
                 label="Version"
                 value={version}
                 subValue={plugin.workingTree ? "working tree" : undefined}
                 mono
                 copyable
               />
-              <KeyValue label="Remote" value={hashValue(plugin.remoteTree)} mono copyable />
-              <KeyValue label="Ref" value={refLabel(plugin)} truncate="end" />
-              <KeyValue label="Subdir" value={plugin.subdir === "" ? "(repo root)" : plugin.subdir} truncate="path" />
+              <KeyValue layout="inline" label="Remote" value={hashValue(plugin.remoteTree)} mono copyable />
+              <KeyValue layout="inline" label="Ref" value={refLabel(plugin)} truncate="end" />
+              <KeyValue
+                layout="inline"
+                label="Subdir"
+                value={plugin.subdir === "" ? "(repo root)" : plugin.subdir}
+                truncate="path"
+              />
             </KeyValueGroup>
             {plugin.latestChange?.subject ? (
-              <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, ...typography.caption }}>
+              <Text selectable numberOfLines={1} style={{ color: colors.foregroundMuted, ...typography.caption }}>
                 Latest remote change: {plugin.latestChange.subject}
                 {plugin.latestChange.date ? ` (${plugin.latestChange.date})` : ""}
               </Text>
