@@ -440,6 +440,122 @@ test("treats a SHA pin as immutable and never probes the remote", async () => {
   assert.equal(calls.some((call) => call.args.includes("fetch")), false);
 });
 
+test("treats an abbreviated SHA requestedRef as an immutable pin and never probes the remote", async () => {
+  const calls: Call[] = [];
+  const records = {
+    pinned: {
+      remote: "https://example.test/pinned.git",
+      requestedRef: "a31901a",
+      trackingBranch: null,
+      commit: LOCAL,
+      pluginPath: "plugins/top",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("pinned", {}),
+    makeRunner({ toplevel: "/managed/pinned", head: LOCAL, calls }),
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.status, "pinned");
+  assert.equal(probe.refKind, "sha");
+  assert.equal(probe.ref, "a31901a");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.error, null);
+  assert.equal(calls.some((call) => call.args.includes("ls-remote")), false);
+  assert.equal(calls.some((call) => call.args.includes("fetch")), false);
+});
+
+test("compares a branch install against its trackingBranch", async () => {
+  const calls: Call[] = [];
+  const records = {
+    tracked: {
+      remote: "https://example.test/repo.git",
+      requestedRef: "main",
+      trackingBranch: "main",
+      commit: REMOTE,
+      pluginPath: "plugins/top",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("tracked", {}),
+    makeRunner({
+      toplevel: "/managed/tracked",
+      head: REMOTE,
+      lsRemote: (ref) => `${REMOTE}\trefs/heads/${ref}\n`,
+      trees: { [`${REMOTE}:plugins/top`]: TREE_REMOTE },
+      calls,
+    }),
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.refKind, "branch");
+  assert.equal(probe.ref, "main");
+  assert.equal(probe.status, "current");
+  const ls = calls.find((call) => call.args[0] === "ls-remote" && call.args[1] !== "--tags");
+  assert.equal(ls?.args[2], "main");
+});
+
+test("prefers trackingBranch over a SHA requestedRef instead of pinning", async () => {
+  const calls: Call[] = [];
+  const records = {
+    mixed: {
+      remote: "https://example.test/repo.git",
+      requestedRef: "a31901a",
+      trackingBranch: "main",
+      commit: REMOTE,
+      pluginPath: "plugins/top",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("mixed", {}),
+    makeRunner({
+      toplevel: "/managed/mixed",
+      head: REMOTE,
+      lsRemote: (ref) => `${REMOTE}\trefs/heads/${ref}\n`,
+      trees: { [`${REMOTE}:plugins/top`]: TREE_REMOTE },
+      calls,
+    }),
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.refKind, "branch");
+  assert.equal(probe.ref, "main");
+  assert.equal(probe.status, "current");
+  const ls = calls.find((call) => call.args[0] === "ls-remote" && call.args[1] !== "--tags");
+  assert.equal(ls?.args[2], "main");
+});
+
+test("keeps a hex-free tag name classified as a tag, not a pin", async () => {
+  const remoteTagCommit = hex("f");
+  const calls: Call[] = [];
+  const records = {
+    tagged: {
+      remote: "https://example.test/repo.git",
+      requestedRef: "v1.2.3",
+      trackingBranch: null,
+      commit: remoteTagCommit,
+      pluginPath: "",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("tagged", {}),
+    makeRunner({
+      toplevel: "/managed/tagged",
+      head: remoteTagCommit,
+      lsRemote: () => `${remoteTagCommit}\trefs/tags/v1.2.3\n`,
+      lsRemoteTags: `${remoteTagCommit}\trefs/tags/v1.2.3\n`,
+      trees: { [`${remoteTagCommit}^{tree}`]: TREE_TAG },
+      calls,
+    }),
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.refKind, "tag");
+  assert.notEqual(probe.status, "pinned");
+  assert.equal(calls.some((call) => call.args.includes("ls-remote")), true);
+});
+
 // ---------------------------------------------------------------------------
 // Dirty working tree
 // ---------------------------------------------------------------------------

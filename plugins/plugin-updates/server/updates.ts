@@ -64,9 +64,18 @@ function toPosix(value: string): string {
   return value.split(path.sep).join("/");
 }
 
+const FULL_COMMIT_RE = /^[0-9a-f]{40,64}$/i;
+// Git abbreviates commit ids down to as few as 7 hex chars; a ref matching this
+// shape is a commit pin, not a movable branch/tag name.
+const COMMIT_REF_RE = /^[0-9a-f]{7,64}$/i;
+
+function isCommitSha(value: string): boolean {
+  return COMMIT_REF_RE.test(value.trim());
+}
+
 function parseCommit(output: string): string | null {
   const value = output.trim();
-  return /^[0-9a-f]{40,64}$/i.test(value) ? value : null;
+  return FULL_COMMIT_RE.test(value) ? value : null;
 }
 
 function short(commit: string | null): string {
@@ -293,11 +302,24 @@ async function resolveRef(
 ): Promise<RefResolution> {
   const managed = identity.managed;
   if (managed) {
-    if (managed.commit && !managed.trackingBranch && !managed.requestedRef) {
-      return pinnedResolution(managed.remote, managed.commit);
+    // A tracked branch is the authoritative moving ref; only fall back to the
+    // requested ref when there is no branch to track.
+    if (managed.trackingBranch) {
+      return {
+        remote: managed.remote,
+        remoteUrl: managed.remote,
+        ref: managed.trackingBranch,
+        refKind: "branch",
+        reportOnly: null,
+        detail: null,
+      };
     }
-    const requested = managed.requestedRef ?? managed.trackingBranch ?? managed.commit;
+    const requested = managed.requestedRef;
+    if (requested && isCommitSha(requested)) {
+      return pinnedResolution(managed.remote, requested);
+    }
     if (!requested) {
+      if (managed.commit) return pinnedResolution(managed.remote, managed.commit);
       return {
         remote: managed.remote,
         remoteUrl: managed.remote,
@@ -307,19 +329,18 @@ async function resolveRef(
         detail: "No ref recorded for this git-managed install — report only",
       };
     }
-    if (/^[0-9a-f]{40,64}$/i.test(requested)) return pinnedResolution(managed.remote, requested);
     return {
       remote: managed.remote,
       remoteUrl: managed.remote,
       ref: requested,
-      refKind: managed.trackingBranch ? "branch" : "tag",
+      refKind: "tag",
       reportOnly: null,
       detail: null,
     };
   }
 
   if (identity.plugin.source === "git" && identity.plugin.remote && identity.plugin.ref) {
-    if (/^[0-9a-f]{40,64}$/i.test(identity.plugin.ref)) {
+    if (isCommitSha(identity.plugin.ref)) {
       return pinnedResolution(identity.plugin.remote, identity.plugin.ref);
     }
     return {
