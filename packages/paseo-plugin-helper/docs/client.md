@@ -530,11 +530,63 @@ import { Grid, MetricGauge, Row, Stack, StatusDot, Text } from "paseo-plugin-hel
   rest. It never collapses to one column on a compact surface.
 
 
+### `<ModalBody>`
+
 A scrollable container for `<Modal.Content>` that automatically applies bottom padding (`paddingBottom: 48` on mobile) to clear OS home navigation bars and keyboards.
 Supports native pull-to-refresh on mobile via `refreshing` and `onRefresh`.
 Pass `header` with `headerMode="pinned"` for a fixed tab/navigation bar. On
 desktop, the host remains the scroll owner and the web header uses sticky
 positioning; on compact/mobile, the header stays above the helper scroller:
+
+#### Modal size contract
+
+Every plugin modal takes the **host-allocated dialog size** and is fluid within
+it. The helper enforces the contract, so plugins never size their own frame:
+
+- **Fill the allocation, don't dictate it.** `ModalBody` is
+  `flex: 1 / minHeight: 0 / width: "100%"`. Keep every wrapper between the host
+  and `ModalBody` equally fluid (`flex: 1`, `minHeight: 0`, `width: "100%"`).
+- **No content-driven resizing.** Children must never determine the dialog's
+  width or height. A root that sizes itself to its children makes the modal
+  visibly resize/redraw as data loads, polls, or grows.
+- **No hardcoded modal dimensions.** Do not put `minWidth`, `minHeight`, `width`,
+  or `height` literals on a modal/surface container. For text that must be able
+  to shrink, use `minWidth: 0` + `flexShrink: 1`. The audit rule
+  `no-hardcoded-modal-dimensions` flags the large cases.
+- **No nested scrollers.** Let the host own the outer scroll on desktop and the
+  bottom sheet own it on mobile; use `ModalBody` for the body instead of wrapping
+  it in another `ScrollView` (a bounded inner `ScrollView` inside `Modal.Content`
+  is still a content-driven height - drop it and let the host scroll).
+
+#### Host behavior: desktop dialog vs mobile sheet
+
+| Surface | Host owns | `ModalBody` renders |
+| --- | --- | --- |
+| Desktop dialog | Bounded dialog size + outer scroll | Plain content view (no second scrollbar; sticky web header for `headerMode="pinned"`) |
+| Mobile bottom sheet (`AdaptiveModalSheet`) | Sheet viewport + sheet gesture + `BottomSheetScrollView` | Host-aware scroller when the helper owns scroll, plain view when the host does; adds the safe bottom inset |
+| 0.8 composer popover | `MenuSurface` / `FloatingScrollView` | Plain content (`ModalBodyScrollOwnerContext` marks the subtree) |
+
+Because the host allocates the size, a plugin cannot request a different dialog
+frame from plugin code - content simply flows into whatever the host gives it.
+
+#### Requesting a wider dialog: `size`
+
+When a genuinely data-dense modal/surface needs more room, use the single
+documented preset instead of a per-plugin literal:
+
+```tsx
+// Default: fully fluid inside the host allocation.
+<ModalBody>...</ModalBody>
+
+// Wide extent for tables, logs, or dense dashboards.
+<ModalBody size="large">...</ModalBody>
+```
+
+`size="large"` applies the helper's documented minimum width on desktop only.
+It is ignored on mobile (the bottom sheet is already full-bleed) and inside
+composer popovers (the host owns that narrow viewport). The host still owns the
+final size, so `large` is a request for room, not a hardcoded frame. Do not add
+`size`-related width/minWidth literals in plugin code; widen here instead.
 
 ```tsx
 <ModalBody

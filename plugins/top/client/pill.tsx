@@ -2095,7 +2095,7 @@ function LiveCustomPillModal({ pillId, initial }: LiveCustomPillModalProps) {
   };
 
   return (
-    <View>
+    <View style={styles.modalRoot}>
       <CustomPillModalContent
         state={effectiveState}
         onRefresh={handleRefresh}

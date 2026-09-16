@@ -19,12 +19,23 @@ import {
 import { getOptionalClientHost, selectHostScrollView, type HostScrollView } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 
+export type ModalBodySize = "default" | "large";
+
 export interface ModalBodyProps {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
   header?: ReactNode;
   headerStyle?: StyleProp<ViewStyle>;
+  /**
+   * Host dialog size preset. "default" (default) is fully fluid inside the
+   * host-allocated dialog. "large" opts into the helper's documented wide
+   * extent on desktop so data-dense modals/surfaces get room, and is ignored on
+   * mobile (the bottom sheet is already full-bleed) and inside composer
+   * popovers (the host owns that narrow viewport). Use this instead of adding a
+   * per-plugin width/minWidth literal; the host still owns the final size.
+   */
+  size?: ModalBodySize;
   /**
    * "scroll" (default): header renders INSIDE the helper-owned compact/mobile
    * ScrollView and moves with content. "pinned": header renders above that
@@ -47,8 +58,28 @@ export interface ModalBodyProps {
 
 export const ModalBodyScrollOwnerContext = createContext<"helper" | "host">("helper");
 
+// The single documented home for the large dialog preset. Prefer
+// `ModalBody size="large"` over adding a per-plugin width/minWidth literal.
+const LARGE_DIALOG_MIN_WIDTH = 640;
+
 /**
  * Mobile-safe scrollable body for Paseo <Modal.Content>.
+ *
+ * Size contract: a modal takes the host-allocated dialog size and is fluid
+ * within it. `ModalBody` fills that allocation (`flex: 1`, `minHeight: 0`,
+ * `width: "100%"`) and never lets its children drive the dialog frame, so the
+ * modal stays stable while content loads, refreshes, or grows. Do not wrap it
+ * in a container that hardcodes `minWidth`/`minHeight`/`width`/`height` or that
+ * sizes itself to its children - that reintroduces content-driven resize/redraw.
+ * Shrinkable text uses `minWidth: 0` + `flexShrink: 1`, never a fixed dimension.
+ *
+ * Host behavior differs by platform: on desktop the host owns a bounded dialog
+ * and its outer scroll, so `ModalBody` renders plain content and adds no second
+ * scroll region. On mobile the host presents a bottom sheet
+ * (`AdaptiveModalSheet`) that already owns the viewport and sheet gesture, so
+ * `ModalBody` defers to a host-provided scroller (or a plain view) and only adds
+ * the safe bottom inset. Plugin code must not guess either size.
+ *
  * Scroll ownership: ordinary compact/mobile modal content uses this helper
  * scroller. A 0.8 composer popover is different: Paseo's MenuSurface already
  * supplies the sole outer scroller, and registerComposerPill marks that
@@ -75,6 +106,7 @@ export function ModalBody({
   header,
   headerStyle,
   headerMode = "scroll",
+  size = "default",
   debugTag,
   extraBottomInset = 0,
   refreshing = false,
@@ -85,6 +117,14 @@ export function ModalBody({
   const { isCompact, isMobile, layout, padding, colors } = usePluginTheme();
   const hostOwnsScroll = useContext(ModalBodyScrollOwnerContext) === "host";
   const helperOwnsScroll = !hostOwnsScroll && (isCompact || isMobile);
+  // The large preset is the ONE documented place a plugin can ask for a wide
+  // dialog frame. It is a desktop-only content minimum: the mobile sheet is
+  // already full-bleed, and a composer popover viewport is host-owned and
+  // intentionally narrow, so both ignore the preset.
+  const sizeStyle =
+    size === "large" && !isMobile && !isCompact && !hostOwnsScroll
+      ? styles.largeDialog
+      : undefined;
   const ResolvedScrollView = selectHostScrollView(
     getOptionalClientHost(),
     FallbackScrollView as unknown as HostScrollView,
@@ -124,7 +164,7 @@ export function ModalBody({
   const scrollBody = (
     <ResolvedScrollView
       ref={setRefs}
-      style={[{ backgroundColor: colors.surface0 }, styles.container, style]}
+      style={[{ backgroundColor: colors.surface0 }, styles.container, sizeStyle, style]}
       nestedScrollEnabled={true}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={true}
@@ -164,7 +204,7 @@ export function ModalBody({
         } as unknown as ViewStyle)
       : undefined;
   const plainBody = (
-    <View style={[styles.plainBody, style]}>
+    <View style={[styles.plainBody, sizeStyle, style]}>
       {header ? (
         <View style={[styles.header, stickyHeaderStyle, headerStyle]}>{header}</View>
       ) : null}
@@ -194,7 +234,7 @@ export function ModalBody({
     return (
       <ResolvedScrollView
         ref={setRefs}
-        style={[{ backgroundColor: colors.surface0 }, styles.container, style]}
+        style={[{ backgroundColor: colors.surface0 }, styles.container, sizeStyle, style]}
         nestedScrollEnabled={true}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={true}
@@ -227,7 +267,7 @@ export function ModalBody({
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, sizeStyle]}>
       <View style={[styles.header, headerStyle]}>{header}</View>
       {scrollBody}
     </View>
@@ -235,6 +275,11 @@ export function ModalBody({
 }
 
 const styles = StyleSheet.create({
+  // Desktop-only wide extent for `size="large"`. The host still owns the final
+  // dialog size; this only asks a content-sizing host for more room.
+  largeDialog: {
+    minWidth: LARGE_DIALOG_MIN_WIDTH,
+  },
   screen: {
     flex: 1,
     minHeight: 0,

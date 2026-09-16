@@ -294,6 +294,34 @@ export const contributePlugin: PluginContribution = (plugin) => {
 
 ---
 
+## Modal Size Contract
+
+Modals do not size themselves. Every plugin modal takes the **host-allocated
+dialog size** and is fluid within it:
+
+- **Fill it, don't dictate it**: `ModalBody` is `flex: 1 / minHeight: 0 /
+  width: "100%"`; keep every wrapper between the host and `ModalBody` fluid too.
+- **No content-driven resizing**: a root that sizes to its children makes the
+  dialog visibly resize/redraw as data loads or grows. That is the anti-pattern
+  this contract removes.
+- **No hardcoded modal dimensions**: no `minWidth`/`minHeight`/fixed `width`/
+  `height` literals on modal or surface containers. Shrinkable text uses
+  `minWidth: 0` + `flexShrink: 1`.
+- **No nested scrollers**: the host owns the outer scroll on desktop and the
+  bottom sheet owns it on mobile; use `ModalBody` instead of adding another
+  `ScrollView`.
+
+On desktop the host presents a bounded dialog and owns scrolling; on mobile the
+host presents an `AdaptiveModalSheet` bottom sheet that owns the viewport and
+sheet gesture. Plugins get neither to guess: they just stay fluid inside
+whatever the host allocates.
+
+When a data-dense modal genuinely needs more room, pass the one documented
+preset `ModalBody size="large"` (desktop-only wide extent; ignored on mobile
+sheets and composer popovers) instead of adding a per-plugin width literal. See
+[`docs/client.md`](docs/client.md) for the full contract and the `ModalBody`
+API.
+
 ## Mobile Modal Gesture Architecture & `<Tabs>`
 
 ### The Challenge with Nested Scrolling in Paseo Modals

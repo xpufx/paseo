@@ -416,7 +416,7 @@ export function CrossDaemonConversation({
         <Modal.Content>
           {introspect.isPending ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Loading agents…</Text> : null}
           {introspect.error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{String(introspect.error)}</Text> : null}
-          <ScrollView style={{ maxHeight: 420 }}>
+          <View>
             {(introspect.data?.daemons ?? []).map((daemon) => (
               <View key={daemon.name}>
                 <Text style={{ color: daemon.reachable ? theme.colors.accent : theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 10, textTransform: "uppercase" as const }}>
@@ -439,7 +439,7 @@ export function CrossDaemonConversation({
                 ))}
               </View>
             ))}
-          </ScrollView>
+          </View>
           <ViaXComms theme={theme} />
         </Modal.Content>
       </Modal>

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { Text, ScrollView } from "react-native";
+import { Text, ScrollView, View } from "react-native";
 import { initClientHelpers } from "../client/host.js";
 import * as themeProvider from "../client/theme/provider.js";
 import { ModalBody } from "../client/layout/ModalBody.js";
@@ -86,6 +86,85 @@ describe.each([false, true])("ModalBody pinned header (compact=%s)", (isCompact)
         : headerView.props.style;
       expect(headerStyle.position).toBe("sticky");
     }
+  });
+});
+
+describe("ModalBody size contract", () => {
+  const flatten = (style: unknown): Record<string, unknown> => {
+    if (Array.isArray(style)) return Object.assign({}, ...style.map(flatten));
+    return (style ?? {}) as Record<string, unknown>;
+  };
+
+  it("fills the host allocation on a compact helper-owned scroller", () => {
+    installStubs(true, false);
+    const r = render(
+      <ModalBody>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const root = r.root.findAllByType(ScrollView)[0];
+    const style = flatten(root.props.style);
+    expect(style.flex).toBe(1);
+    expect(style.minHeight).toBe(0);
+    expect(style.width).toBe("100%");
+  });
+
+  it("fills the host allocation on a non-compact host-owned desktop surface", () => {
+    installStubs(false, false);
+    const r = render(
+      <ModalBody>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const root = r.root.findAllByType(View)[0];
+    const style = flatten(root.props.style);
+    expect(style.flex).toBe(1);
+    expect(style.minHeight).toBe(0);
+    expect(style.width).toBe("100%");
+  });
+
+  it("adds no size constraint by default", () => {
+    installStubs(false, false);
+    const r = render(
+      <ModalBody>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const style = flatten(r.root.findAllByType(View)[0].props.style);
+    expect(style.minWidth).toBeUndefined();
+  });
+
+  it("applies the documented wide extent for size=large on a desktop dialog", () => {
+    installStubs(false, false);
+    const r = render(
+      <ModalBody size="large">
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const style = flatten(r.root.findAllByType(View)[0].props.style);
+    expect(style.minWidth).toBe(640);
+  });
+
+  it("ignores size=large on compact and mobile host surfaces", () => {
+    installStubs(true, false);
+    const compact = render(
+      <ModalBody size="large">
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    expect(
+      flatten(compact.root.findAllByType(ScrollView)[0].props.style).minWidth,
+    ).toBeUndefined();
+
+    installStubs(true, true);
+    const mobile = render(
+      <ModalBody size="large">
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    expect(
+      flatten(mobile.root.findAllByType(ScrollView)[0].props.style).minWidth,
+    ).toBeUndefined();
   });
 });
 

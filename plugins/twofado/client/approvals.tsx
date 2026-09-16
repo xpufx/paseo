@@ -4,7 +4,7 @@ import type {
   PluginButtonRegistration,
   PluginSurfaceProps,
 } from "@getpaseo/plugin/client";
-import { Icon, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   AttentionBeacon,
   Badge,
@@ -16,6 +16,7 @@ import {
   EmptyState,
   KeyValue,
   KeyValueGroup,
+  ModalBody,
   PluginThemeProvider,
   StatusDot,
   Tabs,
@@ -1242,14 +1243,15 @@ function ApprovalSurfaceInner({
 
   return (
     <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
-      <ScrollView
-        style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
+      <ModalBody
+        size="large"
+        style={{ backgroundColor: theme.colors.surface0 }}
         contentContainerStyle={{
-          alignItems: "center",
-          padding: layout.compact ? 12 : 20,
+          paddingHorizontal: layout.compact ? 12 : 20,
+          paddingTop: layout.compact ? 12 : 20,
         }}
       >
-        <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", gap: 10 }}>
+        <View style={{ width: "100%", gap: 10 }}>
           <Card.Header
             title="2fado approvals"
             subtitle="Privileged command gating"
@@ -1407,7 +1409,7 @@ function ApprovalSurfaceInner({
           )}
 
         </View>
-      </ScrollView>
+      </ModalBody>
     </PluginThemeProvider>
   );
 }
@@ -1419,11 +1421,11 @@ export function ApprovalSurface(props: PluginSurfaceProps) {
       label="ApprovalSurface"
       fallback={
         <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
-          <ScrollView
-            style={{ flex: 1, backgroundColor: theme.colors.surface0 }}
-            contentContainerStyle={{ alignItems: "center", padding: 20 }}
+          <ModalBody
+            style={{ backgroundColor: theme.colors.surface0 }}
+            contentContainerStyle={{ padding: 20 }}
           >
-            <View style={{ width: "100%", maxWidth: 640, alignSelf: "center", gap: 10 }}>
+            <View style={{ width: "100%", gap: 10 }}>
               <Card style={{ borderLeftWidth: 3, borderLeftColor: theme.colors.statusDanger }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
                   <Icon name="CloudOff" size={16} color={theme.colors.statusDanger} />
@@ -1436,7 +1438,7 @@ export function ApprovalSurface(props: PluginSurfaceProps) {
                 </Text>
               </Card>
             </View>
-          </ScrollView>
+          </ModalBody>
         </PluginThemeProvider>
       }
     >

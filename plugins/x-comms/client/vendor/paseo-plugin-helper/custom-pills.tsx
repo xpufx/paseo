@@ -53,6 +53,9 @@ export interface CustomPillModalContentProps {
 /**
  * Full modal inspection content for a custom metric pill.
  * Shows status, preformatted command output, last updated time, and quick actions.
+ *
+ * Sized by the host: the root fills the host-allocated modal frame (flex/fluid)
+ * so changing output never drives the dialog size.
  */
 export function CustomPillModalContent({
   state,
@@ -189,6 +192,8 @@ export function registerCustomPills(
 
 const styles = StyleSheet.create({
   modalContent: {
+    flex: 1,
+    minHeight: 0,
     width: "100%",
     padding: 12,
   },
