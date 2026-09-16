@@ -11,7 +11,7 @@ const colors: any = {
   accent: "#3b82f6",
 };
 
-function installStubs(isCompact = true) {
+function installStubs(isCompact = true, isMobile = false) {
   initClientHelpers({
     Icon: () => null,
     Modal: Object.assign(() => null, { Content: () => null }),
@@ -22,10 +22,10 @@ function installStubs(isCompact = true) {
     theme: {} as any,
     colors,
     fonts: {} as any,
-    layout: { compact: isCompact, platform: "web" } as any,
+    layout: { compact: isCompact, platform: isMobile ? "ios" : "web" } as any,
     flair: {} as any,
     isCompact,
-    isMobile: false,
+    isMobile,
     touchTargetMin: 36,
     alpha: (c: string, _o: number) => c,
     getContrastColor: () => "#fff",
@@ -86,5 +86,58 @@ describe.each([false, true])("ModalBody pinned header (compact=%s)", (isCompact)
         : headerView.props.style;
       expect(headerStyle.position).toBe("sticky");
     }
+  });
+});
+
+describe("ModalBody bottom reserve", () => {
+  const flatten = (style: unknown): { paddingBottom?: number } => {
+    if (Array.isArray(style)) return Object.assign({}, ...style.map(flatten));
+    return (style ?? {}) as { paddingBottom?: number };
+  };
+
+  function readBottomPadding(r: TestRenderer.ReactTestRenderer): number {
+    const scroll = r.root.findAllByType(ScrollView)[0];
+    return flatten(scroll.props.contentContainerStyle).paddingBottom as number;
+  }
+
+  it("reserves the large navigation-bar inset only on a mobile platform", () => {
+    installStubs(true, true);
+    const mobile = render(
+      <ModalBody>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    expect(readBottomPadding(mobile)).toBe(48);
+
+    installStubs(true, false);
+    const compactDesktop = render(
+      <ModalBody>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    expect(readBottomPadding(compactDesktop)).toBe(20);
+  });
+
+  it("keeps the small reserve on a non-compact desktop surface", () => {
+    installStubs(false, false);
+    const r = render(
+      <ModalBody>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    // Non-compact desktop is host-owned scroll, so the padding lives on the
+    // plain content wrapper rather than a ScrollView.
+    const content = r.root.findAll((node) => flatten(node.props?.style).paddingBottom !== undefined)[0];
+    expect(flatten(content.props.style).paddingBottom).toBe(20);
+  });
+
+  it("adds extraBottomInset on top of the mobile reserve", () => {
+    installStubs(true, true);
+    const r = render(
+      <ModalBody extraBottomInset={10}>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    expect(readBottomPadding(r)).toBe(58);
   });
 });

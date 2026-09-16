@@ -35,11 +35,21 @@ export function isMobilePlatform(platform: PlatformType): boolean {
 }
 
 /**
- * Returns the recommended minimum interactive touch target size (in pt/px).
- * Ensures compliance with Apple HIG and Android Material guidelines (min 44pt).
+ * Interactive target floor for a compact surface on a non-mobile platform
+ * (e.g. a narrow desktop popover). Sits between the full-desktop floor and the
+ * 44pt touch target: a mouse pointer needs a little more room than a wide
+ * panel, but nothing like a finger-sized hit area.
+ */
+export const COMPACT_DESKTOP_TOUCH_TARGET = 36;
+
+/**
+ * Returns the recommended minimum interactive target size (in pt/px).
+ * Real touch platforms follow Apple HIG / Android Material (min 44pt); a
+ * compact desktop surface gets a modest bump over the 28pt desktop floor.
  */
 export function getTouchTargetMin(layout: ResponsiveLayout): number {
-  return resolveEffectiveCompact(layout) || isMobilePlatform(layout.platform) ? 44 : 28;
+  if (isMobilePlatform(layout.platform)) return 44;
+  return resolveEffectiveCompact(layout) ? COMPACT_DESKTOP_TOUCH_TARGET : 28;
 }
 
 /**

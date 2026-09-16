@@ -100,8 +100,9 @@ export function ModalBody({
     }
   };
 
-  // On mobile/compact, we reserve generous bottom padding to clear navigation bars
-  const bottomPadding = (isCompact ? 48 : 20) + extraBottomInset;
+  // Only real mobile platforms reserve the large bottom inset that clears
+  // navigation bars; a compact desktop popover does not need it.
+  const bottomPadding = (isMobile ? 48 : 20) + extraBottomInset;
 
   const refreshControl = onRefresh ? (
     <RefreshControl

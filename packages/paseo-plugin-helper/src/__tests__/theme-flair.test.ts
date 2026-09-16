@@ -50,15 +50,19 @@ describe("Theme & Visual Flair", () => {
     expect(getStatusColor("accent", colors, "#10b981")).toBe("#10b981");
   });
 
-  it("enforces touch target sizes on mobile/compact", () => {
+  it("enforces touch target sizes on mobile, desktop, and compact desktop", () => {
     expect(isMobilePlatform("ios")).toBe(true);
     expect(isMobilePlatform("android")).toBe(true);
     expect(isMobilePlatform("web")).toBe(false);
 
-    // Compact or mobile requires min 44pt
-    expect(getTouchTargetMin({ compact: true, platform: "web" })).toBe(44);
+    // Real touch platforms require min 44pt
     expect(getTouchTargetMin({ compact: false, platform: "ios" })).toBe(44);
     expect(getTouchTargetMin({ compact: false, platform: "android" })).toBe(44);
+
+    // Compact desktop is mouse-driven: smaller than touch, bigger than full desktop
+    const compactDesktop = getTouchTargetMin({ compact: true, platform: "web" });
+    expect(compactDesktop).toBeLessThan(44);
+    expect(compactDesktop).toBeGreaterThan(28);
 
     // Desktop mouse with non-compact pane allows standard 28pt
     expect(getTouchTargetMin({ compact: false, platform: "web" })).toBe(28);
