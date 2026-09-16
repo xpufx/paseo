@@ -10,8 +10,8 @@ import {
   ForgePill,
   ForgeIssuesModal,
   ForgeIssuesPanel,
-  resolveForgeLabel,
 } from "./client/issues-pill.js";
+import { createForgeLabelResolver } from "./client/pill-label.js";
 import {
   forgeLinkUserTransformer,
   forgeLinkAssistantTransformer,
@@ -33,15 +33,33 @@ export default function contribute(client: PluginClientContext) {
   const removeBoardAlertAssistant = client.addTimelineTransformer(forgeBoardAlertAssistantTransformer);
   const removeBoardAlertRenderer = client.addTimelineRenderer(forgeBoardAlertRenderer);
 
+  // RPC is host-provided and absent on some older hosts; the resolver degrades
+  // to the workspace-name / ellipsis fallback instead of failing registration.
+  const rawRpc = typeof client.rpc === "function" ? client.rpc.bind(client) : null;
+  const forgeLabel = createForgeLabelResolver({
+    rpc: (contract, input) =>
+      rawRpc
+        ? (rawRpc(contract as never, input as never) as Promise<unknown>)
+        : Promise.reject(new Error("client.rpc unavailable")),
+    resolveWorkspace: async (workspaceId) => {
+      const workspace = await client.paseo.workspaces.ref(workspaceId).refresh();
+      return workspace
+        ? {
+            directory: workspace.workspaceDirectory ?? undefined,
+            projectRootPath: workspace.projectRootPath,
+          }
+        : null;
+    },
+  });
+
   const removePill = registerComposerPill(client, {
     id: ISSUES_PILL_ID,
     title: "issues",
-    compactTitle: "iss",
     modalTitle: "Forge Issues",
     modalIcon: "GitPullRequest",
     icon: "GitPullRequest",
-    resolveLabel: (ctx) => resolveForgeLabel(ctx),
-    refreshIntervalMs: 0,
+    resolveLabel: (ctx) => forgeLabel.resolve(ctx),
+    refreshIntervalMs: 5000,
     renderPill: (props) => <ForgePill {...props} />,
     renderModal: (props) => <ForgeIssuesModal {...props} />,
   });

@@ -24,11 +24,9 @@ import {
   usePluginSettings,
   usePluginTheme,
   copyToClipboard,
-  useResponsive,
   getClientHost,
   type RenderModalProps,
   type RenderPillProps,
-  type PillLiveContext,
 } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   ATTENTION_LABELS,
@@ -46,7 +44,6 @@ import {
   effectiveForgeHost,
   forgeContextContract,
   forgeTargetsForWorkspace,
-  formatIssueCountLabel,
   isValidForgeTarget,
   forgeSettingsContract,
   installLabelsContract,
@@ -69,31 +66,10 @@ import {
   workspaceNameKey,
 } from "../shared/issues.js";
 import { useActiveForgeIdentity } from "./active-forge.js";
+import { forgePillLabel } from "./pill-label.js";
 import { ForeignInlineMark } from "./foreign-link.js";
 
 export const ISSUES_PILL_ID = "forges-issues";
-
-interface IssueCountCache {
-  directory?: string;
-  count: number | null;
-  at: number;
-}
-
-const countCache = new Map<string, IssueCountCache>();
-
-function readCachedLabel(ctx: PillLiveContext): string {
-  const cached = countCache.get(ctx.agentId);
-  if (!cached || cached.count == null) return "iss";
-  return `${cached.count}`;
-}
-
-export function resolveForgeLabel(ctx: PillLiveContext): string {
-  return readCachedLabel(ctx);
-}
-
-function rememberCount(agentId: string, directory: string | undefined, count: number | null) {
-  countCache.set(agentId, { directory, count, at: Date.now() });
-}
 
 function useDirectory(workspaceId: string): string | undefined {
   return useWorkspace(
@@ -122,7 +98,7 @@ function useDisplayName(workspaceId: string, inferredRepo: string | null | undef
   return displayNameForDirectory(settings, nameKey, inferredRepo);
 }
 
-function useOpenIssues(workspaceId: string, agentId?: string) {
+function useOpenIssues(workspaceId: string) {
   const directory = useDirectory(workspaceId);
   const { settings } = usePluginSettings(forgeSettingsContract);
   const forgeTarget = activeForgeForDirectory(settings, directory) ?? "";
@@ -131,36 +107,20 @@ function useOpenIssues(workspaceId: string, agentId?: string) {
     { directory: directory ?? undefined, remoteUrl: forgeTarget || undefined },
     { refetchInterval: 30000 },
   );
-  const data = query.data;
-  React.useEffect(() => {
-    if (data) {
-      rememberCount(agentId ?? workspaceId, directory ?? undefined, data.error ? null : data.issues.length);
-    }
-  }, [agentId, workspaceId, directory, data]);
   return { directory, ...query };
 }
 
-export function ForgePill({ agentId, workspaceId, isOpen }: RenderPillProps) {
+export function ForgePill({ workspaceId, isOpen }: RenderPillProps) {
   const { colors } = usePluginTheme();
-  const { isCompact } = useResponsive();
-  const { data, isLoading, directory } = useOpenIssues(workspaceId, agentId);
+  const { data, isLoading, directory } = useOpenIssues(workspaceId);
   const activeForge = useActiveForgeIdentity(directory);
   const forgeHost = activeForge?.host ?? data?.host ?? null;
   const count = data && !data.error ? (data.openIssueCount ?? data.issues.length) : null;
-  const countLabel = formatIssueCountLabel(count);
   const displayName = useDisplayName(workspaceId, data?.repo);
-  const fullLabel = displayName
-    ? (count == null ? displayName : `${displayName} · ${count}`)
-    : countLabel;
-  const label =
-    isLoading && !data
-      ? "..."
-      : isCompact
-        ? (count == null ? "iss" : fullLabel)
-        : fullLabel;
+  const label = forgePillLabel({ displayName, count, loading: isLoading && !data });
   return (
     <View
-      accessibilityLabel={`Forge ${fullLabel}`}
+      accessibilityLabel={`Forge ${label}`}
       style={styles.pillContainer}
     >
       <ForgeIcon host={forgeHost} size={13} color={colors.foreground} />
@@ -816,7 +776,6 @@ function IssueDetailView({
 }
 
 export function ForgeIssuesView({
-  agentId,
   workspaceId,
   onClose,
 }: {
@@ -825,7 +784,7 @@ export function ForgeIssuesView({
   onClose?: () => void;
 }) {
   const { colors } = usePluginTheme();
-  const { data, isLoading, isError, refetch, isRefetching } = useOpenIssues(workspaceId, agentId);
+  const { data, isLoading, isError, refetch, isRefetching } = useOpenIssues(workspaceId);
   const access = useRepoAccess({
     repoPublic: data?.repoPublic,
     tokenPresent: data?.tokenPresent,

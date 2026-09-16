@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveForgeTarget, scopeOfLabel, workspaceNameKey } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveForgeTarget, scopeOfLabel, workspaceNameKey } from "./issues.ts";
+import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
 const REAL_HOST = "forge.example.com";
@@ -637,5 +638,127 @@ describe("cross-repo link classification (issue #108)", () => {
     assert.equal(classifyForgeUrl("https://forge.example.com/owner/repo/pulls/7", active), null);
     assert.equal(classifyForgeUrl("https://example.com/docs", active), null);
     assert.equal(classifyForgeUrl(undefined, active), null);
+  });
+});
+
+describe("composer pill label (issue #162)", () => {
+  it("shows the workspace display name while the count is unknown", () => {
+    assert.equal(forgePillLabel({ displayName: "tea", count: null }), "tea");
+    assert.equal(forgePillLabel({ displayName: "tea" }), "tea");
+  });
+
+  it("shows name · count once the count resolves", () => {
+    assert.equal(forgePillLabel({ displayName: "tea", count: 3 }), "tea · 3");
+    assert.equal(forgePillLabel({ displayName: "tea", count: 1 }), "tea · 1");
+  });
+
+  it("falls back to the bare count without a display name", () => {
+    assert.equal(forgePillLabel({ count: 1 }), "1 issue");
+    assert.equal(forgePillLabel({ count: 4 }), "4 issues");
+  });
+
+  it("never emits the old 'iss' placeholder", () => {
+    for (const input of [{}, { count: null }, { displayName: "" }, { displayName: "   " }]) {
+      assert.equal(forgePillLabel(input), "...");
+      assert.notEqual(forgePillLabel(input), "iss");
+    }
+  });
+
+  it("renders an ellipsis while the first fetch is in flight", () => {
+    assert.equal(forgePillLabel({ displayName: "tea", count: 3, loading: true }), "...");
+  });
+});
+
+describe("forge pill label resolver (issue #162)", () => {
+  const WORKSPACE_ID = "ws-1";
+  const DIRECTORY = "/home/dev/tea";
+  const ROOT = "/home/dev/tea";
+
+  interface RuntimeStub {
+    settings?: unknown;
+    issues?: unknown;
+    issuesError?: Error;
+    now?: () => number;
+    rpcCalls?: { settings: number; issues: number };
+  }
+
+  function runtimeFor(stub: RuntimeStub = {}): ForgePillRuntime {
+    const calls = stub.rpcCalls ?? { settings: 0, issues: 0 };
+    return {
+      now: stub.now,
+      resolveWorkspace: async (workspaceId) =>
+        workspaceId === WORKSPACE_ID ? { directory: DIRECTORY, projectRootPath: ROOT } : null,
+      rpc: async (contract) => {
+        if (contract === forgeSettingsContract.get) {
+          calls.settings += 1;
+          return stub.settings ?? { namesByDirectory: { [ROOT]: "tea" } };
+        }
+        if (contract === openIssuesContract) {
+          calls.issues += 1;
+          if (stub.issuesError) throw stub.issuesError;
+          return (
+            stub.issues ?? {
+              repo: "org/tea",
+              issues: [],
+              openIssueCount: 3,
+              error: undefined,
+            }
+          );
+        }
+        throw new Error("unexpected contract");
+      },
+    };
+  }
+
+  it("resolves name · count without any modal or React mount", async () => {
+    const resolver = createForgeLabelResolver(runtimeFor());
+    assert.equal(await resolver.resolve({ agentId: "agent-1", workspaceId: WORKSPACE_ID }), "tea · 3");
+  });
+
+  it("falls back to the stored display name when the count is unknown, never 'iss'", async () => {
+    const resolver = createForgeLabelResolver(
+      runtimeFor({
+        issues: { repo: "org/tea", issues: [], openIssueCount: null, error: "forge unreachable" },
+      }),
+    );
+    const label = await resolver.resolve({ agentId: "agent-1", workspaceId: WORKSPACE_ID });
+    assert.equal(label, "tea");
+    assert.notEqual(label, "iss");
+  });
+
+  it("uses the ellipsis when nothing resolves, never 'iss'", async () => {
+    const resolver = createForgeLabelResolver(
+      runtimeFor({
+        settings: { namesByDirectory: {} },
+        issues: { repo: null, issues: [], openIssueCount: null, error: "forge unreachable" },
+      }),
+    );
+    const label = await resolver.resolve({ agentId: "agent-1", workspaceId: WORKSPACE_ID });
+    assert.equal(label, "...");
+    assert.notEqual(label, "iss");
+  });
+
+  it("keeps a cached count within the TTL and refetches once it ages out", async () => {
+    let clock = 1_000;
+    const calls = { settings: 0, issues: 0 };
+    const resolver = createForgeLabelResolver(runtimeFor({ rpcCalls: calls, now: () => clock }));
+    await resolver.resolve({ agentId: "agent-1", workspaceId: WORKSPACE_ID });
+    assert.equal(calls.issues, 1);
+
+    clock += 5_000;
+    await resolver.resolve({ agentId: "agent-2", workspaceId: WORKSPACE_ID });
+    assert.equal(calls.issues, 1, "a second agent on the same workspace reuses the cached count");
+
+    clock += 30_000;
+    await resolver.resolve({ agentId: "agent-1", workspaceId: WORKSPACE_ID });
+    assert.equal(calls.issues, 2, "the count refetches after the TTL");
+  });
+
+  it("shares one settings fetch across agents", async () => {
+    const calls = { settings: 0, issues: 0 };
+    const resolver = createForgeLabelResolver(runtimeFor({ rpcCalls: calls }));
+    await resolver.resolve({ agentId: "agent-1", workspaceId: WORKSPACE_ID });
+    await resolver.resolve({ agentId: "agent-2", workspaceId: WORKSPACE_ID });
+    assert.equal(calls.settings, 1);
   });
 });
