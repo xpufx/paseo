@@ -46,6 +46,10 @@ export async function handleListCommands(): Promise<{ commands: SlashCommand[] }
   return { commands: settings.commands.filter((c) => c.enabled) };
 }
 
+export function handleListCatalog(): { commands: SlashCommand[] } {
+  return { commands: SEED_COMMANDS };
+}
+
 const SAFE_OPERATIONS: Record<string, (params: Record<string, unknown>) => unknown> = {
   "slash.ping": () => ({ ok: true, version: SLASH_PLUGIN_VERSION }),
   "slash.echo": (params) => ({ echo: params }),

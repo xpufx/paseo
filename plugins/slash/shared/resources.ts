@@ -8,7 +8,10 @@ export const SLASH_VERSION = "0.1.0";
 
 export const SUGGESTED_PREFIX = "xpufx-";
 
-const namePattern = /^[a-z0-9][a-z0-9-]*$/;
+export const COMMAND_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+export const COMMAND_NAME_HINT =
+  "Lowercase letters, digits, and dashes; must start with a letter or digit.";
 
 export const SendActionSchema = z.object({
   verb: z.literal("send"),
@@ -37,7 +40,7 @@ export const SlashActionSchema = z.discriminatedUnion("verb", [
 export type SlashAction = z.infer<typeof SlashActionSchema>;
 
 export const SlashCommandSchema = z.object({
-  name: z.string().min(1).max(64).regex(namePattern),
+  name: z.string().min(1).max(64).regex(COMMAND_NAME_PATTERN),
   title: z.string().min(1).max(120),
   description: z.string().max(500).default(""),
   enabled: z.boolean().default(true),
@@ -100,9 +103,122 @@ export const SEED_COMMANDS: SlashCommand[] = [
   },
 ];
 
+export type SlashVerb = SlashAction["verb"];
+
+export interface SlashCommandDraft {
+  name: string;
+  title: string;
+  description: string;
+  enabled: boolean;
+  verb: SlashVerb;
+  template: string;
+  target: string;
+  operation: string;
+}
+
+export type CommandDraftErrorField = "name" | "title" | "description" | "action";
+export type CommandDraftErrors = Partial<Record<CommandDraftErrorField, string>>;
+
+export function emptyCommandDraft(): SlashCommandDraft {
+  return {
+    name: "",
+    title: "",
+    description: "",
+    enabled: true,
+    verb: "send",
+    template: "",
+    target: "",
+    operation: "",
+  };
+}
+
+export function draftFromCommand(command: SlashCommand): SlashCommandDraft {
+  const draft: SlashCommandDraft = {
+    ...emptyCommandDraft(),
+    name: command.name,
+    title: command.title,
+    description: command.description,
+    enabled: command.enabled,
+    verb: command.action.verb,
+  };
+  if (command.action.verb === "send") draft.template = command.action.template;
+  else if (command.action.verb === "open") draft.target = command.action.target;
+  else draft.operation = command.action.operation;
+  return draft;
+}
+
+export function commandFromDraft(draft: SlashCommandDraft): SlashCommand {
+  const base = {
+    name: draft.name.trim(),
+    title: draft.title.trim(),
+    description: draft.description,
+    enabled: draft.enabled,
+  };
+  if (draft.verb === "send") return { ...base, action: { verb: "send", template: draft.template } };
+  if (draft.verb === "open") return { ...base, action: { verb: "open", target: draft.target } };
+  return { ...base, action: { verb: "rpc", operation: draft.operation, params: {} } };
+}
+
+export function validateCommandDraft(
+  draft: SlashCommandDraft,
+  takenNames: readonly string[] = [],
+): { errors: CommandDraftErrors; command?: SlashCommand } {
+  const parsed = SlashCommandSchema.safeParse(commandFromDraft(draft));
+  if (!parsed.success) {
+    const errors: CommandDraftErrors = {};
+    for (const issue of parsed.error.issues) {
+      const key = issue.path[0];
+      if (key === "name" || key === "title" || key === "description") {
+        errors[key] ??= issue.message;
+      } else if (key === "action") {
+        errors.action ??= issue.message;
+      }
+    }
+    return { errors };
+  }
+  if (takenNames.includes(parsed.data.name)) {
+    return { errors: { name: "A command with this name already exists" } };
+  }
+  return { errors: {}, command: parsed.data };
+}
+
+export function upsertCommand(
+  commands: readonly SlashCommand[],
+  originalName: string | null,
+  next: SlashCommand,
+): SlashCommand[] {
+  if (originalName === null) return [...commands, next];
+  return commands.map((command) => (command.name === originalName ? next : command));
+}
+
+export function removeCommandByName(commands: readonly SlashCommand[], name: string): SlashCommand[] {
+  return commands.filter((command) => command.name !== name);
+}
+
+export function missingCatalogCommands(
+  commands: readonly SlashCommand[],
+  catalog: readonly SlashCommand[],
+): SlashCommand[] {
+  const present = new Set(commands.map((command) => command.name));
+  return catalog.filter((command) => !present.has(command.name));
+}
+
+export function actionSummary(action: SlashAction): string {
+  if (action.verb === "send") return "send";
+  if (action.verb === "open") return `open → ${action.target}`;
+  return `rpc → ${action.operation}`;
+}
+
 export const listCommandsRpc = defineContract({
   name: "slash.commands.list",
   description: "List effective slash commands with prefix applied",
+  input: z.object({}).default({}),
+  output: z.object({ commands: z.array(SlashCommandSchema) }),
+});
+
+export const catalogRpc = defineContract({
+  name: "slash.catalog.list",
+  description: "List the shipped seed command catalog without touching settings",
   input: z.object({}).default({}),
   output: z.object({ commands: z.array(SlashCommandSchema) }),
 });
