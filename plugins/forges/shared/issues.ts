@@ -42,6 +42,32 @@ export const openIssuesContract = defineContract({
   output: OpenIssuesOutputSchema,
 });
 
+/**
+ * Workspace git-origin forge coordinates, separate from `openIssuesContract`.
+ * The settings form needs a host to key `tokensByHost` even while the issues
+ * query is loading, errored, or has no payload, so this probe never depends on
+ * the issues result.
+ */
+export const ForgeContextInputSchema = z.object({
+  directory: z.string().optional(),
+});
+export type ForgeContextInput = z.infer<typeof ForgeContextInputSchema>;
+
+export const ForgeContextOutputSchema = z.object({
+  directory: z.string().nullable().default(null),
+  derivedRemote: z.string().nullable().default(null),
+  derivedHost: z.string().nullable().default(null),
+  derivedRepo: z.string().nullable().default(null),
+});
+export type ForgeContextOutput = z.infer<typeof ForgeContextOutputSchema>;
+
+export const forgeContextContract = defineContract({
+  name: "forgejo.forge-context",
+  description: "Git-origin forge coordinates for a workspace, independent of issue queries",
+  input: ForgeContextInputSchema,
+  output: ForgeContextOutputSchema,
+});
+
 export interface ForgejoRemote {
   host: string;
   owner: string;
@@ -175,6 +201,24 @@ export function isValidForgeTarget(target: string | undefined | null): boolean {
   const value = typeof target === "string" ? target.trim() : "";
   if (!value) return false;
   return Boolean(parseForgejoRemote(value)) || BARE_REPO_PATTERN.test(value);
+}
+
+/**
+ * Host whose token applies to a workspace's settings form. An explicit target
+ * that carries a host wins; a bare `owner/repo` — or anything unparseable —
+ * borrows the host of the git-derived remote. Null when neither yields a host,
+ * so the token field stays disabled instead of being keyed under a missing
+ * host. The derived remote is supplied independently of any issue query, so a
+ * stored token keeps displaying while issues load or fail (regression #152).
+ */
+export function effectiveForgeHost(
+  activeTarget: string | undefined | null,
+  derivedRemote: string | undefined | null,
+): string | null {
+  const derived = parseForgejoRemote(derivedRemote)?.host ?? null;
+  const target = typeof activeTarget === "string" ? activeTarget.trim() : "";
+  if (!target) return derived;
+  return parseForgejoRemote(target)?.host ?? derived;
 }
 
 /**

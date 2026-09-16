@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, deriveForgejoAccess, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
+import { activeForgeForDirectory, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -212,6 +212,46 @@ describe("multi-forge selection (issue #137)", () => {
     assert.equal(isValidForgeTarget("garbage!!!"), false);
     assert.equal(isValidForgeTarget(""), false);
     assert.equal(isValidForgeTarget(undefined), false);
+  });
+});
+
+describe("settings display regression (issue #152)", () => {
+  const DIR = "/home/xpufx/code/paseo";
+  const gitRemote = `ssh://git@${REAL_HOST}:222/xpufx/paseo.git`;
+  const codeberg = "https://codeberg.org/xpufx/paseo";
+
+  it("resolves the derived host in Auto mode without any issues payload", () => {
+    // The persisted token is keyed by this host; it must not depend on the
+    // issues RPC (which is absent here).
+    assert.equal(effectiveForgeHost("", gitRemote), REAL_HOST);
+    assert.equal(effectiveForgeHost(undefined, gitRemote), REAL_HOST);
+    assert.equal(effectiveForgeHost("   ", gitRemote), REAL_HOST);
+  });
+
+  it("keeps an explicit forge selection's host authoritative", () => {
+    assert.equal(effectiveForgeHost(codeberg, gitRemote), "codeberg.org");
+  });
+
+  it("borrows the derived host for a bare owner/repo selection", () => {
+    assert.equal(effectiveForgeHost("xpufx/paseo", gitRemote), REAL_HOST);
+  });
+
+  it("falls back to the derived host when the selection is unparseable", () => {
+    assert.equal(effectiveForgeHost("garbage!!!", gitRemote), REAL_HOST);
+  });
+
+  it("returns null only when neither the selection nor the remote yields a host", () => {
+    assert.equal(effectiveForgeHost("", null), null);
+    assert.equal(effectiveForgeHost("xpufx/paseo", null), null);
+  });
+
+  it("looks the stored name up by the exact workspace directory key", () => {
+    const settings = { namesByDirectory: { [DIR]: "pas" } };
+    assert.equal(displayNameForDirectory(settings, DIR, null), "pas");
+    // No issues payload: the stored name still wins over a missing repo.
+    assert.equal(displayNameForDirectory(settings, DIR, undefined), "pas");
+    assert.equal(displayNameForDirectory(settings, "/other/workspace", "xpufx/paseo"), "xpufx/paseo");
+    assert.equal(displayNameForDirectory({ namesByDirectory: {} }, DIR, null), null);
   });
 });
 

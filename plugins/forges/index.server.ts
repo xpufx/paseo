@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createPluginLogger } from "./server/vendor/paseo-plugin-helper/index.ts";
 import {
   addCommentContract,
+  forgeContextContract,
   forgejoSettingsContract,
   issueDetailContract,
   openIssuesContract,
@@ -9,6 +10,7 @@ import {
 } from "./shared/issues.js";
 import {
   handleAddComment,
+  handleForgeContext,
   handleIssueDetail,
   handleOpenIssues,
   handleSetLabel,
@@ -19,6 +21,7 @@ const log = createPluginLogger("forges");
 
 export default function contribute(server: PluginServerContext) {
   server.handle(openIssuesContract, handleOpenIssues);
+  server.handle(forgeContextContract, handleForgeContext);
   server.handle(issueDetailContract, handleIssueDetail);
   server.handle(setLabelContract, handleSetLabel);
   server.handle(addCommentContract, handleAddComment);

@@ -7,11 +7,14 @@ import {
   liveScopesFromLabels,
   normalizeIssueNumber,
   parseAgentEnvelope,
+  parseForgejoRemote,
   rankIssues,
   resolveForgeTarget,
   scopeOfLabel,
   type AddCommentInput,
   type AddCommentOutput,
+  type ForgeContextInput,
+  type ForgeContextOutput,
   type IssueDetail,
   type IssueDetailInput,
   type IssueDetailOutput,
@@ -123,6 +126,32 @@ async function resolveRepo(
 
 async function clientFor(host: string): Promise<ForgejoClient> {
   return new ForgejoClient({ host, token: await tokenForHost(host) });
+}
+
+/**
+ * Git-origin forge coordinates for a workspace, exposed independently of the
+ * issues query so the settings form can resolve a host-keyed token even while
+ * issues are loading or unavailable (regression #152). Never throws: an
+ * unreadable directory yields empty coordinates.
+ */
+export async function handleForgeContext(
+  input: ForgeContextInput,
+): Promise<ForgeContextOutput> {
+  const directory =
+    typeof input?.directory === "string" && input.directory.trim()
+      ? input.directory.trim()
+      : null;
+  if (!directory) {
+    return { directory: null, derivedRemote: null, derivedHost: null, derivedRepo: null };
+  }
+  const derivedRemote = await gitOriginForDirectory(directory);
+  const parsed = parseForgejoRemote(derivedRemote);
+  return {
+    directory,
+    derivedRemote,
+    derivedHost: parsed?.host ?? null,
+    derivedRepo: parsed ? `${parsed.owner}/${parsed.repo}` : null,
+  };
 }
 
 /**

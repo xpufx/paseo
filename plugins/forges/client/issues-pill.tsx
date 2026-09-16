@@ -41,6 +41,8 @@ import {
   displayNameForDirectory,
   displayRemoteForApi,
   deriveForgejoAccess,
+  effectiveForgeHost,
+  forgeContextContract,
   forgeTargetsForWorkspace,
   formatIssueCountLabel,
   isValidForgeTarget,
@@ -51,7 +53,6 @@ import {
   issueDetailContract,
   nextStateLabel,
   openIssuesContract,
-  parseForgejoRemote,
   parseMarkdownLite,
   setLabelContract,
   shortLabelName,
@@ -764,6 +765,9 @@ export function ForgejoIssuesView({
   });
   const directory = useDirectory(workspaceId);
   const { settings, updateSettings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
+  // Git-origin context queried separately so the token/name fields render from
+  // persisted settings even while the issues query is loading or unavailable.
+  const forgeContext = useRpcQuery(forgeContextContract, { directory: directory ?? undefined });
   const [forgeDraft, setForgeDraft] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
@@ -772,11 +776,9 @@ export function ForgejoIssuesView({
   const forgeTargets = forgeTargetsForWorkspace(settings, directory);
   const activeForgeValue = activeForgeForDirectory(settings, directory) ?? "";
   const forgeTarget = activeForgeValue;
-  const derivedHost = parseForgejoRemote(data?.derivedRemote)?.host ?? null;
-  const selectedForgeHost = parseForgejoRemote(activeForgeValue)?.host ?? null;
-  const effectiveHost = isValidForgeTarget(activeForgeValue)
-    ? (selectedForgeHost ?? derivedHost)
-    : derivedHost;
+  const derivedRemote =
+    forgeContext.data?.derivedRemote ?? data?.derivedRemote ?? null;
+  const effectiveHost = effectiveForgeHost(activeForgeValue, derivedRemote);
   const activeForgeInvalid = Boolean(activeForgeValue.trim()) && !isValidForgeTarget(activeForgeValue);
   const forgeDraftInvalid = Boolean(forgeDraft?.trim()) && !isValidForgeTarget(forgeDraft);
   const forgeOptions: Array<{ label: string; value: string }> = [
@@ -1013,9 +1015,9 @@ export function ForgejoIssuesView({
                   ))}
                 </View>
               ) : null}
-              {data?.derivedRemote && !activeForgeValue ? (
+              {derivedRemote && !activeForgeValue ? (
                 <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-                  Derived: {displayRemoteForApi(data.derivedRemote)}
+                  Derived: {displayRemoteForApi(derivedRemote)}
                 </Text>
               ) : null}
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
