@@ -10,9 +10,20 @@
  * 4. No plugin has a linked (non-installable) vendored helper tree — warned,
  *    never auto-materialized and never reported healthy
  *
+ * Liveness never depends on a fixed log tail. The whole retained plugin log is
+ * read; a version tag is attributed to the current process (after the last
+ * "Loading plugin"), and when a chatty plugin has evicted every tag the boot
+ * time is compared against the plugin's own code mtime. A missing stamp and
+ * uncommitted working-tree changes are distinct states (`no-stamp`, `dirty`) —
+ * never silently reported as fresh. A plugin is stamp-required when it declares
+ * a `stamp` script or ships a stamp file; that gate is no longer vacuous.
+ *
  * `diagnose()` is strictly read-only. All builds, stamps, vendor syncs, nested
  * helper removals and daemon reloads live in `remediate()`, which is only
  * reached when `--reload`/`--fix` is passed.
+ *
+ * JSON: each `plugins[]` entry gains `dirty`, `dirtyFiles`, `stampRequired`
+ * and `liveSource` ("log-tag" | "process-start" | "-").
  *
  * Usage:
  *   npm run doctor:live             # Check status and print diagnostic table
@@ -104,16 +115,15 @@ function getRepoHead() {
 function getPluginCommit(dir) {
   try {
     const rel = path.relative(ROOT_DIR, dir);
-    const hash = execSync(`git log -n 1 --format="%h" -- "${rel}" ":(exclude)**/version.ts"`, {
-      cwd: ROOT_DIR,
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "ignore"],
-    }).trim();
-    const timeAgo = execSync(`git log -n 1 --format="%cr" -- "${rel}" ":(exclude)**/version.ts"`, {
-      cwd: ROOT_DIR,
-      encoding: "utf8",
-      stdio: ["pipe", "pipe", "ignore"],
-    }).trim();
+    const fields = execSync(
+      `git log -n 1 --format="%h%x09%cr" -- "${rel}" ":(exclude)**/version.ts"`,
+      {
+        cwd: ROOT_DIR,
+        encoding: "utf8",
+        stdio: ["pipe", "pipe", "ignore"],
+      }
+    ).trim();
+    const [hash, timeAgo] = fields.split("\t");
     return { hash: hash || "-", timeAgo: timeAgo || "-" };
   } catch (err) {
     recordDiagnostic(`git log for ${path.relative(ROOT_DIR, dir)}`, err);
@@ -139,24 +149,114 @@ function isAncestorOrEqual(requiredCommit, targetCommit) {
   }
 }
 
-function getStampedVersion(pluginDir) {
+function getVersionFilePath(pluginDir) {
   const possiblePaths = [
     path.join(pluginDir, "shared", "version.ts"),
     path.join(pluginDir, "version.ts"),
     path.join(pluginDir, "src", "version.ts"),
   ];
   for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      const content = fs.readFileSync(p, "utf8");
-      const match = content.match(/PLUGIN_VERSION\s*=\s*["']([^"']+)["']/);
-      if (match) {
-        const full = match[1];
-        const sha = full.includes("+") ? full.split("+")[1] : full;
-        return { full, sha, file: p };
-      }
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+function getStampedVersion(pluginDir) {
+  for (const p of [
+    path.join(pluginDir, "shared", "version.ts"),
+    path.join(pluginDir, "version.ts"),
+    path.join(pluginDir, "src", "version.ts"),
+  ]) {
+    if (!fs.existsSync(p)) continue;
+    const content = fs.readFileSync(p, "utf8");
+    const match = content.match(/PLUGIN_VERSION\s*=\s*["']([^"']+)["']/);
+    if (match) {
+      const full = match[1];
+      const sha = full.includes("+") ? full.split("+")[1] : full;
+      return { full, sha, file: p };
     }
   }
   return null;
+}
+
+// Read-only: a plugin's own uncommitted working-tree changes. Generated stamp
+// and vendored-helper trees are excluded — `--reload` rewrites them by design,
+// so they are not "dirty code". Everything else (tracked edits, new files) is.
+function getPluginDirtyFiles(fullPath) {
+  const rel = path.relative(ROOT_DIR, fullPath);
+  try {
+    const out = execSync(`git status --porcelain -- "${rel}"`, {
+      cwd: ROOT_DIR,
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    return out
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => {
+        let p = line.slice(3);
+        const arrow = p.indexOf(" -> ");
+        if (arrow !== -1) p = p.slice(arrow + 4);
+        return p.replace(/^"|"$/g, "");
+      })
+      .filter((p) => !p.endsWith("/shared/version.ts") && !p.includes("/vendor/"));
+  } catch (err) {
+    recordDiagnostic(`git status for ${rel}`, err);
+    return [];
+  }
+}
+
+function getPluginPackageJson(name, fullPath) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(fullPath, "package.json"), "utf-8"));
+  } catch (err) {
+    recordDiagnostic(`read plugins/${name}/package.json`, err);
+    return null;
+  }
+}
+
+const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
+const CODE_SCAN_SKIP_DIRS = new Set(["node_modules", ".git", "dist", "vendor"]);
+
+// Read-only: newest mtime of the plugin's own runtime source, excluding docs,
+// generated stamps and vendored trees. Rotation-proof fallback evidence for a
+// plugin whose log no longer carries a version tag.
+function getPluginCodeMtime(dir) {
+  let max = 0;
+  const stack = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch (err) {
+      if (!isMissingPath(err)) {
+        recordDiagnostic(`scan ${path.relative(ROOT_DIR, current)}`, err);
+      }
+      continue;
+    }
+    for (const entry of entries) {
+      if (CODE_SCAN_SKIP_DIRS.has(entry.name)) continue;
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (
+        entry.isFile() &&
+        entry.name !== "version.ts" &&
+        CODE_EXTENSIONS.has(path.extname(entry.name))
+      ) {
+        try {
+          const stat = fs.statSync(full);
+          if (stat.mtimeMs > max) max = stat.mtimeMs;
+        } catch (err) {
+          if (!isMissingPath(err)) {
+            recordDiagnostic(`stat ${path.relative(ROOT_DIR, full)}`, err);
+          }
+        }
+      }
+    }
+  }
+  return max;
 }
 
 function getPaseoPlugins() {
@@ -172,24 +272,62 @@ function getPaseoPlugins() {
   }
 }
 
-function getLivePluginVersion(pluginId) {
+const VERSION_TAG_RE = /\[[a-zA-Z0-9_-]+\s+v([0-9a-zA-Z.-]+)\+([0-9a-fA-F]+)\]/g;
+
+function getPluginLogEntries(pluginId) {
   try {
-    const stdout = execSync(`paseo plugin logs "${pluginId}" 2>/dev/null | tail -n 80`, {
+    const stdout = execSync(`paseo plugin logs "${pluginId}" --json`, {
       encoding: "utf8",
       stdio: ["pipe", "pipe", "ignore"],
+      maxBuffer: 32 * 1024 * 1024,
     });
-
-    const loggerMatches = [...stdout.matchAll(/\[[a-zA-Z0-9_-]+\s+v([0-9a-zA-Z.-]+)\+([0-9a-fA-F]+)\]/g)];
-    if (loggerMatches.length > 0) {
-      const lastMatch = loggerMatches[loggerMatches.length - 1];
-      return { version: lastMatch[1], sha: lastMatch[2], source: "log-tag" };
-    }
-
-    return null;
+    const parsed = JSON.parse(stdout);
+    return Array.isArray(parsed) ? parsed : null;
   } catch (err) {
-    recordDiagnostic(`paseo plugin logs ${pluginId}`, err);
+    recordDiagnostic(`paseo plugin logs ${pluginId} --json`, err);
     return null;
   }
+}
+
+// Reads the whole retained log instead of a fixed tail. A chatty plugin can
+// evict its boot banner from the ring buffer, so the version tag is first
+// attributed to the current process (after the last "Loading plugin"); when no
+// tag survives, the boot timestamp is returned as a rotation-proof fallback.
+function getLivePluginInfo(pluginId) {
+  const entries = getPluginLogEntries(pluginId);
+  if (!entries || entries.length === 0) return null;
+
+  let bootIndex = -1;
+  for (let i = 0; i < entries.length; i++) {
+    const message = entries[i].message || "";
+    if (/\[paseo\]\s+Loading plugin/.test(message)) bootIndex = i;
+  }
+  if (bootIndex < 0) {
+    for (let i = 0; i < entries.length; i++) {
+      if (/Initializing plugin/.test(entries[i].message || "")) bootIndex = i;
+    }
+  }
+
+  let tag = null;
+  for (let i = entries.length - 1; i >= Math.max(bootIndex, 0); i--) {
+    const matches = [...(entries[i].message || "").matchAll(VERSION_TAG_RE)];
+    if (matches.length > 0) {
+      tag = matches[matches.length - 1];
+      break;
+    }
+  }
+
+  const bootEntry = bootIndex >= 0 ? entries[bootIndex] : null;
+  const parsedStart = bootEntry ? Date.parse(bootEntry.timestamp) : NaN;
+  const processStartedAt = Number.isFinite(parsedStart) ? parsedStart : null;
+
+  if (!tag && !processStartedAt) return null;
+  return {
+    version: tag ? tag[1] : null,
+    sha: tag ? tag[2] : null,
+    source: tag ? "log-tag" : "process-start",
+    processStartedAt,
+  };
 }
 
 function formatDuration(ms) {
@@ -342,14 +480,37 @@ async function diagnose() {
 
     const pluginId = configured ? configured.id : name;
     const daemonRunning = configured && configured.status === "running";
-    const liveInfo = configured ? getLivePluginVersion(pluginId) : null;
+    const liveInfo = configured ? getLivePluginInfo(pluginId) : null;
+
+    // A plugin is stamp-required when it opts into the regime (a `stamp` script)
+    // or already carries a stamp file. The check is no longer vacuously true when
+    // the file is missing, so an unstamped plugin can never read as fresh.
+    const pkg = getPluginPackageJson(name, fullPath);
+    const stampRequired = Boolean(pkg?.scripts?.stamp) || getVersionFilePath(fullPath) !== null;
+    const stampMissing = stampRequired && !stamped;
 
     // Check stamp freshness: stamped SHA must be at least as new as the latest code commit
-    const stampFresh = !stamped || isAncestorOrEqual(pluginCommit.hash, stamped.sha);
+    const stampFresh = stamped ? isAncestorOrEqual(pluginCommit.hash, stamped.sha) : false;
     const stampStale = Boolean(stamped) && !stampFresh;
 
-    // Check live daemon freshness: running SHA must be at least as new as the latest code commit
-    const liveFresh = liveInfo ? isAncestorOrEqual(pluginCommit.hash, liveInfo.sha) : false;
+    // Check live daemon freshness. A retained version tag is commit-based; with
+    // no tag left, the process boot time vs the plugin's own code mtime still
+    // reflects the code the daemon actually loaded.
+    let liveFresh = false;
+    let liveSource = null;
+    if (liveInfo?.sha) {
+      liveFresh = isAncestorOrEqual(pluginCommit.hash, liveInfo.sha);
+      liveSource = "log-tag";
+    } else if (liveInfo?.processStartedAt) {
+      const codeAt = getPluginCodeMtime(fullPath);
+      if (codeAt) {
+        liveFresh = liveInfo.processStartedAt >= codeAt;
+        liveSource = "process-start";
+      }
+    }
+
+    const dirtyFiles = getPluginDirtyFiles(fullPath);
+    const dirty = dirtyFiles.length > 0;
 
     let status = "ready";
     let message = "Live & up-to-date";
@@ -361,17 +522,29 @@ async function diagnose() {
       status = "stopped";
       message = `Daemon ${configured.status || "stopped"}`;
       result.ready = false;
-    } else if (liveInfo && !liveFresh) {
+    } else if (liveSource && !liveFresh) {
       status = "stale-daemon";
-      message = `Running ${liveInfo.sha}, needs >= ${pluginCommit.hash}`;
+      message = liveInfo.sha
+        ? `Running ${liveInfo.sha}, needs >= ${pluginCommit.hash}`
+        : `Started before ${pluginCommit.hash}`;
       result.ready = false;
     } else if (stampStale) {
       status = "stale-stamp";
       message = `version.ts at ${stamped.sha}, needs >= ${pluginCommit.hash}`;
       result.ready = false;
-    } else if (!liveInfo) {
+    } else if (stampMissing) {
+      status = "no-stamp";
+      message = "shared/version.ts is missing (stamp required)";
+      result.ready = false;
+    } else if (dirty) {
+      // Only reached when the daemon and stamp would otherwise read as fresh:
+      // uncommitted code is a distinct, non-fresh state (never a silent pass).
+      status = "dirty";
+      message = `${dirtyFiles.length} uncommitted change(s) in plugins/${name}`;
+      result.ready = false;
+    } else if (!liveSource) {
       status = "running";
-      message = "Daemon running";
+      message = "Daemon running (no liveness evidence)";
     }
 
     // A linked vendor tree is not installable and must never read as healthy.
@@ -388,6 +561,10 @@ async function diagnose() {
       pluginId,
       status,
       vendorLinked: vendorIsLinked,
+      dirty,
+      dirtyFiles: dirtyFiles.length,
+      stampRequired,
+      liveSource: liveSource || "-",
       repoHead: pluginCommit.hash,
       repoTimeAgo: pluginCommit.timeAgo,
       stampedSha: stamped?.sha || "-",
@@ -399,8 +576,7 @@ async function diagnose() {
     // SDK + helper-dep audit: every plugin should pin the same
     // @getpaseo/plugin range, and none should take the helper from npm
     // post-vendoring (vendored trees are the install path).
-    try {
-      const pkg = JSON.parse(fs.readFileSync(path.join(fullPath, "package.json"), "utf-8"));
+    if (pkg) {
       const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
       pluginData.sdk = deps["@getpaseo/plugin"] || "-";
       pluginData.helperDep = deps["paseo-plugin-helper"] || null;
@@ -408,8 +584,7 @@ async function diagnose() {
         result.npmHelperDeps.push({ plugin: name, range: pluginData.helperDep });
         result.ready = false;
       }
-    } catch (err) {
-      recordDiagnostic(`read plugins/${name}/package.json`, err);
+    } else {
       pluginData.sdk = "?";
       pluginData.helperDep = null;
     }
@@ -578,9 +753,12 @@ function output(result) {
   for (const p of result.plugins) {
     let statColor = colors.green;
     let icon = "✔";
-    if (p.status === "stale-daemon" || p.status === "stale-stamp") {
+    if (p.status === "stale-daemon" || p.status === "stale-stamp" || p.status === "no-stamp") {
       statColor = colors.yellow;
       icon = "▲";
+    } else if (p.status === "dirty") {
+      statColor = colors.yellow;
+      icon = "✎";
     } else if (p.status === "stopped") {
       statColor = colors.red;
       icon = "✖";
@@ -636,6 +814,14 @@ function output(result) {
       for (const h of result.npmHelperDeps) {
         console.log(`  ⚠️  plugins/${h.plugin} still depends on npm paseo-plugin-helper@${h.range} (expected vendored, no dep)`);
       }
+    }
+    const dirtyPlugins = result.plugins.filter((p) => p.status === "dirty");
+    if (dirtyPlugins.length > 0) {
+      console.log(`  ⚠️  Uncommitted plugin code (commit before refreshing): ${dirtyPlugins.map((p) => p.name).join(", ")}`);
+    }
+    const unstampedPlugins = result.plugins.filter((p) => p.status === "no-stamp");
+    if (unstampedPlugins.length > 0) {
+      console.log(`  ⚠️  Missing version stamp: ${unstampedPlugins.map((p) => p.name).join(", ")} (generate shared/version.ts)`);
     }
     {
       const drifted = result.plugins.filter((p) => p.vendorDrift);
