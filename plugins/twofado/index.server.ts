@@ -1,6 +1,4 @@
 import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { PluginStorage, createPluginLogger, registerSettingsRpc } from "./server/vendor/paseo-plugin-helper/index.ts";
 import {
@@ -45,12 +43,7 @@ function migrateLegacySettingsFile(storage: PluginStorage<ApprovalSettingsValues
 }
 
 export default function contribute(server: PluginServerContext) {
-  // paseo-plugin-helper@beta.10 defaults PluginStorage to ~/.paseo/<id>/, but
-  // the live settings file is ~/.paseo/xpufx-plugins/twofado/settings.json
-  // (newer helper namespace default). Without baseDir, get() reads a missing
-  // file and returns empty defaults, so the settings screen stays empty.
   const storage = new PluginStorage("twofado", "settings.json", {
-    baseDir: path.join(os.homedir(), ".paseo", "xpufx-plugins"),
     defaultData: approvalSettings.defaultSettings,
     schema: approvalSettings.schema,
   });

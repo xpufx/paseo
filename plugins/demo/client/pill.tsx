@@ -1184,8 +1184,8 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
           description="Interactive design system showcase and daemon runtime verification suite for paseo-plugin-helper."
           version={data?.version ?? PLUGIN_VERSION}
           author="xpufx"
-          repository="https://github.com/xpufx/paseo-plugin-helper"
-          issues="https://github.com/xpufx/paseo-plugin-helper/issues"
+          repository="https://github.com/xpufx/paseo-helper-demo"
+          issues="https://github.com/xpufx/paseo-helper-demo/issues"
           license="MIT"
           extraItems={[
             { label: "Daemon Verified Port", value: `${data?.daemonPort ?? 4280}`, copyable: true },

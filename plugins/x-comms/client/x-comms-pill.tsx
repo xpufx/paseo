@@ -157,7 +157,7 @@ function XCommsModalContent({ theme, agentId }: { theme: RenderModalProps["theme
           name="X-comms"
           description="Cross-daemon agent conversation over Paseo Relay."
           version="0.3.0"
-          repository="https://github.com/xpufx/paseo-cross-daemon-comms.git"
+          repository="https://github.com/xpufx/paseo-x-comms"
           license="Apache-2.0"
           density="tiny"
         />
