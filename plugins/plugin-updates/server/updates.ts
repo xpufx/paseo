@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { listPlugins, safeSpawn, type PaseoPluginInfo, type SafeSpawnResult } from "paseo-plugin-helper/server";
-import { shortHash } from "../shared/updates";
+import { deriveSourceUrl, shortHash } from "../shared/updates";
 import type {
   PluginUpdate,
   PluginUpdateActionResult,
@@ -161,6 +161,43 @@ async function readJson(
   } catch {
     return null;
   }
+}
+
+interface PackageUrls {
+  repositoryUrl: string | null;
+  homepage: string | null;
+}
+
+// package.json `repository` is either a string or `{ url }`; treat both, and
+// swallow any read/parse failure as "no metadata".
+async function readPackageUrls(pluginPath: string | undefined, readFile: ReadFile): Promise<PackageUrls> {
+  if (!pluginPath) return { repositoryUrl: null, homepage: null };
+  const pkg = await readJson(readFile, path.join(pluginPath, "package.json"));
+  if (!pkg) return { repositoryUrl: null, homepage: null };
+  const repository = pkg.repository;
+  const repositoryUrl =
+    typeof repository === "string"
+      ? asString(repository)
+      : repository && typeof repository === "object"
+        ? asString((repository as Record<string, unknown>).url)
+        : null;
+  return { repositoryUrl, homepage: asString(pkg.homepage) };
+}
+
+async function resolveSourceUrl(
+  plugin: PaseoPluginInfo,
+  identity: PluginIdentity,
+  resolution: RefResolution,
+  deps: ProbeDeps,
+): Promise<string | null> {
+  const urls = await readPackageUrls(plugin.path, deps.readFile ?? defaultReadFile);
+  return deriveSourceUrl({
+    repositoryUrl: urls.repositoryUrl,
+    homepage: urls.homepage,
+    remoteUrl: resolution.remoteUrl,
+    ref: resolution.ref,
+    subdir: identity.subdir,
+  });
 }
 
 async function loadManagedRecords(deps: ProbeDeps): Promise<Map<string, ManagedRecord>> {
@@ -701,6 +738,7 @@ function emptyRow(plugin: PaseoPluginInfo, identity: PluginIdentity, resolution:
     id: plugin.id,
     path: plugin.path,
     source: plugin.source ?? null,
+    sourceUrl: null,
     repoRoot: identity.repoRoot,
     subdir: identity.subdir,
     ref: resolution.ref,
@@ -725,6 +763,7 @@ function notARepoRow(plugin: PaseoPluginInfo): PluginUpdate {
     id: plugin.id,
     path: plugin.path,
     source: plugin.source ?? null,
+    sourceUrl: null,
     repoRoot: null,
     subdir: null,
     ref: null,
@@ -756,9 +795,14 @@ async function probeOne(
   context: ProbeContext,
 ): Promise<PluginUpdate> {
   const plugin = identity.plugin;
-  if (!identity.repoRoot) return notARepoRow(plugin);
+  if (!identity.repoRoot) {
+    const notARepo = notARepoRow(plugin);
+    notARepo.sourceUrl = await resolveSourceUrl(plugin, identity, resolution, context.deps);
+    return notARepo;
+  }
 
   const row = emptyRow(plugin, identity, resolution);
+  row.sourceUrl = await resolveSourceUrl(plugin, identity, resolution, context.deps);
 
   const local = await readLocalState(identity, context.runner);
   row.localCommit = local.localCommit;
@@ -877,6 +921,7 @@ export async function checkInstalledPlugins(
           id: "plugin-manager",
           path: "",
           source: null,
+          sourceUrl: null,
           repoRoot: null,
           subdir: null,
           ref: null,
@@ -929,6 +974,7 @@ async function scanOrphanedDirs(
       id: `orphaned:${entry.name}`,
       path: dir,
       source: null,
+      sourceUrl: null,
       repoRoot: null,
       subdir: null,
       ref: null,

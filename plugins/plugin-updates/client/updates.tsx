@@ -20,7 +20,7 @@ import {
 } from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { ActivityIndicator, Linking, Text, View } from "react-native";
 import {
   pluginUpdatesCheckRpc,
   pluginUpdatesUpdateAllRpc,
@@ -114,6 +114,7 @@ function PluginRow({
   const note = reportOnlyNote(plugin);
   const isOrphan = plugin.status === "orphaned";
   const version = hashValue(plugin.workingTree ?? plugin.localTree);
+  const sourceUrl = plugin.sourceUrl;
   // Errors carry actionable text; clamp only the one-line status sentences.
   const detailLines = plugin.error ? undefined : 1;
   return (
@@ -122,6 +123,17 @@ function PluginRow({
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
           <Text style={{ color: colors.foreground, ...typography.bodyStrong, flex: 1 }}>{plugin.id}</Text>
+          {sourceUrl ? (
+            <Button
+              icon="ExternalLink"
+              variant="ghost"
+              size="sm"
+              accessibilityLabel="Open source"
+              onPress={() => {
+                void Linking.openURL(sourceUrl).catch(() => {});
+              }}
+            />
+          ) : null}
           {plugin.dirty === true && !isOrphan ? <Badge label="dirty" variant="warning" dot /> : null}
           {plugin.updateAvailable && !isOrphan ? (
             <Button

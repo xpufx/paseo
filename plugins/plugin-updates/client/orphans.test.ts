@@ -8,6 +8,7 @@ function plugin(id: string, status: PluginUpdate["status"], path = `/managed/${i
     id,
     path,
     source: null,
+    sourceUrl: null,
     repoRoot: null,
     subdir: null,
     ref: null,
