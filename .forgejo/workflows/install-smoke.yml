@@ -10,8 +10,11 @@
 #                    remote; no GitHub push happens here
 #   4. install     — `paseo plugin add file://<staged> --ref <commit>` for every
 #                    plugin dir, asserting status=running
-#   5. mirror push — on `main` only, after 3+4 pass, push the same scoped tree to
-#                    the public GitHub mirror with secrets.GITHUB_MIRROR_TOKEN
+#   5. mirror push — only on an explicit `workflow_dispatch` with `mirror: true`,
+#                    after 3+4 pass, push the same scoped tree to the public
+#                    GitHub mirror with secrets.GITHUB_MIRROR_TOKEN. Never on a
+#                    plain push: the gate verifies every push, the mirror moves
+#                    on demand.
 #
 # `helper` (packages/paseo-plugin-helper) is a workspace package, not a plugins/
 # directory, so it is part of the staged mirror target set (it must survive the
@@ -45,6 +48,13 @@ on:
         required: false
         default: "mcp-tools forges x-comms slash twofado plugin-updates top demo"
         type: string
+      mirror:
+        description: >-
+          Also push the staged tree to the public GitHub mirror. Default false:
+          the gate only verifies. Set true to release the scoped tree.
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [main]
   pull_request:
@@ -224,13 +234,11 @@ jobs:
           mirror-ref: ${{ steps.source.outputs.ref }}
           plugins: ${{ steps.source.outputs.plugins }}
 
-      # Operator-authorized auto-push. The `push` trigger is branch-limited to
-      # `main`, so a `push` event here is always a main push, and this step only
-      # runs after the staged-tree smoke above passed. A missing secret is a
-      # warning, not a failure: the gate still reports green and the operator is
-      # told what to add.
-      - name: Push staged tree to the public GitHub mirror (main only)
-        if: ${{ github.event_name == 'push' }}
+      # On-demand only: the gate verifies every push/PR, but the public mirror
+      # moves only when dispatched with `mirror: true`, after the staged-tree
+      # smoke above passed. A missing secret is a warning, not a failure.
+      - name: Push staged tree to the public GitHub mirror (on demand)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mirror == 'true' }}
         env:
           GITHUB_MIRROR_TOKEN: ${{ secrets.GITHUB_MIRROR_TOKEN }}
         run: |
