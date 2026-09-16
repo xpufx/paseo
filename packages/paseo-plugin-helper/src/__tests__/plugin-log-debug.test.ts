@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   createPluginLogger,
+  isDevelopmentEnv,
   isProductionEnv,
   resolveDefaultMinLevel,
   resolveMinLevelFromEnv,
@@ -30,21 +31,40 @@ describe("resolveMinLevelFromEnv", () => {
 });
 
 describe("resolveDefaultMinLevel", () => {
-  it("defaults to debug when developing (NODE_ENV unset)", () => {
-    expect(resolveDefaultMinLevel({} as never)).toBe("debug");
+  it("defaults to info when no env is set", () => {
+    expect(resolveDefaultMinLevel({} as never)).toBe("info");
+  });
+
+  it("enables debug with PASEO_DEBUG=1", () => {
+    expect(resolveDefaultMinLevel({ PASEO_DEBUG: "1" } as never)).toBe("debug");
   });
 
   it("stays quiet (info) in production", () => {
     expect(resolveDefaultMinLevel({ NODE_ENV: "production" } as never)).toBe("info");
   });
 
+  it("enables debug when NODE_ENV is explicitly development", () => {
+    expect(resolveDefaultMinLevel({ NODE_ENV: "development" } as never)).toBe("debug");
+  });
+
   it("lets explicit env win in both modes", () => {
+    expect(
+      resolveDefaultMinLevel({ NODE_ENV: "development", PASEO_LOG_LEVEL: "error" } as never),
+    ).toBe("error");
     expect(
       resolveDefaultMinLevel({ NODE_ENV: "production", PASEO_LOG_LEVEL: "debug" } as never),
     ).toBe("debug");
     expect(
       resolveDefaultMinLevel({ PASEO_PLUGIN_LOG_LEVEL: "error" } as never),
     ).toBe("error");
+  });
+
+  it("isDevelopmentEnv only treats explicit dev values as development", () => {
+    expect(isDevelopmentEnv({} as never)).toBe(false);
+    expect(isDevelopmentEnv({ NODE_ENV: "production" } as never)).toBe(false);
+    expect(isDevelopmentEnv({ NODE_ENV: "test" } as never)).toBe(false);
+    expect(isDevelopmentEnv({ NODE_ENV: "development" } as never)).toBe(true);
+    expect(isDevelopmentEnv({ NODE_ENV: "dev" } as never)).toBe(true);
   });
 
   it("isProductionEnv only treats production as production", () => {
@@ -77,12 +97,23 @@ describe("createPluginLogger", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("emits debug by default when developing", () => {
+  it("suppresses debug by default with no env set (shipped default)", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     const logger = createPluginLogger("test-plugin", {
       banner: false,
       version: "0.0.0-test",
       minLevel: resolveDefaultMinLevel({} as never),
+    });
+    logger.debug("hidden-by-default");
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("emits debug when NODE_ENV is explicitly development", () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logger = createPluginLogger("test-plugin", {
+      banner: false,
+      version: "0.0.0-test",
+      minLevel: resolveDefaultMinLevel({ NODE_ENV: "development" } as never),
     });
     logger.debug("visible-dev");
     expect(spy).toHaveBeenCalledWith(expect.stringContaining("[DEBUG] visible-dev"));

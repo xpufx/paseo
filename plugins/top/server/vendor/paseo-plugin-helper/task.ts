@@ -1,9 +1,16 @@
+import { createPluginLogger, type PluginLogger } from "./logger";
+
 export interface PeriodicTaskOptions {
   intervalMs: number;
   task: () => Promise<void> | void;
   onError?: (err: unknown, failureCount: number) => void;
   runImmediately?: boolean;
   maxBackoffMs?: number;
+  /**
+   * Logger for suppressed failures. Defaults to a level-gated
+   * `periodic-task` logger so debug lines stay silent unless debug is enabled.
+   */
+  logger?: PluginLogger;
 }
 
 export interface PeriodicTaskHandle {
@@ -30,6 +37,14 @@ export function createPeriodicTask(options: PeriodicTaskOptions): PeriodicTaskHa
   let inFlight = false;
   let failureCount = 0;
 
+  let taskLogger: PluginLogger | undefined;
+  function taskLog(): PluginLogger {
+    taskLogger ??= options.logger
+      ? options.logger.child("periodic-task")
+      : createPluginLogger("periodic-task", { banner: false });
+    return taskLogger;
+  }
+
   async function execute() {
     if (!running || inFlight) return;
     inFlight = true;
@@ -44,13 +59,13 @@ export function createPeriodicTask(options: PeriodicTaskOptions): PeriodicTaskHa
           onError(err, failureCount);
         } catch (suppressed) {
           // Prevent onError handler from breaking task loop, but stay visible in dev logs.
-          console.debug(
-            `[periodic-task] onError handler failed: ${suppressed instanceof Error ? suppressed.message : String(suppressed)}`,
+          taskLog().debug(
+            `onError handler failed: ${suppressed instanceof Error ? suppressed.message : String(suppressed)}`,
           );
         }
       } else {
-        console.debug(
-          `[periodic-task] suppressed error (failure ${failureCount}): ${err instanceof Error ? err.message : String(err)}`,
+        taskLog().debug(
+          `suppressed error (failure ${failureCount}): ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     } finally {

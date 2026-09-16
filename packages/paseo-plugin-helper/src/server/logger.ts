@@ -39,26 +39,35 @@ export function resolveMinLevelFromEnv(
 }
 
 /**
- * True when running in production (quiet default). Everything else counts as
- * "developing": NODE_ENV unset, empty, or anything other than "production"
- * (development, test, etc.). Deliberately simple so no env var is required
- * for debug output while developing.
+ * True when running in production. Retained for callers that need a
+ * production check; note the default log level no longer keys off this.
  */
 export function isProductionEnv(env: NodeJS.ProcessEnv = process.env): boolean {
   return (env.NODE_ENV ?? "").trim().toLowerCase() === "production";
 }
 
 /**
+ * True only when `NODE_ENV` is explicitly a development value
+ * (`development`/`dev`). Unset, empty, `production`, and anything else
+ * (e.g. `test`) all count as quiet, so a shipped plugin defaults to info
+ * without any env var set.
+ */
+export function isDevelopmentEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const nodeEnv = (env.NODE_ENV ?? "").trim().toLowerCase();
+  return nodeEnv === "development" || nodeEnv === "dev";
+}
+
+/**
  * Default rule (documented for operators):
  * explicit `PASEO_PLUGIN_LOG_LEVEL`/`PASEO_LOG_LEVEL`/`PASEO_DEBUG` always wins;
- * otherwise debug when developing (non-production NODE_ENV), info in production.
- * So `PASEO_DEBUG=1` is never required in dev — set an explicit level only to
- * override (e.g. silence a noisy dev loop or debug a production plugin).
+ * otherwise quiet (`info`) — including when no env var is set at all, so a
+ * shipped plugin never emits debug logs by default. Debug only when `NODE_ENV`
+ * is explicitly a development value (`development`/`dev`).
  */
 export function resolveDefaultMinLevel(
   env: NodeJS.ProcessEnv = process.env,
 ): LogLevel {
-  return resolveMinLevelFromEnv(env) ?? (isProductionEnv(env) ? "info" : "debug");
+  return resolveMinLevelFromEnv(env) ?? (isDevelopmentEnv(env) ? "debug" : "info");
 }
 
 export interface PluginLoggerOptions {
@@ -81,7 +90,7 @@ export interface PluginLoggerOptions {
 
   /**
    * Minimum log level to print. Defaults to resolveDefaultMinLevel():
-   * debug when developing (non-production NODE_ENV), info in production.
+   * info unless NODE_ENV is explicitly development (or an explicit level is set).
    */
   minLevel?: LogLevel;
 
