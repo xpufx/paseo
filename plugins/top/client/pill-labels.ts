@@ -207,62 +207,193 @@ export function formatIdlePillLabel(
   return `idle ${days}d`;
 }
 
-export function formatSegmentLabel(item: PillItemType, snap: SegmentSnapshot): string {
+export function formatSegmentIcon(item: PillItemType, snap?: SegmentSnapshot): string {
+  if (item === "agent_activity") {
+    return snap?.agent?.status === "running" ? "Activity" : "Clock";
+  }
+  const def = METRIC_DEFINITIONS.find((d) => d.id === item);
+  return def?.icon ?? "Activity";
+}
+
+/**
+ * Theme-independent color slot for one piece of a pill segment. The renderer
+ * maps these to concrete theme colors so the composer pill (host-rendered) and
+ * the in-product pill fallback share one description of the same metric.
+ */
+export type SegmentTone =
+  | "foreground"
+  | "muted"
+  | "accent"
+  | "success"
+  | "danger"
+  | "warning"
+  | "cpu"
+  | "mem"
+  | "none";
+
+/**
+ * One pill metric split into its visual pieces. `describeSegment` is the single
+ * source of truth: `formatSegmentLabel` flattens it to the host label string and
+ * the pill renderer lays it out, so label text and inline rendering cannot drift.
+ */
+export interface SegmentDescriptor {
+  icon: string;
+  /** "none" keeps the inline icon hidden (the metric is text-only in-pill). */
+  iconTone: SegmentTone;
+  /** Leading glyph, e.g. the MCP health dot. Excluded from the flat label. */
+  leading?: string;
+  leadingTone?: SegmentTone;
+  prefix?: string;
+  prefixTone?: SegmentTone;
+  text: string;
+  tone: SegmentTone;
+  separator?: string;
+  trailing?: string;
+  trailingTone?: SegmentTone;
+}
+
+export function describeSegment(
+  item: PillItemType,
+  snap: SegmentSnapshot = {},
+): SegmentDescriptor {
   const { data, agent, agentId, worktreeLocationText } = snap;
   const def = METRIC_DEFINITIONS.find((d) => d.id === item);
+  const icon = formatSegmentIcon(item, snap);
+  const prefix = def?.shortLabel ? `${def.shortLabel} ` : "";
   switch (item) {
     case "branch":
-      return data?.branch ?? "--";
+      return { icon, iconTone: "accent", text: data?.branch ?? "--", tone: "foreground" };
     case "worktree":
-      return worktreeLocationText || "--";
+      return {
+        icon,
+        iconTone: "accent",
+        text: worktreeLocationText || "--",
+        tone: "foreground",
+      };
     case "agent_title":
-      return agent?.title ?? "Agent";
+      return { icon, iconTone: "accent", text: agent?.title ?? "Agent", tone: "foreground" };
     case "agent":
-      return agent?.model || agent?.provider || "Agent";
+      return {
+        icon,
+        iconTone: "accent",
+        text: agent?.model || agent?.provider || "Agent",
+        tone: "foreground",
+      };
     case "agent_provider":
-      return agent?.provider ?? "Provider";
-    case "agent_activity":
-      return formatIdlePillLabel(agent?.status, agent?.lastActivityAt);
+      return {
+        icon,
+        iconTone: "accent",
+        text: agent?.provider ?? "Provider",
+        tone: "foreground",
+      };
+    case "agent_activity": {
+      const running = agent?.status === "running";
+      return {
+        icon,
+        iconTone: running ? "success" : "muted",
+        text: formatIdlePillLabel(agent?.status, agent?.lastActivityAt),
+        tone: running ? "success" : "foreground",
+      };
+    }
     case "agent_id":
-      if (agentId && agentId.length > 7) return agentId.slice(0, 7);
-      return agentId ?? "--";
-    case "load": {
-      const prefix = def?.shortLabel ? `${def.shortLabel} ` : "";
-      const val = data?.loadAvg?.[0] !== undefined ? data.loadAvg[0].toFixed(2) : "--";
-      return `${prefix}${val}`;
-    }
-    case "uptime": {
-      const prefix = def?.shortLabel ? `${def.shortLabel} ` : "";
-      const val = data?.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "--";
-      return `${prefix}${val}`;
-    }
+      return {
+        icon,
+        iconTone: "accent",
+        text: agentId && agentId.length > 7 ? agentId.slice(0, 7) : agentId ?? "--",
+        tone: "foreground",
+      };
+    case "load":
+      return {
+        icon,
+        iconTone: "none",
+        prefix,
+        prefixTone: "muted",
+        text: data?.loadAvg?.[0] !== undefined ? data.loadAvg[0].toFixed(2) : "--",
+        tone: "cpu",
+      };
+    case "uptime":
+      return {
+        icon,
+        iconTone: "none",
+        prefix,
+        prefixTone: "muted",
+        text: data?.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "--",
+        tone: "foreground",
+      };
     case "mcp": {
       const mcp = data?.mcp;
-      if (mcp) return `${mcp.healthy}/${mcp.total} MCP`;
-      return "MCP -";
+      const live = mcp && !mcp.isStale;
+      const leadingTone: SegmentTone = live
+        ? mcp.down > 0
+          ? "danger"
+          : mcp.degraded > 0 || mcp.healthy !== mcp.total
+            ? "warning"
+            : "success"
+        : "muted";
+      return {
+        icon,
+        iconTone: "none",
+        leading: live ? "●" : "○",
+        leadingTone,
+        text: mcp ? `${mcp.healthy}/${mcp.total} MCP` : "MCP -",
+        tone: "foreground",
+      };
     }
     case "changes": {
       const last = data?.lastTurn;
       const hasData = last && (last.gitInsertions != null || last.gitDeletions != null);
-      const prefix = def?.shortLabel ? `${def.shortLabel} ` : "";
-      return hasData ? `${prefix}+${last.gitInsertions ?? 0}/-${last.gitDeletions ?? 0}` : `${prefix}--`;
+      return {
+        icon,
+        iconTone: "none",
+        prefix,
+        prefixTone: "muted",
+        text: hasData ? `+${last.gitInsertions ?? 0}/-${last.gitDeletions ?? 0}` : "--",
+        tone: "foreground",
+      };
     }
     case "tokens": {
       const metrics = extractTokenMetrics(snap);
-      return formatTokensLabel(metrics, def?.shortLabel);
+      if (!metrics) {
+        return {
+          icon,
+          iconTone: "none",
+          prefix,
+          prefixTone: "muted",
+          text: formatTokensLabel(metrics, ""),
+          tone: "muted",
+        };
+      }
+      return {
+        icon,
+        iconTone: "none",
+        text: formatTokensLabel(metrics, ""),
+        tone: "foreground",
+      };
     }
     case "tools": {
       const last = data?.lastTurn;
       const hasData = last && last.toolCalls != null;
-      const prefix = def?.shortLabel ? `${def.shortLabel} ` : "";
-      return hasData
-        ? `${prefix}${last.toolCalls}${last.toolErrors ? ` (${last.toolErrors} err)` : ""}`
-        : `${prefix}--`;
+      return {
+        icon,
+        iconTone: "none",
+        prefix,
+        prefixTone: "muted",
+        text: hasData
+          ? `${last.toolCalls}${last.toolErrors ? ` (${last.toolErrors} err)` : ""}`
+          : "--",
+        tone: "foreground",
+      };
     }
     case "turns": {
       const last = data?.lastTurn;
-      const prefix = def?.shortLabel ? `${def.shortLabel} ` : "";
-      return last?.turnCount != null ? `${prefix}${last.turnCount}` : `${prefix}--`;
+      return {
+        icon,
+        iconTone: "none",
+        prefix,
+        prefixTone: "muted",
+        text: last?.turnCount != null ? `${last.turnCount}` : "--",
+        tone: "foreground",
+      };
     }
     case "cpu_ram":
     default: {
@@ -271,17 +402,22 @@ export function formatSegmentLabel(item: PillItemType, snap: SegmentSnapshot): s
           ? formatBytes(data.memoryUsedBytes, { compact: true, decimals: 1 })
           : "--";
       const cpu = data?.cpuUsagePercent !== undefined ? `${data.cpuUsagePercent}%` : "--";
-      return `${cpu} · ${ram}`;
+      return {
+        icon,
+        iconTone: "none",
+        text: cpu,
+        tone: "cpu",
+        separator: " · ",
+        trailing: ram,
+        trailingTone: "mem",
+      };
     }
   }
 }
 
-export function formatSegmentIcon(item: PillItemType, snap?: SegmentSnapshot): string {
-  if (item === "agent_activity") {
-    return snap?.agent?.status === "running" ? "Activity" : "Clock";
-  }
-  const def = METRIC_DEFINITIONS.find((d) => d.id === item);
-  return def?.icon ?? "Activity";
+export function formatSegmentLabel(item: PillItemType, snap: SegmentSnapshot): string {
+  const d = describeSegment(item, snap);
+  return `${d.prefix ?? ""}${d.text}${d.separator ?? ""}${d.trailing ?? ""}`;
 }
 
 export function enabledItemsForSettings(settings: TopSettings): PillItemType[] {

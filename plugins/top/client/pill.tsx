@@ -1,12 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import {
-  StyleSheet,
-  Text,
-  View,
-  Pressable,
-  type StyleProp,
-  type ViewStyle,
-} from "react-native";
+import { Text, View } from "react-native";
 import type { PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import {
   useWorkspace,
@@ -19,10 +12,12 @@ import {
   registerComposerPill,
   type ComposerPillRegistrar,
   type PillLiveContext,
+  type RegisterComposerPillOptions,
   ModalBody,
   Card,
   CardHeader,
   Button,
+  Row,
   KeyValue,
   KeyValueGroup,
   ProgressBar,
@@ -70,8 +65,6 @@ import {
   targetFromCheckboxes,
   type SystemResources,
   type TopSettings,
-  type PillMode,
-  type CustomPillDefinition,
   type CustomPillStateOutput,
   type MetricId,
   type SurfaceTarget,
@@ -79,22 +72,23 @@ import {
 import { PLUGIN_VERSION } from "../shared/version";
 import { TopDashboardSurface } from "./surface";
 import { useTopResourceQuery, useCustomPillsQuery } from "./resources-query";
+import { ChoiceChips } from "./settings-ui";
 import {
   buildAllLabel,
+  describeSegment,
   enabledItemsForSettings,
   extractTokenMetrics,
   formatCompactTokens,
   formatSegmentIcon,
   formatSegmentLabel,
-  formatTokensLabel,
   nextCycleItem,
+  type PillItemType,
   type SegmentSnapshot,
+  type SegmentTone,
   type TopAgentSnapshot,
 } from "./pill-labels";
 
 const EMPTY_PARAMS = {};
-
-const PILL_HIT_SLOP = { top: 6, bottom: 6, left: 4, right: 4 };
 
 function formatWorktreeLocation(dir: string | null | undefined): string {
   if (!dir) return "";
@@ -139,22 +133,6 @@ function formatIdleDuration(isoString: string | null | undefined): string {
   return `${days}d ${hours % 24}h`;
 }
 
-function formatIdlePill(status: string | undefined, isoString: string | null | undefined): string {
-  if (status === "running") return "active";
-  if (!isoString) return status || "--";
-  const time = new Date(isoString).getTime();
-  if (isNaN(time)) return "--";
-  const diffMs = Math.max(0, Date.now() - time);
-  const secs = Math.floor(diffMs / 1000);
-  if (secs < 60) return `idle ${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `idle ${mins}m`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `idle ${hours}h`;
-  const days = Math.floor(hours / 24);
-  return `idle ${days}d`;
-}
-
 const CPU_THRESHOLDS: MetricThresholds = { warning: 60, danger: 85 };
 const MEM_THRESHOLDS: MetricThresholds = { warning: 70, danger: 85 };
 
@@ -164,6 +142,11 @@ const TABS = [
   { id: "settings", label: "Settings", shortLabel: "Settings", icon: "Sliders" },
   { id: "about", label: "About", shortLabel: "About", icon: "Info" },
 ];
+
+const TIMELINE_CADENCE_OPTIONS = Array.from({ length: 11 }, (_, n) => ({
+  id: n,
+  label: n === 0 ? "Never" : n === 1 ? "Every turn" : `${n}`,
+}));
 
 function getMetricColors(
   data: SystemResources | undefined,
@@ -189,22 +172,9 @@ function getMetricColors(
   };
 }
 
-export type PillItemType =
-  | "cpu_ram"
-  | "branch"
-  | "worktree"
-  | "agent_title"
-  | "agent"
-  | "agent_provider"
-  | "agent_activity"
-  | "agent_id"
-  | "load"
-  | "uptime"
-  | "mcp"
-  | "changes"
-  | "tokens"
-  | "tools"
-  | "turns";
+// Canonical metric union lives in pill-labels (no RN imports); re-exported here
+// so pill call sites keep a single import path.
+export type { PillItemType } from "./pill-labels";
 
 export type ModalTab = "system" | "context" | "settings" | "about";
 
@@ -344,6 +314,58 @@ function singleItemLabelResolver(item: PillItemType) {
   };
 }
 
+/**
+ * Custom-pill states are host-wide (not workspace data), so they get the same
+ * treatment as the resource snapshot: one TTL-cached, single-flighted fetch
+ * shared by every custom pill. Resolving each pill's label used to call
+ * `top.custom-pills.get` itself, so a host with N visible custom pills issued N
+ * identical RPCs per label tick.
+ */
+const CUSTOM_PILL_TTL_MS = 3000;
+let customPillCache: { pills: CustomPillStateOutput[]; at: number } | null = null;
+let customPillInflight: Promise<CustomPillStateOutput[]> | null = null;
+
+async function customPillSnapshot(): Promise<CustomPillStateOutput[]> {
+  if (customPillCache && Date.now() - customPillCache.at < CUSTOM_PILL_TTL_MS) {
+    return customPillCache.pills;
+  }
+  if (customPillInflight) return customPillInflight;
+  if (!rpcInvoker) return customPillCache?.pills ?? [];
+  customPillInflight = (async () => {
+    try {
+      const res = await rpcInvoker!(getCustomPillsRpc, EMPTY_PARAMS);
+      const pills: CustomPillStateOutput[] = res?.pills ?? [];
+      customPillCache = { pills, at: Date.now() };
+      return pills;
+    } catch {
+      return customPillCache?.pills ?? [];
+    } finally {
+      customPillInflight = null;
+    }
+  })();
+  return customPillInflight;
+}
+
+/**
+ * Single registration path for every Top pill variant (main cycle/all pill,
+ * per-metric pills, custom metric pills) so the presentation model cannot
+ * diverge: all are centered surfaces with a pinned popover width. Call sites
+ * only describe what is pill-specific.
+ */
+function registerTopPill(
+  client: ComposerPillRegistrar | PluginClientContext,
+  options: Omit<RegisterComposerPillOptions<ModalTab>, "presentation" | "popoverWidth"> & {
+    presentation?: "popover" | "centered";
+    popoverWidth?: number;
+  },
+) {
+  return registerComposerPill<ModalTab>(client as ComposerPillRegistrar, {
+    popoverWidth: 360,
+    ...options,
+    presentation: options.presentation ?? "centered",
+  });
+}
+
 interface PillItemContentProps {
   item: PillItemType;
   data?: SystemResources;
@@ -369,281 +391,60 @@ function PillItemContent({
 }: PillItemContentProps) {
   const { colors } = usePluginTheme();
   const { cpuColor, memColor } = getMetricColors(data, colors);
-  const def = METRIC_DEFINITIONS.find((d) => d.id === item);
-
-  switch (item) {
-    case "branch":
-      return (
-        <View style={styles.pillContainer}>
-          <Icon name={def?.icon ?? "Circle"} size={12} color={colors.accent} />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pillText,
-              isOpen && styles.pillTextActive,
-              { color: colors.foreground, fontWeight: "600" },
-            ]}
-          >
-            {data?.branch ?? "--"}
-          </Text>
-        </View>
-      );
-
-    case "worktree":
-      return (
-        <View style={styles.pillContainer}>
-          <Icon name={def?.icon ?? "Circle"} size={12} color={colors.accent} />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pillText,
-              isOpen && styles.pillTextActive,
-              { color: colors.foreground, fontWeight: "600" },
-            ]}
-          >
-            {worktreeLocationText || "--"}
-          </Text>
-        </View>
-      );
-
-    case "agent_title":
-      return (
-        <View style={styles.pillContainer}>
-          <Icon name={def?.icon ?? "Circle"} size={12} color={colors.accent} />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pillText,
-              isOpen && styles.pillTextActive,
-              { color: colors.foreground, fontWeight: "600" },
-            ]}
-          >
-            {agent?.title ?? "Agent"}
-          </Text>
-        </View>
-      );
-
-    case "agent":
-      return (
-        <View style={styles.pillContainer}>
-          <Icon name={def?.icon ?? "Circle"} size={12} color={colors.accent} />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pillText,
-              isOpen && styles.pillTextActive,
-              { color: colors.foreground, fontWeight: "600" },
-            ]}
-          >
-            {agent?.model || agent?.provider || "Agent"}
-          </Text>
-        </View>
-      );
-
-    case "agent_provider":
-      return (
-        <View style={styles.pillContainer}>
-          <Icon name={def?.icon ?? "Circle"} size={12} color={colors.accent} />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pillText,
-              isOpen && styles.pillTextActive,
-              { color: colors.foreground, fontWeight: "600" },
-            ]}
-          >
-            {agent?.provider ?? "Provider"}
-          </Text>
-        </View>
-      );
-
-    case "agent_activity": {
-      const isRunning = agent?.status === "running";
-      const activityText = formatIdlePill(agent?.status, agent?.lastActivityAt);
-      return (
-        <View style={styles.pillContainer}>
-          <Icon
-            name={isRunning ? "Activity" : "Clock"}
-            size={12}
-            color={isRunning ? colors.statusSuccess : colors.foregroundMuted}
-          />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pillText,
-              isOpen && styles.pillTextActive,
-              { color: isRunning ? colors.statusSuccess : colors.foreground, fontWeight: "600" },
-            ]}
-          >
-            {activityText}
-          </Text>
-        </View>
-      );
+  const descriptor = describeSegment(item, { data, agent, agentId, worktreeLocationText });
+  const toneColor = (tone: SegmentTone): string => {
+    switch (tone) {
+      case "muted":
+        return colors.foregroundMuted;
+      case "accent":
+        return colors.accent;
+      case "success":
+        return colors.statusSuccess;
+      case "danger":
+        return colors.statusDanger;
+      case "warning":
+        return colors.statusWarning;
+      case "cpu":
+        return cpuColor;
+      case "mem":
+        return memColor;
+      default:
+        return colors.foreground;
     }
+  };
 
-    case "agent_id":
-      return (
-        <View style={styles.pillContainer}>
-          <Icon name={def?.icon ?? "Circle"} size={12} color={colors.accent} />
-          <Text
-            numberOfLines={1}
-            style={[
-              styles.pillText,
-              isOpen && styles.pillTextActive,
-              { color: colors.foreground, fontWeight: "600" },
-            ]}
-          >
-            {agentId && agentId.length > 7 ? agentId.slice(0, 7) : (agentId ?? "--")}
+  return (
+    <Row gap={4} align="center" style={styles.pillContainer}>
+      {descriptor.iconTone !== "none" ? (
+        <Icon name={descriptor.icon} size={12} color={toneColor(descriptor.iconTone)} />
+      ) : null}
+      <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
+        {descriptor.leading ? (
+          <Text style={{ color: toneColor(descriptor.leadingTone ?? "muted"), fontWeight: "700" }}>
+            {`${descriptor.leading} `}
           </Text>
-        </View>
-      );
-
-    case "load":
-      return (
-        <View style={styles.pillContainer}>
-          <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
-            <Text style={{ color: cpuColor, fontWeight: "600" }}>
-              {data?.loadAvg?.[0] !== undefined ? data?.loadAvg[0].toFixed(2) : "--"}
-            </Text>
+        ) : null}
+        {descriptor.prefix ? (
+          <Text style={{ color: toneColor(descriptor.prefixTone ?? "muted") }}>
+            {descriptor.prefix}
           </Text>
-        </View>
-      );
-
-    case "uptime":
-      return (
-        <View style={styles.pillContainer}>
-          <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
-            <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-              {data?.uptimeSeconds ? formatUptime(data?.uptimeSeconds) : "--"}
-            </Text>
-          </Text>
-        </View>
-      );
-
-    case "mcp": {
-      const mcp = data?.mcp;
-      let dotChar = "○";
-      let dotColor = colors.foregroundMuted;
-      let text = "MCP -";
-
-      if (mcp && !mcp.isStale) {
-        dotChar = "●";
-        if (mcp.down > 0) {
-          dotColor = colors.statusDanger;
-        } else if (mcp.degraded > 0 || mcp.healthy !== mcp.total) {
-          dotColor = colors.statusWarning;
-        } else {
-          dotColor = colors.statusSuccess;
-        }
-        text = `${mcp.healthy}/${mcp.total} MCP`;
-      } else if (mcp && mcp.isStale) {
-        dotChar = "○";
-        dotColor = colors.foregroundMuted;
-        text = `${mcp.healthy}/${mcp.total} MCP`;
-      }
-
-      return (
-        <View
-          style={styles.pillContainer}
-          accessibilityLabel="MCP Server Health (via paseo-mcp-tools)"
-        >
-          <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: dotColor, fontWeight: "700" }}>{dotChar} </Text>
-            <Text style={{ color: colors.foreground, fontWeight: "600" }}>{text}</Text>
-          </Text>
-        </View>
-      );
-    }
-
-    case "changes": {
-      const last = data?.lastTurn;
-      const hasData = last && (last.gitInsertions != null || last.gitDeletions != null);
-      return (
-        <View style={styles.pillContainer}>
-          <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
-            <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-              {hasData
-                ? `+${last.gitInsertions ?? 0}/-${last.gitDeletions ?? 0}`
-                : "--"}
-            </Text>
-          </Text>
-        </View>
-      );
-    }
-
-    case "tokens": {
-      const metrics = extractTokenMetrics({ data, agent });
-      const label = formatTokensLabel(metrics, "");
-      const isPlaceholder = !metrics;
-      return (
-        <View style={styles.pillContainer}>
-          <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: colors.foregroundMuted }}>
-              {isPlaceholder && def?.shortLabel ? `${def.shortLabel} ` : ""}
-            </Text>
-            <Text
-              style={{
-                color: isPlaceholder ? colors.foregroundMuted : colors.foreground,
-                fontWeight: "600",
-              }}
-            >
-              {label}
-            </Text>
-          </Text>
-        </View>
-      );
-    }
-    case "tools": {
-      const last = data?.lastTurn;
-      const hasData = last && last.toolCalls != null;
-      return (
-        <View style={styles.pillContainer}>
-          <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
-            <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-              {hasData
-                ? `${last.toolCalls}${last.toolErrors ? ` (${last.toolErrors} err)` : ""}`
-                : "--"}
-            </Text>
-          </Text>
-        </View>
-      );
-    }
-
-    case "turns": {
-      const last = data?.lastTurn;
-      return (
-        <View style={styles.pillContainer}>
-          <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-            <Text style={{ color: colors.foregroundMuted }}>{def?.shortLabel ? `${def.shortLabel} ` : ""}</Text>
-            <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-              {last?.turnCount != null ? `${last.turnCount}` : "--"}
-            </Text>
-          </Text>
-        </View>
-      );
-    }
-
-    case "cpu_ram":
-    default: {
-      const ramGb =
-        data?.memoryUsedBytes !== undefined
-          ? formatBytes(data?.memoryUsedBytes, { compact: true, decimals: 1 })
-          : "--";
-      const cpuText =
-        data?.cpuUsagePercent !== undefined ? `${data?.cpuUsagePercent}%` : "--";
-      return (
-        <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-          <Text style={{ color: cpuColor, fontWeight: "600" }}>{cpuText}</Text>
-          <Text style={{ color: colors.foregroundMuted }}>{" · "}</Text>
-          <Text style={{ color: memColor, fontWeight: "600" }}>{ramGb}</Text>
+        ) : null}
+        <Text style={{ color: toneColor(descriptor.tone), fontWeight: "600" }}>
+          {descriptor.text}
         </Text>
-      );
-    }
-  }
+        {descriptor.separator ? (
+          <Text style={{ color: colors.foregroundMuted }}>{descriptor.separator}</Text>
+        ) : null}
+        {descriptor.trailing ? (
+          <Text
+            style={{ color: toneColor(descriptor.trailingTone ?? "foreground"), fontWeight: "600" }}
+          >
+            {descriptor.trailing}
+          </Text>
+        ) : null}
+      </Text>
+    </Row>
+  );
 }
 
 type SettingsListener = (settings: TopSettings) => void;
@@ -667,49 +468,45 @@ export function notifySettingsChanged(settings: TopSettings) {
   }
 }
 
-function PillOffline({ onPress }: { onPress: () => void }) {
+function PillOffline() {
   const { colors } = usePluginTheme();
   return (
-    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={styles.pillContainer}>
+    <Row gap={4} align="center" style={styles.pillContainer}>
       <Icon name="Ghost" size={13} color={colors.statusDanger} />
       <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
         Offline
       </Text>
-    </Pressable>
+    </Row>
   );
 }
 
-function PillLoading({ onPress }: { onPress: () => void }) {
+function PillLoading() {
   const { colors } = usePluginTheme();
   return (
-    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP}>
-      <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-        top...
-      </Text>
-    </Pressable>
+    <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+      top...
+    </Text>
   );
 }
 
-function PillEmpty({ onPress }: { onPress: () => void }) {
+function PillEmpty() {
   const { colors } = usePluginTheme();
   return (
-    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={styles.pillContainer}>
+    <Row gap={4} align="center" style={styles.pillContainer}>
       <Icon name="Activity" size={12} color={colors.accent} />
       <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
         top
       </Text>
-    </Pressable>
+    </Row>
   );
 }
 
-function McpLoadingPill({ onPress }: { onPress: () => void }) {
+function McpLoadingPill() {
   const { colors } = usePluginTheme();
   return (
-    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={styles.pillContainer}>
-      <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
-        MCP…
-      </Text>
-    </Pressable>
+    <Text numberOfLines={1} style={[styles.pillText, { color: colors.foregroundMuted }]}>
+      MCP…
+    </Text>
   );
 }
 
@@ -720,10 +517,13 @@ interface PillSegmentProps {
   agentId?: string;
   worktreeLocationText?: string;
   isOpen?: boolean;
-  onPress: () => void;
-  pressableStyle?: StyleProp<ViewStyle>;
 }
 
+/**
+ * The composer pill body is host-pressed: legacy hosts wrap `renderPill` in
+ * their own pressable and route the tap through `resolveDefaultPayload`, so the
+ * segment must not nest a second interaction handler.
+ */
 function PillSegment({
   item,
   data,
@@ -731,20 +531,16 @@ function PillSegment({
   agentId,
   worktreeLocationText,
   isOpen,
-  onPress,
-  pressableStyle,
 }: PillSegmentProps) {
   return (
-    <Pressable onPress={onPress} hitSlop={PILL_HIT_SLOP} style={pressableStyle}>
-      <PillItemContent
-        item={item}
-        data={data}
-        agent={agent}
-        agentId={agentId}
-        worktreeLocationText={worktreeLocationText}
-        isOpen={isOpen}
-      />
-    </Pressable>
+    <PillItemContent
+      item={item}
+      data={data}
+      agent={agent}
+      agentId={agentId}
+      worktreeLocationText={worktreeLocationText}
+      isOpen={isOpen}
+    />
   );
 }
 
@@ -755,7 +551,6 @@ interface AllInOnePillProps {
   agentId?: string;
   worktreeLocationText?: string;
   isOpen?: boolean;
-  onOpenTab: (tab: ModalTab) => void;
 }
 
 function AllInOnePill({
@@ -765,11 +560,10 @@ function AllInOnePill({
   agentId,
   worktreeLocationText,
   isOpen,
-  onOpenTab,
 }: AllInOnePillProps) {
   const { colors } = usePluginTheme();
   return (
-    <View style={styles.allInOneContainer}>
+    <Row gap={6} align="center" style={styles.allInOneContainer}>
       {items.map((item, idx) => (
         <React.Fragment key={item}>
           {idx > 0 && (
@@ -782,12 +576,10 @@ function AllInOnePill({
             agentId={agentId}
             worktreeLocationText={worktreeLocationText}
             isOpen={isOpen}
-            onPress={() => onOpenTab(getItemTab(item))}
-            pressableStyle={styles.segmentPressable}
           />
         </React.Fragment>
       ))}
-    </View>
+    </Row>
   );
 }
 
@@ -798,11 +590,9 @@ export interface SingleItemPillViewProps extends RenderPillProps<ModalTab> {
 
 export function SingleItemPillView({
   item,
-  defaultTab,
   workspaceId,
   agentId,
   isOpen,
-  open,
 }: SingleItemPillViewProps) {
   const workspaceDirectory = useWorkspace(workspaceId, (w: PluginWorkspaceSnapshot) => w?.directory);
   const agent = useAgent(agentId, (a: TopAgentSnapshot) => ({
@@ -849,23 +639,21 @@ export function SingleItemPillView({
     });
   }, [agentId, data, agent, workspaceDirectory, worktreeLocationText]);
 
-  const targetTab = defaultTab ?? getItemTab(item);
-
   if (item === "mcp") {
     if (data && !data.mcpInstalled) {
       return null;
     }
     if (isLoading || !data) {
-      return <McpLoadingPill onPress={() => open(targetTab)} />;
+      return <McpLoadingPill />;
     }
   }
 
   if (shouldPoll && isError) {
-    return <PillOffline onPress={() => open(targetTab)} />;
+    return <PillOffline />;
   }
 
   if (shouldPoll && (isLoading || !data)) {
-    return <PillLoading onPress={() => open(targetTab)} />;
+    return <PillLoading />;
   }
 
   return (
@@ -876,8 +664,6 @@ export function SingleItemPillView({
       agentId={agentId}
       worktreeLocationText={worktreeLocationText}
       isOpen={isOpen}
-      onPress={() => open(targetTab)}
-      pressableStyle={styles.cyclePressable}
     />
   );
 }
@@ -1003,36 +789,29 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
     items.push("turns");
   }
 
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // Legacy render fallback only. On the supported 0.8 host the pill is
+  // host-rendered from `resolveLabel`, which advances the cycle on the shared
+  // visibility-gated timer; a per-agent React interval here duplicated that
+  // ticker with no RPC value.
+  const activeMode = items.length > 0 ? items[0] : "cpu_ram";
 
   useEffect(() => {
-    if (items.length <= 1) return;
-    const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % items.length);
-    }, settings.intervalSeconds * 1000);
-    return () => clearInterval(timer);
-  }, [items.length, settings.intervalSeconds]);
-
-  const activeMode = items.length > 0 ? items[currentIndex % items.length] : "cpu_ram";
-  const activeTab = getItemTab(activeMode);
-
-  useEffect(() => {
-    currentCycleTabByAgent.set(agentId, activeTab);
+    currentCycleTabByAgent.set(agentId, getItemTab(activeMode));
     return () => {
       currentCycleTabByAgent.delete(agentId);
     };
-  }, [agentId, activeTab]);
+  }, [agentId, activeMode]);
 
   if (shouldPoll && isError) {
-    return <PillOffline onPress={() => open(settings.defaultTab ?? "system")} />;
+    return <PillOffline />;
   }
 
   if (shouldPoll && (isLoading || !data)) {
-    return <PillLoading onPress={() => open(settings.defaultTab ?? "system")} />;
+    return <PillLoading />;
   }
 
   if (items.length === 0) {
-    return <PillEmpty onPress={() => open(settings.defaultTab ?? "system")} />;
+    return <PillEmpty />;
   }
 
   if (settings.pillMode === "all") {
@@ -1044,7 +823,6 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
         agentId={agentId}
         worktreeLocationText={worktreeLocationText}
         isOpen={isOpen}
-        onOpenTab={open}
       />
     );
   }
@@ -1057,8 +835,6 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
       agentId={agentId}
       worktreeLocationText={worktreeLocationText}
       isOpen={isOpen}
-      onPress={() => open(activeTab)}
-      pressableStyle={styles.cyclePressable}
     />
   );
 }
@@ -1726,51 +1502,20 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
             icon="LayoutGrid"
             subtitle="How active items appear in the composer trackbar"
           />
-          <View style={styles.modeRow}>
-            {[
-              { id: "cycle", label: "Cycle", desc: "Rotate one at a time" },
-              { id: "all", label: "All in One", desc: "Combined into one pill" },
-              { id: "multiple", label: "Multiple", desc: "Dedicated pills" },
-            ].map((modeOption) => {
-              const isSelected = (settings.pillMode ?? "cycle") === modeOption.id;
-              return (
-                <Pressable
-                  key={modeOption.id}
-                  onPress={() => {
-                    triggerHaptic("light");
-                    const newSettings: TopSettings = {
-                      ...settings,
-                      pillMode: modeOption.id as PillMode,
-                    };
-                    updateSettings({ pillMode: modeOption.id as PillMode });
-                    notifySettingsChanged(newSettings);
-                  }}
-                  style={[
-                    styles.modeCard,
-                    {
-                      backgroundColor: isSelected ? colors.surface1 : colors.surface0,
-                      borderColor: isSelected ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.modeTitle,
-                      {
-                        color: isSelected ? colors.accent : colors.foreground,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {modeOption.label}
-                  </Text>
-                  <Text style={[styles.modeDesc, { color: colors.foregroundMuted }]}>
-                    {modeOption.desc}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+          <ChoiceChips
+            options={[
+              { id: "cycle", label: "Cycle", description: "Rotate one at a time" },
+              { id: "all", label: "All in One", description: "Combined into one pill" },
+              { id: "multiple", label: "Multiple", description: "Dedicated pills" },
+            ]}
+            value={settings.pillMode ?? "cycle"}
+            showActiveDescription
+            onChange={(nextMode) => {
+              triggerHaptic("light");
+              updateSettings({ pillMode: nextMode });
+              notifySettingsChanged({ ...settings, pillMode: nextMode });
+            }}
+          />
           <View style={styles.settingsSpacer}>
             <Toggle
               label="Show Composer Pill"
@@ -1861,41 +1606,14 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
                 </Text>
               }
             />
-            <View style={styles.speedRow}>
-              {[2, 3, 4, 6].map((sec) => (
-                <View
-                  key={sec}
-                  style={[
-                    styles.speedChip,
-                    {
-                      backgroundColor:
-                        settings.intervalSeconds === sec ? colors.accent : colors.surface1,
-                      borderColor:
-                        settings.intervalSeconds === sec ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    onPress={() => {
-                      triggerHaptic("light");
-                      updateSettings({ intervalSeconds: sec });
-                    }}
-                    style={[
-                      styles.speedChipText,
-                      {
-                        color:
-                          settings.intervalSeconds === sec
-                            ? colors.accentForeground
-                            : colors.foreground,
-                        fontWeight: settings.intervalSeconds === sec ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {`${sec}s`}
-                  </Text>
-                </View>
-              ))}
-            </View>
+            <ChoiceChips
+              options={[2, 3, 4, 6].map((sec) => ({ id: sec, label: `${sec}s` }))}
+              value={settings.intervalSeconds}
+              onChange={(intervalSeconds) => {
+                triggerHaptic("light");
+                updateSettings({ intervalSeconds });
+              }}
+            />
           </Card>
         )}
 
@@ -1915,80 +1633,15 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
             }
             subtitle="How often a card is stamped into the timeline view"
           />
-          <View style={styles.speedRow}>
-            {[
-              { id: 0, label: "Never" },
-              { id: 1, label: "Every turn" },
-            ].map((cadenceOption) => {
-              const isSelected = (settings.timelineCadence ?? 1) === cadenceOption.id;
-              return (
-                <View
-                  key={cadenceOption.label}
-                  style={[
-                    styles.speedChip,
-                    {
-                      flex: 1,
-                      backgroundColor: isSelected ? colors.accent : colors.surface1,
-                      borderColor: isSelected ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    onPress={() => {
-                      triggerHaptic("light");
-                      const next = { ...settings, timelineCadence: cadenceOption.id };
-                      updateSettings({ timelineCadence: cadenceOption.id });
-                      notifySettingsChanged(next);
-                    }}
-                    style={[
-                      styles.speedChipText,
-                      {
-                        color: isSelected ? colors.accentForeground : colors.foreground,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {cadenceOption.label}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-          <View style={[styles.speedRow, styles.speedRowSpaced]}>
-            {[2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
-              const isSelected = (settings.timelineCadence ?? 1) === n;
-              return (
-                <View
-                  key={n}
-                  style={[
-                    styles.speedChip,
-                    {
-                      backgroundColor: isSelected ? colors.accent : colors.surface1,
-                      borderColor: isSelected ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    onPress={() => {
-                      triggerHaptic("light");
-                      const next = { ...settings, timelineCadence: n };
-                      updateSettings({ timelineCadence: n });
-                      notifySettingsChanged(next);
-                    }}
-                    style={[
-                      styles.speedChipText,
-                      {
-                        color: isSelected ? colors.accentForeground : colors.foreground,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {`${n}`}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
+          <ChoiceChips
+            options={TIMELINE_CADENCE_OPTIONS}
+            value={settings.timelineCadence ?? 1}
+            onChange={(timelineCadence) => {
+              triggerHaptic("light");
+              updateSettings({ timelineCadence });
+              notifySettingsChanged({ ...settings, timelineCadence });
+            }}
+          />
           <Text style={[styles.modeDesc, styles.modeDescSpaced, { color: colors.foregroundMuted }]}>
             0 behaves as never; N above 1 stamps every Nth turn
           </Text>
@@ -2005,42 +1658,14 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
               </Text>
             }
           />
-          <View style={styles.speedRow}>
-            {TABS.map((tab) => {
-              const isSelected = (settings.defaultTab || "system") === tab.id;
-              return (
-                <View
-                  key={tab.id}
-                  style={[
-                    styles.speedChip,
-                    {
-                      flex: 1,
-                      backgroundColor: isSelected ? colors.accent : colors.surface1,
-                      borderColor: isSelected ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    onPress={() => {
-                      triggerHaptic("light");
-                      updateSettings({
-                        defaultTab: tab.id as "system" | "context" | "settings" | "about",
-                      });
-                    }}
-                    style={[
-                      styles.speedChipText,
-                      {
-                        color: isSelected ? colors.accentForeground : colors.foreground,
-                        fontWeight: isSelected ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {tab.label}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
+          <ChoiceChips
+            options={TABS.map((tab) => ({ id: tab.id as ModalTab, label: tab.label }))}
+            value={settings.defaultTab ?? "system"}
+            onChange={(defaultTab) => {
+              triggerHaptic("light");
+              updateSettings({ defaultTab });
+            }}
+          />
         </Card>
 
         <Button
@@ -2231,13 +1856,12 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
 
       // Ensure main pill is registered
       if (!activePills.has("paseo-top")) {
-        const cleanup = registerComposerPill<ModalTab>(client, {
+        const cleanup = registerTopPill(client, {
           id: "paseo-top",
           title: "top",
           modalTitle: "Host System Resources",
           modalIcon: "Activity",
           icon: "Cpu",
-          presentation: "centered",
           resolveDefaultPayload: ({ agentId }) => {
             if (latestSettings.pillMode === "all") {
               return latestSettings.defaultTab;
@@ -2260,7 +1884,6 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
             };
           },
           refreshIntervalMs: 3000,
-          popoverWidth: 360,
           renderPill: (props) => <PillView {...props} />,
           renderModal: (props) => <ResourceModal {...props} />,
         });
@@ -2460,17 +2083,15 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
       // Register newly desired pills
       for (const pillDef of desiredPills) {
         if (!activePills.has(pillDef.id)) {
-          const cleanup = registerComposerPill<ModalTab>(client, {
+          const cleanup = registerTopPill(client, {
             id: pillDef.id,
             title: pillDef.title,
             modalTitle: pillDef.modalTitle,
             icon: pillDef.icon,
             modalIcon: pillDef.icon,
-            presentation: "centered",
             resolveDefaultPayload: () => pillDef.defaultTab,
             resolveLabel: singleItemLabelResolver(pillDef.item),
             refreshIntervalMs: 5000,
-            popoverWidth: 360,
             renderPill: (props) => (
               <SingleItemPillView
                 item={pillDef.item}
@@ -2540,9 +2161,8 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
 
     try {
       if (typeof clientWithRpc.rpc !== "function") return;
-      const res = await clientWithRpc.rpc(getCustomPillsRpc, EMPTY_PARAMS);
+      const pills = await customPillSnapshot();
       if (mountDisposed) return;
-      const pills: CustomPillStateOutput[] = res?.pills ?? [];
       const pillIds = new Set(pills.map((p: CustomPillStateOutput) => p.id));
 
       // Remove pills that are no longer configured
@@ -2556,7 +2176,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
       // Register newly discovered custom metric pills
       for (const pill of pills) {
         if (!activeCustomPills.has(pill.id)) {
-          const cleanup = registerComposerPill(client, {
+          const cleanup = registerTopPill(client, {
             id: `top-custom-${pill.id}`,
             title: pill.title,
             compactTitle: pill.compactTitle,
@@ -2564,19 +2184,13 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
             compactIcon: pill.compactIcon,
             modalTitle: pill.modalTitle ?? pill.title,
             resolveLabel: async () => {
-              try {
-                if (rpcInvoker) {
-                  const res = await rpcInvoker(getCustomPillsRpc, EMPTY_PARAMS);
-                  const found = res?.pills?.find((p: CustomPillStateOutput) => p.id === pill.id);
-                  if (found?.displayValue) return found.displayValue;
-                }
-              } catch {
-                // Keep the last pushed label on fetch errors
-              }
-              return pill.displayValue;
+              const states = await customPillSnapshot();
+              return (
+                states.find((p: CustomPillStateOutput) => p.id === pill.id)?.displayValue ??
+                pill.displayValue
+              );
             },
             refreshIntervalMs: 5000,
-            popoverWidth: 360,
             renderPill: () => <LiveCustomPillView pillId={pill.id} initial={pill} />,
             renderModal: () => (
               <LiveCustomPillModal pillId={pill.id} initial={pill} />
@@ -2591,7 +2205,10 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   }
 
   void syncCustomPills();
-  const customPillInterval = setInterval(syncCustomPills, 5000);
+  // Discovery only: labels refresh through `customPillSnapshot` on the shared
+  // pill timer, so this host-wide timer can be slow without stale values. It is
+  // one timer per plugin contribution, independent of agent count.
+  const customPillInterval = setInterval(syncCustomPills, 15000);
   const onSettingsChanged = () => {
     void syncCustomPills();
   };
@@ -2625,7 +2242,10 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   };
 }
 
-const styles = StyleSheet.create({
+// Residual composition styles only (no RN StyleSheet): helper Row/Stack own
+// the flex layout, these are the tiny per-element text/spacing tweaks no helper
+// primitive covers.
+const styles = {
   modalRoot: {
     flex: 1,
     minHeight: 0,
@@ -2689,9 +2309,6 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 11,
     fontWeight: "500",
-  },
-  tabs: {
-    marginBottom: 4,
   },
   gaugeContainer: {
     flexDirection: "row",
@@ -2799,26 +2416,6 @@ const styles = StyleSheet.create({
     width: 38,
     minHeight: 44,
   },
-  speedRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    alignItems: "center",
-  },
-  speedRowSpaced: {
-    marginTop: 8,
-  },
-  speedChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  speedChipText: {
-    fontSize: 10,
-  },
   allInOneContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -2827,39 +2424,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
   },
-  segmentPressable: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexShrink: 1,
-  },
-  cyclePressable: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexShrink: 1,
-  },
   dividerText: {
     fontSize: 10,
     opacity: 0.6,
-  },
-  modeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    paddingTop: 4,
-    paddingBottom: 8,
-  },
-  modeCard: {
-    flex: 1,
-    flexShrink: 1,
-    minWidth: 0,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    gap: 2,
-  },
-  modeTitle: {
-    fontSize: 10,
   },
   modeDesc: {
     fontSize: 8,
@@ -2899,4 +2466,4 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     paddingVertical: 4,
   },
-});
+} as const;

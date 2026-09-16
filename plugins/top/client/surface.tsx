@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import {
   AboutSection,
@@ -9,12 +9,13 @@ import {
   KeyValueGroup,
   MetricGauge,
   ModalBody,
+  Row,
+  Stack,
   Tabs,
   Toggle,
   CardHeader,
   usePluginSettings,
   usePluginTheme,
-  shouldEmitSnapshotUpdate,
 } from "./vendor/paseo-plugin-helper/index";
 import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
@@ -27,6 +28,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { notifySettingsChanged } from "./pill";
+import { ChoiceChips } from "./settings-ui";
 import { useTopResourceQuery } from "./resources-query";
 
 type SurfaceTab = "system" | "settings" | "about";
@@ -36,6 +38,11 @@ const TABS = [
   { id: "settings", label: "Settings", shortLabel: "Settings", icon: "Sliders" },
   { id: "about", label: "About", shortLabel: "About", icon: "Info" },
 ];
+
+const TIMELINE_CADENCE_OPTIONS = Array.from({ length: 11 }, (_, n) => ({
+  id: n,
+  label: n === 0 ? "Never" : n === 1 ? "Every turn" : `${n}`,
+}));
 
 const CPU_THRESHOLDS = { warning: 60, danger: 85 };
 const MEM_THRESHOLDS = { warning: 70, danger: 85 };
@@ -92,23 +99,21 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
         refreshing={isLoading}
       >
         {activeTab === "system" && (
-        <View style={{ gap: 12 }}>
+        <Stack gap={12}>
           <Text style={{ fontSize: 16, fontWeight: "700", color: colors.foreground }}>
             Host System Resources
           </Text>
 
           {pillHidden && (
             <Card variant="elevated">
-              <View style={styles.banner}>
-                <Text style={[styles.bannerText, { color: colors.foregroundMuted }]}>
-                  Composer pill is hidden in trackbar. You can re-enable it from the Settings tab above.
-                </Text>
-              </View>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foregroundMuted }}>
+                Composer pill is hidden in trackbar. You can re-enable it from the Settings tab above.
+              </Text>
             </Card>
           )}
 
           <Card variant="elevated">
-            <View style={styles.gaugeContainer}>
+            <Row justify="space-around" align="center" style={styles.gaugeContainer}>
               <MetricGauge
                 value={data?.cpuUsagePercent ?? 0}
                 thresholds={CPU_THRESHOLDS}
@@ -121,7 +126,7 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
                 label="RAM Used"
                 size={72}
               />
-            </View>
+            </Row>
           </Card>
 
           <Card variant="elevated">
@@ -162,55 +167,28 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
               Loading live snapshot...
             </Text>
           ) : null}
-        </View>
+        </Stack>
       )}
 
       {activeTab === "settings" && (
-        <View style={{ gap: 12 }}>
+        <Stack gap={12}>
           <Card variant="elevated">
             <CardHeader
               title="Pill Display Mode"
               icon="LayoutGrid"
               subtitle="How active items appear in the composer trackbar"
             />
-            <View style={styles.modeRow}>
-              {[
-                { id: "cycle", label: "Cycle", desc: "Rotate one at a time" },
-                { id: "all", label: "All in One", desc: "Combined into one pill" },
-                { id: "multiple", label: "Multiple", desc: "Dedicated pills" },
-              ].map((modeOption) => {
-                const isSelected = (settings.pillMode ?? "cycle") === modeOption.id;
-                return (
-                  <Pressable
-                    key={modeOption.id}
-                    onPress={() => applySettings({ pillMode: modeOption.id as PillMode })}
-                    style={[
-                      styles.modeCard,
-                      {
-                        backgroundColor: isSelected ? colors.surface1 : colors.surface0,
-                        borderColor: isSelected ? colors.accent : colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.modeTitle,
-                        {
-                          color: isSelected ? colors.accent : colors.foreground,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {modeOption.label}
-                    </Text>
-                    <Text style={[styles.modeDesc, { color: colors.foregroundMuted }]}>
-                      {modeOption.desc}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={{ marginTop: 12 }}>
+            <ChoiceChips
+              options={[
+                { id: "cycle", label: "Cycle", description: "Rotate one at a time" },
+                { id: "all", label: "All in One", description: "Combined into one pill" },
+                { id: "multiple", label: "Multiple", description: "Dedicated pills" },
+              ]}
+              value={settings.pillMode ?? "cycle"}
+              showActiveDescription
+              onChange={(pillMode: PillMode) => applySettings({ pillMode })}
+            />
+            <View style={styles.settingsSpacer}>
               <Toggle
                 label="Show Composer Pill"
                 description="Hide the composer pill entirely; the dashboard stays available from the sidebar"
@@ -226,7 +204,7 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
               icon="Sliders"
               subtitle="Choose where each metric appears (pill vs timeline)"
             />
-            <View style={{ gap: 12 }}>
+            <Stack gap={12}>
               {METRIC_DEFINITIONS.map((def) => {
                 const boxes = checkboxesFromTarget(settings.metricSurfaces?.[def.id]);
                 const setBox = (which: "pill" | "timeline", val: boolean) => {
@@ -244,28 +222,24 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
                     <Text style={{ fontSize: 11, fontWeight: "700", color: colors.foreground }}>
                       {def.title}
                     </Text>
-                    <View style={{ flexDirection: "row", gap: 24, paddingLeft: 4, marginTop: 4 }}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                          Pill
-                        </Text>
+                    <Row gap={24} align="center" style={styles.metricTargets}>
+                      <Row gap={6} align="center">
+                        <Text style={styles.metricTargetLabel}>Pill</Text>
                         <Toggle value={boxes.pill} onValueChange={(val) => setBox("pill", val)} />
-                      </View>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                        <Text style={{ fontSize: 9, fontWeight: "600", color: colors.foregroundMuted }}>
-                          Timeline
-                        </Text>
+                      </Row>
+                      <Row gap={6} align="center">
+                        <Text style={styles.metricTargetLabel}>Timeline</Text>
                         <Toggle
                           value={boxes.timeline && !def.pillOnly}
                           disabled={!!def.pillOnly}
                           onValueChange={(val) => setBox("timeline", val)}
                         />
-                      </View>
-                    </View>
+                      </Row>
+                    </Row>
                   </View>
                 );
               })}
-            </View>
+            </Stack>
           </Card>
 
           <Card variant="elevated">
@@ -278,38 +252,11 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
                 </Text>
               }
             />
-            <View style={styles.speedRow}>
-              {[2, 3, 4, 6].map((sec) => (
-                <View
-                  key={sec}
-                  style={[
-                    styles.speedChip,
-                    {
-                      backgroundColor:
-                        settings.intervalSeconds === sec ? colors.accent : colors.surface1,
-                      borderColor:
-                        settings.intervalSeconds === sec ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text
-                    onPress={() => applySettings({ intervalSeconds: sec })}
-                    style={[
-                      styles.speedChipText,
-                      {
-                        color:
-                          settings.intervalSeconds === sec
-                            ? colors.accentForeground
-                            : colors.foreground,
-                        fontWeight: settings.intervalSeconds === sec ? "700" : "500",
-                      },
-                    ]}
-                  >
-                    {`${sec}s`}
-                  </Text>
-                </View>
-              ))}
-            </View>
+            <ChoiceChips
+              options={[2, 3, 4, 6].map((sec) => ({ id: sec, label: `${sec}s` }))}
+              value={settings.intervalSeconds}
+              onChange={(intervalSeconds) => applySettings({ intervalSeconds })}
+            />
           </Card>
 
           <Card variant="elevated">
@@ -327,36 +274,11 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
               }
               subtitle="How often a card is stamped into the timeline view (0 = never)"
             />
-            <View style={styles.speedRow}>
-              {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
-                const isSelected = (settings.timelineCadence ?? 1) === n;
-                return (
-                  <View
-                    key={n}
-                    style={[
-                      styles.speedChip,
-                      {
-                        backgroundColor: isSelected ? colors.accent : colors.surface1,
-                        borderColor: isSelected ? colors.accent : colors.border,
-                      },
-                    ]}
-                  >
-                    <Text
-                      onPress={() => applySettings({ timelineCadence: n })}
-                      style={[
-                        styles.speedChipText,
-                        {
-                          color: isSelected ? colors.accentForeground : colors.foreground,
-                          fontWeight: isSelected ? "700" : "500",
-                        },
-                      ]}
-                    >
-                      {n === 0 ? "Never" : n === 1 ? "Every turn" : `${n}`}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
+            <ChoiceChips
+              options={TIMELINE_CADENCE_OPTIONS}
+              value={settings.timelineCadence ?? 1}
+              onChange={(timelineCadence) => applySettings({ timelineCadence })}
+            />
           </Card>
 
           <Button
@@ -369,7 +291,7 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
               });
             }}
           />
-        </View>
+        </Stack>
       )}
 
       {activeTab === "about" && (
@@ -407,63 +329,25 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
   );
 }
 
-const styles = StyleSheet.create({
+const styles = {
   root: {
     flex: 1,
     minHeight: 0,
     width: "100%",
   },
-  banner: {
-    gap: 8,
+  gaugeContainer: {
+    paddingVertical: 12,
+    width: "100%",
   },
-  bannerText: {
-    fontSize: 12,
+  settingsSpacer: {
+    marginTop: 12,
+  },
+  metricTargets: {
+    paddingLeft: 4,
+    marginTop: 4,
+  },
+  metricTargetLabel: {
+    fontSize: 9,
     fontWeight: "600",
   },
-  gaugeContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingVertical: 12,
-  },
-  modeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    paddingTop: 4,
-    paddingBottom: 8,
-  },
-  modeCard: {
-    flex: 1,
-    minWidth: 90,
-    paddingVertical: 6,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    gap: 2,
-  },
-  modeTitle: {
-    fontSize: 10,
-  },
-  modeDesc: {
-    fontSize: 8,
-    lineHeight: 10,
-  },
-  speedRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    alignItems: "center",
-  },
-  speedChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  speedChipText: {
-    fontSize: 10,
-  },
-});
+} as const;

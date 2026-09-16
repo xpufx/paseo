@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAllLabel,
+  describeSegment,
   enabledItemsForSettings,
   extractTokenMetrics,
   formatCompactTokens,
@@ -10,6 +11,7 @@ import {
   formatTokensLabel,
   nextCycleItem,
   resetCycleState,
+  type PillItemType,
 } from "./pill-labels";
 import { topSettingsContract } from "../shared/resources";
 
@@ -223,3 +225,71 @@ test("formatSegmentIcon returns definition icon per metric and dynamic activity 
   assert.equal(formatSegmentIcon("agent_activity", {}), "Clock");
 });
 
+const ALL_ITEMS: PillItemType[] = [
+  "cpu_ram",
+  "branch",
+  "worktree",
+  "agent_title",
+  "agent",
+  "agent_provider",
+  "agent_activity",
+  "agent_id",
+  "load",
+  "uptime",
+  "mcp",
+  "changes",
+  "tokens",
+  "tools",
+  "turns",
+];
+
+const richSnap = {
+  data: {
+    branch: "v0.8",
+    cpuUsagePercent: 42,
+    memoryUsedBytes: 1024 ** 3,
+    loadAvg: [1.234],
+    uptimeSeconds: 90_000,
+    mcp: { healthy: 3, total: 4, isStale: false, down: 0, degraded: 1 },
+    lastTurn: {
+      turnCount: 14,
+      toolCalls: 9,
+      toolErrors: 1,
+      gitInsertions: 12,
+      gitDeletions: 3,
+      inputTokens: 500,
+      outputTokens: 388,
+    },
+  } as never,
+  agent: {
+    title: "Worker",
+    model: "gpt-5.4",
+    provider: "codex",
+    status: "running",
+    lastActivityAt: new Date().toISOString(),
+  },
+  agentId: "abcdef123456",
+  worktreeLocationText: "money-lion",
+};
+
+test("describeSegment is the single source of truth for the flat pill label", () => {
+  for (const item of ALL_ITEMS) {
+    const d = describeSegment(item, richSnap);
+    const flattened = `${d.prefix ?? ""}${d.text}${d.separator ?? ""}${d.trailing ?? ""}`;
+    assert.equal(flattened, formatSegmentLabel(item, richSnap), `label drift for ${item}`);
+    assert.ok(d.text.length > 0, `${item} descriptor must carry text`);
+  }
+});
+
+test("describeSegment keeps render-only decorations out of the host label", () => {
+  const cpu = describeSegment("cpu_ram", richSnap);
+  assert.equal(cpu.tone, "cpu");
+  assert.equal(cpu.trailingTone, "mem");
+  assert.equal(cpu.separator, " · ");
+
+  const mcp = describeSegment("mcp", richSnap);
+  assert.equal(mcp.leading, "●");
+  assert.equal(mcp.leadingTone, "warning");
+  assert.equal(mcp.text, "3/4 MCP");
+  assert.ok(!formatSegmentLabel("mcp", richSnap).includes("●"));
+});

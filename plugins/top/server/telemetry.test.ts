@@ -442,10 +442,11 @@ test("metric definitions, ids, defaults, and pill types stay in sync", () => {
       `metric ${id} needs a default surface target`,
     );
   }
-  // PillItemType lives in client code (RN imports) so it is compared by
-  // source text: a metric missing from either side breaks pills or settings.
+  // PillItemType lives in the RN-free pill-labels module (pill.tsx re-exports
+  // it), so it is compared by source text: a metric missing from either side
+  // breaks pills or settings.
   const pillSource = fs.readFileSync(
-    path.join(__dirname, "..", "client", "pill.tsx"),
+    path.join(__dirname, "..", "client", "pill-labels.ts"),
     "utf8",
   );
   const unionBody = pillSource.split("export type PillItemType =")[1].split(";")[0];
@@ -488,6 +489,27 @@ test("pill render uses definition icons and labels, never hardcoded literals", (
     new Set(shorts).size,
     shorts.length,
     "definition shortLabels must be unique",
+  );
+});
+
+test("every top pill variant shares one centered presentation model", () => {
+  const pillSource = fs.readFileSync(
+    path.join(__dirname, "..", "client", "pill.tsx"),
+    "utf8",
+  );
+  assert.ok(
+    !/presentation:\s*"popover"/.test(pillSource),
+    "no pill may force popover presentation; the model is centered",
+  );
+  assert.equal(
+    (pillSource.match(/registerComposerPill</g) ?? []).length,
+    1,
+    "registerComposerPill must only be called by the shared registerTopPill wrapper",
+  );
+  assert.equal(
+    (pillSource.match(/registerTopPill\(client, \{/g) ?? []).length,
+    3,
+    "main, per-metric, and custom pills must all register through registerTopPill",
   );
 });
 
