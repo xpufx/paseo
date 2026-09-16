@@ -162,6 +162,11 @@ function useDebouncedValue<T>(value: T, delayMs: number): T {
 
 const REMOTE_SEARCH_DEBOUNCE_MS = 300;
 
+// Operator-only surface: the optional label-set install stays wired for our own
+// board but never renders in the release (issue #163). The matching RPC is not
+// registered either, so there is no end-user path to it.
+const LABEL_SET_INSTALL_VISIBLE = false;
+
 /**
  * Markdown reference for pasting into chat, e.g. `[#30 Turn count](url)`.
  * The repo web URL is derived from the RPC repo when available.
@@ -1221,6 +1226,7 @@ export function ForgeIssuesView({
                 />
               </View>
             </Card>
+            {LABEL_SET_INSTALL_VISIBLE ? (
             <Card>
               <Card.Header
                 title="Paseo label set"
@@ -1293,6 +1299,7 @@ export function ForgeIssuesView({
                 <Text style={[styles.hint, { color: colors.foregroundMuted }]}>{installSummary}</Text>
               ) : null}
             </Card>
+            ) : null}
             </>
           ) : (
           <>

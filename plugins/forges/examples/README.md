@@ -23,11 +23,11 @@ and rewrite the placeholders (`forge.example.com`, `your-org/your-repo`,
 `fgj`/`fgjx`, `envelope-tool`) to match your tooling. If you do not have
 equivalent tooling, replace the CLI steps with direct Forgejo API calls.
 
-## The label taxonomy the plugin ships
+## The label taxonomy the skills assume
 
-The `forges` plugin can copy this scoped label set onto a repo (Settings tab →
-**Paseo label set** → *Install label set…*). Nothing is written until you pick
-**Keep existing** or **Replace our scopes**:
+The scoped label set below is what the skills and the plugin's label chips use.
+The plugin no longer ships a label-set install in the UI, so create these labels
+on your repo yourself (by hand or via the Forgejo API):
 
 | Scope       | Labels                                                        |
 | ----------- | ------------------------------------------------------------- |
@@ -37,12 +37,8 @@ The `forges` plugin can copy this scoped label set onto a repo (Settings tab →
 | `spec/`     | `0-needed`, `1-checklist`, `2-approved`                       |
 
 Gitea-family scoped labels are exclusive per scope, so applying one evicts the
-previous mate in the same scope. **Keep existing** only adds missing labels.
-**Replace our scopes** additionally deletes the repo's labels that share one of
-these scopes but are not part of the set (for example a foreign
-`state/ready-for-review`); labels in other scopes and unscoped labels are never
-touched. The install requires a token saved in the plugin settings — it is
-daemon-side and never reaches the client.
+previous mate in the same scope. The plugin's label chips rely on this
+vocabulary to advance `state/`, `priority/`, `attention/`, and `spec/`.
 
 ## Working without our tooling
 

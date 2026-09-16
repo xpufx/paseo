@@ -20,9 +20,6 @@ GitLab would need a separate API client.
 - **Live label vocabulary.** Scopes are derived from the labels actually on the
   board, so a foreign board degrades gracefully instead of failing on an
   unknown scope.
-- **Optional label-set install.** Copy our scoped taxonomy
-  (`state/`, `priority/`, `attention/`, `spec/`) onto the configured repo with
-  an explicit keep-or-replace choice. Nothing is written without your action.
 - **Example skills.** Our agent workflow ships under `examples/` as a starting
   point to adapt — see [`examples/README.md`](./examples/README.md).
 
@@ -55,10 +52,6 @@ Open the plugin's **Settings** tab inside a workspace.
 - **API token.** Saved per host in daemon-side plugin settings. Reads work
   anonymously on public repos; labels and comments need an accepted token on
   both public and private repos.
-- **Label set.** Optional. Pick **Install label set…** and then **Keep
-  existing** (add missing labels only) or **Replace our scopes** (also remove
-  labels that share a scope with ours but are not part of the set). Labels in
-  other scopes and unscoped labels are never touched. Requires a saved token.
 
 ## Development
 

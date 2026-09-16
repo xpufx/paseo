@@ -442,7 +442,13 @@ export const addCommentContract = defineContract({
   server-side (`min(1)` after trim).
 - Input accepts `issueNumber` (primary) with `number` as a deprecated alias.
 
-### 5.5 `forge.install-labels` (write, explicit action)
+### 5.5 `forge.install-labels` (operator-only, not shipped)
+
+> Operator-gated, not registered: the optional label-set install is kept in the
+> codebase for our own board but excluded from the release surface (issue #163).
+> `index.server.ts` deliberately omits `handleInstallLabels`, so the RPC is not
+> reachable by end users, and the Settings card does not render. The contract,
+> handler, and planner below remain as the internals.
 
 ```ts
 export const installLabelsContract = defineContract({
@@ -465,10 +471,10 @@ export const installLabelsContract = defineContract({
 });
 ```
 
-- Ships our taxonomy as installable data (`paseoLabelSet()`): `state/`,
+- Keeps our taxonomy as installable data (`paseoLabelSet()`): `state/`,
   `priority/`, `attention/`, `spec/`. The install is **never automatic** — the
-  client's Settings tab requires an explicit action plus a keep/replace choice,
-  and the server only writes after resolving an explicit forge target.
+  pre-gate client required an explicit action plus a keep/replace choice, and
+  the server only writes after resolving an explicit forge target.
 - `mode` is required with no default so the choice can never be implicit.
   `merge` only creates missing labels. `replace` additionally deletes the
   target's labels that share a scope with our set but are not in it (e.g. a
@@ -795,8 +801,6 @@ No code touched.
 - [ ] Auth uses a daemon-side token saved per host in plugin settings; the
       token never reaches the client and no `fgj` config or host CLI is
       required.
-- [ ] The optional label-set install is explicit-only, offers keep vs replace,
-      and never mutates a board without the user's action.
 - [ ] Pill shows verify-first counts (`"3 verify · 12 open"` / `"3v"`) and
       deep-opens the pre-filtered dashboard; zero-verify hides the verify
       chip (never `0 verify`).
