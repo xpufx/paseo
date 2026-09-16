@@ -17,7 +17,7 @@ import {
   useRpcMutation,
   useRpcQuery,
   type TabItem,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
 import {
   COMMAND_NAME_HINT,
   SUGGESTED_PREFIX,

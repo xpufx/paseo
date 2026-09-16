@@ -1,5 +1,5 @@
 import type { PluginAgentSnapshot } from "@getpaseo/plugin";
-import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
+import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   isPillEnabled,
   legacyFlagView,

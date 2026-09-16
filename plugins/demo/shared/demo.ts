@@ -2,7 +2,7 @@ import {
   defineContract,
   defineSettingsContract,
   type RpcOutput,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/shared";
 import { z } from "zod";
 
 export const DemoSettingsSchema = z.object({

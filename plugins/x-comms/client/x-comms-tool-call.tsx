@@ -1,6 +1,6 @@
 import { type PluginTimelineItemProps, type PluginTimelineTransformerContribution, type PluginTimelineRendererContribution } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { Badge, Card, CodeBlock, StatusDot } from "./vendor/paseo-plugin-helper/index";
+import { Badge, Card, CodeBlock, StatusDot } from "paseo-plugin-helper/client";
 import { Text, View } from "react-native";
 import { ViaXComms } from "./via-x-comms";
 import { usePeerDisplay } from "./peer-label";

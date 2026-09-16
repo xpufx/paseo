@@ -1,4 +1,4 @@
-import { createPluginLogger } from "./vendor/paseo-plugin-helper/index.ts";
+import { createPluginLogger } from "paseo-plugin-helper/server";
 import {
   INSTALL_LABEL_MODES,
   IssueDetailSchema,
@@ -28,7 +28,7 @@ import {
   type SetLabelInput,
   type SetLabelOutput,
 } from "../shared/issues.js";
-import type { RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
+import type { RpcOutput } from "paseo-plugin-helper/shared";
 import { ForgeClient, type ForgejoIssueDetail } from "./forge-client.js";
 import { ForgeGuard, type GuardLogLevel } from "./forge-guard.js";
 import { gitOriginForDirectory } from "./git-origin.js";

@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
-import { safeSpawn } from "../vendor/paseo-plugin-helper/index";
-import { stripAnsi } from "../../shared/vendor/paseo-plugin-helper/index";
+import { safeSpawn } from "paseo-plugin-helper/server";
+import { stripAnsi } from "paseo-plugin-helper/shared";
 import type { McpProbe, ProbeContext, McpServer } from "../discovery/types";
 import { matchesOpencodeFamily } from "./family";
 import { redact } from "../discovery/extract";

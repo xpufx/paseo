@@ -16,8 +16,8 @@ import {
   CardHeader,
   usePluginSettings,
   usePluginTheme,
-} from "./vendor/paseo-plugin-helper/index";
-import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
+import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   topSettingsContract,
   checkboxesFromTarget,

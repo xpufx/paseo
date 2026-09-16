@@ -1,6 +1,6 @@
 import React from "react";
 import { Text } from "react-native";
-import { Button, Row, Stack, usePluginTheme } from "./vendor/paseo-plugin-helper/index";
+import { Button, Row, Stack, usePluginTheme } from "paseo-plugin-helper/client";
 
 export interface ChipOption<T extends string | number> {
   id: T;

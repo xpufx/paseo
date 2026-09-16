@@ -3,7 +3,7 @@ import {
   defineContract,
   defineSettingsContract,
   normalizeForgeHost,
-} from "./vendor/paseo-plugin-helper/index.ts";
+} from "paseo-plugin-helper/shared";
 
 export const FORGES_PLUGIN_ID = "forges";
 

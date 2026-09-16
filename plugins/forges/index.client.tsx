@@ -4,7 +4,7 @@ import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput
 import {
   initClientHelpers,
   registerComposerPill,
-} from "./client/vendor/paseo-plugin-helper/index.ts";
+} from "paseo-plugin-helper/client";
 import {
   ISSUES_PILL_ID,
   ForgePill,

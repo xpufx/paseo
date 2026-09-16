@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { PluginStorage, createPluginLogger, registerSettingsRpc } from "./server/vendor/paseo-plugin-helper/index.ts";
+import { PluginStorage, createPluginLogger, registerSettingsRpc } from "paseo-plugin-helper/server";
 import {
   approvalAck,
   approvalSettings,

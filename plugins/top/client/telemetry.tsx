@@ -10,8 +10,8 @@ import {
   Row,
   Stack,
   usePluginSettings,
-} from "./vendor/paseo-plugin-helper/index";
-import { formatBytes, formatUptime, truncatePath } from "../shared/vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
+import { formatBytes, formatUptime, truncatePath } from "paseo-plugin-helper/shared";
 import {
   isTimelineEnabled,
   isMcpSurfaceEnabled,

@@ -2,7 +2,7 @@ import {
   PluginStorage,
   createPluginLogger,
   createSettingsHandlers,
-} from "./vendor/paseo-plugin-helper/index.ts";
+} from "paseo-plugin-helper/server";
 import {
   FORGES_PLUGIN_ID,
   activeForgeForDirectory,

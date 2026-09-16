@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { guardRpcHandler } from "./server/vendor/paseo-plugin-helper/index";
+import { guardRpcHandler } from "paseo-plugin-helper/server";
 import {
   getSystemResourcesRpc,
   getCustomPillsRpc,

@@ -28,7 +28,7 @@ import {
   getClientHost,
   type RenderModalProps,
   type RenderPillProps,
-} from "./vendor/paseo-plugin-helper/index.ts";
+} from "paseo-plugin-helper/client";
 import {
   ATTENTION_LABELS,
   PRIORITY_ORDER,

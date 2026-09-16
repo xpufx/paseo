@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { redactSecrets, tryParseJsonc } from "../vendor/paseo-plugin-helper/index";
+import { redactSecrets, tryParseJsonc } from "paseo-plugin-helper/server";
 import type { McpServer, DiagnosticStep } from "./types";
 
 export interface CandidatePath {

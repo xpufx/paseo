@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createPluginLogger, safeSpawn } from "./vendor/paseo-plugin-helper/index";
-import { withTimeout } from "../shared/vendor/paseo-plugin-helper/index";
+import { createPluginLogger, safeSpawn } from "paseo-plugin-helper/server";
+import { withTimeout } from "paseo-plugin-helper/shared";
 import { getSnapshotFresh, agentCountFor, refreshSnapshot, initializeSnapshot } from "./snapshot";
 import {
   registryReadRpc,
@@ -340,7 +340,7 @@ export async function handleDaemonProbe(input: { value: string }) {
 
 
 
-import { PluginStorage } from "./vendor/paseo-plugin-helper/index";
+import { PluginStorage } from "paseo-plugin-helper/server";
 import { resolveFeatureFlags, resolveInjectionEnabled, resolvePresenceEnabled, applyFeaturePrefsUpdate } from "./settings.ts";
 import { stateDir, migrateFromRoot } from "./registry";
 

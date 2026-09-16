@@ -1,7 +1,7 @@
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers } from "./client/vendor/paseo-plugin-helper/index.ts";
+import { initClientHelpers } from "paseo-plugin-helper/client";
 import { ErrorBoundary } from "./client/error-boundary";
 import {
   ApprovalHeaderIcon,

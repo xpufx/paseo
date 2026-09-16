@@ -4,6 +4,7 @@ import { execSync, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { rewriteBareSpecifiers, hasBareHelperSpecifier } from "./lib/plugin-helper-layout.mjs";
 
 // CLI Arguments
 const args = process.argv.slice(2);
@@ -128,6 +129,59 @@ try {
     } catch {
       // Ignored if path was not in tree
     }
+  }
+
+  // 3b. Rewrite dev bare specifiers to the committed vendored copies. Dev
+  // source imports `paseo-plugin-helper/<tree>` (live via the workspace link);
+  // the published tree has no node_modules, so the staged plugin sources must
+  // import the vendored relative copies instead. Operates on the temp index, so
+  // the working tree and HEAD stay untouched.
+  const stagedPlugins = (isAll ? allAvailablePlugins : [...selectedTargets]).filter((p) =>
+    allAvailablePlugins.includes(p)
+  );
+  let rewritten = 0;
+  for (const plugin of stagedPlugins) {
+    const files = execFileSync(
+      "git",
+      ["ls-tree", "-r", "-z", "--name-only", "HEAD", `plugins/${plugin}`],
+      { encoding: "utf-8" }
+    )
+      .split("\0")
+      .filter(Boolean);
+    for (const rel of files) {
+      if (!/\.(ts|tsx)$/.test(rel)) continue;
+      if (rel.includes("/vendor/paseo-plugin-helper/")) continue;
+      const src = execFileSync("git", ["cat-file", "-p", `HEAD:${rel}`], {
+        encoding: "utf-8",
+        maxBuffer: 32 * 1024 * 1024,
+      });
+      let out;
+      try {
+        out = rewriteBareSpecifiers(src, path.resolve(rel), path.resolve("plugins", plugin));
+      } catch (err) {
+        console.error(`[mirror-github] error: ${err.message}`);
+        process.exit(1);
+      }
+      if (hasBareHelperSpecifier(out)) {
+        console.error(
+          `[mirror-github] error: a bare paseo-plugin-helper specifier survived the publish rewrite in ${rel} — the staged plugin would not resolve it`
+        );
+        process.exit(1);
+      }
+      if (out === src) continue;
+      const blob = execFileSync("git", ["hash-object", "-w", "--stdin"], {
+        input: out,
+        encoding: "utf-8",
+      }).trim();
+      execFileSync("git", ["update-index", "--cacheinfo", "100644", blob, rel], {
+        env,
+        stdio: "ignore",
+      });
+      rewritten++;
+    }
+  }
+  if (rewritten > 0) {
+    console.log(`[mirror-github] rewrote ${rewritten} plugin source file(s) to vendored helper imports`);
   }
 
   // 4. Prepare scoped root package.json for the monorepo baseline

@@ -11,7 +11,7 @@ import { paseo as paseoProbe } from "./providers/catalog";
 import { PLUGIN_VERSION } from "../shared/version";
 // Direct source import. The helper MCP client has zero runtime deps,
 // so no bundling step is needed for the daemon to resolve it.
-import { createPluginLogger, PluginStorage, redactSecrets } from "./vendor/paseo-plugin-helper/index";
+import { createPluginLogger, PluginStorage, redactSecrets } from "paseo-plugin-helper/server";
 import { checkMany, checkMcpServerHealth, callMcpServerTool } from "./health/health";
 
 type McpServer = z.infer<typeof McpServerSchema>;

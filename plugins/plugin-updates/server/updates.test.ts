@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { PaseoPluginInfo, SafeSpawnResult } from "./vendor/paseo-plugin-helper/index";
+import type { PaseoPluginInfo, SafeSpawnResult } from "paseo-plugin-helper/server";
 import { testing } from "./updates";
 
 function result(stdout = "", code = 0, stderr = ""): SafeSpawnResult {

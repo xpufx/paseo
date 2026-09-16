@@ -13,7 +13,7 @@ import {
   isPluginRunning,
   CustomPillPoller,
   discoverCustomPillConfigs,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/server";
 import {
   type SystemResources,
   topSettingsContract,

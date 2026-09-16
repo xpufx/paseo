@@ -8,7 +8,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { ForgeIcon, copyToClipboard } from "./vendor/paseo-plugin-helper/index.ts";
+import { ForgeIcon, copyToClipboard } from "paseo-plugin-helper/client";
 import {
   classifyForgeLink,
   classifyForgeUrl,

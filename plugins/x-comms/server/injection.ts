@@ -7,7 +7,7 @@ import {
   type McpInjectionHookHandler,
   type McpInjectionServer,
   type McpStdioInjectionConfig,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/server";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { serverPath } from "./server-status.ts";
 import { stateDir } from "./registry.ts";

@@ -1,41 +1,30 @@
 #!/usr/bin/env node
-// vendor-sync: re-copy paseo-plugin-helper src trees into
+// vendor-sync: refresh the committed paseo-plugin-helper copies under
 // plugins/<plugin>/{client,server,shared}/vendor/paseo-plugin-helper/ so the
-// released plugin installs with zero host requirements (no npm, no registry).
-// Directory plugins import these vendored trees directly; they do not resolve
-// the workspace package at runtime.
-// See plugins/top/shared/vendor/paseo-plugin-helper/README.md (Track B, #71).
+// published plugin installs with zero host requirements (no npm, no registry).
+//
+// Dev source imports the bare specifier `paseo-plugin-helper/client|server|
+// shared|mcp`; each plugin's tsconfig `paths` aliases it to the helper src, so
+// a helper src edit shows up on reload with no copy step (#176). The vendored
+// copies are the *publish* artifact: mirror-github.mjs rewrites the bare
+// specifiers to these relative copies when it stages the scoped tree.
 //
 // Usage: node scripts/vendor-sync.mjs [--check] [--link]
-//   --check: exit non-zero if the vendor trees differ from a fresh copy or are
-//     dev links (a linked tree is not publishable).
-//   --link: REFUSED. Dev symlinks are unsupported: Paseo's plugin compiler
-//     reclassifies relative vendored imports by realpath and rejects a symlink
-//     that resolves outside the plugin directory (plugin:
-//     paseo-plugin-server-runtime-boundary), so a linked plugin will not load
-//     or install. We must never ship or publish something that won't install;
-//     run plain vendor-sync to materialize copies. A pre-existing linked tree
-//     is still materialized by the plain sync path.
+//   --check: exit non-zero if the vendored copies drift from a fresh copy of
+//     the helper src, or if a legacy dev symlink is present (not publishable).
+//   --link: dev-link preflight (no longer creates symlinks). Verifies the
+//     workspace link + per-plugin tsconfig alias that give live helper edits.
+//     The old relative-vendor symlink is unsupported by Paseo's compiler and
+//     is retired (#146 option C).
+// See plugins/top/shared/vendor/paseo-plugin-helper/README.md (Track B, #71).
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { PLUGINS, TREES, destDir } from "./lib/plugin-helper-layout.mjs";
 
-const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HELPER_SRC = path.join(ROOT, "packages", "paseo-plugin-helper", "src");
-// Per-plugin helper src trees to vendor. "mcp" is server-side (node-only)
-// and lands in <plugin>/server/vendor/paseo-plugin-helper/mcp/.
-const PLUGINS = {
-  "top": ["client", "server", "shared"],
-  "mcp-tools": ["client", "server", "shared", "mcp"],
-  "demo": ["client", "server", "shared"],
-  "forges": ["client", "server", "shared"],
-  "slash": ["client", "server", "shared"],
-  "x-comms": ["client", "server", "shared", "mcp"],
-  "twofado": ["client", "server", "shared"],
-  "plugin-updates": ["client", "server", "shared"],
-};
-const TREES = ["client", "server", "shared", "mcp"];
-const DEST_ROOT = "vendor/paseo-plugin-helper";
 const CHECK = process.argv.includes("--check");
 const LINK = process.argv.includes("--link");
 
@@ -57,24 +46,45 @@ function isLink(dir) {
   }
 }
 
-// Dev-link mode is refused outright: Paseo's plugin compiler rejects a
-// relative vendored symlink that realpaths outside the plugin directory, so a
-// linked tree cannot load, build, or install. Never create that state.
-function refuseLink() {
-  console.error(
-    [
-      "error: --link is unsupported — vendored helper trees must remain materialized copies.",
-      "",
-      "Paseo's plugin compiler reclassifies relative vendored imports by realpath and",
-      "rejects a symlink that resolves outside the plugin directory",
-      "(plugin: paseo-plugin-server-runtime-boundary). A linked plugin will not load,",
-      "build, or install, so we refuse to create that state.",
-      "",
-      "Materialize the vendored copies instead:",
-      "  node scripts/vendor-sync.mjs",
-    ].join("\n")
-  );
-  process.exit(2);
+// Dev-link preflight: the live dev link is the workspace
+// node_modules/paseo-plugin-helper package plus each plugin's tsconfig `paths`
+// alias to the helper src. No vendor symlink is created (Paseo's compiler
+// rejects a relative vendored symlink that escapes the plugin directory).
+function devLinkStatus() {
+  const helperRoot = path.join(ROOT, "packages", "paseo-plugin-helper");
+  const workspaceLink = path.join(ROOT, "node_modules", "paseo-plugin-helper");
+  const problems = [];
+
+  let linkTarget = null;
+  try {
+    linkTarget = fs.realpathSync(workspaceLink);
+  } catch {
+    problems.push(`node_modules/paseo-plugin-helper is missing — run: npm install`);
+  }
+  if (linkTarget && linkTarget !== fs.realpathSync(helperRoot)) {
+    problems.push(`node_modules/paseo-plugin-helper points at ${linkTarget}, not packages/paseo-plugin-helper`);
+  }
+
+  for (const plugin of Object.keys(PLUGINS)) {
+    const tsconfig = path.join(ROOT, "plugins", plugin, "tsconfig.json");
+    let raw = "";
+    try {
+      raw = fs.readFileSync(tsconfig, "utf-8");
+    } catch {
+      problems.push(`plugins/${plugin}/tsconfig.json is missing`);
+      continue;
+    }
+    if (!raw.includes('"paseo-plugin-helper/client"')) {
+      problems.push(`plugins/${plugin}/tsconfig.json has no "paseo-plugin-helper/client" path alias`);
+    }
+  }
+
+  if (problems.length > 0) {
+    console.error("dev live link is not ready:");
+    for (const p of problems) console.error(`  - ${p}`);
+    process.exit(1);
+  }
+  console.log("dev live link OK: bare paseo-plugin-helper/* resolves to helper src via the workspace link + tsconfig paths");
 }
 
 // Publish mode: replace linked dirs with transformed copies, restoring the
@@ -101,12 +111,6 @@ function materializeLinks() {
     }
   }
   return changed;
-}
-
-// Destination dir for a helper src tree inside a plugin.
-function destDir(pluginRoot, srcTree) {
-  if (srcTree === "mcp") return path.join(pluginRoot, "server", DEST_ROOT, "mcp");
-  return path.join(pluginRoot, srcTree, DEST_ROOT);
 }
 
 // Rewrite a module specifier from a helper-src file to its vendored location.
@@ -208,14 +212,22 @@ function prune(pluginRoot, tree) {
   return removed;
 }
 
-if (LINK) {
-  if (CHECK) {
-    console.error("error: --link and --check are mutually exclusive");
-    process.exit(2);
+function main() {
+  if (LINK) {
+    if (CHECK) {
+      console.error("error: --link and --check are mutually exclusive");
+      process.exit(2);
+    }
+    devLinkStatus();
+    return;
   }
-  refuseLink();
-} else {
   syncOnce();
+}
+
+// Only run when invoked as a script; mirror-github.mjs imports the shared
+// layout module, not this file, but keep the guard so any import stays inert.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
 }
 
 function syncOnce() {
@@ -224,11 +236,11 @@ for (const [plugin, trees] of Object.entries(PLUGINS)) {
   const pluginRoot = path.join(ROOT, "plugins", plugin);
   for (const tree of trees) {
     const dest = destDir(pluginRoot, tree);
-    // A deliberate dev link is not copy drift: report it with a distinct
-    // marker so callers keying on "drift:" (doctor-live auto-sync) do not
-    // mistake it for stale copies and materialize it away.
+    // A legacy relative-vendor symlink (pre-#176) is not copy drift: report it
+    // with a distinct marker so it is never mistaken for stale copies. It is
+    // not publishable and plain vendor-sync materializes it below.
     if (isLink(dest)) {
-      console.log(`  linked: ${path.relative(ROOT, dest)} (dev link to helper src — not publishable; run node scripts/vendor-sync.mjs to materialize)`);
+      console.log(`  linked: ${path.relative(ROOT, dest)} (legacy dev symlink — not publishable; run node scripts/vendor-sync.mjs to materialize)`);
       dirty++;
       continue;
     }

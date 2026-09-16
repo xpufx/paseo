@@ -1,7 +1,7 @@
 import {
   defineContract,
   defineSettingsContract,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/shared";
 import { z } from "zod";
 
 export const SLASH_VERSION = "0.1.0";

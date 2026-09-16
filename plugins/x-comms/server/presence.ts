@@ -1,4 +1,4 @@
-import { PluginStorage } from "./vendor/paseo-plugin-helper/index";
+import { PluginStorage } from "paseo-plugin-helper/server";
 
 /**
  * Presence store (mesh Layer 1, control plane only).

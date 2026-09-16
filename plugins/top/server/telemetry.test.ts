@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
-import { PluginStorage } from "./vendor/paseo-plugin-helper/index";
+import { PluginStorage } from "paseo-plugin-helper/server";
 import {
   topTimelineTelemetrySchema,
   TopSettingsSchema,

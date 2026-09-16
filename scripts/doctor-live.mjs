@@ -7,8 +7,11 @@
  * 1. packages/paseo-plugin-helper/dist is compiled and up-to-date with src
  * 2. Each plugin's shared/version.ts contains current code changes
  * 3. Each plugin's Paseo daemon is running and loaded with current code changes
- * 4. No plugin has a linked (non-installable) vendored helper tree — warned,
- *    never auto-materialized and never reported healthy
+ * 4. No plugin has a legacy linked (non-installable) vendored helper tree —
+ *    warned, never auto-materialized and never reported healthy. Vendored-copy
+ *    drift from the helper src is reported as a publish-time warning only: dev
+ *    resolves the bare paseo-plugin-helper specifier straight to the helper src
+ *    via each plugin's tsconfig paths, so dev never needs a vendor copy step.
  *
  * Liveness never depends on a fixed log tail. The whole retained plugin log is
  * read; a version tag is attributed to the current process (after the last
@@ -372,7 +375,6 @@ async function diagnose() {
     stampVersionFn: await loadStampVersionFn(),
     vendorDrifted: new Set(),
     vendorLinked: new Set(),
-    vendorNeedsReload: new Set(),
     pluginStates: [],
   };
 
@@ -437,7 +439,6 @@ async function diagnose() {
     }
   }
   if (state.vendorLinked.size > 0) result.ready = false;
-  state.vendorNeedsReload = new Set(state.vendorDrifted);
 
   for (const name of pluginDirs) {
     const fullPath = path.join(pluginsDir, name);
@@ -604,12 +605,9 @@ async function diagnose() {
       }
       pluginData.vendorPin = "-";
     }
-    if (pluginData.vendorPin !== "-" && state.vendorDrifted.has(name)) {
-      pluginData.vendorDrift = true;
-      result.ready = false;
-    } else {
-      pluginData.vendorDrift = false;
-    }
+    // Vendor drift is a publish-time concern: dev resolves the bare helper
+    // specifier to the helper src, so stale copies never block a dev reload.
+    pluginData.vendorDrift = pluginData.vendorPin !== "-" && state.vendorDrifted.has(name);
 
     result.plugins.push(pluginData);
 
@@ -659,13 +657,10 @@ async function remediate(result, state) {
     }
   }
 
+  // Vendored copies are publish artifacts, not a dev dependency: never copy
+  // them during a reload. The publish gate runs `vendor-sync` itself.
   if (state.vendorDrifted.size > 0) {
-    console.log(`${colors.yellow}⚡ Synchronizing vendored helper trees before reload...${colors.reset}`);
-    execSync("node scripts/vendor-sync.mjs", {
-      cwd: ROOT_DIR,
-      stdio: "inherit",
-    });
-    state.vendorDrifted.clear();
+    console.log(`${colors.yellow}ℹ Vendored helper copies are stale (publish artifact) — run: node scripts/vendor-sync.mjs before publishing${colors.reset}`);
   }
 
   for (const ps of state.pluginStates) {
@@ -692,8 +687,7 @@ async function remediate(result, state) {
       ps.configured &&
       (ps.pluginData.status === "stale-daemon" ||
         ps.pluginData.status === "stale-stamp" ||
-        ps.pluginData.status === "stopped" ||
-        state.vendorNeedsReload.has(ps.name));
+        ps.pluginData.status === "stopped");
 
     if (needsReload) {
       console.log(`${colors.yellow}⚡ Reloading plugin '${ps.pluginId}' via paseo...${colors.reset}`);
@@ -792,9 +786,20 @@ function output(result) {
 
   const linkedPlugins = result.plugins.filter((p) => p.vendorLinked);
   if (linkedPlugins.length > 0) {
-    console.log(`${colors.yellow}⚠️  Vendored helper trees are dev links — NOT installable, do not ship/publish:${colors.reset}`);
+    console.log(`${colors.yellow}⚠️  Vendored helper trees are legacy dev symlinks — NOT installable, do not ship/publish:${colors.reset}`);
     for (const p of linkedPlugins) {
       console.log(`      plugins/${p.name} — materialize with ${colors.cyan}node scripts/vendor-sync.mjs${colors.reset}`);
+    }
+    console.log("");
+  }
+
+  // Publish-only signal: dev is unaffected because it resolves the bare helper
+  // specifier straight to the helper src.
+  const driftedPublish = result.plugins.filter((p) => p.vendorDrift);
+  if (driftedPublish.length > 0) {
+    console.log(`${colors.yellow}ℹ Vendored helper copies stale (publish artifact only — dev resolves helper src directly):${colors.reset}`);
+    for (const p of driftedPublish) {
+      console.log(`      plugins/${p.name}: pinned ${p.vendorPin} — run ${colors.cyan}node scripts/vendor-sync.mjs${colors.reset} before publishing`);
     }
     console.log("");
   }
@@ -822,15 +827,6 @@ function output(result) {
     const unstampedPlugins = result.plugins.filter((p) => p.status === "no-stamp");
     if (unstampedPlugins.length > 0) {
       console.log(`  ⚠️  Missing version stamp: ${unstampedPlugins.map((p) => p.name).join(", ")} (generate shared/version.ts)`);
-    }
-    {
-      const drifted = result.plugins.filter((p) => p.vendorDrift);
-      if (drifted.length > 0) {
-        console.log(`  ⚠️  Vendor drift (vendored copy differs from helper src): ${colors.cyan}make vendor-sync${colors.reset}`);
-        for (const p of drifted) {
-          console.log(`      ${p.name}: pinned ${p.vendorPin}, needs re-sync`);
-        }
-      }
     }
     if (result.nestedHelperShadows.length > 0) {
       for (const s of result.nestedHelperShadows) {

@@ -5,7 +5,7 @@ import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput
 import {
   initClientHelpers,
   type ComposerPillRegistrar,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import {
@@ -44,8 +44,8 @@ import {
   type VisualFlair,
   type AttentionBeaconMode,
   type AttentionBeaconTone,
-} from "./vendor/paseo-plugin-helper/index";
-import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
+import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   getDemoDataRpc,
   triggerDemoActionRpc,
@@ -704,7 +704,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
             <Card.Header title="Sample Code Block" />
             <CodeBlock
               language="typescript"
-              code={`import { createPluginPill, MetricGauge } from "./vendor/paseo-plugin-helper/index";\n\n// Renders circular ring\n<MetricGauge value={75} label="CPU Load" />`}
+              code={`import { createPluginPill, MetricGauge } from "paseo-plugin-helper/client";\n\n// Renders circular ring\n<MetricGauge value={75} label="CPU Load" />`}
               copyable
             />
           </Card>

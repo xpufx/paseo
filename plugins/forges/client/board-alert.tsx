@@ -8,7 +8,7 @@ import type {
 import {
   Badge,
   ForgeIcon,
-} from "./vendor/paseo-plugin-helper/index.ts";
+} from "paseo-plugin-helper/client";
 import {
   boardAlertTimelineSchema,
   classifyForgeUrl,

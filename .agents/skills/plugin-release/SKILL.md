@@ -106,9 +106,17 @@ node scripts/vendor-sync.mjs --check   # must exit 0
 git ls-files -s | awk '$1==120000 {print $4}'   # no symlink under a vendor path
 ```
 
-`--check` fails on drift or a linked tree. A linked vendor tree is not
+`--check` fails on drift or a legacy linked tree. A linked vendor tree is not
 installable (Paseo's compiler rejects a symlink that realpaths outside the
 plugin) — run `node scripts/vendor-sync.mjs` to materialize it.
+
+Dev source imports the bare specifier (`paseo-plugin-helper/{client,server,
+shared,mcp}`), which each plugin's `tsconfig.json` `paths` aliases to the helper
+src, so a helper src edit reflects on reload with no copy step (#176). The
+committed vendored copies are the **publish** artifact: `mirror-github.mjs`
+rewrites those bare specifiers to the vendored relative imports in the staged
+tree (and fails if any bare specifier survives). `vendor-sync` refreshes the
+committed copies; run it whenever the helper src changed, then commit them.
 
 ## 6. CI gate: `.forgejo/workflows/install-smoke.yml`
 
@@ -120,12 +128,13 @@ It gates the tree the mirror *would* publish, in order:
    (`oktay`, `aager`, non-documented `mrs.aager.de` hosts) plus README presence.
    `forge.mrs.aager.de/xpufx/paseo` remains allowed as the documented mirror
    source.
-2. **Vendor gate** — `node scripts/vendor-sync.mjs` materializes any dev link,
-   then `--check` must be clean and no vendored helper path may be a committed
-   symlink (`git ls-files -s` mode 120000). A linked/partial tree is never
-   smoked or published.
+2. **Vendor gate** — `node scripts/vendor-sync.mjs` materializes any legacy dev
+   symlink, then `--check` must be clean and no vendored helper path may be a
+   committed symlink (`git ls-files -s` mode 120000). A linked/partial tree is
+   never smoked or published.
 3. **Staged tree** — `node scripts/mirror-github.mjs --target=<8 plugins,helper>
-   --dry-run` prepares the scoped tree/commit against a temp local bare remote
+   --dry-run` rewrites dev bare helper specifiers to the vendored relative
+   imports and prepares the scoped tree/commit against a temp local bare remote
    (`file://`, never github.com); the prepared commit is pushed to that local
    remote only.
 4. **Install smoke** — `paseo plugin add file://<staged>:plugins/<dir> --ref

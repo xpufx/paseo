@@ -40,14 +40,14 @@ import {
   type KeyValueProps,
   type CardHeaderProps,
   type BadgeProps,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
 import {
   formatBytes,
   formatUptime,
   resolveMetricStatus,
   type MetricThresholds,
   type CustomPillState,
-} from "../shared/vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/shared";
 import {
   getSystemResourcesRpc,
   topSettingsContract,

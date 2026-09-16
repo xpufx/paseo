@@ -24,7 +24,7 @@ import {
   copyToClipboard,
   usePluginSettings,
   usePluginTheme,
-} from "./vendor/paseo-plugin-helper/index.ts";
+} from "paseo-plugin-helper/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Easing, Text, View } from "react-native";

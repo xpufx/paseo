@@ -98,13 +98,17 @@ jobs:
           [ "$missing" -eq 0 ] || exit 1
           echo "hygiene clean"
 
-      - name: Gate — materialize dev links, then vendor trees are publishable
+      - name: Gate — vendored copy trees are publishable
         run: |
           set -euo pipefail
-          # Materialize any working-tree dev link first (a no-op on a clean
-          # checkout), then assert no copy drift and no committed symlink under a
-          # vendored helper path. The gate must never smoke or publish a
-          # linked/partial tree — such a tree installs as a broken plugin (#146).
+          # Dev imports the bare paseo-plugin-helper specifier (resolved to the
+          # helper src via the workspace link + tsconfig paths); the vendored
+          # copies are the publish artifact the mirror stages and this gate
+          # installs. Materialize any legacy working-tree dev symlink first (a
+          # no-op on a clean checkout), then assert no copy drift and no
+          # committed symlink under a vendored helper path. The gate must never
+          # smoke or publish a linked/partial tree — such a tree installs as a
+          # broken plugin (#146).
           node scripts/vendor-sync.mjs
           node scripts/vendor-sync.mjs --check
           linked="$(git ls-files -s | awk '$1==120000 && $4 ~ /\/vendor\/paseo-plugin-helper\// {print $4}')"

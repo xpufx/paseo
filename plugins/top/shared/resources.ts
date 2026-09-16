@@ -3,7 +3,7 @@ import {
   defineSettingsContract,
   type RpcOutput,
   type CustomPillState,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/shared";
 import { z } from "zod";
 
 export type { CustomPillState };

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineContract, defineSettingsContract } from "./vendor/paseo-plugin-helper/index.ts";
+import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 
 export const notificationTargets = ["telegram", "paseo", "both"] as const;
 export type NotificationTarget = (typeof notificationTargets)[number];

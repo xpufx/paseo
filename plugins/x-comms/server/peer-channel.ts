@@ -4,8 +4,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { buildDaemonWebSocketUrl, buildRelayWebSocketUrl } from "@getpaseo/protocol/daemon-endpoints";
-import { createPluginLogger, safeSpawn } from "./vendor/paseo-plugin-helper/index";
-import { withTimeout } from "../shared/vendor/paseo-plugin-helper/index";
+import { createPluginLogger, safeSpawn } from "paseo-plugin-helper/server";
+import { withTimeout } from "paseo-plugin-helper/shared";
 
 const log = createPluginLogger("paseo-x-comms", { subsystem: "peer-channel" });
 const CONNECT_TIMEOUT_MS = 8000;

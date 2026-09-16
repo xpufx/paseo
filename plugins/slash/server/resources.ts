@@ -1,4 +1,4 @@
-import { PluginStorage, createPluginLogger } from "./vendor/paseo-plugin-helper/index";
+import { PluginStorage, createPluginLogger } from "paseo-plugin-helper/server";
 import {
   SEED_COMMANDS,
   interpolateTemplate,

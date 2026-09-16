@@ -18,7 +18,7 @@ import {
   SectionHeader,
   TextInput,
   usePluginTheme,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
 import { formatPeerDisplay } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 import {

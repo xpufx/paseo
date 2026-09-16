@@ -3,7 +3,7 @@ import { Icon, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyT
 import {
   initClientHelpers,
   type ComposerPillRegistrar,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import { useMemo, useState } from "react";
@@ -34,7 +34,7 @@ import {
   type RenderModalProps,
   type RenderPillProps,
   type TabItem,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
 import { useMcpHealthQuery, useMcpQuery } from "./mcp-query";
 import {
   callMcpTool,

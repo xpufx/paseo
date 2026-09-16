@@ -11,7 +11,7 @@ import {
   triggerHaptic,
   usePluginTheme,
   useSuiteSettings,
-} from "./vendor/paseo-plugin-helper/index";
+} from "paseo-plugin-helper/client";
 
 export function SharedSuiteCard() {
   const { colors, typography } = usePluginTheme();

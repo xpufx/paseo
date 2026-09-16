@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers, registerCommandCenterItem, registerSidebarSurface } from "./client/vendor/paseo-plugin-helper/index";
+import { initClientHelpers, registerCommandCenterItem, registerSidebarSurface } from "paseo-plugin-helper/client";
 import { registerSlashCommands } from "./client/commands";
 import { SlashConsole } from "./client/console";
 

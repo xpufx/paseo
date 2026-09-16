@@ -30,7 +30,7 @@ conformance:
 build:
 	@npm run build --workspaces --if-present
 
-## vendor-sync: Re-copy helper src into top vendor trees (Track B, #71)
+## vendor-sync: Refresh the committed helper copies plugins publish from (Track B, #71)
 vendor-sync:
 	@node scripts/vendor-sync.mjs
 
@@ -38,11 +38,11 @@ vendor-sync:
 stamp:
 	@for p in demo top mcp-tools; do npm run stamp --prefix plugins/$$p; done
 
-## vendor-link: REFUSED — dev symlinks are not installable (Paseo compiler rejects them); use vendor-sync
+## vendor-link: Verify the live dev link (workspace link + tsconfig alias); creates no symlinks
 vendor-link:
 	@node scripts/vendor-sync.mjs --link
 
-## vendor-check: Fail if vendor trees drifted from helper src or are dev links (not publishable)
+## vendor-check: Fail if committed helper copies drifted from helper src or a legacy dev symlink remains
 vendor-check:
 	@node scripts/vendor-sync.mjs --check
 

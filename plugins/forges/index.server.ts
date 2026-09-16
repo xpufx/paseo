@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createPluginLogger } from "./server/vendor/paseo-plugin-helper/index.ts";
+import { createPluginLogger } from "paseo-plugin-helper/server";
 import {
   addCommentContract,
   forgeContextContract,

@@ -1,7 +1,7 @@
 import net from "node:net";
 import os from "node:os";
-import type { RpcInput, RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
-import { createPluginLogger, guardRpcHandler } from "./vendor/paseo-plugin-helper/index.ts";
+import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
+import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
 import {
   approvalAck,
   approvalSettings,

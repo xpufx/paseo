@@ -1,5 +1,5 @@
-import { McpClient } from "../vendor/paseo-plugin-helper/mcp/index";
-import { withTimeout } from "../../shared/vendor/paseo-plugin-helper/index";
+import { McpClient } from "paseo-plugin-helper/mcp";
+import { withTimeout } from "paseo-plugin-helper/shared";
 import type { McpServer } from "../../shared/mcp";
 
 // GTD: generic health check that works with *every* MCP.
