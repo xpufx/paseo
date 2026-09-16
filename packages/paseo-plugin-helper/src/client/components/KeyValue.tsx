@@ -146,7 +146,7 @@ export function KeyValue({
             styles.stackedValueText,
             {
               color: colors.foreground,
-              ...typography.body,
+              ...typography.bodySmall,
               fontFamily,
             },
             valueStyle,
@@ -204,7 +204,7 @@ export function KeyValue({
               styles.rowValueText,
               {
                 color: colors.foreground,
-                ...typography.body,
+                ...typography.bodySmall,
                 fontFamily,
               },
               valueStyle,

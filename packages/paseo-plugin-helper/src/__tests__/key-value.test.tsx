@@ -64,9 +64,9 @@ describe("KeyValue typography scale", () => {
     expect(labelStyles.some((s) => s?.fontWeight === scale.label.fontWeight)).toBe(true);
 
     const valueStyles = flat(value.props.style);
-    expect(valueStyles.some((s) => s?.fontSize === scale.body.fontSize)).toBe(true);
-    expect(valueStyles.some((s) => s?.lineHeight === scale.body.lineHeight)).toBe(true);
-    expect(valueStyles.some((s) => s?.fontWeight === scale.body.fontWeight)).toBe(true);
+    expect(valueStyles.some((s) => s?.fontSize === scale.bodySmall.fontSize)).toBe(true);
+    expect(valueStyles.some((s) => s?.lineHeight === scale.bodySmall.lineHeight)).toBe(true);
+    expect(valueStyles.some((s) => s?.fontWeight === scale.bodySmall.fontWeight)).toBe(true);
   });
 
   it("steps value/label type down for compact layout", () => {
@@ -75,7 +75,7 @@ describe("KeyValue typography scale", () => {
     const regular = resolveTypography(regularLayout, "comfortable");
     const compact = resolveTypography(compactLayout, "comfortable");
 
-    expect(compact.bodyStrong.fontSize).toBeLessThan(regular.bodyStrong.fontSize);
+    expect(compact.bodySmall.fontSize).toBeLessThan(regular.bodySmall.fontSize);
 
     const r = render(
       withLayout(
@@ -86,7 +86,7 @@ describe("KeyValue typography scale", () => {
 
     const [label, value] = r.root.findAllByType(Text as any);
     expect(flat(label.props.style).some((s) => s?.fontSize === compact.label.fontSize)).toBe(true);
-    expect(flat(value.props.style).some((s) => s?.fontSize === compact.body.fontSize)).toBe(true);
+    expect(flat(value.props.style).some((s) => s?.fontSize === compact.bodySmall.fontSize)).toBe(true);
   });
 
   it("steps value/label type down for compact density", () => {
@@ -94,7 +94,7 @@ describe("KeyValue typography scale", () => {
     const comfortable = resolveTypography(layout, "comfortable");
     const dense = resolveTypography(layout, "compact");
 
-    expect(dense.bodyStrong.fontSize).toBeLessThan(comfortable.bodyStrong.fontSize);
+    expect(dense.bodySmall.fontSize).toBeLessThan(comfortable.bodySmall.fontSize);
 
     const r = render(
       withLayout(
@@ -106,7 +106,7 @@ describe("KeyValue typography scale", () => {
 
     const [label, value] = r.root.findAllByType(Text as any);
     expect(flat(label.props.style).some((s) => s?.fontSize === dense.label.fontSize)).toBe(true);
-    expect(flat(value.props.style).some((s) => s?.fontSize === dense.body.fontSize)).toBe(true);
+    expect(flat(value.props.style).some((s) => s?.fontSize === dense.bodySmall.fontSize)).toBe(true);
   });
 
   it("keeps caller labelStyle/valueStyle overrides applied last", () => {
@@ -127,6 +127,39 @@ describe("KeyValue typography scale", () => {
     const valueStyle = flat(value.props.style).filter((s) => s?.fontSize !== undefined).pop();
     expect(labelStyle?.fontSize).toBe(9);
     expect(valueStyle?.fontSize).toBe(8);
+  });
+
+  it("never lets the value outrank its own label in size", () => {
+    for (const layout of [
+      { compact: false, platform: "web" } as HostLayout,
+      { compact: true, platform: "web" } as HostLayout,
+    ]) {
+      const scale = resolveTypography(layout, "comfortable");
+      expect(scale.label.fontSize).toBeGreaterThanOrEqual(scale.bodySmall.fontSize);
+
+      const r = render(withLayout(layout, <KeyValue label="Remote" value="origin/main" mono />));
+      const [label, value] = r.root.findAllByType(Text as any);
+      const labelSize = flat(label.props.style)
+        .filter((s) => s?.fontSize !== undefined)
+        .pop()?.fontSize;
+      const valueSize = flat(value.props.style)
+        .filter((s) => s?.fontSize !== undefined)
+        .pop()?.fontSize;
+      expect(labelSize).toBeGreaterThanOrEqual(valueSize);
+    }
+  });
+
+  it("derives bodySmall from label: same metrics at normal weight", () => {
+    for (const density of ["compact", "comfortable", "spacious"] as const) {
+      for (const compact of [false, true]) {
+        const scale = resolveTypography({ compact, platform: "web" }, density);
+        expect(scale.bodySmall.fontSize).toBe(scale.label.fontSize);
+        expect(scale.bodySmall.lineHeight).toBe(scale.label.lineHeight);
+        expect(scale.bodySmall.fontWeight).toBe("400");
+        expect(scale.bodySmall.fontSize).toBeGreaterThan(scale.caption.fontSize);
+        expect(scale.bodySmall.fontSize).toBeLessThan(scale.body.fontSize);
+      }
+    }
   });
 });
 
@@ -171,7 +204,7 @@ describe("KeyValue row layout", () => {
       .findAllByType(Text as any)
       .find((t) => flat(t.props.style).some((s) => s?.textAlign === "right"))!;
     expect(flat(value.props.style).some((s) => s?.minWidth === 0)).toBe(true);
-    expect(flat(value.props.style).some((s) => s?.lineHeight === scale.body.lineHeight)).toBe(
+    expect(flat(value.props.style).some((s) => s?.lineHeight === scale.bodySmall.lineHeight)).toBe(
       true,
     );
 

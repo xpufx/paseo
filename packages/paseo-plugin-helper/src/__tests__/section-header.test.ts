@@ -4,6 +4,7 @@ import TestRenderer, { act } from "react-test-renderer";
 import { Text } from "react-native";
 import { initClientHelpers } from "../client/host.js";
 import * as themeProvider from "../client/theme/provider.js";
+import { resolveTypography } from "../client/theme/tokens.js";
 import { SectionHeader } from "../client/components/SectionHeader.js";
 import { Badge } from "../client/components/Badge.js";
 
@@ -43,6 +44,7 @@ function installStubs(flair: any = { headingTransform: "uppercase" }) {
     getVariantPalette: () => ({ bg: "#000", text: "#fff", border: "#333" }),
     resolveRadius: () => 8,
     padding: { horizontal: 12, vertical: 8, gap: 8 },
+    typography: resolveTypography({ compact: false, platform: "web" }, "comfortable"),
   } as any);
 }
 
@@ -69,14 +71,25 @@ describe("SectionHeader", () => {
   });
 
   it("renders title with themed muted style", () => {
+    const scale = resolveTypography({ compact: false, platform: "web" }, "comfortable");
     const renderer = render(React.createElement(SectionHeader, { title: "Overview" }));
     const text = renderer.root.findByType(Text as any);
     expect(text.props.children).toBe("Overview");
     const flat = flatStyles(text.props.style);
     expect(flat.some((s: any) => s?.color === colors.foregroundMuted)).toBe(true);
-    expect(flat.some((s: any) => s?.fontSize === 11)).toBe(true);
-    expect(flat.some((s: any) => s?.fontWeight === "700")).toBe(true);
+    expect(flat.some((s: any) => s?.fontSize === scale.bodyStrong.fontSize)).toBe(true);
+    expect(flat.some((s: any) => s?.fontWeight === scale.bodyStrong.fontWeight)).toBe(true);
     expect(flat.some((s: any) => s?.letterSpacing === 0.8)).toBe(true);
+  });
+
+  it("keeps the title at least as large as the values it heads", () => {
+    const scale = resolveTypography({ compact: false, platform: "web" }, "comfortable");
+    const renderer = render(React.createElement(SectionHeader, { title: "Overview" }));
+    const style = flatStyles(renderer.root.findByType(Text as any).props.style);
+    const titleSize = style.filter((s: any) => s?.fontSize !== undefined).pop()?.fontSize;
+    expect(titleSize).toBeGreaterThanOrEqual(scale.bodySmall.fontSize);
+    expect(titleSize).toBeGreaterThanOrEqual(scale.label.fontSize);
+    expect(titleSize).toBeGreaterThanOrEqual(scale.body.fontSize);
   });
 
   it("uppercases title when flair.headingTransform is uppercase", () => {

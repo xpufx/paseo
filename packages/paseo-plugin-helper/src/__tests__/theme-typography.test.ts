@@ -12,6 +12,27 @@ describe("theme typography", () => {
     expect(scale.label.fontWeight).toBe("600");
   });
 
+  it("derives bodySmall from label so a value never outranks its label", () => {
+    const scale = resolveTypography({ compact: false, platform: "web" }, "comfortable");
+
+    expect(scale.bodySmall.fontSize).toBe(scale.label.fontSize);
+    expect(scale.bodySmall.lineHeight).toBe(scale.label.lineHeight);
+    expect(scale.bodySmall.fontWeight).toBe("400");
+    expect(scale.label.fontSize).toBeGreaterThanOrEqual(scale.bodySmall.fontSize);
+    expect(scale.bodySmall.fontSize).toBeGreaterThan(scale.caption.fontSize);
+    expect(scale.bodySmall.fontSize).toBeLessThan(scale.body.fontSize);
+  });
+
+  it("steps bodySmall down with compact layout and density", () => {
+    const regular = resolveTypography({ compact: false, platform: "web" }, "comfortable");
+    const compact = resolveTypography({ compact: true, platform: "web" }, "comfortable");
+    const dense = resolveTypography({ compact: false, platform: "web" }, "compact");
+
+    expect(compact.bodySmall.fontSize).toBeLessThan(regular.bodySmall.fontSize);
+    expect(dense.bodySmall.fontSize).toBeLessThan(regular.bodySmall.fontSize);
+    expect(compact.bodySmall.fontSize).toBe(compact.label.fontSize);
+  });
+
   it("steps down compact layouts without making captions unreadable", () => {
     const regular = resolveTypography({ compact: false, platform: "web" }, "comfortable");
     const compact = resolveTypography({ compact: true, platform: "web" }, "comfortable");

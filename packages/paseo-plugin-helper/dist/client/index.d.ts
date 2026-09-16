@@ -169,6 +169,11 @@ interface TypographyScale {
     heading: TypographyToken;
     body: TypographyToken;
     bodyStrong: TypographyToken;
+    /**
+     * Value text that pairs with a {@link TypographyScale.label}: same size as
+     * the label, normal weight, so a value never outranks its own label.
+     */
+    bodySmall: TypographyToken;
     caption: TypographyToken;
     label: TypographyToken;
 }

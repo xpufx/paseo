@@ -29,6 +29,11 @@ export interface TypographyScale {
   heading: TypographyToken;
   body: TypographyToken;
   bodyStrong: TypographyToken;
+  /**
+   * Value text that pairs with a {@link TypographyScale.label}: same size as
+   * the label, normal weight, so a value never outranks its own label.
+   */
+  bodySmall: TypographyToken;
   caption: TypographyToken;
   label: TypographyToken;
 }
@@ -46,13 +51,27 @@ export function resolveTypography(
   const size = (regular: number, minimum = 10) =>
     Math.max(minimum, regular + (compact ? -1 : 0) + densityStep);
 
+  const label: TypographyToken = {
+    fontSize: size(12, 11),
+    lineHeight: size(16, 14),
+    fontWeight: "600",
+  };
+  // Derived, not a fresh literal: a paired value shares the label's metrics
+  // and drops to normal weight, so it can never render larger than its label.
+  const bodySmall: TypographyToken = {
+    fontSize: label.fontSize,
+    lineHeight: label.lineHeight,
+    fontWeight: "400",
+  };
+
   return {
     title: { fontSize: size(16, 14), lineHeight: size(22, 18), fontWeight: "600" },
     heading: { fontSize: size(14, 12), lineHeight: size(20, 16), fontWeight: "600" },
     body: { fontSize: size(13, 12), lineHeight: size(19, 16), fontWeight: "400" },
     bodyStrong: { fontSize: size(13, 12), lineHeight: size(19, 16), fontWeight: "600" },
+    bodySmall,
     caption: { fontSize: size(11, 10), lineHeight: size(15, 14), fontWeight: "400" },
-    label: { fontSize: size(12, 11), lineHeight: size(16, 14), fontWeight: "600" },
+    label,
   };
 }
 
