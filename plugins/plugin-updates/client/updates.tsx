@@ -100,6 +100,7 @@ function PluginRow({
   const { colors, typography } = usePluginTheme();
   const detail = fallbackDetail(plugin);
   const note = reportOnlyNote(plugin.status);
+  const isOrphan = plugin.status === "orphaned";
   const version = plugin.workingTree ?? plugin.localTree;
   return (
     <Card variant="elevated" noPadding>
@@ -107,8 +108,8 @@ function PluginRow({
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
           <Text style={{ color: colors.foreground, ...typography.bodyStrong, flex: 1 }}>{plugin.id}</Text>
-          {plugin.dirty === true ? <Badge label="dirty" variant="warning" dot /> : null}
-          {plugin.updateAvailable ? (
+          {plugin.dirty === true && !isOrphan ? <Badge label="dirty" variant="warning" dot /> : null}
+          {plugin.updateAvailable && !isOrphan ? (
             <Button
               label={forceNeeded ? "Force update" : "Update"}
               variant={forceNeeded ? "primary" : "secondary"}
@@ -125,25 +126,29 @@ function PluginRow({
         {note ? (
           <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>{note}</Text>
         ) : null}
-        <KeyValueGroup columns={2} gap={8}>
-          <KeyValue
-            label="Version"
-            value={version}
-            subValue={plugin.workingTree ? "working tree" : undefined}
-            mono
-            truncate="middle"
-            copyable
-          />
-          <KeyValue label="Remote" value={plugin.remoteTree} mono truncate="middle" copyable />
-          <KeyValue label="Ref" value={refLabel(plugin)} truncate="end" />
-          <KeyValue label="Subdir" value={plugin.subdir === "" ? "(repo root)" : plugin.subdir} truncate="path" />
-        </KeyValueGroup>
-        {plugin.latestChange?.subject ? (
-          <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, ...typography.caption }}>
-            Latest remote change: {plugin.latestChange.subject}
-            {plugin.latestChange.date ? ` (${plugin.latestChange.date})` : ""}
-          </Text>
-        ) : null}
+        {isOrphan ? null : (
+          <>
+            <KeyValueGroup columns={2} gap={8}>
+              <KeyValue
+                label="Version"
+                value={version}
+                subValue={plugin.workingTree ? "working tree" : undefined}
+                mono
+                truncate="middle"
+                copyable
+              />
+              <KeyValue label="Remote" value={plugin.remoteTree} mono truncate="middle" copyable />
+              <KeyValue label="Ref" value={refLabel(plugin)} truncate="end" />
+              <KeyValue label="Subdir" value={plugin.subdir === "" ? "(repo root)" : plugin.subdir} truncate="path" />
+            </KeyValueGroup>
+            {plugin.latestChange?.subject ? (
+              <Text selectable numberOfLines={2} style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                Latest remote change: {plugin.latestChange.subject}
+                {plugin.latestChange.date ? ` (${plugin.latestChange.date})` : ""}
+              </Text>
+            ) : null}
+          </>
+        )}
       </View>
     </Card>
   );
