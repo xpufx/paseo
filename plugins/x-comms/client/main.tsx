@@ -16,10 +16,12 @@ import {
   ModalBody,
   ModalContent,
   SectionHeader,
+  Tabs,
   TextInput,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
 import { formatPeerDisplay } from "./peer-label";
+import { SettingsPrototype } from "./settings-prototype";
 import { ViaXComms } from "./via-x-comms";
 import {
   registryReadRpc,
@@ -86,7 +88,30 @@ function HealthBadge({
   return <Badge label="unreachable" variant="danger" dot />;
 }
 
-export function MainSurface({ theme }: PluginSurfaceProps) {
+// #97: the operator asked for an entirely new prototype surface alongside the
+// current one. MainSurface keeps the existing page as the default "Current" tab
+// and renders the helper-primitives prototype behind the marked "Prototype" tab.
+export function MainSurface(props: PluginSurfaceProps) {
+  const { colors } = usePluginTheme();
+  const [surface, setSurface] = useState<"current" | "prototype">("current");
+  return (
+    <View style={{ flex: 1, minHeight: 0, width: "100%", backgroundColor: colors.surface0 }}>
+      <View style={{ paddingHorizontal: 12, paddingTop: 12 }}>
+        <Tabs
+          tabs={[
+            { id: "current", label: "Current" },
+            { id: "prototype", label: "Prototype", badge: "new" },
+          ]}
+          activeTab={surface}
+          onTabChange={(id) => setSurface(id === "prototype" ? "prototype" : "current")}
+        />
+      </View>
+      {surface === "current" ? <CurrentSurface {...props} /> : <SettingsPrototype {...props} />}
+    </View>
+  );
+}
+
+function CurrentSurface({ theme }: PluginSurfaceProps) {
   const { colors } = usePluginTheme();
   const callRead = useRpc(registryReadRpc);
   const callAdd = useRpc(daemonAddRpc);

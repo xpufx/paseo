@@ -351,6 +351,7 @@ interface UiPrefsState {
   prereqsCollapsed?: boolean;
   presenceEnabled?: boolean;
   injectionEnabled?: boolean;
+  daemonEnabled?: Record<string, boolean>;
   daemonIdentities?: Record<string, string>;
   daemonHostnames?: Record<string, string>;
   serverPath?: string;
@@ -418,11 +419,12 @@ export async function handleUiPrefsGet() {
   const prefs = readUiPrefs();
   return {
     prereqsCollapsed: prefs.prereqsCollapsed === true,
+    daemonEnabled: prefs.daemonEnabled ?? {},
     ...resolveFeatureFlags(prefs),
   };
 }
 
-export async function handleUiPrefsSet(input: { prereqsCollapsed: boolean; presenceEnabled?: boolean; injectionEnabled?: boolean }) {
+export async function handleUiPrefsSet(input: { prereqsCollapsed: boolean; presenceEnabled?: boolean; injectionEnabled?: boolean; daemonEnabled?: Record<string, boolean> }) {
   const state = readUiPrefs();
   writeUiPrefs({
     ...state,
@@ -432,6 +434,7 @@ export async function handleUiPrefsSet(input: { prereqsCollapsed: boolean; prese
   const next = readUiPrefs();
   return {
     prereqsCollapsed: next.prereqsCollapsed === true,
+    daemonEnabled: next.daemonEnabled ?? {},
     ...resolveFeatureFlags(next),
   };
 }

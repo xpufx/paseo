@@ -9,10 +9,16 @@
 export interface FeaturePrefs {
   presenceEnabled?: boolean;
   injectionEnabled?: boolean;
+  /** Per-daemon enablement; an absent or non-false entry means enabled. */
+  daemonEnabled?: Record<string, boolean>;
 }
 
 export function resolvePresenceEnabled(prefs: FeaturePrefs): boolean {
   return prefs.presenceEnabled !== false;
+}
+
+export function resolveDaemonEnabled(prefs: FeaturePrefs, name: string): boolean {
+  return prefs.daemonEnabled?.[name] !== false;
 }
 
 export function resolveInjectionEnabled(prefs: FeaturePrefs): boolean {
@@ -39,9 +45,13 @@ export function applyFeaturePrefsUpdate(
   stored: FeaturePrefs,
   input: FeaturePrefs,
 ): FeaturePrefs {
+  const daemonEnabled = input.daemonEnabled
+    ? { ...stored.daemonEnabled, ...input.daemonEnabled }
+    : stored.daemonEnabled;
   return {
     ...stored,
     presenceEnabled: input.presenceEnabled ?? stored.presenceEnabled,
     injectionEnabled: input.injectionEnabled ?? stored.injectionEnabled,
+    ...(daemonEnabled !== undefined ? { daemonEnabled } : {}),
   };
 }
