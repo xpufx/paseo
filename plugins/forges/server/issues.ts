@@ -143,6 +143,7 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
       repoPublic: null,
       tokenPresent: false,
       tokenValid: null,
+      repoWritePermission: null,
       page: 1,
       hasMore: false,
       error: resolved.error,
@@ -155,28 +156,29 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     const message = remoteSource === "explicit"
       ? `Selected forge ${host}/${repo} is unreachable or not a forge API host`
       : "Not a forge repo for this workspace";
-    return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenPresent: false, tokenValid: null, error: message };
+    return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenPresent: false, tokenValid: null, repoWritePermission: null, error: message };
   }
   const anonClient = new ForgeClient({ host });
   const tokenPresent = client.hasToken();
   const page = input?.page ?? 1;
-  const [paged, openIssueCount, repoPublic, tokenValid] = await Promise.all([
+  const [paged, openIssueCount, repoPublic, tokenValid, repoWritePermission] = await Promise.all([
     client.listIssues(repo, page),
     client.openIssueCount(repo),
     anonClient.repoIsPublic(repo),
     client.tokenIsValid(),
+    client.repoWritePermission(repo),
   ]);
   if (!paged) {
     logAt(guard.failureLogLevel(host, repo), "issue list failed", { repo, host });
     const message = remoteSource === "explicit"
       ? `Issue list unavailable for ${host}/${repo}`
       : "Issue list unavailable";
-    return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid, error: message };
+    return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid, repoWritePermission, error: message };
   }
   guard.noteSuccess(host, repo);
   const issues: OpenIssuesResult["issues"] = rankIssues(paged.issues);
   void liveScopesFromIssues(issues);
-  return { repo, host, issues, openIssueCount, page, hasMore: paged.hasMore, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid };
+  return { repo, host, issues, openIssueCount, page, hasMore: paged.hasMore, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid, repoWritePermission };
 }
 
 // ---------------------------------------------------------------------------
@@ -280,7 +282,7 @@ export async function handleIssueDetail(
   try {
     const issueNumber = normalizeIssueNumber(input ?? {});
     if (issueNumber == null) {
-      return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenPresent: false, tokenValid: null, error: "issueNumber is required" };
+      return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenPresent: false, tokenValid: null, repoWritePermission: null, error: "issueNumber is required" };
     }
     const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
     if (!resolved.ok) {
@@ -291,16 +293,18 @@ export async function handleIssueDetail(
         repoPublic: null,
         tokenPresent: false,
         tokenValid: null,
+        repoWritePermission: null,
         error: resolved.error,
       };
     }
     const { host, repo } = resolved;
     const client = await clientFor(host);
     const tokenPresent = client.hasToken();
-    const [issue, repoPublic, tokenValid] = await Promise.all([
+    const [issue, repoPublic, tokenValid, repoWritePermission] = await Promise.all([
       fetchIssueDetail(repo, host, issueNumber),
       new ForgeClient({ host }).repoIsPublic(repo),
       client.tokenIsValid(),
+      client.repoWritePermission(repo),
     ]);
     if (!issue) {
       return {
@@ -310,13 +314,14 @@ export async function handleIssueDetail(
         repoPublic,
         tokenPresent,
         tokenValid,
+        repoWritePermission,
         error: `Issue #${issueNumber} not found in ${repo}`,
       };
     }
-    return { repo, issue, fetchedAt, repoPublic, tokenPresent, tokenValid };
+    return { repo, issue, fetchedAt, repoPublic, tokenPresent, tokenValid, repoWritePermission };
   } catch (error) {
     log.warn("issue detail failed", { error: String(error) });
-    return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenPresent: false, tokenValid: null, error: "Issue detail unavailable" };
+    return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenPresent: false, tokenValid: null, repoWritePermission: null, error: "Issue detail unavailable" };
   }
 }
 

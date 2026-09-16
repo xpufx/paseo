@@ -50,8 +50,13 @@ Open the plugin's **Settings** tab inside a workspace.
   `origin`. An explicit selection wins absolutely: an invalid or unreachable
   selection fails loudly instead of silently deriving.
 - **API token.** Saved per host in daemon-side plugin settings. Reads work
-  anonymously on public repos; labels and comments need an accepted token on
-  both public and private repos.
+  anonymously on public repos; labels and comments need an accepted token with
+  write scope on both public and private repos. For Forgejo/Gitea create the
+  PAT with `read:user`, `read:repository`, and `write:issue` (add
+  `write:repository` if label management still 403s). Edit capability is read
+  from the repo's permission object (`permissions.push`/`admin`, or GitLab
+  `access_level >= 30`), so a token that is accepted but under-scoped shows
+  "token lacks write scope" instead of enabling edits.
 
 ## Development
 

@@ -279,7 +279,7 @@ function ForgeCardChips({ host, access }: { host?: string | null; access: ForgeA
 function useRepoAccess(input: ForgeAccessInput): ForgeAccessState {
   return useMemo(
     () => deriveForgeAccess(input),
-    [input.repoPublic, input.tokenPresent, input.tokenValid],
+    [input.repoPublic, input.tokenPresent, input.tokenValid, input.repoWritePermission],
   );
 }
 
@@ -602,10 +602,13 @@ function ReadOnlyNotice({
   onAction: () => void;
 }) {
   const { colors } = usePluginTheme();
+  const underScoped = access.auth === "lacks-write-scope";
   return (
     <View style={styles.readOnlyNotice}>
       <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-        Read-only — {capability} needs a valid token. {access.summary}
+        {underScoped
+          ? `Read-only — this token cannot ${capability}; it lacks write scope. Add a token with ${access.requiredScopes}.`
+          : `Read-only — ${capability} needs a valid token. ${access.summary}`}
       </Text>
       <Button
         size="sm"
@@ -748,6 +751,7 @@ function IssueDetailView({
     repoPublic: detail.data?.repoPublic,
     tokenPresent: detail.data?.tokenPresent,
     tokenValid: detail.data?.tokenValid,
+    repoWritePermission: detail.data?.repoWritePermission,
   });
   // Go-to-match (issue #190): section offsets reported relative to the detail
   // root, then resolved to the first section that contains the query. Only the
@@ -973,6 +977,7 @@ export function ForgeIssuesView({
     repoPublic: data?.repoPublic,
     tokenPresent: data?.tokenPresent,
     tokenValid: data?.tokenValid,
+    repoWritePermission: data?.repoWritePermission,
   });
   const directory = useDirectory(workspaceId);
   const projectRootPath = useWorkspaceRoot(workspaceId);
@@ -1360,6 +1365,9 @@ export function ForgeIssuesView({
                 {effectiveHost
                   ? `API token for ${effectiveHost}. Leave empty to remove it.`
                   : "API token — needs a resolvable host from the forge above."}
+              </Text>
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                Minimum scopes: {access.requiredScopes}.
               </Text>
               <TextInput
                 value={tokenValue}

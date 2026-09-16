@@ -121,8 +121,15 @@ The token lives in daemon-side plugin settings, keyed by host
 4. Handlers never throw: failures return a typed `error` field and the client
    renders `EmptyState` + Retry (per `docs/surfaces.md` — data absent with a
    live source renders the empty state, never a crash). Unauthenticated public
-   repos stay readable; writes require an accepted token on both public and
-   private repos (issue #152).
+   repos stay readable; writes require an accepted, write-scoped token on both
+   public and private repos (issues #152, #193). Edit capability is derived
+   from the repo response's permission object (`forgeCapabilityFromRepo`:
+   Forgejo/GitHub `permissions.push`/`admin`, GitLab `access_level >= 30`),
+   with bare token validity as the fallback when a host returns none. The
+   minimum Forgejo/Gitea scopes are `read:user`, `read:repository`, and
+   `write:issue`; a valid token without write scope surfaces as
+   **"token lacks write scope"** (`auth: "lacks-write-scope"`), never as
+   edits-enabled.
 
 Why embedded fetch over a subprocess: the plugin needs no preinstalled CLI or
 credential store, auth is explicit and daemon-scoped, and the API surface is

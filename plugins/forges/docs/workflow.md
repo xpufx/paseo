@@ -284,6 +284,20 @@ Explicit non-goals (do not expect the plugin to do these):
 - **No CLI or host dotfile dependency.** The plugin works on a machine that has
   never had a forge CLI installed.
 
+### 6.1 Minimum token scopes (write-enabled forges)
+
+A token the host accepts is not automatically write-capable. Edit surfaces
+(labels, comments, label-set install) require the repo to report write
+permission; the plugin reads that from the repo response
+(`permissions.push`/`admin` on Forgejo/GitHub, `access_level >= 30` on GitLab)
+and otherwise falls back to token validity. A valid but under-scoped token is
+reported as **"token lacks write scope"**, not rejected.
+
+Forgejo/Gitea PAT: `read:user` (identity probe), `read:repository` (repo
+metadata), and `write:issue` (issues, comments, labels). Add
+`write:repository` if label management still 403s. GitHub needs `read:user`
+plus `repo`; GitLab needs `read_user`, `read_api`, and `api`.
+
 ## 7. Adopter checklist
 
 - [ ] Create the board labels from `examples/labels/label-base.yaml`.

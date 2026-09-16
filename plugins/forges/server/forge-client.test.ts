@@ -124,3 +124,42 @@ describe("ForgeClient label metadata (issue #182)", () => {
     ]);
   });
 });
+
+describe("ForgeClient.repoWritePermission (issue #193)", () => {
+  it("reports write capability from the repo permissions object", async () => {
+    let seen = "";
+    stubFetch((url) => {
+      seen = url;
+      return jsonResponse({ permissions: { push: true, admin: false, pull: true } });
+    });
+    const granted = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .repoWritePermission("owner/repo");
+    assert.equal(granted, true);
+    assert.equal(seen, "https://forge.example.com/api/v1/repos/owner/repo");
+  });
+
+  it("reports false for a read-only token that can pull but not push", async () => {
+    stubFetch(() => jsonResponse({ permissions: { push: false, admin: false, pull: true } }));
+    const granted = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .repoWritePermission("owner/repo");
+    assert.equal(granted, false);
+  });
+
+  it("returns null when the host omits a permission object (fallback path)", async () => {
+    stubFetch(() => jsonResponse({ full_name: "owner/repo", id: 1 }));
+    const granted = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .repoWritePermission("owner/repo");
+    assert.equal(granted, null);
+  });
+
+  it("returns null without a token, and on an API failure", async () => {
+    stubFetch(() => jsonResponse({ permissions: { push: true } }));
+    const anonymous = await new ForgeClient({ host: "forge.example.com" })
+      .repoWritePermission("owner/repo");
+    assert.equal(anonymous, null);
+    stubFetch(() => jsonResponse({ message: "forbidden" }, 403));
+    const forbidden = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .repoWritePermission("owner/repo");
+    assert.equal(forbidden, null);
+  });
+});
