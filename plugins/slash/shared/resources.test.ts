@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWN_OPEN_TARGETS,
   SEED_COMMANDS,
+  SlashSettingsSchema,
   actionSummary,
   draftFromCommand,
   emptyCommandDraft,
@@ -23,6 +24,13 @@ function command(name: string): SlashCommand {
 }
 
 const validSend = draft({ name: "deploy", title: "Deploy", template: "Ship {args}" });
+
+describe("SlashSettingsSchema prefix", () => {
+  it("defaults an unset prefix to slash- but keeps an explicit empty override", () => {
+    expect(SlashSettingsSchema.parse({ commands: [] }).prefix).toBe("slash-");
+    expect(SlashSettingsSchema.parse({ prefix: "", commands: [] }).prefix).toBe("");
+  });
+});
 
 describe("validateCommandDraft", () => {
   it("accepts valid send, open, and rpc drafts", () => {

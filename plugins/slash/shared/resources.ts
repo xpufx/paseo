@@ -6,7 +6,7 @@ import { z } from "zod";
 
 export const SLASH_VERSION = "0.1.0";
 
-export const SUGGESTED_PREFIX = "xpufx-";
+export const SUGGESTED_PREFIX = "slash-";
 
 // The host owns the surface registry and exposes no enumeration to plugins, so
 // this list is maintained by hand from in-repo surface registrations and can
@@ -54,7 +54,7 @@ export const SlashCommandSchema = z.object({
 export type SlashCommand = z.infer<typeof SlashCommandSchema>;
 
 export const SlashSettingsSchema = z.object({
-  prefix: z.string().max(32).default(""),
+  prefix: z.string().max(32).default("slash-"),
   commands: z.array(SlashCommandSchema).default([]),
 });
 export type SlashSettings = z.infer<typeof SlashSettingsSchema>;

@@ -25,8 +25,8 @@ A command carries one of three actions:
   summary and supports add / edit / remove through helper form primitives.
 - **Shipped catalog.** The seed commands (`review`, `console`, `ping`) are
   listed separately so a missing one can be added back with one tap.
-- **Prefix.** An optional shared prefix (suggestion, not default: `xpufx-`) is
-  applied to every command name.
+- **Prefix.** An optional shared prefix (default `slash-`, clearable to render
+  bare command names) is applied to every command name.
 - **Bundle import/export.** Enabled commands round-trip through a versioned
   `slash-commands` document, so a command set can be shared between machines.
 

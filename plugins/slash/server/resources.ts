@@ -13,7 +13,7 @@ import { orchestrateHandover } from "./orchestrate";
 
 export const log = createPluginLogger("slash", { version: SLASH_PLUGIN_VERSION });
 
-const DEFAULTS: SlashSettings = { prefix: "", commands: SEED_COMMANDS };
+const DEFAULTS: SlashSettings = { prefix: "slash-", commands: SEED_COMMANDS };
 
 const settingsStorage = new PluginStorage<SlashSettings>("slash", "settings.json", {
   schema: slashSettingsContract.schema,

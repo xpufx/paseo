@@ -19,7 +19,7 @@ function harness() {
   const rpc = vi.fn(async (contract: unknown, input: unknown) => {
     rpcCalls.push({ contract, input });
     if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
-    if (contract === slashSettingsContract.get) return { prefix: "" };
+    if (contract === slashSettingsContract.get) return { prefix: "slash-" };
     if (contract === runCommandRpc) return { verb: "rpc", result: { ok: true } };
     throw new Error("unexpected contract");
   });
@@ -46,7 +46,7 @@ describe("registerSlashCommands rpc wiring", () => {
     const dispose = registerSlashCommands(client);
 
     await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
-    const orchestrate = contributions.find((c) => c.name === "orchestrate");
+    const orchestrate = contributions.find((c) => c.name === "slash-orchestrate");
     expect(orchestrate).toBeDefined();
 
     await orchestrate?.onSubmit({
