@@ -65,6 +65,7 @@ import {
   type AgentEnvelope,
   type ForgeRepoIdentity,
   type ForgeIssue,
+  type ForgeLabel,
   type IssueComment,
   type MarkdownLiteSpan,
   workspaceNameKey,
@@ -72,6 +73,7 @@ import {
 import { useActiveForgeIdentity } from "./active-forge.js";
 import { forgePillLabel } from "./pill-label.js";
 import { ForeignInlineMark } from "./foreign-link.js";
+import { LabelChip } from "./label-chip.js";
 
 export const ISSUES_PILL_ID = "forges-issues";
 
@@ -171,7 +173,11 @@ const LABEL_SET_INSTALL_VISIBLE = false;
  * Markdown reference for pasting into chat, e.g. `[#30 Turn count](url)`.
  * The repo web URL is derived from the RPC repo when available.
  */
-function issueMarkdownRef(issue: ForgeIssue, repo: string | null, host: string | null): string {
+function issueMarkdownRef(
+  issue: Pick<ForgeIssue, "number" | "title">,
+  repo: string | null,
+  host: string | null,
+): string {
   const ref = `#${issue.number}: ${issue.title}`;
   if (!repo || !host) return ref;
   return `[${ref}](https://${host}/${repo}/issues/${issue.number})`;
@@ -236,11 +242,10 @@ function useRepoAccess(input: ForgeAccessInput): ForgeAccessState {
   );
 }
 
-function badgeVariantForLabel(label: string): "danger" | "warning" | "info" | "success" | "neutral" {  if (label === "priority/0-SOS") return "danger";
-  if (label === "state/3-verify") return "warning";
-  if (label === "state/1-wip") return "info";
-  if (label === "state/4-done" || label === "spec/2-approved") return "success";
-  return "neutral";
+function issueLabelChips(issue: Pick<ForgeIssue, "labels" | "labelDetails">): ForgeLabel[] {
+  // Prefer the color-bearing API view; fall back to names for older payloads.
+  if (issue.labelDetails.length > 0) return issue.labelDetails;
+  return issue.labels.map((name) => ({ name }));
 }
 
 function renderInlineSpans(
@@ -363,7 +368,7 @@ function IssueRow({
   number,
   title,
   state,
-  labels,
+  labelDetails,
   repo,
   host,
   onSelect,
@@ -371,7 +376,7 @@ function IssueRow({
   number: number;
   title: string;
   state: string;
-  labels: string[];
+  labelDetails: ForgeLabel[];
   repo: string | null;
   host: string | null;
   onSelect: (issueNumber: number) => void;
@@ -379,7 +384,7 @@ function IssueRow({
   const { colors } = usePluginTheme();
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    copyToClipboard(issueMarkdownRef({ number, title, state, labels }, repo, host))
+    copyToClipboard(issueMarkdownRef({ number, title }, repo, host))
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -399,10 +404,12 @@ function IssueRow({
       />
       <Pressable style={styles.rowBody} onPress={() => onSelect(number)} hitSlop={4}>
         <Text style={[styles.rowTitle, { color: colors.foreground }]}>{title}</Text>
-        {labels.length > 0 ? (
-          <Text style={[styles.rowLabels, { color: colors.foregroundMuted }]}>
-            {labels.join(", ")}
-          </Text>
+        {labelDetails.length > 0 ? (
+          <View style={styles.rowLabels}>
+            {labelDetails.map((label) => (
+              <LabelChip key={label.name} label={label} />
+            ))}
+          </View>
         ) : null}
       </Pressable>
       <Button
@@ -682,15 +689,9 @@ function IssueDetailView({
               badge={<ForgeCardChips host={activeForge?.host} access={access} />}
             />
             <View style={styles.badgeRow}>
-              {state ? <Badge variant={badgeVariantForLabel(state)} label={shortLabelName(state)} /> : null}
-              {priority ? (
-                <Badge variant={badgeVariantForLabel(priority)} label={shortLabelName(priority)} />
-              ) : null}
-              {labels
-                .filter((label) => label !== state && label !== priority)
-                .map((label) => (
-                  <Badge key={label} variant={badgeVariantForLabel(label)} label={label} />
-                ))}
+              {issueLabelChips(issue).map((label) => (
+                <LabelChip key={label.name} label={label} />
+              ))}
             </View>
           </Card>
 
@@ -1366,7 +1367,7 @@ export function ForgeIssuesView({
                     number={issue.number}
                     title={issue.title}
                     state={issue.state}
-                    labels={issue.labels}
+                    labelDetails={issue.labelDetails}
                     repo={repo}
                     host={data?.host ?? null}
                     onSelect={setSelected}
@@ -1448,7 +1449,9 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   rowLabels: {
-    fontSize: 11,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
   },
   note: {
     fontSize: 11,

@@ -78,3 +78,49 @@ describe("ForgeClient.isForgeHost (issue #114)", () => {
     assert.equal(authorization, "token secret");
   });
 });
+
+describe("ForgeClient label metadata (issue #182)", () => {
+  it("keeps label colors/descriptions alongside the names view", async () => {
+    stubFetch((url) => {
+      assert.match(url, /\/repos\/owner\/repo\/issues\?/);
+      return jsonResponse([
+        {
+          number: 7,
+          title: "chips",
+          state: "open",
+          labels: [
+            { id: 1, name: "state/1-wip", color: "e11d48", description: "In progress" },
+            { id: 2, name: "priority/1-high", color: "d93f0b" },
+          ],
+        },
+      ]);
+    });
+    const result = await new ForgeClient({ host: "forge.example.com" }).listIssues("owner/repo");
+    assert.ok(result);
+    assert.deepEqual(result.issues[0].labels, ["state/1-wip", "priority/1-high"]);
+    assert.deepEqual(result.issues[0].labelDetails, [
+      { name: "state/1-wip", color: "e11d48", description: "In progress" },
+      { name: "priority/1-high", color: "d93f0b" },
+    ]);
+  });
+
+  it("degrades labels without a color and bare-string entries to name-only", async () => {
+    stubFetch(() =>
+      jsonResponse([
+        {
+          number: 8,
+          title: "plain",
+          state: "open",
+          labels: [{ id: 1, name: "no-color" }, "legacy-string"],
+        },
+      ]),
+    );
+    const result = await new ForgeClient({ host: "forge.example.com" }).listIssues("owner/repo");
+    assert.ok(result);
+    assert.deepEqual(result.issues[0].labels, ["no-color", "legacy-string"]);
+    assert.deepEqual(result.issues[0].labelDetails, [
+      { name: "no-color" },
+      { name: "legacy-string" },
+    ]);
+  });
+});

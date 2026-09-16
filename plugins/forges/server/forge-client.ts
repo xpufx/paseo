@@ -1,4 +1,4 @@
-import { ForgeIssueSchema, type ForgeIssue } from "../shared/issues.js";
+import { ForgeIssueSchema, type ForgeIssue, type ForgeLabel } from "../shared/issues.js";
 
 export interface ForgeClientOptions {
   host: string;
@@ -11,17 +11,39 @@ const FORGE_PROBE_TIMEOUT_MS = 5000;
 
 interface ApiLabel {
   name?: unknown;
+  color?: unknown;
+  description?: unknown;
 }
 
-function labelNames(value: unknown): string[] {
+/**
+ * Map the Gitea-family label objects on an issue to `{ name, color,
+ * description? }`. Bare string entries (older shapes) degrade to name-only.
+ * The API returns `color` as hex without `#`; it is passed through untouched.
+ */
+function labelList(value: unknown): ForgeLabel[] {
   if (!Array.isArray(value)) return [];
-  return (value as unknown[])
-    .map((entry) =>
-      entry && typeof entry === "object"
-        ? (entry as ApiLabel).name
-        : entry,
-    )
-    .filter((name): name is string => typeof name === "string");
+  const labels: ForgeLabel[] = [];
+  for (const entry of value as unknown[]) {
+    if (entry && typeof entry === "object") {
+      const record = entry as ApiLabel;
+      if (typeof record.name !== "string" || !record.name) continue;
+      labels.push({
+        name: record.name,
+        ...(typeof record.color === "string" && record.color ? { color: record.color } : {}),
+        ...(typeof record.description === "string" && record.description
+          ? { description: record.description }
+          : {}),
+      });
+    } else if (typeof entry === "string" && entry) {
+      labels.push({ name: entry });
+    }
+  }
+  return labels;
+}
+
+/** Label-name view, derived from the full label objects. */
+function labelNames(value: unknown): string[] {
+  return labelList(value).map((label) => label.name);
 }
 
 function asText(value: unknown, fallback = ""): string {
@@ -50,6 +72,7 @@ function toIssues(rows: unknown[], openOnly: boolean): ForgeIssue[] {
       title: record.title,
       state: record.state,
       labels: labelNames(record.labels),
+      labelDetails: labelList(record.labels),
       updatedAt: typeof record.updated_at === "string" ? record.updated_at : undefined,
     };
     const parsed = ForgeIssueSchema.safeParse(candidate);
@@ -93,6 +116,7 @@ export interface ForgejoIssueDetail {
   title: string;
   state: string;
   labels: string[];
+  labelDetails: ForgeLabel[];
   body: string;
   author: string;
   createdAt: string;
@@ -134,6 +158,7 @@ function toDetail(repo: string, host: string, payload: unknown): ForgejoIssueDet
     title: asText(rawIssue.title, `Issue #${rawIssue.number}`),
     state: asText(rawIssue.state, "open"),
     labels: labelNames(rawIssue.labels),
+    labelDetails: labelList(rawIssue.labels),
     body: asText(rawIssue.body),
     author: asLogin(rawIssue.user),
     createdAt: asText(rawIssue.created_at),

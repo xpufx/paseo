@@ -7,14 +7,62 @@ import {
 
 export const FORGES_PLUGIN_ID = "forges";
 
+/**
+ * Label metadata as Forgejo's REST API returns it. `color` is a hex string
+ * without the leading `#`; `description` is the optional label tooltip.
+ */
+export const ForgeLabelSchema = z.object({
+  name: z.string(),
+  color: z.string().optional(),
+  description: z.string().optional(),
+});
+export type ForgeLabel = z.infer<typeof ForgeLabelSchema>;
+
 export const ForgeIssueSchema = z.object({
   number: z.number(),
   title: z.string(),
   state: z.string(),
+  /** Label names view, kept for scope/priority/filter logic. */
   labels: z.array(z.string()),
+  /** Full label objects (name/color/description) for rendering. */
+  labelDetails: z.array(ForgeLabelSchema).default([]),
   updatedAt: z.string().optional(),
 });
 export type ForgeIssue = z.infer<typeof ForgeIssueSchema>;
+
+/** Normalize a Forgejo label color into `#rrggbb`, or null when unusable. */
+export function normalizeLabelColor(color: string | undefined | null): string | null {
+  if (typeof color !== "string") return null;
+  const hex = color.trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    return `#${hex.split("").map((char) => char + char).join("")}`.toLowerCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex}`.toLowerCase();
+  return null;
+}
+
+/** Text colors a label pill may use; black on light, white on dark. */
+export const LABEL_TEXT_ON_LIGHT = "#000000";
+export const LABEL_TEXT_ON_DARK = "#ffffff";
+
+/**
+ * Readable text color for a label background (WCAG relative luminance): light
+ * backgrounds take black text, dark ones white. Null when the background is not
+ * a usable hex color, so callers fall back to the neutral theme chip.
+ */
+export function labelTextColor(color: string | undefined | null): string | null {
+  const background = normalizeLabelColor(color);
+  if (!background) return null;
+  return relativeLuminance(background) > 0.45 ? LABEL_TEXT_ON_LIGHT : LABEL_TEXT_ON_DARK;
+}
+
+function relativeLuminance(hex: string): number {
+  const channel = (offset: number): number => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
 
 export const OpenIssuesInputSchema = z.object({
   directory: z.string().optional(),
@@ -985,6 +1033,7 @@ export const IssueDetailSchema = z.object({
   title: z.string(),
   state: z.string(),
   labels: z.array(z.string()),
+  labelDetails: z.array(ForgeLabelSchema).default([]),
   body: z.string(),
   author: z.string(),
   createdAt: z.string(),

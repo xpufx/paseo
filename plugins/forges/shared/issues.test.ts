@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, workspaceNameKey, type ForgeIssue } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, ForgeIssueSchema, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, workspaceNameKey, type ForgeIssue } from "./issues.ts";
 import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
@@ -794,6 +794,7 @@ describe("resolveIssueSearchLayer", () => {
     title: `issue ${number}`,
     state: "open",
     labels: [],
+    labelDetails: [],
   });
   const clientIssues = [issue(1)];
   const remoteIssues = [issue(2)];
@@ -859,5 +860,63 @@ describe("resolveIssueSearchLayer", () => {
       clientIssues,
     });
     assert.equal(disabled.source, "client");
+  });
+});
+
+describe("label color metadata (issue #182)", () => {
+  it("preserves name/color/description and the names view", () => {
+    const parsed = ForgeIssueSchema.parse({
+      number: 7,
+      title: "chips",
+      state: "open",
+      labels: ["state/1-wip", "priority/1-high"],
+      labelDetails: [
+        { name: "state/1-wip", color: "e11d48", description: "In progress" },
+        { name: "priority/1-high", color: "d93f0b" },
+      ],
+    });
+    assert.deepEqual(parsed.labels, ["state/1-wip", "priority/1-high"]);
+    assert.deepEqual(parsed.labelDetails[0], {
+      name: "state/1-wip",
+      color: "e11d48",
+      description: "In progress",
+    });
+    assert.equal(parsed.labelDetails[1].color, "d93f0b");
+  });
+
+  it("defaults labelDetails to empty when an older payload omits it", () => {
+    const parsed = ForgeIssueSchema.parse({
+      number: 8,
+      title: "no metadata",
+      state: "open",
+      labels: ["kind/bug"],
+    });
+    assert.deepEqual(parsed.labelDetails, []);
+    assert.deepEqual(parsed.labels, ["kind/bug"]);
+  });
+
+  it("normalizes hex colors with and without the leading hash", () => {
+    assert.equal(normalizeLabelColor("e11d48"), "#e11d48");
+    assert.equal(normalizeLabelColor("#E11D48"), "#e11d48");
+    assert.equal(normalizeLabelColor("0f0"), "#00ff00");
+  });
+
+  it("returns null for missing or malformed colors", () => {
+    assert.equal(normalizeLabelColor(undefined), null);
+    assert.equal(normalizeLabelColor(""), null);
+    assert.equal(normalizeLabelColor("not-a-color"), null);
+    assert.equal(normalizeLabelColor("12345"), null);
+  });
+
+  it("picks black text on light backgrounds and white on dark ones", () => {
+    assert.equal(labelTextColor("ffffff"), "#000000");
+    assert.equal(labelTextColor("f9d0c4"), "#000000");
+    assert.equal(labelTextColor("000000"), "#ffffff");
+    assert.equal(labelTextColor("1d76db"), "#ffffff");
+  });
+
+  it("has no text color without a usable background", () => {
+    assert.equal(labelTextColor(undefined), null);
+    assert.equal(labelTextColor("nope"), null);
   });
 });

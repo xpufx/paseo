@@ -16,6 +16,7 @@ import {
 } from "../shared/issues.js";
 import { useActiveForgeIdentityForAgent } from "./active-forge.js";
 import { ForeignLinkBadge } from "./foreign-link.js";
+import { LabelChip } from "./label-chip.js";
 
 const boardAlertCardSchema = boardAlertTimelineSchema.extend({
   text: z.string(),
@@ -97,9 +98,11 @@ function BoardAlertIssueRow({
           </Pressable>
         ) : null}
         {issue.labels.length > 0 ? (
-          <Text style={[styles.issueLabels, { color: theme.colors.foregroundMuted }]}>
-            {issue.labels.join(", ")}
-          </Text>
+          <View style={styles.issueLabels}>
+            {issue.labels.map((name) => (
+              <LabelChip key={name} label={{ name }} />
+            ))}
+          </View>
         ) : null}
         {issue.action ? (
           <Text style={[styles.issueAction, { color: theme.colors.foregroundMuted }]}>
@@ -221,7 +224,9 @@ const styles = StyleSheet.create({
     textDecorationLine: "underline",
   },
   issueLabels: {
-    fontSize: 11,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 4,
   },
   issueAction: {
     fontSize: 11,
