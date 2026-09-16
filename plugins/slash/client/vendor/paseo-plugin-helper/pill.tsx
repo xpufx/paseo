@@ -13,6 +13,7 @@ import { PluginThemeProvider } from "./theme/provider";
 import { useResponsive } from "./theme/useResponsive";
 import type { VisualFlair } from "./theme/flair";
 import { ModalBodyScrollOwnerContext } from "./layout/ModalBody";
+import { reportSuppressed } from "../../../shared/vendor/paseo-plugin-helper/suppressed";
 
 export interface RenderPillProps<TPayload = any> extends HostPillProps {
   isOpen: boolean;
@@ -303,6 +304,9 @@ export function registerComposerPill<TPayload = any>(
     pills.set(agentId, {
       dispose: () => {},
     });
+    // Surface even when the plugin wired no onError: a swallowed registration
+    // failure leaves the pill missing with no trace anywhere.
+    reportSuppressed(console, `registerComposerPill registration failed (agent ${agentId})`, error, "warn");
     options.onError?.({
       agentId,
       workspaceId,
@@ -347,6 +351,13 @@ export function registerComposerPill<TPayload = any>(
         }
       })
       .catch((error) => {
+        // resolveLabel/resolveIcon usually perform an RPC; a rejection here is
+        // the pill's live data failing, so it must not vanish when onError is unset.
+        reportSuppressed(
+          console,
+          `registerComposerPill resolveLabel/resolveIcon failed (agent ${agentId})`,
+          error,
+        );
         options.onError?.({
           agentId,
           workspaceId,
@@ -468,7 +479,10 @@ export function registerComposerPill<TPayload = any>(
         if (agent.workspaceId) addPill(agent.id, agent.workspaceId);
       }
     })
-    .catch(() => {});
+    .catch((error) => {
+      // Silently dropping this leaves a plugin with zero pills and no clue why.
+      reportSuppressed(console, "registerComposerPill agents.list() failed", error, "warn");
+    });
 
   return () => {
     if (disposed) return;
