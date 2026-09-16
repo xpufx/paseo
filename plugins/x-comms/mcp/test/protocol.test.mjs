@@ -19,6 +19,16 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER = join(HERE, "..", "paseo-x-comms.mjs");
 const FAKE = join(HERE, "fixtures", "fake-paseo.mjs");
+const EXTENSIONS = join(HERE, "fixtures", "extensions");
+
+// Extensions are loaded from disk on server start; tests must never read the
+// operator's real ~/.paseo/paseo-x-comms/extensions tree. Default to an empty
+// temp dir and point individual tests at the fixture dirs.
+const NO_EXTENSIONS = mkdtempSync(join(tmpdir(), "paseo-x-comms-no-ext-"));
+
+function extensionDir(name) {
+  return join(EXTENSIONS, name);
+}
 
 // Bare base64 payload (old `paseo daemon pair` format). The new implementation
 // does NOT wrap it; the registry must hold canonical forms (full pairing URL
@@ -35,6 +45,7 @@ function baseEnv(extra = {}) {
     PASEO_X_COMMS_PASEO: FAKE,
     PASEO_AGENT_ID: "agent-test-1",
     PASEO_AGENT_CWD: "/tmp/test-cwd",
+    PASEO_X_COMMS_EXTENSIONS: NO_EXTENSIONS,
     ...extra,
   };
 }
@@ -468,4 +479,111 @@ test("server does not exit while a call is in flight after stdin closes", async 
   assert.equal(code, 0, "server did not exit cleanly");
   const elapsed = Date.now() - t0;
   assert.ok(elapsed >= 1800, `server exited before the 2s call completed (${elapsed}ms)`);
+});
+
+// extensions
+
+function extEnv(name, remotes) {
+  return startClient({ PASEO_X_COMMS_EXTENSIONS: extensionDir(name) }, remotes);
+}
+
+test("extensions: onSend transform rewrites the stamped prompt", async () => {
+  const { client } = await extEnv("transform", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello there" },
+    });
+    const sent = JSON.parse(textOf(res));
+    assert.equal(sent.promptHead.split("\n\n")[1], "[EXT] hello there");
+  } finally {
+    await client.close();
+  }
+});
+
+test("extensions: onToolCall transforms args and onReceive transforms the response", async () => {
+  const { client } = await extEnv("transform", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}inspect`,
+      arguments: { daemon: "hsi", agentId: "agent-7" },
+    });
+    const parsed = JSON.parse(textOf(res));
+    assert.equal(parsed.Id, "agent-7-rewritten", "onToolCall must rewrite the args");
+    assert.equal(parsed.extTag, "seen", "onReceive must rewrite the response");
+  } finally {
+    await client.close();
+  }
+});
+
+test("extensions: onSend block surfaces the reason and fails the call", async () => {
+  const { client } = await extEnv("block", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello" },
+    });
+    assert.equal(res.isError, true);
+    assert.match(textOf(res), /blocked by fixture/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("extensions: onToolCall block surfaces the reason and leaves other tools working", async () => {
+  const { client } = await extEnv("tool-block", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const blocked = await client.callTool({ name: `${PREFIX}list_daemons`, arguments: {} });
+    assert.equal(blocked.isError, true);
+    assert.match(textOf(blocked), /denied by fixture/);
+
+    const ok = await client.callTool({
+      name: `${PREFIX}list_agents`,
+      arguments: { daemon: "hsi" },
+    });
+    assert.equal(ok.isError, undefined);
+    assert.equal(JSON.parse(textOf(ok))[0].sawHost, RELAY_URL);
+  } finally {
+    await client.close();
+  }
+});
+
+test("extensions: a bad extension is skipped without affecting the others (load failure)", async () => {
+  const { client } = await extEnv("broken-load", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello" },
+    });
+    assert.equal(res.isError, undefined, "the good neighbour must still run");
+    assert.equal(JSON.parse(textOf(res)).promptHead.split("\n\n")[1], "[GOOD] hello");
+  } finally {
+    await client.close();
+  }
+});
+
+test("extensions: a throwing hook is isolated and the others still run (call failure)", async () => {
+  const { client } = await extEnv("broken-hook", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello" },
+    });
+    assert.equal(res.isError, undefined, "a throwing hook must not fail the call");
+    assert.equal(JSON.parse(textOf(res)).promptHead.split("\n\n")[1], "[GOOD] hello");
+  } finally {
+    await client.close();
+  }
+});
+
+test("extensions: registerTool adds a tool to the same server", async () => {
+  const { client } = await extEnv("custom-tool", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const { tools } = await client.listTools();
+    assert.ok(tools.some((t) => t.name === "x_comms_ext_echo"), "extension tool must be listed");
+    const res = await client.callTool({ name: "x_comms_ext_echo", arguments: {} });
+    assert.equal(textOf(res), "echo-from-extension");
+  } finally {
+    await client.close();
+  }
 });

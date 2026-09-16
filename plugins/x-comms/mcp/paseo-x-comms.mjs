@@ -21,11 +21,13 @@
 //                                     (default ~/.paseo/paseo-x-comms/registry.json)
 //   PASEO_X_COMMS_PASEO      paseo binary (default "paseo")
 //   PASEO_X_COMMS_TIMEOUT_MS per paseo call timeout (default 120000)
+//   PASEO_X_COMMS_EXTENSIONS extension dir (default <registry dir>/extensions)
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join, dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 
 const VERSION = "0.3.0";
@@ -39,6 +41,9 @@ const REMOTES_FILE =
 
 const PASEO = process.env.PASEO_X_COMMS_PASEO || "paseo";
 const DEFAULT_TIMEOUT_MS = Number(process.env.PASEO_X_COMMS_TIMEOUT_MS || 120000);
+
+const EXTENSIONS_DIR =
+  process.env.PASEO_X_COMMS_EXTENSIONS || join(REMOTES_DIR, "extensions");
 
 // daemons registry
 
@@ -244,30 +249,180 @@ function result(data) {
   };
 }
 
+// Third-party extensions
+//
+// ⚠️ TRUSTED, UNSANDBOXED SERVER-TIER CODE. An extension is a `.mjs` file in the
+// extension dir that exports `register(api)` (default or named). It runs in
+// THIS process with full Node privileges — filesystem, network, child
+// processes — exactly like the server itself and like any installed paseo
+// plugin. There is no sandbox, no permission prompt, and no isolation boundary.
+// Only drop in extensions you would run yourself.
+//
+// API (version 1; bump API_VERSION on any breaking change to the surface):
+//   api.version                     -> 1
+//   api.onSend(fn)                  -> outbound message filter
+//   api.onReceive(fn)               -> payload received from a daemon
+//   api.onToolCall(fn)              -> every tool invocation (raw args)
+//   api.registerTool(name, cfg, fn) -> register on this same McpServer
+//   api.log(message)                -> stderr
+//
+// A filter is `(payload, context) => outcome`, run in filename order, and
+// returns one of:
+//   undefined | null | { action: "pass" }       -> passthrough
+//   any other value                             -> transform (new payload)
+//   { action: "transform", value: <payload> }   -> transform
+//   { action: "block", reason: "<why>" }        -> block (reason is surfaced)
+//
+// A block stops the chain. A hook that throws is logged and treated as
+// passthrough; a file that fails to import or register is skipped. One bad
+// extension cannot take down the server or the other extensions.
+
+const API_VERSION = 1;
+
+const extensionHooks = { onSend: [], onReceive: [], onToolCall: [] };
+
+function extensionLog(message) {
+  process.stderr.write(`[paseo-x-comms:extensions] ${message}\n`);
+}
+
+function describeError(cause) {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+async function runFilter(hookName, payload, context) {
+  let current = payload;
+  for (const { filename, fn } of extensionHooks[hookName]) {
+    let outcome;
+    try {
+      outcome = await fn(current, context);
+    } catch (cause) {
+      extensionLog(`${filename}: ${hookName} threw, passing through: ${describeError(cause)}`);
+      continue;
+    }
+    if (outcome === undefined || outcome === null) continue;
+    if (typeof outcome === "object" && typeof outcome.action === "string") {
+      if (outcome.action === "pass" || outcome.action === "passthrough") continue;
+      if (outcome.action === "block") {
+        const reason =
+          typeof outcome.reason === "string" && outcome.reason.trim()
+            ? outcome.reason.trim()
+            : `${filename} blocked this ${hookName}`;
+        return { blocked: true, reason };
+      }
+      if (outcome.action === "transform") {
+        current = outcome.value;
+        continue;
+      }
+      extensionLog(`${filename}: unknown ${hookName} action '${outcome.action}', passing through`);
+      continue;
+    }
+    current = outcome;
+  }
+  return { blocked: false, value: current };
+}
+
+async function filterOrThrow(hookName, payload, context) {
+  const outcome = await runFilter(hookName, payload, context);
+  if (outcome.blocked) throw new Error(`x-comms extension blocked ${context.tool}: ${outcome.reason}`);
+  return outcome.value;
+}
+
+function extensionApi(filename) {
+  const add = (hookName) => (fn) => {
+    if (typeof fn !== "function") {
+      extensionLog(`${filename}: ${hookName} expects a function, ignoring`);
+      return;
+    }
+    extensionHooks[hookName].push({ filename, fn });
+  };
+  return {
+    version: API_VERSION,
+    onSend: add("onSend"),
+    onReceive: add("onReceive"),
+    onToolCall: add("onToolCall"),
+    registerTool: (name, config, handler) => registerTool(name, config, handler),
+    log: (message) => extensionLog(`${filename}: ${message}`),
+  };
+}
+
+async function loadExtensions(dir = EXTENSIONS_DIR) {
+  let files;
+  try {
+    files = readdirSync(dir).filter((name) => name.endsWith(".mjs")).sort();
+  } catch (cause) {
+    if (cause?.code !== "ENOENT") extensionLog(`cannot read ${dir}: ${describeError(cause)}`);
+    return;
+  }
+  if (files.length === 0) return;
+  extensionLog(`loading ${files.length} extension(s) from ${dir} (trusted, unsandboxed)`);
+  for (const filename of files) {
+    try {
+      const mod = await import(pathToFileURL(join(dir, filename)).href);
+      const register = mod.default ?? mod.register;
+      if (typeof register !== "function") {
+        extensionLog(`${filename}: no default/register export, skipping`);
+        continue;
+      }
+      await register(extensionApi(filename));
+      extensionLog(`${filename}: loaded`);
+    } catch (cause) {
+      extensionLog(`${filename}: failed to load, skipping: ${describeError(cause)}`);
+    }
+  }
+}
+
+// Every tool — built-in or extension-registered — runs its raw args through
+// the onToolCall chain first. A block becomes a tool error; a transform
+// replaces the args.
+function registerTool(name, config, handler) {
+  server.registerTool(name, config, async (input, extra) => {
+    const args = await filterOrThrow("onToolCall", input, { tool: name });
+    return handler(args, extra);
+  });
+}
+
+// Tool calls that hit a daemon expose the response to onReceive before it
+// reaches the model.
+async function callPaseo(tool, args, { signal, daemon = null, agentId = null } = {}) {
+  const data = await runPaseo(args, { signal });
+  return await filterOrThrow("onReceive", data, { tool, daemon, agentId });
+}
+
 async function handleSend(input, signal) {
-  const daemons = loadDaemons();
-  const target = hostTargetFor(input.daemon, daemons);
+  const message = await filterOrThrow(
+    "onSend",
+    {
+      daemon: input.daemon,
+      agentId: input.agentId,
+      prompt: input.prompt,
+      fromAgentId: input.fromAgentId ?? null,
+      fromAgentName: input.fromAgentName ?? null,
+    },
+    { tool: `${PREFIX}send` },
+  );
+  const target = hostTargetFor(message.daemon, loadDaemons());
   const stamped = `${await senderMetaBlock(signal, {
-    agentId: input.agentId,
-    daemon: input.daemon,
+    agentId: message.agentId,
+    daemon: message.daemon,
   }, {
-    agentId: input.fromAgentId ?? null,
-    agentName: input.fromAgentName ?? null,
-  })}\n\n${input.prompt}`;
-  return await runPaseo(
-    ["send", input.agentId, "--host", target, "--json", "--no-wait", stamped],
-    { signal },
+    agentId: message.fromAgentId ?? null,
+    agentName: message.fromAgentName ?? null,
+  })}\n\n${message.prompt}`;
+  return await callPaseo(
+    `${PREFIX}send`,
+    ["send", message.agentId, "--host", target, "--json", "--no-wait", stamped],
+    { signal, daemon: message.daemon, agentId: message.agentId },
   );
 }
 
 function registerTools(server) {
-  server.registerTool(
+  registerTool(
     `${PREFIX}list_daemons`,
     { title: "List daemons", description: "List configured paseo daemons (names only).", inputSchema: TOOL_SCHEMAS.listDaemons },
     () => result(Object.keys(loadDaemons())),
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}add_daemon`,
     {
       title: "Add daemon",
@@ -283,7 +438,7 @@ function registerTools(server) {
     },
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}remove_daemon`,
     {
       title: "Remove daemon",
@@ -299,7 +454,7 @@ function registerTools(server) {
     },
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}list_agents`,
     {
       title: "List agents",
@@ -308,13 +463,14 @@ function registerTools(server) {
     },
     async (input, extra) =>
       result(
-        await runPaseo(["ls", "--host", hostTargetFor(input.daemon, loadDaemons()), "--json"], {
+        await callPaseo(`${PREFIX}list_agents`, ["ls", "--host", hostTargetFor(input.daemon, loadDaemons()), "--json"], {
           signal: extra.signal,
+          daemon: input.daemon,
         }),
       ),
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}inspect`,
     {
       title: "Inspect agent",
@@ -323,14 +479,15 @@ function registerTools(server) {
     },
     async (input, extra) =>
       result(
-        await runPaseo(
+        await callPaseo(
+          `${PREFIX}inspect`,
           ["inspect", input.agentId, "--host", hostTargetFor(input.daemon, loadDaemons()), "--json"],
-          { signal: extra.signal },
+          { signal: extra.signal, daemon: input.daemon, agentId: input.agentId },
         ),
       ),
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}send`,
     {
       title: "Send message",
@@ -341,7 +498,7 @@ function registerTools(server) {
     async (input, extra) => result(await handleSend(input, extra.signal)),
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}logs`,
     {
       title: "View agent logs",
@@ -350,14 +507,15 @@ function registerTools(server) {
     },
     async (input, extra) =>
       result(
-        await runPaseo(
+        await callPaseo(
+          `${PREFIX}logs`,
           ["logs", input.agentId, "--host", hostTargetFor(input.daemon, loadDaemons()), "--json"],
-          { signal: extra.signal },
+          { signal: extra.signal, daemon: input.daemon, agentId: input.agentId },
         ),
       ),
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}wait`,
     {
       title: "Wait for agent",
@@ -369,11 +527,11 @@ function registerTools(server) {
       const args = ["wait", input.agentId];
       if (input.timeoutSeconds !== undefined) args.push("--timeout", String(input.timeoutSeconds));
       args.push("--host", hostTargetFor(input.daemon, loadDaemons()), "--json");
-      return result(await runPaseo(args, { signal: extra.signal }));
+      return result(await callPaseo(`${PREFIX}wait`, args, { signal: extra.signal, daemon: input.daemon, agentId: input.agentId }));
     },
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}list_permissions`,
     {
       title: "List permissions",
@@ -382,14 +540,15 @@ function registerTools(server) {
     },
     async (input, extra) =>
       result(
-        await runPaseo(
+        await callPaseo(
+          `${PREFIX}list_permissions`,
           ["permit", "ls", "--host", hostTargetFor(input.daemon, loadDaemons()), "--json"],
-          { signal: extra.signal },
+          { signal: extra.signal, daemon: input.daemon },
         ),
       ),
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}allow_permission`,
     {
       title: "Allow permission",
@@ -404,11 +563,11 @@ function registerTools(server) {
       if (input.all) args.push("--all");
       if (input.input !== undefined) args.push("--input", input.input);
       args.push("--host", hostTargetFor(input.daemon, loadDaemons()), "--json");
-      return result(await runPaseo(args, { signal: extra.signal }));
+      return result(await callPaseo(`${PREFIX}allow_permission`, args, { signal: extra.signal, daemon: input.daemon, agentId: input.agentId }));
     },
   );
 
-  server.registerTool(
+  registerTool(
     `${PREFIX}deny_permission`,
     {
       title: "Deny permission",
@@ -424,7 +583,7 @@ function registerTools(server) {
       if (input.message !== undefined) args.push("--message", input.message);
       if (input.interrupt) args.push("--interrupt");
       args.push("--host", hostTargetFor(input.daemon, loadDaemons()), "--json");
-      return result(await runPaseo(args, { signal: extra.signal }));
+      return result(await callPaseo(`${PREFIX}deny_permission`, args, { signal: extra.signal, daemon: input.daemon, agentId: input.agentId }));
     },
   );
 }
@@ -443,6 +602,8 @@ const server = new McpServer(
 );
 
 registerTools(server);
+
+await loadExtensions();
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

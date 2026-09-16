@@ -165,6 +165,46 @@ payload) is passed through untouched and paseo fails visibly on it. (Note:
 paseo's own `--host` help text lists only `host:port` and `tcp://…`; bare
 ports and `unix://` also work but are not documented in the CLI help.)
 
+## Extensions
+
+> [!WARNING]
+> **Extensions are trusted, unsandboxed server-tier code.** They run in this
+> MCP server's process with full Node privileges: filesystem, network, child
+> processes. There is no sandbox, no permission prompt, and no isolation
+> boundary — the same trust level as an installed paseo plugin. Only drop in
+> `.mjs` files you would run yourself.
+
+Drop `*.mjs` files into the extension dir (default
+`~/.paseo/paseo-x-comms/extensions`, override with `PASEO_X_COMMS_EXTENSIONS`).
+Each exports `register(api)` (default or named) and is loaded in filename
+order at startup. Extensions can add filters and register their own tools on
+the same MCP server:
+
+```js
+export default function register(api) {
+  // payload + context -> transform (return new payload), block, or passthrough
+  api.onSend((message, context) => ({ ...message, prompt: message.prompt.trim() }));
+  api.onReceive((data, context) => data);            // response from a daemon
+  api.onToolCall((args, context) => args);           // every tool invocation
+
+  api.registerTool(
+    "x_comms_hello",
+    { title: "Hello", description: "Demo tool", inputSchema: {} },
+    () => ({ content: [{ type: "text", text: "hi" }] }),
+  );
+}
+```
+
+- `api.version` is the extension API version (currently `1`); it is bumped on
+  any breaking change to the surface above.
+- A filter returns `undefined`/`null`/`{action:"pass"}` to pass through, a new
+  payload (or `{action:"transform", value}`) to transform, or
+  `{action:"block", reason}` to block. A block stops the chain and surfaces the
+  reason as the tool error.
+- A file that throws while loading is skipped, and a hook that throws is logged
+  and treated as passthrough. One bad extension cannot take down the server or
+  the other extensions.
+
 ## Security
 
 The registry (default `~/.paseo/paseo-x-comms/registry.json`) holds live
@@ -180,6 +220,7 @@ the file.
 | `PASEO_X_COMMS_REMOTES` | `~/.paseo/paseo-x-comms/registry.json` | registry file path |
 | `PASEO_X_COMMS_PASEO` | `paseo` | paseo binary |
 | `PASEO_X_COMMS_TIMEOUT_MS` | `120000` | per paseo call timeout |
+| `PASEO_X_COMMS_EXTENSIONS` | `~/.paseo/paseo-x-comms/extensions` | extension dir (trusted, unsandboxed) |
 
 ## Registering with clients
 
