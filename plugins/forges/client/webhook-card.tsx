@@ -127,7 +127,7 @@ export function ForgejoWebhookCard({ item, theme }: PluginTimelineItemProps<Forg
       </View>
       {data.subject ? <SubjectRow theme={theme} subject={data.subject} /> : null}
       <Text style={[styles.footer, { color: theme.colors.foregroundMuted }]}>
-        {data.version != null ? `via forgejo v${data.version}` : "via forgejo"}
+        via forges
       </Text>
     </View>
   );
