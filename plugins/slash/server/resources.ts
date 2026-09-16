@@ -8,6 +8,7 @@ import {
   type SlashSettings,
 } from "../shared/resources";
 import { PLUGIN_VERSION as SLASH_PLUGIN_VERSION } from "../shared/version";
+import { orchestrateHandover } from "./orchestrate";
 
 export const log = createPluginLogger("slash", { version: SLASH_PLUGIN_VERSION });
 
@@ -50,16 +51,38 @@ export function handleListCatalog(): { commands: SlashCommand[] } {
   return { commands: SEED_COMMANDS };
 }
 
-const SAFE_OPERATIONS: Record<string, (params: Record<string, unknown>) => unknown> = {
+export interface OperationContext {
+  agentId?: string;
+}
+
+type OperationHandler = (params: Record<string, unknown>, context: OperationContext) => unknown;
+
+const SAFE_OPERATIONS: Record<string, OperationHandler> = {
   "slash.ping": () => ({ ok: true, version: SLASH_PLUGIN_VERSION }),
   "slash.echo": (params) => ({ echo: params }),
+  "slash.orchestrate": (_params, context) => {
+    if (!context.agentId) throw new Error("orchestrate requires a caller agent id");
+    return orchestrateHandover(context.agentId);
+  },
 };
 
 export function allowedOperations(): string[] {
   return Object.keys(SAFE_OPERATIONS);
 }
 
-export async function handleRunCommand(input: { name: string; args: string }) {
+export async function runOperation(
+  operation: string,
+  params: Record<string, unknown>,
+  context: OperationContext = {},
+): Promise<unknown> {
+  const handler = SAFE_OPERATIONS[operation];
+  if (!handler) {
+    throw new Error(`rpc operation not allowlisted: ${operation}`);
+  }
+  return handler(params, context);
+}
+
+export async function handleRunCommand(input: { name: string; args: string; agentId?: string }) {
   const settings = await readSettings();
   const command = settings.commands.find((c) => c.enabled && c.name === input.name);
   if (!command) {
@@ -71,11 +94,10 @@ export async function handleRunCommand(input: { name: string; args: string }) {
   if (command.action.verb === "open") {
     return { verb: "open" as const, target: command.action.target };
   }
-  const handler = SAFE_OPERATIONS[command.action.operation];
-  if (!handler) {
-    throw new Error(`rpc operation not allowlisted: ${command.action.operation}`);
-  }
-  return { verb: "rpc" as const, result: handler(command.action.params ?? {}) };
+  const result = await runOperation(command.action.operation, command.action.params ?? {}, {
+    agentId: input.agentId,
+  });
+  return { verb: "rpc" as const, result };
 }
 
 export async function handleExportBundle(): Promise<{ bundle: CommandBundle }> {

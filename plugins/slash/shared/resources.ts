@@ -101,6 +101,13 @@ export const SEED_COMMANDS: SlashCommand[] = [
     enabled: true,
     action: { verb: "rpc", operation: "slash.ping", params: {} },
   },
+  {
+    name: "orchestrate",
+    title: "Orchestrate",
+    description: "Hand the orchestrator role to this agent via the forgejo hook",
+    enabled: true,
+    action: { verb: "rpc", operation: "slash.orchestrate", params: {} },
+  },
 ];
 
 export type SlashVerb = SlashAction["verb"];
@@ -226,7 +233,7 @@ export const catalogRpc = defineContract({
 export const runCommandRpc = defineContract({
   name: "slash.commands.run",
   description: "Run one slash command by name; send/open resolve client-side, rpc runs here",
-  input: z.object({ name: z.string(), args: z.string().default("") }),
+  input: z.object({ name: z.string(), args: z.string().default(""), agentId: z.string().optional() }),
   output: z.object({
     verb: z.enum(["send", "open", "rpc"]),
     prompt: z.string().optional(),

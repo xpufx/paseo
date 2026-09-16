@@ -95,7 +95,7 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
               try {
                 const out = await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<{ result?: unknown }>)(
                   runCommandRpc as unknown,
-                  { name: command.name, args: ctx.args },
+                  { name: command.name, args: ctx.args, agentId: ctx.agent.id },
                 );
                 await ctx.paseo.agents.ref(ctx.agent.id).send(`/${command.name}: ${JSON.stringify(out.result ?? null)}`);
               } catch (e) {
