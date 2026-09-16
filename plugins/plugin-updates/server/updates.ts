@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { listPlugins, safeSpawn, type PaseoPluginInfo, type SafeSpawnResult } from "paseo-plugin-helper/server";
+import { listPlugins, safeSpawn, type PaseoPluginInfo, type SafeSpawnResult } from "./vendor/paseo-plugin-helper/index";
 import { deriveSourceUrl, shortHash } from "../shared/updates";
 import type {
   PluginUpdate,

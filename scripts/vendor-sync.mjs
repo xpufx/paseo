@@ -32,6 +32,7 @@ const PLUGINS = {
   "slash": ["client", "server", "shared"],
   "x-comms": ["client", "server", "shared", "mcp"],
   "twofado": ["client", "server", "shared"],
+  "plugin-updates": ["client", "server", "shared"],
 };
 const TREES = ["client", "server", "shared", "mcp"];
 const DEST_ROOT = "vendor/paseo-plugin-helper";

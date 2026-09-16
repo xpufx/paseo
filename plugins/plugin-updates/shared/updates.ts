@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineContract } from "paseo-plugin-helper/shared";
+import { defineContract } from "./vendor/paseo-plugin-helper/index";
 
 export const PluginUpdateStatusSchema = z.enum([
   "checking",

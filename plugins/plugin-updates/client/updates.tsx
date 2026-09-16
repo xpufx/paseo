@@ -18,7 +18,7 @@ import {
   SectionHeader,
   StatusDot,
   usePluginTheme,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Linking, Text, View } from "react-native";

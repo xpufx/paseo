@@ -7,9 +7,6 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npx tsx --test shared/updates.test.ts server/updates.test.ts client/orphans.test.ts"
   },
-  "dependencies": {
-    "paseo-plugin-helper": "^0.4.0-beta.12"
-  },
   "devDependencies": {
     "@getpaseo/plugin": "0.8.0",
     "@types/node": "^22.0.0",

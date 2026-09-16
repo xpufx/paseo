@@ -13,15 +13,14 @@
 //   treeShaking:true, metafile:true, write:false -- and NO minify.
 //
 // Two views are reported:
-//   1. "as-loaded": natural module resolution. Seven plugins vendor helper
+//   1. "as-loaded": natural module resolution. Every plugin vendors helper
 //      source into `<plugin>/{client,server}/vendor/paseo-plugin-helper/` and
-//      the daemon bundles that source; `plugin-updates` resolves the
-//      `paseo-plugin-helper` package (its minified `dist`).
+//      the daemon bundles that source.
 //   2. "helper-dist": every plugin's helper imports are redirected to a built
 //      helper dist so the build variants can be compared per plugin --
 //      before = pre-#126 config (minify:false, treeshake:true), after = current
 //      dist (minify:true, treeshake:true, sideEffects:false). For the vendored
-//      plugins this is a projection; for `plugin-updates` it is the real path.
+//      plugins this is a projection.
 //
 // Usage:
 //   node scripts/measure-plugin-bundles.mjs                 # markdown report

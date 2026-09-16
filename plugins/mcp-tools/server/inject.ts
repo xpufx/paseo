@@ -1,4 +1,4 @@
-import type { AgentSessionConfig } from "@getpaseo/protocol/agent-types";
+import type { PluginBeforeRequests } from "@getpaseo/plugin/server";
 
 export const GATEWAY_SERVER_NAME = "gateway";
 
@@ -7,7 +7,7 @@ export interface GatewayInjectOptions {
   url: string;
 }
 
-type CreateRequest = { config: AgentSessionConfig; env?: Record<string, string> };
+type CreateRequest = PluginBeforeRequests["agent.create"];
 
 // Returns a modified agent.create request with the gateway MCP server
 // injected, or undefined to keep the caller's request unchanged.

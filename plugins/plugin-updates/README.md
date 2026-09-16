@@ -6,7 +6,7 @@ Adds a header button to every workspace that opens a popover listing the install
 
 > [!NOTE]
 > **Prerequisites & Platform Support**:
-> - Requires **npm** and **Node.js** (v18+) in `$PATH`. Paseo runs `npm install` during plugin installation to resolve the `paseo-plugin-helper` runtime dependency. The same Node.js toolchain is enough for local `typecheck` and `test`.
+> - Zero install requirements: the helper runtime is vendored (`client|server|shared/vendor/paseo-plugin-helper/`, pinned helper 0.4.0-beta.12), so Paseo installs this plugin with no build step and no npm/registry access. For local `typecheck` and `test`, Node.js (v18+) is enough.
 > - The system `git` CLI must be available, because update checks and pulls shell out to `git`.
 > - Developed and tested primarily on **Linux**.
 
