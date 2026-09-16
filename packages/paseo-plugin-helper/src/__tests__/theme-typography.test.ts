@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveTypography } from "../client/theme/tokens.js";
+import { COMPACT_FORM_FACTOR_WIDTH } from "../client/theme/responsive.js";
 
 describe("theme typography", () => {
   it("provides a coherent semantic scale", () => {
@@ -24,5 +25,36 @@ describe("theme typography", () => {
 
     expect(scale.heading.fontWeight).toBe("600");
     expect(scale.caption.lineHeight).toBeGreaterThan(scale.caption.fontSize);
+  });
+
+  it("steps down when a container width at or below the compact threshold is known", () => {
+    const wide = resolveTypography({ compact: false, platform: "web", width: 900 }, "comfortable");
+    const narrow = resolveTypography(
+      { compact: false, platform: "web", width: COMPACT_FORM_FACTOR_WIDTH },
+      "comfortable",
+    );
+
+    expect(narrow.body.fontSize).toBeLessThan(wide.body.fontSize);
+    expect(narrow.caption.fontSize).toBeLessThan(wide.caption.fontSize);
+    expect(narrow.caption.fontSize).toBeGreaterThanOrEqual(10);
+  });
+
+  it("stays non-compact when the known container width is above the threshold", () => {
+    const scale = resolveTypography(
+      { compact: false, platform: "web", width: COMPACT_FORM_FACTOR_WIDTH + 1 },
+      "comfortable",
+    );
+    const wide = resolveTypography({ compact: false, platform: "web" }, "comfortable");
+
+    expect(scale.body.fontSize).toBe(wide.body.fontSize);
+    expect(scale.caption.fontSize).toBe(wide.caption.fontSize);
+  });
+
+  it("keeps host compact surfaces compact even when the reported width is wide", () => {
+    const forced = resolveTypography({ compact: true, platform: "web", width: 900 }, "comfortable");
+    const compact = resolveTypography({ compact: true, platform: "web" }, "comfortable");
+
+    expect(forced.body.fontSize).toBe(compact.body.fontSize);
+    expect(forced.caption.fontSize).toBe(compact.caption.fontSize);
   });
 });

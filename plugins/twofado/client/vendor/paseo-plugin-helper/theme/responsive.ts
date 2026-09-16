@@ -2,6 +2,32 @@ import type { DensityStyle } from "./flair";
 import type { PlatformType, ResponsiveLayout } from "../../../../shared/vendor/paseo-plugin-helper/types";
 
 /**
+ * Container width (px) at or below which a surface steps down to the compact
+ * scale. Mirrors the host's `COMPACT_FORM_FACTOR_WIDTH` so plugin typography
+ * in narrow popovers matches full-screen mobile surfaces.
+ */
+export const COMPACT_FORM_FACTOR_WIDTH = 500;
+
+/**
+ * Resolves compact mode from the actual container width when it is known,
+ * falling back to the host's viewport-derived `compact` flag otherwise.
+ *
+ * A host-declared compact surface stays compact at any width; a known width at
+ * or below {@link COMPACT_FORM_FACTOR_WIDTH} forces compact even when the host
+ * viewport is wide (e.g. a narrow header-button popover on desktop).
+ */
+export function resolveEffectiveCompact(
+  layout: ResponsiveLayout,
+  widthOverride?: number,
+): boolean {
+  const width = widthOverride ?? layout.width;
+  if (typeof width === "number" && width > 0) {
+    return width <= COMPACT_FORM_FACTOR_WIDTH || Boolean(layout.compact);
+  }
+  return Boolean(layout.compact);
+}
+
+/**
  * Checks if the current platform is mobile (iOS or Android).
  */
 export function isMobilePlatform(platform: PlatformType): boolean {
@@ -13,14 +39,14 @@ export function isMobilePlatform(platform: PlatformType): boolean {
  * Ensures compliance with Apple HIG and Android Material guidelines (min 44pt).
  */
 export function getTouchTargetMin(layout: ResponsiveLayout): number {
-  return layout.compact || isMobilePlatform(layout.platform) ? 44 : 28;
+  return resolveEffectiveCompact(layout) || isMobilePlatform(layout.platform) ? 44 : 28;
 }
 
 /**
  * Selects a value based on compact/mobile vs desktop screen constraints.
  */
 export function responsiveValue<T>(layout: ResponsiveLayout, desktopVal: T, compactVal: T): T {
-  return layout.compact ? compactVal : desktopVal;
+  return resolveEffectiveCompact(layout) ? compactVal : desktopVal;
 }
 
 /**
@@ -30,7 +56,7 @@ export function resolvePadding(
   layout: ResponsiveLayout,
   density: DensityStyle,
 ): { horizontal: number; vertical: number; gap: number } {
-  const isCompact = layout.compact;
+  const isCompact = resolveEffectiveCompact(layout);
 
   switch (density) {
     case "compact":
@@ -91,7 +117,7 @@ export function responsiveSelect<T>(
   options: ResponsiveSelectOptions<T>,
 ): T | undefined {
   const isMobile = isMobilePlatform(layout.platform);
-  const isCompact = Boolean(layout.compact);
+  const isCompact = resolveEffectiveCompact(layout);
 
   // 1. Specific platform override
   if (options.platform && layout.platform in options.platform) {

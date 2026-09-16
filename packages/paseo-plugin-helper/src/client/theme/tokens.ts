@@ -1,6 +1,7 @@
 import type { PlatformType } from "../../shared/types.js";
 import type { DensityStyle } from "./flair.js";
 import type { ResponsiveLayout } from "../../shared/types.js";
+import { resolveEffectiveCompact } from "./responsive.js";
 
 /**
  * Standard spacing scale (pt/px) shared by every helper surface.
@@ -40,7 +41,7 @@ export function resolveTypography(
   layout: ResponsiveLayout,
   density: DensityStyle,
 ): TypographyScale {
-  const compact = layout.compact;
+  const compact = resolveEffectiveCompact(layout);
   const densityStep = density === "compact" ? -1 : density === "spacious" ? 1 : 0;
   const size = (regular: number, minimum = 10) =>
     Math.max(minimum, regular + (compact ? -1 : 0) + densityStep);

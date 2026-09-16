@@ -1,6 +1,7 @@
 import type { PlatformType } from "../../../../shared/vendor/paseo-plugin-helper/types";
 import type { DensityStyle } from "./flair";
 import type { ResponsiveLayout } from "../../../../shared/vendor/paseo-plugin-helper/types";
+import { resolveEffectiveCompact } from "./responsive";
 
 /**
  * Standard spacing scale (pt/px) shared by every helper surface.
@@ -40,7 +41,7 @@ export function resolveTypography(
   layout: ResponsiveLayout,
   density: DensityStyle,
 ): TypographyScale {
-  const compact = layout.compact;
+  const compact = resolveEffectiveCompact(layout);
   const densityStep = density === "compact" ? -1 : density === "spacious" ? 1 : 0;
   const size = (regular: number, minimum = 10) =>
     Math.max(minimum, regular + (compact ? -1 : 0) + densityStep);
