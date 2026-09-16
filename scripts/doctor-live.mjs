@@ -7,6 +7,8 @@
  * 1. packages/paseo-plugin-helper/dist is compiled and up-to-date with src
  * 2. Each plugin's shared/version.ts contains current code changes
  * 3. Each plugin's Paseo daemon is running and loaded with current code changes
+ * 4. No plugin has a linked (non-installable) vendored helper tree — warned,
+ *    never auto-materialized and never reported healthy
  *
  * Usage:
  *   npm run doctor:live             # Check status and print diagnostic table
@@ -188,6 +190,7 @@ async function main() {
     nestedHelperShadows: [],
     sdkDrift: [],
     npmHelperDeps: [],
+    vendorLinked: [],
     reloaded: [],
   };
 
@@ -244,7 +247,12 @@ async function main() {
 
   // Vendor drift (once): which plugins' vendored helper copies differ
   // from a fresh sync. Paths look like "drift: plugins/<name>/...".
+  // A deliberate dev link ("linked: plugins/<name>/...") is NOT drift and must
+  // never be auto-materialized here (#146) — it is reported as a warning, since
+  // a linked tree is not installable. It is also excluded from reload: the
+  // Paseo compiler rejects the relative vendored symlink.
   const vendorDrifted = new Set();
+  const vendorLinked = new Set();
   try {
     const out = execSync("node scripts/vendor-sync.mjs --check", {
       cwd: ROOT_DIR,
@@ -257,7 +265,11 @@ async function main() {
     for (const m of out.matchAll(/drift:\s*plugins\/([^/\s]+)/g)) {
       vendorDrifted.add(m[1]);
     }
+    for (const m of out.matchAll(/linked:\s*plugins\/([^/\s]+)/g)) {
+      vendorLinked.add(m[1]);
+    }
   }
+  if (vendorLinked.size > 0) result.ready = false;
   const vendorNeedsReload = new Set(vendorDrifted);
   if (shouldReload && vendorDrifted.size > 0) {
     console.log(`${colors.yellow}⚡ Synchronizing vendored helper trees before reload...${colors.reset}`);
@@ -341,10 +353,20 @@ async function main() {
       message = "Daemon running";
     }
 
+    // A linked vendor tree is not installable and must never read as healthy.
+    // Do not auto-materialize it (#146): warn and leave the fix to the user.
+    const vendorIsLinked = vendorLinked.has(name);
+    if (vendorIsLinked) {
+      status = "vendor-linked";
+      message = "Vendored helper is a dev link — not installable";
+      result.ready = false;
+    }
+
     const pluginData = {
       name,
       pluginId,
       status,
+      vendorLinked: vendorIsLinked,
       repoHead: pluginCommit.hash,
       repoTimeAgo: pluginCommit.timeAgo,
       stampedSha: stamped?.sha || "-",
@@ -409,6 +431,8 @@ async function main() {
       }
     }
   }
+
+  result.vendorLinked = [...vendorLinked].sort();
 
   // SDK drift: distinct declared ranges across plugins (ignoring "-" and "?")
   const sdkRanges = new Set(
@@ -477,6 +501,9 @@ async function main() {
     } else if (p.status === "reloaded") {
       statColor = colors.green;
       icon = "✔";
+    } else if (p.status === "vendor-linked") {
+      statColor = colors.red;
+      icon = "⚠";
     }
 
     const nameCol = p.name.padEnd(12);
@@ -492,6 +519,15 @@ async function main() {
   }
 
   console.log("─".repeat(82));
+
+  const linkedPlugins = result.plugins.filter((p) => p.vendorLinked);
+  if (linkedPlugins.length > 0) {
+    console.log(`${colors.yellow}⚠️  Vendored helper trees are dev links — NOT installable, do not ship/publish:${colors.reset}`);
+    for (const p of linkedPlugins) {
+      console.log(`      plugins/${p.name} — materialize with ${colors.cyan}node scripts/vendor-sync.mjs${colors.reset}`);
+    }
+    console.log("");
+  }
 
   if (!result.ready && !shouldReload) {
     console.log(`${colors.yellow}⚠️  Action Required to Test Fresh Code:${colors.reset}`);
@@ -531,6 +567,11 @@ async function main() {
     console.log(`  💡 Tip: run with ${colors.cyan}--reload${colors.reset} to auto-fix and reload: ${colors.cyan}npm run doctor:live -- --reload${colors.reset}`);
     console.log("");
     console.log(`${colors.gray}🖥️  Client UI Note: If you have Paseo open, press Ctrl+R (Cmd+R) or re-open the plugin modal/surface to pick up fresh evaluated client code.${colors.reset}`);
+    console.log("");
+    process.exit(1);
+  } else if (linkedPlugins.length > 0) {
+    console.log(`${colors.red}✖ Linked vendored helper trees cannot load or install — refusing to report healthy.${colors.reset}`);
+    console.log(`${colors.gray}Run: node scripts/vendor-sync.mjs${colors.reset}`);
     console.log("");
     process.exit(1);
   } else {

@@ -38,11 +38,11 @@ vendor-sync:
 stamp:
 	@for p in demo top mcp-tools; do npm run stamp --prefix plugins/$$p; done
 
-## vendor-link: Symlink plugin vendor trees to live helper src for dev (never commit)
+## vendor-link: REFUSED — dev symlinks are not installable (Paseo compiler rejects them); use vendor-sync
 vendor-link:
 	@node scripts/vendor-sync.mjs --link
 
-## vendor-check: Fail if vendor trees drifted from helper src
+## vendor-check: Fail if vendor trees drifted from helper src or are dev links (not publishable)
 vendor-check:
 	@node scripts/vendor-sync.mjs --check
 

@@ -7,10 +7,15 @@
 // See plugins/top/shared/vendor/paseo-plugin-helper/README.md (Track B, #71).
 //
 // Usage: node scripts/vendor-sync.mjs [--check] [--link]
-//   --check: exit non-zero if the vendor trees differ from a fresh copy.
-//   --link: replace vendor dirs with symlinks to helper src for live dev
-//     (helper edits reflect instantly, no sync step). Never commit or mirror
-//     the linked state: run plain vendor-sync to materialize copies first.
+//   --check: exit non-zero if the vendor trees differ from a fresh copy or are
+//     dev links (a linked tree is not publishable).
+//   --link: REFUSED. Dev symlinks are unsupported: Paseo's plugin compiler
+//     reclassifies relative vendored imports by realpath and rejects a symlink
+//     that resolves outside the plugin directory (plugin:
+//     paseo-plugin-server-runtime-boundary), so a linked plugin will not load
+//     or install. We must never ship or publish something that won't install;
+//     run plain vendor-sync to materialize copies. A pre-existing linked tree
+//     is still materialized by the plain sync path.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -33,12 +38,7 @@ const DEST_ROOT = "vendor/paseo-plugin-helper";
 const CHECK = process.argv.includes("--check");
 const LINK = process.argv.includes("--link");
 
-// Source dir for a helper src tree.
-function srcDir(srcTree) {
-  return path.join(HELPER_SRC, srcTree);
-}
-
-// The shared vendor README has no helper-src counterpart, so a --link pass
+// The shared vendor README has no helper-src counterpart, so a legacy --link pass
 // would delete it (and per-plugin copies may differ).
 // Stash it next to the link as <name>.link-bak (gitignored, dev-only) and
 // restore it on materialize.
@@ -56,53 +56,24 @@ function isLink(dir) {
   }
 }
 
-// The mcp vendor path nests inside the server vendor dir, so it cannot be
-// linked independently: linking server first would make an mcp link land
-// inside helper src. Instead helper src carries a committed server/mcp ->
-// ../mcp symlink, and linked server trees expose mcp through it. Only the
-// materialized copy needs a real mcp dir (filled by the mcp tree pass).
-function ensureSrcMcpLink() {
-  const link = path.join(HELPER_SRC, "server", "mcp");
-  try {
-    if (fs.readlinkSync(link) === "../mcp") return;
-    fs.unlinkSync(link);
-  } catch {
-    // Missing or not a link — create below.
-  }
-  fs.symlinkSync("../mcp", link, "dir");
-}
-
-// Dev mode: point each vendor dir at live helper src. New/edited helper
-// files reflect in plugins immediately; nothing is copied.
-function linkOnce() {
-  let changed = 0;
-  for (const [plugin, trees] of Object.entries(PLUGINS)) {
-    const pluginRoot = path.join(ROOT, "plugins", plugin);
-    for (const tree of trees) {
-      if (tree === "mcp") {
-        ensureSrcMcpLink();
-        continue;
-      }
-      const dest = destDir(pluginRoot, tree);
-      if (isLink(dest) && fs.readlinkSync(dest) === path.relative(path.dirname(dest), srcDir(tree))) {
-        continue;
-      }
-      if (tree === "shared") {
-        const readme = path.join(dest, "README.md");
-        if (!isLink(dest) && fs.existsSync(readme)) {
-          const bak = readmeBackupPath(dest);
-          fs.mkdirSync(path.dirname(bak), { recursive: true });
-          fs.renameSync(readme, bak);
-        }
-      }
-      fs.rmSync(dest, { recursive: true, force: true });
-      fs.mkdirSync(path.dirname(dest), { recursive: true });
-      fs.symlinkSync(path.relative(path.dirname(dest), srcDir(tree)), dest, "dir");
-      console.log(`  linked: ${path.relative(ROOT, dest)} -> ${path.relative(ROOT, srcDir(tree))}`);
-      changed++;
-    }
-  }
-  console.log(changed === 0 ? "vendor trees already linked" : `vendor trees linked (${changed} dir(s)) — dev only, do not commit`);
+// Dev-link mode is refused outright: Paseo's plugin compiler rejects a
+// relative vendored symlink that realpaths outside the plugin directory, so a
+// linked tree cannot load, build, or install. Never create that state.
+function refuseLink() {
+  console.error(
+    [
+      "error: --link is unsupported — vendored helper trees must remain materialized copies.",
+      "",
+      "Paseo's plugin compiler reclassifies relative vendored imports by realpath and",
+      "rejects a symlink that resolves outside the plugin directory",
+      "(plugin: paseo-plugin-server-runtime-boundary). A linked plugin will not load,",
+      "build, or install, so we refuse to create that state.",
+      "",
+      "Materialize the vendored copies instead:",
+      "  node scripts/vendor-sync.mjs",
+    ].join("\n")
+  );
+  process.exit(2);
 }
 
 // Publish mode: replace linked dirs with transformed copies, restoring the
@@ -241,7 +212,7 @@ if (LINK) {
     console.error("error: --link and --check are mutually exclusive");
     process.exit(2);
   }
-  linkOnce();
+  refuseLink();
 } else {
   syncOnce();
 }
@@ -256,7 +227,7 @@ for (const [plugin, trees] of Object.entries(PLUGINS)) {
     // marker so callers keying on "drift:" (doctor-live auto-sync) do not
     // mistake it for stale copies and materialize it away.
     if (isLink(dest)) {
-      console.log(`  linked: ${path.relative(ROOT, dest)} (dev link to helper src — run --link to recreate)`);
+      console.log(`  linked: ${path.relative(ROOT, dest)} (dev link to helper src — not publishable; run node scripts/vendor-sync.mjs to materialize)`);
       dirty++;
       continue;
     }
