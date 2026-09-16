@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "paseo-plugin-helper": ["../../packages/paseo-plugin-helper/src/index.ts"],
+      "paseo-plugin-helper/client": ["../../packages/paseo-plugin-helper/src/client/index.ts"],
+      "paseo-plugin-helper/server": ["../../packages/paseo-plugin-helper/src/server/index.ts"],
+      "paseo-plugin-helper/shared": ["../../packages/paseo-plugin-helper/src/shared/index.ts"],
+      "paseo-plugin-helper/mcp": ["../../packages/paseo-plugin-helper/src/mcp/index.ts"]
+    },
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "*.ts",
+    "*.tsx",
+    "client/**/*",
+    "server/**/*",
+    "shared/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "mcp"
+  ]
+}

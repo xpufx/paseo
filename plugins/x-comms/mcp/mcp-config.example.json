@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "paseo-x-comms": {
+      "command": "paseo-x-comms",
+      "type": "stdio"
+    }
+  }
+}

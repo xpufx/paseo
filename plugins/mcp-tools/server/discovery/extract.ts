@@ -1,0 +1,277 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { redactSecrets, tryParseJsonc } from "../vendor/paseo-plugin-helper/index";
+import type { McpServer, DiagnosticStep } from "./types";
+
+export interface CandidatePath {
+  path: string;
+  label: string;
+}
+
+/**
+ * Redacts tokens, keys, passwords, and sensitive auth data via helper.
+ */
+export function redact(text: string): string {
+  return redactSecrets(text, { mask: "•••" });
+}
+
+/**
+ * Universal JSON / JSONC / Trailing-comma tolerant parser via helper.
+ * Returns null instead of throwing so callers degrade gracefully.
+ */
+export function parseJsonc(raw: string): unknown | null {
+  if (!raw || typeof raw !== "string") return null;
+  const parsed = tryParseJsonc<unknown>(raw, null);
+  if (parsed !== null) return parsed;
+  return tryParseJsonc<unknown>(raw.replace(/,\s*([}\]])/g, "$1"), null);
+}
+
+/**
+ * Heuristically finds the container holding MCP server definitions in arbitrary JSON.
+ */
+function findServersContainer(data: unknown): Record<string, unknown> | Array<unknown> | null {
+  if (!data || typeof data !== "object") return null;
+
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  const obj = data as Record<string, unknown>;
+
+  // Common root key heuristics across all ecosystem tools
+  const candidateKeys = [
+    "mcpServers",
+    "mcp-servers",
+    "mcp_servers",
+    "servers",
+    "mcp",
+    "plugins",
+  ];
+
+  for (const key of candidateKeys) {
+    if (key in obj && obj[key] && typeof obj[key] === "object") {
+      return obj[key] as Record<string, unknown> | Array<unknown>;
+    }
+  }
+
+  // Heuristic: Is the root object itself a map of servers?
+  // Check if properties look like server definitions (have command, url, type, transport, args, or module)
+  const entries = Object.entries(obj);
+  if (entries.length > 0) {
+    const looksLikeServers = entries.every(([_, val]) => {
+      if (!val || typeof val !== "object" || Array.isArray(val)) return false;
+      const v = val as Record<string, unknown>;
+      return Boolean(v.command || v.url || v.type || v.transport || v.args || v.module || v.entrypoint);
+    });
+    if (looksLikeServers) {
+      return obj;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Normalizes an arbitrary server definition entry into a standard McpServer.
+ */
+export function normalizeMcpServer(
+  idPrefix: string,
+  nameHint: string,
+  defRaw: unknown,
+  sourcePath: string,
+  sourceLabel: string,
+): McpServer | null {
+  if (!defRaw || typeof defRaw !== "object" || Array.isArray(defRaw)) return null;
+  const def = defRaw as Record<string, unknown>;
+
+  // Check disabled heuristics
+  if (def.disabled === true || def.enabled === false || def.active === false) {
+    return null;
+  }
+
+  const name = typeof def.name === "string" && def.name.trim() ? def.name.trim() : nameHint;
+  if (!name) return null;
+
+  // Extract URL
+  const url =
+    typeof def.url === "string"
+      ? def.url
+      : typeof def.endpoint === "string"
+        ? def.endpoint
+        : typeof def.serverUrl === "string"
+          ? def.serverUrl
+          : null;
+
+  // Extract command & args. Keep the structured args alongside the
+  // joined command string so dialers can spawn the exact argv.
+  let command: string | null = null;
+  let argv: string[] | null = null;
+  if (typeof def.command === "string") {
+    const argList = Array.isArray(def.args) ? def.args.filter((a) => typeof a === "string") : [];
+    if (argList.length > 0) argv = argList;
+    const args = argList.join(" ");
+    command = args ? `${def.command} ${args}` : def.command;
+  } else if (typeof def.socket === "string") {
+    command = def.socket;
+  } else if (typeof def.module === "string") {
+    command = `node ${def.module}`;
+  }
+
+  // Determine transport
+  let transport: McpServer["transport"] = "unknown";
+  if (url) {
+    const isSse = def.type === "sse" || def.transport === "sse" || url.includes("/sse");
+    transport = isSse ? "sse" : "http";
+  } else if (command) {
+    transport = "stdio";
+  } else if (def.transport === "stdio" || def.transport === "http" || def.transport === "sse") {
+    transport = def.transport;
+  }
+
+  // Detect secrets
+  const hasSecrets = Boolean(
+    def.env ||
+    def.headers ||
+    def.auth ||
+    def.bearerToken ||
+    def.apiKey ||
+    def.token ||
+    def.secret
+  );
+
+  // Description heuristic
+  const description =
+    (typeof def.description === "string" && def.description) ||
+    url ||
+    command ||
+    "";
+
+  return {
+    id: `session:${idPrefix}:${name}`,
+    name,
+    transport,
+    source: {
+      kind: "session",
+      label: sourceLabel,
+      path: sourcePath,
+    },
+    command,
+    args: argv,
+    url,
+    description,
+    hasSecrets,
+    configPreview: JSON.stringify(redactSecrets(def, { mask: "•••" }), null, 2),
+  };
+}
+
+/**
+ * Extracts all valid MCP servers from raw JSON/JSONC text using heuristics.
+ */
+export function extractMcpServersFromText(
+  rawText: string,
+  idPrefix: string,
+  sourcePath: string,
+  sourceLabel: string,
+): McpServer[] {
+  const parsed = parseJsonc(rawText);
+  if (!parsed) return [];
+
+  const container = findServersContainer(parsed);
+  if (!container) return [];
+
+  const servers: McpServer[] = [];
+
+  if (Array.isArray(container)) {
+    for (let i = 0; i < container.length; i++) {
+      const item = container[i];
+      const s = normalizeMcpServer(idPrefix, `server-${i + 1}`, item, sourcePath, sourceLabel);
+      if (s) servers.push(s);
+    }
+  } else {
+    for (const [name, item] of Object.entries(container)) {
+      const s = normalizeMcpServer(idPrefix, name, item, sourcePath, sourceLabel);
+      if (s) servers.push(s);
+    }
+  }
+
+  return servers;
+}
+
+/**
+ * Discovers MCP servers across multiple candidate paths with low -> high precedence merging.
+ */
+export async function discoverFromCandidates(
+  idPrefix: string,
+  candidates: CandidatePath[],
+): Promise<{ servers: McpServer[]; error: string | null; steps: DiagnosticStep[] }> {
+  const merged = new Map<string, { def: unknown; name: string; source: CandidatePath }>();
+  const steps: DiagnosticStep[] = [];
+
+  for (const cand of candidates) {
+    if (!existsSync(cand.path)) {
+      steps.push({
+        target: cand.path,
+        status: "missing",
+        details: `${cand.label} does not exist`,
+        contentPreview: null,
+      });
+      continue;
+    }
+    try {
+      const raw = await readFile(cand.path, "utf8");
+      const parsed = parseJsonc(raw);
+      if (!parsed) {
+        steps.push({
+          target: cand.path,
+          status: "error",
+          details: `${cand.label} (${raw.length} bytes) · Invalid JSON/JSONC syntax`,
+          contentPreview: redact(raw.slice(0, 1000)),
+        });
+        continue;
+      }
+
+      const container = findServersContainer(parsed);
+      let count = 0;
+      if (container) {
+        if (Array.isArray(container)) {
+          count = container.length;
+          for (let i = 0; i < container.length; i++) {
+            const item = container[i];
+            const name = (item && typeof item === "object" && typeof (item as Record<string, unknown>).name === "string")
+              ? (item as Record<string, unknown>).name as string
+              : `server-${i + 1}`;
+            merged.set(name, { def: item, name, source: cand });
+          }
+        } else {
+          const entries = Object.entries(container);
+          count = entries.length;
+          for (const [name, item] of entries) {
+            merged.set(name, { def: item, name, source: cand });
+          }
+        }
+      }
+
+      steps.push({
+        target: cand.path,
+        status: "found",
+        details: `${cand.label} (${raw.length} bytes) · Valid config with ${count} MCP server(s)`,
+        contentPreview: redact(raw.slice(0, 1000)),
+      });
+    } catch (e) {
+      steps.push({
+        target: cand.path,
+        status: "error",
+        details: `${cand.label} failed to read: ${e instanceof Error ? e.message : String(e)}`,
+        contentPreview: null,
+      });
+    }
+  }
+
+  const servers: McpServer[] = [];
+  for (const [_, { def, name, source }] of merged) {
+    const s = normalizeMcpServer(idPrefix, name, def, source.path, source.label);
+    if (s) servers.push(s);
+  }
+
+  return { servers, error: null, steps };
+}

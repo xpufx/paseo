@@ -1,0 +1,91 @@
+import { describe, expect, it } from "vitest";
+import { probes, probeForProvider } from "./index";
+import { McpServerSchema } from "../../shared/mcp";
+import type { McpProbe } from "../discovery/types";
+
+describe("provider contract verification (black-box guarantee)", () => {
+  for (const probe of probes) {
+    describe(`provider probe: ${probe.id}`, () => {
+      it("satisfies McpProbe interface format", () => {
+        expect(probe.id).toMatch(/^[a-z0-9_-]+$/);
+        expect(typeof probe.label).toBe("string");
+        expect(probe.label.trim().length).toBeGreaterThan(0);
+        expect(typeof probe.matches).toBe("function");
+        expect(typeof probe.probe).toBe("function");
+      });
+
+      it("matches its own provider identifier", () => {
+        expect(probe.matches(probe.id)).toBe(true);
+        expect(probe.matches("non-existent-provider-xyz")).toBe(false);
+      });
+
+      it(
+        "probes without throwing uncaught exceptions and returns schema-compliant servers",
+        async () => {
+          const result = await probe.probe({
+            agentId: "test-agent-mock",
+            provider: probe.id,
+            cwd: "/tmp",
+            sessionId: "test-session-mock",
+          });
+
+          // 1. Must return a valid result structure
+          expect(result).toBeDefined();
+          expect(Array.isArray(result.servers)).toBe(true);
+          if (result.error !== undefined && result.error !== null) {
+            expect(typeof result.error).toBe("string");
+          }
+
+          // 2. Every returned server MUST strictly pass runtime Zod validation
+          for (const s of result.servers) {
+            const parsed = McpServerSchema.safeParse(s);
+            if (!parsed.success) {
+              console.error(`Invalid server returned by probe ${probe.id}:`, parsed.error.format());
+            }
+            expect(parsed.success).toBe(true);
+          }
+        },
+        15000,
+      );
+    });
+  }
+
+  describe("family-affix resolution (issue #87)", () => {
+    it("resolves opencode variants by id or label, reusing the opencode probe", () => {
+      expect(probeForProvider("opencode-example-fork")?.id).toBe("opencode");
+      expect(probeForProvider("opencode-sample-fork")?.id).toBe("opencode");
+      expect(probeForProvider("example-fork")?.id).toBe("opencode");
+      expect(probeForProvider("example-fork", "opencode-example-fork")?.id).toBe("opencode");
+      expect(probeForProvider("other-id", "opencode-example-fork")?.id).toBe("opencode");
+    });
+
+    it("resolves antigravity variants by family affix", () => {
+      expect(probeForProvider("antigravity-acp")?.id).toBe("antigravity");
+      expect(probeForProvider("antigravity_acp")?.id).toBe("antigravity");
+    });
+
+    it("keeps base families resolving and unknown providers null", () => {
+      for (const id of ["antigravity", "claude", "codex", "opencode", "paseo", "pi"]) {
+        expect(probeForProvider(id)?.id).toBe(id);
+      }
+      expect(probeForProvider("unknown-provider")).toBeNull();
+      expect(probeForProvider("unknown-provider", "unknown-label")).toBeNull();
+    });
+  });
+
+  describe("catalog resolution", () => {
+    it("ensures unique probe IDs", () => {
+      const ids = probes.map((p: McpProbe) => p.id);
+      expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it("resolves probes via probeForProvider", () => {
+      for (const probe of probes) {
+        const found = probeForProvider(probe.id);
+        expect(found).not.toBeNull();
+        expect(found?.id).toBe(probe.id);
+      }
+      expect(probeForProvider("unknown-provider")).toBeNull();
+    });
+  });
+});

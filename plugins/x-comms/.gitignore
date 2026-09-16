@@ -1,0 +1,6 @@
+node_modules
+node_modules/
+
+# Local operational docs — kept on disk, never committed
+AGENTS.md
+HANDOVER.md

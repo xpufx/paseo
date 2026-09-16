@@ -1,0 +1,28 @@
+{
+  "name": "@xpufx/paseo",
+  "version": "0.1.0",
+  "description": "Monorepo for xpufx Paseo tooling: shared plugin helper, Paseo plugins, MCP servers, and agent skills",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/paseo-plugin-helper",
+    "plugins/top",
+    "plugins/demo",
+    "plugins/mcp-tools",
+    "plugins/forges",
+    "plugins/x-comms",
+    "plugins/slash",
+    "plugins/twofado",
+    "plugins/plugin-updates"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "doctor:live": "node scripts/doctor-live.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:xpufx/paseo.git"
+  },
+  "license": "MIT"
+}

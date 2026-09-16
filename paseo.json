@@ -1,0 +1,60 @@
+{
+  "scripts": {
+    "forgejo-hook": {
+      "type": "service",
+      "command": "node scripts/forgejo-hook.mjs"
+    },
+    "doctor": {
+      "type": "script",
+      "command": "make doctor"
+    },
+    "reload": {
+      "type": "script",
+      "command": "make reload"
+    },
+    "check": {
+      "type": "script",
+      "command": "make check"
+    },
+    "npm-push-helper-dry": {
+      "type": "script",
+      "command": "make npm-push-helper-dry"
+    },
+    "npm-push-helper": {
+      "type": "script",
+      "command": "make npm-push-helper"
+    },
+    "npm-push-x-comms-dry": {
+      "type": "script",
+      "command": "make npm-push-x-comms-dry"
+    },
+    "npm-push-x-comms": {
+      "type": "script",
+      "command": "make npm-push-x-comms"
+    },
+    "github-mirror-top-dry": {
+      "type": "script",
+      "command": "make github-mirror-top-dry"
+    },
+    "github-mirror-top": {
+      "type": "script",
+      "command": "make github-mirror-top"
+    },
+    "github-mirror-helper-dry": {
+      "type": "script",
+      "command": "make github-mirror-helper-dry"
+    },
+    "github-mirror-helper": {
+      "type": "script",
+      "command": "make github-mirror-helper"
+    },
+    "github-mirror-top-and-helper-dry": {
+      "type": "script",
+      "command": "make github-mirror-top-and-helper-dry"
+    },
+    "github-mirror-top-and-helper": {
+      "type": "script",
+      "command": "make github-mirror-top-and-helper"
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "id": "plugin-updates",
+  "requirements": { "paseo": ">=0.8.0" }
+}
