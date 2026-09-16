@@ -37,8 +37,11 @@ import {
   currentStateLabel,
   displayNameForDirectory,
   displayRemoteForApi,
+  deriveForgejoAccess,
   formatIssueCountLabel,
   forgejoSettingsContract,
+  type ForgejoAccessInput,
+  type ForgejoAccessState,
   type ForgejoSettings,
   issueDetailContract,
   nextStateLabel,
@@ -172,11 +175,36 @@ function formatTimestamp(value: string | undefined | null): string {
   return parsed.toLocaleString();
 }
 
-function RepoVisibilityBadge({ visible }: { visible: boolean | null | undefined }) {
-  if (visible == null) return null;
-  return visible
-    ? <Badge variant="success" label="public" icon="Globe" />
-    : <Badge variant="neutral" label="private" icon="Lock" />;
+/**
+ * Combined visibility + auth chips, derived from the same access state for
+ * both the issues and settings pages (issue #152). The auth chip is what
+ * tells the user whether edits are enabled on a public repo.
+ */
+function RepoAccessChips({ access }: { access: ForgejoAccessState }) {
+  return (
+    <View style={styles.accessChips}>
+      {access.visibilityLabel ? (
+        <Badge
+          variant={access.visibility === "public" ? "success" : "neutral"}
+          label={access.visibilityLabel}
+          icon={access.visibility === "public" ? "Globe" : "Lock"}
+        />
+      ) : null}
+      <Badge
+        variant={access.authVariant}
+        label={access.authLabel}
+        icon={access.authIcon}
+      />
+    </View>
+  );
+}
+
+/** Single derivation both pages render from: visibility × token state. */
+function useRepoAccess(input: ForgejoAccessInput): ForgejoAccessState {
+  return useMemo(
+    () => deriveForgejoAccess(input),
+    [input.repoPublic, input.tokenPresent, input.tokenValid],
+  );
 }
 
 function badgeVariantForLabel(label: string): "danger" | "warning" | "info" | "success" | "neutral" {  if (label === "priority/0-SOS") return "danger";
@@ -404,6 +432,33 @@ function CommentCard({ comment }: { comment: IssueComment }) {
   );
 }
 
+/** Gated edit notice with a working route to fix the credential state. */
+function ReadOnlyNotice({
+  access,
+  capability,
+  onAction,
+}: {
+  access: ForgejoAccessState;
+  capability: string;
+  onAction: () => void;
+}) {
+  const { colors } = usePluginTheme();
+  return (
+    <View style={styles.readOnlyNotice}>
+      <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+        Read-only — {capability} needs a valid token. {access.summary}
+      </Text>
+      <Button
+        size="sm"
+        variant="secondary"
+        icon="Settings"
+        label="Add a token"
+        onPress={onAction}
+      />
+    </View>
+  );
+}
+
 function ScopedLabelGroup({
   title,
   labels,
@@ -443,11 +498,13 @@ function IssueDetailView({
   issueNumber,
   onBack,
   onBoardRefresh,
+  onOpenSettings,
 }: {
   workspaceId: string;
   issueNumber: number;
   onBack: () => void;
   onBoardRefresh: () => void;
+  onOpenSettings: () => void;
 }) {
   const { colors } = usePluginTheme();
   const toast = useToast();
@@ -498,6 +555,11 @@ function IssueDetailView({
   const next = issue ? nextStateLabel(labels) : null;
   const labelPending = setLabel.isPending;
   const commentPending = addComment.isPending;
+  const access = useRepoAccess({
+    repoPublic: detail.data?.repoPublic,
+    tokenPresent: detail.data?.tokenPresent,
+    tokenValid: detail.data?.tokenValid,
+  });
 
   return (
     <View style={styles.detail}>
@@ -528,7 +590,7 @@ function IssueDetailView({
             <Card.Header
               title={`#${issue.number} ${issue.title}`}
               subtitle={`${displayName ? `${displayName} · ` : ""}by ${issue.author} · ${formatTimestamp(issue.updatedAt)}`}
-              badge={<RepoVisibilityBadge visible={detail.data?.repoPublic} />}
+              badge={<RepoAccessChips access={access} />}
             />
             <View style={styles.badgeRow}>
               {state ? <Badge variant={badgeVariantForLabel(state)} label={shortLabelName(state)} /> : null}
@@ -545,10 +607,8 @@ function IssueDetailView({
 
           <Card>
             <Card.Header title="Labels" subtitle="One tap applies; scope evicts the rest" icon="Tags" />
-            {detail.data?.tokenValid !== true ? (
-              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-                Read-only — labeling needs a valid token (see Settings).
-              </Text>
+            {!access.canEdit ? (
+              <ReadOnlyNotice access={access} capability="labeling" onAction={onOpenSettings} />
             ) : (
             <>
             {next ? (
@@ -612,10 +672,8 @@ function IssueDetailView({
             ) : (
               issue.comments.map((comment) => <CommentCard key={comment.id} comment={comment} />)
             )}
-            {detail.data?.tokenValid !== true ? (
-              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-                Read-only — commenting needs a valid token (see Settings).
-              </Text>
+            {!access.canEdit ? (
+              <ReadOnlyNotice access={access} capability="commenting" onAction={onOpenSettings} />
             ) : (
             <View style={styles.composer}>
               <TextInput
@@ -657,6 +715,11 @@ export function ForgejoIssuesView({
 }) {
   const { colors } = usePluginTheme();
   const { data, isLoading, isError, refetch, isRefetching } = useOpenIssues(workspaceId, agentId);
+  const access = useRepoAccess({
+    repoPublic: data?.repoPublic,
+    tokenPresent: data?.tokenPresent,
+    tokenValid: data?.tokenValid,
+  });
   const directory = useDirectory(workspaceId);
   const { settings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
   const [remoteDraft, setRemoteDraft] = useState<string | null>(null);
@@ -782,6 +845,10 @@ export function ForgejoIssuesView({
             issueNumber={selected}
             onBack={() => setSelected(null)}
             onBoardRefresh={() => refetch()}
+            onOpenSettings={() => {
+              setSelected(null);
+              setActiveTab("settings");
+            }}
           />
           <View style={styles.actions}>
             <Button label="Refresh" variant="secondary" onPress={() => { refetch(); }} />
@@ -795,7 +862,7 @@ export function ForgejoIssuesView({
               <Card.Header
                 title={displayName ? `Forgejo settings · ${displayName}` : "Forgejo settings"}
                 subtitle={storedRemote.trim() ? "Explicit override active" : "Derived from git origin remote"}
-                badge={<RepoVisibilityBadge visible={data?.repoPublic} />}
+                badge={<RepoAccessChips access={access} />}
                 icon="Settings"
               />
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
@@ -840,16 +907,7 @@ export function ForgejoIssuesView({
               ) : null}
               {data && !isLoading ? (
                 <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-                  {data.repoPublic == null
-                    ? "Repo visibility unknown (could not reach host)."
-                    : data.repoPublic
-                      ? "Repo is public — anonymous reads work."
-                      : "Repo is private — a valid token is required."}
-                  {data.tokenValid == null
-                    ? " No token saved."
-                    : data.tokenValid
-                      ? " Token is valid."
-                      : " Saved token was rejected."}
+                  {access.summary}
                 </Text>
               ) : null}
               {formError ? (
@@ -877,7 +935,7 @@ export function ForgejoIssuesView({
           <Card variant="elevated">
             <Card.Header
               title={displayName ? `Issues · ${displayName}` : "Forgejo Issues"}
-              badge={<RepoVisibilityBadge visible={data?.repoPublic} />}
+              badge={<RepoAccessChips access={access} />}
               subtitle={
                 data && !data.error
                   ? query.trim()
@@ -1003,6 +1061,15 @@ const styles = StyleSheet.create({
   hint: {
     fontSize: 12,
     paddingVertical: 8,
+  },
+  accessChips: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  readOnlyNotice: {
+    gap: 4,
+    alignItems: "flex-start",
   },
   actions: {
     flexDirection: "row",

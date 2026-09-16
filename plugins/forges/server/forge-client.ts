@@ -164,6 +164,11 @@ export class ForgejoClient {
     }
   }
 
+  /** Whether a token is configured for this client's host. */
+  hasToken(): boolean {
+    return Boolean(this.token);
+  }
+
   /**
    * Token validity probe: null when no token is configured, otherwise true
    * when /user answers with it.

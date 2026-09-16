@@ -159,6 +159,7 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
       derivedRemote: resolved.derivedRemote,
       remoteSource: null,
       repoPublic: null,
+      tokenPresent: false,
       tokenValid: null,
       page: 1,
       hasMore: false,
@@ -173,10 +174,11 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     } else {
       log.debug("skipping non-Forgejo remote", { repo, host });
     }
-    return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenValid: null, error: "Not a Forgejo repo for this workspace" };
+    return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenPresent: false, tokenValid: null, error: "Not a Forgejo repo for this workspace" };
   }
   const client = await clientFor(host);
   const anonClient = new ForgejoClient({ host });
+  const tokenPresent = client.hasToken();
   const page = input?.page ?? 1;
   const [paged, openIssueCount, repoPublic, tokenValid] = await Promise.all([
     client.listIssues(repo, page),
@@ -190,12 +192,12 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     } else {
       log.debug("issue list failed", { repo, host });
     }
-    return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenValid, error: "Issue list unavailable" };
+    return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid, error: "Issue list unavailable" };
   }
   noteListSuccess(host, repo);
   const issues: OpenIssuesResult["issues"] = rankIssues(paged.issues);
   void liveScopesFromIssues(issues);
-  return { repo, host, issues, openIssueCount, page, hasMore: paged.hasMore, derivedRemote, remoteSource, repoPublic, tokenValid };
+  return { repo, host, issues, openIssueCount, page, hasMore: paged.hasMore, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid };
 }
 
 // ---------------------------------------------------------------------------
@@ -269,7 +271,7 @@ export async function handleIssueDetail(
   try {
     const issueNumber = normalizeIssueNumber(input ?? {});
     if (issueNumber == null) {
-      return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenValid: null, error: "issueNumber is required" };
+      return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenPresent: false, tokenValid: null, error: "issueNumber is required" };
     }
     const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
     if (!resolved.ok) {
@@ -278,12 +280,14 @@ export async function handleIssueDetail(
         issue: null,
         fetchedAt,
         repoPublic: null,
+        tokenPresent: false,
         tokenValid: null,
         error: resolved.error,
       };
     }
     const { host, repo } = resolved;
     const client = await clientFor(host);
+    const tokenPresent = client.hasToken();
     const [issue, repoPublic, tokenValid] = await Promise.all([
       fetchIssueDetail(repo, host, issueNumber),
       new ForgejoClient({ host }).repoIsPublic(repo),
@@ -295,14 +299,15 @@ export async function handleIssueDetail(
         issue: null,
         fetchedAt,
         repoPublic,
+        tokenPresent,
         tokenValid,
         error: `Issue #${issueNumber} not found in ${repo}`,
       };
     }
-    return { repo, issue, fetchedAt, repoPublic, tokenValid };
+    return { repo, issue, fetchedAt, repoPublic, tokenPresent, tokenValid };
   } catch (error) {
     log.warn("issue detail failed", { error: String(error) });
-    return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenValid: null, error: "Issue detail unavailable" };
+    return { repo: null, issue: null, fetchedAt, repoPublic: null, tokenPresent: false, tokenValid: null, error: "Issue detail unavailable" };
   }
 }
 

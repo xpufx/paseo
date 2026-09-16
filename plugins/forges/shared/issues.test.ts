@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { extractBareForgejoIssueUrls, isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
+import { deriveForgejoAccess, extractBareForgejoIssueUrls, isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -180,6 +180,106 @@ describe("live label sync + ranking (issue #122)", () => {
     const set = paseoLabelSet();
     assert.ok(set.some((def) => def.name === "state/1-wip" && def.exclusive));
     assert.ok(set.some((def) => def.name === "attention/1-agent"));
+  });
+});
+
+describe("repo access state matrix (issue #152)", () => {
+  const cases: Array<{
+    name: string;
+    input: { repoPublic: boolean | null; tokenPresent: boolean; tokenValid: boolean | null };
+    visibility: string;
+    auth: string;
+    canEdit: boolean;
+  }> = [
+    {
+      name: "public x no token",
+      input: { repoPublic: true, tokenPresent: false, tokenValid: null },
+      visibility: "public",
+      auth: "anonymous",
+      canEdit: false,
+    },
+    {
+      name: "public x valid token (edits enabled)",
+      input: { repoPublic: true, tokenPresent: true, tokenValid: true },
+      visibility: "public",
+      auth: "authenticated",
+      canEdit: true,
+    },
+    {
+      name: "public x invalid token",
+      input: { repoPublic: true, tokenPresent: true, tokenValid: false },
+      visibility: "public",
+      auth: "invalid-token",
+      canEdit: false,
+    },
+    {
+      name: "private x no token",
+      input: { repoPublic: false, tokenPresent: false, tokenValid: null },
+      visibility: "private",
+      auth: "anonymous",
+      canEdit: false,
+    },
+    {
+      name: "private x valid token",
+      input: { repoPublic: false, tokenPresent: true, tokenValid: true },
+      visibility: "private",
+      auth: "authenticated",
+      canEdit: true,
+    },
+    {
+      name: "private x invalid token",
+      input: { repoPublic: false, tokenPresent: true, tokenValid: false },
+      visibility: "private",
+      auth: "invalid-token",
+      canEdit: false,
+    },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, () => {
+      const access = deriveForgejoAccess(testCase.input);
+      assert.equal(access.visibility, testCase.visibility);
+      assert.equal(access.auth, testCase.auth);
+      assert.equal(access.canEdit, testCase.canEdit);
+    });
+  }
+
+  it("enables edits for a public repo holding a valid token (the third state)", () => {
+    const access = deriveForgejoAccess({ repoPublic: true, tokenPresent: true, tokenValid: true });
+    assert.equal(access.canEdit, true);
+    assert.equal(access.visibilityLabel, "public");
+    assert.equal(access.authLabel, "Authenticated");
+    assert.equal(access.authVariant, "success");
+  });
+
+  it("keeps edit capability when visibility cannot be probed but the token is valid", () => {
+    const access = deriveForgejoAccess({ repoPublic: null, tokenPresent: true, tokenValid: true });
+    assert.equal(access.visibility, "unknown");
+    assert.equal(access.visibilityLabel, null);
+    assert.equal(access.canEdit, true);
+  });
+
+  it("treats a present-but-unprobed token as unverified and read-only", () => {
+    const access = deriveForgejoAccess({ repoPublic: false, tokenPresent: true, tokenValid: null });
+    assert.equal(access.auth, "unknown");
+    assert.equal(access.canEdit, false);
+    assert.equal(access.authVariant, "warning");
+  });
+
+  it("stays read-only with no probes at all", () => {
+    const access = deriveForgejoAccess();
+    assert.equal(access.visibility, "unknown");
+    assert.equal(access.auth, "anonymous");
+    assert.equal(access.canEdit, false);
+  });
+
+  it("keeps chips and summary consistent for one derived state", () => {
+    const access = deriveForgejoAccess({ repoPublic: true, tokenPresent: true, tokenValid: false });
+    assert.equal(access.visibilityLabel, "public");
+    assert.equal(access.authLabel, "Token rejected");
+    assert.equal(access.authVariant, "danger");
+    assert.match(access.summary, /^Public repo/);
+    assert.match(access.summary, /rejected/);
   });
 });
 

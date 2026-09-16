@@ -29,6 +29,7 @@ export const OpenIssuesOutputSchema = z.object({
   derivedRemote: z.string().nullable().default(null),
   remoteSource: z.enum(["explicit", "derived"]).nullable().default(null),
   repoPublic: z.boolean().nullable().default(null),
+  tokenPresent: z.boolean().default(false),
   tokenValid: z.boolean().nullable().default(null),
   error: z.string().optional(),
 });
@@ -231,6 +232,121 @@ export function displayRemoteForApi(url: string | undefined | null): string | nu
 export function formatIssueCountLabel(count: number | null | undefined): string {
   if (count == null) return "issues --";
   return count === 1 ? "1 issue" : `${count} issues`;
+}
+
+// ---------------------------------------------------------------------------
+// Repo access state (issue #152). Writes need an accepted token on BOTH
+// public and private repos, so edit capability derives from visibility AND
+// credential presence/validity, never from visibility alone. This is the
+// single source of truth both client pages render from.
+// ---------------------------------------------------------------------------
+
+export type ForgejoVisibility = "public" | "private" | "unknown";
+export type ForgejoAuthState =
+  | "authenticated"
+  | "invalid-token"
+  | "anonymous"
+  | "unknown";
+
+export interface ForgejoAccessInput {
+  /** Anonymous repo probe: true public, false private/missing, null unknown. */
+  repoPublic?: boolean | null;
+  /** Whether a token is configured for the host at all. */
+  tokenPresent?: boolean | null;
+  /** Token probe: true accepted, false rejected, null not probed. */
+  tokenValid?: boolean | null;
+}
+
+export interface ForgejoAccessState {
+  visibility: ForgejoVisibility;
+  auth: ForgejoAuthState;
+  /** Labels and comments require an accepted token, public repo or not. */
+  canEdit: boolean;
+  /** Chip label for visibility, or null when unknown. */
+  visibilityLabel: string | null;
+  /** Chip label for auth state (always known). */
+  authLabel: string;
+  /** Lucide icon name for the auth chip. */
+  authIcon: string;
+  /** Status variant for the auth chip. */
+  authVariant: "success" | "danger" | "warning" | "neutral";
+  /** One-line human explanation shared by both pages. */
+  summary: string;
+}
+
+/**
+ * Derive the combined access state from the two independent probes.
+ * `canEdit` is true only for an accepted token: a public repo with a valid
+ * token is editable, while a public repo without one stays read-only.
+ */
+export function deriveForgejoAccess(input: ForgejoAccessInput = {}): ForgejoAccessState {
+  const visibility: ForgejoVisibility =
+    input.repoPublic === true
+      ? "public"
+      : input.repoPublic === false
+        ? "private"
+        : "unknown";
+
+  let auth: ForgejoAuthState;
+  if (input.tokenValid === true) auth = "authenticated";
+  else if (input.tokenPresent !== true) auth = "anonymous";
+  else if (input.tokenValid === false) auth = "invalid-token";
+  else auth = "unknown";
+
+  const canEdit = auth === "authenticated";
+
+  const visibilityLabel = visibility === "unknown" ? null : visibility;
+
+  let authLabel: string;
+  let authIcon: string;
+  let authVariant: ForgejoAccessState["authVariant"];
+  if (auth === "authenticated") {
+    authLabel = "Authenticated";
+    authIcon = "KeyRound";
+    authVariant = "success";
+  } else if (auth === "invalid-token") {
+    authLabel = "Token rejected";
+    authIcon = "AlertTriangle";
+    authVariant = "danger";
+  } else if (auth === "anonymous") {
+    authLabel = "No token";
+    authIcon = "User";
+    authVariant = "neutral";
+  } else {
+    authLabel = "Token unverified";
+    authIcon = "AlertCircle";
+    authVariant = "warning";
+  }
+
+  return {
+    visibility,
+    auth,
+    canEdit,
+    visibilityLabel,
+    authLabel,
+    authIcon,
+    authVariant,
+    summary: accessSummary(visibility, auth),
+  };
+}
+
+function accessSummary(visibility: ForgejoVisibility, auth: ForgejoAuthState): string {
+  const authClause =
+    auth === "authenticated"
+      ? "Token accepted — reads and edits enabled."
+      : auth === "invalid-token"
+        ? "Saved token was rejected — edits disabled."
+        : auth === "anonymous"
+          ? "No token saved — edits disabled."
+          : "Token state unverified — edits disabled.";
+
+  if (visibility === "public") {
+    return `Public repo — anonymous reads work. ${authClause}`;
+  }
+  if (visibility === "private") {
+    return `Private repo — a valid token is required for reads. ${authClause}`;
+  }
+  return `Repo visibility unknown (could not reach host). ${authClause}`;
 }
 
 /**
@@ -595,6 +711,7 @@ export const IssueDetailOutputSchema = z.object({
   issue: IssueDetailSchema.nullable(),
   fetchedAt: z.string().datetime(),
   repoPublic: z.boolean().nullable().default(null),
+  tokenPresent: z.boolean().default(false),
   tokenValid: z.boolean().nullable().default(null),
   error: z.string().optional(),
 });
