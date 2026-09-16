@@ -452,3 +452,45 @@ export function activateServer(server) {
 }
 ```
 
+## 15. Shared Suite Settings Across Sibling Plugins: `createSharedPluginSettings`
+
+Independently installed plugins from one suite can read and write a **single** settings file and stay
+in sync, with no upstream Paseo change. Every sibling points at the same suite directory
+(`~/.paseo/xpufx-plugins/<suite>/<filename>`) through the same atomic `PluginStorage`:
+
+```ts
+import { createSharedPluginSettings } from "paseo-plugin-helper/server";
+import { SuiteSettingsContract, SuiteSettingsSchema } from "paseo-plugin-helper/shared";
+
+export const shared = createSharedPluginSettings({
+  suite: "xpufx-suite",            // same suite in every sibling
+  schema: SuiteSettingsSchema,     // same schema + contract in every sibling
+  contract: SuiteSettingsContract,
+});
+
+export default function activate(server) {
+  const handlers = shared.createHandlers();
+  server.handle(shared.contract.get, handlers.get);
+  server.handle(shared.contract.update, handlers.update);
+  server.handle(shared.contract.reset, handlers.reset);
+  return () => shared.dispose();
+}
+```
+
+What makes the sharing safe:
+
+- **One contract, declared by each plugin.** The daemon routes `plugin.rpc.invoke` by plugin id, so
+  identical RPC method names across plugins do not collide: each sibling serves its own handlers
+  against the same file.
+- **`suite` + `filename` determine the path.** The same pair yields one file; there are no per-plugin
+  files. Read `shared.filePath` to display it.
+- **Live fan-out, no reload.** `update()`/`reset()` notify local listeners immediately; `watch(listener)`
+  (fs-watch, 25 ms debounce) fires for writes made by siblings; clients using
+  `useSharedPluginSettings(contract)` re-render within the default 2 s poll.
+- **Ownership is convention, not locking.** `PluginStorage` only guarantees atomic temp-file renames,
+  so siblings must keep their fields disjoint and not read-modify-write the same key concurrently.
+
+Live-verified with two throwaway pill plugins on daemon 0.8.0: both computed the same
+`~/.paseo/xpufx-plugins/sharedset-demo/settings.json`, a write in A was observed by B in ~25 ms (and
+the reverse) with no plugin reload, and no per-plugin settings directories were created.
+

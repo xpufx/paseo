@@ -784,6 +784,22 @@ function SettingsTab() {
 }
 ```
 
+### `useSharedPluginSettings(contract, options?)`
+Reactive hook for suite-wide settings shared by independently installed sibling plugins. It wraps
+`usePluginSettings` with sync-friendly defaults (`staleTime: 0`, `refetchOnMount: "always"`,
+`refetchOnWindowFocus: true`) plus a 2 s background poll, so a value written by another plugin
+appears without a reload or reopening the modal. Set `pollIntervalMs: false` to disable polling.
+
+```tsx
+import { useSharedPluginSettings } from "paseo-plugin-helper/client";
+import { suiteSettingsContract } from "../shared/suite-settings.js";
+
+const { settings, updateSettings } = useSharedPluginSettings(suiteSettingsContract);
+```
+
+`useSuiteSettings(options?)` is the same hook bound to the canonical `SuiteSettingsContract`.
+Server-side setup lives in `createSharedPluginSettings` (see `docs/server.md` section 15).
+
 ### `registerHelperSettingsScreen(client, contract, options)`
 Turns a settings contract built by `defineSettingsContract` into a native Paseo settings screen with zero hand-written JSX. Field mapping follows the Zod object schema: boolean fields render as Switch, `z.enum` fields render as Select, string and number fields render as Input. Schema `.describe()` text is used for labels and hints when present, otherwise the field name is used. Unsupported field shapes are skipped with a logged warning and never throw. Values bind through the existing `usePluginSettings(contract)` hook, so the host `useRpc` injected via `initClientHelpers` is reused with no new plumbing. Number fields ignore unparseable keystrokes and keep the last good value, so `NaN` is never written back.
 
