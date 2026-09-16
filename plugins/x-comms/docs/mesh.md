@@ -82,6 +82,24 @@ Implemented on this branch (`server/injection.ts`, wired in
 Not implemented. Planned: injection snapshot plus diff against live
 session configs. Separate slice.
 
+## Layer 4: Conversation reliability (sender-side outbox)
+
+Implemented (`server/outbox.ts` + the plugin server, #12):
+- Failed `conversation.send` calls are held in an `outbox.json` store and
+  retried over the same `x_comms_send` path: exponential backoff
+  (5s doubling to 60s), a 15s periodic sweep, and an immediate retry when a
+  peer's reachability flips false -> true (health/snapshot).
+- Held messages expire after a configurable window (default 10 min); on
+  expiry the sender gets an `x-comms-outbox-notice` timeline item with the
+  reason, then the entry is dropped.
+- Scope: this covers plugin-server sends (panel/composer). Agent-initiated
+  `x_comms_send` calls run in an ephemeral per-session MCP process and are not
+  outboxed.
+- Not implemented: UUID-keyed idempotency. The conversation envelope has no
+  message-id slot and receivers keep no seen-id set for messages, so a retry
+  after an ambiguous failure can re-deliver. Adding it needs a wire-format
+  change (separate decision).
+
 ## Trust corollary
 
 Any installed plugin can run these hooks, so peering with a daemon means

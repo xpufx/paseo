@@ -143,12 +143,15 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
   const prereqsCollapsed = prefs.data?.prereqsCollapsed ?? true;
   const presenceEnabled = prefs.data?.presenceEnabled ?? true;
   const injectionEnabled = prefs.data?.injectionEnabled ?? true;
+  const outboxExpirySeconds = prefs.data?.outboxExpirySeconds ?? 600;
+  const [expiryDraft, setExpiryDraft] = useState<string | null>(null);
 
   const persistPrefs = useCallback(
     (patch: {
       prereqsCollapsed?: boolean;
       presenceEnabled?: boolean;
       injectionEnabled?: boolean;
+      outboxExpirySeconds?: number;
       daemonEnabled?: Record<string, boolean>;
     }) => {
       prefsSet.mutate(
@@ -163,6 +166,13 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
     },
     [prefsSet, prefs, prereqsCollapsed, presenceEnabled, injectionEnabled],
   );
+
+  const commitExpiry = useCallback(() => {
+    const seconds = Number.parseInt(expiryDraft ?? "", 10);
+    setExpiryDraft(null);
+    if (!Number.isFinite(seconds) || seconds <= 0 || seconds === outboxExpirySeconds) return;
+    persistPrefs({ outboxExpirySeconds: seconds });
+  }, [expiryDraft, outboxExpirySeconds, persistPrefs]);
 
   const canAdd = newName.trim().length > 0 && newValue.trim().length > 0;
   const mismatch =
@@ -372,6 +382,18 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
             value={injectionEnabled}
             disabled={prefs.isPending}
             onValueChange={(next) => persistPrefs({ injectionEnabled: next })}
+          />
+        </FormRow>
+        <FormRow
+          label="Outbox expiry (seconds)"
+          description="How long an undelivered message is retried before the sender is notified. Default 600. Press Enter to save."
+        >
+          <TextInput
+            value={expiryDraft ?? String(outboxExpirySeconds)}
+            onChangeText={setExpiryDraft}
+            keyboardType="number-pad"
+            disabled={prefs.isPending}
+            onSubmitEditing={commitExpiry}
           />
         </FormRow>
         <ErrorRow label="Preferences update failed" message={prefsSet.error?.message} />

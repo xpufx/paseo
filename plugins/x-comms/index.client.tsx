@@ -3,7 +3,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers, registerSidebarSurface, type ComposerPillRegistrar } from "paseo-plugin-helper/client";
 import { MainSurface } from "./client/main";
-import { crossDaemonTransformer, crossDaemonRenderer } from "./client/x-comms-timeline";
+import { crossDaemonTransformer, crossDaemonRenderer, outboxNoticeRenderer } from "./client/x-comms-timeline";
 import { crossDaemonToolCallTransformer, crossDaemonToolCallRenderer } from "./client/x-comms-tool-call";
 import { contributeClient } from "./client/x-comms-pill";
 import { CrossDaemonPanel } from "./client/x-comms-panel";
@@ -13,6 +13,7 @@ initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatLis
 export default function contribute(client: PluginClientContext) {
   client.addTimelineTransformer(crossDaemonTransformer);
   client.addTimelineRenderer(crossDaemonRenderer);
+  client.addTimelineRenderer(outboxNoticeRenderer);
   client.addTimelineTransformer(crossDaemonToolCallTransformer);
   client.addTimelineRenderer(crossDaemonToolCallRenderer);
   client.addWorkspacePanel({

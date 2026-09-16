@@ -22,6 +22,8 @@ import {
   injectionEnabled,
   onLocalAgentCreated,
   onLocalAgentArchived,
+  rememberPaseo,
+  stopOutboxWorker,
 } from "./server/handlers";
 import { maybeRegisterInjection, toInjectionServer } from "./server/injection";
 import {
@@ -66,14 +68,17 @@ export default function contribute(server: PluginServerContext) {
   server.handle(presenceAnnounceRpc, handlePresenceAnnounce);
   server.handle(presenceRetractRpc, handlePresenceRetract);
   server.handle(presenceListRpc, handlePresenceList);
-  server.on("agent.created", ({ agent }) => {
+  server.on("agent.created", ({ agent }, context) => {
+    rememberPaseo(context.paseo);
     void onLocalAgentCreated(agent).catch(() => {});
   });
-  server.on("agent.archived", ({ agent }) => {
+  server.on("agent.archived", ({ agent }, context) => {
+    rememberPaseo(context.paseo);
     void onLocalAgentArchived(agent).catch(() => {});
   });
   const removeInjection = maybeRegisterInjection(toInjectionServer(server), { enabled: injectionEnabled() });
   return () => {
+    stopOutboxWorker();
     removeInjection();
   };
 }

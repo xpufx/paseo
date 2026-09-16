@@ -5,7 +5,9 @@ import {
   resolveDaemonEnabled,
   resolveFeatureFlags,
   resolveInjectionEnabled,
+  resolveOutboxExpiryMs,
   resolvePresenceEnabled,
+  OUTBOX_EXPIRY_DEFAULT_SECONDS,
 } from "./settings.ts";
 
 describe("feature flags", () => {
@@ -34,6 +36,25 @@ describe("feature flags", () => {
   it("keeps stored values when the update omits them", () => {
     const stored = { presenceEnabled: false, injectionEnabled: false };
     assert.deepEqual(applyFeaturePrefsUpdate(stored, {}), stored);
+  });
+});
+
+describe("outbox expiry", () => {
+  it("defaults to 10 minutes when absent", () => {
+    assert.equal(resolveOutboxExpiryMs({}), OUTBOX_EXPIRY_DEFAULT_SECONDS * 1000);
+  });
+
+  it("honors an explicit value and clamps to a sane range", () => {
+    assert.equal(resolveOutboxExpiryMs({ outboxExpirySeconds: 120 }), 120_000);
+    assert.equal(resolveOutboxExpiryMs({ outboxExpirySeconds: 1 }), 10_000);
+    assert.equal(resolveOutboxExpiryMs({ outboxExpirySeconds: 999_999 }), 24 * 60 * 60 * 1000);
+    assert.equal(resolveOutboxExpiryMs({ outboxExpirySeconds: Number.NaN }), OUTBOX_EXPIRY_DEFAULT_SECONDS * 1000);
+  });
+
+  it("round-trips an expiry update without touching the flags", () => {
+    const stored = { presenceEnabled: false, injectionEnabled: false };
+    const next = applyFeaturePrefsUpdate(stored, { outboxExpirySeconds: 300 });
+    assert.deepEqual(next, { presenceEnabled: false, injectionEnabled: false, outboxExpirySeconds: 300 });
   });
 });
 

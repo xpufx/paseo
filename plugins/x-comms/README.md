@@ -73,6 +73,15 @@ Every `x_comms_send` prepends one line:
 
 Tools (via the embedded server) are `x_comms_list_daemons`, `x_comms_add_daemon`, `x_comms_remove_daemon`, `x_comms_list_agents`, `x_comms_inspect`, `x_comms_send`, `x_comms_logs`, `x_comms_wait`, `x_comms_list_permissions`, `x_comms_allow_permission`, `x_comms_deny_permission` — see [mcp/README.md#tools](mcp/README.md#tools) for the reference. The plugin's conversation/panel UI wraps `send`/`logs`/`wait`/permissions for interactive use.
 
+### Outbox: retry, expiry, notification
+
+The plugin server keeps an **outbox** (the plugin state dir's `outbox.json`) for messages whose send failed. Held messages are retried over the same `x_comms_send` path with exponential backoff (5s doubling to a 60s cap), swept on a 15s periodic pass, and retried immediately when a peer is observed reconnecting (health/snapshot reachability flip).
+
+A held message expires after **10 minutes** by default (configurable in the settings surface, `outboxExpirySeconds`, clamped to 10s–24h). On expiry the sender is notified by appending an `x-comms-outbox-notice` timeline item with the reason; the message is then dropped.
+
+**Idempotency is not implemented.** The conversation protocol has no message-UUID slot and the receiver keeps no seen-id set for messages, so a retry after an ambiguous failure (send succeeded, acknowledgement lost) can re-deliver. Adding it would need a wire-format change; tracked separately.
+
+
 ## Repository layout
 
 ```

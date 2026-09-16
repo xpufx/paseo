@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createPluginLogger, safeSpawn } from "paseo-plugin-helper/server";
+import { createPeriodicTask, createPluginLogger, safeSpawn } from "paseo-plugin-helper/server";
+import type { PaseoApi } from "@getpaseo/client";
 import { withTimeout } from "paseo-plugin-helper/shared";
 import { getSnapshotFresh, agentCountFor, refreshSnapshot, initializeSnapshot } from "./snapshot";
 import {
@@ -27,6 +28,16 @@ import { readRelayStatus } from "./relay-status";
 // plugin backend loads, so a corrupt or invalid config is caught early and
 // visible in `paseo plugin logs`.
 const log = createPluginLogger("paseo-x-comms");
+
+// The host Paseo API, remembered from the most recent handler/hook context so
+// the periodic outbox worker can append expiry notices to a local agent's
+// timeline even when no RPC is in flight.
+let paseoRef: PaseoApi | null = null;
+
+export function rememberPaseo(paseo: PaseoApi | null | undefined): void {
+  if (paseo) paseoRef = paseo;
+}
+
 export function runStartupCheck(): void {
   const registryPath = currentRegistryPath();
   const current = readRegistry(registryPath);
@@ -136,8 +147,10 @@ export async function handleDaemonRemove(input: { name: string }) {
   return result;
 }
 
-export async function handleDaemonHealth() {
+export async function handleDaemonHealth(_input?: unknown, context?: PluginHandlerContext) {
+  rememberPaseo(context?.paseo);
   const snapshot = await getSnapshotFresh();
+  for (const entry of snapshot.daemons) notePeerReachability(entry.name, entry.reachable);
   return {
     results: snapshot.daemons.map((entry) => ({
       name: entry.name,
@@ -270,17 +283,28 @@ function extractServerVersion(serverPath: string): string | null {
   }
 }
 
-export async function handleConversationSend(input: { daemon: string; agentId: string; prompt: string; fromAgentId?: string | null; fromAgentName?: string | null }) {
+export interface ConversationSendInput {
+  daemon: string;
+  agentId: string;
+  prompt: string;
+  fromAgentId?: string | null;
+  fromAgentName?: string | null;
+}
+
+/**
+ * The existing send path, unchanged: bundled server over stdio MCP, which
+ * stamps the envelope and shells out to `paseo send`. Rejects on failure;
+ * callers either record the send or hold it in the outbox for retry.
+ */
+async function deliverConversationMessage(input: ConversationSendInput): Promise<void> {
   let sendDaemon = daemonNameForServerId(input.daemon) ?? input.daemon;
   // Fallback: if daemon is a serverId (srv_…) and not in registry, scan registry values' offer serverId
   if (sendDaemon === input.daemon && input.daemon.startsWith("srv_")) {
     const byOffer = readRegistry(currentRegistryPath()).daemons.find((d) => parseOffer(d.value)?.serverId === input.daemon);
     if (byOffer) sendDaemon = byOffer.name;
   }
-  let client: InstanceType<typeof McpStdioClient> | null = null;
+  const client = new McpStdioClient(serverPath());
   try {
-    const path = serverPath();
-    client = new McpStdioClient(path);
     await client.connect();
     await client.callTool("x_comms_send", {
       daemon: sendDaemon,
@@ -289,22 +313,41 @@ export async function handleConversationSend(input: { daemon: string; agentId: s
       fromAgentId: input.fromAgentId ?? null,
       fromAgentName: input.fromAgentName ?? null,
     });
-    recordOutboundSend({
-      daemon: input.daemon,
-      agentId: input.agentId,
-      localAgentId: input.fromAgentId ?? null,
-    });
-    return { daemon: input.daemon, agentId: input.agentId, ok: true, error: null };
+  } finally {
+    client.close();
+  }
+}
+
+export async function handleConversationSend(input: ConversationSendInput, context?: PluginHandlerContext) {
+  rememberPaseo(context?.paseo);
+  try {
+    await deliverConversationMessage(input);
   } catch (cause) {
+    const error = cause instanceof Error ? cause.message : String(cause);
+    const entry = await withOutboxLock(() => {
+      const state = readOutbox();
+      const held = holdMessage(state, input, {
+        nowMs: Date.now(),
+        expiryMs: resolveOutboxExpiryMs(readUiPrefs()),
+        error,
+      });
+      writeOutbox(state);
+      return held;
+    });
+    log.warn(`outbox: held ${entry.id} for '${input.daemon}/${input.agentId}' until ${entry.expiresAt}: ${error}`);
     return {
       daemon: input.daemon,
       agentId: input.agentId,
       ok: false,
-      error: cause instanceof Error ? cause.message : String(cause),
+      error: `undelivered; held in the outbox for retry until ${entry.expiresAt}: ${error}`,
     };
-  } finally {
-    client?.close();
   }
+  recordOutboundSend({
+    daemon: input.daemon,
+    agentId: input.agentId,
+    localAgentId: input.fromAgentId ?? null,
+  });
+  return { daemon: input.daemon, agentId: input.agentId, ok: true, error: null };
 }
 
 
@@ -341,7 +384,17 @@ export async function handleDaemonProbe(input: { value: string }) {
 
 
 import { PluginStorage } from "paseo-plugin-helper/server";
-import { resolveFeatureFlags, resolveInjectionEnabled, resolvePresenceEnabled, applyFeaturePrefsUpdate } from "./settings.ts";
+import { resolveFeatureFlags, resolveInjectionEnabled, resolveOutboxExpiryMs, resolvePresenceEnabled, applyFeaturePrefsUpdate } from "./settings.ts";
+import {
+  OUTBOX_POLL_INTERVAL_MS,
+  holdMessage,
+  outboxPath,
+  readOutbox,
+  runOutboxPass,
+  writeOutbox,
+  type OutboxEntry,
+} from "./outbox";
+import { OUTBOX_NOTICE_KIND, OUTBOX_NOTICE_VERSION } from "../shared/outbox.ts";
 import { stateDir, migrateFromRoot } from "./registry";
 
 const UI_PREFS_FILE = join(stateDir(), "plugin.json");
@@ -351,6 +404,7 @@ interface UiPrefsState {
   prereqsCollapsed?: boolean;
   presenceEnabled?: boolean;
   injectionEnabled?: boolean;
+  outboxExpirySeconds?: number;
   daemonEnabled?: Record<string, boolean>;
   daemonIdentities?: Record<string, string>;
   daemonHostnames?: Record<string, string>;
@@ -420,11 +474,12 @@ export async function handleUiPrefsGet() {
   return {
     prereqsCollapsed: prefs.prereqsCollapsed === true,
     daemonEnabled: prefs.daemonEnabled ?? {},
+    outboxExpirySeconds: prefs.outboxExpirySeconds,
     ...resolveFeatureFlags(prefs),
   };
 }
 
-export async function handleUiPrefsSet(input: { prereqsCollapsed: boolean; presenceEnabled?: boolean; injectionEnabled?: boolean; daemonEnabled?: Record<string, boolean> }) {
+export async function handleUiPrefsSet(input: { prereqsCollapsed: boolean; presenceEnabled?: boolean; injectionEnabled?: boolean; outboxExpirySeconds?: number; daemonEnabled?: Record<string, boolean> }) {
   const state = readUiPrefs();
   writeUiPrefs({
     ...state,
@@ -435,6 +490,7 @@ export async function handleUiPrefsSet(input: { prereqsCollapsed: boolean; prese
   return {
     prereqsCollapsed: next.prereqsCollapsed === true,
     daemonEnabled: next.daemonEnabled ?? {},
+    outboxExpirySeconds: next.outboxExpirySeconds,
     ...resolveFeatureFlags(next),
   };
 }
@@ -448,7 +504,9 @@ export function injectionEnabled(): boolean {
 }
 
 export async function handleSnapshotRefresh(_input?: unknown, context?: PluginHandlerContext) {
+  rememberPaseo(context?.paseo);
   const snapshot = await refreshSnapshot();
+  for (const entry of snapshot.daemons) notePeerReachability(entry.name, entry.reachable);
   if (context?.paseo) await reconcileInbound(context.paseo);
   return { updatedAt: snapshot.updatedAt };
 }
@@ -877,6 +935,113 @@ export async function onLocalAgentArchived(agent: { id: string }): Promise<void>
       writePresence(retry);
     }
   }
+}
+
+// Outbox: retry, expiry, and sender notification for undelivered messages.
+// Idempotency (UUID-keyed receiver dedup) is out of scope here — the
+// conversation protocol has no message-UUID slot (see #12).
+
+const peerReachability = new Map<string, boolean>();
+
+// The outbox read-modify-write straddles awaits (delivery/notification), so a
+// hold landing mid-pass could otherwise be clobbered by the pass's write.
+let outboxLock: Promise<unknown> = Promise.resolve();
+
+function withOutboxLock<T>(operation: () => Promise<T> | T): Promise<T> {
+  const run = outboxLock.then(operation, operation);
+  outboxLock = run.catch(() => {});
+  return run;
+}
+
+/**
+ * Track a peer's reachability and kick an immediate outbox retry when it flips
+ * from unreachable back to reachable. First observation is not a reconnect.
+ */
+function notePeerReachability(name: string, reachable: boolean): void {
+  const previous = peerReachability.get(name);
+  peerReachability.set(name, reachable);
+  if (!reachable || previous !== false) return;
+  log.info(`outbox: peer '${name}' reconnected; retrying held messages`);
+  void flushOutbox(name).catch((cause) => {
+    log.error(`outbox: reconnect flush for '${name}' failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+  });
+}
+
+/**
+ * Append the expiry notice to the sender's local timeline. `fromAgentId` is the
+ * local sender agent; without it (or without a remembered Paseo API) there is
+ * no timeline to notify, so this resolves after logging.
+ */
+async function notifyOutboxExpiry(entry: OutboxEntry, reason: string): Promise<void> {
+  const paseo = paseoRef;
+  if (!entry.fromAgentId || !paseo) {
+    log.warn(`outbox: expiry notice for ${entry.id} not appended (${entry.fromAgentId ? "no paseo handle" : "no local sender agent"}): ${reason}`);
+    return;
+  }
+  await paseo.agents.ref(entry.fromAgentId).timeline.append({
+    type: "plugin",
+    id: `x-comms-outbox-${entry.id}`,
+    kind: OUTBOX_NOTICE_KIND,
+    version: OUTBOX_NOTICE_VERSION,
+    data: {
+      daemon: entry.daemon,
+      agentId: entry.agentId,
+      reason,
+      attempts: entry.attempts,
+      heldForMs: Math.max(0, Date.now() - Date.parse(entry.createdAt)),
+    },
+  });
+}
+
+export interface OutboxFlushSummary {
+  delivered: number;
+  retried: number;
+  expired: number;
+  notified: number;
+}
+
+/** One outbox sweep: expire overdue held messages, then retry the due ones. */
+export async function flushOutbox(forceDaemon?: string): Promise<OutboxFlushSummary> {
+  return withOutboxLock(async () => {
+    const state = readOutbox();
+    if (state.entries.length === 0) return { delivered: 0, retried: 0, expired: 0, notified: 0 };
+    const result = await runOutboxPass(
+      state,
+      {
+        deliver: async (entry) => {
+          await deliverConversationMessage(entry);
+          recordOutboundSend({ daemon: entry.daemon, agentId: entry.agentId, localAgentId: entry.fromAgentId });
+        },
+        notify: notifyOutboxExpiry,
+      },
+      { nowMs: Date.now(), forceDaemon },
+    );
+    writeOutbox(state);
+    if (result.delivered.length || result.retried.length || result.expired.length) {
+      log.info(`outbox: delivered ${result.delivered.length}, retried ${result.retried.length}, expired ${result.expired.length} (path: ${outboxPath()})`);
+    }
+    return {
+      delivered: result.delivered.length,
+      retried: result.retried.length,
+      expired: result.expired.length,
+      notified: result.notified.length,
+    };
+  });
+}
+
+export const outboxWorker = createPeriodicTask({
+  intervalMs: OUTBOX_POLL_INTERVAL_MS,
+  runImmediately: true,
+  task: async () => {
+    await flushOutbox();
+  },
+  onError: (cause) => {
+    log.error(`outbox: periodic flush failed: ${cause instanceof Error ? cause.message : String(cause)}`);
+  },
+});
+
+export function stopOutboxWorker(): void {
+  outboxWorker.stop();
 }
 
 // Runs when this module has fully evaluated. Placed last so every

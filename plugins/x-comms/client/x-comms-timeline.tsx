@@ -5,6 +5,12 @@ import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useMemo, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { EnvelopeSchema, cardSignal, isOverflowing, parseEnvelope, type CrossDaemonEnvelope } from "../shared/envelope";
+import {
+  OUTBOX_NOTICE_KIND,
+  OUTBOX_NOTICE_VERSION,
+  OutboxNoticeSchema,
+  type OutboxNotice,
+} from "../shared/outbox";
 import { formatPeerDisplay, usePeerAlias } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 
@@ -141,4 +147,30 @@ export const crossDaemonRenderer: PluginTimelineRendererContribution<typeof Item
   version: 1,
   schema: ItemSchema,
   Component: CrossDaemonMessage,
+};
+
+/**
+ * Expiry notice for a message the outbox gave up on. Local to the sender's
+ * timeline; never part of the wire envelope.
+ */
+function OutboxNoticeCard({ theme, item }: PluginTimelineItemProps<OutboxNotice>) {
+  return (
+    <View style={{ paddingVertical: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
+        <Icon name="AlertTriangle" size={14} color={theme.colors.statusWarning} />
+        <Text style={{ color: theme.colors.statusWarning, fontSize: 12, fontWeight: "600" as const }}>
+          x-comms · Delivery failed
+        </Text>
+      </View>
+      <Text style={{ color: theme.colors.foreground, fontSize: 13 }}>{item.data.reason}</Text>
+      <ViaXComms theme={theme} />
+    </View>
+  );
+}
+
+export const outboxNoticeRenderer: PluginTimelineRendererContribution<typeof OutboxNoticeSchema> = {
+  kind: OUTBOX_NOTICE_KIND,
+  version: OUTBOX_NOTICE_VERSION,
+  schema: OutboxNoticeSchema,
+  Component: OutboxNoticeCard,
 };
