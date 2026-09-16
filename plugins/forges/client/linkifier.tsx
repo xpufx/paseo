@@ -10,11 +10,16 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { copyToClipboard } from "./vendor/paseo-plugin-helper/index.ts";
 import {
+  classifyForgeLink,
+  classifyForgeUrl,
   extractBareForgejoIssueUrls,
   parseMarkdownLite,
+  type ForgeRepoIdentity,
   type ForgejoIssueLink,
   type MarkdownLiteSpan,
 } from "../shared/issues.js";
+import { useActiveForgeIdentityForAgent } from "./active-forge.js";
+import { FOREIGN_LINK_HINT, ForeignInlineMark, ForeignLinkBadge } from "./foreign-link.js";
 
 const ForgejoIssueLinkSchema = z.object({
   text: z.string(),
@@ -77,7 +82,15 @@ export const forgejoLinkAssistantTransformer: PluginTimelineTransformerContribut
   },
 };
 
-function IssueLinkRow({ theme, link }: { theme: PluginTheme; link: ForgejoIssueLink }) {
+function IssueLinkRow({
+  theme,
+  link,
+  foreign,
+}: {
+  theme: PluginTheme;
+  link: ForgejoIssueLink;
+  foreign: boolean;
+}) {
   const open = () => {
     Linking.openURL(link.url).catch(() => {});
   };
@@ -87,7 +100,17 @@ function IssueLinkRow({ theme, link }: { theme: PluginTheme; link: ForgejoIssueL
   return (
     <View style={styles.row}>
       <Icon name="ExternalLink" size={13} color={theme.colors.accent} />
-      <Pressable style={styles.linkBody} onPress={open} hitSlop={8}>
+      <Pressable
+        style={styles.linkBody}
+        onPress={open}
+        hitSlop={8}
+        accessibilityRole="link"
+        accessibilityLabel={
+          foreign
+            ? `${link.owner}/${link.repo}#${link.number} on ${link.host} — ${FOREIGN_LINK_HINT}`
+            : undefined
+        }
+      >
         <Text style={[styles.linkText, { color: theme.colors.accent }]}>
           {link.owner}/{link.repo}#{link.number}
         </Text>
@@ -95,6 +118,7 @@ function IssueLinkRow({ theme, link }: { theme: PluginTheme; link: ForgejoIssueL
           {link.host}
         </Text>
       </Pressable>
+      {foreign ? <ForeignLinkBadge /> : null}
       <Pressable accessibilityRole="button" accessibilityLabel="Copy issue link" onPress={copy} hitSlop={10}>
         <Text style={[styles.copyText, { color: theme.colors.foregroundMuted }]}>⧉</Text>
       </Pressable>
@@ -102,11 +126,20 @@ function IssueLinkRow({ theme, link }: { theme: PluginTheme; link: ForgejoIssueL
   );
 }
 
-function FormattedSpans({ theme, spans }: { theme: PluginTheme; spans: MarkdownLiteSpan[] }) {
+function FormattedSpans({
+  theme,
+  spans,
+  activeForge,
+}: {
+  theme: PluginTheme;
+  spans: MarkdownLiteSpan[];
+  activeForge: ForgeRepoIdentity | null;
+}) {
   return (
     <Text style={[styles.bodyText, { color: theme.colors.foreground }]}>
       {spans.map((span, index) => {
         if (span.kind === "link") {
+          const foreign = classifyForgeUrl(span.url, activeForge) === "foreign";
           return (
             <Text
               key={index}
@@ -114,6 +147,7 @@ function FormattedSpans({ theme, spans }: { theme: PluginTheme; spans: MarkdownL
               onPress={() => Linking.openURL(span.url).catch(() => {})}
             >
               {span.text}
+              {foreign ? <ForeignInlineMark color={theme.colors.statusWarning} /> : null}
             </Text>
           );
         }
@@ -144,7 +178,8 @@ function FormattedSpans({ theme, spans }: { theme: PluginTheme; spans: MarkdownL
   );
 }
 
-function ForgejoIssueLinks({ theme, item }: PluginTimelineItemProps<ForgejoIssueLinkData>) {
+function ForgejoIssueLinks({ theme, item, agentId }: PluginTimelineItemProps<ForgejoIssueLinkData>) {
+  const activeForge = useActiveForgeIdentityForAgent(agentId);
   const blocks = parseMarkdownLite(item.data.text);
   return (
     <View style={styles.card}>
@@ -161,7 +196,7 @@ function ForgejoIssueLinks({ theme, item }: PluginTimelineItemProps<ForgejoIssue
           );
         }
         if (block.kind === "heading") {
-          return <FormattedSpans key={index} theme={theme} spans={block.spans} />;
+          return <FormattedSpans key={index} theme={theme} spans={block.spans} activeForge={activeForge} />;
         }
         if (block.kind === "list") {
           return (
@@ -172,14 +207,14 @@ function ForgejoIssueLinks({ theme, item }: PluginTimelineItemProps<ForgejoIssue
                     {block.ordered ? `${itemIndex + 1}.` : "•"}
                   </Text>
                   <View style={{ flex: 1 }}>
-                    <FormattedSpans theme={theme} spans={spans} />
+                    <FormattedSpans theme={theme} spans={spans} activeForge={activeForge} />
                   </View>
                 </View>
               ))}
             </View>
           );
         }
-        return <FormattedSpans key={index} theme={theme} spans={block.spans} />;
+        return <FormattedSpans key={index} theme={theme} spans={block.spans} activeForge={activeForge} />;
       })}
       <View style={styles.header}>
         <Icon name="GitPullRequest" size={13} color={theme.colors.foregroundMuted} />
@@ -188,7 +223,12 @@ function ForgejoIssueLinks({ theme, item }: PluginTimelineItemProps<ForgejoIssue
         </Text>
       </View>
       {item.data.links.map((link) => (
-        <IssueLinkRow key={`${link.host}/${link.owner}/${link.repo}#${link.number}`} theme={theme} link={link} />
+        <IssueLinkRow
+          key={`${link.host}/${link.owner}/${link.repo}#${link.number}`}
+          theme={theme}
+          link={link}
+          foreign={classifyForgeLink(link, activeForge) === "foreign"}
+        />
       ))}
     </View>
   );

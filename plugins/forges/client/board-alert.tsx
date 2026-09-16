@@ -11,8 +11,11 @@ import {
 } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   boardAlertTimelineSchema,
+  classifyForgeUrl,
   parseBoardAlert,
 } from "../shared/issues.js";
+import { useActiveForgeIdentityForAgent } from "./active-forge.js";
+import { ForeignLinkBadge } from "./foreign-link.js";
 
 const boardAlertCardSchema = boardAlertTimelineSchema.extend({
   text: z.string(),
@@ -59,9 +62,11 @@ export const forgejoBoardAlertAssistantTransformer: PluginTimelineTransformerCon
 function BoardAlertIssueRow({
   theme,
   issue,
+  foreign,
 }: {
   theme: PluginTimelineItemProps<BoardAlertIssueRowData>["theme"];
   issue: BoardAlertIssueRowData["issues"][number];
+  foreign: boolean;
 }) {
   const open = issue.url
     ? () => {
@@ -101,6 +106,7 @@ function BoardAlertIssueRow({
           </Text>
         ) : null}
       </View>
+      {foreign ? <ForeignLinkBadge /> : null}
     </View>
   );
 }
@@ -108,7 +114,9 @@ function BoardAlertIssueRow({
 export function ForgejoBoardAlertCard({
   item,
   theme,
+  agentId,
 }: PluginTimelineItemProps<BoardAlertCardData>) {
+  const activeForge = useActiveForgeIdentityForAgent(agentId);
   const count = item.data.issues.length;
   return (
     <View
@@ -138,7 +146,12 @@ export function ForgejoBoardAlertCard({
       </Text>
       <View style={styles.issues}>
         {item.data.issues.map((issue) => (
-          <BoardAlertIssueRow key={issue.number} theme={theme} issue={issue} />
+          <BoardAlertIssueRow
+            key={issue.number}
+            theme={theme}
+            issue={issue}
+            foreign={classifyForgeUrl(issue.url, activeForge) === "foreign"}
+          />
         ))}
       </View>
       <Text style={[styles.footer, { color: theme.colors.foregroundMuted }]}>

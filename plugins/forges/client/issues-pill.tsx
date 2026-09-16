@@ -36,6 +36,7 @@ import {
   STATE_ORDER,
   activeForgeForDirectory,
   addCommentContract,
+  classifyForgeUrl,
   currentPriorityLabel,
   currentStateLabel,
   displayNameForDirectory,
@@ -58,10 +59,13 @@ import {
   shortLabelName,
   stripAgentEnvelopeFooter,
   type AgentEnvelope,
+  type ForgeRepoIdentity,
   type ForgejoIssue,
   type IssueComment,
   type MarkdownLiteSpan,
 } from "../shared/issues.js";
+import { useActiveForgeIdentity } from "./active-forge.js";
+import { ForeignInlineMark } from "./foreign-link.js";
 
 export const ISSUES_PILL_ID = "forges-issues";
 
@@ -222,8 +226,9 @@ function badgeVariantForLabel(label: string): "danger" | "warning" | "info" | "s
 
 function renderInlineSpans(
   spans: MarkdownLiteSpan[],
-  colors: { foreground: string; accent: string },
+  colors: { foreground: string; accent: string; statusWarning: string },
   keyPrefix: string,
+  activeForge: ForgeRepoIdentity | null,
 ) {
   return spans.map((span, index) => {
     const key = `${keyPrefix}-${index}`;
@@ -249,6 +254,7 @@ function renderInlineSpans(
       );
     }
     if (span.kind === "link") {
+      const foreign = classifyForgeUrl(span.url, activeForge) === "foreign";
       return (
         <Text
           key={key}
@@ -260,6 +266,7 @@ function renderInlineSpans(
           }}
         >
           {span.text}
+          {foreign ? <ForeignInlineMark color={colors.statusWarning} /> : null}
         </Text>
       );
     }
@@ -270,9 +277,16 @@ function renderInlineSpans(
 /**
  * Markdown-lite for Forgejo bodies: headings, paragraphs, lists, links,
  * inline code/emphasis, and fenced code blocks. Outer Text stays
- * selectable; links open on tap with copy fallback.
+ * selectable; links open on tap with copy fallback. Forge issue links that
+ * point outside the active repo get an inline `foreign` marker.
  */
-function MarkdownLite({ body }: { body: string }) {
+function MarkdownLite({
+  body,
+  activeForge,
+}: {
+  body: string;
+  activeForge: ForgeRepoIdentity | null;
+}) {
   const { colors } = usePluginTheme();
   const blocks = useMemo(() => parseMarkdownLite(body), [body]);
   return (
@@ -292,7 +306,7 @@ function MarkdownLite({ body }: { body: string }) {
                 { color: colors.foreground },
               ]}
             >
-              {renderInlineSpans(block.spans, colors, `h${index}`)}
+              {renderInlineSpans(block.spans, colors, `h${index}`, activeForge)}
             </Text>
           );
         }
@@ -305,7 +319,7 @@ function MarkdownLite({ body }: { body: string }) {
                     {block.ordered ? `${itemIndex + 1}.` : "•"}
                   </Text>
                   <Text selectable style={[styles.listText, { color: colors.foreground }]}>
-                    {renderInlineSpans(item, colors, `li${index}-${itemIndex}`)}
+                    {renderInlineSpans(item, colors, `li${index}-${itemIndex}`, activeForge)}
                   </Text>
                 </View>
               ))}
@@ -318,7 +332,7 @@ function MarkdownLite({ body }: { body: string }) {
             selectable
             style={[styles.bodyText, { color: colors.foreground }]}
           >
-            {renderInlineSpans(block.spans, colors, `p${index}`)}
+            {renderInlineSpans(block.spans, colors, `p${index}`, activeForge)}
           </Text>
         );
       })}
@@ -423,7 +437,15 @@ function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
   );
 }
 
-function CommentCard({ comment, issueUrl }: { comment: IssueComment; issueUrl: string }) {
+function CommentCard({
+  comment,
+  issueUrl,
+  activeForge,
+}: {
+  comment: IssueComment;
+  issueUrl: string;
+  activeForge: ForgeRepoIdentity | null;
+}) {
   const { colors } = usePluginTheme();
   const { Icon } = getClientHost();
   const body = stripAgentEnvelopeFooter(comment.body) || comment.body;
@@ -450,7 +472,7 @@ function CommentCard({ comment, issueUrl }: { comment: IssueComment; issueUrl: s
           onPress={open}
           hitSlop={8}
         >
-          <MarkdownLite body={body} />
+          <MarkdownLite body={body} activeForge={activeForge} />
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -531,6 +553,7 @@ function IssueDetailView({
   workspaceId,
   issueNumber,
   forgeTarget,
+  activeForge,
   onBack,
   onBoardRefresh,
   onOpenSettings,
@@ -538,6 +561,7 @@ function IssueDetailView({
   workspaceId: string;
   issueNumber: number;
   forgeTarget: string;
+  activeForge: ForgeRepoIdentity | null;
   onBack: () => void;
   onBoardRefresh: () => void;
   onOpenSettings: () => void;
@@ -697,7 +721,7 @@ function IssueDetailView({
           <Card>
             <Card.Header title="Description" icon="FileText" />
             {issue.body.trim() ? (
-              <MarkdownLite body={issue.body} />
+              <MarkdownLite body={issue.body} activeForge={activeForge} />
             ) : (
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>No description.</Text>
             )}
@@ -712,7 +736,12 @@ function IssueDetailView({
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>No comments yet.</Text>
             ) : (
               issue.comments.map((comment) => (
-                <CommentCard key={comment.id} comment={comment} issueUrl={issue.webUrl} />
+                <CommentCard
+                  key={comment.id}
+                  comment={comment}
+                  issueUrl={issue.webUrl}
+                  activeForge={activeForge}
+                />
               ))
             )}
             {!access.canEdit ? (
@@ -764,6 +793,7 @@ export function ForgejoIssuesView({
     tokenValid: data?.tokenValid,
   });
   const directory = useDirectory(workspaceId);
+  const activeForge = useActiveForgeIdentity(directory);
   const { settings, updateSettings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
   // Git-origin context queried separately so the token/name fields render from
   // persisted settings even while the issues query is loading or unavailable.
@@ -933,6 +963,7 @@ export function ForgejoIssuesView({
             workspaceId={workspaceId}
             issueNumber={selected}
             forgeTarget={forgeTarget}
+            activeForge={activeForge}
             onBack={() => setSelected(null)}
             onBoardRefresh={() => refetch()}
             onOpenSettings={() => {

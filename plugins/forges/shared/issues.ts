@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { defineContract, defineSettingsContract } from "./vendor/paseo-plugin-helper/index.ts";
+import {
+  defineContract,
+  defineSettingsContract,
+  normalizeForgeHost,
+} from "./vendor/paseo-plugin-helper/index.ts";
 
 export const FORGEJO_PLUGIN_ID = "forges";
 
@@ -360,6 +364,60 @@ export function extractBareForgejoIssueUrls(text: string | undefined | null): Fo
     });
   }
   return links;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-repo link classification (issue #108). A rendered issue link is only
+// `local` when BOTH its host and its owner/repo match the workspace's active
+// forge identity. Everything else — a different repo on the same host, the
+// same repo on a different host, or an unresolvable active target — is
+// `foreign`, so the marker errs toward warning the reader rather than falsely
+// claiming a link belongs to this workspace's board.
+// ---------------------------------------------------------------------------
+
+/** A workspace's active forge identity: host plus `owner/repo`. */
+export interface ForgeRepoIdentity {
+  host?: string | null;
+  repo?: string | null;
+}
+
+export type ForgeLinkScope = "local" | "foreign";
+
+function normalizeForgeRepo(repo: string | null | undefined): string | null {
+  if (!repo || typeof repo !== "string") return null;
+  const normalized = repo.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+  return normalized || null;
+}
+
+/** Classify an extracted issue link against the workspace's active forge. */
+export function classifyForgeLink(
+  link: Pick<ForgejoIssueLink, "host" | "owner" | "repo">,
+  active: ForgeRepoIdentity | null | undefined,
+): ForgeLinkScope {
+  const linkHost = normalizeForgeHost(link.host);
+  const linkRepo = normalizeForgeRepo(`${link.owner}/${link.repo}`);
+  const activeHost = normalizeForgeHost(active?.host);
+  const activeRepo = normalizeForgeRepo(active?.repo);
+  if (!linkHost || !linkRepo || !activeHost || !activeRepo) return "foreign";
+  return linkHost === activeHost && linkRepo === activeRepo ? "local" : "foreign";
+}
+
+/** The issue link a URL points at, or null when it is not a forge issue URL. */
+export function forgejoIssueLinkFromUrl(url: string | undefined | null): ForgejoIssueLink | null {
+  return extractForgejoIssueUrls(url)[0] ?? null;
+}
+
+/**
+ * Classify a raw URL for the markdown renderers: null when the URL is not a
+ * forge issue URL (so unrelated links stay unstyled), otherwise local/foreign
+ * against the active forge.
+ */
+export function classifyForgeUrl(
+  url: string | undefined | null,
+  active: ForgeRepoIdentity | null | undefined,
+): ForgeLinkScope | null {
+  const link = forgejoIssueLinkFromUrl(url);
+  return link ? classifyForgeLink(link, active) : null;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, forgejoIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -507,5 +507,60 @@ describe("extractForgejoIssueUrls comment anchors (issue #154)", () => {
   it("still skips markdown-linked anchored urls as bare rows", () => {
     const links = extractBareForgejoIssueUrls(`[comment](${url(152)}#issuecomment-99001)`);
     assert.deepEqual(links, []);
+  });
+});
+
+describe("cross-repo link classification (issue #108)", () => {
+  const active = { host: REAL_HOST, repo: "xpufx/paseo" };
+  const link = (host: string, owner: string, repo: string) => ({ host, owner, repo });
+  const urlFor = (n: number) => `https://${REAL_HOST}/xpufx/paseo/issues/${n}`;
+
+  it("marks a link local when host and owner/repo match the active forge", () => {
+    assert.equal(classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), active), "local");
+  });
+
+  it("marks a different repo on the same host foreign (foreign-by-repo)", () => {
+    assert.equal(classifyForgeLink(link(REAL_HOST, "oktay", "2fado"), active), "foreign");
+  });
+
+  it("marks the same repo on a different host foreign (foreign-by-host)", () => {
+    assert.equal(classifyForgeLink(link("codeberg.org", "xpufx", "paseo"), active), "foreign");
+  });
+
+  it("marks an unknown host foreign even when the repo path matches", () => {
+    assert.equal(classifyForgeLink(link("unknown.forge", "xpufx", "paseo"), active), "foreign");
+  });
+
+  it("treats an unresolvable active target as foreign rather than local", () => {
+    assert.equal(classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), null), "foreign");
+    assert.equal(
+      classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), { host: null, repo: null }),
+      "foreign",
+    );
+    assert.equal(classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), { repo: "xpufx/paseo" }), "foreign");
+  });
+
+  it("matches host and repo case-insensitively and ignores a host port", () => {
+    assert.equal(classifyForgeLink(link(REAL_HOST.toUpperCase(), "XPUFX", "Paseo"), active), "local");
+    assert.equal(
+      classifyForgeLink(link(REAL_HOST, "xpufx", "paseo"), { host: `${REAL_HOST}:3000`, repo: "xpufx/paseo" }),
+      "local",
+    );
+  });
+
+  it("reuses the extraction, comment anchor and all, without regressing commentId", () => {
+    const anchored = forgejoIssueLinkFromUrl(`${urlFor(152)}#issuecomment-99001`);
+    assert.ok(anchored);
+    assert.equal(anchored.commentId, 99001);
+    assert.equal(anchored.url, `${urlFor(152)}#issuecomment-99001`);
+    assert.equal(classifyForgeLink(anchored, active), "local");
+  });
+
+  it("classifies URLs and leaves non-issue URLs unmarked", () => {
+    assert.equal(classifyForgeUrl(urlFor(152), active), "local");
+    assert.equal(classifyForgeUrl(`https://codeberg.org/oktay/2fado/issues/9`, active), "foreign");
+    assert.equal(classifyForgeUrl("https://forge.example.com/owner/repo/pulls/7", active), null);
+    assert.equal(classifyForgeUrl("https://example.com/docs", active), null);
+    assert.equal(classifyForgeUrl(undefined, active), null);
   });
 });
