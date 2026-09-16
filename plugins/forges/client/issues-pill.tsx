@@ -18,6 +18,7 @@ import {
   KeyValue,
   KeyValueGroup,
   TextInput,
+  ForgeIcon,
   useRpcQuery,
   useRpcMutation,
   usePluginSettings,
@@ -142,8 +143,9 @@ function useOpenIssues(workspaceId: string, agentId?: string) {
 export function ForgePill({ agentId, workspaceId, isOpen }: RenderPillProps) {
   const { colors } = usePluginTheme();
   const { isCompact } = useResponsive();
-  const { Icon } = getClientHost();
-  const { data, isLoading } = useOpenIssues(workspaceId, agentId);
+  const { data, isLoading, directory } = useOpenIssues(workspaceId, agentId);
+  const activeForge = useActiveForgeIdentity(directory);
+  const forgeHost = activeForge?.host ?? data?.host ?? null;
   const count = data && !data.error ? (data.openIssueCount ?? data.issues.length) : null;
   const countLabel = formatIssueCountLabel(count);
   const displayName = useDisplayName(workspaceId, data?.repo);
@@ -161,7 +163,7 @@ export function ForgePill({ agentId, workspaceId, isOpen }: RenderPillProps) {
       accessibilityLabel={`Forge ${fullLabel}`}
       style={styles.pillContainer}
     >
-      <Icon name="GitPullRequest" size={13} color={colors.foreground} />
+      <ForgeIcon host={forgeHost} size={13} color={colors.foreground} />
       <Text
         numberOfLines={1}
         ellipsizeMode="clip"
@@ -202,6 +204,16 @@ function formatTimestamp(value: string | undefined | null): string {
 }
 
 /**
+ * Host-resolved forge mark for headers and rows. The helper's `ForgeIcon`
+ * resolves the host to its brand mark (generic for unknown hosts), so the
+ * plugin carries no host table of its own.
+ */
+function ForgeMark({ host, size = 14 }: { host?: string | null; size?: number }) {
+  const { colors } = usePluginTheme();
+  return <ForgeIcon host={host} size={size} color={colors.foregroundMuted} />;
+}
+
+/**
  * Combined visibility + auth chips, derived from the same access state for
  * both the issues and settings pages (issue #152). The auth chip is what
  * tells the user whether edits are enabled on a public repo.
@@ -221,6 +233,16 @@ function RepoAccessChips({ access }: { access: ForgeAccessState }) {
         label={access.authLabel}
         icon={access.authIcon}
       />
+    </View>
+  );
+}
+
+/** Card-header identity cluster: the forge mark beside the access chips. */
+function ForgeCardChips({ host, access }: { host?: string | null; access: ForgeAccessState }) {
+  return (
+    <View style={styles.accessChips}>
+      <ForgeMark host={host} />
+      <RepoAccessChips access={access} />
     </View>
   );
 }
@@ -385,6 +407,7 @@ function IssueRow({
   };
   return (
     <View style={styles.row}>
+      <ForgeMark host={host} />
       <Badge
         variant={state === "open" ? "success" : "neutral"}
         label={`#${number}`}
@@ -671,7 +694,7 @@ function IssueDetailView({
             <Card.Header
               title={`#${issue.number} ${issue.title}`}
               subtitle={`${displayName ? `${displayName} · ` : ""}by ${issue.author} · ${formatTimestamp(issue.updatedAt)}`}
-              badge={<RepoAccessChips access={access} />}
+              badge={<ForgeCardChips host={activeForge?.host} access={access} />}
             />
             <View style={styles.badgeRow}>
               {state ? <Badge variant={badgeVariantForLabel(state)} label={shortLabelName(state)} /> : null}
@@ -1028,7 +1051,7 @@ export function ForgeIssuesView({
               <Card.Header
                 title={displayName ? `Forge settings · ${displayName}` : "Forge settings"}
                 subtitle={activeForgeValue ? "Explicit forge selected" : "Derived from the git origin remote"}
-                badge={<RepoAccessChips access={access} />}
+                badge={<ForgeCardChips host={activeForge?.host ?? effectiveHost} access={access} />}
                 icon="Settings"
               />
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
@@ -1074,6 +1097,7 @@ export function ForgeIssuesView({
                 <View style={styles.forgeList}>
                   {forgeTargets.map((target) => (
                     <View key={target} style={styles.forgeRow}>
+                      <ForgeMark host={target} />
                       <Text
                         numberOfLines={1}
                         style={[styles.forgeTarget, { color: colors.foreground }]}
@@ -1232,7 +1256,7 @@ export function ForgeIssuesView({
           <Card variant="elevated">
             <Card.Header
               title={displayName ? `Issues · ${displayName}` : "Forge Issues"}
-              badge={<RepoAccessChips access={access} />}
+              badge={<ForgeCardChips host={activeForge?.host ?? data?.host} access={access} />}
               subtitle={
                 data && !data.error
                   ? query.trim()

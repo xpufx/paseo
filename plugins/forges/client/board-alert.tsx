@@ -5,9 +5,9 @@ import type {
   PluginTimelineItemProps,
   PluginTimelineTransformerContribution,
 } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
   Badge,
+  ForgeIcon,
 } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   boardAlertTimelineSchema,
@@ -75,6 +75,7 @@ function BoardAlertIssueRow({
     : undefined;
   return (
     <View style={styles.issueRow}>
+      <ForgeIcon host={issue.url} size={13} color={theme.colors.foregroundMuted} />
       <Badge variant="info" label={`#${issue.number}`} />
       <View style={styles.issueBody}>
         {open ? (
@@ -132,7 +133,11 @@ export function ForgeBoardAlertCard({
         {item.data.text}
       </Text>
       <View style={styles.header}>
-        <Icon name="GitPullRequest" size={14} color={theme.colors.accent} />
+        <ForgeIcon
+          host={activeForge?.host ?? item.data.issues[0]?.url}
+          size={14}
+          color={theme.colors.accent}
+        />
         <Text style={[styles.title, { color: theme.colors.foreground }]}>
           Forge Board Alert
         </Text>
