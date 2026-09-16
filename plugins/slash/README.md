@@ -6,6 +6,10 @@ S/ash-command console for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
   <img src="docs/screenshots/slash-console.jpg" alt="S/ash console — command repository, prefix, and shipped catalog" width="380">
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/slash-autocomplete.jpg" alt="S/ash command autocomplete in the composer" width="480">
+</p>
+
 Adds a **S/ash console** sidebar surface for managing the slash commands offered
 in the composer, and keeps those commands registered as the repository changes.
 A command carries one of three actions:
