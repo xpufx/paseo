@@ -42,7 +42,7 @@ toggles, and quick comments all live in plugin surfaces powered by
   placeholder, never a false zero).
 - Client: composer pill (`GitPullRequest` icon, 15 s label poll / 30 s query
   poll) + issues modal (`Tabs`, `SearchInput`, `Card`, `EmptyState`, copy the
-  `[#N title](url)` markdown ref — push-to-composer is unavailable on the v8
+  `[#N title](url)` markdown ref — push-to-composer is unavailable on the 0.8
   SDK, so copy-and-paste remains the handoff).
 
 This spec extends that plugin with four new RPC contracts and three new UI
@@ -77,7 +77,7 @@ surfaces. All shared parsing helpers (`parseForgeRemote`,
 
 - No new Paseo SDK surface (`initClientHelpers` four-field shape unchanged;
   `registerComposerPill` / `registerSidebarSurface` used as documented).
-- No push-to-composer (v8 SDK exposes no composer-insert API — same
+- No push-to-composer (0.8 SDK exposes no composer-insert API — same
   limitation the current issues modal already documents).
 - No actionable toasts (see the
   [toast-to-approval spec](./toast-to-approval.md) for the split-surface

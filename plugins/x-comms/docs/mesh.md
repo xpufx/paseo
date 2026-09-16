@@ -4,7 +4,7 @@ How Paseo daemons find each other, how agents get tools without being asked,
 and how the fleet stays observable. Three mechanisms, each independent,
 composable in that order.
 
-This mirrors `docs/mesh.md` in `paseo-plugin-helper` (v8 line): both repos
+This mirrors `docs/mesh.md` in `paseo-plugin-helper` (0.8 line): both repos
 tell the same story and share one vocabulary (announce/retract, tombstones,
 intended vs actual). The helper doc is the vision; this file records what
 x-comms implements and what is still ahead.

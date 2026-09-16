@@ -64,7 +64,7 @@ When referencing issues in comments, commit messages, or chat harness:
 
 If an issue fix includes a code commit:
 1. **Always record the exact commit SHA and branch**:
-   `commit: abc1234 on branch v8 in forge.example.com/your-org/your-repo`
+   `commit: abc1234 on branch main in forge.example.com/your-org/your-repo`
 2. **Public Mirroring**: Never push directly to GitHub without human instruction; code stays on Forgejo `origin`. For external repositories (like `paseo-x-comms`), state the repository origin remote + branch + SHA explicitly.
 3. **Anchored resolution explanations**: post the why + commit ref on the resolved issue itself, never as a loose top-level thread elsewhere.
 
