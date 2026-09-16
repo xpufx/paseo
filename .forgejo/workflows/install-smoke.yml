@@ -25,7 +25,11 @@ on:
         default: ""
         type: string
       plugins:
-        description: "Space-separated plugin directory names under plugins/ (default: top demo)"
+        description: >-
+          Space-separated plugin DIRECTORY names under plugins/ (default: top
+          demo). Each directory's runtime plugin id is resolved from its
+          paseo-plugin.json manifest after install, so it need not match the
+          directory name.
         required: false
         default: "top demo"
         type: string
@@ -114,6 +118,8 @@ jobs:
           echo "mirror_url=${MIRROR_URL}" >> "$GITHUB_OUTPUT"
           echo "mirror_ref=${MIRROR_REF}" >> "$GITHUB_OUTPUT"
 
+      # The action installs each directory, resolves its runtime plugin id from
+      # the manifest, and asserts that id reaches running.
       - name: Install each plugin from the mirror and assert it is running
         uses: ./.forgejo/actions/install-plugin-smoke
         with:

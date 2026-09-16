@@ -2,8 +2,11 @@ name: "Install plugin smoke test"
 description: >-
   Install one or more Git-managed plugins from a public mirror into a running
   local daemon and assert each reaches status=running (compile + load success).
-  Dumps the install output, plugin state, and daemon log on failure so a red
-  job is actionable from its log alone.
+  The installed runtime id is resolved after install, because it is the
+  paseo-plugin.json manifest id and need not match the plugins/<directory> name
+  (the mirror's demo installs as paseo-helper-demo). Dumps the install output,
+  plugin state, and daemon log on failure so a red job is actionable from its
+  log alone.
 inputs:
   mirror-url:
     description: "Git URL of the public mirror (e.g. https://github.com/xpufx/paseo.git)"
@@ -12,7 +15,9 @@ inputs:
     description: "Git branch, tag, or commit to install"
     required: true
   plugins:
-    description: "Space-separated plugin directory names under plugins/ (default: top demo)"
+    description: >-
+      Space-separated plugin DIRECTORY names under plugins/ (default: top demo).
+      Each directory's runtime plugin id is resolved after install.
     required: false
     default: "top demo"
   host:
@@ -32,15 +37,39 @@ runs:
       run: |
         set -uo pipefail
 
+        # The runtime plugin id is the daemon's own id for the plugin: the
+        # paseo-plugin.json manifest `id` read from the installed checkout. It
+        # is NOT the plugins/<directory> name — the mirror's plugins/demo
+        # manifest has id=paseo-helper-demo — so asserting on the directory name
+        # fails with "Plugin is not configured: demo". Resolve the real id from
+        # the `plugin add --json` record, falling back to the manifest inside the
+        # daemon's plugin store when that output is unavailable.
+        resolve_runtime_id() {
+          local dir="$1" json="$2" id manifest
+          id="$(jq -r 'if type == "array" then (.[0].id // empty) else (.id // empty) end' "$json" 2>/dev/null || true)"
+          if [ -z "$id" ] || [ "$id" = "null" ]; then
+            manifest="$(find "${PASEO_HOME:-/nonexistent}/plugins" \
+              -path "*/checkout/plugins/${dir}/paseo-plugin.json" -print -quit 2>/dev/null || true)"
+            if [ -n "$manifest" ]; then
+              id="$(jq -r '.id // empty' "$manifest" 2>/dev/null || true)"
+            fi
+          fi
+          printf '%s' "$id"
+        }
+
         dump_diagnostics() {
-          local plugin="$1" log="$2"
-          echo "::group::diagnostics: ${plugin}"
-          echo "--- paseo plugin add output ---"
+          local dir="$1" id="$2" log="$3"
+          echo "::group::diagnostics: plugins/${dir} (runtime id: ${id:-unresolved})"
+          echo "--- paseo plugin add stderr ---"
           cat "$log" 2>/dev/null || true
-          echo "--- paseo plugin ls ${plugin} --json ---"
-          paseo plugin ls "${plugin}" --json --host "${INPUT_HOST}" 2>&1 || true
-          echo "--- paseo plugin logs ${plugin} ---"
-          paseo plugin logs "${plugin}" --host "${INPUT_HOST}" 2>&1 || true
+          if [ -n "$id" ]; then
+            echo "--- paseo plugin ls ${id} --json ---"
+            paseo plugin ls "${id}" --json --host "${INPUT_HOST}" 2>&1 || true
+            echo "--- paseo plugin logs ${id} ---"
+            paseo plugin logs "${id}" --host "${INPUT_HOST}" 2>&1 || true
+          fi
+          echo "--- paseo plugin ls --json (all) ---"
+          paseo plugin ls --json --host "${INPUT_HOST}" 2>&1 || true
           if [ -n "${PASEO_HOME:-}" ] && [ -f "${PASEO_HOME}/daemon.log" ]; then
             echo "--- daemon.log (tail) ---"
             tail -n 200 "${PASEO_HOME}/daemon.log" || true
@@ -49,43 +78,57 @@ runs:
         }
 
         install_and_assert() {
-          local plugin="$1"
-          local log rc status
+          local dir="$1"
+          local log jsonlog rc status id
           log="$(mktemp)"
+          jsonlog="$(mktemp)"
 
-          echo "::group::install ${plugin}"
-          paseo plugin add "${INPUT_MIRROR_URL}:plugins/${plugin}" \
-            --ref "${INPUT_MIRROR_REF}" --host "${INPUT_HOST}" 2>&1 | tee "$log"
-          rc="${PIPESTATUS[0]}"
+          echo "::group::install plugins/${dir}"
+          paseo plugin add "${INPUT_MIRROR_URL}:plugins/${dir}" \
+            --ref "${INPUT_MIRROR_REF}" --host "${INPUT_HOST}" --json \
+            >"$jsonlog" 2>"$log"
+          rc=$?
+          cat "$log"
+          echo "--- paseo plugin add --json ---"
+          cat "$jsonlog"
           echo "::endgroup::"
 
           if [ "$rc" -ne 0 ]; then
-            echo "::error::paseo plugin add failed for ${plugin} (exit ${rc})"
-            dump_diagnostics "$plugin" "$log"
-            rm -f "$log"
+            echo "::error::paseo plugin add failed for plugins/${dir} (exit ${rc})"
+            dump_diagnostics "$dir" "" "$log"
+            rm -f "$log" "$jsonlog"
             return 1
           fi
 
-          status="$(paseo plugin ls "${plugin}" --json --host "${INPUT_HOST}" | jq -r '.[0].status // "missing"')"
-          echo "${plugin}: status=${status}"
+          id="$(resolve_runtime_id "$dir" "$jsonlog")"
+          if [ -z "$id" ]; then
+            echo "::error::installed plugins/${dir} but could not resolve its runtime plugin id"
+            dump_diagnostics "$dir" "" "$log"
+            rm -f "$log" "$jsonlog"
+            return 1
+          fi
+          echo "plugins/${dir}: installed as runtime id '${id}'"
+
+          status="$(paseo plugin ls "${id}" --json --host "${INPUT_HOST}" | jq -r '.[0].status // "missing"')"
+          echo "${id}: status=${status}"
           if [ "$status" != "running" ]; then
-            echo "::error::plugin ${plugin} installed but status is '${status}', not 'running'"
-            dump_diagnostics "$plugin" "$log"
-            rm -f "$log"
+            echo "::error::plugin ${id} (plugins/${dir}) installed but status is '${status}', not 'running'"
+            dump_diagnostics "$dir" "$id" "$log"
+            rm -f "$log" "$jsonlog"
             return 1
           fi
 
-          rm -f "$log"
-          echo "${plugin}: OK (running)"
+          rm -f "$log" "$jsonlog"
+          echo "${id} (plugins/${dir}): OK (running)"
         }
 
         plugins="${INPUT_PLUGINS:-top demo}"
         failed=0
-        for plugin in $plugins; do
-          install_and_assert "$plugin" || failed=1
+        for dir in $plugins; do
+          install_and_assert "$dir" || failed=1
         done
         if [ "$failed" -ne 0 ]; then
           echo "::error::one or more plugins failed the install smoke test"
           exit 1
         fi
-        echo "all plugins installed and running: ${plugins}"
+        echo "all plugin directories installed and running: ${plugins}"
