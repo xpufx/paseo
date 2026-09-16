@@ -33,6 +33,28 @@ function asLogin(value: unknown): string {
   return "unknown";
 }
 
+/**
+ * Parse Gitea-family issue rows. `openOnly` keeps the open snapshot contract of
+ * `listIssues`; search drops the filter so closed issues are included.
+ */
+function toIssues(rows: unknown[], openOnly: boolean): ForgeIssue[] {
+  const issues: ForgeIssue[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const record = row as Record<string, unknown>;
+    const candidate = {
+      number: record.number,
+      title: record.title,
+      state: record.state,
+      labels: labelNames(record.labels),
+      updatedAt: typeof record.updated_at === "string" ? record.updated_at : undefined,
+    };
+    const parsed = ForgeIssueSchema.safeParse(candidate);
+    if (parsed.success && (!openOnly || parsed.data.state === "open")) issues.push(parsed.data);
+  }
+  return issues;
+}
+
 export interface ForgejoLabel {
   id: number;
   name: string;
@@ -214,21 +236,25 @@ export class ForgeClient {
       `/repos/${repo}/issues?state=open&type=issues&limit=${limit}&page=${page}`,
     );
     if (!Array.isArray(payload)) return null;
-    const issues: ForgeIssue[] = [];
-    for (const row of payload) {
-      if (!row || typeof row !== "object") continue;
-      const record = row as Record<string, unknown>;
-      const candidate = {
-        number: record.number,
-        title: record.title,
-        state: record.state,
-        labels: labelNames(record.labels),
-        updatedAt: typeof record.updated_at === "string" ? record.updated_at : undefined,
-      };
-      const parsed = ForgeIssueSchema.safeParse(candidate);
-      if (parsed.success && parsed.data.state === "open") issues.push(parsed.data);
-    }
-    return { issues, hasMore: payload.length >= limit };
+    return { issues: toIssues(payload, true), hasMore: payload.length >= limit };
+  }
+
+  /**
+   * Live keyword search over open and closed issues (never pull requests).
+   * The Gitea/Forgejo issues endpoint's `q` matches title, body, and comments.
+   * Returns null on a transport/API failure so the handler can surface an error.
+   */
+  async searchIssues(
+    repo: string,
+    query: string,
+    page = 1,
+    limit = 50,
+  ): Promise<{ issues: ForgeIssue[]; hasMore: boolean } | null> {
+    const payload = await this.request(
+      `/repos/${repo}/issues?state=all&type=issues&q=${encodeURIComponent(query)}&limit=${limit}&page=${page}`,
+    );
+    if (!Array.isArray(payload)) return null;
+    return { issues: toIssues(payload, false), hasMore: payload.length >= limit };
   }
 
   async listComments(repo: string, issueNumber: number): Promise<ForgejoComment[] | null> {

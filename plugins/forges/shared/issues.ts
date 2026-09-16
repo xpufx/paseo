@@ -46,6 +46,77 @@ export const openIssuesContract = defineContract({
   output: OpenIssuesOutputSchema,
 });
 
+export const SearchIssuesInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  query: z.string(),
+  page: z.number().int().positive().default(1),
+});
+export type SearchIssuesInput = z.infer<typeof SearchIssuesInputSchema>;
+
+export const SearchIssuesOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable().default(null),
+  // Live keyword search returns both open and closed issues, so the rows carry
+  // their own state instead of the open-only shape of `openIssuesContract`.
+  issues: z.array(ForgeIssueSchema),
+  page: z.number().int().positive().default(1),
+  hasMore: z.boolean().default(false),
+  error: z.string().optional(),
+});
+export type SearchIssuesOutput = z.infer<typeof SearchIssuesOutputSchema>;
+
+export const searchIssuesContract = defineContract({
+  name: "forge.search-issues",
+  description: "Keyword-search forge issues (open and closed) for the repo backing a workspace directory",
+  input: SearchIssuesInputSchema,
+  output: SearchIssuesOutputSchema,
+});
+
+/**
+ * Monotonic generation gate for debounced remote search (issue #139). Responses
+ * can settle out of order since each keystroke's query races on the network, so
+ * every dispatch takes a fresh generation and only the newest one may publish.
+ */
+export function createRemoteSearchGate(): {
+  begin: () => number;
+  accept: (generation: number) => boolean;
+} {
+  let latest = 0;
+  return {
+    begin: () => {
+      latest += 1;
+      return latest;
+    },
+    accept: (generation: number) => generation === latest,
+  };
+}
+
+/**
+ * Which issue list a search surface renders. The instant client-side filter is
+ * always the fallback; a remote result wins only when the toggle is on, it
+ * carried no error, and it was produced for the query currently in the box —
+ * so a slow response from an earlier keystroke never displaces fresher results.
+ */
+export function resolveIssueSearchLayer(input: {
+  query: string;
+  remoteEnabled: boolean;
+  remoteQuery: string | null;
+  remoteIssues: ForgeIssue[] | null;
+  remoteError: string | null;
+  clientIssues: ForgeIssue[];
+}): { issues: ForgeIssue[]; source: "client" | "remote" } {
+  const active = input.query.trim();
+  const isCurrent =
+    input.remoteEnabled &&
+    input.remoteIssues !== null &&
+    input.remoteError === null &&
+    input.remoteQuery !== null &&
+    input.remoteQuery === active;
+  if (isCurrent) return { issues: input.remoteIssues as ForgeIssue[], source: "remote" };
+  return { issues: input.clientIssues, source: "client" };
+}
+
 /**
  * Workspace git-origin forge coordinates, separate from `openIssuesContract`.
  * The settings form needs a host to key `tokensByHost` even while the issues

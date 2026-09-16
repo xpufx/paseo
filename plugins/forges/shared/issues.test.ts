@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveForgeTarget, scopeOfLabel, workspaceNameKey } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, workspaceNameKey, type ForgeIssue } from "./issues.ts";
 import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
@@ -760,5 +760,104 @@ describe("forge pill label resolver (issue #162)", () => {
     await resolver.resolve({ agentId: "agent-1", workspaceId: WORKSPACE_ID });
     await resolver.resolve({ agentId: "agent-2", workspaceId: WORKSPACE_ID });
     assert.equal(calls.settings, 1);
+  });
+});
+
+describe("live remote search contract (issue #139)", () => {
+  it("registers under the generic forge.* namespace with query defaulting a page", () => {
+    assert.equal(searchIssuesContract.name, "forge.search-issues");
+    const parsed = SearchIssuesInputSchema.parse({ query: "crash" });
+    assert.equal(parsed.query, "crash");
+    assert.equal(parsed.page, 1);
+    assert.throws(() => SearchIssuesInputSchema.parse({}));
+  });
+});
+
+describe("createRemoteSearchGate", () => {
+  it("accepts only the newest generation", () => {
+    const gate = createRemoteSearchGate();
+    const first = gate.begin();
+    const second = gate.begin();
+    assert.equal(gate.accept(first), false);
+    assert.equal(gate.accept(second), true);
+  });
+
+  it("lets the initial generation through", () => {
+    const gate = createRemoteSearchGate();
+    assert.equal(gate.accept(gate.begin()), true);
+  });
+});
+
+describe("resolveIssueSearchLayer", () => {
+  const issue = (number: number): ForgeIssue => ({
+    number,
+    title: `issue ${number}`,
+    state: "open",
+    labels: [],
+  });
+  const clientIssues = [issue(1)];
+  const remoteIssues = [issue(2)];
+
+  it("renders the instant client filter while no current remote result exists", () => {
+    assert.deepEqual(
+      resolveIssueSearchLayer({
+        query: "ab",
+        remoteEnabled: true,
+        remoteQuery: null,
+        remoteIssues: null,
+        remoteError: null,
+        clientIssues,
+      }),
+      { issues: clientIssues, source: "client" },
+    );
+  });
+
+  it("renders the remote list once it matches the active query", () => {
+    assert.deepEqual(
+      resolveIssueSearchLayer({
+        query: "ab",
+        remoteEnabled: true,
+        remoteQuery: "ab",
+        remoteIssues,
+        remoteError: null,
+        clientIssues,
+      }),
+      { issues: remoteIssues, source: "remote" },
+    );
+  });
+
+  it("discards a stale remote result from an earlier keystroke", () => {
+    assert.deepEqual(
+      resolveIssueSearchLayer({
+        query: "abc",
+        remoteEnabled: true,
+        remoteQuery: "ab",
+        remoteIssues,
+        remoteError: null,
+        clientIssues,
+      }),
+      { issues: clientIssues, source: "client" },
+    );
+  });
+
+  it("never renders remote results for a failed search or with the toggle off", () => {
+    const failed = resolveIssueSearchLayer({
+      query: "ab",
+      remoteEnabled: true,
+      remoteQuery: "ab",
+      remoteIssues,
+      remoteError: "forge unreachable",
+      clientIssues,
+    });
+    assert.equal(failed.source, "client");
+    const disabled = resolveIssueSearchLayer({
+      query: "ab",
+      remoteEnabled: false,
+      remoteQuery: "ab",
+      remoteIssues,
+      remoteError: null,
+      clientIssues,
+    });
+    assert.equal(disabled.source, "client");
   });
 });

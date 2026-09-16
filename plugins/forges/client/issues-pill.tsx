@@ -13,6 +13,7 @@ import {
   FormRow,
   SearchInput,
   Tabs,
+  Toggle,
   CodeBlock,
   CommandBox,
   KeyValue,
@@ -38,6 +39,7 @@ import {
   classifyForgeUrl,
   currentPriorityLabel,
   currentStateLabel,
+  createRemoteSearchGate,
   displayNameForDirectory,
   displayRemoteForApi,
   deriveForgeAccess,
@@ -55,6 +57,8 @@ import {
   nextStateLabel,
   openIssuesContract,
   parseMarkdownLite,
+  resolveIssueSearchLayer,
+  searchIssuesContract,
   setLabelContract,
   shortLabelName,
   stripAgentEnvelopeFooter,
@@ -145,6 +149,18 @@ function issueMatchesQuery(issue: ForgeIssue, query: string): boolean {
     issue.labels.some((label) => label.toLowerCase().includes(q))
   );
 }
+
+/** Trailing-edge debounce: emits `value` only after it stops changing. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  React.useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+const REMOTE_SEARCH_DEBOUNCE_MS = 300;
 
 /**
  * Markdown reference for pasting into chat, e.g. `[#30 Turn count](url)`.
@@ -371,6 +387,10 @@ function IssueRow({
       <Badge
         variant={state === "open" ? "success" : "neutral"}
         label={`#${number}`}
+      />
+      <Badge
+        variant={state === "open" ? "success" : "neutral"}
+        label={state === "closed" ? "Closed" : "Open"}
       />
       <Pressable style={styles.rowBody} onPress={() => onSelect(number)} hitSlop={4}>
         <Text style={[styles.rowTitle, { color: colors.foreground }]}>{title}</Text>
@@ -929,6 +949,62 @@ export function ForgeIssuesView({
   const [nextPage, setNextPage] = useState(2);
   const [extraHasMore, setExtraHasMore] = useState(false);
   const [moreError, setMoreError] = useState<string | null>(null);
+  // Live remote search (issue #139). Off by default: the tab filters the loaded
+  // snapshot instantly. On, the debounced query goes to the selected forge and
+  // the instant client filter keeps rendering until a current result lands.
+  const [remoteSearch, setRemoteSearch] = useState(false);
+  const [remoteIssues, setRemoteIssues] = useState<ForgeIssue[] | null>(null);
+  const [remoteResultQuery, setRemoteResultQuery] = useState<string | null>(null);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [remotePending, setRemotePending] = useState(false);
+  const searchGate = React.useRef(createRemoteSearchGate());
+  const searchIssuesMutation = useRpcMutation(searchIssuesContract);
+  const debouncedQuery = useDebouncedValue(query, REMOTE_SEARCH_DEBOUNCE_MS);
+  const remoteQuery = remoteSearch ? debouncedQuery.trim() : "";
+  React.useEffect(() => {
+    const generation = searchGate.current.begin();
+    if (!remoteQuery) {
+      setRemoteIssues(null);
+      setRemoteResultQuery(null);
+      setRemoteError(null);
+      setRemotePending(false);
+      return;
+    }
+    let cancelled = false;
+    setRemotePending(true);
+    void searchIssuesMutation
+      .mutateAsync({
+        directory: directory ?? undefined,
+        remoteUrl: forgeTarget || undefined,
+        query: remoteQuery,
+        page: 1,
+      })
+      .then((result) => {
+        // Out-of-order guard: only the newest dispatch may publish, and an
+        // unmounted surface never sets state.
+        if (cancelled || !searchGate.current.accept(generation)) return;
+        setRemotePending(false);
+        if (result.error) {
+          setRemoteIssues(null);
+          setRemoteResultQuery(null);
+          setRemoteError(result.error);
+          return;
+        }
+        setRemoteError(null);
+        setRemoteIssues(result.issues);
+        setRemoteResultQuery(remoteQuery);
+      })
+      .catch(() => {
+        if (cancelled || !searchGate.current.accept(generation)) return;
+        setRemotePending(false);
+        setRemoteIssues(null);
+        setRemoteResultQuery(null);
+        setRemoteError("Remote search failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [remoteQuery, directory, forgeTarget, searchIssuesMutation.mutateAsync]);
   const resetPages = () => {
     setExtraIssues([]);
     setNextPage(2);
@@ -955,10 +1031,23 @@ export function ForgeIssuesView({
     () => (data && !data.error ? [...data.issues, ...extraIssues] : [...extraIssues]),
     [data, extraIssues],
   );
-  const issues = useMemo(
+  const clientIssues = useMemo(
     () => pool.filter((issue: ForgeIssue) => issueMatchesQuery(issue, query)),
     [pool, query],
   );
+  const searchLayer = useMemo(
+    () =>
+      resolveIssueSearchLayer({
+        query,
+        remoteEnabled: remoteSearch && remoteQuery.length > 0,
+        remoteQuery: remoteResultQuery,
+        remoteIssues,
+        remoteError,
+        clientIssues,
+      }),
+    [query, remoteSearch, remoteQuery, remoteResultQuery, remoteIssues, remoteError, clientIssues],
+  );
+  const issues = searchLayer.issues;
   const hasMore = extraHasMore || (data && !data.error ? data.hasMore : false);
   const failed = Boolean(data?.error) || isError;
   return (
@@ -1212,6 +1301,12 @@ export function ForgeIssuesView({
             onChangeText={setQuery}
             placeholder="Filter by keyword or #number…"
           />
+          <FormRow
+            label="Search the forge"
+            description="Query the selected forge for open and closed issues. Off filters the loaded snapshot instantly."
+          >
+            <Toggle value={remoteSearch} onValueChange={setRemoteSearch} />
+          </FormRow>
           <Card variant="elevated">
             <Card.Header
               title={displayName ? `Issues · ${displayName}` : "Forge Issues"}
@@ -1219,13 +1314,21 @@ export function ForgeIssuesView({
               subtitle={
                 data && !data.error
                   ? query.trim()
-                    ? `${issues.length} of ${data.openIssueCount ?? pool.length} match`
+                    ? searchLayer.source === "remote"
+                      ? `${issues.length} match${issues.length === 1 ? "" : "es"} (open and closed)`
+                      : `${issues.length} of ${data.openIssueCount ?? pool.length} match`
                     : `${data.openIssueCount ?? pool.length} open`
                   : "Open issues for this workspace repo"
               }
             />
             {isLoading && !data ? (
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>Loading issues…</Text>
+            ) : null}
+            {remotePending ? (
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>Searching the forge…</Text>
+            ) : null}
+            {remoteError ? (
+              <Text style={[styles.hint, { color: colors.foreground }]}>{remoteError}</Text>
             ) : null}
             {failed ? (
               <EmptyState
@@ -1240,7 +1343,13 @@ export function ForgeIssuesView({
               <EmptyState
                 icon={query.trim() ? "Search" : "CheckCircle2"}
                 title={query.trim() ? "No matches" : "No open issues"}
-                description={query.trim() ? "Try a different keyword or issue number." : "Nothing open on this repo right now."}
+                description={
+                  query.trim()
+                    ? remoteSearch
+                      ? "No open or closed issues matched on this forge."
+                      : "Try a different keyword or issue number."
+                    : "Nothing open on this repo right now."
+                }
               />
             ) : null}
             {!failed

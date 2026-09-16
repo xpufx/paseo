@@ -23,6 +23,8 @@ import {
   type IssueDetailOutput,
   type OpenIssuesInput,
   type OpenIssuesOutput,
+  type SearchIssuesInput,
+  type SearchIssuesOutput,
   type SetLabelInput,
   type SetLabelOutput,
 } from "../shared/issues.js";
@@ -208,6 +210,49 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
   const issues: OpenIssuesResult["issues"] = rankIssues(paged.issues);
   void liveScopesFromIssues(issues);
   return { repo, host, issues, openIssueCount, page, hasMore: paged.hasMore, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid };
+}
+
+// ---------------------------------------------------------------------------
+// Live remote issue search (issue #139). Same remote resolution and auth as
+// `handleOpenIssues` — the token is attached daemon-side — but the query goes
+// to the issues API's `q` parameter with `state=all`, so closed issues match.
+// Never throws: failures come back as an `error` field for the client to show
+// while it keeps rendering its instant client-side filter.
+// ---------------------------------------------------------------------------
+
+export async function handleSearchIssues(input: SearchIssuesInput): Promise<SearchIssuesOutput> {
+  const query = typeof input?.query === "string" ? input.query.trim() : "";
+  if (!query) {
+    return { repo: null, host: null, issues: [], page: 1, hasMore: false, error: "Enter a search query" };
+  }
+  const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+  if (!resolved.ok) {
+    return { repo: null, host: null, issues: [], page: 1, hasMore: false, error: resolved.error };
+  }
+  const { host, repo } = resolved;
+  if (!(await probeForgeHost(host))) {
+    return {
+      repo,
+      host,
+      issues: [],
+      page: 1,
+      hasMore: false,
+      error: `Selected forge ${host}/${repo} is unreachable or not a forge API host`,
+    };
+  }
+  const client = await clientFor(host);
+  const page = input?.page ?? 1;
+  const result = await client.searchIssues(repo, query, page);
+  if (!result) {
+    if (noteListFailure(host, repo)) {
+      log.warn("issue search failed", { repo, host });
+    } else {
+      log.debug("issue search failed", { repo, host });
+    }
+    return { repo, host, issues: [], page, hasMore: false, error: `Search unavailable for ${host}/${repo}` };
+  }
+  noteListSuccess(host, repo);
+  return { repo, host, issues: result.issues, page, hasMore: result.hasMore };
 }
 
 // ---------------------------------------------------------------------------
