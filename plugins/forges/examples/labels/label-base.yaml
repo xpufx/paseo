@@ -1,0 +1,117 @@
+# Generic workflow label base for a Forgejo/Gitea-family repository.
+#
+# Apply as an advanced label template (Forgejo >= 1.19), or create the same
+# labels through the UI/API. `exclusive: true` makes a scoped label mutually
+# exclusive per scope: applying one evicts any other label with the same scope,
+# which is what the forges plugin's chips and state transitions rely on.
+#
+# Colors are 6-digit hex. Edit names/colors/descriptions freely; if you rename
+# a scope, keep the `scope/value` shape and update your Skills to match.
+
+labels:
+  # ---------------------------------------------------------------------------
+  # Execution lifecycle. One state per issue; advance by applying the next one.
+  # ---------------------------------------------------------------------------
+  - name: "state/0-triage"
+    exclusive: true
+    color: "#1d76db"
+    description: "New issue awaiting initial triage"
+
+  - name: "state/1-wip"
+    exclusive: true
+    color: "#0e7c6b"
+    description: "Active implementation in progress"
+
+  - name: "state/2-review"
+    exclusive: true
+    color: "#a6700b"
+    description: "Awaiting internal review before operator verification"
+
+  - name: "state/3-verify"
+    exclusive: true
+    color: "#6e40c9"
+    description: "Awaiting human operator signoff or live verification"
+
+  - name: "state/4-done"
+    exclusive: true
+    color: "#1a7f37"
+    description: "Accepted"
+
+  # ---------------------------------------------------------------------------
+  # Priority / queue ordering. Unlabeled issues are treated as normal.
+  # ---------------------------------------------------------------------------
+  - name: "priority/0-SOS"
+    exclusive: true
+    color: "#d1242f"
+    description: "Urgent dispatch; preempts all standard work"
+
+  - name: "priority/1-high"
+    exclusive: true
+    color: "#e85d04"
+    description: "High priority"
+
+  - name: "priority/2-normal"
+    exclusive: true
+    color: "#1d76db"
+    description: "Normal priority (default when no priority label is set)"
+
+  - name: "priority/3-low"
+    exclusive: true
+    color: "#59636e"
+    description: "Low priority"
+
+  - name: "priority/4-backburner"
+    exclusive: true
+    color: "#8c959f"
+    description: "Parked; surface only when idle"
+
+  # ---------------------------------------------------------------------------
+  # Attention / who acts next. This is the operator's steering channel.
+  # ---------------------------------------------------------------------------
+  - name: "attention/0-orchestrator"
+    exclusive: true
+    color: "#8250df"
+    description: "Requires orchestrator triage, decomposition, or dispatch"
+
+  - name: "attention/1-agent"
+    exclusive: true
+    color: "#0e7c6b"
+    description: "Available for an agent to claim and act on"
+
+  - name: "attention/2-user"
+    exclusive: true
+    color: "#d1242f"
+    description: "Blocked on human operator clarification or decision"
+
+  - name: "attention/3-ignore"
+    exclusive: true
+    color: "#6b7280"
+    description: "Suppress automated triage unless escalated"
+
+  # ---------------------------------------------------------------------------
+  # Specification / pre-code shaping. Optional but useful for large tickets.
+  # ---------------------------------------------------------------------------
+  - name: "spec/0-needed"
+    exclusive: true
+    color: "#a6700b"
+    description: "Needs a technical specification and boundary constraints"
+
+  - name: "spec/1-checklist"
+    exclusive: true
+    color: "#1d76db"
+    description: "Actionable checklist shaped and ready for human review"
+
+  - name: "spec/2-approved"
+    exclusive: true
+    color: "#1a7f37"
+    description: "Specification and checklist approved for implementation"
+
+  # ---------------------------------------------------------------------------
+  # Optional: circuit breaker referenced by the orchestrator example Skill.
+  # Add more scopes the same way; the plugin derives live scopes from the board,
+  # so anything you define here shows up in its chips.
+  # ---------------------------------------------------------------------------
+  - name: "flag/stop-work"
+    exclusive: true
+    color: "#d1242f"
+    description: "Halt all work on this issue immediately"

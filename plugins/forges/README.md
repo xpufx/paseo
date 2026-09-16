@@ -68,4 +68,7 @@ node packages/paseo-plugin-helper/bin/paseo-plugin-helper.js audit plugins/forge
 ```
 
 See [`docs/specs/forge-workflow-gui.md`](./docs/specs/forge-workflow-gui.md)
-for the data model, RPC contracts, and UI surfaces.
+for the data model, RPC contracts, and UI surfaces, and
+[`docs/workflow.md`](./docs/workflow.md) for the end-to-end agent workflow
+(hook service, label usage, agent responsibilities, and what the plugin ships
+versus what an adopter supplies).

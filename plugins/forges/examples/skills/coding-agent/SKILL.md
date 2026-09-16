@@ -8,7 +8,8 @@ description: EXAMPLE skill — workflow, CLI tool usage, self-stamping, and task
 > Paseo workflow using that team's CLI wrappers (`fgj`/`fgjx`,
 > `envelope-tool`), label taxonomy, and board conventions. Adapt the host,
 > repo, tooling, labels, and envelope format to your own workflow before use.
-> See `../../README.md`.
+> See `../../README.md`, and `../../docs/workflow.md` for how the labels, the
+> hook service, and the two agent roles fit together.
 
 # Coding Agent Skill
 
@@ -129,12 +130,20 @@ Understand the intent of board labels:
 - **`blockee` / `blocker`**: Dependency indicators. Check linked blocking issues before proceeding.
 
 ### Scoped & Exclusive Labels (Forgejo Native Standard)
-Defined in [`.forgejo/labels/agent-workflow.yaml`](file:///.forgejo/labels/agent-workflow.yaml). When scoped labels (`scope/name`) with `exclusive: true` are present, applying a new label in that scope automatically evicts any existing label sharing that scope prefix at the Forgejo DB level (zero `--remove-label` needed):
+Seed these labels from [`../../labels/label-base.yaml`](../../labels/label-base.yaml). When scoped labels (`scope/name`) with `exclusive: true` are present, applying a new label in that scope automatically evicts any existing label sharing that scope prefix at the Forgejo DB level (zero `--remove-label` needed):
 - **`format/` Scope**: `format/0-needed` ↔ `format/1-ok` (cleaning presentation and applying `format/1-ok` automatically clears `format/0-needed`).
 - **`spec/` Scope**: `spec/0-needed` → `spec/1-checklist` → `spec/2-approved` (shaping phase transitions automatically clear previous stages).
 - **`state/` Scope**: `state/0-triage` → `state/1-wip` → `state/2-review` → `state/3-verify` → `state/4-done` (execution lifecycle).
 - **`attention/` Scope**: `attention/0-orchestrator` ↔ `attention/1-agent` ↔ `attention/2-user` ↔ `attention/3-ignore` (action token).
 - **`priority/` Scope**: `priority/0-SOS` ↔ `priority/1-high` ↔ `priority/2-normal` ↔ `priority/3-low` ↔ `priority/4-backburner`.
+
+### Missing labels are advisory (cold start)
+
+The operator may apply **no labels at all** — a ticket can reach you with an
+empty label set, and that is normal, not a signal that it is out of scope. Read
+the ticket and comment thread, infer the state/priority yourself, and set the
+labels on first touch. Never skip or park work solely because `state/`, `spec/`,
+or `priority/` is absent.
 
 ### Board Prioritization & Intelligence Model
 
