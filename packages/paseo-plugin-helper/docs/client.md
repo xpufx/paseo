@@ -238,6 +238,24 @@ registerSidebarSurface(plugin, {
 });
 ```
 
+### `registerCommandCenterItem(plugin, contribution)`
+Registers an entry in the host Ctrl+K command center. Thin pass-through that keeps plugins on the helper seam; `onSelect` receives `{ openSurface, openSettings }`.
+
+```tsx
+import { registerCommandCenterItem } from "paseo-plugin-helper/client";
+
+registerCommandCenterItem(plugin, {
+  id: "open-my-surface",
+  title: "My surface",
+  icon: "LayoutDashboard",
+  keywords: ["dashboard", "console"],
+  context: "global", // "global" | "workspace" | "agent"
+  onSelect({ openSurface }) {
+    openSurface("my-surface");
+  },
+});
+```
+
 ### `registerWorkspacePanel(plugin, options)` & `registerAgentPanel(plugin, options)`
 Registers panels with automatic `<PluginThemeProvider>` injection.
 

@@ -3,6 +3,7 @@ export * from "./components/index.js";
 export * from "./layout/index.js";
 export * from "./pill.js";
 export * from "./surface.js";
+export * from "./command-center.js";
 export * from "./panel.js";
 export * from "./query.js";
 export * from "./query-refresh.js";

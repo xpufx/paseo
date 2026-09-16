@@ -3,6 +3,7 @@ export * from "./components/index";
 export * from "./layout/index";
 export * from "./pill";
 export * from "./surface";
+export * from "./command-center";
 export * from "./panel";
 export * from "./query";
 export * from "./query-refresh";
