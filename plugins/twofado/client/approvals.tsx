@@ -45,6 +45,9 @@ const LIST_KEY = ["twofado", "pending"];
 const RECENT_KEY = ["twofado", "recent"];
 const POLL_MS = 3000;
 const RECENT_POLL_MS = 5000;
+// The plugin SDK only takes a label string (the host owns the Text), so the
+// header marquee must step the store instead of animating client-side.
+const HEADER_MARQUEE_MS = 1000;
 const RECENT_LIMIT = 10;
 const OUTPUT_PREVIEW = 2000;
 const EXPIRY_URGENT_S = 30;
@@ -172,7 +175,10 @@ function ApprovalHeaderIconInner(props: PluginButtonIconProps) {
     const timer = setTimeout(() => {
       const reg = headerRegistry.get(workspaceId);
       if (!reg) return;
+      let last: string | undefined;
       const show = (label: string | undefined) => {
+        if (label === last) return;
+        last = label;
         try {
           reg.update({ label });
         } catch (err) {
@@ -195,7 +201,7 @@ function ApprovalHeaderIconInner(props: PluginButtonIconProps) {
       interval = setInterval(() => {
         offset = (offset + 1) % unit.length;
         show(track.slice(offset, offset + width));
-      }, 400);
+      }, HEADER_MARQUEE_MS);
     }, 0);
     return () => {
       clearTimeout(timer);
