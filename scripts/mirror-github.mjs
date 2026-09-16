@@ -101,7 +101,7 @@ if (!isAll) {
   }
 
   // Internal/development tooling
-  unwantedPaths.push("mcp", ".agents", "skills");
+  unwantedPaths.push("mcp", ".agents", "skills", ".forgejo");
 
   // The monorepo lockfile references pruned workspace paths (packages/*,
   // sibling plugins); shipping it breaks `npm install` in the scoped

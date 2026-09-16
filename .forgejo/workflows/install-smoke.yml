@@ -33,13 +33,6 @@ on:
         required: false
         default: "top demo"
         type: string
-      runner_image:
-        description: >-
-          Container image for the smoke job; must provide git, make, jq, and
-          Node.js 22. Leave blank for the neutral default.
-        required: false
-        default: ""
-        type: string
   push:
     branches: [main]
 
@@ -49,9 +42,8 @@ jobs:
     runs-on: alpine-docker
     # Clean Ubuntu 24.04 + Node 22 + git/make/jq image. A fresh container per
     # run is the point: no reused node_modules and no pre-existing daemon state.
-    # Override with the runner_image dispatch input to point at your own builder.
     container:
-      image: ${{ github.event.inputs.runner_image || 'ghcr.io/example/runner-containers/ubuntu-podman-builder:latest' }}
+      image: forge.mrs.aager.de/oktay/runner-containers/ubuntu-podman-builder:latest
     env:
       # Dedicated daemon home, wiped below, so the job never reuses state.
       PASEO_HOME: /tmp/paseo-install-smoke/home

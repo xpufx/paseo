@@ -40,9 +40,12 @@ Vendored helper copies (`plugins/*/{client,server,shared}/vendor/paseo-plugin-he
 mirror `packages/paseo-plugin-helper/src`. Fix the helper source, then run
 `node scripts/vendor-sync.mjs` — never edit vendor copies by hand.
 
-`.agents/**` is pruned from the mirror by the cumulative target set (see §4).
-Never mirror with `--all`: `--all` skips that prune and would publish internal
-skills and the root lockfile.
+`.agents/**` and `.forgejo/**` are pruned from the mirror by the cumulative
+target set (see §4). Never mirror with `--all`: `--all` skips that prune and
+would publish internal skills, Forgejo CI metadata, and the root lockfile.
+`.forgejo/` is Forgejo-only CI metadata — it is excluded from the mirror, so
+internal runner/registry paths there are legitimate and the hygiene scan must
+not force fake placeholders into the workflows.
 
 ## 2. README presence + accuracy
 
