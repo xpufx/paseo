@@ -143,6 +143,10 @@ Agents and Orchestrators evaluate the board using a two-step approach:
      - Check discussions (`kind/discussion`) with operator guidance to shape into actionable specifications (`spec/0-needed` → `spec/1-checklist`).
      - Check tickets unblocked by recent commits or sibling issues (`dep/blocked`).
      - Advance tickets blocked on clarifying questions.
+   - A comment containing `/orchestrator <text>` is a direct routing signal
+     to the Orchestrator. Even terse free text such as `/orchestrator holler`
+     must be surfaced and handled as an instruction, not treated as routine
+     webhook noise.
 
 ---
 

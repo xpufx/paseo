@@ -63,6 +63,12 @@ The operator signals with line-anchored `/`-commands in issue comments. Obey whe
 - `/orchestrator <text>` — explicit override: orchestrator handles directly, never forwards.
 - `/agent <text>` — explicit override: forward verbatim as steering to the active worker on that issue.
 
+An explicit `/orchestrator` directive is actionable even when its free-text is
+informal or terse. Treat phrases such as `/orchestrator holler` as a request
+to immediately inspect the complete ticket and latest workspace/agent state,
+then report the relevant finding or blocker; do not classify the message as a
+routine webhook or dismiss it because it lacks a conventional command verb.
+
 ## 7. Attention Contract (Agreed Operating Rules)
 
 - The operator only touches `attention/*`. Nothing else is a signal.
@@ -71,3 +77,14 @@ The operator signals with line-anchored `/`-commands in issue comments. Obey whe
 - Tree conflicts keep gating dispatch: no worker enters a checkout the operator is hands-on in. Queue, don't collide.
 - Pre-flight stands: never present unverified work for operator testing.
 - Verify is non-binding: resolve unilaterally with narration rather than park in mutual wait.
+
+## 8. Presentation: clickable issue references
+
+- Every issue number in chat responses and issue comments MUST be a clickable Markdown link to `https://forge.mrs.aager.de/xpufx/paseo/issues/<n>` (e.g. [#98](https://forge.mrs.aager.de/xpufx/paseo/issues/98)). Never emit a bare `#nnn`.
+
+## 9. Forgejo labels: one flag per label
+
+- `fgjx issue edit` does NOT split commas: `--add-label 'a,b'` is sent as one
+  unknown label name and silently ignored. Repeat the flag instead:
+  `--add-label 'a' --add-label 'b'` (same for `--remove-label`).
+- Always read back with `fgjx issue view` and confirm the label set changed.
