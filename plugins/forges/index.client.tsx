@@ -22,10 +22,18 @@ import {
   forgeBoardAlertAssistantTransformer,
   forgeBoardAlertRenderer,
 } from "./client/board-alert.js";
+import {
+  forgejoWebhookUserTransformer,
+  forgejoWebhookRenderer,
+} from "./client/webhook-card.js";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
 export default function contribute(client: PluginClientContext) {
+  // Hook cards are registered before the linkifier: first-match-wins, and hook
+  // messages carry a bare issue URL the linkifier would otherwise claim.
+  const removeWebhookUser = client.addTimelineTransformer(forgejoWebhookUserTransformer);
+  const removeWebhookRenderer = client.addTimelineRenderer(forgejoWebhookRenderer);
   const removeUserLink = client.addTimelineTransformer(forgeLinkUserTransformer);
   const removeAssistantLink = client.addTimelineTransformer(forgeLinkAssistantTransformer);
   const removeLinkRenderer = client.addTimelineRenderer(forgeLinkRenderer);
@@ -76,6 +84,8 @@ export default function contribute(client: PluginClientContext) {
   return () => {
     removePanel();
     removePill();
+    removeWebhookUser();
+    removeWebhookRenderer();
     removeUserLink();
     removeAssistantLink();
     removeLinkRenderer();
