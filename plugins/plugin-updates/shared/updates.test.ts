@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveSourceUrl, normalizeRepoUrl } from "./updates";
+import {
+  deriveSourceUrl,
+  GENERIC_SOURCE_ICON,
+  normalizeRepoUrl,
+  resolveSourceRef,
+  sourceIconName,
+} from "./updates";
 
 // ---------------------------------------------------------------------------
 // Remote → browse URL normalization
@@ -156,4 +162,59 @@ test("falls back to the repo root without a ref or subdir", () => {
     deriveSourceUrl({ remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git", ref: "main", subdir: null }),
     base,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Source presentation (per-forge glyph + host label)
+// ---------------------------------------------------------------------------
+
+test("maps known forge hosts to their brand glyph, case-insensitively", () => {
+  assert.equal(sourceIconName("github.com"), "Github");
+  assert.equal(sourceIconName("GitHub.com"), "Github");
+  assert.equal(sourceIconName("  github.com  "), "Github");
+  assert.equal(sourceIconName("gitlab.com"), "Gitlab");
+});
+
+test("falls back to the generic glyph for Codeberg, self-hosted and unknown hosts", () => {
+  assert.equal(sourceIconName("codeberg.org"), GENERIC_SOURCE_ICON);
+  assert.equal(sourceIconName("forge.mrs.aager.de"), GENERIC_SOURCE_ICON);
+  assert.equal(sourceIconName("gitea.example.test"), GENERIC_SOURCE_ICON);
+  assert.equal(sourceIconName("example.test"), GENERIC_SOURCE_ICON);
+  assert.equal(sourceIconName(null), GENERIC_SOURCE_ICON);
+  assert.equal(sourceIconName(undefined), GENERIC_SOURCE_ICON);
+  assert.equal(sourceIconName(""), GENERIC_SOURCE_ICON);
+});
+
+test("resolves host, label and glyph from the derived source URL", () => {
+  assert.deepEqual(resolveSourceRef("https://github.com/xpufx/paseo/tree/main/plugins/demo"), {
+    url: "https://github.com/xpufx/paseo/tree/main/plugins/demo",
+    host: "github.com",
+    label: "github.com",
+    icon: "Github",
+  });
+  assert.deepEqual(resolveSourceRef("https://codeberg.org/xpufx/paseo"), {
+    url: "https://codeberg.org/xpufx/paseo",
+    host: "codeberg.org",
+    label: "codeberg.org",
+    icon: GENERIC_SOURCE_ICON,
+  });
+  assert.deepEqual(resolveSourceRef("https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/plugin-updates"), {
+    url: "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/plugin-updates",
+    host: "forge.mrs.aager.de",
+    label: "forge.mrs.aager.de",
+    icon: GENERIC_SOURCE_ICON,
+  });
+});
+
+test("returns null without a URL so the affordance stays hidden", () => {
+  assert.equal(resolveSourceRef(null), null);
+  assert.equal(resolveSourceRef(undefined), null);
+  assert.equal(resolveSourceRef("   "), null);
+});
+
+test("falls back to the raw URL when the host cannot be parsed", () => {
+  const ref = resolveSourceRef("not a url");
+  assert.equal(ref?.host, null);
+  assert.equal(ref?.label, "not a url");
+  assert.equal(ref?.icon, GENERIC_SOURCE_ICON);
 });

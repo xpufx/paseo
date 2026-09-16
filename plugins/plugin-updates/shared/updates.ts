@@ -147,6 +147,54 @@ export function deriveSourceUrl(input: SourceUrlInput): string | null {
   return deepLink(base, ref, subdir);
 }
 
+// ---------------------------------------------------------------------------
+// Source presentation (per-forge glyph + host label)
+// ---------------------------------------------------------------------------
+
+/** Generic Lucide glyph for hosts without a brand mark (Forgejo/Gitea, self-hosted, unknown). */
+export const GENERIC_SOURCE_ICON = "Globe";
+
+// Lucide brand marks for the forges recognised by hostname. Codeberg has no
+// brand mark in the host's icon set, so it deliberately falls through to the
+// generic glyph.
+const SOURCE_ICON_BY_HOST: Record<string, string> = {
+  "github.com": "Github",
+  "gitlab.com": "Gitlab",
+};
+
+/** Lucide icon name for a forge host, or the generic fallback. */
+export function sourceIconName(host: string | null | undefined): string {
+  const normalized = host?.trim().toLowerCase() ?? "";
+  return SOURCE_ICON_BY_HOST[normalized] ?? GENERIC_SOURCE_ICON;
+}
+
+export interface SourceRef {
+  url: string;
+  /** Lowercased hostname of the browse URL, or `null` when it cannot be parsed. */
+  host: string | null;
+  /** Label for the row affordance: the host, else the raw URL. */
+  label: string;
+  /** Lucide icon name for the host's forge, or the generic fallback. */
+  icon: string;
+}
+
+/**
+ * Resolves how a plugin's browse URL is presented: which forge glyph to show
+ * and what source label to render beside it. `null` when there is no URL, so
+ * the affordance stays hidden entirely.
+ */
+export function resolveSourceRef(sourceUrl: string | null | undefined): SourceRef | null {
+  const trimmed = sourceUrl?.trim();
+  if (!trimmed) return null;
+  let host: string | null = null;
+  try {
+    host = new URL(trimmed).hostname.toLowerCase() || null;
+  } catch {
+    host = null;
+  }
+  return { url: trimmed, host, label: host ?? trimmed, icon: sourceIconName(host) };
+}
+
 export const pluginUpdatesCheckRpc = defineContract({
   name: "plugin-updates.check",
   description: "Checks installed plugins for per-subdirectory git updates",

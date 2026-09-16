@@ -26,6 +26,7 @@ import {
   pluginUpdatesCheckRpc,
   pluginUpdatesUpdateAllRpc,
   pluginUpdatesUpdateRpc,
+  resolveSourceRef,
   shortHash,
   type PluginUpdate,
 } from "../shared/updates";
@@ -115,7 +116,7 @@ function PluginRow({
   const note = reportOnlyNote(plugin);
   const isOrphan = plugin.status === "orphaned";
   const version = hashValue(plugin.workingTree ?? plugin.localTree);
-  const sourceUrl = plugin.sourceUrl;
+  const source = resolveSourceRef(plugin.sourceUrl);
   // Errors carry actionable text; clamp only the one-line status sentences.
   const detailLines = plugin.error ? undefined : 1;
   return (
@@ -124,14 +125,15 @@ function PluginRow({
         <Row align="center">
           <StatusDot variant={statusVariant(plugin.status)} pulse={plugin.status === "checking"} />
           <Text style={{ color: colors.foreground, ...typography.bodyStrong, flex: 1 }}>{plugin.id}</Text>
-          {sourceUrl ? (
+          {source ? (
             <Button
-              icon="ExternalLink"
+              icon={source.icon}
+              label={source.label}
               variant="ghost"
               size="sm"
               accessibilityLabel="Open source"
               onPress={() => {
-                void Linking.openURL(sourceUrl).catch(() => {});
+                void Linking.openURL(source.url).catch(() => {});
               }}
             />
           ) : null}
