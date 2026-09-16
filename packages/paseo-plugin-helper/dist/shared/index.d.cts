@@ -26,4 +26,26 @@ interface SuppressedSink {
  */
 declare function reportSuppressed(sink: Pick<SuppressedSink, "debug" | "warn"> | undefined, context: string, error: unknown, level?: "debug" | "warn"): void;
 
-export { type SuppressedSink, TimeoutError, reportSuppressed, withTimeout };
+/**
+ * Text-run splitting for search highlighting, shared by every helper surface
+ * that paints matched query text. The query is matched literally via
+ * `indexOf` on lowercased strings — never compiled as a regular expression — so
+ * user input cannot inject a pattern.
+ */
+interface HighlightPart {
+    /** The run's source text, in its original casing. */
+    text: string;
+    /** True when this run is an occurrence of the (trimmed) query. */
+    matched: boolean;
+}
+/**
+ * Split `text` into alternating unmatched/matched runs for every
+ * case-insensitive, non-overlapping occurrence of `query`. Surrounding
+ * whitespace on the query is ignored; an empty or whitespace-only query (or
+ * empty text) yields the whole text as a single unmatched run.
+ */
+declare function splitHighlightParts(text: string, query: string): HighlightPart[];
+/** Whether `text` contains at least one occurrence of the trimmed `query`. */
+declare function hasHighlightMatch(text: string, query: string): boolean;
+
+export { type HighlightPart, type SuppressedSink, TimeoutError, hasHighlightMatch, reportSuppressed, splitHighlightParts, withTimeout };
