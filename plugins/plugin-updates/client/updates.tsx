@@ -24,6 +24,7 @@ import {
   pluginUpdatesCheckRpc,
   pluginUpdatesUpdateAllRpc,
   pluginUpdatesUpdateRpc,
+  shortHash,
   type PluginUpdate,
 } from "../shared/updates";
 
@@ -55,7 +56,7 @@ function fallbackDetail(plugin: PluginUpdate): string {
     case "current":
       return "Up to date";
     case "pinned":
-      return "Pinned to an immutable commit — report only";
+      return "Pinned to a fixed ref — report only";
     case "not-a-repo":
       return "Not a git repository — no git update possible";
     case "unpinned":
@@ -73,10 +74,15 @@ function fallbackDetail(plugin: PluginUpdate): string {
   }
 }
 
-function reportOnlyNote(status: PluginUpdate["status"]): string | null {
+function reportOnlyNote(plugin: PluginUpdate): string | null {
+  const status = plugin.status;
   if (status === "not-a-repo") return "Not a git checkout — update it from the workspace instead.";
   if (status === "orphaned") return "Orphaned managed directory — safe to remove if unused.";
-  if (status === "pinned") return "Pinned by commit — immutable, no update is ever offered.";
+  if (status === "pinned") {
+    return plugin.refKind === "tag"
+      ? "Pinned to a tag — tags are never auto-updated. Reinstall to move to another tag."
+      : "Pinned by commit — immutable, no update is ever offered.";
+  }
   if (status === "unpinned" || status === "no-upstream") return "Report only — no upstream remote to update from.";
   return null;
 }
@@ -84,6 +90,10 @@ function reportOnlyNote(status: PluginUpdate["status"]): string | null {
 function refLabel(plugin: PluginUpdate): string {
   if (!plugin.ref) return "-";
   return plugin.refKind ? `${plugin.refKind} · ${plugin.ref}` : plugin.ref;
+}
+
+function hashValue(value: string | null): string | null {
+  return value ? shortHash(value) : null;
 }
 
 function PluginRow({
@@ -99,9 +109,9 @@ function PluginRow({
 }) {
   const { colors, typography } = usePluginTheme();
   const detail = fallbackDetail(plugin);
-  const note = reportOnlyNote(plugin.status);
+  const note = reportOnlyNote(plugin);
   const isOrphan = plugin.status === "orphaned";
-  const version = plugin.workingTree ?? plugin.localTree;
+  const version = hashValue(plugin.workingTree ?? plugin.localTree);
   return (
     <Card variant="elevated" noPadding>
       <View style={{ padding: 10, gap: 8 }}>
@@ -134,10 +144,9 @@ function PluginRow({
                 value={version}
                 subValue={plugin.workingTree ? "working tree" : undefined}
                 mono
-                truncate="middle"
                 copyable
               />
-              <KeyValue label="Remote" value={plugin.remoteTree} mono truncate="middle" copyable />
+              <KeyValue label="Remote" value={hashValue(plugin.remoteTree)} mono copyable />
               <KeyValue label="Ref" value={refLabel(plugin)} truncate="end" />
               <KeyValue label="Subdir" value={plugin.subdir === "" ? "(repo root)" : plugin.subdir} truncate="path" />
             </KeyValueGroup>

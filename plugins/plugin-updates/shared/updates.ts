@@ -18,6 +18,15 @@ export type PluginUpdateStatus = z.infer<typeof PluginUpdateStatusSchema>;
 export const RefKindSchema = z.enum(["branch", "tag", "sha", "detached"]);
 export type RefKind = z.infer<typeof RefKindSchema>;
 
+// One short-hash length for every git id rendered in the row UI (and in detail
+// strings): full 40-char ids are wasted width and cannot clash with peers in
+// the same repo.
+export const SHORT_HASH_LENGTH = 10;
+
+export function shortHash(value: string | null | undefined): string {
+  return value ? value.slice(0, SHORT_HASH_LENGTH) : "unknown";
+}
+
 export const PluginUpdateChangeSchema = z.object({
   commit: z.string(),
   date: z.string().nullable(),

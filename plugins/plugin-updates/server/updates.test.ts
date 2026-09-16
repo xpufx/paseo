@@ -43,7 +43,6 @@ interface MockOptions {
   refs?: Record<string, string>;
   revParseStderr?: (expr: string) => string;
   lsRemote?: (ref: string) => string;
-  lsRemoteTags?: string;
   lsRemoteCode?: number;
   lsRemoteStderr?: string;
   lsRemoteThrows?: Error;
@@ -103,7 +102,6 @@ function makeRunner(opts: MockOptions): Runner {
 
     if (cmd === "ls-remote") {
       if (opts.lsRemoteThrows) throw opts.lsRemoteThrows;
-      if (gitArgs[1] === "--tags") return result(opts.lsRemoteTags ?? "");
       if ((opts.lsRemoteCode ?? 0) !== 0) {
         return result("", opts.lsRemoteCode ?? 128, opts.lsRemoteStderr ?? "fatal: unable to access remote");
       }
@@ -407,74 +405,100 @@ function sourcesFile(records: Record<string, unknown>) {
   };
 }
 
-test("reports a moved tag as an update", async () => {
+test("treats an annotated tag install as report-only using the peeled commit", async () => {
   const tagObject = hex("e");
-  const remoteTagCommit = hex("f");
-  const localTagCommit = hex("0");
-  const past = JSON.stringify({
+  const tagCommit = hex("f");
+  const records = {
     gitty: {
       remote: "https://example.test/gitty.git",
       requestedRef: "v1.0.0",
       trackingBranch: null,
-      commit: localTagCommit,
+      commit: tagCommit,
       pluginPath: "",
     },
-  });
+  };
   const probe = await testing.probePlugin(
     gitInstall("gitty", {}),
     makeRunner({
       toplevel: "/managed/gitty",
-      head: localTagCommit,
-      lsRemote: () => `${tagObject}\trefs/tags/v1.0.0\n${remoteTagCommit}\trefs/tags/v1.0.0^{}\n`,
-      lsRemoteTags: "",
-      trees: { [`${remoteTagCommit}^{tree}`]: TREE_TAG },
+      head: tagCommit,
+      lsRemote: () => `${tagObject}\trefs/tags/v1.0.0\n${tagCommit}\trefs/tags/v1.0.0^{}\n`,
+      trees: { [`${tagCommit}^{tree}`]: TREE_TAG },
     }),
-    {
-      readFile: async (file) => (file.endsWith("sources.json") ? past : (() => { throw new Error("missing"); })()),
-      cacheRoot: "/cache",
-    },
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
   );
 
   assert.equal(probe.refKind, "tag");
-  assert.equal(probe.remoteCommit, remoteTagCommit);
-  assert.equal(probe.status, "behind");
-  assert.equal(probe.updateAvailable, true);
-  assert.match(probe.detail ?? "", /moved/i);
+  assert.equal(probe.remoteCommit, tagCommit);
+  assert.notEqual(probe.remoteCommit, tagObject);
+  assert.equal(probe.status, "pinned");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.error, null);
+  assert.match(probe.detail ?? "", /v1\.0\.0/);
+  assert.doesNotMatch(probe.detail ?? "", /moved/i);
 });
 
-test("reports a newer semver tag as an update without treating the tag as a branch", async () => {
-  const remoteTagCommit = hex("f");
-  const v2 = hex("9");
-  const past = JSON.stringify({
+test("stays report-only when an annotated tag's peeled commit changed", async () => {
+  const tagObject = hex("e");
+  const installed = hex("0");
+  const changed = hex("f");
+  const records = {
     gitty: {
       remote: "https://example.test/gitty.git",
       requestedRef: "v1.0.0",
       trackingBranch: null,
-      commit: remoteTagCommit,
+      commit: installed,
       pluginPath: "",
     },
-  });
-  const calls: Call[] = [];
+  };
   const probe = await testing.probePlugin(
     gitInstall("gitty", {}),
     makeRunner({
       toplevel: "/managed/gitty",
-      head: remoteTagCommit,
-      lsRemote: () => `${remoteTagCommit}\trefs/tags/v1.0.0\n`,
-      lsRemoteTags: `${remoteTagCommit}\trefs/tags/v1.0.0\n${v2}\trefs/tags/v2.0.0\n`,
-      trees: { [`${remoteTagCommit}^{tree}`]: TREE_TAG },
-      calls,
+      head: installed,
+      lsRemote: () => `${tagObject}\trefs/tags/v1.0.0\n${changed}\trefs/tags/v1.0.0^{}\n`,
+      trees: { [`${changed}^{tree}`]: TREE_TAG },
     }),
-    {
-      readFile: async (file) => (file.endsWith("sources.json") ? past : (() => { throw new Error("missing"); })()),
-      cacheRoot: "/cache",
-    },
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
   );
 
-  assert.equal(probe.status, "behind");
-  assert.equal(probe.updateAvailable, true);
-  assert.match(probe.detail ?? "", /v2\.0\.0/);
-  assert.equal(calls.some((call) => call.args[0] === "merge-base"), false);
+  // The peeled commit is compared, never the tag object, and the result is
+  // still not actionable: `paseo plugin update` cannot move a tag install.
+  assert.equal(probe.remoteCommit, changed);
+  assert.notEqual(probe.remoteCommit, tagObject);
+  assert.equal(probe.status, "pinned");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.error, null);
+  assert.doesNotMatch(probe.detail ?? "", /moved|update available/i);
+});
+
+test("handles a lightweight tag with no peeled ref", async () => {
+  const tagCommit = hex("f");
+  const records = {
+    gitty: {
+      remote: "https://example.test/gitty.git",
+      requestedRef: "v1.0.0",
+      trackingBranch: null,
+      commit: tagCommit,
+      pluginPath: "",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("gitty", {}),
+    makeRunner({
+      toplevel: "/managed/gitty",
+      head: tagCommit,
+      lsRemote: () => `${tagCommit}\trefs/tags/v1.0.0\n`,
+      trees: { [`${tagCommit}^{tree}`]: TREE_TAG },
+    }),
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.refKind, "tag");
+  assert.equal(probe.remoteCommit, tagCommit);
+  assert.equal(probe.status, "pinned");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.error, null);
 });
 
 test("treats a SHA pin as immutable and never probes the remote", async () => {
@@ -555,7 +579,7 @@ test("compares a branch install against its trackingBranch", async () => {
   assert.equal(probe.refKind, "branch");
   assert.equal(probe.ref, "main");
   assert.equal(probe.status, "current");
-  const ls = calls.find((call) => call.args[0] === "ls-remote" && call.args[1] !== "--tags");
+  const ls = calls.find((call) => call.args[0] === "ls-remote");
   assert.equal(ls?.args[2], "main");
 });
 
@@ -585,11 +609,11 @@ test("prefers trackingBranch over a SHA requestedRef instead of pinning", async 
   assert.equal(probe.refKind, "branch");
   assert.equal(probe.ref, "main");
   assert.equal(probe.status, "current");
-  const ls = calls.find((call) => call.args[0] === "ls-remote" && call.args[1] !== "--tags");
+  const ls = calls.find((call) => call.args[0] === "ls-remote");
   assert.equal(ls?.args[2], "main");
 });
 
-test("keeps a hex-free tag name classified as a tag, not a pin", async () => {
+test("probes a tag's peeled ref instead of treating the name as a SHA pin", async () => {
   const remoteTagCommit = hex("f");
   const calls: Call[] = [];
   const records = {
@@ -607,7 +631,6 @@ test("keeps a hex-free tag name classified as a tag, not a pin", async () => {
       toplevel: "/managed/tagged",
       head: remoteTagCommit,
       lsRemote: () => `${remoteTagCommit}\trefs/tags/v1.2.3\n`,
-      lsRemoteTags: `${remoteTagCommit}\trefs/tags/v1.2.3\n`,
       trees: { [`${remoteTagCommit}^{tree}`]: TREE_TAG },
       calls,
     }),
@@ -615,8 +638,11 @@ test("keeps a hex-free tag name classified as a tag, not a pin", async () => {
   );
 
   assert.equal(probe.refKind, "tag");
-  assert.notEqual(probe.status, "pinned");
-  assert.equal(calls.some((call) => call.args.includes("ls-remote")), true);
+  assert.notEqual(probe.refKind, "sha");
+  assert.equal(probe.status, "pinned");
+  assert.equal(probe.updateAvailable, false);
+  const ls = calls.find((call) => call.args[0] === "ls-remote");
+  assert.ok(ls?.args.includes("refs/tags/v1.2.3^{}"));
 });
 
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { listPlugins, safeSpawn, type PaseoPluginInfo, type SafeSpawnResult } from "paseo-plugin-helper/server";
+import { shortHash } from "../shared/updates";
 import type {
   PluginUpdate,
   PluginUpdateActionResult,
@@ -81,10 +82,6 @@ function parseCommit(output: string): string | null {
   return FULL_COMMIT_RE.test(value) ? value : null;
 }
 
-function short(commit: string | null): string {
-  return commit ? commit.slice(0, 7) : "unknown";
-}
-
 function treeExpr(commit: string, subdir: string): string {
   return subdir ? `${commit}:${subdir}` : `${commit}^{tree}`;
 }
@@ -121,54 +118,6 @@ function parseLsRemote(output: string): LsRemoteLine[] {
     if (sha && ref && /^[0-9a-f]{40,64}$/i.test(sha)) lines.push({ sha, ref });
   }
   return lines;
-}
-
-interface SemverTag {
-  name: string;
-  commit: string;
-  version: [number, number, number] | null;
-}
-
-function parseTagList(output: string): SemverTag[] {
-  const byName = new Map<string, { direct?: string; peeled?: string }>();
-  for (const line of parseLsRemote(output)) {
-    const match = /^refs\/tags\/(.+?)(\^\{\})?$/.exec(line.ref);
-    if (!match) continue;
-    const name = match[1]!;
-    const entry = byName.get(name) ?? {};
-    if (match[2]) entry.peeled = line.sha;
-    else entry.direct = line.sha;
-    byName.set(name, entry);
-  }
-  return [...byName.entries()].map(([name, entry]) => ({
-    name,
-    commit: entry.peeled ?? entry.direct!,
-    version: parseSemver(name),
-  }));
-}
-
-function parseSemver(name: string): [number, number, number] | null {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(name);
-  if (!match) return null;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function compareSemver(a: [number, number, number], b: [number, number, number]): number {
-  for (let i = 0; i < 3; i += 1) {
-    if (a[i]! !== b[i]!) return a[i]! - b[i]!;
-  }
-  return 0;
-}
-
-function findNewerSemver(tags: SemverTag[], current: SemverTag): SemverTag | null {
-  if (!current.version) return null;
-  let best: SemverTag | null = null;
-  for (const tag of tags) {
-    if (!tag.version) continue;
-    if (compareSemver(tag.version, current.version) <= 0) continue;
-    if (!best || !best.version || compareSemver(tag.version, best.version) > 0) best = tag;
-  }
-  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -295,7 +244,7 @@ function pinnedResolution(remote: string, ref: string | null): RefResolution {
     ref,
     refKind: "sha",
     reportOnly: "pinned",
-    detail: ref ? `Pinned to immutable commit ${short(ref)} — report only` : "Pinned to an immutable commit — report only",
+    detail: ref ? `Pinned to immutable commit ${shortHash(ref)} — report only` : "Pinned to an immutable commit — report only",
   };
 }
 
@@ -481,7 +430,11 @@ async function resolveRemoteState(
   const ref = resolution.ref!;
   const cacheDir = cacheDirFor(cache.cacheRoot, remoteUrl, ref);
 
-  const ls = await git(runner, ["ls-remote", remoteUrl, ref], undefined);
+  // A bare tag name matches only the unpeeled `refs/tags/<tag>` line, which for
+  // an annotated tag is the tag OBJECT, not the commit. Ask for the peeled ref
+  // explicitly so the compared commit is the tag's target commit.
+  const tagRef = `refs/tags/${ref}`;
+  const ls = await git(runner, ["ls-remote", remoteUrl, ref, tagRef, `${tagRef}^{}`], undefined);
   if (ls.code !== 0) {
     return { commit: null, refKind: resolution.refKind, refExists: false, cacheDir, shallow: false, error: outputOf(ls) || "git ls-remote failed" };
   }
@@ -491,12 +444,14 @@ async function resolveRemoteState(
 
   let commit: string | null = null;
   let refKind: RefKind | null = resolution.refKind;
-  if (heads.length > 0) {
+  if (resolution.refKind !== "tag" && heads.length > 0) {
     commit = (heads.find((line) => line.ref === `refs/heads/${ref}`) ?? heads[0]!).sha;
     refKind = "branch";
   } else if (tags.length > 0) {
-    const peeled = tags.find((line) => line.ref === `refs/tags/${ref}^{}`);
-    const direct = tags.find((line) => line.ref === `refs/tags/${ref}`);
+    // Annotated tags peel to the commit via `^{}`; lightweight tags have no
+    // peeled entry, so the direct ref already points at the commit.
+    const peeled = tags.find((line) => line.ref === `${tagRef}^{}`);
+    const direct = tags.find((line) => line.ref === tagRef);
     commit = (peeled ?? direct ?? tags[0]!).sha;
     refKind = "tag";
   }
@@ -687,7 +642,7 @@ async function classifyBranch(
   const localCommit = local.localCommit;
   const remoteCommit = state.commit;
   if (localCommit && remoteCommit && localCommit === remoteCommit) {
-    return { status: "current", updateAvailable: false, detail: `Up to date with ${resolution.ref} (${short(remoteCommit)})` };
+    return { status: "current", updateAvailable: false, detail: `Up to date with ${resolution.ref} (${shortHash(remoteCommit)})` };
   }
   if (local.localTree && remote.tree && local.localTree === remote.tree) {
     return { status: "current", updateAvailable: false, detail: `Subdirectory tree matches remote ${resolution.ref}` };
@@ -696,7 +651,7 @@ async function classifyBranch(
   if (localCommit && remoteCommit) {
     const localBehind = await isAncestor(runner, identity.repoRoot!, localCommit, remoteCommit);
     if (localBehind === true) {
-      return { status: "behind", updateAvailable: true, detail: `Remote ${resolution.ref} is ahead (${short(remoteCommit)}); update available` };
+      return { status: "behind", updateAvailable: true, detail: `Remote ${resolution.ref} is ahead (${shortHash(remoteCommit)}); update available` };
     }
     const remoteBehind = await isAncestor(runner, identity.repoRoot!, remoteCommit, localCommit);
     if (remoteBehind === true) {
@@ -721,37 +676,20 @@ async function classifyBranch(
   return { status: "behind", updateAvailable: true, detail: `Subdirectory tree differs from remote ${resolution.ref}; update available` };
 }
 
-async function classifyTag(
+function classifyTag(
   identity: PluginIdentity,
   resolution: RefResolution,
   state: RemoteRefState,
-  runner: CommandRunner,
-): Promise<Verdict> {
-  const localTagCommit = identity.managed?.commit ?? null;
-  const remoteCommit = state.commit!;
-  if (localTagCommit && localTagCommit !== remoteCommit) {
-    return {
-      status: "behind",
-      updateAvailable: true,
-      detail: `Tag ${resolution.ref} moved to ${short(remoteCommit)} (was ${short(localTagCommit)}) — update available`,
-    };
-  }
-  const lsTags = await git(runner, ["ls-remote", "--tags", resolution.remoteUrl!], undefined);
-  if (lsTags.code === 0) {
-    const tags = parseTagList(lsTags.stdout);
-    const current = tags.find((tag) => tag.name === resolution.ref);
-    if (current) {
-      const newer = findNewerSemver(tags, current);
-      if (newer) {
-        return {
-          status: "behind",
-          updateAvailable: true,
-          detail: `Newer release tag ${newer.name} available (pinned to ${resolution.ref})`,
-        };
-      }
-    }
-  }
-  return { status: "current", updateAvailable: false, detail: `Tag ${resolution.ref} is unchanged` };
+): Verdict {
+  // `paseo plugin update` no-ops for any install without a tracking branch, so
+  // a tag install is never actionable. Report-only: the tag never "moves" into
+  // an update we could apply.
+  const commit = identity.managed?.commit ?? state.commit;
+  return {
+    status: "pinned",
+    updateAvailable: false,
+    detail: `Pinned to tag ${resolution.ref} (${shortHash(commit)}) — tags are not auto-updated; report only`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -870,7 +808,7 @@ async function probeOne(
 
   const verdict =
     row.refKind === "tag"
-      ? await classifyTag(identity, resolution, state, context.runner)
+      ? classifyTag(identity, resolution, state)
       : await classifyBranch(identity, resolution, local, state, remote, context.runner);
 
   row.status = verdict.status;
@@ -1259,8 +1197,6 @@ export const testing = {
   resolveRef,
   classifyBranch,
   classifyTag,
-  parseTagList,
-  findNewerSemver,
   PROBE_TIMEOUT_MS,
   FETCH_TIMEOUT_MS,
   UPDATE_TIMEOUT_MS,
