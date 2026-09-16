@@ -32,7 +32,7 @@ afterEach(() => {
 
 describe("orchestrateHandover", () => {
   it("POSTs the caller agent id with bearer auth and returns the hook result", async () => {
-    const result = { key: "forge.mrs.aager.de/xpufx/paseo", agentId: "agent-1", previous: "agent-0" };
+    const result = { key: "forge.example.com/owner/repo", agentId: "agent-1", previous: "agent-0" };
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(JSON.stringify(result), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 

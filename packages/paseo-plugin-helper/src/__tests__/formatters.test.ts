@@ -91,7 +91,7 @@ describe("Shared Formatters", () => {
   });
 
   it("truncates paths intelligently keeping root and filename", () => {
-    const path = "/home/xpufx/code/paseo-plugin-helper/src/client/approvals.tsx";
+    const path = "/home/user/code/paseo-plugin-helper/src/client/approvals.tsx";
     expect(truncatePath(path, 100)).toBe(path);
     const shortened = truncatePath(path, 35);
     expect(shortened).toContain("…");

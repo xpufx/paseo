@@ -56,7 +56,7 @@ test("returns null for empty or non-URL input", () => {
   assert.equal(normalizeRepoUrl(null), null);
   assert.equal(normalizeRepoUrl(undefined), null);
   assert.equal(normalizeRepoUrl("   "), null);
-  assert.equal(normalizeRepoUrl("/home/xpufx/code/paseo"), null);
+  assert.equal(normalizeRepoUrl("/home/user/code/paseo"), null);
   assert.equal(normalizeRepoUrl("https://github.com"), null);
 });
 

@@ -25,18 +25,18 @@ const VALID_ENVELOPE = {
     event: "issues",
     action: "opened",
     repo: "xpufx/paseo",
-    repoUrl: "https://forge.mrs.aager.de/xpufx/paseo",
+    repoUrl: "https://forge.example.com/owner/repo",
     sender: "octocat",
     subject: {
       kind: "issue",
       number: 178,
       title: "Render the incoming hook",
-      url: "https://forge.mrs.aager.de/xpufx/paseo/issues/178",
+      url: "https://forge.example.com/owner/repo/issues/178",
     },
   },
 };
 
-const VALID_BODY = `${HOOK_HEAD} [issues:opened] xpufx/paseo#178 Render the incoming hook (by octocat) https://forge.mrs.aager.de/xpufx/paseo/issues/178`;
+const VALID_BODY = `${HOOK_HEAD} [issues:opened] xpufx/paseo#178 Render the incoming hook (by octocat) https://forge.example.com/owner/repo/issues/178`;
 
 describe("parseForgejoWebhookEnvelope", () => {
   it("parses a valid v1 envelope and keeps the human body", () => {
@@ -78,7 +78,7 @@ describe("parseForgejoWebhookSummary (today's plain line)", () => {
     assert.equal(card.subject?.kind, "issue");
     assert.equal(card.subject?.number, 178);
     assert.equal(card.subject?.title, "Render the incoming hook");
-    assert.equal(card.subject?.url, "https://forge.mrs.aager.de/xpufx/paseo/issues/178");
+    assert.equal(card.subject?.url, "https://forge.example.com/owner/repo/issues/178");
   });
 
   it("parses an issue_comment comment anchor", () => {
@@ -234,7 +234,7 @@ describe("forgejo-webhook transformer precedence over the linkifier", () => {
     const hook = firstMatch(VALID_BODY);
     assert.equal(hook?.kind, "forgejo-webhook");
 
-    const nonHook = "linked issue https://forge.mrs.aager.de/xpufx/paseo/issues/178";
+    const nonHook = "linked issue https://forge.example.com/owner/repo/issues/178";
     assert.equal(forgejoWebhookItem(nonHook), undefined);
     assert.equal(firstMatch(nonHook)?.kind, "forge-issue-link");
   });

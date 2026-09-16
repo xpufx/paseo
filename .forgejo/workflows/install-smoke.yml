@@ -92,10 +92,10 @@ jobs:
       - name: Hygiene — publish surface has no private strings or missing READMEs
         run: |
           set -euo pipefail
-          # plugin-release SKILL.md §1/§2. `forge.mrs.aager.de/xpufx/paseo` is the
-          # documented mirror source, so it is allowed to remain on the surface.
-          hits="$(git grep -n -E 'oktay|aager|mrs\.aager\.de' -- 'plugins/*' 'packages/*' ':!*dist*' ':!*node_modules*' \
-            | grep -vE 'forge\.mrs\.aager\.de/xpufx/paseo' || true)"
+          # plugin-release SKILL.md §1/§2. No allowlist: the internal Forgejo
+          # host, internal organisation strings, and developer home paths must
+          # never reach the public mirror (tests ship too).
+          hits="$(git grep -n -E 'oktay|aager|mrs\.aager\.de|pufaysokt|oktaya|/home/xpufx' -- 'plugins/*' 'packages/*' ':!*dist*' ':!*node_modules*' || true)"
           if [ -n "$hits" ]; then
             printf '%s\n' "$hits"
             echo "::error::private strings on the publish surface — see .agents/skills/plugin-release/SKILL.md §1"
