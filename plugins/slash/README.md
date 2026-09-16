@@ -2,6 +2,14 @@
 
 S/ash-command console for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
 
+<p align="center">
+  <img src="docs/screenshots/slash-console.jpg" alt="S/ash console — command repository, prefix, and shipped catalog" width="380">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/slash-autocomplete.jpg" alt="S/ash command autocomplete in the composer" width="480">
+</p>
+
 Adds a **S/ash console** sidebar surface for managing the slash commands offered
 in the composer, and keeps those commands registered as the repository changes.
 A command carries one of three actions:
@@ -25,8 +33,8 @@ A command carries one of three actions:
   summary and supports add / edit / remove through helper form primitives.
 - **Shipped catalog.** The seed commands (`review`, `console`, `ping`) are
   listed separately so a missing one can be added back with one tap.
-- **Prefix.** An optional shared prefix (suggestion, not default: `xpufx-`) is
-  applied to every command name.
+- **Prefix.** An optional shared prefix (default `slash-`, clearable to render
+  bare command names) is applied to every command name.
 - **Bundle import/export.** Enabled commands round-trip through a versioned
   `slash-commands` document, so a command set can be shared between machines.
 

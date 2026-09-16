@@ -1,4 +1,4 @@
-import { ForgeIssueSchema, type ForgeIssue, type ForgeLabel } from "../shared/issues.js";
+import { ForgeIssueSchema, forgeCapabilityFromRepo, type ForgeIssue, type ForgeLabel } from "../shared/issues.js";
 
 export interface ForgeClientOptions {
   host: string;
@@ -268,6 +268,19 @@ export class ForgeClient {
     if (!this.token) return null;
     const payload = await this.request("/user");
     return payload ? true : false;
+  }
+
+  /**
+   * Write capability for the configured token against one repo (issue #193),
+   * derived from the repo response's permission object (Forgejo/GitHub
+   * `permissions`, GitLab `access_level`). Null when no token is configured or
+   * the host returned no recognizable permissions, so `deriveForgeAccess`
+   * keeps treating bare validity as the capability.
+   */
+  async repoWritePermission(repo: string): Promise<boolean | null> {
+    if (!this.token) return null;
+    const payload = await this.request(`/repos/${repo}`);
+    return forgeCapabilityFromRepo(payload);
   }
 
   async openIssueCount(repo: string): Promise<number | null> {

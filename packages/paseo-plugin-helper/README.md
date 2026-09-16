@@ -61,7 +61,7 @@ flowchart TB
     H["paseo-plugin-helper\nwhat you get"]
 
     H --> RPC["RPC contracts\ndefineContract • defineSettingsContract\nuseRpcQuery • useRpcMutation\nuseAutoRefreshQuery"]
-    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nToggle • TextInput • FormRow\nModalBody • ActionBar\nRow • Stack • Grid\nAboutSection • EmptyState\nStatusDot • ForgeIcon • AttentionBeacon"]
+    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nHighlightedText\nToggle • TextInput • Select • FormRow\nModalBody • ActionBar\nRow • Stack • Grid\nAboutSection • EmptyState\nStatusDot • ForgeIcon • AttentionBeacon"]
     H --> PILL["Surfaces\nregisterComposerPill\nregisterSidebarSurface\nregisterWorkspacePanel\nregisterAgentPanel"]
     H --> SET["Settings\nusePluginSettings\nuseSharedPluginSettings\nuseSuiteSettings"]
     H --> SRV["Daemon utilities\ncreatePluginLogger • PluginStorage\nregisterSettingsRpc\ngetSystemMetrics • safeSpawn\nredactSecrets • guardRpcHandler"]
@@ -319,7 +319,10 @@ whatever the host allocates.
 
 When a data-dense modal genuinely needs more room, pass the one documented
 preset `ModalBody size="large"` (desktop-only wide extent; ignored on mobile
-sheets and composer popovers) instead of adding a per-plugin width literal. See
+sheets and composer popovers) instead of adding a per-plugin width literal. In
+the other direction, `ModalBody maxContentWidth={n}` caps and centers the
+content column so settings/forms do not stretch edge-to-edge on large viewports;
+both are helper-owned, so plugin code adds no width literals. See
 [`docs/client.md`](docs/client.md) for the full contract and the `ModalBody`
 API.
 

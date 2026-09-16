@@ -1,5 +1,6 @@
 import { PluginStorage, createPluginLogger } from "./vendor/paseo-plugin-helper/index";
 import {
+  KNOWN_OPEN_TARGETS,
   SEED_COMMANDS,
   interpolateTemplate,
   slashSettingsContract,
@@ -12,7 +13,7 @@ import { orchestrateHandover } from "./orchestrate";
 
 export const log = createPluginLogger("slash", { version: SLASH_PLUGIN_VERSION });
 
-const DEFAULTS: SlashSettings = { prefix: "", commands: SEED_COMMANDS };
+const DEFAULTS: SlashSettings = { prefix: "slash-", commands: SEED_COMMANDS };
 
 const settingsStorage = new PluginStorage<SlashSettings>("slash", "settings.json", {
   schema: slashSettingsContract.schema,
@@ -49,6 +50,10 @@ export async function handleListCommands(): Promise<{ commands: SlashCommand[] }
 
 export function handleListCatalog(): { commands: SlashCommand[] } {
   return { commands: SEED_COMMANDS };
+}
+
+export function handleListOperations(): { rpc: string[]; open: string[] } {
+  return { rpc: allowedOperations(), open: [...KNOWN_OPEN_TARGETS] };
 }
 
 export interface OperationContext {

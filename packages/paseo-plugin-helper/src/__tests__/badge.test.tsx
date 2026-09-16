@@ -134,4 +134,15 @@ describe("Badge size", () => {
     // Overrides layer on top, they do not replace the sm metrics.
     expect(styleValue(text.props.style, "fontSize")).toBe(10);
   });
+
+  it("highlights matches in the label when highlightQuery is set", () => {
+    const renderer = render(
+      React.createElement(Badge, { label: "bug report", highlightQuery: "bug" }),
+    );
+    const matched = renderer.root
+      .findAllByType(Text as any)
+      .filter((node) => styleValue(node.props.style, "backgroundColor") === "#3b82f6");
+    expect(matched).toHaveLength(1);
+    expect(matched[0].props.children).toBe("bug");
+  });
 });

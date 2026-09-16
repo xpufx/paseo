@@ -310,6 +310,34 @@ Form input with label, placeholder, helper or error text, secure text entry, and
 />
 ```
 
+### `<Select>`
+Compact single-choice picker sized for `<FormRow>`. The closed trigger is one
+line tall; opening reveals a bounded, scrollable option list, so a long list
+degrades to scrolling instead of overflow. Themed through the same tokens as
+`TextInput`/`Badge`; callers supply no styling.
+
+```tsx
+<Select
+  label="RPC operation"
+  value={operation}
+  options={rpcOptions.map((name) => ({ label: name, value: name }))}
+  onValueChange={setOperation}
+  placeholder="Choose an operation…"
+  size="md" // "md" (default, theme caption metrics) | "sm" (10/12 Badge scale)
+  disabled={isLocked}
+/>
+```
+
+#### Properties:
+- `value`: Currently selected value; a free-text value that is not in `options` is surfaced on the trigger instead of the placeholder.
+- `options`: `{ label, value }[]` choices.
+- `onValueChange`: Fired with the new value on selection; the list closes.
+- `label`: Optional accessible label (composed with the current value).
+- `size`: `"md"` (default) or `"sm"`, reusing the `Badge` size scale.
+- `placeholder`: Shown when `value` is empty (default `"Select…"`).
+- `disabled`: Blocks opening and mutes the trigger. A trigger with no options is also inert.
+- `style`: Escape-hatch override for the container.
+
 ### `<Toggle>`
 Accessible boolean switch with minimum 44pt touch boundary and custom visual flair theme support.
 
@@ -349,9 +377,24 @@ Status indicator chip with automatic contrast styling.
 - `icon`: Lucide icon name or custom node rendered before the label.
 - `dot`: Renders a status dot instead of an icon.
 - `style` / `textStyle`: Escape-hatch overrides layered on top of the size metrics.
+- `highlightQuery`: When set, every case-insensitive (literal, non-regex) occurrence of the query inside `label` is painted with the accent highlight.
+
+### `<HighlightedText>`
+`<Text>` that paints every case-insensitive occurrence of a search query with the theme accent background/foreground. The query is matched literally via `indexOf` (never compiled as a regular expression), so user input cannot inject a pattern. When the query is empty or absent the text renders unchanged. Pair it with `splitHighlightParts(text, query)` / `hasHighlightMatch(text, query)` from `paseo-plugin-helper/shared` when you need the runs or a boolean without rendering.
+
+```tsx
+<HighlightedText text={issue.title} query={query} style={styles.title} />
+```
+
+#### Properties:
+- `text`: Source text; rendered as-is when no query is active.
+- `query`: Active search query. Matched case-insensitively and literally.
+- `style`: Escape-hatch text style applied to the outer `<Text>`.
+- `highlightStyle`: Overrides the matched-run style (defaults to accent background + `accentForeground`).
+- `numberOfLines` / `selectable`: Forwarded to the underlying `<Text>`.
 
 ### `<Card>`
-Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips.
+Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips. `<Card.Header highlightQuery={q}>` highlights case-insensitive, literal matches of `q` inside the title.
 ```tsx
 <Card variant="tinted" padding="md">
   <Card.Header
@@ -653,6 +696,23 @@ It is ignored on mobile (the bottom sheet is already full-bleed) and inside
 composer popovers (the host owns that narrow viewport). The host still owns the
 final size, so `large` is a request for room, not a hardcoded frame. Do not add
 `size`-related width/minWidth literals in plugin code; widen here instead.
+
+#### Constraining content width: `maxContentWidth`
+
+`size` widens the *dialog*; `maxContentWidth` caps the *content column* inside
+it so settings and forms stay readable on large viewports instead of stretching
+edge-to-edge. It is additive and defaults to the fully fluid body:
+
+```tsx
+// Host allocates a wide dialog; content stays a centered ~600px column.
+<ModalBody maxContentWidth={600}>...</ModalBody>
+```
+
+The helper applies `width: "100%"` (fluid below the cap) and
+`alignSelf: "center"` (centered above it) to its single content column, in both
+the host-owned and helper-owned scroll paths. It does not dictate the dialog
+frame, so it composes with `size` and the rest of the size contract. Prefer this
+over a per-plugin wrapper carrying a `maxWidth` literal.
 
 ```tsx
 <ModalBody

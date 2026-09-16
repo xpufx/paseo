@@ -2,6 +2,7 @@ import React, { type ReactNode } from "react";
 import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
+import { HighlightedText } from "./HighlightedText.js";
 import type { SurfaceStyle } from "../theme/flair.js";
 
 export interface CardProps {
@@ -21,6 +22,11 @@ export interface CardHeaderProps {
   style?: StyleProp<ViewStyle>;
   titleStyle?: StyleProp<TextStyle>;
   subtitleStyle?: StyleProp<TextStyle>;
+  /**
+   * When set, every case-insensitive (literal, non-regex) occurrence of the
+   * query inside `title` is painted with the accent highlight.
+   */
+  highlightQuery?: string;
 }
 
 export function CardHeader({
@@ -33,6 +39,7 @@ export function CardHeader({
   style,
   titleStyle,
   subtitleStyle,
+  highlightQuery,
 }: CardHeaderProps) {
   const { Icon } = getClientHost();
   const { colors, flair, typography } = usePluginTheme();
@@ -54,7 +61,7 @@ export function CardHeader({
               titleStyle,
             ]}
           >
-            {title}
+            {highlightQuery ? <HighlightedText text={title} query={highlightQuery} /> : title}
           </Text>
           {subtitle ? (
             <Text

@@ -2,8 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, ForgeIssueSchema, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, splitScopedLabel, workspaceNameKey, type ForgeIssue } from "./issues.ts";
-import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, FORGE_WRITE_SCOPES, ForgeIssueSchema, forgeCapabilityFromRepo, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, forgeWriteScopeList, isBoardAlertText, isValidForgeTarget, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, splitScopedLabel, workspaceNameKey, type ForgeIssue } from "./issues.ts";import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
 const REAL_HOST = "forge.example.com";
@@ -435,7 +434,12 @@ describe("optional label-set install planning (issue #121.3)", () => {
 describe("repo access state matrix (issue #152)", () => {
   const cases: Array<{
     name: string;
-    input: { repoPublic: boolean | null; tokenPresent: boolean; tokenValid: boolean | null };
+    input: {
+      repoPublic: boolean | null;
+      tokenPresent: boolean;
+      tokenValid: boolean | null;
+      repoWritePermission?: boolean | null;
+    };
     visibility: string;
     auth: string;
     canEdit: boolean;
@@ -529,6 +533,89 @@ describe("repo access state matrix (issue #152)", () => {
     assert.equal(access.authVariant, "danger");
     assert.match(access.summary, /^Public repo/);
     assert.match(access.summary, /rejected/);
+  });
+});
+
+describe("write capability derivation (issue #193)", () => {
+  it("disables edits when a valid token cannot push, naming the scopes", () => {
+    const access = deriveForgeAccess({
+      repoPublic: true,
+      tokenPresent: true,
+      tokenValid: true,
+      repoWritePermission: false,
+    });
+    assert.equal(access.auth, "lacks-write-scope");
+    assert.equal(access.canEdit, false);
+    assert.equal(access.authLabel, "Token lacks write scope");
+    assert.equal(access.authVariant, "warning");
+    assert.match(access.summary, /lacks write scope|cannot push/);
+    assert.match(access.summary, /write:issue/);
+    assert.equal(access.requiredScopes, "read:user, read:repository, write:issue");
+  });
+
+  it("enables edits for a valid token the repo reports as write-capable", () => {
+    const access = deriveForgeAccess({
+      repoPublic: false,
+      tokenPresent: true,
+      tokenValid: true,
+      repoWritePermission: true,
+    });
+    assert.equal(access.auth, "authenticated");
+    assert.equal(access.canEdit, true);
+    assert.equal(access.authVariant, "success");
+  });
+
+  it("falls back to token validity when the host returns no permissions", () => {
+    const access = deriveForgeAccess({
+      repoPublic: true,
+      tokenPresent: true,
+      tokenValid: true,
+      repoWritePermission: null,
+    });
+    assert.equal(access.auth, "authenticated");
+    assert.equal(access.canEdit, true);
+  });
+
+  it("does not claim write scope for an anonymous or rejected token", () => {
+    const anonymous = deriveForgeAccess({ repoPublic: true, tokenPresent: false });
+    assert.equal(anonymous.auth, "anonymous");
+    assert.equal(anonymous.canEdit, false);
+    const rejected = deriveForgeAccess({
+      repoPublic: true,
+      tokenPresent: true,
+      tokenValid: false,
+      repoWritePermission: false,
+    });
+    assert.equal(rejected.auth, "invalid-token");
+    assert.equal(rejected.canEdit, false);
+  });
+});
+
+describe("forgeCapabilityFromRepo permission mapping (issue #193)", () => {
+  it("maps Forgejo/GitHub permissions.push and permissions.admin", () => {
+    assert.equal(forgeCapabilityFromRepo({ permissions: { push: true, admin: false } }), true);
+    assert.equal(forgeCapabilityFromRepo({ permissions: { push: false, admin: true } }), true);
+    assert.equal(forgeCapabilityFromRepo({ permissions: { push: false, admin: false } }), false);
+  });
+
+  it("maps GitLab access_level with Developer (30) as the write threshold", () => {
+    assert.equal(forgeCapabilityFromRepo({ access_level: 40 }), true);
+    assert.equal(forgeCapabilityFromRepo({ access_level: 30 }), true);
+    assert.equal(forgeCapabilityFromRepo({ access_level: 20 }), false);
+    assert.equal(forgeCapabilityFromRepo({ access_level: 10 }), false);
+  });
+
+  it("returns null when the payload carries no recognizable permission object", () => {
+    assert.equal(forgeCapabilityFromRepo({ permissions: {} }), null);
+    assert.equal(forgeCapabilityFromRepo({}), null);
+    assert.equal(forgeCapabilityFromRepo(null), null);
+    assert.equal(forgeCapabilityFromRepo("nope"), null);
+  });
+
+  it("exposes one scope list per forge family", () => {
+    assert.equal(forgeWriteScopeList("forgejo"), "read:user, read:repository, write:issue");
+    assert.ok(FORGE_WRITE_SCOPES.github.includes("repo"));
+    assert.ok(FORGE_WRITE_SCOPES.gitlab.includes("api"));
   });
 });
 
@@ -989,6 +1076,30 @@ describe("label color metadata (issue #182)", () => {
     assert.deepEqual(planLabelChip({ name: "bug", color: "nope" }), {
       kind: "single",
       half: { text: "bug" },
+    });
+  });
+
+  it("compacts a chip half so scoped labels share a wrap line", () => {
+    assert.equal(LABEL_VALUE_MAX_LENGTH, 10);
+    assert.equal(compactLabelValue("0-orchestrator"), "0-orchest…");
+    assert.equal(compactLabelValue("4-backburner"), "4-backbur…");
+    // A value at or under the cap passes through untouched.
+    assert.equal(compactLabelValue("1-wip"), "1-wip");
+    assert.equal(compactLabelValue(""), "");
+  });
+
+  it("ellipsizes the value half while the scope half stays whole", () => {
+    assert.deepEqual(planLabelChip({ name: "attention/0-orchestrator", color: "b60205" }), {
+      kind: "scoped",
+      scope: { text: "attention", background: "#a50205", textColor: "#ffffff" },
+      value: { text: "0-orchest…", background: "#b60205", textColor: "#ffffff" },
+    });
+  });
+
+  it("compacts a long unscoped name as a single pill", () => {
+    assert.deepEqual(planLabelChip({ name: "needs-reproduction" }), {
+      kind: "single",
+      half: { text: "needs-rep…" },
     });
   });
 

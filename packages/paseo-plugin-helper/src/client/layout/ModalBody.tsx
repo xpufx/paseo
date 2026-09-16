@@ -37,6 +37,15 @@ export interface ModalBodyProps {
    */
   size?: ModalBodySize;
   /**
+   * Optional upper bound (px) on the content column width. On large viewports
+   * the host still allocates a wide dialog, but the body's content column stays
+   * readable instead of stretching edge-to-edge: `width: "100%"` keeps it fluid
+   * below the cap and `alignSelf: "center"` centers the capped column. Undefined
+   * (default) preserves the fully fluid body. This does not dictate the dialog
+   * frame; widen the frame with `size` when dense content genuinely needs room.
+   */
+  maxContentWidth?: number;
+  /**
    * "scroll" (default): header renders INSIDE the helper-owned compact/mobile
    * ScrollView and moves with content. "pinned": header renders above that
    * compact/mobile scroller; on desktop the host remains the scroll owner.
@@ -117,6 +126,7 @@ export function ModalBody({
   headerStyle,
   headerMode = "scroll",
   size = "default",
+  maxContentWidth,
   scrollMode = "auto",
   debugTag,
   extraBottomInset = 0,
@@ -141,6 +151,12 @@ export function ModalBody({
     getOptionalClientHost(),
     FallbackScrollView as unknown as HostScrollView,
   );
+  // Optional readability cap on the content column. `width: "100%"` keeps the
+  // column fluid under the cap; `alignSelf: "center"` centers it over the cap.
+  const columnStyle =
+    maxContentWidth !== undefined
+      ? ({ width: "100%", maxWidth: maxContentWidth, alignSelf: "center" } as ViewStyle)
+      : undefined;
   const innerRef = useRef<ScrollViewInstance>(null);
 
   const setRefs = (node: ScrollViewInstance | null) => {
@@ -199,6 +215,7 @@ export function ModalBody({
           paddingBottom: bottomPadding,
           gap: padding.gap,
         },
+        columnStyle,
         contentContainerStyle,
       ]}
     >
@@ -229,6 +246,7 @@ export function ModalBody({
             paddingBottom: bottomPadding,
             gap: padding.gap,
           },
+          columnStyle,
           contentContainerStyle,
         ]}
       >
@@ -269,6 +287,7 @@ export function ModalBody({
             paddingBottom: bottomPadding,
             gap: padding.gap,
           },
+          columnStyle,
           contentContainerStyle,
         ]}
       >

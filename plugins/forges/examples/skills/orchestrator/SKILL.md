@@ -6,12 +6,28 @@ description: EXAMPLE skill — workflow, pre-flight audits, agent synchronizatio
 > [!WARNING]
 > **This is an example, not a drop-in.** It encodes one team's board
 > conventions (labels, slash commands, issue-link format) built on the
-> label set this plugin can install. Adapt the labels, commands, and
-> escalation rules to your own workflow before use. See `../../README.md`.
+> scoped label seed in `../../labels/label-base.yaml`. This variant operates
+> through the `forges` plugin's own surfaces and embedded `/api/v1` client and
+> needs no forge CLI; the richer CLI twin is
+> [`../orchestrator-fgjx/SKILL.md`](../orchestrator-fgjx/SKILL.md). Adapt the
+> labels, commands, and escalation rules to your own workflow before use. See
+> `../../README.md` and `../../docs/workflow.md`.
 
 # Orchestrator Skill
 
 You coordinate the fleet. Default: **delegate unless stopped**. Labels describe state; they never gate action.
+
+> [!WARNING]
+> **Reads are paged — page 1 is not the board.** Issue lists, search results,
+> label lists, and comment lists each return a single page, and the default page
+> size is **server-defined and can change**, so an unpaged read silently
+> truncates. Page every list read before you reason about it (`limit`/`page`, or
+> follow `Link` / `X-Total-Count`): never rank, dispatch, or conclude "no
+> results" from one unpaged call. The board overview and label chips are
+> collections too — a surface that lists results must page internally rather
+> than render a truncated set (#189). Worked example: an unpaged `fgj label
+> list` returned **30 of 59** labels, producing false "labels not found" errors
+> (#197).
 
 ## 1. Binding stops (only two)
 
@@ -88,9 +104,30 @@ routine webhook or dismiss it because it lacks a conventional command verb.
 
 - Every issue number in chat responses and issue comments MUST be a clickable Markdown link to `https://forge.example.com/your-org/your-repo/issues/<n>` (e.g. [#98](https://forge.example.com/your-org/your-repo/issues/98)). Never emit a bare `#nnn`.
 
-## 9. Forgejo labels: one flag per label
+## 9. Forgejo labels: one scoped label at a time
 
-- `fgjx issue edit` does NOT split commas: `--add-label 'a,b'` is sent as one
-  unknown label name and silently ignored. Repeat the flag instead:
-  `--add-label 'a' --add-label 'b'` (same for `--remove-label`).
-- Always read back with `fgjx issue view` and confirm the label set changed.
+- Label writes go through the plugin (`forge.set-label` via the Labels tab /
+  label chips). It adds the new label **and** explicitly removes any same-scope
+  mate, so the result is correct even on boards whose scope names differ from
+  the canonical set — never rely on DB-level exclusivity alone.
+- Verify the set changed by re-reading the issue (plugin detail view or
+  `GET /repos/{owner}/{repo}/issues/{n}`).
+- Unknown scopes are rejected before any API call. No label CLI is required.
+
+## 10. Comment & chat budget (keep the board readable)
+
+- Issue comments and pre-flight/presentation posts: **one screen (~15 lines)**.
+  Summary first — what changed, commit SHA, test result, what is left.
+- Analysis, checklists, and design detail go in the issue **body** or a linked
+  child issue, not a comment.
+- Never paste diffs, full test logs, or restate code already in the body.
+- One comment per handoff; no per-step narration.
+- Chat: one line pointing at the ticket; never duplicate the substance.
+- Comment length is not a status signal. A short, complete comment beats a long
+  one.
+
+## 11. Cold start (no labels yet)
+
+The operator may never set labels; a ticket can arrive bare. Never treat an
+unlabeled ticket as out of scope or blocked: infer the state, apply the labels
+yourself, and dispatch. The board is bootstrapped by agents, not by the operator.

@@ -3,6 +3,7 @@ import {
   defineContract,
   defineSettingsContract,
   normalizeForgeHost,
+  truncate,
 } from "./vendor/paseo-plugin-helper/index";
 
 export const FORGES_PLUGIN_ID = "forges";
@@ -119,6 +120,23 @@ export interface LabelChipHalf {
 }
 
 /**
+ * Longest value half a chip renders before it is tail-ellipsized. Scoped names
+ * such as `attention/0-orchestrator` are what widen a chip past a wrap line, so
+ * the value is bounded while the scope half stays whole and legible.
+ */
+export const LABEL_VALUE_MAX_LENGTH = 10;
+
+/**
+ * Compact one chip half for the wrapping label rows. A value wider than
+ * `LABEL_VALUE_MAX_LENGTH` is tail-ellipsized, so several chips share a line
+ * instead of one per row. Mirrors `shortLabelName` as a pure, unit-testable
+ * display transform; callers never print the raw label name.
+ */
+export function compactLabelValue(value: string): string {
+  return truncate(value, LABEL_VALUE_MAX_LENGTH);
+}
+
+/**
  * How a label renders: a single-segment pill for an unscoped name, or a
  * two-segment pill for a scoped name. A scoped name is always split, so the
  * raw `scope/value` slash form is never rendered even when no color is known.
@@ -132,19 +150,21 @@ export function planLabelChip(label: ForgeLabel): LabelChipPlan {
   const textColor = labelTextColor(label.color);
   const parts = splitScopedLabel(label.name);
   if (!parts) {
+    const text = compactLabelValue(label.name);
     return {
       kind: "single",
       half:
         background && textColor
-          ? { text: label.name, background, textColor }
-          : { text: label.name },
+          ? { text, background, textColor }
+          : { text },
     };
   }
+  const value = compactLabelValue(parts.value);
   if (!background || !textColor) {
     return {
       kind: "scoped",
       scope: { text: parts.scope },
-      value: { text: parts.value },
+      value: { text: value },
     };
   }
   return {
@@ -154,7 +174,7 @@ export function planLabelChip(label: ForgeLabel): LabelChipPlan {
       background: darkenLabelColor(label.color) ?? background,
       textColor,
     },
-    value: { text: parts.value, background, textColor },
+    value: { text: value, background, textColor },
   };
 }
 
@@ -177,6 +197,8 @@ export const OpenIssuesOutputSchema = z.object({
   repoPublic: z.boolean().nullable().default(null),
   tokenPresent: z.boolean().default(false),
   tokenValid: z.boolean().nullable().default(null),
+  /** Repo-reported write capability; null when the host returned none (#193). */
+  repoWritePermission: z.boolean().nullable().default(null),
   error: z.string().optional(),
 });
 export type OpenIssuesOutput = z.infer<typeof OpenIssuesOutputSchema>;
@@ -655,18 +677,71 @@ export function formatIssueCountLabel(count: number | null | undefined): string 
 }
 
 // ---------------------------------------------------------------------------
-// Repo access state (issue #152). Writes need an accepted token on BOTH
+// Repo access state (issues #152, #193). Writes need an accepted token on BOTH
 // public and private repos, so edit capability derives from visibility AND
-// credential presence/validity, never from visibility alone. This is the
+// credential presence/validity, never from visibility alone. Since #193 it also
+// requires write capability on the repo, which is read from the repo response's
+// permission object rather than inferred from token validity. This is the
 // single source of truth both client pages render from.
 // ---------------------------------------------------------------------------
 
 export type ForgeVisibility = "public" | "private" | "unknown";
 export type ForgeAuthState =
   | "authenticated"
+  | "lacks-write-scope"
   | "invalid-token"
   | "anonymous"
   | "unknown";
+
+/**
+ * Write capability the host reported for the configured token against the repo.
+ * null means the host returned no permission object, so edit capability falls
+ * back to the bare token-validity heuristic (issue #193).
+ */
+export type ForgeRepoWritePermission = boolean | null;
+
+/**
+ * The scopes a Forgejo/Gitea token needs for this plugin's write surface,
+ * by forge family. `read:user` is what the identity probe (`GET /user`, still
+ * the fallback capability path) requires; a token accepted there without a
+ * write scope is valid but under-scoped, not rejected.
+ */
+export const FORGE_WRITE_SCOPES: Record<"forgejo" | "github" | "gitlab", string[]> = {
+  forgejo: ["read:user", "read:repository", "write:issue"],
+  github: ["read:user", "repo"],
+  gitlab: ["read_user", "read_api", "api"],
+};
+
+/** Human-readable minimum scopes for a forge, e.g. `read:user, read:repository, write:issue`. */
+export function forgeWriteScopeList(
+  family: "forgejo" | "github" | "gitlab" = "forgejo",
+): string {
+  return FORGE_WRITE_SCOPES[family].join(", ");
+}
+
+/**
+ * Resolve write capability from a forge repo payload (issue #193) so a
+ * host-accepted token that lacks write scope is not treated as edit-capable.
+ * One mapping per forge family keeps #137 multi-forge coherent:
+ * - Forgejo/Gitea and GitHub: `permissions.push` (or `permissions.admin`).
+ * - GitLab: `access_level >= 30` (Developer/maintainer; 30 is Developer).
+ * Returns null when the payload carries no recognizable permission object, so
+ * callers keep the token-validity fallback instead of guessing `false`.
+ */
+export function forgeCapabilityFromRepo(payload: unknown): ForgeRepoWritePermission {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const permissions = record.permissions;
+  if (permissions && typeof permissions === "object") {
+    const perms = permissions as Record<string, unknown>;
+    if (typeof perms.push === "boolean" || typeof perms.admin === "boolean") {
+      return perms.push === true || perms.admin === true;
+    }
+  }
+  const accessLevel = record.access_level ?? record.accessLevel;
+  if (typeof accessLevel === "number") return accessLevel >= 30;
+  return null;
+}
 
 export interface ForgeAccessInput {
   /** Anonymous repo probe: true public, false private/missing, null unknown. */
@@ -675,12 +750,14 @@ export interface ForgeAccessInput {
   tokenPresent?: boolean | null;
   /** Token probe: true accepted, false rejected, null not probed. */
   tokenValid?: boolean | null;
+  /** Repo-reported write capability; null when the host returned none. */
+  repoWritePermission?: ForgeRepoWritePermission;
 }
 
 export interface ForgeAccessState {
   visibility: ForgeVisibility;
   auth: ForgeAuthState;
-  /** Labels and comments require an accepted token, public repo or not. */
+  /** Labels and comments require an accepted, write-scoped token. */
   canEdit: boolean;
   /** Chip label for visibility, or null when unknown. */
   visibilityLabel: string | null;
@@ -692,12 +769,15 @@ export interface ForgeAccessState {
   authVariant: "success" | "danger" | "warning" | "neutral";
   /** One-line human explanation shared by both pages. */
   summary: string;
+  /** Minimum token scopes for the write surface, e.g. for a token hint. */
+  requiredScopes: string;
 }
 
 /**
- * Derive the combined access state from the two independent probes.
- * `canEdit` is true only for an accepted token: a public repo with a valid
- * token is editable, while a public repo without one stays read-only.
+ * Derive the combined access state from the probes. `canEdit` requires an
+ * accepted token AND write capability: false when the host explicitly reports
+ * the token cannot push, and (issue #193) otherwise the bare validity result
+ * when the host returned no permission object.
  */
 export function deriveForgeAccess(input: ForgeAccessInput = {}): ForgeAccessState {
   const visibility: ForgeVisibility =
@@ -708,8 +788,9 @@ export function deriveForgeAccess(input: ForgeAccessInput = {}): ForgeAccessStat
         : "unknown";
 
   let auth: ForgeAuthState;
-  if (input.tokenValid === true) auth = "authenticated";
-  else if (input.tokenPresent !== true) auth = "anonymous";
+  if (input.tokenValid === true) {
+    auth = input.repoWritePermission === false ? "lacks-write-scope" : "authenticated";
+  } else if (input.tokenPresent !== true) auth = "anonymous";
   else if (input.tokenValid === false) auth = "invalid-token";
   else auth = "unknown";
 
@@ -724,6 +805,10 @@ export function deriveForgeAccess(input: ForgeAccessInput = {}): ForgeAccessStat
     authLabel = "Authenticated";
     authIcon = "KeyRound";
     authVariant = "success";
+  } else if (auth === "lacks-write-scope") {
+    authLabel = "Token lacks write scope";
+    authIcon = "ShieldAlert";
+    authVariant = "warning";
   } else if (auth === "invalid-token") {
     authLabel = "Token rejected";
     authIcon = "AlertTriangle";
@@ -747,18 +832,23 @@ export function deriveForgeAccess(input: ForgeAccessInput = {}): ForgeAccessStat
     authIcon,
     authVariant,
     summary: accessSummary(visibility, auth),
+    requiredScopes: forgeWriteScopeList(),
   };
 }
 
 function accessSummary(visibility: ForgeVisibility, auth: ForgeAuthState): string {
+  const scopeHint = `required scopes: ${forgeWriteScopeList()}.`;
+
   const authClause =
     auth === "authenticated"
-      ? "Token accepted — reads and edits enabled."
-      : auth === "invalid-token"
-        ? "Saved token was rejected — edits disabled."
-        : auth === "anonymous"
-          ? "No token saved — edits disabled."
-          : "Token state unverified — edits disabled.";
+      ? "Token accepted with write scope — reads and edits enabled."
+      : auth === "lacks-write-scope"
+        ? `Token accepted but it cannot push — edits disabled; ${scopeHint}`
+        : auth === "invalid-token"
+          ? "Saved token was rejected — edits disabled."
+          : auth === "anonymous"
+            ? "No token saved — edits disabled."
+            : "Token state unverified — edits disabled.";
 
   if (visibility === "public") {
     return `Public repo — anonymous reads work. ${authClause}`;
@@ -1252,6 +1342,8 @@ export const IssueDetailOutputSchema = z.object({
   repoPublic: z.boolean().nullable().default(null),
   tokenPresent: z.boolean().default(false),
   tokenValid: z.boolean().nullable().default(null),
+  /** Repo-reported write capability; null when the host returned none (#193). */
+  repoWritePermission: z.boolean().nullable().default(null),
   error: z.string().optional(),
 });
 export type IssueDetailOutput = z.infer<typeof IssueDetailOutputSchema>;

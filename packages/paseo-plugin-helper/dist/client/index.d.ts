@@ -429,8 +429,14 @@ interface BadgeProps {
     dot?: boolean;
     style?: StyleProp<ViewStyle>;
     textStyle?: StyleProp<TextStyle>;
+    /**
+     * When set, every case-insensitive occurrence of the query inside `label` is
+     * painted with the accent highlight. The query is matched literally, never as
+     * a regular expression.
+     */
+    highlightQuery?: string;
 }
-declare function Badge({ label, variant, styleVariant, size, icon, dot, style, textStyle, }: BadgeProps): React__default.JSX.Element;
+declare function Badge({ label, variant, styleVariant, size, icon, dot, style, textStyle, highlightQuery, }: BadgeProps): React__default.JSX.Element;
 
 interface StatusDotProps {
     variant?: StatusVariant;
@@ -456,8 +462,13 @@ interface CardHeaderProps {
     style?: StyleProp<ViewStyle>;
     titleStyle?: StyleProp<TextStyle>;
     subtitleStyle?: StyleProp<TextStyle>;
+    /**
+     * When set, every case-insensitive (literal, non-regex) occurrence of the
+     * query inside `title` is painted with the accent highlight.
+     */
+    highlightQuery?: string;
 }
-declare function CardHeader({ title, subtitle, value, badge, action, icon, style, titleStyle, subtitleStyle, }: CardHeaderProps): React__default.JSX.Element;
+declare function CardHeader({ title, subtitle, value, badge, action, icon, style, titleStyle, subtitleStyle, highlightQuery, }: CardHeaderProps): React__default.JSX.Element;
 declare function Card({ children, variant, style, noPadding }: CardProps): React__default.JSX.Element;
 declare namespace Card {
     var Header: typeof CardHeader;
@@ -528,6 +539,28 @@ interface TextInputProps {
     onSubmitEditing?: () => void;
 }
 declare function TextInput({ value, onChangeText, label, placeholder, helperText, errorText, secureTextEntry, keyboardType, autoCapitalize, autoCorrect, disabled, mono, multiline, numberOfLines, style, inputStyle, onSubmitEditing, }: TextInputProps): React__default.JSX.Element;
+
+interface SelectOption {
+    label: string;
+    value: string;
+}
+interface SelectProps {
+    value: string;
+    options: SelectOption[];
+    onValueChange: (value: string) => void;
+    label?: string;
+    /** Compact/pill scale shared with {@link Badge}: `"md"` (default) or `"sm"`. */
+    size?: BadgeSize;
+    placeholder?: string;
+    disabled?: boolean;
+    style?: StyleProp<ViewStyle>;
+}
+/**
+ * Compact single-choice picker sized to sit inside a {@link FormRow}. The
+ * closed trigger stays one line tall; opening reveals a bounded, scrollable
+ * option list, so a long list degrades to scrolling rather than overflow.
+ */
+declare function Select({ value, options, onValueChange, label, size, placeholder, disabled, style, }: SelectProps): React__default.JSX.Element;
 
 interface ToggleProps {
     value: boolean;
@@ -839,6 +872,28 @@ interface SectionHeaderProps {
 }
 declare function SectionHeader({ title, count, badgeVariant, style, textStyle, }: SectionHeaderProps): React__default.ReactElement | null;
 
+interface HighlightedTextProps {
+    /** Source text rendered as-is when no query is active. */
+    text: string;
+    /** Active search query; matched case-insensitively and never as a regex. */
+    query: string;
+    style?: StyleProp<TextStyle>;
+    /**
+     * Overrides the matched-run style. Defaults to the theme accent background
+     * with `accentForeground` text so a match reads as selected.
+     */
+    highlightStyle?: StyleProp<TextStyle>;
+    numberOfLines?: number;
+    selectable?: boolean;
+}
+/**
+ * `<Text>` that paints every case-insensitive occurrence of `query` with the
+ * accent background/foreground. The query is matched literally, so user input
+ * is never evaluated as a regular expression. Renders the plain text when the
+ * query is empty or absent.
+ */
+declare function HighlightedText({ text, query, style, highlightStyle, numberOfLines, selectable, }: HighlightedTextProps): React__default.JSX.Element;
+
 type ModalBodySize = "default" | "large";
 interface ModalBodyProps {
     children: ReactNode;
@@ -855,6 +910,15 @@ interface ModalBodyProps {
      * per-plugin width/minWidth literal; the host still owns the final size.
      */
     size?: ModalBodySize;
+    /**
+     * Optional upper bound (px) on the content column width. On large viewports
+     * the host still allocates a wide dialog, but the body's content column stays
+     * readable instead of stretching edge-to-edge: `width: "100%"` keeps it fluid
+     * below the cap and `alignSelf: "center"` centers the capped column. Undefined
+     * (default) preserves the fully fluid body. This does not dictate the dialog
+     * frame; widen the frame with `size` when dense content genuinely needs room.
+     */
+    maxContentWidth?: number;
     /**
      * "scroll" (default): header renders INSIDE the helper-owned compact/mobile
      * ScrollView and moves with content. "pinned": header renders above that
@@ -922,7 +986,7 @@ declare const ModalBodyScrollOwnerContext: React__default.Context<"helper" | "ho
  * Requires the host <Modal.Content scrollable={false}> so no outer sheet
  * scroller drags the header along.
  */
-declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, headerMode, size, scrollMode, debugTag, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
+declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, headerMode, size, maxContentWidth, scrollMode, debugTag, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
 
 interface ModalContentProps extends Omit<ModalBodyProps, "scrollMode"> {
     children: ReactNode;
@@ -1770,4 +1834,4 @@ interface ForgeIconProps extends ForgeMarkInput {
  */
 declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, normalizeSnapshotScope, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, normalizeSnapshotScope, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };

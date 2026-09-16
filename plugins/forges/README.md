@@ -20,6 +20,13 @@ GitLab would need a separate API client.
 - **Live label vocabulary.** Scopes are derived from the labels actually on the
   board, so a foreign board degrades gracefully instead of failing on an
   unknown scope.
+- **Paged reads.** Issue list, keyword search, label list, and comment list are
+  all collections: each call returns **one page**, and the default page size is
+  **server-defined and can change**. Treat every list as paged
+  (`limit`/`page`, or follow `Link`/`X-Total-Count`) instead of assuming a
+  single call is complete — one unpaged call is never evidence of "no results".
+  A surface that lists results should page internally rather than render a
+  truncated set (#189).
 - **Example skills.** Our agent workflow ships under `examples/` as a starting
   point to adapt — see [`examples/README.md`](./examples/README.md).
 
@@ -50,8 +57,13 @@ Open the plugin's **Settings** tab inside a workspace.
   `origin`. An explicit selection wins absolutely: an invalid or unreachable
   selection fails loudly instead of silently deriving.
 - **API token.** Saved per host in daemon-side plugin settings. Reads work
-  anonymously on public repos; labels and comments need an accepted token on
-  both public and private repos.
+  anonymously on public repos; labels and comments need an accepted token with
+  write scope on both public and private repos. For Forgejo/Gitea create the
+  PAT with `read:user`, `read:repository`, and `write:issue` (add
+  `write:repository` if label management still 403s). Edit capability is read
+  from the repo's permission object (`permissions.push`/`admin`, or GitLab
+  `access_level >= 30`), so a token that is accepted but under-scoped shows
+  "token lacks write scope" instead of enabling edits.
 
 ## Development
 
@@ -68,4 +80,7 @@ node packages/paseo-plugin-helper/bin/paseo-plugin-helper.js audit plugins/forge
 ```
 
 See [`docs/specs/forge-workflow-gui.md`](./docs/specs/forge-workflow-gui.md)
-for the data model, RPC contracts, and UI surfaces.
+for the data model, RPC contracts, and UI surfaces, and
+[`docs/workflow.md`](./docs/workflow.md) for the end-to-end agent workflow
+(hook service, label usage, agent responsibilities, and what the plugin ships
+versus what an adopter supplies).
