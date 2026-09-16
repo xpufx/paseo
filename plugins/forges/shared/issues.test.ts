@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, deriveForgejoAccess, extractBareForgejoIssueUrls, forgeTargetsForWorkspace, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
+import { activeForgeForDirectory, deriveForgejoAccess, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -437,5 +437,35 @@ describe("extractBareForgejoIssueUrls quoted-content guard (issue #143)", () => 
       `See ${url(42)} first\n\n| [#33](${url(33)}) | mirror readiness |\n`,
     );
     assert.deepEqual(links.map((link) => link.number), [42]);
+  });
+});
+
+describe("extractForgejoIssueUrls comment anchors (issue #154)", () => {
+  const url = (n: number) => `https://${REAL_HOST}/xpufx/paseo/issues/${n}`;
+
+  it("keeps the #issuecomment anchor in the url and exposes its id", () => {
+    const links = extractBareForgejoIssueUrls(`See ${url(152)}#issuecomment-99001 for details`);
+    assert.equal(links.length, 1);
+    assert.equal(links[0].number, 152);
+    assert.equal(links[0].commentId, 99001);
+    assert.ok(links[0].url.endsWith("#issuecomment-99001"));
+  });
+
+  it("leaves non-anchored urls unchanged without a commentId", () => {
+    const links = extractBareForgejoIssueUrls(`See ${url(152)} for details`);
+    assert.equal(links.length, 1);
+    assert.equal(links[0].url, url(152));
+    assert.equal(links[0].commentId, undefined);
+  });
+
+  it("populates the anchor through the non-bare extractor too", () => {
+    const links = extractForgejoIssueUrls(`${url(152)}#issuecomment-99001`);
+    assert.equal(links[0].commentId, 99001);
+    assert.equal(links[0].url, `${url(152)}#issuecomment-99001`);
+  });
+
+  it("still skips markdown-linked anchored urls as bare rows", () => {
+    const links = extractBareForgejoIssueUrls(`[comment](${url(152)}#issuecomment-99001)`);
+    assert.deepEqual(links, []);
   });
 });

@@ -239,11 +239,13 @@ export interface ForgejoIssueLink {
   owner: string;
   repo: string;
   number: number;
+  /** Anchor comment id when the URL carries `#issuecomment-<id>`. */
+  commentId?: number;
   url: string;
 }
 
 const ISSUE_URL_PATTERN =
-  /https?:\/\/([^/\s#?]+)\/([^/\s#?]+)\/([^/\s#?]+)\/issues\/(\d+)(?![/\w])/g;
+  /https?:\/\/([^/\s#?]+)\/([^/\s#?]+)\/([^/\s#?]+)\/issues\/(\d+)(?:#issuecomment-(\d+))?(?![/\w])/g;
 
 /**
  * Extract issue URLs (host/owner/repo/issues/N) from chat text for the
@@ -260,6 +262,7 @@ export function extractForgejoIssueUrls(text: string | undefined | null): Forgej
       owner: match[2],
       repo: match[3],
       number: Number(match[4]),
+      commentId: match[5] != null ? Number(match[5]) : undefined,
       url: match[0],
     });
   }
@@ -308,6 +311,7 @@ export function extractBareForgejoIssueUrls(text: string | undefined | null): Fo
       owner: match[2],
       repo: match[3],
       number: Number(match[4]),
+      commentId: match[5] != null ? Number(match[5]) : undefined,
       url: match[0],
     });
   }
