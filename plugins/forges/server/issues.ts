@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { createPluginLogger } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   INSTALL_LABEL_MODES,
@@ -30,6 +28,7 @@ import {
 } from "../shared/issues.js";
 import type { RpcOutput } from "../shared/vendor/paseo-plugin-helper/index.ts";
 import { ForgejoClient, type ForgejoIssueDetail } from "./forge-client.js";
+import { gitOriginForDirectory } from "./git-origin.js";
 
 const log = createPluginLogger("forges");
 
@@ -84,18 +83,6 @@ function noteListSuccess(host: string, repo: string): void {
 }
 
 import { storedForgeSelection, tokenForHost } from "./settings.js";
-
-/** Read the origin remote without shelling: parse .git/config directly. */
-async function gitOriginForDirectory(directory: string): Promise<string | null> {
-  try {
-    const config = await readFile(join(directory, ".git", "config"), "utf8");
-    const section = /\[remote\s+"origin"\][^\[]*?url\s*=\s*(.+)/.exec(config);
-    const url = section?.[1]?.trim();
-    return url || null;
-  } catch {
-    return null;
-  }
-}
 
 type ResolvedRepo =
   | { ok: true; host: string; repo: string; derivedRemote: string | null; remoteSource: "explicit" | "derived" }

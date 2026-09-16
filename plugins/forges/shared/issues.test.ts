@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, forgejoIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, deriveForgejoAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgejoIssueUrls, extractForgejoIssueUrls, forgeTargetsForWorkspace, forgejoIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel, workspaceNameKey } from "./issues.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
 const REAL_HOST = "forge.example.com";
@@ -252,6 +252,36 @@ describe("settings display regression (issue #152)", () => {
     assert.equal(displayNameForDirectory(settings, DIR, undefined), "pas");
     assert.equal(displayNameForDirectory(settings, "/other/workspace", "your-org/your-repo"), "your-org/your-repo");
     assert.equal(displayNameForDirectory({ namesByDirectory: {} }, DIR, null), null);
+  });
+});
+
+describe("workspace name key (issue #160)", () => {
+  const MAIN = "/work/project";
+  const WORKTREE = "/work/project-worktrees/feature-x";
+
+  it("keeps the main checkout keyed by its own directory", () => {
+    assert.equal(workspaceNameKey(MAIN, MAIN), MAIN);
+  });
+
+  it("maps a worktree to its project/main-repo root", () => {
+    assert.equal(workspaceNameKey(WORKTREE, MAIN), MAIN);
+    assert.equal(workspaceNameKey(WORKTREE, undefined), WORKTREE);
+  });
+
+  it("normalizes trailing separators so read and write agree", () => {
+    assert.equal(workspaceNameKey(`${MAIN}/`, undefined), MAIN);
+    assert.equal(workspaceNameKey(`${WORKTREE}//`, `${MAIN}/`), MAIN);
+  });
+
+  it("returns an empty key when neither path is known", () => {
+    assert.equal(workspaceNameKey(undefined, undefined), "");
+    assert.equal(workspaceNameKey(null, null), "");
+  });
+
+  it("lets a worktree read the name written for the main checkout", () => {
+    const settings = { namesByDirectory: { [MAIN]: "pas" } };
+    const key = workspaceNameKey(WORKTREE, MAIN);
+    assert.equal(displayNameForDirectory(settings, key, "your-org/your-repo"), "pas");
   });
 });
 

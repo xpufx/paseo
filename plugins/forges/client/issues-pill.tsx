@@ -65,6 +65,7 @@ import {
   type ForgejoIssue,
   type IssueComment,
   type MarkdownLiteSpan,
+  workspaceNameKey,
 } from "../shared/issues.js";
 import { useActiveForgeIdentity } from "./active-forge.js";
 import { ForeignInlineMark } from "./foreign-link.js";
@@ -100,11 +101,24 @@ function useDirectory(workspaceId: string): string | undefined {
   ) as string | undefined;
 }
 
+/** Main-repo root backing a workspace (shared by its worktrees), if known. */
+function useWorkspaceRoot(workspaceId: string): string | undefined {
+  return useWorkspace(
+    workspaceId,
+    (w: PluginWorkspaceSnapshot) => w?.projectRootPath,
+  ) as string | undefined;
+}
+
+/** Settings key for the workspace display name (worktrees share the main root). */
+function useWorkspaceNameKey(workspaceId: string): string {
+  return workspaceNameKey(useDirectory(workspaceId), useWorkspaceRoot(workspaceId));
+}
+
 /** Workspace display name everywhere: explicit label, else resolved repo. */
 function useDisplayName(workspaceId: string, inferredRepo: string | null | undefined): string | null {
-  const directory = useDirectory(workspaceId);
+  const nameKey = useWorkspaceNameKey(workspaceId);
   const { settings } = usePluginSettings(forgejoSettingsContract);
-  return displayNameForDirectory(settings, directory, inferredRepo);
+  return displayNameForDirectory(settings, nameKey, inferredRepo);
 }
 
 function useOpenIssues(workspaceId: string, agentId?: string) {
@@ -795,6 +809,8 @@ export function ForgejoIssuesView({
     tokenValid: data?.tokenValid,
   });
   const directory = useDirectory(workspaceId);
+  const projectRootPath = useWorkspaceRoot(workspaceId);
+  const nameKey = workspaceNameKey(directory, projectRootPath);
   const activeForge = useActiveForgeIdentity(directory);
   const { settings, updateSettings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
   // Git-origin context queried separately so the token/name fields render from
@@ -820,7 +836,7 @@ export function ForgejoIssuesView({
   if (activeForgeValue && !forgeTargets.includes(activeForgeValue)) {
     forgeOptions.push({ label: activeForgeValue, value: activeForgeValue });
   }
-  const storedName = directory ? (settings.namesByDirectory?.[directory] ?? "") : "";
+  const storedName = nameKey ? (settings.namesByDirectory?.[nameKey] ?? "") : "";
   const nameValue = nameDraft ?? storedName;
   const storedToken = effectiveHost ? (settings.tokensByHost?.[effectiveHost] ?? "") : "";
   const tokenValue = tokenDraft ?? storedToken;
@@ -882,8 +898,8 @@ export function ForgejoIssuesView({
       }
       if (nameValue !== storedName) {
         const next = { ...(settings.namesByDirectory ?? {}) };
-        if (nameValue.trim()) next[directory] = nameValue.trim();
-        else delete next[directory];
+        if (nameValue.trim()) next[nameKey] = nameValue.trim();
+        else delete next[nameKey];
         updates.namesByDirectory = next;
       }
       await updateSettingsAsync(updates);

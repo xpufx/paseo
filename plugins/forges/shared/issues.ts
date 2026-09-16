@@ -557,16 +557,32 @@ function accessSummary(visibility: ForgejoVisibility, auth: ForgejoAuthState): s
 }
 
 /**
+ * Key under which a workspace's display name is persisted. A linked worktree
+ * shares its main checkout's name, so the project root wins when known and the
+ * workspace directory is the fallback. Trailing separators are trimmed so the
+ * read and write paths always agree.
+ */
+export function workspaceNameKey(
+  directory: string | undefined | null,
+  projectRootPath: string | undefined | null,
+): string {
+  const normalize = (value: string | undefined | null): string =>
+    typeof value === "string" ? value.trim().replace(/[\\/]+$/, "") : "";
+  return normalize(projectRootPath) || normalize(directory);
+}
+
+/**
  * Display name for a workspace: explicit user label wins, otherwise the
- * resolved repo (owner/repo) is inferred. Null when neither exists.
+ * resolved repo (owner/repo) is inferred. Null when neither exists. The caller
+ * passes the same key `workspaceNameKey` produces on write.
  */
 export function displayNameForDirectory(
   settings: Pick<ForgejoSettings, "namesByDirectory"> | undefined | null,
-  directory: string | undefined | null,
+  nameKey: string | undefined | null,
   inferredRepo: string | undefined | null,
 ): string | null {
-  if (directory) {
-    const stored = settings?.namesByDirectory?.[directory];
+  if (nameKey) {
+    const stored = settings?.namesByDirectory?.[nameKey];
     if (typeof stored === "string" && stored.trim()) return stored.trim();
   }
   if (typeof inferredRepo === "string" && inferredRepo.trim()) return inferredRepo.trim();

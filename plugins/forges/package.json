@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "esbuild shared/issues.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-issues.test.mjs --log-level=error && node --test ${TMPDIR:-/tmp}/paseo-forges-issues.test.mjs"
+    "test": "esbuild shared/issues.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-issues.test.mjs --log-level=error && esbuild server/git-origin.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-git-origin.test.mjs --log-level=error && node --test ${TMPDIR:-/tmp}/paseo-forges-issues.test.mjs ${TMPDIR:-/tmp}/paseo-forges-git-origin.test.mjs"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.8.0",
