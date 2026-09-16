@@ -1,8 +1,8 @@
 # Native Forge Workflow GUI Plugin for Paseo
 
-**Status:** specification (implements [Issue #56 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/56));
+**Status:** specification (implements [Issue #56 (forge.example.com)](https://forge.example.com/your-org/your-repo/issues/56));
 the auth/data-path, label, and install sections below track the shipped
-implementation as of the standalone-release pass for [Issue #121 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo/issues/121)
+implementation as of the standalone-release pass for [Issue #121 (forge.example.com)](https://forge.example.com/your-org/your-repo/issues/121)
 **Scope:** `plugins/forges` (`paseo-forges`) server + client, built only on
 `paseo-plugin-helper` primitives — no Paseo host/SDK changes
 **Auth model:** daemon-side token in plugin settings; all forge access goes
@@ -16,7 +16,7 @@ There is no `fgj`/`fgjx` subprocess dependency and no host dotfile coupling.
 
 ## 1. Problem statement
 
-The operator (`@oktay`) and the Orchestrator must leave the Paseo
+The operator (`@your-org`) and the Orchestrator must leave the Paseo
 desktop/mobile client and open an external web browser to inspect issues,
 review agent deliverables, advance label state, or cross-reference agent IDs
 and commit hashes. Every context switch breaks the orchestration loop:

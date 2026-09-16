@@ -531,7 +531,7 @@ describe("repo access state matrix (issue #152)", () => {
 });
 
 describe("extractBareForgeIssueUrls quoted-content guard (issue #143)", () => {
-  const url = (n: number) => `https://${REAL_HOST}/oktay/2fado/issues/${n}`;
+  const url = (n: number) => `https://${REAL_HOST}/other-org/other-repo/issues/${n}`;
   it("extracts bare prose links", () => {
     const links = extractBareForgeIssueUrls(`See ${url(33)} for details`);
     assert.deepEqual(links.map((link) => link.number), [33]);
@@ -596,7 +596,7 @@ describe("cross-repo link classification (issue #108)", () => {
   });
 
   it("marks a different repo on the same host foreign (foreign-by-repo)", () => {
-    assert.equal(classifyForgeLink(link(REAL_HOST, "oktay", "2fado"), active), "foreign");
+    assert.equal(classifyForgeLink(link(REAL_HOST, "other-org", "other-repo"), active), "foreign");
   });
 
   it("marks the same repo on a different host foreign (foreign-by-host)", () => {
@@ -634,7 +634,7 @@ describe("cross-repo link classification (issue #108)", () => {
 
   it("classifies URLs and leaves non-issue URLs unmarked", () => {
     assert.equal(classifyForgeUrl(urlFor(152), active), "local");
-    assert.equal(classifyForgeUrl(`https://codeberg.org/oktay/2fado/issues/9`, active), "foreign");
+    assert.equal(classifyForgeUrl(`https://codeberg.org/other-org/other-repo/issues/9`, active), "foreign");
     assert.equal(classifyForgeUrl("https://forge.example.com/owner/repo/pulls/7", active), null);
     assert.equal(classifyForgeUrl("https://example.com/docs", active), null);
     assert.equal(classifyForgeUrl(undefined, active), null);

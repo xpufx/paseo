@@ -113,7 +113,7 @@ Understand the intent of board labels:
 - **`agent-finished`**: Completed check signal. Attached by the agent alongside `agent-attention` upon finishing its review/work.
 - **`user-attention`**: Escalation signal for blocked or ambiguous issues. Used when an issue is sitting and the required deliverable (or next action) is fundamentally unclear.
   - **Strict Guardrail**: Agents may **never** use this label as an excuse to avoid work or offload solvable technical decisions.
-  - **Mandatory Requirement**: Whenever applying `user-attention`, the agent **MUST** post a clear, precise comment directly addressing the human user (`@oktay`) stating what options exist and what exact clarification or decision is required to unblock execution.
+  - **Mandatory Requirement**: Whenever applying `user-attention`, the agent **MUST** post a clear, precise comment directly addressing the human user (`@your-org`) stating what options exist and what exact clarification or decision is required to unblock execution.
 - **`upstream-check` / `check-upstream`**: Steering instruction. Before implementing custom logic or local workarounds, investigate upstream Paseo code, releases, PRs, issues, or discussions to see what Paseo already provides, plans to support, or how it implements the pattern natively.
 - **`upstream`**: Blocked directly on an upstream Paseo capability or bug fix.
 - **`format-issue`**: Clean up presentation, spelling, typos, broken markdown, code blocks, or formatting of the issue text without altering what it says or changing the author's meaning/intent.
@@ -222,4 +222,4 @@ When code is implemented and verified locally:
    > **MANDATORY LABEL UPDATE**: You MUST execute `fgjx issue edit <number> --add-label ...`. Merely posting an envelope comment without executing the label update command leaves the issue stranded in its old state on the board.
 
 4. **Do NOT close the issue**: Agents and the Orchestrator do not close issues upon completion. The issue must remain `open` so the human operator can verify and close it.
-5. Stand by for fast review from the `Orchestrator` or testing by human user `oktay`.
+5. Stand by for fast review from the `Orchestrator` or testing by human user `@your-org`.

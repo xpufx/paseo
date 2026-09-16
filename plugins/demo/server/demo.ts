@@ -13,18 +13,18 @@ import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { demoSettingsContract, type DemoData, type DemoSettings } from "../shared/demo.js";
 import { PLUGIN_VERSION } from "../shared/version.js";
 
-export const log = createPluginLogger("helper-demo-v8");
+export const log = createPluginLogger("helper-demo");
 
-export const demoStorage = new PluginStorage<DemoSettings>("helper-demo-v8", "settings.json", {
+export const demoStorage = new PluginStorage<DemoSettings>("helper-demo", "settings.json", {
   schema: demoSettingsContract.schema,
 });
 
 export const settingsHandlers = createSettingsHandlers(demoSettingsContract, demoStorage, {
   onUpdate: (newSettings) => {
-    log.info("Demo v8 settings updated via RPC:", newSettings);
+    log.info("Demo settings updated via RPC:", newSettings);
   },
   onReset: () => {
-    log.info("Demo v8 settings reset to default values");
+    log.info("Demo settings reset to default values");
   },
 });
 
@@ -33,7 +33,7 @@ let backgroundTicks = 0;
 
 findAvailablePort(4280, 20).then((port) => {
   daemonPort = port;
-  log.info(`Showcase demo v8 background service verified on port: ${port}`);
+  log.info(`Showcase demo background service verified on port: ${port}`);
 });
 
 export const backgroundWorker = createPeriodicTask({
@@ -74,7 +74,7 @@ export function handleGetDemoData(): DemoData {
 }
 
 export function handleTriggerDemoAction(input: { actionName: string }) {
-  log.info(`Received demo v8 action: "${input.actionName}" at tick ${backgroundTicks}`);
+  log.info(`Received demo action: "${input.actionName}" at tick ${backgroundTicks}`);
   return {
     success: true,
     message: `Triggered action "${input.actionName}" (Worker tick #${backgroundTicks})`,

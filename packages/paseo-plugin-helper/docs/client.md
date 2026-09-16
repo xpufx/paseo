@@ -484,7 +484,7 @@ import { ForgeIcon, resolveForgeMark } from "paseo-plugin-helper/client";
 <ForgeIcon host="codeberg.org" size={16} color={colors.foreground} />
 
 // explicit forge identity when the host is a self-hosted unknown
-<ForgeIcon host="forge.mrs.aager.de" kind="forgejo" size={16} />
+<ForgeIcon host="forge.example.com" kind="forgejo" size={16} />
 
 // pure, testable resolution for shared/server code
 const mark = resolveForgeMark({ host: "gitea.com" });

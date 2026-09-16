@@ -221,7 +221,7 @@ test("derives a directory install's source from its checkout remote, not package
       toplevel: "/repo",
       head: LOCAL,
       upstream: "origin/main",
-      remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git",
+      remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git",
       lsRemote: () => branchRemote(REMOTE),
       trees: { [`${LOCAL}:plugins/x-comms`]: TREE_LOCAL, [`${REMOTE}:plugins/x-comms`]: TREE_REMOTE },
       isAncestor: () => 0,
@@ -234,14 +234,14 @@ test("derives a directory install's source from its checkout remote, not package
 
   assert.equal(
     probe.sourceUrl,
-    "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/x-comms",
+    "https://forge.example.com/xpufx/paseo/src/branch/main/plugins/x-comms",
   );
 });
 
 test("derives a git install's source from its managed remote, not package.json", async () => {
   const records = {
     gitty: {
-      remote: "https://forge.mrs.aager.de/xpufx/paseo.git",
+      remote: "https://forge.example.com/xpufx/paseo.git",
       requestedRef: "main",
       trackingBranch: "main",
       commit: REMOTE,
@@ -262,7 +262,7 @@ test("derives a git install's source from its managed remote, not package.json",
 
   assert.equal(
     probe.sourceUrl,
-    "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/gitty",
+    "https://forge.example.com/xpufx/paseo/src/branch/main/plugins/gitty",
   );
 });
 

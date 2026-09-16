@@ -61,7 +61,7 @@ describe("forgeKindFromHost", () => {
   });
 
   it("falls back to generic for unknown hosts", () => {
-    expect(forgeKindFromHost("forge.mrs.aager.de")).toBe("generic");
+    expect(forgeKindFromHost("forge.example.com")).toBe("generic");
     expect(forgeKindFromHost("example.test")).toBe("generic");
     expect(forgeKindFromHost(null)).toBe("generic");
     expect(forgeKindFromHost("")).toBe("generic");
@@ -83,7 +83,7 @@ describe("resolveForgeMark", () => {
   });
 
   it("resolves an unknown host to the generic fallback", () => {
-    expect(resolveForgeMark("forge.mrs.aager.de")).toMatchObject({
+    expect(resolveForgeMark("forge.example.com")).toMatchObject({
       kind: "generic",
       lucideName: "Globe",
       custom: false,
@@ -121,7 +121,7 @@ describe("ForgeIcon", () => {
   it("delegates GitHub/GitLab/unknown to the host Lucide icon set", () => {
     render(React.createElement(ForgeIcon, { host: "github.com" }));
     render(React.createElement(ForgeIcon, { host: "gitlab.com" }));
-    render(React.createElement(ForgeIcon, { host: "forge.mrs.aager.de" }));
+    render(React.createElement(ForgeIcon, { host: "forge.example.com" }));
     expect(hostIcons.map((p) => p.name)).toEqual(["Github", "Gitlab", "Globe"]);
   });
 
@@ -155,7 +155,7 @@ describe("ForgeIcon", () => {
 
   it("honours an explicit kind over the host", () => {
     const renderer = render(
-      React.createElement(ForgeIcon, { host: "forge.mrs.aager.de", kind: "gitea" }),
+      React.createElement(ForgeIcon, { host: "forge.example.com", kind: "gitea" }),
     );
     expect(renderer.root.findByType(Image).props.accessibilityLabel).toBe("Gitea");
   });

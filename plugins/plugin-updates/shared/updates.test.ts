@@ -14,8 +14,8 @@ import {
 
 test("normalizes ssh:// remotes, dropping userinfo and port", () => {
   assert.equal(
-    normalizeRepoUrl("ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git"),
-    "https://forge.mrs.aager.de/xpufx/paseo",
+    normalizeRepoUrl("ssh://git@forge.example.com:222/xpufx/paseo.git"),
+    "https://forge.example.com/xpufx/paseo",
   );
   assert.equal(
     normalizeRepoUrl("ssh://git@github.com/xpufx/paseo.git"),
@@ -25,7 +25,7 @@ test("normalizes ssh:// remotes, dropping userinfo and port", () => {
 
 test("normalizes scp-like remotes", () => {
   assert.equal(normalizeRepoUrl("git@github.com:xpufx/paseo.git"), "https://github.com/xpufx/paseo");
-  assert.equal(normalizeRepoUrl("git@forge.mrs.aager.de:xpufx/paseo"), "https://forge.mrs.aager.de/xpufx/paseo");
+  assert.equal(normalizeRepoUrl("git@forge.example.com:xpufx/paseo"), "https://forge.example.com/xpufx/paseo");
 });
 
 test("normalizes https/http/git scheme remotes and strips a trailing .git", () => {
@@ -77,9 +77,9 @@ test("prefers the install remote over package.json repository.url and homepage",
     deriveSourceUrl({
       repositoryUrl: "git@github.com:xpufx/paseo-cross-daemon-comms.git",
       homepage: "https://example.test/docs",
-      remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git",
+      remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git",
     }),
-    "https://forge.mrs.aager.de/xpufx/paseo",
+    "https://forge.example.com/xpufx/paseo",
   );
   assert.equal(
     deriveSourceUrl({
@@ -108,11 +108,11 @@ test("prefers the install remote and deep-links the subdir over a differing pack
   assert.equal(
     deriveSourceUrl({
       repositoryUrl: "https://github.com/xpufx/paseo-cross-daemon-comms.git",
-      remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git",
+      remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git",
       ref: "main",
       subdir: "plugins/x-comms",
     }),
-    "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/x-comms",
+    "https://forge.example.com/xpufx/paseo/src/branch/main/plugins/x-comms",
   );
 });
 
@@ -155,11 +155,11 @@ test("deep-links a subdir with the GitHub tree shape", () => {
 test("deep-links a subdir with the Forgejo/Gitea src/branch shape", () => {
   assert.equal(
     deriveSourceUrl({
-      remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git",
+      remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git",
       ref: "main",
       subdir: "plugins/plugin-updates",
     }),
-    "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/plugin-updates",
+    "https://forge.example.com/xpufx/paseo/src/branch/main/plugins/plugin-updates",
   );
 });
 
@@ -175,15 +175,15 @@ test("keeps slashes in branch refs and trims a wrapped subdir", () => {
 });
 
 test("falls back to the repo root without a ref or subdir", () => {
-  const base = "https://forge.mrs.aager.de/xpufx/paseo";
-  assert.equal(deriveSourceUrl({ remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git", ref: "main" }), base);
-  assert.equal(deriveSourceUrl({ remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git", subdir: "plugins/demo" }), base);
+  const base = "https://forge.example.com/xpufx/paseo";
+  assert.equal(deriveSourceUrl({ remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git", ref: "main" }), base);
+  assert.equal(deriveSourceUrl({ remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git", subdir: "plugins/demo" }), base);
   assert.equal(
-    deriveSourceUrl({ remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git", ref: "main", subdir: "" }),
+    deriveSourceUrl({ remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git", ref: "main", subdir: "" }),
     base,
   );
   assert.equal(
-    deriveSourceUrl({ remoteUrl: "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git", ref: "main", subdir: null }),
+    deriveSourceUrl({ remoteUrl: "ssh://git@forge.example.com:222/xpufx/paseo.git", ref: "main", subdir: null }),
     base,
   );
 });
@@ -201,7 +201,7 @@ test("maps known forge hosts to their brand glyph, case-insensitively", () => {
 
 test("falls back to the generic glyph for Codeberg, self-hosted and unknown hosts", () => {
   assert.equal(sourceIconName("codeberg.org"), GENERIC_SOURCE_ICON);
-  assert.equal(sourceIconName("forge.mrs.aager.de"), GENERIC_SOURCE_ICON);
+  assert.equal(sourceIconName("forge.example.com"), GENERIC_SOURCE_ICON);
   assert.equal(sourceIconName("gitea.example.test"), GENERIC_SOURCE_ICON);
   assert.equal(sourceIconName("example.test"), GENERIC_SOURCE_ICON);
   assert.equal(sourceIconName(null), GENERIC_SOURCE_ICON);
@@ -222,10 +222,10 @@ test("resolves host, label and glyph from the derived source URL", () => {
     label: "codeberg.org",
     icon: GENERIC_SOURCE_ICON,
   });
-  assert.deepEqual(resolveSourceRef("https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/plugin-updates"), {
-    url: "https://forge.mrs.aager.de/xpufx/paseo/src/branch/main/plugins/plugin-updates",
-    host: "forge.mrs.aager.de",
-    label: "forge.mrs.aager.de",
+  assert.deepEqual(resolveSourceRef("https://forge.example.com/xpufx/paseo/src/branch/main/plugins/plugin-updates"), {
+    url: "https://forge.example.com/xpufx/paseo/src/branch/main/plugins/plugin-updates",
+    host: "forge.example.com",
+    label: "forge.example.com",
     icon: GENERIC_SOURCE_ICON,
   });
 });

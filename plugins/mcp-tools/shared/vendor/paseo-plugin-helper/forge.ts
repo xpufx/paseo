@@ -30,7 +30,7 @@ export interface ResolvedForgeMark {
 }
 
 export interface ForgeMarkInput {
-  /** Forge hostname, e.g. `codeberg.org` or `forge.mrs.aager.de`. */
+  /** Forge hostname, e.g. `codeberg.org` or `forge.example.com`. */
   host?: string | null;
   /** Explicit forge identity; wins over host detection when it names a known forge. */
   kind?: ForgeKind | string | null;

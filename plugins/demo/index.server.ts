@@ -36,11 +36,11 @@ export default function contribute(server: PluginServerContext) {
   server.handle(demoBeaconBlinkContract, handleDemoBeaconBlink);
   server.handle(demoBeaconClearContract, handleDemoBeaconClear);
 
-  log.info("Helper demo v8 server handlers registered");
+  log.info("Helper demo server handlers registered");
 
   return () => {
     backgroundWorker.stop();
     demoBeacon.stopAll();
-    log.info("Helper demo v8 server background task stopped");
+    log.info("Helper demo server background task stopped");
   };
 }

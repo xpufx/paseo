@@ -16,7 +16,7 @@ export function matchesAnyFamily(provider: string, families: string[]): boolean 
   return families.some((family) => matchesFamily(provider, family));
 }
 
-export const OPENCODE_FORK_IDS = ["pufaysokt", "oktaya"];
+export const OPENCODE_FORK_IDS = ["example-fork", "sample-fork"];
 
 export function matchesOpencodeFamily(provider: string): boolean {
   const p = norm(provider);

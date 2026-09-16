@@ -49,8 +49,8 @@ The modal navbar renders two ways, switchable in the Settings tab (`navigationSt
 
 ## RPC contracts (`shared/demo.ts`)
 
-- `helper-demo-v8.get-data`: hostname, platform, CPU model/usage, memory, load averages, uptime, daemon port, background ticks, service items.
-- `helper-demo-v8.trigger-action`: background action demo with success/error toast + haptic feedback.
-- `helper-demo-v8.agent-identity`: active agent identity/session for self-inspection.
-- `helper-demo-v8.beacon-set` / `beacon-blink` / `beacon-clear`: workspace status beacon control.
-- `helper-demo-v8.settings`: persisted settings (`showCpuUsage`, `accentPillLabel`, `pollingRate`, `navigationStyle`, `highCpuThreshold`, flair fields).
+- `helper-demo.get-data`: hostname, platform, CPU model/usage, memory, load averages, uptime, daemon port, background ticks, service items.
+- `helper-demo.trigger-action`: background action demo with success/error toast + haptic feedback.
+- `helper-demo.agent-identity`: active agent identity/session for self-inspection.
+- `helper-demo.beacon-set` / `beacon-blink` / `beacon-clear`: workspace status beacon control.
+- `helper-demo.settings`: persisted settings (`showCpuUsage`, `accentPillLabel`, `pollingRate`, `navigationStyle`, `highCpuThreshold`, flair fields).

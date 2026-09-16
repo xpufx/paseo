@@ -41,13 +41,13 @@ export function resolveDemoHeaderMode(
 }
 
 export const demoSettingsContract = defineSettingsContract({
-  name: "helper-demo-v8.settings",
+  name: "helper-demo.settings",
   schema: DemoSettingsSchema,
   description: "Showcase demo settings",
 });
 
 export const getDemoDataRpc = defineContract({
-  name: "helper-demo-v8.get-data",
+  name: "helper-demo.get-data",
   description: "Get comprehensive demo metrics, hardware stats, and service items",
   input: z.object({}),
   output: z.object({
@@ -76,7 +76,7 @@ export const getDemoDataRpc = defineContract({
 });
 
 export const triggerDemoActionRpc = defineContract({
-  name: "helper-demo-v8.trigger-action",
+  name: "helper-demo.trigger-action",
   description: "Trigger an RPC action on the daemon",
   input: z.object({
     actionName: z.string(),
@@ -90,7 +90,7 @@ export const triggerDemoActionRpc = defineContract({
 export type DemoData = RpcOutput<typeof getDemoDataRpc>;
 
 export const demoAgentIdentityContract = defineContract({
-  name: "helper-demo-v8.agent-identity",
+  name: "helper-demo.agent-identity",
   description: "Get active agent identity and session for self-inspection",
   input: z.object({}),
   output: z.object({
@@ -111,7 +111,7 @@ export const demoAgentIdentityContract = defineContract({
 export type DemoAgentIdentity = RpcOutput<typeof demoAgentIdentityContract>;
 
 export const demoBeaconSetContract = defineContract({
-  name: "helper-demo-v8.beacon-set",
+  name: "helper-demo.beacon-set",
   description: "Set workspace status beacon label on the active workspace",
   input: z.object({
     workspaceId: z.string().min(1),
@@ -127,7 +127,7 @@ export const demoBeaconSetContract = defineContract({
 });
 
 export const demoBeaconBlinkContract = defineContract({
-  name: "helper-demo-v8.beacon-blink",
+  name: "helper-demo.beacon-blink",
   description: "Blink workspace beacon between emerald and orange states",
   input: z.object({
     workspaceId: z.string().min(1),
@@ -140,7 +140,7 @@ export const demoBeaconBlinkContract = defineContract({
 });
 
 export const demoBeaconClearContract = defineContract({
-  name: "helper-demo-v8.beacon-clear",
+  name: "helper-demo.beacon-clear",
   description: "Clear workspace beacon label and restore original title",
   input: z.object({
     workspaceId: z.string().min(1),

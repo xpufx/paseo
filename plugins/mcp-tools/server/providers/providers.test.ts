@@ -52,11 +52,11 @@ describe("provider contract verification (black-box guarantee)", () => {
 
   describe("family-affix resolution (issue #87)", () => {
     it("resolves opencode variants by id or label, reusing the opencode probe", () => {
-      expect(probeForProvider("opencode-pufaysokt")?.id).toBe("opencode");
-      expect(probeForProvider("opencode-oktaya")?.id).toBe("opencode");
-      expect(probeForProvider("pufaysokt")?.id).toBe("opencode");
-      expect(probeForProvider("pufaysokt", "opencode-pufaysokt")?.id).toBe("opencode");
-      expect(probeForProvider("other-id", "opencode-pufaysokt")?.id).toBe("opencode");
+      expect(probeForProvider("opencode-example-fork")?.id).toBe("opencode");
+      expect(probeForProvider("opencode-sample-fork")?.id).toBe("opencode");
+      expect(probeForProvider("example-fork")?.id).toBe("opencode");
+      expect(probeForProvider("example-fork", "opencode-example-fork")?.id).toBe("opencode");
+      expect(probeForProvider("other-id", "opencode-example-fork")?.id).toBe("opencode");
     });
 
     it("resolves antigravity variants by family affix", () => {

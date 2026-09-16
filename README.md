@@ -17,6 +17,9 @@ Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared ru
 - `plugins/mcp-tools/` — MCP server fleet management and diagnostic plugin.
 - `plugins/x-comms/` — Cross-daemon agent conversation mesh plugin.
 - `plugins/forges/` — Forge/Gitea-family issue tracker and workflow integration plugin.
+- `plugins/slash/` — Slash-command console: manage and run custom composer slash commands.
+- `plugins/twofado/` — Approval-gate surface for the 2fado privileged-command daemon.
+- `plugins/plugin-updates/` — Git-source update monitor for installed plugins.
 - `plugins/demo/` — Conformance testbed and canonical showcase for `paseo-plugin-helper` primitives.
 
 ## Installation
