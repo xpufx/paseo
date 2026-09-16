@@ -252,9 +252,17 @@ for (const [plugin, trees] of Object.entries(PLUGINS)) {
   const pluginRoot = path.join(ROOT, "plugins", plugin);
   for (const tree of trees) {
     const dest = destDir(pluginRoot, tree);
-    // Linked dev state (or a leftover README stash) is never publishable.
-    if (isLink(dest) || fs.existsSync(readmeBackupPath(dest))) {
-      console.log(`  drift: ${path.relative(ROOT, dest)} (linked dev state — run node scripts/vendor-sync.mjs)`);
+    // A deliberate dev link is not copy drift: report it with a distinct
+    // marker so callers keying on "drift:" (doctor-live auto-sync) do not
+    // mistake it for stale copies and materialize it away.
+    if (isLink(dest)) {
+      console.log(`  linked: ${path.relative(ROOT, dest)} (dev link to helper src — run --link to recreate)`);
+      dirty++;
+      continue;
+    }
+    // A leftover README stash without a link is still real drift.
+    if (fs.existsSync(readmeBackupPath(dest))) {
+      console.log(`  drift: ${path.relative(ROOT, dest)} (leftover README stash — run node scripts/vendor-sync.mjs)`);
       dirty++;
       continue;
     }

@@ -64,9 +64,9 @@ describe("KeyValue typography scale", () => {
     expect(labelStyles.some((s) => s?.fontWeight === scale.label.fontWeight)).toBe(true);
 
     const valueStyles = flat(value.props.style);
-    expect(valueStyles.some((s) => s?.fontSize === scale.bodyStrong.fontSize)).toBe(true);
-    expect(valueStyles.some((s) => s?.lineHeight === scale.bodyStrong.lineHeight)).toBe(true);
-    expect(valueStyles.some((s) => s?.fontWeight === scale.bodyStrong.fontWeight)).toBe(true);
+    expect(valueStyles.some((s) => s?.fontSize === scale.body.fontSize)).toBe(true);
+    expect(valueStyles.some((s) => s?.lineHeight === scale.body.lineHeight)).toBe(true);
+    expect(valueStyles.some((s) => s?.fontWeight === scale.body.fontWeight)).toBe(true);
   });
 
   it("steps value/label type down for compact layout", () => {
@@ -86,7 +86,7 @@ describe("KeyValue typography scale", () => {
 
     const [label, value] = r.root.findAllByType(Text as any);
     expect(flat(label.props.style).some((s) => s?.fontSize === compact.label.fontSize)).toBe(true);
-    expect(flat(value.props.style).some((s) => s?.fontSize === compact.bodyStrong.fontSize)).toBe(true);
+    expect(flat(value.props.style).some((s) => s?.fontSize === compact.body.fontSize)).toBe(true);
   });
 
   it("steps value/label type down for compact density", () => {
@@ -106,7 +106,7 @@ describe("KeyValue typography scale", () => {
 
     const [label, value] = r.root.findAllByType(Text as any);
     expect(flat(label.props.style).some((s) => s?.fontSize === dense.label.fontSize)).toBe(true);
-    expect(flat(value.props.style).some((s) => s?.fontSize === dense.bodyStrong.fontSize)).toBe(true);
+    expect(flat(value.props.style).some((s) => s?.fontSize === dense.body.fontSize)).toBe(true);
   });
 
   it("keeps caller labelStyle/valueStyle overrides applied last", () => {
@@ -171,7 +171,7 @@ describe("KeyValue row layout", () => {
       .findAllByType(Text as any)
       .find((t) => flat(t.props.style).some((s) => s?.textAlign === "right"))!;
     expect(flat(value.props.style).some((s) => s?.minWidth === 0)).toBe(true);
-    expect(flat(value.props.style).some((s) => s?.lineHeight === scale.bodyStrong.lineHeight)).toBe(
+    expect(flat(value.props.style).some((s) => s?.lineHeight === scale.body.lineHeight)).toBe(
       true,
     );
 
