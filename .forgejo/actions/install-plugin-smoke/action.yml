@@ -16,10 +16,10 @@ inputs:
     required: true
   plugins:
     description: >-
-      Space-separated plugin DIRECTORY names under plugins/ (default: top demo).
-      Each directory's runtime plugin id is resolved after install.
+      Space-separated plugin DIRECTORY names under plugins/ (default: all eight
+      plugins). Each directory's runtime plugin id is resolved after install.
     required: false
-    default: "top demo"
+    default: "mcp-tools forges x-comms slash twofado plugin-updates top demo"
   host:
     description: "Daemon host target for paseo plugin commands"
     required: false
@@ -122,7 +122,7 @@ runs:
           echo "${id} (plugins/${dir}): OK (running)"
         }
 
-        plugins="${INPUT_PLUGINS:-top demo}"
+        plugins="${INPUT_PLUGINS:-mcp-tools forges x-comms slash twofado plugin-updates top demo}"
         failed=0
         for dir in $plugins; do
           install_and_assert "$dir" || failed=1

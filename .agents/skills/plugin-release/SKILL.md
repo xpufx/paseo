@@ -16,6 +16,10 @@ GitHub pushes are **operator-authorized only**. Do not run `git push github`,
 issues carry `flag/stop-work` and freeze mirror work; a push while they are
 open is a protocol violation. Report the dry-run result and stop.
 
+The one standing exception is the `install-smoke` workflow itself: on `main` it
+performs the push automatically **after** the staged-tree smoke for the same
+scoped tree passes (see §6). Agents still never push by hand.
+
 ## 1. Hygiene scan — no private strings
 
 Scan the publish surface (plugin trees plus `packages/paseo-plugin-helper`):
@@ -105,6 +109,39 @@ git ls-files -s | awk '$1==120000 {print $4}'   # no symlink under a vendor path
 `--check` fails on drift or a linked tree. A linked vendor tree is not
 installable (Paseo's compiler rejects a symlink that realpaths outside the
 plugin) — run `node scripts/vendor-sync.mjs` to materialize it.
+
+## 6. CI gate: `.forgejo/workflows/install-smoke.yml`
+
+The steps above are also enforced automatically by the install-smoke workflow
+on `pull_request` and `push` to `main` (and manually via `workflow_dispatch`).
+It gates the tree the mirror *would* publish, in order:
+
+1. **Hygiene** — private-strings scan on `plugins/*` + `packages/*`
+   (`oktay`, `aager`, non-documented `mrs.aager.de` hosts) plus README presence.
+   `forge.mrs.aager.de/xpufx/paseo` remains allowed as the documented mirror
+   source.
+2. **Vendor gate** — `node scripts/vendor-sync.mjs` materializes any dev link,
+   then `--check` must be clean and no vendored helper path may be a committed
+   symlink (`git ls-files -s` mode 120000). A linked/partial tree is never
+   smoked or published.
+3. **Staged tree** — `node scripts/mirror-github.mjs --target=<8 plugins,helper>
+   --dry-run` prepares the scoped tree/commit against a temp local bare remote
+   (`file://`, never github.com); the prepared commit is pushed to that local
+   remote only.
+4. **Install smoke** — `paseo plugin add file://<staged>:plugins/<dir> --ref
+   <commit>` for all eight plugins, asserting each reaches `status=running`.
+   On failure the job dumps the daemon log.
+5. **Mirror push** — on `main` only, after 3+4 pass, `mirror-github.mjs` pushes
+   the same scoped tree to the public GitHub mirror. The credential is the
+   Forgejo Actions secret `GITHUB_MIRROR_TOKEN` (GitHub fine-grained PAT with
+   `Contents: Read and write` on `xpufx/paseo`). If the secret is absent the step
+   warns and skips the push; the gate itself still passes.
+
+`helper` is a workspace package (`packages/paseo-plugin-helper`), not a
+`plugins/` directory: it is part of the staged target set (so the mirror does
+not prune it) and is validated by step 2, not by `paseo plugin add`.
+`.forgejo/**` stays excluded from the mirror by the target set — never mirror
+with `--all`.
 
 ## Gate result
 

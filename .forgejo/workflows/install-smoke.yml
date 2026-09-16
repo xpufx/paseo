@@ -1,11 +1,21 @@
-# Clean-environment install smoke: proves a plugin actually INSTALLS from the
-# public GitHub mirror, not merely that it builds in the dev checkout.
+# Pre-release install gate: proves the tree the mirror WOULD publish actually
+# installs, before the mirror moves. Replaces the old post-push smoke that only
+# validated `top` + `demo` after the public mirror had already advanced.
 #
-# Catches the #146 class of failure — a tree that compiles locally but is not
-# installable by a third party (symlinked vendor trees, missing deps, stale
-# dist, a mirror that pruned a needed path). The mirror is the third-party
-# install surface; `make vendor-check` is the pre-install gate and
-# `paseo plugin add` + `paseo plugin ls` is the real install path.
+# Order (mirrors .agents/skills/plugin-release/SKILL.md):
+#   1. hygiene     — no private strings / missing READMEs on the publish surface
+#   2. vendor gate — materialize any dev link, then vendor-sync --check is clean
+#   3. staged tree — mirror-github.mjs --dry-run prepares the exact scoped tree
+#                    (all 8 plugins + helper) and commits it to a temp LOCAL bare
+#                    remote; no GitHub push happens here
+#   4. install     — `paseo plugin add file://<staged> --ref <commit>` for every
+#                    plugin dir, asserting status=running
+#   5. mirror push — on `main` only, after 3+4 pass, push the same scoped tree to
+#                    the public GitHub mirror with secrets.GITHUB_MIRROR_TOKEN
+#
+# `helper` (packages/paseo-plugin-helper) is a workspace package, not a plugins/
+# directory, so it is part of the staged mirror target set (it must survive the
+# mirror prune) but is validated by the vendor gate, not by `paseo plugin add`.
 #
 # Runner conventions (runs-on label, registry image) are copied from
 # xpufx/aur-automation/.forgejo/workflows/*.
@@ -15,25 +25,29 @@ on:
   workflow_dispatch:
     inputs:
       mirror_url:
-        description: "Public mirror Git URL to install from"
+        description: >-
+          Override install source: a Git URL to install from directly. Leave
+          empty to gate the staged scoped tree the mirror would publish.
         required: false
-        default: "https://github.com/xpufx/paseo.git"
+        default: ""
         type: string
       mirror_ref:
-        description: "Mirror branch, tag, or commit SHA (default: mirror main HEAD)"
+        description: "Branch, tag, or commit for mirror_url (empty = mirror main HEAD)"
         required: false
         default: ""
         type: string
       plugins:
         description: >-
-          Space-separated plugin DIRECTORY names under plugins/ (default: top
-          demo). Each directory's runtime plugin id is resolved from its
-          paseo-plugin.json manifest after install, so it need not match the
+          Space-separated plugin DIRECTORY names under plugins/ (default: all
+          eight plugins). Each directory's runtime plugin id is resolved from
+          its paseo-plugin.json manifest after install, so it need not match the
           directory name.
         required: false
-        default: "top demo"
+        default: "mcp-tools forges x-comms slash twofado plugin-updates top demo"
         type: string
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
 
 jobs:
@@ -47,19 +61,115 @@ jobs:
     env:
       # Dedicated daemon home, wiped below, so the job never reuses state.
       PASEO_HOME: /tmp/paseo-install-smoke/home
+      # Cumulative mirror target set: every plugin directory plus helper. Always
+      # the full set so the staged tree matches what the mirror publishes (a
+      # subset target would prune the other plugins from the public repo).
+      MIRROR_TARGETS: "top,demo,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
+      DEFAULT_PLUGINS: "mcp-tools forges x-comms slash twofado plugin-updates top demo"
       MIRROR_URL_IN: ${{ github.event.inputs.mirror_url }}
       MIRROR_REF_IN: ${{ github.event.inputs.mirror_ref }}
       PLUGINS_IN: ${{ github.event.inputs.plugins }}
+      # `git commit-tree` (mirror-github.mjs) needs a committer identity; a
+      # clean runner container has none. Applies to the staged tree and the
+      # real mirror commit alike.
+      GIT_AUTHOR_NAME: paseo-install-smoke
+      GIT_AUTHOR_EMAIL: install-smoke@paseo.invalid
+      GIT_COMMITTER_NAME: paseo-install-smoke
+      GIT_COMMITTER_EMAIL: install-smoke@paseo.invalid
     steps:
       - uses: actions/checkout@v4
 
-      - name: Gate — vendor trees are publishable (no dev symlinks / drift)
+      - name: Hygiene — publish surface has no private strings or missing READMEs
         run: |
           set -euo pipefail
-          # Fails on linked vendor trees and on drift from helper src before we
-          # ever install. A linked tree cannot load or install, so this gate
-          # keeps the smoke test meaningful.
-          make vendor-check
+          # plugin-release SKILL.md §1/§2. `forge.mrs.aager.de/xpufx/paseo` is the
+          # documented mirror source, so it is allowed to remain on the surface.
+          hits="$(git grep -n -E 'oktay|aager|mrs\.aager\.de' -- 'plugins/*' 'packages/*' ':!*dist*' ':!*node_modules*' \
+            | grep -vE 'forge\.mrs\.aager\.de/xpufx/paseo' || true)"
+          if [ -n "$hits" ]; then
+            printf '%s\n' "$hits"
+            echo "::error::private strings on the publish surface — see .agents/skills/plugin-release/SKILL.md §1"
+            exit 1
+          fi
+          missing=0
+          for p in plugins/*/; do
+            [ -f "${p}README.md" ] || { echo "::error::missing README: ${p}"; missing=1; }
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "hygiene clean"
+
+      - name: Gate — materialize dev links, then vendor trees are publishable
+        run: |
+          set -euo pipefail
+          # Materialize any working-tree dev link first (a no-op on a clean
+          # checkout), then assert no copy drift and no committed symlink under a
+          # vendored helper path. The gate must never smoke or publish a
+          # linked/partial tree — such a tree installs as a broken plugin (#146).
+          node scripts/vendor-sync.mjs
+          node scripts/vendor-sync.mjs --check
+          linked="$(git ls-files -s | awk '$1==120000 && $4 ~ /\/vendor\/paseo-plugin-helper\// {print $4}')"
+          if [ -n "$linked" ]; then
+            printf '%s\n' "$linked"
+            echo "::error::committed symlink under a vendored helper path is not installable"
+            exit 1
+          fi
+
+      - name: Prepare staged mirror tree (dry-run of the scoped publish set)
+        id: stage
+        run: |
+          set -euo pipefail
+          STAGE_ROOT="$(mktemp -d)"
+          MIRROR_REPO="$STAGE_ROOT/mirror.git"
+          # A local bare remote stands in for github.com so the mirror's dry-run
+          # push is a real git operation against a throwaway repo — never the
+          # public mirror.
+          git init --bare --quiet "$MIRROR_REPO"
+          git -C "$MIRROR_REPO" symbolic-ref HEAD refs/heads/main
+          git remote remove staged-smoke 2>/dev/null || true
+          git remote add staged-smoke "$MIRROR_REPO"
+          GITHUB_REMOTE=staged-smoke node scripts/mirror-github.mjs \
+            --target="$MIRROR_TARGETS" --dry-run | tee "$STAGE_ROOT/mirror.log"
+          TREE="$(sed -n 's/.*Prepared tree ID: //p' "$STAGE_ROOT/mirror.log" | tail -n1)"
+          COMMIT="$(sed -n 's/.*Created commit ID: //p' "$STAGE_ROOT/mirror.log" | tail -n1)"
+          if [ -z "$TREE" ] || [ -z "$COMMIT" ]; then
+            echo "::error::mirror dry-run did not prepare a tree/commit"
+            exit 1
+          fi
+          # Publish the prepared commit into the local bare remote so
+          # `paseo plugin add file://...` clones exactly the staged tree.
+          git push --quiet staged-smoke "${COMMIT}:refs/heads/main"
+          echo "staged_url=file://${MIRROR_REPO}" >> "$GITHUB_OUTPUT"
+          echo "staged_ref=${COMMIT}" >> "$GITHUB_OUTPUT"
+          echo "staged_tree=${TREE}" >> "$GITHUB_OUTPUT"
+          echo "staged scoped tree: ${MIRROR_REPO} @ ${COMMIT} (tree ${TREE})"
+
+      - name: Resolve install source and plugin set
+        id: source
+        run: |
+          set -euo pipefail
+          if [ -n "${MIRROR_URL_IN:-}" ]; then
+            URL="$MIRROR_URL_IN"
+            REF="${MIRROR_REF_IN:-}"
+            if [ -z "$REF" ]; then
+              # Pin the exact mirror commit a third party would resolve today,
+              # rather than a moving branch name.
+              REF="$(git ls-remote "$URL" main | awk 'NR==1{print $1}')"
+            fi
+            if [ -z "$REF" ]; then
+              echo "::error::could not resolve a ref from ${URL} (is the mirror public and reachable?)"
+              exit 1
+            fi
+            echo "installing from configured mirror: ${URL} @ ${REF}"
+          else
+            URL="${{ steps.stage.outputs.staged_url }}"
+            REF="${{ steps.stage.outputs.staged_ref }}"
+            echo "installing from the staged tree: ${URL} @ ${REF}"
+          fi
+          PLUGINS="${PLUGINS_IN:-$DEFAULT_PLUGINS}"
+          echo "plugin set: ${PLUGINS}"
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
+          echo "plugins=${PLUGINS}" >> "$GITHUB_OUTPUT"
 
       - name: Install published Paseo CLI
         run: |
@@ -99,30 +209,36 @@ jobs:
           tail -n 200 "$PASEO_HOME/daemon.log" || true
           exit 1
 
-      - name: Resolve mirror source
-        id: mirror
-        run: |
-          set -euo pipefail
-          MIRROR_URL="${MIRROR_URL_IN:-https://github.com/xpufx/paseo.git}"
-          MIRROR_REF="${MIRROR_REF_IN:-}"
-          if [ -z "$MIRROR_REF" ]; then
-            # Pin the exact mirror commit a third party would resolve today,
-            # rather than a moving branch name.
-            MIRROR_REF="$(git ls-remote "$MIRROR_URL" main | awk 'NR==1{print $1}')"
-          fi
-          if [ -z "$MIRROR_REF" ]; then
-            echo "::error::could not resolve a ref from ${MIRROR_URL} (is the mirror public and reachable?)"
-            exit 1
-          fi
-          echo "installing from ${MIRROR_URL} @ ${MIRROR_REF}"
-          echo "mirror_url=${MIRROR_URL}" >> "$GITHUB_OUTPUT"
-          echo "mirror_ref=${MIRROR_REF}" >> "$GITHUB_OUTPUT"
-
       # The action installs each directory, resolves its runtime plugin id from
-      # the manifest, and asserts that id reaches running.
-      - name: Install each plugin from the mirror and assert it is running
+      # the manifest, and asserts that id reaches running. On the staged path the
+      # source is a local `file://` clone of the prepared tree, so this red result
+      # precedes any real mirror push.
+      - name: Install each plugin from the staged tree and assert it is running
         uses: ./.forgejo/actions/install-plugin-smoke
         with:
-          mirror-url: ${{ steps.mirror.outputs.mirror_url }}
-          mirror-ref: ${{ steps.mirror.outputs.mirror_ref }}
-          plugins: ${{ env.PLUGINS_IN }}
+          mirror-url: ${{ steps.source.outputs.url }}
+          mirror-ref: ${{ steps.source.outputs.ref }}
+          plugins: ${{ steps.source.outputs.plugins }}
+
+      # Operator-authorized auto-push. The `push` trigger is branch-limited to
+      # `main`, so a `push` event here is always a main push, and this step only
+      # runs after the staged-tree smoke above passed. A missing secret is a
+      # warning, not a failure: the gate still reports green and the operator is
+      # told what to add.
+      - name: Push staged tree to the public GitHub mirror (main only)
+        if: ${{ github.event_name == 'push' }}
+        env:
+          GITHUB_MIRROR_TOKEN: ${{ secrets.GITHUB_MIRROR_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITHUB_MIRROR_TOKEN:-}" ]; then
+            echo "::warning::GITHUB_MIRROR_TOKEN is not configured — the GitHub mirror was NOT pushed."
+            echo "::warning::Add repository/organization secret GITHUB_MIRROR_TOKEN (a GitHub fine-grained PAT with Contents: Read and write on xpufx/paseo) to enable the automatic mirror push."
+            exit 0
+          fi
+          # Authenticate without ever putting the token in a logged URL.
+          git remote remove github 2>/dev/null || true
+          git remote add github https://github.com/xpufx/paseo.git
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_MIRROR_TOKEN" | base64 | tr -d '\n')"
+          node scripts/mirror-github.mjs --target="$MIRROR_TARGETS"
