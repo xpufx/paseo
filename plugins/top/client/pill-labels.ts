@@ -1,11 +1,29 @@
+import type { PluginAgentSnapshot } from "@getpaseo/plugin";
 import { formatBytes, formatUptime } from "../shared/vendor/paseo-plugin-helper/index";
 import {
   isPillEnabled,
   legacyFlagView,
   METRIC_DEFINITIONS,
+  type LiveUsage,
   type SystemResources,
   type TopSettings,
 } from "../shared/resources";
+
+/**
+ * Agent usage record. The daemon populates `lastUsage` on agent snapshots but
+ * `@getpaseo/plugin`'s PluginAgentSnapshot omits it; raw provider usage may
+ * surface either the canonical AgentUsage names or their legacy aliases.
+ */
+export type AgentUsageSnapshot = LiveUsage & {
+  cachedTokens?: number;
+  contextUsedTokens?: number;
+  contextMaxTokens?: number;
+  costUsd?: number;
+};
+
+export type TopAgentSnapshot = PluginAgentSnapshot & {
+  lastUsage?: AgentUsageSnapshot | null;
+};
 
 export type PillItemType =
   | "cpu_ram"
@@ -32,16 +50,7 @@ export interface SegmentSnapshot {
     provider?: string;
     status?: string;
     lastActivityAt?: string;
-    lastUsage?: {
-      inputTokens?: number | null;
-      outputTokens?: number | null;
-      cachedInputTokens?: number | null;
-      contextWindowUsedTokens?: number | null;
-      contextWindowMaxTokens?: number | null;
-      totalCostUsd?: number | null;
-      [key: string]: any;
-    } | null;
-    [key: string]: any;
+    lastUsage?: AgentUsageSnapshot | null;
   } | null;
   agentId?: string;
   worktreeLocationText?: string;
@@ -70,16 +79,10 @@ export function formatCompactTokens(n: number): string {
   return `${Math.round(n)}`;
 }
 
-export function extractTokenMetrics(snap: {
-  data?: SystemResources;
-  agent?: {
-    lastUsage?: any;
-    [key: string]: any;
-  } | null;
-}): TokenMetrics | null {
+export function extractTokenMetrics(snap: SegmentSnapshot): TokenMetrics | null {
   const live = snap.data?.liveUsage;
   const last = snap.data?.lastTurn;
-  const agentUsage = (snap.agent as any)?.lastUsage;
+  const agentUsage = snap.agent?.lastUsage;
 
   const num = (v: unknown): number | undefined =>
     typeof v === "number" && Number.isFinite(v) ? v : undefined;
@@ -96,8 +99,8 @@ export function extractTokenMetrics(snap: {
 
   const cachedTokens =
     num(live?.cachedInputTokens) ??
-    num((last as any)?.cachedTokens) ??
-    num((last as any)?.cachedInputTokens) ??
+    num(last?.cachedTokens) ??
+    num(last?.cachedInputTokens) ??
     num(agentUsage?.cachedInputTokens) ??
     num(agentUsage?.cachedTokens);
 

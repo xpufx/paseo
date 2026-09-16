@@ -12,7 +12,7 @@ import {
   type MetricId,
   type TopTimelineTelemetryData,
 } from "../shared/resources";
-import { formatCompactTokens } from "./pill-labels";
+import { formatCompactTokens, type TopAgentSnapshot } from "./pill-labels";
 
 export { TIMELINE_RENDERED_METRICS };
 
@@ -24,24 +24,24 @@ export function TopTimelineTelemetryCard({
 }: PluginTimelineItemProps<TopTimelineTelemetryData>) {
   const data = item.data;
   const [isExpanded, setIsExpanded] = useState(false);
-  const liveUsage = useAgent(data.agentId, (a: any) => a?.lastUsage);
-  const inputTokens = data.inputTokens ?? (liveUsage as any)?.inputTokens;
-  const outputTokens = data.outputTokens ?? (liveUsage as any)?.outputTokens;
+  const liveUsage = useAgent(data.agentId, (a: TopAgentSnapshot) => a.lastUsage);
+  const inputTokens = data.inputTokens ?? liveUsage?.inputTokens;
+  const outputTokens = data.outputTokens ?? liveUsage?.outputTokens;
   const cachedTokens =
     data.cachedTokens ??
-    (data as any)?.cachedInputTokens ??
-    (liveUsage as any)?.cachedInputTokens ??
-    (liveUsage as any)?.cachedTokens;
+    data.cachedInputTokens ??
+    liveUsage?.cachedInputTokens ??
+    liveUsage?.cachedTokens;
   const contextUsedTokens =
     data.contextUsedTokens ??
-    (liveUsage as any)?.contextWindowUsedTokens ??
-    (liveUsage as any)?.contextUsedTokens;
+    liveUsage?.contextWindowUsedTokens ??
+    liveUsage?.contextUsedTokens;
   const contextMaxTokens =
     data.contextMaxTokens ??
-    (liveUsage as any)?.contextWindowMaxTokens ??
-    (liveUsage as any)?.contextMaxTokens;
+    liveUsage?.contextWindowMaxTokens ??
+    liveUsage?.contextMaxTokens;
   const costUsd =
-    data.costUsd ?? (liveUsage as any)?.totalCostUsd ?? (liveUsage as any)?.costUsd;
+    data.costUsd ?? liveUsage?.totalCostUsd ?? liveUsage?.costUsd;
   const { settings } = usePluginSettings(topSettingsContract);
   const surfaces = settings.metricSurfaces;
   const show = (id: MetricId) =>

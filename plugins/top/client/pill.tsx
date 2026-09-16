@@ -7,10 +7,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import type {
-  PluginWorkspaceSnapshot,
-  PluginAgentSnapshot,
-} from "@getpaseo/plugin";
+import type { PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import {
   useWorkspace,
   useAgent,
@@ -92,6 +89,7 @@ import {
   formatTokensLabel,
   nextCycleItem,
   type SegmentSnapshot,
+  type TopAgentSnapshot,
 } from "./pill-labels";
 
 const EMPTY_PARAMS = {};
@@ -789,13 +787,13 @@ export function SingleItemPillView({
   open,
 }: SingleItemPillViewProps) {
   const workspaceDirectory = useWorkspace(workspaceId, (w: PluginWorkspaceSnapshot) => w?.directory);
-  const agent = useAgent(agentId, (a: PluginAgentSnapshot) => ({
+  const agent = useAgent(agentId, (a: TopAgentSnapshot) => ({
     title: a?.title,
     model: a?.model,
     provider: a?.provider,
     status: a?.status,
     lastActivityAt: a?.lastActivityAt,
-    lastUsage: (a as any)?.lastUsage,
+    lastUsage: a?.lastUsage,
   }));
 
   const needsResource = useMemo(() => {
@@ -879,13 +877,13 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
   }, [settings]);
 
   const workspaceDirectory = useWorkspace(workspaceId, (w: PluginWorkspaceSnapshot) => w?.directory);
-  const agent = useAgent(agentId, (a: PluginAgentSnapshot) => ({
+  const agent = useAgent(agentId, (a: TopAgentSnapshot) => ({
     title: a?.title,
     model: a?.model,
     provider: a?.provider,
     status: a?.status,
     lastActivityAt: a?.lastActivityAt,
-    lastUsage: (a as any)?.lastUsage,
+    lastUsage: a?.lastUsage,
   }));
 
   const hasAnyEnabled =
@@ -921,7 +919,7 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
     if (last && (last.inputTokens != null || last.outputTokens != null)) {
       found.add("tokens");
     }
-    const agentUsage = (agent as any)?.lastUsage;
+    const agentUsage = agent?.lastUsage;
     if (
       agentUsage &&
       (agentUsage.inputTokens != null ||
@@ -942,7 +940,7 @@ function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalT
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data?.lastTurn, data?.liveUsage, agent?.model, agent?.provider, (agent as any)?.lastUsage]);
+  }, [data?.lastTurn, data?.liveUsage, agent?.model, agent?.provider, agent?.lastUsage]);
 
   const worktreeLocationText = useMemo(
     () => formatWorktreeLocation(workspaceDirectory),
@@ -1238,14 +1236,14 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     diffStat: w?.diffStat,
   }));
 
-  const agent = useAgent(agentId, (a: PluginAgentSnapshot) => ({
+  const agent = useAgent(agentId, (a: TopAgentSnapshot) => ({
     title: a?.title,
     model: a?.model,
     provider: a?.provider,
     status: a?.status,
     cwd: a?.cwd,
     lastActivityAt: a?.lastActivityAt,
-    lastUsage: (a as any)?.lastUsage,
+    lastUsage: a?.lastUsage,
   }));
 
   const { data, isError, error, isLoading, isRefetching, refetch } = useTopResourceQuery(
