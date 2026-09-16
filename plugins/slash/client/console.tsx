@@ -63,6 +63,11 @@ const VERB_VARIANT = {
   rpc: "warning",
 } as const;
 
+// Keep the console a readable centered column instead of stretching edge-to-edge
+// on large viewports. The cap lives in the helper (`ModalBody maxContentWidth`);
+// this is the only place the console picks the value.
+const CONSOLE_CONTENT_MAX_WIDTH = 600;
+
 // Header-only rows: the helper reserves an 8px bottom margin for content that
 // follows. Command rows have none, so reclaim it and use the token scale for
 // the row's own inset instead of Card's full surface padding.
@@ -75,12 +80,14 @@ const ROW_HEADER_STYLE = {
 interface CommandRowProps {
   prefix: string;
   command: SlashCommand;
+  /** True when the command is one of the plugin's bundled (shipped) seeds. */
+  shipped?: boolean;
   onToggle: (enabled: boolean) => void;
   onEdit: () => void;
   onRemove: () => void;
 }
 
-function CommandRow({ prefix, command, onToggle, onEdit, onRemove }: CommandRowProps) {
+function CommandRow({ prefix, command, shipped, onToggle, onEdit, onRemove }: CommandRowProps) {
   const label = `/${prefix}${command.name}`;
   return (
     <Card variant="elevated" noPadding>
@@ -89,11 +96,14 @@ function CommandRow({ prefix, command, onToggle, onEdit, onRemove }: CommandRowP
         title={label}
         subtitle={command.description || command.title}
         badge={
-          <Badge
-            size="sm"
-            label={actionSummary(command.action)}
-            variant={VERB_VARIANT[command.action.verb]}
-          />
+          <Row gap="xs" align="center">
+            <Badge
+              size="sm"
+              label={actionSummary(command.action)}
+              variant={VERB_VARIANT[command.action.verb]}
+            />
+            {shipped ? <Badge size="sm" label="Shipped" variant="neutral" /> : null}
+          </Row>
         }
         action={
           <Row gap="xs" align="center">
@@ -249,6 +259,8 @@ export function SlashConsole() {
     ? validateCommandDraft(form.draft, takenNames, operationCatalog)
     : { errors: {} as CommandDraftErrors, warnings: {} as CommandDraftWarnings };
   const catalogCommands = catalog.data?.commands ?? [];
+  const catalogNames = new Set(catalogCommands.map((command) => command.name));
+  const presentNames = new Set(commands.map((command) => command.name));
   const missingFromCatalog = missingCatalogCommands(commands, catalogCommands);
 
   function updateDraft(patch: Partial<SlashCommandDraft>) {
@@ -284,7 +296,7 @@ export function SlashConsole() {
 
   return (
     <View style={{ flex: 1, minHeight: 0, width: "100%" }}>
-      <ModalBody scrollMode="always">
+      <ModalBody scrollMode="always" maxContentWidth={CONSOLE_CONTENT_MAX_WIDTH}>
         <Card variant="tinted">
           <FormRow label="Command prefix">
             <TextInput
@@ -349,6 +361,7 @@ export function SlashConsole() {
                 key={command.name}
                 prefix={prefix}
                 command={command}
+                shipped={catalogNames.has(command.name)}
                 onToggle={(enabled) =>
                   updateSettings({
                     commands: commands.map((c) => (c.name === command.name ? { ...c, enabled } : c)),
@@ -368,42 +381,55 @@ export function SlashConsole() {
           badge={
             <Badge
               size="sm"
-              label={String(missingFromCatalog.length)}
+              label={
+                missingFromCatalog.length > 0 ? `${missingFromCatalog.length} to add` : "All added"
+              }
               variant={missingFromCatalog.length > 0 ? "warning" : "neutral"}
             />
           }
         >
           {catalog.isLoading ? (
             <EmptyState icon="Package" title="Loading the shipped catalog…" />
-          ) : missingFromCatalog.length === 0 ? (
-            <EmptyState icon="PackageCheck" title="All shipped commands are present" />
+          ) : catalogCommands.length === 0 ? (
+            <EmptyState
+              icon="Package"
+              title="Shipped catalog unavailable"
+              description="The bundled command list could not be loaded."
+            />
           ) : (
             <Stack gap="xs">
-              {missingFromCatalog.map((command) => (
-                <Card key={command.name} variant="tinted" noPadding>
-                  <Card.Header
-                    title={`/${command.name}`}
-                    subtitle={command.description || command.title}
-                    badge={
-                      <Badge
-                        size="sm"
-                        label={actionSummary(command.action)}
-                        variant={VERB_VARIANT[command.action.verb]}
-                      />
-                    }
-                    action={
-                      <Button
-                        label="Add"
-                        size="sm"
-                        variant="secondary"
-                        icon="Plus"
-                        onPress={() => updateSettings({ commands: [...commands, command] })}
-                      />
-                    }
-                    style={ROW_HEADER_STYLE}
-                  />
-                </Card>
-              ))}
+              {catalogCommands.map((command) => {
+                const added = presentNames.has(command.name);
+                return (
+                  <Card key={command.name} variant="tinted" noPadding>
+                    <Card.Header
+                      title={`/${command.name}`}
+                      subtitle={command.description || command.title}
+                      badge={
+                        <Badge
+                          size="sm"
+                          label={actionSummary(command.action)}
+                          variant={VERB_VARIANT[command.action.verb]}
+                        />
+                      }
+                      action={
+                        added ? (
+                          <Badge size="sm" label="Added" variant="neutral" />
+                        ) : (
+                          <Button
+                            label="Add"
+                            size="sm"
+                            variant="secondary"
+                            icon="Plus"
+                            onPress={() => updateSettings({ commands: [...commands, command] })}
+                          />
+                        )
+                      }
+                      style={ROW_HEADER_STYLE}
+                    />
+                  </Card>
+                );
+              })}
             </Stack>
           )}
         </Collapsible>

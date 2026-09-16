@@ -682,6 +682,23 @@ composer popovers (the host owns that narrow viewport). The host still owns the
 final size, so `large` is a request for room, not a hardcoded frame. Do not add
 `size`-related width/minWidth literals in plugin code; widen here instead.
 
+#### Constraining content width: `maxContentWidth`
+
+`size` widens the *dialog*; `maxContentWidth` caps the *content column* inside
+it so settings and forms stay readable on large viewports instead of stretching
+edge-to-edge. It is additive and defaults to the fully fluid body:
+
+```tsx
+// Host allocates a wide dialog; content stays a centered ~600px column.
+<ModalBody maxContentWidth={600}>...</ModalBody>
+```
+
+The helper applies `width: "100%"` (fluid below the cap) and
+`alignSelf: "center"` (centered above it) to its single content column, in both
+the host-owned and helper-owned scroll paths. It does not dictate the dialog
+frame, so it composes with `size` and the rest of the size contract. Prefer this
+over a per-plugin wrapper carrying a `maxWidth` literal.
+
 ```tsx
 <ModalBody
   header={<Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />}

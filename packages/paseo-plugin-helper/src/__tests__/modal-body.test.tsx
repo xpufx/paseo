@@ -145,6 +145,44 @@ describe("ModalBody size contract", () => {
     expect(style.minWidth).toBe(640);
   });
 
+  it("caps and centers the content column when maxContentWidth is set", () => {
+    installStubs(false, false);
+    const r = render(
+      <ModalBody maxContentWidth={600}>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const column = r.root.findAll((node) => flatten(node.props?.style).maxWidth === 600)[0];
+    const style = flatten(column.props.style);
+    expect(style.width).toBe("100%");
+    expect(style.alignSelf).toBe("center");
+  });
+
+  it("caps the helper-owned scroller content column too", () => {
+    installStubs(true, false);
+    const r = render(
+      <ModalBody maxContentWidth={600}>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const style = flatten(r.root.findAllByType(ScrollView)[0].props.contentContainerStyle);
+    expect(style.maxWidth).toBe(600);
+    expect(style.alignSelf).toBe("center");
+  });
+
+  it("adds no numeric content-width cap by default", () => {
+    installStubs(false, false);
+    const r = render(
+      <ModalBody>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const capped = r.root.findAll(
+      (node) => typeof flatten(node.props?.style).maxWidth === "number",
+    );
+    expect(capped).toHaveLength(0);
+  });
+
   it("ignores size=large on compact and mobile host surfaces", () => {
     installStubs(true, false);
     const compact = render(
