@@ -10,6 +10,10 @@
  * 4. No plugin has a linked (non-installable) vendored helper tree — warned,
  *    never auto-materialized and never reported healthy
  *
+ * `diagnose()` is strictly read-only. All builds, stamps, vendor syncs, nested
+ * helper removals and daemon reloads live in `remediate()`, which is only
+ * reached when `--reload`/`--fix` is passed.
+ *
  * Usage:
  *   npm run doctor:live             # Check status and print diagnostic table
  *   npm run doctor:live -- --reload # Auto-rebuild helper, re-stamp versions, & reload stale daemons
@@ -38,6 +42,27 @@ const colors = {
   cyan: "\x1b[36m",
   gray: "\x1b[90m",
 };
+
+// Checks that cannot complete must not vanish: each catch below records the
+// context and the underlying cause, printed once before the process exits.
+const diagnostics = [];
+
+function recordDiagnostic(context, err) {
+  const message = err instanceof Error ? err.message : String(err);
+  diagnostics.push({ context, message });
+}
+
+function isMissingPath(err) {
+  return Boolean(err) && err.code === "ENOENT";
+}
+
+function printDiagnostics() {
+  if (diagnostics.length === 0) return;
+  console.error(`${colors.yellow}⚠️  Diagnostics (checks that could not complete):${colors.reset}`);
+  for (const d of diagnostics) {
+    console.error(`   ${d.context}: ${d.message}`);
+  }
+}
 
 function getLatestMtime(dir) {
   if (!fs.existsSync(dir)) return 0;
@@ -70,7 +95,8 @@ function getRepoHead() {
       encoding: "utf8",
       stdio: ["pipe", "pipe", "ignore"],
     }).trim();
-  } catch {
+  } catch (err) {
+    recordDiagnostic("git rev-parse --short HEAD", err);
     return "-";
   }
 }
@@ -89,7 +115,8 @@ function getPluginCommit(dir) {
       stdio: ["pipe", "pipe", "ignore"],
     }).trim();
     return { hash: hash || "-", timeAgo: timeAgo || "-" };
-  } catch {
+  } catch (err) {
+    recordDiagnostic(`git log for ${path.relative(ROOT_DIR, dir)}`, err);
     return { hash: "-", timeAgo: "-" };
   }
 }
@@ -103,7 +130,11 @@ function isAncestorOrEqual(requiredCommit, targetCommit) {
       stdio: ["pipe", "pipe", "ignore"],
     });
     return true;
-  } catch {
+  } catch (err) {
+    // Exit 1 is the normal "not an ancestor" answer; anything else is a real failure.
+    if (err.status !== 1) {
+      recordDiagnostic(`git merge-base --is-ancestor ${requiredCommit} ${targetCommit}`, err);
+    }
     return false;
   }
 }
@@ -135,7 +166,8 @@ function getPaseoPlugins() {
       stdio: ["pipe", "pipe", "ignore"],
     });
     return JSON.parse(stdout);
-  } catch {
+  } catch (err) {
+    recordDiagnostic("paseo plugin ls --json", err);
     return [];
   }
 }
@@ -154,7 +186,8 @@ function getLivePluginVersion(pluginId) {
     }
 
     return null;
-  } catch {
+  } catch (err) {
+    recordDiagnostic(`paseo plugin logs ${pluginId}`, err);
     return null;
   }
 }
@@ -168,23 +201,25 @@ function formatDuration(ms) {
   return `${hrs}h ago`;
 }
 
-async function main() {
-  let stampVersionFn = null;
+async function loadStampVersionFn() {
+  const entry = path.join(ROOT_DIR, "packages", "paseo-plugin-helper", "dist", "server", "index.js");
   try {
-    const helperServer = await import(
-      path.join(ROOT_DIR, "packages", "paseo-plugin-helper", "dist", "server", "index.js")
-    );
-    stampVersionFn = helperServer.stampVersion;
-  } catch {
-    // helper dist not compiled yet
+    const helperServer = await import(entry);
+    return helperServer.stampVersion ?? null;
+  } catch (err) {
+    // Expected before the first build; the helper row reports staleness.
+    recordDiagnostic(`import helper dist at ${path.relative(ROOT_DIR, entry)}`, err);
+    return null;
   }
+}
 
-  const repoHead = getRepoHead();
-
+// Read-only: inspects the helper, vendored trees and every plugin, and returns
+// both the reportable result and the state remediation needs. No writes.
+async function diagnose() {
   const result = {
     timestamp: new Date().toISOString(),
     ready: true,
-    repoHead,
+    repoHead: getRepoHead(),
     helper: null,
     plugins: [],
     nestedHelperShadows: [],
@@ -192,6 +227,15 @@ async function main() {
     npmHelperDeps: [],
     vendorLinked: [],
     reloaded: [],
+  };
+
+  const state = {
+    helperStale: false,
+    stampVersionFn: await loadStampVersionFn(),
+    vendorDrifted: new Set(),
+    vendorLinked: new Set(),
+    vendorNeedsReload: new Set(),
+    pluginStates: [],
   };
 
   // 1. Check Helper Build Sync
@@ -203,6 +247,7 @@ async function main() {
   const helperStale = !fs.existsSync(helperDistDir) || srcMtime > distMtime;
   const helperDiff = Math.abs(srcMtime - distMtime);
 
+  state.helperStale = helperStale;
   result.helper = {
     status: helperStale ? "stale" : "synced",
     srcMtime,
@@ -216,24 +261,6 @@ async function main() {
 
   if (helperStale) {
     result.ready = false;
-    if (shouldReload) {
-      console.log(`${colors.yellow}⚡ Rebuilding helper (dist was stale)...${colors.reset}`);
-      execSync("npm run build --workspace=packages/paseo-plugin-helper", {
-        cwd: ROOT_DIR,
-        stdio: "inherit",
-      });
-      result.reloaded.push("packages/paseo-plugin-helper");
-      result.helper.status = "synced";
-
-      if (!stampVersionFn) {
-        try {
-          const helperServer = await import(
-            path.join(ROOT_DIR, "packages", "paseo-plugin-helper", "dist", "server", "index.js")
-          );
-          stampVersionFn = helperServer.stampVersion;
-        } catch {}
-      }
-    }
   }
 
   // 2. Check Monorepo Plugins
@@ -251,34 +278,28 @@ async function main() {
   // never be auto-materialized here (#146) — it is reported as a warning, since
   // a linked tree is not installable. It is also excluded from reload: the
   // Paseo compiler rejects the relative vendored symlink.
-  const vendorDrifted = new Set();
-  const vendorLinked = new Set();
   try {
-    const out = execSync("node scripts/vendor-sync.mjs --check", {
+    execSync("node scripts/vendor-sync.mjs --check", {
       cwd: ROOT_DIR,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "ignore"],
     });
-    void out;
-  } catch (e) {
-    const out = (e.stdout || "") + "\n" + (e.stderr || "");
+  } catch (err) {
+    // A non-zero exit is expected when drift/linked output was produced; a
+    // genuine failure is one that yields neither.
+    const out = (err.stdout || "") + "\n" + (err.stderr || "");
     for (const m of out.matchAll(/drift:\s*plugins\/([^/\s]+)/g)) {
-      vendorDrifted.add(m[1]);
+      state.vendorDrifted.add(m[1]);
     }
     for (const m of out.matchAll(/linked:\s*plugins\/([^/\s]+)/g)) {
-      vendorLinked.add(m[1]);
+      state.vendorLinked.add(m[1]);
+    }
+    if (state.vendorDrifted.size === 0 && state.vendorLinked.size === 0) {
+      recordDiagnostic("node scripts/vendor-sync.mjs --check", err);
     }
   }
-  if (vendorLinked.size > 0) result.ready = false;
-  const vendorNeedsReload = new Set(vendorDrifted);
-  if (shouldReload && vendorDrifted.size > 0) {
-    console.log(`${colors.yellow}⚡ Synchronizing vendored helper trees before reload...${colors.reset}`);
-    execSync("node scripts/vendor-sync.mjs", {
-      cwd: ROOT_DIR,
-      stdio: "inherit",
-    });
-    vendorDrifted.clear();
-  }
+  if (state.vendorLinked.size > 0) result.ready = false;
+  state.vendorNeedsReload = new Set(state.vendorDrifted);
 
   for (const name of pluginDirs) {
     const fullPath = path.join(pluginsDir, name);
@@ -289,24 +310,30 @@ async function main() {
     let nestedStat = null;
     try {
       nestedStat = fs.lstatSync(nestedHelper);
-    } catch {}
+    } catch (err) {
+      // No nested helper is the normal case; anything else is a real failure.
+      if (!isMissingPath(err)) {
+        recordDiagnostic(`inspect plugins/${name}/node_modules/paseo-plugin-helper`, err);
+      }
+    }
+
+    let nestedShadow = false;
+    let nestedVersion = "?";
     if (nestedStat && !nestedStat.isSymbolicLink()) {
-      let nestedVersion = "?";
+      nestedShadow = true;
       try {
         nestedVersion = JSON.parse(
           fs.readFileSync(path.join(nestedHelper, "package.json"), "utf-8")
         ).version;
-      } catch {}
+      } catch (err) {
+        recordDiagnostic(`read plugins/${name}/node_modules/paseo-plugin-helper/package.json`, err);
+      }
       result.nestedHelperShadows.push({ plugin: name, version: nestedVersion });
       result.ready = false;
-      if (shouldReload) {
-        console.log(`${colors.yellow}⚡ Removing nested paseo-plugin-helper@${nestedVersion} shadowing workspace link in plugins/${name}...${colors.reset}`);
-        fs.rmSync(nestedHelper, { recursive: true, force: true });
-        result.reloaded.push(`plugins/${name}/node_modules/paseo-plugin-helper`);
-      }
     }
+
     const pluginCommit = getPluginCommit(fullPath);
-    let stamped = getStampedVersion(fullPath);
+    const stamped = getStampedVersion(fullPath);
 
     // Match with Paseo configured plugins
     const configured = configuredPlugins.find(
@@ -315,17 +342,11 @@ async function main() {
 
     const pluginId = configured ? configured.id : name;
     const daemonRunning = configured && configured.status === "running";
-    let liveInfo = configured ? getLivePluginVersion(pluginId) : null;
+    const liveInfo = configured ? getLivePluginVersion(pluginId) : null;
 
     // Check stamp freshness: stamped SHA must be at least as new as the latest code commit
     const stampFresh = !stamped || isAncestorOrEqual(pluginCommit.hash, stamped.sha);
-    const stampStale = stamped && !stampFresh;
-
-    if (stampStale && shouldReload && stampVersionFn && stamped.file) {
-      console.log(`${colors.yellow}⚡ Stamping updated git version into ${path.relative(ROOT_DIR, stamped.file)}...${colors.reset}`);
-      stampVersionFn({ cwd: fullPath, targetFile: stamped.file });
-      stamped = getStampedVersion(fullPath);
-    }
+    const stampStale = Boolean(stamped) && !stampFresh;
 
     // Check live daemon freshness: running SHA must be at least as new as the latest code commit
     const liveFresh = liveInfo ? isAncestorOrEqual(pluginCommit.hash, liveInfo.sha) : false;
@@ -355,7 +376,7 @@ async function main() {
 
     // A linked vendor tree is not installable and must never read as healthy.
     // Do not auto-materialize it (#146): warn and leave the fix to the user.
-    const vendorIsLinked = vendorLinked.has(name);
+    const vendorIsLinked = state.vendorLinked.has(name);
     if (vendorIsLinked) {
       status = "vendor-linked";
       message = "Vendored helper is a dev link — not installable";
@@ -387,7 +408,8 @@ async function main() {
         result.npmHelperDeps.push({ plugin: name, range: pluginData.helperDep });
         result.ready = false;
       }
-    } catch {
+    } catch (err) {
+      recordDiagnostic(`read plugins/${name}/package.json`, err);
       pluginData.sdk = "?";
       pluginData.helperDep = null;
     }
@@ -400,10 +422,14 @@ async function main() {
       );
       const vm = readme.match(/Pinned helper version:\s*([0-9A-Za-z.-]+)/);
       pluginData.vendorPin = vm ? vm[1].replace(/[.]+$/, "") : "?";
-    } catch {
+    } catch (err) {
+      // A plugin without a vendored tree has no README; other errors are real.
+      if (!isMissingPath(err)) {
+        recordDiagnostic(`read vendored helper README for plugins/${name}`, err);
+      }
       pluginData.vendorPin = "-";
     }
-    if (pluginData.vendorPin !== "-" && vendorDrifted.has(name)) {
+    if (pluginData.vendorPin !== "-" && state.vendorDrifted.has(name)) {
       pluginData.vendorDrift = true;
       result.ready = false;
     } else {
@@ -412,27 +438,21 @@ async function main() {
 
     result.plugins.push(pluginData);
 
-    if (
-      shouldReload &&
-      configured &&
-      (status === "stale-daemon" ||
-        status === "stale-stamp" ||
-        status === "stopped" ||
-        vendorNeedsReload.has(name))
-    ) {
-      console.log(`${colors.yellow}⚡ Reloading plugin '${pluginId}' via paseo...${colors.reset}`);
-      try {
-        execSync(`paseo plugin reload "${pluginId}"`, { stdio: "inherit" });
-        result.reloaded.push(pluginId);
-        pluginData.status = "reloaded";
-        pluginData.detail = "Reloaded just now";
-      } catch (e) {
-        pluginData.detail = `Reload failed: ${e.message}`;
-      }
-    }
+    state.pluginStates.push({
+      name,
+      fullPath,
+      pluginId,
+      configured,
+      pluginData,
+      pluginCommitHash: pluginCommit.hash,
+      stampStale,
+      stamped,
+      nestedShadow,
+      nestedVersion,
+    });
   }
 
-  result.vendorLinked = [...vendorLinked].sort();
+  result.vendorLinked = [...state.vendorLinked].sort();
 
   // SDK drift: distinct declared ranges across plugins (ignoring "-" and "?")
   const sdkRanges = new Set(
@@ -443,22 +463,92 @@ async function main() {
     result.ready = false;
   }
 
-  // (vendor drift computed above, before the plugin loop)
+  return { result, state };
+}
 
-  // 3. Output Handling
+// Mutating: only reached with --reload/--fix. Mirrors the historical fix order:
+// helper rebuild, vendor sync, then per-plugin (drop nested shadow, re-stamp,
+// reload), then a root npm install to restore workspace links.
+async function remediate(result, state) {
+  if (state.helperStale) {
+    console.log(`${colors.yellow}⚡ Rebuilding helper (dist was stale)...${colors.reset}`);
+    execSync("npm run build --workspace=packages/paseo-plugin-helper", {
+      cwd: ROOT_DIR,
+      stdio: "inherit",
+    });
+    result.reloaded.push("packages/paseo-plugin-helper");
+    result.helper.status = "synced";
+
+    if (!state.stampVersionFn) {
+      state.stampVersionFn = await loadStampVersionFn();
+    }
+  }
+
+  if (state.vendorDrifted.size > 0) {
+    console.log(`${colors.yellow}⚡ Synchronizing vendored helper trees before reload...${colors.reset}`);
+    execSync("node scripts/vendor-sync.mjs", {
+      cwd: ROOT_DIR,
+      stdio: "inherit",
+    });
+    state.vendorDrifted.clear();
+  }
+
+  for (const ps of state.pluginStates) {
+    if (ps.nestedShadow) {
+      console.log(`${colors.yellow}⚡ Removing nested paseo-plugin-helper@${ps.nestedVersion} shadowing workspace link in plugins/${ps.name}...${colors.reset}`);
+      fs.rmSync(path.join(ps.fullPath, "node_modules", "paseo-plugin-helper"), {
+        recursive: true,
+        force: true,
+      });
+      result.reloaded.push(`plugins/${ps.name}/node_modules/paseo-plugin-helper`);
+    }
+
+    if (ps.stampStale && state.stampVersionFn && ps.stamped && ps.stamped.file) {
+      console.log(`${colors.yellow}⚡ Stamping updated git version into ${path.relative(ROOT_DIR, ps.stamped.file)}...${colors.reset}`);
+      state.stampVersionFn({ cwd: ps.fullPath, targetFile: ps.stamped.file });
+      const restamped = getStampedVersion(ps.fullPath);
+      ps.pluginData.stampedSha = restamped?.sha || "-";
+      if (ps.pluginData.status === "stale-stamp") {
+        ps.pluginData.detail = `version.ts at ${ps.pluginData.stampedSha}, needs >= ${ps.pluginCommitHash}`;
+      }
+    }
+
+    const needsReload =
+      ps.configured &&
+      (ps.pluginData.status === "stale-daemon" ||
+        ps.pluginData.status === "stale-stamp" ||
+        ps.pluginData.status === "stopped" ||
+        state.vendorNeedsReload.has(ps.name));
+
+    if (needsReload) {
+      console.log(`${colors.yellow}⚡ Reloading plugin '${ps.pluginId}' via paseo...${colors.reset}`);
+      try {
+        execSync(`paseo plugin reload "${ps.pluginId}"`, { stdio: "inherit" });
+        result.reloaded.push(ps.pluginId);
+        ps.pluginData.status = "reloaded";
+        ps.pluginData.detail = "Reloaded just now";
+      } catch (err) {
+        ps.pluginData.detail = `Reload failed: ${err.message}`;
+      }
+    }
+  }
+
   // Re-resolve workspace links once after removing nested shadows (without
   // this the plugin keeps resolving stale nested helper types)
-  if (shouldReload && result.nestedHelperShadows.length > 0) {
+  if (result.nestedHelperShadows.length > 0) {
     console.log(`${colors.yellow}⚡ Restoring workspace links via root npm install...${colors.reset}`);
     execSync("npm install", { cwd: ROOT_DIR, stdio: "inherit" });
   }
+}
+
+function output(result) {
   if (isJson) {
     console.log(JSON.stringify(result, null, 2));
-    process.exit(result.ready ? 0 : 1);
+    return result.ready ? 0 : 1;
   }
 
   console.log("");
-  console.log(`${colors.bold}🔍 Paseo Live Deployment Doctor${colors.reset}  ${colors.gray}[${new Date().toLocaleTimeString()} • HEAD: ${repoHead}]${colors.reset}`);
+  console.log(`${colors.bold}🔍 Paseo Live Deployment Doctor${colors.reset}  ${colors.gray}[${new Date().toLocaleTimeString()} • HEAD: ${result.repoHead}]${colors.reset}`);
   console.log("─".repeat(82));
 
   // Helper Row
@@ -467,7 +557,9 @@ async function main() {
     helperVersion = JSON.parse(
       fs.readFileSync(path.join(ROOT_DIR, "packages", "paseo-plugin-helper", "package.json"), "utf-8")
     ).version || "?";
-  } catch {}
+  } catch (err) {
+    recordDiagnostic("read packages/paseo-plugin-helper/package.json", err);
+  }
   const helperColor = result.helper.status === "synced" ? colors.green : colors.yellow;
   const helperIcon = result.helper.status === "synced" ? "✔" : "▲";
   console.log(
@@ -568,21 +660,35 @@ async function main() {
     console.log("");
     console.log(`${colors.gray}🖥️  Client UI Note: If you have Paseo open, press Ctrl+R (Cmd+R) or re-open the plugin modal/surface to pick up fresh evaluated client code.${colors.reset}`);
     console.log("");
-    process.exit(1);
+    return 1;
   } else if (linkedPlugins.length > 0) {
     console.log(`${colors.red}✖ Linked vendored helper trees cannot load or install — refusing to report healthy.${colors.reset}`);
     console.log(`${colors.gray}Run: node scripts/vendor-sync.mjs${colors.reset}`);
     console.log("");
-    process.exit(1);
+    return 1;
   } else {
     console.log(`${colors.green}✔ All configured daemons and helper builds are synchronized with latest code!${colors.reset}`);
     console.log(`${colors.gray}🖥️  Client UI Note: If you have Paseo open, press Ctrl+R (Cmd+R) or re-open the plugin modal/surface to verify UI changes.${colors.reset}`);
     console.log("");
-    process.exit(0);
+    return 0;
   }
 }
 
-main().catch((err) => {
-  console.error("Doctor failed:", err);
-  process.exit(1);
-});
+async function main() {
+  const { result, state } = await diagnose();
+  if (shouldReload) {
+    await remediate(result, state);
+  }
+  const exitCode = output(result);
+  printDiagnostics();
+  return exitCode;
+}
+
+main()
+  .then((code) => {
+    process.exitCode = code;
+  })
+  .catch((err) => {
+    console.error("Doctor failed:", err);
+    process.exit(1);
+  });
