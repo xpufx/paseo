@@ -248,6 +248,28 @@ function issueLabelChips(issue: Pick<ForgeIssue, "labels" | "labelDetails">): Fo
   return issue.labels.map((name) => ({ name }));
 }
 
+/**
+ * Color map for labels seen on the loaded board, keyed by name. The editor's
+ * candidate vocabulary is static, so this is how a picker chip learns the
+ * forge's color for a label the issue itself does not carry.
+ */
+function boardLabelMap(issues: readonly ForgeIssue[]): Map<string, ForgeLabel> {
+  const map = new Map<string, ForgeLabel>();
+  for (const issue of issues) {
+    for (const label of issue.labelDetails) {
+      if (!map.has(label.name)) map.set(label.name, label);
+    }
+  }
+  return map;
+}
+
+function editorLabelChips(
+  names: readonly string[],
+  known: Map<string, ForgeLabel>,
+): ForgeLabel[] {
+  return names.map((name) => known.get(name) ?? { name });
+}
+
 function renderInlineSpans(
   spans: MarkdownLiteSpan[],
   colors: { foreground: string; accent: string; statusWarning: string },
@@ -554,26 +576,29 @@ function ScopedLabelGroup({
   onSelect,
 }: {
   title: string;
-  labels: readonly string[];
+  labels: readonly ForgeLabel[];
   active: string | null;
   pending: boolean;
   onSelect: (label: string) => void;
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, touchTargetMin } = usePluginTheme();
+  const hitSlop = Math.max(0, (touchTargetMin - 32) / 2);
   return (
     <View style={styles.labelGroup}>
       <Text style={[styles.sectionTitle, { color: colors.foregroundMuted }]}>{title}</Text>
       <View style={styles.labelRow}>
         {labels.map((label) => (
-          <Button
-            key={label}
-            size="sm"
-            variant={active === label ? "primary" : "ghost"}
-            label={shortLabelName(label)}
+          <Pressable
+            key={label.name}
+            onPress={() => onSelect(label.name)}
             disabled={pending}
-            loading={pending && active === label}
-            onPress={() => onSelect(label)}
-          />
+            accessibilityRole="button"
+            accessibilityLabel={shortLabelName(label.name)}
+            hitSlop={hitSlop}
+            style={pending && active === label.name ? styles.labelChipPending : undefined}
+          >
+            <LabelChip label={label} selected={active === label.name} />
+          </Pressable>
         ))}
       </View>
     </View>
@@ -585,6 +610,7 @@ function IssueDetailView({
   issueNumber,
   forgeTarget,
   activeForge,
+  boardLabels,
   onBack,
   onBoardRefresh,
   onOpenSettings,
@@ -593,6 +619,7 @@ function IssueDetailView({
   issueNumber: number;
   forgeTarget: string;
   activeForge: ForgeRepoIdentity | null;
+  boardLabels: Map<string, ForgeLabel>;
   onBack: () => void;
   onBoardRefresh: () => void;
   onOpenSettings: () => void;
@@ -651,6 +678,16 @@ function IssueDetailView({
   const next = issue ? nextStateLabel(labels) : null;
   const labelPending = setLabel.isPending;
   const commentPending = addComment.isPending;
+  const candidates = useMemo(() => {
+    const known = new Map(boardLabels);
+    for (const label of issue?.labelDetails ?? []) known.set(label.name, label);
+    return {
+      state: editorLabelChips(STATE_ORDER, known),
+      priority: editorLabelChips(PRIORITY_ORDER, known),
+      attention: editorLabelChips(ATTENTION_LABELS, known),
+      spec: editorLabelChips(SPEC_LABELS, known),
+    };
+  }, [boardLabels, issue?.labelDetails]);
   const access = useRepoAccess({
     repoPublic: detail.data?.repoPublic,
     tokenPresent: detail.data?.tokenPresent,
@@ -713,28 +750,28 @@ function IssueDetailView({
             ) : null}
             <ScopedLabelGroup
               title="State"
-              labels={STATE_ORDER}
+              labels={candidates.state}
               active={state}
               pending={labelPending}
               onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
             />
             <ScopedLabelGroup
               title="Priority"
-              labels={PRIORITY_ORDER}
+              labels={candidates.priority}
               active={priority}
               pending={labelPending}
               onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
             />
             <ScopedLabelGroup
               title="Attention"
-              labels={ATTENTION_LABELS}
+              labels={candidates.attention}
               active={labels.find((label) => (ATTENTION_LABELS as readonly string[]).includes(label)) ?? null}
               pending={labelPending}
               onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
             />
             <ScopedLabelGroup
               title="Spec"
-              labels={SPEC_LABELS}
+              labels={candidates.spec}
               active={labels.find((label) => (SPEC_LABELS as readonly string[]).includes(label)) ?? null}
               pending={labelPending}
               onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
@@ -1037,6 +1074,7 @@ export function ForgeIssuesView({
     () => (data && !data.error ? [...data.issues, ...extraIssues] : [...extraIssues]),
     [data, extraIssues],
   );
+  const boardLabels = useMemo(() => boardLabelMap(pool), [pool]);
   const clientIssues = useMemo(
     () => pool.filter((issue: ForgeIssue) => issueMatchesQuery(issue, query)),
     [pool, query],
@@ -1085,6 +1123,7 @@ export function ForgeIssuesView({
             issueNumber={selected}
             forgeTarget={forgeTarget}
             activeForge={activeForge}
+            boardLabels={boardLabels}
             onBack={() => setSelected(null)}
             onBoardRefresh={() => refetch()}
             onOpenSettings={() => {
@@ -1504,6 +1543,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
+  },
+  labelChipPending: {
+    opacity: 0.5,
   },
   sectionTitle: {
     fontSize: 11,

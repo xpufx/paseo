@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, ForgeIssueSchema, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, workspaceNameKey, type ForgeIssue } from "./issues.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, ForgeIssueSchema, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, isBoardAlertText, isValidForgeTarget, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, splitScopedLabel, workspaceNameKey, type ForgeIssue } from "./issues.ts";
 import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
@@ -918,5 +918,67 @@ describe("label color metadata (issue #182)", () => {
   it("has no text color without a usable background", () => {
     assert.equal(labelTextColor(undefined), null);
     assert.equal(labelTextColor("nope"), null);
+  });
+
+  it("splits scoped label names on the first slash", () => {
+    assert.deepEqual(splitScopedLabel("attention/2-user"), {
+      scope: "attention",
+      value: "2-user",
+    });
+    assert.deepEqual(splitScopedLabel("scope/sub/item"), {
+      scope: "scope",
+      value: "sub/item",
+    });
+  });
+
+  it("treats unscoped and edge-slash names as unscoped", () => {
+    assert.equal(splitScopedLabel("kind"), null);
+    assert.equal(splitScopedLabel("trailing/"), null);
+    assert.equal(splitScopedLabel("/leading"), null);
+    assert.equal(splitScopedLabel(""), null);
+  });
+
+  it("derives Forgejo's darker scope shade from the label color", () => {
+    assert.equal(darkenLabelColor("b60205"), "#a50205");
+    assert.equal(darkenLabelColor("1d76db"), "#1b70cf");
+    assert.equal(darkenLabelColor("#FFFFFF"), "#ebebeb");
+  });
+
+  it("keeps the darkened shade bounded and null without a usable color", () => {
+    // Pure black cannot darken; the factor clamps to zero rather than NaN.
+    assert.equal(darkenLabelColor("000000"), "#000000");
+    assert.equal(darkenLabelColor(undefined), null);
+    assert.equal(darkenLabelColor("nope"), null);
+  });
+
+  it("plans a two-tone pill for a scoped label with a usable color", () => {
+    assert.deepEqual(planLabelChip({ name: "attention/2-user", color: "b60205" }), {
+      kind: "scoped",
+      scope: "attention",
+      value: "2-user",
+      scopeBackground: "#a50205",
+      valueBackground: "#b60205",
+      textColor: "#ffffff",
+    });
+  });
+
+  it("plans a single solid pill for an unscoped label", () => {
+    assert.deepEqual(planLabelChip({ name: "bug", color: "f9d0c4" }), {
+      kind: "solid",
+      label: "bug",
+      background: "#f9d0c4",
+      textColor: "#000000",
+    });
+  });
+
+  it("falls back to the neutral chip without a usable color", () => {
+    assert.deepEqual(planLabelChip({ name: "attention/2-user" }), {
+      kind: "neutral",
+      label: "attention/2-user",
+    });
+    assert.deepEqual(planLabelChip({ name: "attention/2-user", color: "nope" }), {
+      kind: "neutral",
+      label: "attention/2-user",
+    });
   });
 });

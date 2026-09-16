@@ -64,6 +64,82 @@ function relativeLuminance(hex: string): number {
   return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
 }
 
+/** Scope and value halves of a scoped label name (`"state/1-wip"`). */
+export interface ScopedLabelParts {
+  scope: string;
+  value: string;
+}
+
+/**
+ * Split a scoped label name on its first `/` into scope and value. Null when
+ * the name is unscoped or the separator sits at either end.
+ */
+export function splitScopedLabel(name: string): ScopedLabelParts | null {
+  const slash = name.indexOf("/");
+  if (slash <= 0 || slash + 1 >= name.length) return null;
+  return { scope: name.slice(0, slash), value: name.slice(slash + 1) };
+}
+
+/**
+ * The darker shade Forgejo paints the scope half of a scoped label with.
+ * Mirrors the channel-proportional darkening in Gitea/Forgejo's `RenderLabel`
+ * so a scoped pill reads like the site's; null when the color is unusable.
+ */
+export function darkenLabelColor(color: string | undefined | null): string | null {
+  const background = normalizeLabelColor(color);
+  if (!background) return null;
+  const channels = [
+    parseInt(background.slice(1, 3), 16),
+    parseInt(background.slice(3, 5), 16),
+    parseInt(background.slice(5, 7), 16),
+  ];
+  const [r, g, b] = channels;
+  const brightness = (0.2126729 * r + 0.7151522 * g + 0.072175 * b) / 255;
+  const contrast = 0.01 + brightness * 0.03;
+  const darken = contrast + Math.max(brightness + contrast - 1, 0);
+  const factor = Math.max(brightness - darken, 0) / Math.max(brightness, 1 / 255);
+  return `#${channels
+    .map((channel) =>
+      Math.min(Math.round(channel * factor), 255)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+/**
+ * How a label renders: a neutral theme pill when the color is unusable, a
+ * single solid pill for an unscoped name, or a two-tone pill (`scope` in the
+ * darker shade, `value` in the base color) for a scoped name.
+ */
+export type LabelChipPlan =
+  | { kind: "neutral"; label: string }
+  | { kind: "solid"; label: string; background: string; textColor: string }
+  | {
+      kind: "scoped";
+      scope: string;
+      value: string;
+      scopeBackground: string;
+      valueBackground: string;
+      textColor: string;
+    };
+
+export function planLabelChip(label: ForgeLabel): LabelChipPlan {
+  const background = normalizeLabelColor(label.color);
+  const textColor = labelTextColor(label.color);
+  if (!background || !textColor) return { kind: "neutral", label: label.name };
+  const parts = splitScopedLabel(label.name);
+  if (!parts) return { kind: "solid", label: label.name, background, textColor };
+  return {
+    kind: "scoped",
+    scope: parts.scope,
+    value: parts.value,
+    scopeBackground: darkenLabelColor(label.color) ?? background,
+    valueBackground: background,
+    textColor,
+  };
+}
+
 export const OpenIssuesInputSchema = z.object({
   directory: z.string().optional(),
   remoteUrl: z.string().optional(),
