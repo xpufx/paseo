@@ -310,7 +310,7 @@ test("a README-only remote commit does not flag a diverged subdir that it never 
   assert.match(probe.detail ?? "", /did not change/i);
 });
 
-test("treats a subdir absent on the remote as a local-only plugin, not an update", async () => {
+test("reports report-only missing when the plugin subdir is absent at the resolved remote ref", async () => {
   const probe = await testing.probePlugin(
     plugin("plugin-updates", "/repo/plugins/plugin-updates"),
     makeRunner({
@@ -323,10 +323,73 @@ test("treats a subdir absent on the remote as a local-only plugin, not an update
     { readFile: NO_FILES, cacheRoot: "/cache" },
   );
 
-  assert.equal(probe.status, "current");
+  assert.equal(probe.status, "missing");
   assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.error, null);
   assert.equal(probe.remoteTree, null);
-  assert.match(probe.detail ?? "", /local-only/i);
+  assert.equal(probe.detail, "Plugin does not exist at the source it was installed from.");
+});
+
+test("reports report-only no-upstream when the tracked ref no longer exists at the remote", async () => {
+  const calls: Call[] = [];
+  const records = {
+    tracked: {
+      remote: "https://example.test/repo.git",
+      requestedRef: "main",
+      trackingBranch: "feature/gone",
+      commit: REMOTE,
+      pluginPath: "plugins/top",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("tracked", {}),
+    makeRunner({
+      toplevel: "/managed/tracked",
+      head: REMOTE,
+      lsRemote: () => "",
+      calls,
+    }),
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.ref, "feature/gone");
+  assert.equal(probe.status, "no-upstream");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.error, null);
+  assert.equal(probe.detail, "Plugin does not exist at the source it was installed from.");
+  assert.equal(calls.some((call) => call.args.includes("fetch")), false);
+});
+
+test("reports report-only missing when the git install's pluginPath is absent at the resolved commit", async () => {
+  const records = {
+    tracked: {
+      remote: "https://example.test/repo.git",
+      requestedRef: "main",
+      trackingBranch: "main",
+      commit: REMOTE,
+      pluginPath: "plugins/moved-away",
+    },
+  };
+  const probe = await testing.probePlugin(
+    gitInstall("tracked", {}),
+    makeRunner({
+      toplevel: "/managed/tracked",
+      head: REMOTE,
+      lsRemote: (ref) => `${REMOTE}\trefs/heads/${ref}\n`,
+      revParseStderr: (expr) =>
+        expr.includes("plugins/moved-away")
+          ? `fatal: path 'plugins/moved-away' does not exist in '${REMOTE}'`
+          : `fatal: bad revision '${expr}'`,
+    }),
+    { readFile: sourcesFile(records), cacheRoot: "/cache" },
+  );
+
+  assert.equal(probe.refKind, "branch");
+  assert.equal(probe.status, "missing");
+  assert.equal(probe.updateAvailable, false);
+  assert.equal(probe.error, null);
+  assert.equal(probe.remoteTree, null);
+  assert.equal(probe.detail, "Plugin does not exist at the source it was installed from.");
 });
 
 // ---------------------------------------------------------------------------

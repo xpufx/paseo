@@ -15,6 +15,9 @@ const FETCH_TIMEOUT_MS = 30_000;
 const UPDATE_TIMEOUT_MS = 120_000;
 const RELOAD_TIMEOUT_MS = 60_000;
 
+// Report-only verdict for an install whose tracked ref or plugin subdirectory is gone.
+const MISSING_SOURCE_DETAIL = "Plugin does not exist at the source it was installed from.";
+
 type CommandRunner = (
   command: string,
   args: string[],
@@ -498,7 +501,9 @@ async function resolveRemoteState(
     refKind = "tag";
   }
   if (!commit) {
-    return { commit: null, refKind, refExists: false, cacheDir, shallow: false, error: `Remote has no ref matching '${ref}'` };
+    // The remote is reachable but holds no ref with this name: the tracked
+    // branch/tag was deleted. That is report-only, not a raw git error.
+    return { commit: null, refKind, refExists: false, cacheDir, shallow: false, error: null };
   }
 
   const resolved: RefResolution = { ...resolution, refKind };
@@ -679,13 +684,6 @@ async function classifyBranch(
   runner: CommandRunner,
 ): Promise<Verdict> {
   const scope = scopeLabel(identity.subdir);
-  if (remote.absent) {
-    return {
-      status: "current",
-      updateAvailable: false,
-      detail: `Remote ${resolution.ref} has no ${scope} — local-only plugin, nothing to pull`,
-    };
-  }
   const localCommit = local.localCommit;
   const remoteCommit = state.commit;
   if (localCommit && remoteCommit && localCommit === remoteCommit) {
@@ -851,8 +849,8 @@ async function probeOne(
   row.refKind = state.refKind ?? resolution.refKind;
 
   if (!state.refExists || !state.commit) {
-    row.status = "error";
-    row.error = `Remote has no ref matching '${resolution.ref}'`;
+    row.status = "no-upstream";
+    row.detail = MISSING_SOURCE_DETAIL;
     return row;
   }
 
@@ -863,6 +861,11 @@ async function probeOne(
     return row;
   }
   row.remoteTree = remote.tree;
+  if (remote.absent) {
+    row.status = "missing";
+    row.detail = MISSING_SOURCE_DETAIL;
+    return row;
+  }
   row.latestChange = await readLatestChange(state.cacheDir, state.commit, identity.subdir ?? "", context.runner, state.shallow);
 
   const verdict =

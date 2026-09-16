@@ -62,6 +62,8 @@ function fallbackDetail(plugin: PluginUpdate): string {
       return "Detached HEAD — no upstream to compare (report only)";
     case "no-upstream":
       return "No upstream remote configured (report only)";
+    case "missing":
+      return "Plugin does not exist at the source it was installed from.";
     case "orphaned":
       return "Leftover managed directory from a failed install — not probed";
     case "checking":

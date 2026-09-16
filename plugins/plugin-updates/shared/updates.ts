@@ -8,6 +8,7 @@ export const PluginUpdateStatusSchema = z.enum([
   "pinned",
   "unpinned",
   "no-upstream",
+  "missing",
   "not-a-repo",
   "orphaned",
   "error",
