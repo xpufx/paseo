@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { deriveForgejoAccess, extractBareForgejoIssueUrls, isBoardAlertText, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, scopeOfLabel } from "./issues.ts";
+import { activeForgeForDirectory, deriveForgejoAccess, extractBareForgejoIssueUrls, forgeTargetsForWorkspace, isBoardAlertText, isValidForgeTarget, liveScopesFromIssues, parseBoardAlert, parseForgejoRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelSet, rankIssues, resolveForgejoRepo, resolveForgeTarget, scopeOfLabel } from "./issues.ts";
 
 const ALIAS_REMOTE = "mrs-forge:xpufx/paseo.git";
 const REAL_HOST = "forge.mrs.aager.de";
@@ -81,6 +81,137 @@ describe("resolveForgejoRepo precedence", () => {
     assert.equal(resolveForgejoRepo(null, null), null);
     assert.equal(resolveForgejoRepo("garbage!!!", undefined), null);
     assert.equal(resolveForgejoRepo("xpufx/paseo", null), null);
+  });
+});
+
+describe("multi-forge selection (issue #137)", () => {
+  const DIR = "/work/paseo";
+  const codeberg = "https://codeberg.org/xpufx/paseo";
+  const forge = `https://${REAL_HOST}/xpufx/paseo`;
+
+  it("lists configured targets plus the legacy remote, deduped and trimmed", () => {
+    assert.deepEqual(
+      forgeTargetsForWorkspace(
+        {
+          forgesByDirectory: { [DIR]: [codeberg, codeberg, "  xpufx/other  "] },
+          remotesByDirectory: { [DIR]: forge },
+        },
+        DIR,
+      ),
+      [codeberg, "xpufx/other", forge],
+    );
+  });
+
+  it("seeds the list from the legacy single remote", () => {
+    assert.deepEqual(
+      forgeTargetsForWorkspace(
+        { forgesByDirectory: {}, remotesByDirectory: { [DIR]: forge } },
+        DIR,
+      ),
+      [forge],
+    );
+  });
+
+  it("returns no targets for a blank or unknown directory", () => {
+    assert.deepEqual(
+      forgeTargetsForWorkspace({ forgesByDirectory: {}, remotesByDirectory: {} }, DIR),
+      [],
+    );
+    assert.deepEqual(forgeTargetsForWorkspace(undefined, DIR), []);
+    assert.deepEqual(forgeTargetsForWorkspace({}, "  "), []);
+  });
+
+  it("explicit active selection wins absolutely", () => {
+    assert.equal(
+      activeForgeForDirectory(
+        {
+          activeForgeByDirectory: { [DIR]: codeberg },
+          forgesByDirectory: { [DIR]: [codeberg, forge] },
+          remotesByDirectory: { [DIR]: forge },
+        },
+        DIR,
+      ),
+      codeberg,
+    );
+  });
+
+  it("a present-but-blank active entry means auto and suppresses the legacy remote", () => {
+    assert.equal(
+      activeForgeForDirectory(
+        {
+          activeForgeByDirectory: { [DIR]: "" },
+          forgesByDirectory: {},
+          remotesByDirectory: { [DIR]: forge },
+        },
+        DIR,
+      ),
+      null,
+    );
+  });
+
+  it("falls back to the legacy remote only when no selection exists", () => {
+    assert.equal(
+      activeForgeForDirectory(
+        {
+          activeForgeByDirectory: {},
+          forgesByDirectory: {},
+          remotesByDirectory: { [DIR]: forge },
+        },
+        DIR,
+      ),
+      forge,
+    );
+    assert.equal(activeForgeForDirectory({}, DIR), null);
+    assert.equal(activeForgeForDirectory(undefined, undefined), null);
+  });
+
+  it("uses an explicit target as-is and reports its source", () => {
+    assert.deepEqual(resolveForgeTarget(codeberg, ALIAS_REMOTE), {
+      ok: true,
+      host: "codeberg.org",
+      repo: "xpufx/paseo",
+      source: "explicit",
+    });
+    assert.deepEqual(resolveForgeTarget("xpufx/paseo", ALIAS_REMOTE), {
+      ok: true,
+      host: "mrs-forge",
+      repo: "xpufx/paseo",
+      source: "explicit",
+    });
+  });
+
+  it("never silently derives past an invalid explicit selection", () => {
+    const resolved = resolveForgeTarget("garbage!!!", ALIAS_REMOTE);
+    assert.equal(resolved.ok, false);
+    assert.match((resolved as { error: string }).error, /not a valid forge remote/);
+    const bareWithoutHost = resolveForgeTarget("xpufx/paseo", null);
+    assert.equal(bareWithoutHost.ok, false);
+  });
+
+  it("only derives from git when nothing is explicitly selected", () => {
+    assert.deepEqual(resolveForgeTarget(undefined, ALIAS_REMOTE), {
+      ok: true,
+      host: "mrs-forge",
+      repo: "xpufx/paseo",
+      source: "derived",
+    });
+    assert.deepEqual(resolveForgeTarget("  ", ALIAS_REMOTE), {
+      ok: true,
+      host: "mrs-forge",
+      repo: "xpufx/paseo",
+      source: "derived",
+    });
+    const nothing = resolveForgeTarget(null, null);
+    assert.equal(nothing.ok, false);
+  });
+
+  it("validates forge targets (remote URL or bare owner/repo)", () => {
+    assert.equal(isValidForgeTarget(codeberg), true);
+    assert.equal(isValidForgeTarget("xpufx/paseo"), true);
+    assert.equal(isValidForgeTarget("git@codeberg.org:xpufx/paseo.git"), true);
+    assert.equal(isValidForgeTarget("garbage!!!"), false);
+    assert.equal(isValidForgeTarget(""), false);
+    assert.equal(isValidForgeTarget(undefined), false);
   });
 });
 

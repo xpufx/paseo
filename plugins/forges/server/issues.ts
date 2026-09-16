@@ -7,8 +7,8 @@ import {
   liveScopesFromLabels,
   normalizeIssueNumber,
   parseAgentEnvelope,
-  parseForgejoRemote,
   rankIssues,
+  resolveForgeTarget,
   scopeOfLabel,
   type AddCommentInput,
   type AddCommentOutput,
@@ -75,7 +75,7 @@ function noteListSuccess(host: string, repo: string): void {
   listFailureCounts.delete(listKey(host, repo));
 }
 
-import { storedRemoteForDirectory, tokenForHost } from "./settings.js";
+import { storedForgeSelection, tokenForHost } from "./settings.js";
 
 /** Read the origin remote without shelling: parse .git/config directly. */
 async function gitOriginForDirectory(directory: string): Promise<string | null> {
@@ -94,47 +94,30 @@ type ResolvedRepo =
   | { ok: false; derivedRemote: string | null; error: string };
 
 /**
- * Single remote resolution for the whole plugin. Explicit settings remote
- * wins absolutely: when present it is used as-is and never falls back to
- * git derivation (garbage fails loudly). Git origin is only consulted when
- * no explicit remote is set, or to supply the host for a bare owner/repo.
+ * Single remote resolution for the whole plugin. The explicit forge target
+ * (per-request override, else the workspace's active forge selection, else the
+ * legacy single remote) wins absolutely: when present it is used as-is and
+ * never falls back to git derivation, so an invalid target fails loudly. Git
+ * origin is only consulted when no explicit target is set, or to supply the
+ * host for a bare owner/repo.
  */
 async function resolveRepo(
   directory?: string,
   explicitRemote?: string,
 ): Promise<ResolvedRepo> {
-  const stored = await storedRemoteForDirectory(directory);
+  const stored = await storedForgeSelection(directory);
   const explicit = explicitRemote?.trim() ? explicitRemote.trim() : stored?.trim();
   const remoteUrl = directory ? await gitOriginForDirectory(directory) : null;
-  if (explicit) {
-    const parsed = parseForgejoRemote(explicit);
-    if (parsed) {
-      return {
-        ok: true,
-        host: parsed.host,
-        repo: `${parsed.owner}/${parsed.repo}`,
-        derivedRemote: remoteUrl,
-        remoteSource: "explicit",
-      };
-    }
-    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(explicit)) {
-      const git = parseForgejoRemote(remoteUrl);
-      if (git) {
-        return { ok: true, host: git.host, repo: explicit, derivedRemote: remoteUrl, remoteSource: "explicit" };
-      }
-      return { ok: false, derivedRemote: remoteUrl, error: `Saved remote "${explicit}" needs a git origin remote to supply its host` };
-    }
-    return { ok: false, derivedRemote: remoteUrl, error: `Saved remote "${explicit}" is not a valid remote URL or owner/repo` };
+  const resolved = resolveForgeTarget(explicit, remoteUrl);
+  if (!resolved.ok) {
+    return { ok: false, derivedRemote: remoteUrl, error: resolved.error };
   }
-  if (!remoteUrl) return { ok: false, derivedRemote: null, error: "No Forgejo repo found for this workspace" };
-  const git = parseForgejoRemote(remoteUrl);
-  if (!git) return { ok: false, derivedRemote: remoteUrl, error: "No Forgejo repo found for this workspace" };
   return {
     ok: true,
-    host: git.host,
-    repo: `${git.owner}/${git.repo}`,
+    host: resolved.host,
+    repo: resolved.repo,
     derivedRemote: remoteUrl,
-    remoteSource: "derived",
+    remoteSource: resolved.source,
   };
 }
 
@@ -174,7 +157,10 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     } else {
       log.debug("skipping non-Forgejo remote", { repo, host });
     }
-    return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenPresent: false, tokenValid: null, error: "Not a Forgejo repo for this workspace" };
+    const message = remoteSource === "explicit"
+      ? `Selected forge ${host}/${repo} is unreachable or not a Forgejo/Gitea API host`
+      : "Not a Forgejo repo for this workspace";
+    return { repo, host, issues: [], openIssueCount: null, page: 1, hasMore: false, derivedRemote, remoteSource, repoPublic: null, tokenPresent: false, tokenValid: null, error: message };
   }
   const client = await clientFor(host);
   const anonClient = new ForgejoClient({ host });
@@ -192,7 +178,10 @@ export async function handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssu
     } else {
       log.debug("issue list failed", { repo, host });
     }
-    return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid, error: "Issue list unavailable" };
+    const message = remoteSource === "explicit"
+      ? `Issue list unavailable for ${host}/${repo}`
+      : "Issue list unavailable";
+    return { repo, host, issues: [], openIssueCount, page, hasMore: false, derivedRemote, remoteSource, repoPublic, tokenPresent, tokenValid, error: message };
   }
   noteListSuccess(host, repo);
   const issues: OpenIssuesResult["issues"] = rankIssues(paged.issues);

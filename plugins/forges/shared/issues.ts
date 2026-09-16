@@ -96,13 +96,18 @@ export const ForgejoSettingsSchema = z.object({
   remotesByDirectory: z.record(z.string(), z.string()).default({}),
   tokensByHost: z.record(z.string(), z.string()).default({}),
   namesByDirectory: z.record(z.string(), z.string()).default({}),
+  // Multi-forge selection (issue #137): the forge remotes a workspace may
+  // watch, and which one is active. Explicit selection wins absolutely; when
+  // nothing is selected the server derives the remote from git origin.
+  forgesByDirectory: z.record(z.string(), z.array(z.string())).default({}),
+  activeForgeByDirectory: z.record(z.string(), z.string()).default({}),
 });
 export type ForgejoSettings = z.infer<typeof ForgejoSettingsSchema>;
 
 export const forgejoSettingsContract = defineSettingsContract({
   name: "forges.settings",
   schema: ForgejoSettingsSchema,
-  description: "Forgejo plugin settings: remote overrides and host tokens",
+  description: "Forges plugin settings: forge selection, remote overrides and host tokens",
 });
 
 export interface ResolvedForgejoRepo {
@@ -131,6 +136,102 @@ export function resolveForgejoRepo(
   }
   if (!git) return null;
   return { host: git.host, repo: `${git.owner}/${git.repo}` };
+}
+
+export type ForgeTargetResolution =
+  | { ok: true; host: string; repo: string; source: "explicit" | "derived" }
+  | { ok: false; error: string };
+
+/**
+ * Strict forge-coordinate resolution for the server. An explicit target wins
+ * absolutely: when it is invalid the result is an error and git origin is
+ * NEVER consulted as a silent fallback. Git origin is only used to derive
+ * coordinates when nothing is explicit, or to supply the host for a bare
+ * `owner/repo` that the git remote can qualify.
+ */
+export function resolveForgeTarget(
+  explicitTarget: string | undefined | null,
+  gitRemoteUrl: string | undefined | null,
+): ForgeTargetResolution {
+  const explicit = typeof explicitTarget === "string" ? explicitTarget.trim() : "";
+  const git = parseForgejoRemote(gitRemoteUrl);
+  if (explicit) {
+    const parsed = parseForgejoRemote(explicit);
+    if (parsed) {
+      return { ok: true, host: parsed.host, repo: `${parsed.owner}/${parsed.repo}`, source: "explicit" };
+    }
+    if (BARE_REPO_PATTERN.test(explicit)) {
+      if (git) return { ok: true, host: git.host, repo: explicit, source: "explicit" };
+      return { ok: false, error: `Selected forge "${explicit}" needs a git origin remote to supply its host` };
+    }
+    return { ok: false, error: `Selected forge "${explicit}" is not a valid forge remote or owner/repo` };
+  }
+  if (!git) return { ok: false, error: "No forge repo found for this workspace" };
+  return { ok: true, host: git.host, repo: `${git.owner}/${git.repo}`, source: "derived" };
+}
+
+/** A forge target parses as a remote URL or a bare `owner/repo`. */
+export function isValidForgeTarget(target: string | undefined | null): boolean {
+  const value = typeof target === "string" ? target.trim() : "";
+  if (!value) return false;
+  return Boolean(parseForgejoRemote(value)) || BARE_REPO_PATTERN.test(value);
+}
+
+/**
+ * Forge remotes a workspace may watch, in first-seen order. Configured targets
+ * come first, then the legacy single remote override, so pre-#137 installs keep
+ * their pinned remote without a settings migration write. Blank duplicates are
+ * dropped.
+ */
+export function forgeTargetsForWorkspace(
+  settings:
+    | Partial<Pick<ForgejoSettings, "forgesByDirectory" | "remotesByDirectory">>
+    | undefined
+    | null,
+  directory: string | undefined | null,
+): string[] {
+  const dir = typeof directory === "string" ? directory.trim() : "";
+  if (!dir) return [];
+  const targets: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (trimmed && !targets.includes(trimmed)) targets.push(trimmed);
+  };
+  for (const target of settings?.forgesByDirectory?.[dir] ?? []) push(target);
+  push(settings?.remotesByDirectory?.[dir]);
+  return targets;
+}
+
+/**
+ * The workspace's explicitly selected forge target, or null to derive from the
+ * git origin remote. Explicit selection wins absolutely: a present-but-blank
+ * `activeForgeByDirectory` entry means "auto" and suppresses the legacy remote,
+ * while an absent entry falls back to the legacy remote for compatibility.
+ * The value is returned verbatim so an invalid selection fails loudly rather
+ * than silently deriving.
+ */
+export function activeForgeForDirectory(
+  settings:
+    | Partial<
+        Pick<
+          ForgejoSettings,
+          "activeForgeByDirectory" | "forgesByDirectory" | "remotesByDirectory"
+        >
+      >
+    | undefined
+    | null,
+  directory: string | undefined | null,
+): string | null {
+  const dir = typeof directory === "string" ? directory.trim() : "";
+  if (!dir) return null;
+  const activeMap = settings?.activeForgeByDirectory;
+  if (activeMap && Object.prototype.hasOwnProperty.call(activeMap, dir)) {
+    const active = activeMap[dir];
+    return typeof active === "string" && active.trim() ? active.trim() : null;
+  }
+  const legacy = settings?.remotesByDirectory?.[dir];
+  return typeof legacy === "string" && legacy.trim() ? legacy.trim() : null;
 }
 
 export interface ForgejoIssueLink {

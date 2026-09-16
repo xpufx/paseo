@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { useWorkspace } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
+import { SettingsSelect } from "@getpaseo/plugin/client/ui";
 import type { PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import {
   ModalBody,
@@ -9,6 +10,7 @@ import {
   Button,
   Badge,
   EmptyState,
+  FormRow,
   SearchInput,
   Tabs,
   CodeBlock,
@@ -32,13 +34,16 @@ import {
   PRIORITY_ORDER,
   SPEC_LABELS,
   STATE_ORDER,
+  activeForgeForDirectory,
   addCommentContract,
   currentPriorityLabel,
   currentStateLabel,
   displayNameForDirectory,
   displayRemoteForApi,
   deriveForgejoAccess,
+  forgeTargetsForWorkspace,
   formatIssueCountLabel,
+  isValidForgeTarget,
   forgejoSettingsContract,
   type ForgejoAccessInput,
   type ForgejoAccessState,
@@ -98,10 +103,10 @@ function useDisplayName(workspaceId: string, inferredRepo: string | null | undef
 function useOpenIssues(workspaceId: string, agentId?: string) {
   const directory = useDirectory(workspaceId);
   const { settings } = usePluginSettings(forgejoSettingsContract);
-  const storedRemote = directory ? (settings.remotesByDirectory?.[directory] ?? "") : "";
+  const forgeTarget = activeForgeForDirectory(settings, directory) ?? "";
   const query = useRpcQuery(
     openIssuesContract,
-    { directory: directory ?? undefined, remoteUrl: storedRemote || undefined },
+    { directory: directory ?? undefined, remoteUrl: forgeTarget || undefined },
     { refetchInterval: 30000 },
   );
   const data = query.data;
@@ -496,12 +501,14 @@ function ScopedLabelGroup({
 function IssueDetailView({
   workspaceId,
   issueNumber,
+  forgeTarget,
   onBack,
   onBoardRefresh,
   onOpenSettings,
 }: {
   workspaceId: string;
   issueNumber: number;
+  forgeTarget: string;
   onBack: () => void;
   onBoardRefresh: () => void;
   onOpenSettings: () => void;
@@ -509,9 +516,14 @@ function IssueDetailView({
   const { colors } = usePluginTheme();
   const toast = useToast();
   const directory = useDirectory(workspaceId);
+  const baseInput = {
+    issueNumber,
+    directory: directory ?? undefined,
+    remoteUrl: forgeTarget || undefined,
+  };
   const detail = useRpcQuery(
     issueDetailContract,
-    { issueNumber, directory: directory ?? undefined },
+    baseInput,
     { refetchInterval: 30000 },
   );
   const [draft, setDraft] = useState("");
@@ -618,7 +630,7 @@ function IssueDetailView({
                 label={state ? `Move to ${shortLabelName(next)}` : `Start ${shortLabelName(next)}`}
                 disabled={labelPending}
                 loading={labelPending}
-                onPress={() => setLabel.mutate({ issueNumber, directory: directory ?? undefined, label: next })}
+                onPress={() => setLabel.mutate({ ...baseInput, label: next })}
               />
             ) : null}
             <ScopedLabelGroup
@@ -626,28 +638,28 @@ function IssueDetailView({
               labels={STATE_ORDER}
               active={state}
               pending={labelPending}
-              onSelect={(label) => setLabel.mutate({ issueNumber, directory: directory ?? undefined, label })}
+              onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
             />
             <ScopedLabelGroup
               title="Priority"
               labels={PRIORITY_ORDER}
               active={priority}
               pending={labelPending}
-              onSelect={(label) => setLabel.mutate({ issueNumber, directory: directory ?? undefined, label })}
+              onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
             />
             <ScopedLabelGroup
               title="Attention"
               labels={ATTENTION_LABELS}
               active={labels.find((label) => (ATTENTION_LABELS as readonly string[]).includes(label)) ?? null}
               pending={labelPending}
-              onSelect={(label) => setLabel.mutate({ issueNumber, directory: directory ?? undefined, label })}
+              onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
             />
             <ScopedLabelGroup
               title="Spec"
               labels={SPEC_LABELS}
               active={labels.find((label) => (SPEC_LABELS as readonly string[]).includes(label)) ?? null}
               pending={labelPending}
-              onSelect={(label) => setLabel.mutate({ issueNumber, directory: directory ?? undefined, label })}
+              onSelect={(label) => setLabel.mutate({ ...baseInput, label })}
             />
             </>
             )}
@@ -692,7 +704,7 @@ function IssueDetailView({
                 onPress={() => {
                   const body = draft.trim();
                   if (!body) return;
-                  addComment.mutate({ issueNumber, directory: directory ?? undefined, body });
+                  addComment.mutate({ ...baseInput, body });
                 }}
               />
             </View>
@@ -721,37 +733,83 @@ export function ForgejoIssuesView({
     tokenValid: data?.tokenValid,
   });
   const directory = useDirectory(workspaceId);
-  const { settings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
-  const [remoteDraft, setRemoteDraft] = useState<string | null>(null);
+  const { settings, updateSettings, updateSettingsAsync } = usePluginSettings(forgejoSettingsContract);
+  const [forgeDraft, setForgeDraft] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const storedRemote = directory ? (settings.remotesByDirectory?.[directory] ?? "") : "";
+  const forgeTargets = forgeTargetsForWorkspace(settings, directory);
+  const activeForgeValue = activeForgeForDirectory(settings, directory) ?? "";
+  const forgeTarget = activeForgeValue;
+  const derivedHost = parseForgejoRemote(data?.derivedRemote)?.host ?? null;
+  const selectedForgeHost = parseForgejoRemote(activeForgeValue)?.host ?? null;
+  const effectiveHost = isValidForgeTarget(activeForgeValue)
+    ? (selectedForgeHost ?? derivedHost)
+    : derivedHost;
+  const activeForgeInvalid = Boolean(activeForgeValue.trim()) && !isValidForgeTarget(activeForgeValue);
+  const forgeDraftInvalid = Boolean(forgeDraft?.trim()) && !isValidForgeTarget(forgeDraft);
+  const forgeOptions: Array<{ label: string; value: string }> = [
+    { label: "Auto — derive from the git origin remote", value: "" },
+    ...forgeTargets.map((target) => ({ label: target, value: target })),
+  ];
+  if (activeForgeValue && !forgeTargets.includes(activeForgeValue)) {
+    forgeOptions.push({ label: activeForgeValue, value: activeForgeValue });
+  }
   const storedName = directory ? (settings.namesByDirectory?.[directory] ?? "") : "";
   const nameValue = nameDraft ?? storedName;
-  const remoteValue = remoteDraft ?? storedRemote;
-  const trimmedRemote = remoteValue.trim();
-  const isBareRemote = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(trimmedRemote);
-  const derivedHost = parseForgejoRemote(data?.derivedRemote)?.host ?? null;
-  const effectiveHost = trimmedRemote
-    ? (parseForgejoRemote(trimmedRemote)?.host ?? (isBareRemote ? derivedHost : null))
-    : derivedHost;
-  const remoteInvalid = Boolean(trimmedRemote && !parseForgejoRemote(trimmedRemote) && !isBareRemote);
   const storedToken = effectiveHost ? (settings.tokensByHost?.[effectiveHost] ?? "") : "";
   const tokenValue = tokenDraft ?? storedToken;
+  const selectForge = (value: string) => {
+    if (!directory) return;
+    updateSettings({
+      activeForgeByDirectory: { ...(settings.activeForgeByDirectory ?? {}), [directory]: value },
+    });
+  };
+  const addForge = () => {
+    if (!directory) return;
+    const target = (forgeDraft ?? "").trim();
+    if (!isValidForgeTarget(target)) {
+      setFormError("Forge target must be a remote URL or owner/repo.");
+      return;
+    }
+    const list = forgeTargets.includes(target) ? forgeTargets : [...forgeTargets, target];
+    // Editing the list supersedes the legacy single remote: fold it into the
+    // list and clear the legacy key so the two sources cannot disagree.
+    const nextRemotes = { ...(settings.remotesByDirectory ?? {}) };
+    delete nextRemotes[directory];
+    updateSettings({
+      forgesByDirectory: { ...(settings.forgesByDirectory ?? {}), [directory]: list },
+      remotesByDirectory: nextRemotes,
+      activeForgeByDirectory: { ...(settings.activeForgeByDirectory ?? {}), [directory]: target },
+    });
+    setForgeDraft(null);
+    setFormError(null);
+  };
+  const removeForge = (target: string) => {
+    if (!directory) return;
+    const list = forgeTargets.filter((entry) => entry !== target);
+    const nextForges = { ...(settings.forgesByDirectory ?? {}) };
+    if (list.length) nextForges[directory] = list;
+    else delete nextForges[directory];
+    const nextRemotes = { ...(settings.remotesByDirectory ?? {}) };
+    delete nextRemotes[directory];
+    const currentActive = activeForgeForDirectory(settings, directory) ?? "";
+    updateSettings({
+      forgesByDirectory: nextForges,
+      remotesByDirectory: nextRemotes,
+      activeForgeByDirectory: {
+        ...(settings.activeForgeByDirectory ?? {}),
+        [directory]: currentActive === target ? (list[0] ?? "") : currentActive,
+      },
+    });
+  };
   const saveSettings = async () => {
     if (!directory) return;
     setFormSaving(true);
     setFormError(null);
     try {
       const updates: Partial<ForgejoSettings> = {};
-      if (remoteValue !== storedRemote) {
-        const next = { ...(settings.remotesByDirectory ?? {}) };
-        if (trimmedRemote) next[directory] = trimmedRemote;
-        else delete next[directory];
-        updates.remotesByDirectory = next;
-      }
       if (tokenDraft != null && effectiveHost) {
         const next = { ...(settings.tokensByHost ?? {}) };
         if (tokenDraft.trim()) next[effectiveHost] = tokenDraft.trim();
@@ -765,7 +823,6 @@ export function ForgejoIssuesView({
         updates.namesByDirectory = next;
       }
       await updateSettingsAsync(updates);
-      setRemoteDraft(null);
       setTokenDraft(null);
       setNameDraft(null);
       refetch();
@@ -790,7 +847,7 @@ export function ForgejoIssuesView({
     setExtraHasMore(false);
     setMoreError(null);
   };
-  React.useEffect(() => { resetPages(); }, [data?.repo]);
+  React.useEffect(() => { resetPages(); }, [data?.repo, forgeTarget]);
   const loadMore = useRpcMutation(openIssuesContract, {
     onSuccess: (result) => {
       if (result.error) {
@@ -843,6 +900,7 @@ export function ForgejoIssuesView({
           <IssueDetailView
             workspaceId={workspaceId}
             issueNumber={selected}
+            forgeTarget={forgeTarget}
             onBack={() => setSelected(null)}
             onBoardRefresh={() => refetch()}
             onOpenSettings={() => {
@@ -860,27 +918,80 @@ export function ForgejoIssuesView({
           {activeTab === "settings" ? (
             <Card>
               <Card.Header
-                title={displayName ? `Forgejo settings · ${displayName}` : "Forgejo settings"}
-                subtitle={storedRemote.trim() ? "Explicit override active" : "Derived from git origin remote"}
+                title={displayName ? `Forge settings · ${displayName}` : "Forge settings"}
+                subtitle={activeForgeValue ? "Explicit forge selected" : "Derived from the git origin remote"}
                 badge={<RepoAccessChips access={access} />}
                 icon="Settings"
               />
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-                Remote accepts owner/repo, scp-like (git@host:owner/repo.git), ssh:// and https:// URLs.
-                Leave empty to derive from the git origin remote.
-                {data?.derivedRemote && !storedRemote.trim() ? ` Derived: ${displayRemoteForApi(data.derivedRemote)}` : null}
+                Pick which forge this workspace watches. Issues and search follow the
+                active forge; Auto derives from the git origin remote.
               </Text>
-              <TextInput
-                value={remoteValue}
-                onChangeText={(text) => setRemoteDraft(text)}
-                placeholder={displayRemoteForApi(data?.derivedRemote) ?? "e.g. https://forge.mrs.aager.de/xpufx/paseo"}
-                autoCapitalize="none"
-                autoCorrect={false}
+              <SettingsSelect
+                label="Active forge"
+                hint="Explicit selection wins; an unreachable or invalid forge fails instead of deriving."
+                value={activeForgeValue}
+                options={forgeOptions}
+                onValueChange={selectForge}
+                disabled={!directory}
               />
+              <FormRow
+                label="Add another forge"
+                description="Remote URL or owner/repo for a second forge, e.g. https://codeberg.org/owner/repo."
+              >
+                <TextInput
+                  value={forgeDraft ?? ""}
+                  onChangeText={setForgeDraft}
+                  placeholder="https://codeberg.org/owner/repo"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <View style={styles.actions}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="Plus"
+                    label="Add forge"
+                    disabled={!directory || !(forgeDraft ?? "").trim() || forgeDraftInvalid}
+                    onPress={addForge}
+                  />
+                </View>
+              </FormRow>
+              {forgeDraftInvalid ? (
+                <Text style={[styles.hint, { color: colors.foreground }]}>
+                  Forge target must be a remote URL or owner/repo.
+                </Text>
+              ) : null}
+              {forgeTargets.length > 0 ? (
+                <View style={styles.forgeList}>
+                  {forgeTargets.map((target) => (
+                    <View key={target} style={styles.forgeRow}>
+                      <Text
+                        numberOfLines={1}
+                        style={[styles.forgeTarget, { color: colors.foreground }]}
+                      >
+                        {target}
+                      </Text>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon="Trash2"
+                        label="Remove"
+                        onPress={() => removeForge(target)}
+                      />
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              {data?.derivedRemote && !activeForgeValue ? (
+                <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                  Derived: {displayRemoteForApi(data.derivedRemote)}
+                </Text>
+              ) : null}
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
                 {effectiveHost
                   ? `API token for ${effectiveHost}. Leave empty to remove it.`
-                  : "API token — needs a resolvable host from the remote above."}
+                  : "API token — needs a resolvable host from the forge above."}
               </Text>
               <TextInput
                 value={tokenValue}
@@ -900,12 +1011,17 @@ export function ForgejoIssuesView({
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              {remoteInvalid ? (
+              {activeForgeInvalid ? (
                 <Text style={[styles.hint, { color: colors.foreground }]}>
-                  Remote is not a valid remote URL or owner/repo.
+                  Selected forge is not a valid remote URL or owner/repo.
                 </Text>
               ) : null}
-              {data && !isLoading ? (
+              {failed && data?.error ? (
+                <Text style={[styles.hint, { color: colors.foreground }]}>
+                  Forge unavailable: {data.error}
+                </Text>
+              ) : null}
+              {data && !isLoading && !data.error ? (
                 <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
                   {access.summary}
                 </Text>
@@ -919,7 +1035,7 @@ export function ForgejoIssuesView({
                 <Button
                   label={formSaving ? "Saving…" : "Save"}
                   variant="primary"
-                  disabled={formSaving || !directory || remoteInvalid || (remoteValue === storedRemote && tokenDraft == null && nameValue === storedName) || (tokenDraft != null && !effectiveHost)}
+                  disabled={formSaving || !directory || activeForgeInvalid || (tokenDraft == null && nameValue === storedName) || (tokenDraft != null && !effectiveHost)}
                   loading={formSaving}
                   onPress={() => { void saveSettings(); }}
                 />
@@ -984,7 +1100,7 @@ export function ForgejoIssuesView({
                   variant="secondary"
                   disabled={loadMore.isPending}
                   loading={loadMore.isPending}
-                  onPress={() => { loadMore.mutate({ directory: directory ?? undefined, remoteUrl: storedRemote || undefined, page: nextPage }); }}
+                  onPress={() => { loadMore.mutate({ directory: directory ?? undefined, remoteUrl: forgeTarget || undefined, page: nextPage }); }}
                 />
               </View>
             ) : null}
@@ -1066,6 +1182,19 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+  },
+  forgeList: {
+    gap: 4,
+    paddingVertical: 4,
+  },
+  forgeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  forgeTarget: {
+    fontSize: 12,
+    flex: 1,
   },
   readOnlyNotice: {
     gap: 4,

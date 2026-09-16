@@ -16,10 +16,16 @@ Supported forges (verified live, anonymous reads):
 
 GitLab is future work and needs a separate API client.
 
-Remote resolution: one effective remote per workspace. An explicit
-settings remote wins absolutely and never falls back; git origin is only
-derived from when nothing is set. An invalid explicit remote fails loudly
-instead of silently deriving.
+Forge selection: each workspace watches one active forge at a time. The
+Settings tab lists forge remotes for the workspace (any `parseForgejoRemote`
+form plus bare `owner/repo`) and a dropdown picks the active one; the choice
+persists per workspace in daemon-side plugin settings. Issue list, search
+filter, detail, labels, and comments all follow the active forge.
+
+Explicit selection wins absolutely and never falls back to git derivation; git
+origin is only consulted when the selection is Auto, or to supply the host for
+a bare `owner/repo`. An invalid or unreachable selected forge fails loudly with
+a notice instead of silently deriving.
 
 0.8 layout: `index.client.tsx` / `index.server.ts` entries, `client/` /
 `server/` / `shared/` split, manifest declares

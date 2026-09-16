@@ -5,6 +5,7 @@ import {
 } from "./vendor/paseo-plugin-helper/index.ts";
 import {
   FORGEJO_PLUGIN_ID,
+  activeForgeForDirectory,
   forgejoSettingsContract,
   type ForgejoSettings,
 } from "../shared/issues.js";
@@ -30,14 +31,17 @@ export const settingsHandlers = createSettingsHandlers(
   },
 );
 
-/** Explicit remote URL pinned for a workspace directory, if any. */
-export async function storedRemoteForDirectory(
+/**
+ * Explicit forge target selected for a workspace directory, if any. Reflects
+ * the per-workspace `activeForgeByDirectory` choice, falling back to the legacy
+ * single remote override when no selection was ever made (issue #137).
+ */
+export async function storedForgeSelection(
   directory: string | undefined,
 ): Promise<string | undefined> {
   if (!directory) return undefined;
   const settings = await forgejoStorage.readAsync();
-  const pinned = settings.remotesByDirectory?.[directory];
-  return typeof pinned === "string" && pinned.trim() ? pinned.trim() : undefined;
+  return activeForgeForDirectory(settings, directory) ?? undefined;
 }
 
 /** Daemon-side API token for a Forgejo host. Never leaves the server. */
