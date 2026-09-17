@@ -8,9 +8,10 @@ import {
   type PluginClientContext,
 } from "@getpaseo/plugin/client";
 import {
-  PluginThemeProvider,
   registerComposerPill,
+  registerSidebarSurface,
   type ComposerPillRegistrar,
+  type SidebarSurfaceRegistrar,
   type PillLiveContext,
   type RegisterComposerPillOptions,
   ModalBody,
@@ -1809,24 +1810,15 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   }
   let cleanupSidebar: (() => void) | null = null;
   if ("addSurface" in client && "addSidebarItem" in client) {
-    const removeSurface = client.addSurface("paseo-top-dashboard", (props) => (
-      <PluginThemeProvider
-        theme={props.theme}
-        layout={props.layout}
-      >
-        <TopDashboardSurface {...props} />
-      </PluginThemeProvider>
-    ));
-    const removeItem = client.addSidebarItem({
-      id: "paseo-top-dashboard",
-      title: "Top Dashboard",
-      icon: "Activity",
-      surface: "paseo-top-dashboard",
-    });
-    cleanupSidebar = () => {
-      removeSurface();
-      removeItem();
-    };
+    cleanupSidebar = registerSidebarSurface(
+      client as unknown as SidebarSurfaceRegistrar,
+      {
+        id: "paseo-top-dashboard",
+        title: "Top Dashboard",
+        icon: "Activity",
+        Component: TopDashboardSurface,
+      },
+    );
   }
   const activePills = new Map<string, () => void>();
   let latestSettings: TopSettings = topSettingsContract.defaultSettings;

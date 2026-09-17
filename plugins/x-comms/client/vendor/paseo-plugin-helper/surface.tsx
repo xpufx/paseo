@@ -35,11 +35,15 @@ export interface RegisterSidebarSurfaceOptions {
  * `"required"` scroll-owner context makes every `ModalBody` inside own the
  * scroll on every surface, so plugins inherit working scroll with no
  * per-plugin workaround.
+ *
+ * Returns an idempotent disposer that removes both the surface and the sidebar
+ * item, matching every other helper `add*` registration. Existing callers that
+ * ignore the return value are unaffected.
  */
 export function registerSidebarSurface(
   plugin: SidebarSurfaceRegistrar,
   options: RegisterSidebarSurfaceOptions,
-): void {
+): () => void {
   const { id, title, icon, Component, flair } = options;
 
   const WrappedComponent: ComponentType<PluginSurfaceProps> = (props) => (
@@ -50,11 +54,27 @@ export function registerSidebarSurface(
     </PluginThemeProvider>
   );
 
-  plugin.addSurface(id, WrappedComponent);
-  plugin.addSidebarItem({
+  const surfaceRegistration = plugin.addSurface(id, WrappedComponent);
+  const itemRegistration = plugin.addSidebarItem({
     id,
     title,
     icon,
     surface: id,
   });
+
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    // Host registrations expose `remove()`; tolerate hosts that return a bare
+    // function or nothing so cleanup never throws.
+    for (const registration of [itemRegistration, surfaceRegistration]) {
+      if (!registration) continue;
+      if (typeof registration === "function") {
+        (registration as () => void)();
+      } else if (typeof registration.remove === "function") {
+        registration.remove();
+      }
+    }
+  };
 }

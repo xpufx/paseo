@@ -131,3 +131,63 @@ describe("sidebar surface scroll ownership (#213)", () => {
     expect(renderer.root.findAllByType(ScrollView).length).toBe(0);
   });
 });
+
+describe("registerSidebarSurface disposer", () => {
+  function registrar() {
+    const removed: string[] = [];
+    const client = {
+      addSurface(id: string) {
+        return { remove: () => removed.push(`surface:${id}`) };
+      },
+      addSidebarItem(contribution: any) {
+        return { remove: () => removed.push(`item:${contribution.id}`) };
+      },
+    } as any;
+    return { client, removed };
+  }
+
+  it("removes both the surface and the sidebar item, once", () => {
+    const { client, removed } = registrar();
+    const dispose = registerSidebarSurface(client, {
+      id: "main",
+      title: "Main",
+      icon: "Activity",
+      Component: () => null,
+    });
+    expect(typeof dispose).toBe("function");
+
+    dispose();
+    expect(removed.sort()).toEqual(["item:main", "surface:main"]);
+
+    // Idempotent: a second call must not remove again.
+    dispose();
+    expect(removed).toHaveLength(2);
+  });
+
+  it("tolerates a host that returns a bare remover function", () => {
+    const removed: string[] = [];
+    const client = {
+      addSurface: () => () => removed.push("surface"),
+      addSidebarItem: () => () => removed.push("item"),
+    } as any;
+    registerSidebarSurface(client, {
+      id: "main",
+      title: "Main",
+      icon: "Activity",
+      Component: () => null,
+    })();
+    expect(removed.sort()).toEqual(["item", "surface"]);
+  });
+
+  it("tolerates a host that returns nothing", () => {
+    const client = { addSurface: () => undefined, addSidebarItem: () => undefined } as any;
+    const dispose = registerSidebarSurface(client, {
+      id: "main",
+      title: "Main",
+      icon: "Activity",
+      Component: () => null,
+    });
+    expect(() => dispose()).not.toThrow();
+  });
+});
+

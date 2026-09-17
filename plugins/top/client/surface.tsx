@@ -47,6 +47,12 @@ const TIMELINE_CADENCE_OPTIONS = Array.from({ length: 11 }, (_, n) => ({
 const CPU_THRESHOLDS = { warning: 60, danger: 85 };
 const MEM_THRESHOLDS = { warning: 70, danger: 85 };
 
+// Keep the dashboard a readable centered column instead of stretching
+// edge-to-edge on large viewports. The cap lives in the helper
+// (`ModalBody maxContentWidth`); this is the only place the surface picks
+// the value.
+const TOP_CONTENT_MAX_WIDTH = 600;
+
 export function TopDashboardSurface(_props: PluginSurfaceProps) {
   const { colors } = usePluginTheme();
   const [activeTab, setActiveTab] = useState<SurfaceTab>("system");
@@ -77,6 +83,7 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
     <View style={[styles.root, { backgroundColor: colors.surface0 }]}>
       <ModalBody
         headerMode="pinned"
+        maxContentWidth={TOP_CONTENT_MAX_WIDTH}
         header={
           <Tabs
             tabs={TABS}
