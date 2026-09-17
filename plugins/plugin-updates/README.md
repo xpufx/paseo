@@ -1,6 +1,6 @@
 # plugin-updates
 
-Git-source update monitor for [Paseo](https://github.com/getpaseo/paseo) plugins (v0.8+).
+Git-source update monitor and updater for [Paseo](https://github.com/getpaseo/paseo) plugins (v0.8+).
 
 <table align="center">
   <tr>
