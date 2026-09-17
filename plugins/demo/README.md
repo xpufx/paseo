@@ -54,3 +54,4 @@ The modal navbar renders two ways, switchable in the Settings tab (`navigationSt
 - `helper-demo.agent-identity`: active agent identity/session for self-inspection.
 - `helper-demo.beacon-set` / `beacon-blink` / `beacon-clear`: workspace status beacon control.
 - `helper-demo.settings`: persisted settings (`showCpuUsage`, `accentPillLabel`, `pollingRate`, `navigationStyle`, `highCpuThreshold`, flair fields).
+<!-- plugin-updates demo: availability touch -->
