@@ -86,7 +86,7 @@ paseo plugin add ./plugins/plugin-updates
 
 ## Limitations
 
-- **Local git installs give no reliable installed-version check.** When a plugin is added from a local path or repo (`paseo plugin add ./plugins/plugin-updates`), no install ref or version is recorded, so the update status is best-effort — a working-tree comparison that may not reflect what is actually running. Install from a git remote + subpath for dependable version tracking.
+- **Local git installs** have no recorded install ref, so status comes from a working-tree comparison rather than a known version. Use a git remote + subpath for ref-based tracking.
 
 ## Development
 
