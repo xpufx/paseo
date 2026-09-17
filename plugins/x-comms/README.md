@@ -144,4 +144,3 @@ No live daemons, no real `~/.paseo/paseo-x-comms/registry.json` touched in tests
 ## License
 
 Apache-2.0.
-<!-- plugin-updates demo: availability touch -->
