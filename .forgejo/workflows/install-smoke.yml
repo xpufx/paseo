@@ -254,4 +254,5 @@ jobs:
           git remote add github https://github.com/xpufx/paseo.git
           git config --local http.https://github.com/.extraheader \
             "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GITHUB_MIRROR_TOKEN" | base64 | tr -d '\n')"
+          git fetch --depth=1 github "${{ github.event.inputs.mirror_ref || 'main' }}" || true
           node scripts/mirror-github.mjs --target="$MIRROR_TARGETS"

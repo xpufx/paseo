@@ -238,6 +238,16 @@ try {
     if (lsRemote) {
       const remoteHead = lsRemote.split(/\s+/)[0];
       if (remoteHead && /^[0-9a-f]{40}$/.test(remoteHead)) {
+        try {
+          execFileSync("git", ["cat-file", "-e", remoteHead], { stdio: "ignore" });
+        } catch {
+          console.log(`[mirror-github] Fetching remote parent commit ${remoteHead}...`);
+          try {
+            execFileSync("git", ["fetch", "--depth=1", remoteDestination, `refs/heads/${targetBranch}`], { stdio: "ignore" });
+          } catch (fetchErr) {
+            console.warn("[mirror-github] Failed to fetch remote parent commit:", fetchErr.message);
+          }
+        }
         parentArgs = ["-p", remoteHead];
         console.log(`[mirror-github] Remote parent: ${remoteHead}`);
       }
