@@ -1,5 +1,7 @@
 # twofado
 
+> **Status**: Coming soon / Work in progress.
+
 Approval-gate UI for the **2fado** privileged-command daemon, for
 [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
 
