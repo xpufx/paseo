@@ -163,3 +163,61 @@ describe("ForgeClient.repoWritePermission (issue #193)", () => {
     assert.equal(forbidden, null);
   });
 });
+
+describe("ForgeClient.createIssue (issue #200)", () => {
+  it("POSTs /repos/{repo}/issues and returns the created number", async () => {
+    let seen = "";
+    let init: RequestInit | undefined;
+    stubFetch((url, requestInit) => {
+      seen = url;
+      init = requestInit;
+      return jsonResponse({ number: 42, title: "New ticket", state: "open" });
+    });
+    const number = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .createIssue("owner/repo", { title: "New ticket", body: "Body text" });
+    assert.equal(number, 42);
+    assert.equal(seen, "https://forge.example.com/api/v1/repos/owner/repo/issues");
+    assert.equal(init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      title: "New ticket",
+      body: "Body text",
+    });
+    assert.equal(
+      (init?.headers as Record<string, string> | undefined)?.Authorization,
+      "token secret",
+    );
+  });
+
+  it("attaches labels when provided", async () => {
+    let init: RequestInit | undefined;
+    stubFetch((_url, requestInit) => {
+      init = requestInit;
+      return jsonResponse({ number: 7 });
+    });
+    const number = await new ForgeClient({ host: "forge.example.com" })
+      .createIssue("owner/repo", {
+        title: "Labeled",
+        body: "",
+        labels: ["kind/feature", "target/forges"],
+      });
+    assert.equal(number, 7);
+    assert.deepEqual(JSON.parse(String(init?.body)), {
+      title: "Labeled",
+      labels: ["kind/feature", "target/forges"],
+    });
+  });
+
+  it("returns null when the API rejects the create or omits a number", async () => {
+    stubFetch(() => jsonResponse({ message: "forbidden" }, 403));
+    assert.equal(
+      await new ForgeClient({ host: "forge.example.com", token: "secret" })
+        .createIssue("owner/repo", { title: "Nope" }),
+      null,
+    );
+    stubFetch(() => jsonResponse({ title: "no number" }));
+    assert.equal(
+      await new ForgeClient({ host: "forge.example.com" }).createIssue("owner/repo", { title: "x" }),
+      null,
+    );
+  });
+});

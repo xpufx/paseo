@@ -19,6 +19,8 @@ import {
   KeyValue,
   KeyValueGroup,
   TextInput,
+  Collapsible,
+  ActionBar,
   ForgeIcon,
   HighlightedText,
   useRpcQuery,
@@ -39,6 +41,7 @@ import {
   activeForgeForDirectory,
   addCommentContract,
   classifyForgeUrl,
+  createIssueContract,
   currentPriorityLabel,
   currentStateLabel,
   createRemoteSearchGate,
@@ -51,6 +54,7 @@ import {
   isValidForgeTarget,
   forgeSettingsContract,
   installLabelsContract,
+  parseLabelList,
   type ForgeAccessInput,
   type ForgeAccessState,
   type ForgeSettings,
@@ -64,6 +68,7 @@ import {
   setLabelContract,
   shortLabelName,
   stripAgentEnvelopeFooter,
+  writeGateNotice,
   type AgentEnvelope,
   type ForgeRepoIdentity,
   type ForgeIssue,
@@ -602,13 +607,10 @@ function ReadOnlyNotice({
   onAction: () => void;
 }) {
   const { colors } = usePluginTheme();
-  const underScoped = access.auth === "lacks-write-scope";
   return (
     <View style={styles.readOnlyNotice}>
       <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
-        {underScoped
-          ? `Read-only — this token cannot ${capability}; it lacks write scope. Add a token with ${access.requiredScopes}.`
-          : `Read-only — ${capability} needs a valid token. ${access.summary}`}
+        {writeGateNotice(access, capability)}
       </Text>
       <Button
         size="sm"
@@ -655,6 +657,126 @@ function ScopedLabelGroup({
         ))}
       </View>
     </View>
+  );
+}
+
+/**
+ * Compose surface for opening a ticket on the active forge (issue #200).
+ * Gated on the shared access state: hidden when anonymous (no path to a write),
+ * the #193 scope hint when the token is accepted but under-scoped, and the
+ * enabled form otherwise. The list refreshes on success.
+ */
+function NewIssueComposer({
+  directory,
+  forgeTarget,
+  access,
+  onCreated,
+  onOpenSettings,
+}: {
+  directory?: string;
+  forgeTarget: string;
+  access: ForgeAccessState;
+  onCreated: () => void;
+  onOpenSettings: () => void;
+}) {
+  const toast = useToast();
+  const [expanded, setExpanded] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [labelsText, setLabelsText] = useState("");
+  const create = useRpcMutation(createIssueContract, {
+    onSuccess: (result) => {
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      setTitle("");
+      setBody("");
+      setLabelsText("");
+      setExpanded(false);
+      onCreated();
+      toast.show(result.number ? `Created issue #${result.number}` : "Issue created", {
+        variant: "success",
+      });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : "Could not create issue");
+    },
+  });
+  // Anonymous hosts have no path to a write, so the surface is hidden entirely;
+  // every other non-editable state keeps the gate visible with its explanation.
+  if (access.auth === "anonymous") return null;
+  if (!access.canEdit) {
+    return (
+      <ReadOnlyNotice access={access} capability="creating issues" onAction={onOpenSettings} />
+    );
+  }
+  const pending = create.isPending;
+  const canSubmit = title.trim().length > 0 && !pending;
+  const submit = () => {
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+    create.mutate({
+      directory: directory ?? undefined,
+      remoteUrl: forgeTarget || undefined,
+      title: nextTitle,
+      body: body.trim(),
+      labels: parseLabelList(labelsText),
+    });
+  };
+  return (
+    <Collapsible
+      title="New issue"
+      subtitle="Open a ticket on the active forge"
+      icon="Plus"
+      isExpanded={expanded}
+      onToggle={setExpanded}
+    >
+      <View style={styles.newIssueForm}>
+        <FormRow label="Title">
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Short, specific title"
+            autoCapitalize="sentences"
+          />
+        </FormRow>
+        <FormRow label="Description" description="Markdown supported.">
+          <TextInput
+            value={body}
+            onChangeText={setBody}
+            placeholder="What needs to happen?"
+            multiline
+            numberOfLines={4}
+          />
+        </FormRow>
+        <Collapsible title="Labels" subtitle="Optional — comma-separated names" icon="Tags">
+          <FormRow label="Label names">
+            <TextInput
+              value={labelsText}
+              onChangeText={setLabelsText}
+              placeholder="state/1-wip, priority/1-high"
+            />
+          </FormRow>
+        </Collapsible>
+        <ActionBar>
+          <Button
+            label="Cancel"
+            variant="ghost"
+            disabled={pending}
+            onPress={() => setExpanded(false)}
+          />
+          <Button
+            label={pending ? "Creating…" : "Create issue"}
+            variant="primary"
+            icon="Plus"
+            disabled={!canSubmit}
+            loading={pending}
+            onPress={submit}
+          />
+        </ActionBar>
+      </View>
+    </Collapsible>
   );
 }
 
@@ -1505,6 +1627,16 @@ export function ForgeIssuesView({
           >
             <Toggle value={remoteSearch} onValueChange={setRemoteSearch} />
           </FormRow>
+          <NewIssueComposer
+            directory={directory}
+            forgeTarget={forgeTarget}
+            access={access}
+            onCreated={() => {
+              resetPages();
+              refetch();
+            }}
+            onOpenSettings={() => setActiveTab("settings")}
+          />
           <View
             onLayout={(e) => {
               listTop.current = e.nativeEvent.layout.y;
@@ -1787,5 +1919,8 @@ const styles = StyleSheet.create({
   composer: {
     gap: 8,
     paddingTop: 4,
+  },
+  newIssueForm: {
+    gap: 8,
   },
 });

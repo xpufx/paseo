@@ -401,4 +401,22 @@ export class ForgeClient {
     const id = (created as Record<string, unknown>).id;
     return typeof id === "number" ? id : null;
   }
+
+  /** Create one issue; returns its number, or null when the API rejects it. */
+  async createIssue(
+    repo: string,
+    issue: { title: string; body?: string; labels?: string[] },
+  ): Promise<number | null> {
+    const created = await this.request(`/repos/${repo}/issues`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: issue.title,
+        ...(issue.body ? { body: issue.body } : {}),
+        ...(issue.labels && issue.labels.length ? { labels: issue.labels } : {}),
+      }),
+    });
+    if (!created || typeof created !== "object") return null;
+    const number = (created as Record<string, unknown>).number;
+    return typeof number === "number" ? number : null;
+  }
 }

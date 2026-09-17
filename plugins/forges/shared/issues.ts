@@ -836,6 +836,18 @@ export function deriveForgeAccess(input: ForgeAccessInput = {}): ForgeAccessStat
   };
 }
 
+/**
+ * Read-only explanation shared by every gated write surface. An under-scoped
+ * token names the missing scopes instead of an opaque failure; any other
+ * non-editable state falls back to the combined access summary.
+ */
+export function writeGateNotice(access: ForgeAccessState, capability: string): string {
+  if (access.auth === "lacks-write-scope") {
+    return `Read-only — this token cannot ${capability}; it lacks write scope. Add a token with ${access.requiredScopes}.`;
+  }
+  return `Read-only — ${capability} needs a valid token. ${access.summary}`;
+}
+
 function accessSummary(visibility: ForgeVisibility, auth: ForgeAuthState): string {
   const scopeHint = `required scopes: ${forgeWriteScopeList()}.`;
 
@@ -1392,6 +1404,76 @@ export const addCommentContract = defineContract({
   input: AddCommentInputSchema,
   output: AddCommentOutputSchema,
 });
+
+// ---------------------------------------------------------------------------
+// Create issue (issue #200). Mirrors the other write verbs: the daemon resolves
+// the active forge and attaches the token, and the client only ever sees the
+// resulting issue number. Validation lives in a pure function so the composer
+// and the handler reject the same payloads.
+// ---------------------------------------------------------------------------
+
+export const CREATE_ISSUE_TITLE_MAX = 200;
+export const CREATE_ISSUE_BODY_MAX = 10000;
+export const CREATE_ISSUE_LABEL_MAX = 50;
+
+export const CreateIssueInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  title: z.string(),
+  body: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+});
+export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
+
+export const CreateIssueOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable().default(null),
+  number: z.number().int().positive().nullable().default(null),
+  error: z.string().optional(),
+});
+export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;
+
+export const createIssueContract = defineContract({
+  name: "forge.create-issue",
+  description: "Create a new issue on the configured forge repo",
+  input: CreateIssueInputSchema,
+  output: CreateIssueOutputSchema,
+});
+
+/**
+ * Validate a create-issue payload; null when it is well-formed. A title is
+ * required (issue #200); the body and labels stay optional.
+ */
+export function validateCreateIssueInput(input: {
+  title?: unknown;
+  body?: unknown;
+  labels?: unknown;
+}): string | null {
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (!title) return "Issue title must not be empty";
+  if (title.length > CREATE_ISSUE_TITLE_MAX) return "Issue title is too long";
+  const body = typeof input.body === "string" ? input.body : "";
+  if (body.length > CREATE_ISSUE_BODY_MAX) return "Issue description is too long";
+  if (input.labels !== undefined) {
+    if (!Array.isArray(input.labels)) return "Labels must be a list";
+    if (input.labels.length > CREATE_ISSUE_LABEL_MAX) return "Too many labels";
+    if (input.labels.some((label) => typeof label !== "string" || !label.trim())) {
+      return "Label must not be empty";
+    }
+  }
+  return null;
+}
+
+/** Split a free-text labels field into trimmed, de-duplicated, non-empty names. */
+export function parseLabelList(text: string | undefined | null): string[] {
+  if (!text || typeof text !== "string") return [];
+  const names: string[] = [];
+  for (const part of text.split(",")) {
+    const name = part.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
 
 // ---------------------------------------------------------------------------
 // Markdown-lite (issue #136): focused renderer input for forge issue
