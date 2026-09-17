@@ -155,7 +155,12 @@ describe("ModalBody size contract", () => {
     const column = r.root.findAll((node) => flatten(node.props?.style).maxWidth === 600)[0];
     const style = flatten(column.props.style);
     expect(style.width).toBe("100%");
-    expect(style.alignSelf).toBe("center");
+    // Centering uses auto side margins, never alignSelf: on a ScrollView content
+    // container alignSelf stops the column stretching to the viewport, so a
+    // wrapping row sizes to its children and never wraps (#202 regression).
+    expect(style.marginLeft).toBe("auto");
+    expect(style.marginRight).toBe("auto");
+    expect(style.alignSelf).toBeUndefined();
   });
 
   it("caps the helper-owned scroller content column too", () => {
@@ -167,7 +172,9 @@ describe("ModalBody size contract", () => {
     );
     const style = flatten(r.root.findAllByType(ScrollView)[0].props.contentContainerStyle);
     expect(style.maxWidth).toBe(600);
-    expect(style.alignSelf).toBe("center");
+    expect(style.marginLeft).toBe("auto");
+    expect(style.marginRight).toBe("auto");
+    expect(style.alignSelf).toBeUndefined();
   });
 
   it("adds no numeric content-width cap by default", () => {
