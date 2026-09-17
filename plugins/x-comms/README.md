@@ -8,6 +8,8 @@
 
 Scope: x-comms links one owner's daemons through one client UI. Pairing is explicit and local; stranger federation is out of scope (an experimental flag at most, post-1.0).
 
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
+
 This repo ships two things:
 
 * **Paseo plugin** (recommended) — UI + embedded MCP server. (This README is for the plugin. See below)

@@ -7,6 +7,8 @@ building Paseo plugins. It does not necessarily do anything useful to end
 users. Install this one to see every pattern running live; depend on the
 helper to build your own.
 
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
+
 The helper package and demo are together a demonstration of an idea: that
 the plugin ecosystem can benefit from a common library, not necessarily this
 common library, rather than solving the same issues again and again.
@@ -23,7 +25,6 @@ common library, rather than solving the same issues again and again.
 
 > [!NOTE]
 > **Prerequisites & Platform Support**:
-> - Zero install requirements: the helper runtime is vendored (`client|server|shared/vendor/paseo-plugin-helper/`, pinned helper 0.4.0-beta.12), so Paseo installs this plugin with no build step and no npm/registry access. For local development (`typecheck`/`test`), Node.js (v18+) is enough.
 > - The composer pill shows live host CPU; the modal covers metrics, actions, tables, beacons, settings, diagnostics, and logs.
 
 ## Showcase tabs

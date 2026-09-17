@@ -18,13 +18,10 @@ A command carries one of three actions:
 - **open** — open a named plugin surface.
 - **rpc** — run an allowlisted daemon operation (shipped: `slash.ping`, `slash.echo`).
 
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
+
 > [!NOTE]
 > **Prerequisites & Platform Support**:
-> - Zero install requirements: the helper runtime is vendored
->   (`client|server|shared/vendor/paseo-plugin-helper/`, pinned helper
->   `0.4.0-beta.12`), so Paseo installs this plugin with no build step and no
->   npm/registry access. For local development (`typecheck`/`test`), Node.js
->   (v18+) is enough.
 > - Developed and tested primarily on **Linux**.
 
 ## What it does

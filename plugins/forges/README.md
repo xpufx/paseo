@@ -8,6 +8,8 @@ to unlock autonomous agent orchestration.
 
 Pull requests, releases, actions, and everything else are out of scope for now.
 
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
+
 ## Highlights
 
 - **No CLI dependency.** All forge access goes through an embedded TypeScript
