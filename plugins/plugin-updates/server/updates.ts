@@ -16,6 +16,17 @@ const FETCH_TIMEOUT_MS = 30_000;
 const UPDATE_TIMEOUT_MS = 120_000;
 const RELOAD_TIMEOUT_MS = 60_000;
 
+// This plugin's own install id. Paseo runs plugin backend code in the plugin's
+// subprocess, so `paseo plugin reload plugin-updates` terminates the very
+// process executing the update loop (#210). We therefore never reload ourselves
+// from inside ourselves.
+const SELF_PLUGIN_ID = "plugin-updates";
+
+// Shown when the updater updated itself: the pull succeeded, but applying it
+// requires a reload that only the host can safely perform.
+const SELF_UPDATE_DETAIL =
+  "Updated in place. Reload plugin-updates from Settings to apply (a plugin cannot safely reload itself).";
+
 // Report-only verdict for an install whose tracked ref or plugin subdirectory is gone.
 const MISSING_SOURCE_DETAIL = "Plugin does not exist at the source it was installed from.";
 
@@ -1049,6 +1060,49 @@ async function reloadPlugin(
   }
 }
 
+/**
+ * Splits the plugins affected by a pull into those we may reload and the ones
+ * we must not.
+ *
+ * `plugin-updates` MUST never reload itself: its handlers run inside the plugin
+ * subprocess, so `paseo plugin reload plugin-updates` kills the process that is
+ * mid-update — the crash/loop in #210. Callers report the self entry as updated
+ * with a "reload from Settings" note instead.
+ */
+export function planReloads(
+  ids: string[],
+  selfId: string = SELF_PLUGIN_ID,
+): { reload: string[]; skippedSelf: string[] } {
+  const reload: string[] = [];
+  const skippedSelf: string[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (id === selfId) skippedSelf.push(id);
+    else reload.push(id);
+  }
+  return { reload, skippedSelf };
+}
+
+/**
+ * Reloads plugins strictly one at a time.
+ *
+ * Reloads are serialized because each `paseo plugin reload` restarts a plugin
+ * subprocess; overlapping them races the daemon's plugin registry (#210).
+ */
+async function reloadSerially(
+  ids: string[],
+  runner: CommandRunner,
+): Promise<Array<{ id: string; ok: boolean; output: string | null; error: string | null }>> {
+  const outcomes: Array<{ id: string; ok: boolean; output: string | null; error: string | null }> = [];
+  for (const id of ids) {
+    const reload = await reloadPlugin(id, runner);
+    outcomes.push({ id, ...reload });
+  }
+  return outcomes;
+}
+
 interface PullOutcome {
   ok: boolean;
   requiresForce: boolean;
@@ -1158,14 +1212,20 @@ export async function updatePlugin(
   }
 
   const ids = await idsSharingRoot(installed, records, identity.repoRoot, runner);
+  // Never reload ourselves: this handler runs inside the plugin subprocess, so
+  // reloading plugin-updates would kill the process mid-update (#210).
+  const { reload, skippedSelf } = planReloads(ids);
   const reloadFailures: string[] = [];
-  for (const id of ids) {
-    const reload = await reloadPlugin(id, runner);
-    if (!reload.ok) reloadFailures.push(`${id}: ${reload.error}`);
+  for (const outcome of await reloadSerially(reload, runner)) {
+    if (!outcome.ok) reloadFailures.push(`${outcome.id}: ${outcome.error}`);
   }
   const output = pull.output ?? `Pulled ${identity.repoRoot}`;
   if (reloadFailures.length > 0) {
     return actionResult(pluginId, "error", `Pulled but failed to reload: ${reloadFailures.join("; ")}`, output);
+  }
+  // Updating ourselves: the pull succeeded, but only the host can apply it.
+  if (skippedSelf.length > 0) {
+    return actionResult(pluginId, "updated", null, `${output}\n${SELF_UPDATE_DETAIL}`);
   }
   return actionResult(pluginId, "updated", null, output);
 }
@@ -1205,21 +1265,42 @@ export async function updateAllPlugins(
     const result = await invokePaseoUpdate([row.id], runner);
     results.push(actionResult(row.id, result.status, result.error, result.output));
   }
+
+  // Phase 1: pull every affected directory root, collecting the outcome. Each
+  // root is pulled exactly once (`directoryGroups` is keyed by root); reloads
+  // are deliberately NOT interleaved here — a reload restarts a plugin
+  // subprocess, and doing that mid-batch is what let a self/shared-root update
+  // tear down the running updater and loop (#210).
+  const pulled = new Map<string, { ids: string[]; pull: PullOutcome }>();
   for (const [root, group] of directoryGroups) {
     const ids = group.map((row) => row.id);
     const pull = await pullRoot(root, options.force ?? false, runner);
+    pulled.set(root, { ids, pull });
+  }
+
+  // Phase 2: reload once, after every pull has completed, strictly serially.
+  for (const [root, { ids, pull }] of pulled) {
     if (!pull.ok) {
       for (const id of ids) {
         results.push(actionResult(id, "error", pull.error, pull.output, pull.requiresForce));
       }
       continue;
     }
+    const { reload, skippedSelf } = planReloads(ids);
+    const outcomes = await reloadSerially(reload, runner);
+    const byId = new Map(outcomes.map((outcome) => [outcome.id, outcome]));
     for (const id of ids) {
-      const reload = await reloadPlugin(id, runner);
+      if (skippedSelf.includes(id)) {
+        results.push(
+          actionResult(id, "updated", null, `${pull.output ?? `Pulled ${root}`}\n${SELF_UPDATE_DETAIL}`),
+        );
+        continue;
+      }
+      const reload = byId.get(id);
       results.push(
-        reload.ok
+        reload?.ok
           ? actionResult(id, "updated", null, pull.output ?? `Pulled ${root}`)
-          : actionResult(id, "error", reload.error, pull.output),
+          : actionResult(id, "error", reload?.error ?? "reload did not run", pull.output),
       );
     }
   }
@@ -1238,11 +1319,13 @@ export const testing = {
   checkInstalledPlugins,
   updatePlugin,
   updateAllPlugins,
+  planReloads,
   loadManagedRecords,
   resolveIdentity,
   resolveRef,
   classifyBranch,
   classifyTag,
+  SELF_PLUGIN_ID,
   PROBE_TIMEOUT_MS,
   FETCH_TIMEOUT_MS,
   UPDATE_TIMEOUT_MS,
