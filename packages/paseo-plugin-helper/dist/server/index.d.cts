@@ -7,17 +7,13 @@ interface PluginStorageOptions<T> {
     defaultData?: T;
     /**
      * Base directory override. When provided, storage is located at path.join(baseDir, pluginId).
-     * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "xpufx-plugins", pluginId).
+     * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "plugin-data/xpufx", pluginId).
      */
     baseDir?: string;
     /**
-     * Namespace directory under ~/.paseo. Defaults to "xpufx-plugins".
+     * Namespace directory under ~/.paseo. Defaults to "plugin-data/xpufx".
      */
     namespace?: string;
-    /**
-     * Legacy directory override for backward compatibility testing or custom setups.
-     */
-    legacyDir?: string;
     /**
      * Optional Zod schema to validate and parse data on read/write, automatically applying defaults.
      */
@@ -34,6 +30,7 @@ declare const DEFAULT_NAMESPACE_README = "# Paseo Plugins Storage (xpufx)\n\nThi
  * Scoped, atomic filesystem-backed document storage for Paseo daemon plugins.
  * Automatically handles directory creation, atomic temporary file swaps,
  * schema validation, default state fallback, and isolated namespace auditing.
+ * State lives under ~/.paseo/plugin-data/xpufx/<pluginId>/ by default.
  */
 declare class PluginStorage<T extends Record<string, any>> {
     readonly pluginId: string;
@@ -41,22 +38,18 @@ declare class PluginStorage<T extends Record<string, any>> {
     readonly pluginDir: string;
     readonly filePath: string;
     readonly namespaceDir: string | null;
-    readonly legacyPluginDir: string | null;
-    readonly legacyFilePath: string | null;
     readonly defaultData?: T;
     readonly schema?: ZodType<T>;
     constructor(pluginId: string, filename?: string, options?: PluginStorageOptions<T>);
     private ensureDir;
-    private checkMigrateLegacy;
-    private checkMigrateLegacyAsync;
     private getDefault;
     private parseData;
     /**
-     * Checks if the backing state file exists (in primary or legacy path).
+     * Checks if the backing state file exists.
      */
     exists(): boolean;
     /**
-     * Reads data synchronously. If file does not exist, checks legacy location or returns defaultData.
+     * Reads data synchronously. If file does not exist, returns defaultData.
      */
     read(): T;
     /**
@@ -165,7 +158,7 @@ interface SharedPluginSettings<TSettings extends Record<string, any>> {
 /**
  * Creates a suite-scoped settings store shared across independent sibling plugins.
  * Every plugin in the suite points at the same file
- * (`~/.paseo/xpufx-plugins/<suite>/<filename>`) through an atomic PluginStorage,
+ * (`~/.paseo/plugin-data/xpufx/<suite>/<filename>`) through an atomic PluginStorage,
  * so an update written by Plugin A is immediately readable by Plugin B.
  */
 declare function createSharedPluginSettings<TSettings extends Record<string, any>>(options: SharedPluginSettingsOptions<TSettings>): SharedPluginSettings<TSettings>;

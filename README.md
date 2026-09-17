@@ -56,7 +56,7 @@ npm test --workspace=plugins/top
 
 ## Storage Namespace
 
-Plugin persistent storage converges on `~/.paseo/xpufx-plugins/<pluginId>/`, managed canonically by `paseo-plugin-helper`.
+Plugin persistent storage converges on `~/.paseo/plugin-data/xpufx/<pluginId>/`, managed canonically by `paseo-plugin-helper`.
 
 ## License
 

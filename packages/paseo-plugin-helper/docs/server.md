@@ -456,7 +456,7 @@ export function activateServer(server) {
 
 Independently installed plugins from one suite can read and write a **single** settings file and stay
 in sync, with no upstream Paseo change. Every sibling points at the same suite directory
-(`~/.paseo/xpufx-plugins/<suite>/<filename>`) through the same atomic `PluginStorage`:
+(`~/.paseo/plugin-data/xpufx/<suite>/<filename>`) through the same atomic `PluginStorage`:
 
 ```ts
 import { createSharedPluginSettings } from "paseo-plugin-helper/server";
@@ -491,6 +491,6 @@ What makes the sharing safe:
   so siblings must keep their fields disjoint and not read-modify-write the same key concurrently.
 
 Live-verified with two throwaway pill plugins on daemon 0.8.0: both computed the same
-`~/.paseo/xpufx-plugins/sharedset-demo/settings.json`, a write in A was observed by B in ~25 ms (and
+`~/.paseo/plugin-data/xpufx/sharedset-demo/settings.json`, a write in A was observed by B in ~25 ms (and
 the reverse) with no plugin reload, and no per-plugin settings directories were created.
 
