@@ -341,7 +341,7 @@ export function TopTimelineTelemetryCard({
               <Row justify="space-between" align="center">
                 <Row gap={4} align="center">
                   <Icon name="Coins" size={12} color={theme.colors.foregroundMuted} />
-                  <Text style={styles.sectionTitle}>Tokens & Context</Text>
+                  <Text style={sectionTitleStyle(theme.colors)}>Tokens & Context</Text>
                 </Row>
                 {costUsd != null && (
                   <Text style={{ fontSize: 10, fontWeight: "600", color: theme.colors.foreground }}>
@@ -387,7 +387,7 @@ export function TopTimelineTelemetryCard({
             </Stack>
           ) : show("tokens") ? (
             <Row justify="space-between" align="center">
-              <Text style={styles.sectionTitle}>Tokens & Context</Text>
+              <Text style={sectionTitleStyle(theme.colors)}>Tokens & Context</Text>
               <Text
                 style={{
                   fontSize: 10,
@@ -401,7 +401,7 @@ export function TopTimelineTelemetryCard({
           ) : null}
 
           <Stack gap={4}>
-            <Text style={styles.sectionTitle}>Turn Details</Text>
+            <Text style={sectionTitleStyle(theme.colors)}>Turn Details</Text>
             <Row wrap gap={12} align="center">
               <Vital icon="Cpu" color={theme.colors.foreground}>
                 {data.agentModel ?? "Unknown model"} ({data.agentProvider ?? "default"})
@@ -442,6 +442,9 @@ export function TopTimelineTelemetryCard({
 }
 
 const styles = {
+  // Layout-only. Color MUST come from the theme: a raw style without `color`
+  // falls back to React Native's default black and vanishes in dark mode
+  // (xpufx-org/paseo#208). Use `sectionTitleStyle(colors)` at call sites.
   sectionTitle: {
     fontSize: 10,
     fontWeight: "600",
@@ -449,3 +452,7 @@ const styles = {
     letterSpacing: 0.5,
   },
 } as const;
+
+function sectionTitleStyle(colors: { foregroundMuted: string }) {
+  return [styles.sectionTitle, { color: colors.foregroundMuted }];
+}

@@ -110,9 +110,34 @@ describe("Collapsible component", () => {
     });
     const styles = pressStyle(findPressable(renderer!.root), true);
     expect(styles.some((s: any) => s?.cursor === "pointer")).toBe(true);
-    expect(styles.some((s: any) => s?.backgroundColor === colors.surface1)).toBe(true);
+    // Pressed feedback is a translucent tint; the container owns the surface
+    // color so the header never paints a second opaque band (#208).
+    expect(styles.some((s: any) => s?.backgroundColor === colors.foregroundMuted)).toBe(false);
     const idle = pressStyle(findPressable(renderer!.root), false);
-    expect(idle.some((s: any) => s?.backgroundColor === colors.surface0)).toBe(true);
+    expect(idle.some((s: any) => s?.backgroundColor === "transparent")).toBe(true);
+  });
+
+  it("honors the SurfaceStyle variant on the container (#208)", () => {
+    const containerStyle = (variant?: "flat" | "elevated" | "tinted") => {
+      let renderer!: TestRenderer.ReactTestRenderer;
+      act(() => {
+        renderer = TestRenderer.create(
+          React.createElement(Collapsible, { title: "T", variant, children: "x" }),
+        );
+      });
+      // The outermost View is the container.
+      const container = renderer.root.findAllByType("View" as any)[0];
+      const flatStyle = Array.isArray(container.props.style)
+        ? Object.assign({}, ...container.props.style.flat(Infinity).filter(Boolean))
+        : container.props.style;
+      return flatStyle;
+    };
+
+    expect(containerStyle().backgroundColor).toBe(colors.surface0);
+    expect(containerStyle("flat").backgroundColor).toBe(colors.surface0);
+    expect(containerStyle("elevated").backgroundColor).toBe(colors.surface1);
+    // tinted uses the accent wash; the mocked alpha returns the color as-is.
+    expect(containerStyle("tinted").backgroundColor).toBe(colors.accent);
   });
 
   it("renders chevron badge container and correct icon per state", () => {
