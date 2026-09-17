@@ -1,6 +1,6 @@
-# slash
+# s/ash
 
-S/ash-command console for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
+Slash-command console for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
 
 <p align="center">
   <img src="docs/screenshots/slash-console.jpg" alt="S/ash console — command repository, prefix, and shipped catalog" width="380">
