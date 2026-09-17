@@ -7,17 +7,13 @@ export interface PluginStorageOptions<T> {
   defaultData?: T;
   /**
    * Base directory override. When provided, storage is located at path.join(baseDir, pluginId).
-   * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "xpufx-plugins", pluginId).
+   * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "plugin-data/xpufx", pluginId).
    */
   baseDir?: string;
   /**
-   * Namespace directory under ~/.paseo. Defaults to "xpufx-plugins".
+   * Namespace directory under ~/.paseo. Defaults to "plugin-data/xpufx".
    */
   namespace?: string;
-  /**
-   * Legacy directory override for backward compatibility testing or custom setups.
-   */
-  legacyDir?: string;
   /**
    * Optional Zod schema to validate and parse data on read/write, automatically applying defaults.
    */
@@ -42,6 +38,7 @@ This directory is managed by \`paseo-plugin-helper\` to store persistent setting
  * Scoped, atomic filesystem-backed document storage for Paseo daemon plugins.
  * Automatically handles directory creation, atomic temporary file swaps,
  * schema validation, default state fallback, and isolated namespace auditing.
+ * State lives under ~/.paseo/plugin-data/xpufx/<pluginId>/ by default.
  */
 export class PluginStorage<T extends Record<string, any>> {
   readonly pluginId: string;
@@ -49,8 +46,6 @@ export class PluginStorage<T extends Record<string, any>> {
   readonly pluginDir: string;
   readonly filePath: string;
   readonly namespaceDir: string | null;
-  readonly legacyPluginDir: string | null;
-  readonly legacyFilePath: string | null;
   readonly defaultData?: T;
   readonly schema?: ZodType<T>;
 
@@ -60,19 +55,16 @@ export class PluginStorage<T extends Record<string, any>> {
     this.defaultData = options.defaultData;
     this.schema = options.schema;
 
-    const namespace = options.namespace ?? "xpufx-plugins";
+    const namespace = options.namespace ?? "plugin-data/xpufx";
     if (options.baseDir) {
       this.namespaceDir = options.baseDir;
       this.pluginDir = path.join(options.baseDir, pluginId);
-      this.legacyPluginDir = options.legacyDir ?? null;
     } else {
       this.namespaceDir = path.join(os.homedir(), ".paseo", namespace);
       this.pluginDir = path.join(this.namespaceDir, pluginId);
-      this.legacyPluginDir = options.legacyDir ?? path.join(os.homedir(), ".paseo", pluginId);
     }
 
     this.filePath = path.join(this.pluginDir, filename);
-    this.legacyFilePath = this.legacyPluginDir ? path.join(this.legacyPluginDir, filename) : null;
   }
 
   private ensureDir(): void {
@@ -92,28 +84,6 @@ export class PluginStorage<T extends Record<string, any>> {
     const dir = path.dirname(this.filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
-    }
-  }
-
-  private checkMigrateLegacy(): void {
-    if (!fs.existsSync(this.filePath) && this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
-      try {
-        this.ensureDir();
-        fs.copyFileSync(this.legacyFilePath, this.filePath);
-      } catch {
-        // Fall back to reading legacy in read()
-      }
-    }
-  }
-
-  private async checkMigrateLegacyAsync(): Promise<void> {
-    if (!fs.existsSync(this.filePath) && this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
-      try {
-        this.ensureDir();
-        await fs.promises.copyFile(this.legacyFilePath, this.filePath);
-      } catch {
-        // Fall back
-      }
     }
   }
 
@@ -139,25 +109,18 @@ export class PluginStorage<T extends Record<string, any>> {
   }
 
   /**
-   * Checks if the backing state file exists (in primary or legacy path).
+   * Checks if the backing state file exists.
    */
   exists(): boolean {
-    if (fs.existsSync(this.filePath)) return true;
-    if (this.legacyFilePath && fs.existsSync(this.legacyFilePath)) return true;
-    return false;
+    return fs.existsSync(this.filePath);
   }
 
   /**
-   * Reads data synchronously. If file does not exist, checks legacy location or returns defaultData.
+   * Reads data synchronously. If file does not exist, returns defaultData.
    */
   read(): T {
     try {
-      this.checkMigrateLegacy();
       if (!fs.existsSync(this.filePath)) {
-        if (this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
-          const raw = fs.readFileSync(this.legacyFilePath, "utf8");
-          return this.parseData(JSON.parse(raw));
-        }
         return this.getDefault();
       }
       const raw = fs.readFileSync(this.filePath, "utf8");
@@ -172,12 +135,7 @@ export class PluginStorage<T extends Record<string, any>> {
    */
   async readAsync(): Promise<T> {
     try {
-      await this.checkMigrateLegacyAsync();
       if (!fs.existsSync(this.filePath)) {
-        if (this.legacyFilePath && fs.existsSync(this.legacyFilePath)) {
-          const raw = await fs.promises.readFile(this.legacyFilePath, "utf8");
-          return this.parseData(JSON.parse(raw));
-        }
         return this.getDefault();
       }
       const raw = await fs.promises.readFile(this.filePath, "utf8");

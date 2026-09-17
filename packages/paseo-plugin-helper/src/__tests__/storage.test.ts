@@ -13,9 +13,9 @@ describe("PluginStorage Scoped Namespace and Auditing (#49)", () => {
     }
   });
 
-  it("defaults to scoped ~/.paseo/xpufx-plugins/<pluginId> path", () => {
+  it("defaults to scoped ~/.paseo/plugin-data/xpufx/<pluginId> path", () => {
     const storage = new PluginStorage("my-plugin", "settings.json");
-    const expectedDir = path.join(os.homedir(), ".paseo", "xpufx-plugins", "my-plugin");
+    const expectedDir = path.join(os.homedir(), ".paseo", "plugin-data", "xpufx", "my-plugin");
     const expectedFile = path.join(expectedDir, "settings.json");
 
     expect(storage.pluginDir).toBe(expectedDir);
@@ -67,46 +67,23 @@ describe("PluginStorage Scoped Namespace and Auditing (#49)", () => {
     expect(aliasStats.totalBytes).toBe(stats.totalBytes);
   });
 
-  it("seamlessly falls back to and migrates from legacy storage directory", () => {
-    const legacyDir = path.join(testBase, "legacy-plugin");
-    const newDir = path.join(testBase, "xpufx-plugins", "legacy-plugin");
-
-    // Simulate pre-existing legacy state
-    fs.mkdirSync(legacyDir, { recursive: true });
-    fs.writeFileSync(path.join(legacyDir, "config.json"), JSON.stringify({ migrated: true, version: 1 }), "utf8");
-
-    const storage = new PluginStorage<{ migrated: boolean; version: number }>("legacy-plugin", "config.json", {
-      baseDir: path.join(testBase, "xpufx-plugins"),
-      legacyDir,
+  it("returns defaults when no state file exists", () => {
+    const storage = new PluginStorage<{ version: number }>("missing-plugin", "config.json", {
+      baseDir: path.join(testBase, "plugin-data", "xpufx"),
+      defaultData: { version: 1 },
     });
 
-    expect(storage.exists()).toBe(true);
-    // Reading triggers automatic migration
-    const data = storage.read();
-    expect(data).toEqual({ migrated: true, version: 1 });
-
-    // File should now be copied to new location
-    expect(fs.existsSync(path.join(newDir, "config.json"))).toBe(true);
-
-    // Subsequent write should update the new location
-    storage.write({ migrated: true, version: 2 });
-    expect(storage.read().version).toBe(2);
+    expect(storage.exists()).toBe(false);
+    expect(storage.read()).toEqual({ version: 1 });
   });
 
-  it("async reads also fall back to and migrate from legacy storage", async () => {
-    const legacyDir = path.join(testBase, "legacy-async-plugin");
-    const newDir = path.join(testBase, "xpufx-plugins", "legacy-async-plugin");
-
-    fs.mkdirSync(legacyDir, { recursive: true });
-    fs.writeFileSync(path.join(legacyDir, "async-config.json"), JSON.stringify({ asyncVal: 42 }), "utf8");
-
-    const storage = new PluginStorage<{ asyncVal: number }>("legacy-async-plugin", "async-config.json", {
-      baseDir: path.join(testBase, "xpufx-plugins"),
-      legacyDir,
+  it("async reads return defaults when no state file exists", async () => {
+    const storage = new PluginStorage<{ asyncVal: number }>("missing-async-plugin", "async-config.json", {
+      baseDir: path.join(testBase, "plugin-data", "xpufx"),
+      defaultData: { asyncVal: 42 },
     });
 
     const data = await storage.readAsync();
     expect(data).toEqual({ asyncVal: 42 });
-    expect(fs.existsSync(path.join(newDir, "async-config.json"))).toBe(true);
   });
 });

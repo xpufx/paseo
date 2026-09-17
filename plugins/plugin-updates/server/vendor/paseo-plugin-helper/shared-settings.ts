@@ -60,7 +60,7 @@ function safeSerialize(value: unknown): string {
 /**
  * Creates a suite-scoped settings store shared across independent sibling plugins.
  * Every plugin in the suite points at the same file
- * (`~/.paseo/xpufx-plugins/<suite>/<filename>`) through an atomic PluginStorage,
+ * (`~/.paseo/plugin-data/xpufx/<suite>/<filename>`) through an atomic PluginStorage,
  * so an update written by Plugin A is immediately readable by Plugin B.
  */
 export function createSharedPluginSettings<TSettings extends Record<string, any>>(

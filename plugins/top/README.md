@@ -62,7 +62,7 @@ Every metric can be routed independently via settings to:
 - **None**: Disable the metric entirely.
 
 ### 7. Extensible Custom Metric Pills (JSONC Engine)
-Add user-defined metrics by dropping declarative `.jsonc` definitions into `~/.paseo/xpufx-plugins/top/pills/`:
+Add user-defined metrics by dropping declarative `.jsonc` definitions into `~/.paseo/plugin-data/xpufx/top/pills/`:
 - **Shell Command Execution**: Executes commands or scripts at configurable intervals.
 - **Threshold Matching**: Maps outputs or exit codes to visual statuses (`neutral`, `success`, `warning`, `danger`, `accent`, `info`).
 - **Interactive Modal Drilldown**: Clicking a custom pill can trigger an on-demand secondary command (for example, `docker ps -a` or `df -h`) and render terminal output directly inside the detail modal.
