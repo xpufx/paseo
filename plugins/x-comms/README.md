@@ -1,5 +1,7 @@
 # paseo-x-comms
 
+> **Status**: Coming soon / Work in progress.
+
 > Tracks stable paseo (`@getpaseo/* 0.8.0`, manifest requires `paseo >= 0.8.0`). Expect breaking changes between versions.
 
 > Work in progress. Not all features work %100 as described.
