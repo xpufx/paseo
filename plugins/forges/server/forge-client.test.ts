@@ -164,6 +164,73 @@ describe("ForgeClient.repoWritePermission (issue #193)", () => {
   });
 });
 
+describe("ForgeClient token scope handling (issue #212)", () => {
+  it("treats a 403 from /user as a valid token with a narrower scope", async () => {
+    stubFetch((url, init) => {
+      if (url.endsWith("/user")) {
+        // Forgejo demands read:user; an issue-scoped PAT gets 403.
+        assert.equal((init?.headers as Record<string, string>)?.Authorization, "token secret");
+        return jsonResponse({ message: "token does not have required scope(s): [read:user]" }, 403);
+      }
+      return jsonResponse({}, 404);
+    });
+    const validity = await new ForgeClient({ host: "forge.example.com", token: "secret" }).tokenIsValid();
+    assert.equal(validity, true);
+  });
+
+  it("still reports an invalid token on 401", async () => {
+    stubFetch(() => jsonResponse({ message: "Unauthorized" }, 401));
+    const validity = await new ForgeClient({ host: "forge.example.com", token: "secret" }).tokenIsValid();
+    assert.equal(validity, false);
+  });
+
+  it("returns null (unknown, not invalid) when the probe cannot reach the host", async () => {
+    stubFetch(() => {
+      throw new Error("ECONNREFUSED");
+    });
+    const validity = await new ForgeClient({ host: "forge.example.com", token: "secret" }).tokenIsValid();
+    assert.equal(validity, null);
+  });
+
+  it("falls back to an anonymous read for openIssueCount when the token lacks read:repository", async () => {
+    const seen: Array<{ url: string; auth?: string }> = [];
+    stubFetch((url, init) => {
+      const auth = (init?.headers as Record<string, string>)?.Authorization;
+      seen.push({ url, auth });
+      if (auth) return jsonResponse({ message: "required scope(s): [read:repository]" }, 403);
+      return jsonResponse({ open_issues_count: 7 });
+    });
+    const count = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .openIssueCount("owner/repo");
+    assert.equal(count, 7);
+    // Authenticated attempt first, then the anonymous retry.
+    assert.equal(seen.length, 2);
+    assert.equal(seen[0].auth, "token secret");
+    assert.equal(seen[1].auth, undefined);
+  });
+
+  it("does not fabricate a count when the repo is private and the token is scope-limited", async () => {
+    stubFetch((url, init) => {
+      const auth = (init?.headers as Record<string, string>)?.Authorization;
+      return auth ? jsonResponse({ message: "forbidden" }, 403) : jsonResponse({ message: "not found" }, 404);
+    });
+    const count = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .openIssueCount("owner/private");
+    assert.equal(count, null);
+  });
+
+  it("retries repoWritePermission anonymously on a scope 403 instead of reporting read-only", async () => {
+    stubFetch((url, init) => {
+      const auth = (init?.headers as Record<string, string>)?.Authorization;
+      if (auth) return jsonResponse({ message: "required scope(s): [read:repository]" }, 403);
+      return jsonResponse({ permissions: { push: true, admin: false, pull: true } });
+    });
+    const granted = await new ForgeClient({ host: "forge.example.com", token: "secret" })
+      .repoWritePermission("owner/repo");
+    assert.equal(granted, true);
+  });
+});
+
 describe("ForgeClient.createIssue (issue #200)", () => {
   it("POSTs /repos/{repo}/issues and returns the created number", async () => {
     let seen = "";

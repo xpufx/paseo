@@ -183,11 +183,18 @@ export class ForgeClient {
     this.timeoutMs = options.timeoutMs ?? 15000;
   }
 
-  private async request(
+  /**
+   * Status-aware variant of {@link request}. A 403 from Forgejo means "token is
+   * valid but lacks the scope this endpoint needs" (e.g. `/user` demands
+   * `read:user`), which is materially different from a 401 "token is bad"
+   * (xpufx-org/paseo#212). Callers that must tell those apart use this instead
+   * of the null-collapsing `request`.
+   */
+  private async requestWithStatus(
     path: string,
     init?: RequestInit,
     timeoutMs = this.timeoutMs,
-  ): Promise<unknown | null> {
+  ): Promise<{ status: number; payload: unknown | null; ok: boolean }> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -204,20 +211,30 @@ export class ForgeClient {
         headers,
         signal: controller.signal,
       });
-      if (!res.ok) return null;
-      if (res.status === 204) return {};
+      if (!res.ok) return { status: res.status, payload: null, ok: false };
+      if (res.status === 204) return { status: res.status, payload: {}, ok: true };
       const text = await res.text();
-      if (!text) return {};
+      if (!text) return { status: res.status, payload: {}, ok: true };
       try {
-        return JSON.parse(text) as unknown;
+        return { status: res.status, payload: JSON.parse(text) as unknown, ok: true };
       } catch {
-        return null;
+        return { status: res.status, payload: null, ok: false };
       }
     } catch {
-      return null;
+      // status 0: transport/abort failure, not an HTTP verdict.
+      return { status: 0, payload: null, ok: false };
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private async request(
+    path: string,
+    init?: RequestInit,
+    timeoutMs = this.timeoutMs,
+  ): Promise<unknown | null> {
+    const { ok, payload } = await this.requestWithStatus(path, init, timeoutMs);
+    return ok ? payload : null;
   }
 
   /**
@@ -261,13 +278,21 @@ export class ForgeClient {
   }
 
   /**
-   * Token validity probe: null when no token is configured, otherwise true
-   * when /user answers with it.
+   * Token validity probe: null when no token is configured.
+   *
+   * `/user` requires the `read:user` scope, so a fine-grained token limited to
+   * issue scopes gets a **403** even though it is perfectly valid. Treat 403 as
+   * valid-but-narrow and only a 401 (or an unauthenticated rejection) as
+   * invalid; a transport failure stays null so callers do not cache a wrong
+   * verdict (xpufx-org/paseo#212).
    */
   async tokenIsValid(): Promise<boolean | null> {
     if (!this.token) return null;
-    const payload = await this.request("/user");
-    return payload ? true : false;
+    const { status, ok } = await this.requestWithStatus("/user");
+    if (ok) return true;
+    if (status === 403) return true; // valid token, missing read:user
+    if (status === 0) return null; // transport failure: unknown, not invalid
+    return false;
   }
 
   /**
@@ -276,18 +301,55 @@ export class ForgeClient {
    * `permissions`, GitLab `access_level`). Null when no token is configured or
    * the host returned no recognizable permissions, so `deriveForgeAccess`
    * keeps treating bare validity as the capability.
+   *
+   * A fine-grained token without `read:repository` gets a 403 here even for a
+   * public repo. That is a scope gap, not a read-only verdict, so retry
+   * anonymously before giving up (xpufx-org/paseo#212).
    */
   async repoWritePermission(repo: string): Promise<boolean | null> {
     if (!this.token) return null;
-    const payload = await this.request(`/repos/${repo}`);
-    return forgeCapabilityFromRepo(payload);
+    const { ok, payload } = await this.requestWithStatus(`/repos/${repo}`);
+    if (ok) return forgeCapabilityFromRepo(payload);
+    const anonymous = await this.anonymousRepo(repo);
+    if (anonymous === null) return null;
+    return forgeCapabilityFromRepo(anonymous);
   }
 
   async openIssueCount(repo: string): Promise<number | null> {
-    const payload = await this.request(`/repos/${repo}`);
-    if (!payload || typeof payload !== "object") return null;
-    const count = (payload as Record<string, unknown>).open_issues_count;
-    return typeof count === "number" && Number.isInteger(count) && count >= 0 ? count : null;
+    const count = (payload: unknown): number | null => {
+      if (!payload || typeof payload !== "object") return null;
+      const value = (payload as Record<string, unknown>).open_issues_count;
+      return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+    };
+    const authed = await this.requestWithStatus(`/repos/${repo}`);
+    if (authed.ok) return count(authed.payload);
+    // Scope-limited token (403) on a public repo: the anonymous read still
+    // carries open_issues_count (xpufx-org/paseo#212).
+    return count(await this.anonymousRepo(repo));
+  }
+
+  /** Unauthenticated repo read; null on any non-ok/invalid response. */
+  private async anonymousRepo(repo: string): Promise<unknown | null> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await fetch(`${this.baseUrl}/repos/${repo}`, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+      const text = await res.text();
+      if (!text) return null;
+      try {
+        return JSON.parse(text) as unknown;
+      } catch {
+        return null;
+      }
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async listIssues(repo: string, page = 1, limit = 50): Promise<{ issues: ForgeIssue[]; hasMore: boolean } | null> {
