@@ -8,13 +8,10 @@ approve, deny, or acknowledge them without leaving Paseo. The plugin also
 registers a sidebar item, a workspace header button, and a command-center
 entry so the queue is one tap away.
 
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
+
 > [!NOTE]
 > **Prerequisites & Platform Support**:
-> - Zero install requirements: the helper runtime is vendored
->   (`client|server|shared/vendor/paseo-plugin-helper/`, pinned helper
->   `0.4.0-beta.12`), so Paseo installs this plugin with no build step and no
->   npm/registry access. For local development (`typecheck`), Node.js (v18+)
->   is enough.
 > - Requires a running `2fadod`; the daemon is reached over a unix socket.
 >   The socket path is configurable and otherwise falls back to
 >   `$TWOFADO_SOCKET`, `$FADO_SOCKET`, then `/tmp/2fado.sock`.

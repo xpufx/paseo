@@ -4,19 +4,7 @@ Provides an inline UI for checking MCP servers available to an agent session wit
 
 (**Paseo** is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions.)
 
-> [!NOTE]
-> **Prerequisites & Platform Support**:
-> - Zero install requirements: the helper runtime is vendored (`client|server|shared/vendor/paseo-plugin-helper/` plus `server/vendor/paseo-plugin-helper/mcp/`, pinned helper 0.4.0-beta.12 — see `shared/vendor/paseo-plugin-helper/README.md`), so Paseo installs this plugin with no build step and no npm/registry access. For local development (`typecheck`/`test`), Node.js (v18+) is enough.
-
-## What it does
-
-- **Pill** above the composer shows `MCP n` (live servers for that agent). Badge updates via `mcp.list`, shared between pill and modal.
-- **Live discovery** per-CLI via isolated `providers/<id>.ts` (`opencode` → `opencode mcp list`, `claude` → `~/.claude.json` live, `antigravity` → `~/.gemini/config/mcp_config.json`, etc.) + Paseo-injected `StoredAgentRecord.mcpServers`. Groups by `source.label`, dedupes by name.
-- **Paseo Built-in Host MCP**: Automatically discovers Paseo's host daemon control plane (`/mcp/agents?callerAgentId=...`) as a first-class MCP server (`Paseo (Builtin)`), exposing all 60+ live tools (workspaces, browser automation, schedules, terminals, agent orchestration).
-- **Detail & Live Health**: Server tap reveals real-time status dots, latency, server instructions, and full tool declarations.
-- **Interactive Tool Runner (User Execution)**: Users can execute any discovered MCP tool directly from the UI without prompting the agent. Features a dynamic schema-driven form with `*REQUIRED` validation, type coercion (boolean, number, object, array, union/nullable types), live tool execution via host RPC (`mcp.call_tool`), and output inspection with 1-tap clipboard copying.
-- **Real-Time Tool Search**: Server Detail view features a real-time search input filtering across tool names and descriptions, making servers with large command sets (like Paseo, Forgejo, Chrome DevTools) fast and easy to navigate.
-- **Diagnostics**: Full polymorphic probe checklist verifying paths, permissions, and agent records across hosts.
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
 
 ## Screenshots
 
@@ -27,6 +15,16 @@ Provides an inline UI for checking MCP servers available to an agent session wit
 | Server Details | Tool Execution |
 | :---: | :---: |
 | <img src="screenshots/mcp-server-details.png" width="100%" alt="Server Details" /> | <img src="screenshots/mcp-execute.png" width="100%" alt="Tool Execution" /> |
+
+## What it does
+
+- **Pill** above the composer shows `MCP n` (live servers for that agent). Badge updates via `mcp.list`, shared between pill and modal.
+- **Live discovery** per-CLI via isolated `providers/<id>.ts` (`opencode` → `opencode mcp list`, `claude` → `~/.claude.json` live, `antigravity` → `~/.gemini/config/mcp_config.json`, etc.) + Paseo-injected `StoredAgentRecord.mcpServers`. Groups by `source.label`, dedupes by name.
+- **Paseo Built-in Host MCP**: Automatically discovers Paseo's host daemon control plane (`/mcp/agents?callerAgentId=...`) as a first-class MCP server (`Paseo (Builtin)`), exposing all 60+ live tools (workspaces, browser automation, schedules, terminals, agent orchestration).
+- **Detail & Live Health**: Server tap reveals real-time status dots, latency, server instructions, and full tool declarations.
+- **Interactive Tool Runner (User Execution)**: Users can execute any discovered MCP tool directly from the UI without prompting the agent. Features a dynamic schema-driven form with `*REQUIRED` validation, type coercion (boolean, number, object, array, union/nullable types), live tool execution via host RPC (`mcp.call_tool`), and output inspection with 1-tap clipboard copying.
+- **Real-Time Tool Search**: Server Detail view features a real-time search input filtering across tool names and descriptions, making servers with large command sets (like Paseo, Forgejo, Chrome DevTools) fast and easy to navigate.
+- **Diagnostics**: Full polymorphic probe checklist verifying paths, permissions, and agent records across hosts.
 
 ## Supported Providers
 
