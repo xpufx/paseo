@@ -11,7 +11,7 @@ import { serverCandidates, serverPath } from "./server-status.ts";
  * skipped on every reload and x-comms never reached agents.
  *
  * Ground truth measured on the live daemon (temporary diagnostic):
- *   cwd = /home/xpufx/.dsh      (the daemon's own cwd — NOT the plugin dir)
+ *   cwd = the daemon's own working directory (NOT the plugin dir)
  *   import.meta.url = undefined (Paseo bundles and inlines the server)
  *
  * So neither of the original locators could ever work. The dependable source is

@@ -92,8 +92,8 @@ function moduleCandidates(): string[] {
  * Working-directory candidates.
  *
  * Paseo does **not** spawn plugin subprocesses from the plugin directory (the
- * daemon inherits its own cwd — observed as `/home/xpufx/.dsh`), so this is a
- * low-priority fallback that helps when a plugin is run directly (tests, tsx).
+ * daemon inherits its own cwd), so this is a low-priority fallback that helps
+ * when a plugin is run directly (tests, tsx).
  */
 function cwdCandidates(): string[] {
   const cwd = process.cwd();
