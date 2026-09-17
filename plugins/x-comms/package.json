@@ -22,7 +22,7 @@
     "cross-daemon",
     "plugin"
   ],
-  "license": "Apache-2.0",
+  "license": "MIT",
   "dependencies": {
     "@getpaseo/client": "^0.8.0",
     "@getpaseo/protocol": "^0.8.0",
