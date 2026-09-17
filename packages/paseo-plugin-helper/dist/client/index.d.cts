@@ -1315,8 +1315,12 @@ interface RegisterSidebarSurfaceOptions {
  * `"required"` scroll-owner context makes every `ModalBody` inside own the
  * scroll on every surface, so plugins inherit working scroll with no
  * per-plugin workaround.
+ *
+ * Returns an idempotent disposer that removes both the surface and the sidebar
+ * item, matching every other helper `add*` registration. Existing callers that
+ * ignore the return value are unaffected.
  */
-declare function registerSidebarSurface(plugin: SidebarSurfaceRegistrar, options: RegisterSidebarSurfaceOptions): void;
+declare function registerSidebarSurface(plugin: SidebarSurfaceRegistrar, options: RegisterSidebarSurfaceOptions): () => void;
 
 /**
  * Structural registrar interface satisfied by both Paseo v0.7 PluginContext
