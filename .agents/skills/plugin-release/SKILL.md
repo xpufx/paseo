@@ -59,6 +59,8 @@ git grep -n -i -E 'beta|v7|v8' -- 'plugins/*/README.md' 'README.md'
 ```
 
 - Every shipped plugin has a root `README.md`.
+- Every plugin's `package.json` declares `"license": "MIT"` (paseo.cafe
+  catalog `hasLicense` check — fatal in CI).
 - Install command is present and correct:
   `paseo plugin add xpufx/paseo --path plugins/<id>` (or the plugin's own repo).
 - Version strings match `plugins/<id>/package.json` and

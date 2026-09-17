@@ -1,6 +1,7 @@
 {
   "name": "plugin-updates",
   "private": true,
+  "license": "MIT",
   "version": "0.1.0",
   "description": "Monitor installed Paseo plugins for git-source updates, with per-subdirectory status, source links, and one-click pulls.",
   "scripts": {

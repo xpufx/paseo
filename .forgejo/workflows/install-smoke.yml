@@ -105,6 +105,9 @@ jobs:
           missing=0
           for p in plugins/*/; do
             [ -f "${p}README.md" ] || { echo "::error::missing README: ${p}"; missing=1; }
+            # paseo.cafe catalog `hasLicense`: every plugin must declare MIT.
+            lic="$(node -e "console.log(require('./${p}package.json').license)" 2>/dev/null || echo MISSING)"
+            [ "$lic" = "MIT" ] || { echo "::error::${p}package.json license must be MIT (got: ${lic})"; missing=1; }
           done
           [ "$missing" -eq 0 ] || exit 1
           # Issue #206: every plugin with screenshots must expose them through
