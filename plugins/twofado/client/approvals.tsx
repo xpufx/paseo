@@ -52,6 +52,12 @@ const RECENT_LIMIT = 10;
 const OUTPUT_PREVIEW = 2000;
 const EXPIRY_URGENT_S = 30;
 
+// Keep the approvals surface a readable centered column instead of stretching
+// edge-to-edge on large viewports. The cap lives in the helper
+// (`ModalBody maxContentWidth`); this is the only place the surface picks
+// the value.
+const TWOFADO_CONTENT_MAX_WIDTH = 600;
+
 const seenIds = new Set<string>();
 const SEEN_IDS_CAP = 500;
 
@@ -1251,6 +1257,7 @@ function ApprovalSurfaceInner({
     <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
       <ModalBody
         size="large"
+        maxContentWidth={TWOFADO_CONTENT_MAX_WIDTH}
         style={{ backgroundColor: theme.colors.surface0 }}
         contentContainerStyle={{
           paddingHorizontal: layout.compact ? 12 : 20,
@@ -1428,6 +1435,7 @@ export function ApprovalSurface(props: PluginSurfaceProps) {
       fallback={
         <PluginThemeProvider theme={{ colors: theme.colors }} layout={layout}>
           <ModalBody
+            maxContentWidth={TWOFADO_CONTENT_MAX_WIDTH}
             style={{ backgroundColor: theme.colors.surface0 }}
             contentContainerStyle={{ padding: 20 }}
           >

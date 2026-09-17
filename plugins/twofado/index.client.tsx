@@ -1,7 +1,10 @@
 import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers } from "paseo-plugin-helper/client";
+import {
+  initClientHelpers,
+  registerSidebarSurface,
+} from "paseo-plugin-helper/client";
 import { ErrorBoundary } from "./client/error-boundary";
 import {
   ApprovalHeaderIcon,
@@ -18,12 +21,15 @@ export default function contribute(client: PluginClientContext) {
       <ApprovalSurface {...props} />
     </ErrorBoundary>
   );
-  client.addSurface("approvals", Surface);
-  client.addSidebarItem({
+  // Helper primitive instead of a handrolled surface registration: besides
+  // injecting the theme provider it marks the subtree as helper-scroll-owned,
+  // so the page owns a working scroll region on a wide desktop window
+  // (xpufx-org/paseo#213) rather than clipping.
+  registerSidebarSurface(client, {
     id: "approvals",
     title: "2fado",
     icon: "ShieldCheck",
-    surface: "approvals",
+    Component: Surface,
   });
   client.addCommandCenterItem({
     id: "open-approvals",
