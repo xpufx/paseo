@@ -107,6 +107,27 @@ jobs:
             [ -f "${p}README.md" ] || { echo "::error::missing README: ${p}"; missing=1; }
           done
           [ "$missing" -eq 0 ] || exit 1
+          # Issue #206: every plugin with screenshots must expose them through
+          # an `images` symlink (fatal). A missing screenshots dir is only a
+          # warning (non-fatal: coming-soon / WIP plugins like twofado, x-comms).
+          badlink=0
+          for p in plugins/*/; do
+            shots=""
+            if [ -d "${p}screenshots" ]; then shots="${p}screenshots"; fi
+            if [ -d "${p}docs/screenshots" ]; then shots="${p}docs/screenshots"; fi
+            if [ -z "$shots" ]; then
+              echo "::warning::no screenshots directory: ${p}"
+              continue
+            fi
+            if [ ! -L "${p}images" ]; then
+              echo "::error::missing images symlink: ${p} (has ${shots}, expected ${p}images -> screenshots)"
+              badlink=1
+            elif [ ! -d "${p}images" ]; then
+              echo "::error::dangling images symlink: ${p}images -> $(readlink "${p}images")"
+              badlink=1
+            fi
+          done
+          [ "$badlink" -eq 0 ] || exit 1
           echo "hygiene clean"
 
       - name: Gate — vendored copy trees are publishable

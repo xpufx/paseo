@@ -64,6 +64,20 @@ git grep -n -i -E 'beta|v7|v8' -- 'plugins/*/README.md' 'README.md'
 - Version strings match `plugins/<id>/package.json` and
   `plugins/<id>/paseo-plugin.json` (`requirements.paseo >= 0.8.0`).
 - No stale generation wording (`v7`, `v8`, superseded beta pins) in prose.
+- Screenshots surface (#206): if a plugin ships `screenshots/` (or
+  `docs/screenshots/`), it MUST expose an `images` symlink resolving to it
+  (`[ -L plugins/<id>/images ] && [ -d plugins/<id>/images ]`) — fatal in CI.
+  A missing screenshots dir is a non-fatal warning (coming-soon / WIP plugins
+  like `twofado`, `x-comms`). Local check:
+
+```bash
+for p in plugins/*/; do
+  shots=""; [ -d "${p}screenshots" ] && shots="${p}screenshots"
+  [ -d "${p}docs/screenshots" ] && shots="${p}docs/screenshots"
+  [ -z "$shots" ] && { echo "WARN: no screenshots: $p"; continue; }
+  [ -L "${p}images" ] && [ -d "${p}images" ] || echo "FAIL: bad/missing images symlink: $p"
+done
+```
 
 ## 3. Open issues per plugin
 
