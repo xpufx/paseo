@@ -10,6 +10,12 @@ Pull requests, releases, actions, and everything else are out of scope for now.
 
 Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
 
+## Screenshots
+
+| Main | Issue List | Issue Detail |
+| :---: | :---: | :---: |
+| <img src="screenshots/forge-main.png" width="100%" alt="Forges Main" /> | <img src="screenshots/forge-list.png" width="100%" alt="Forge Issue List" /> | <img src="screenshots/forge-issue-detail.png" width="100%" alt="Forge Issue Detail" /> |
+
 ## Highlights
 
 - **No CLI dependency.** All forge access goes through an embedded TypeScript
