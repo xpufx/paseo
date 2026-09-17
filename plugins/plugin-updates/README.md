@@ -86,7 +86,7 @@ paseo plugin add ./plugins/plugin-updates
 
 ## Limitations
 
-- **Local git installs** have no recorded install ref, so status comes from a working-tree comparison rather than a known version. Use a git remote + subpath for ref-based tracking.
+- **Local git installs are report-only.** With no upstream remote or recorded ref, there is nothing to compare against or pull, so no **Update** button is offered for them. Use a git remote + subpath to get updates.
 
 ## Development
 
