@@ -68,7 +68,7 @@ jobs:
     # Clean Ubuntu 24.04 + Node 22 + git/make/jq image. A fresh container per
     # run is the point: no reused node_modules and no pre-existing daemon state.
     container:
-      image: forge.mrs.aager.de/oktay/runner-containers/ubuntu-podman-builder:latest
+      image: forge.mrs.uppidi.com/oktay/runner-containers/ubuntu-podman-builder:latest
     env:
       # Dedicated daemon home, wiped below, so the job never reuses state.
       PASEO_HOME: /tmp/paseo-install-smoke/home

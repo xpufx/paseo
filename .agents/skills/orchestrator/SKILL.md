@@ -80,7 +80,7 @@ routine webhook or dismiss it because it lacks a conventional command verb.
 
 ## 8. Presentation: clickable issue references
 
-- Every issue number in chat responses and issue comments MUST be a clickable Markdown link to `https://forge.mrs.aager.de/xpufx/paseo/issues/<n>` (e.g. [#98](https://forge.mrs.aager.de/xpufx/paseo/issues/98)). Never emit a bare `#nnn`.
+- Every issue number in chat responses and issue comments MUST be a clickable Markdown link to `https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/<n>` (e.g. [#98](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/98)). Never emit a bare `#nnn`.
 
 ## 9. Forgejo labels: one flag per label
 

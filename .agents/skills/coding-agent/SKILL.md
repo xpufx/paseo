@@ -20,30 +20,30 @@ This skill defines the operational workflow, tool usage, issue conventions, and 
 Interact with the Forgejo task board using `fgjx` (available in `$PATH`).
 **Rule**: Always invoke `fgjx`, never bare `fgj`. `fgjx` is a complete passthrough wrapper over `fgj` (including `fgjx api ...`) while adding display enhancements (labels, formatting, envelope stamping).
 
-- **Host**: `forge.mrs.aager.de`
-- **Repo**: `xpufx/paseo-plugin-helper` (or target repo in `owner/repo` format)
+- **Host**: `forge.mrs.uppidi.com`
+- **Repo**: `xpufx-org/paseo` (or target repo in `owner/repo` format)
 
 ### Essential Commands
 
 ```bash
 # List open issues with labels
-fgjx --hostname forge.mrs.aager.de -R xpufx/paseo-plugin-helper issue list
+fgjx --hostname forge.mrs.uppidi.com -R xpufx-org/paseo issue list
 
 # View issue details, labels, and formatted comment history
-fgjx --hostname forge.mrs.aager.de -R xpufx/paseo-plugin-helper issue view <NUMBER>
+fgjx --hostname forge.mrs.uppidi.com -R xpufx-org/paseo issue view <NUMBER>
 
 # Post a comment with auto agent-envelope self-stamp
-fgjx issue comment <NUMBER> --hostname forge.mrs.aager.de -R xpufx/paseo-plugin-helper --envelope -b "Comment text"
+fgjx issue comment <NUMBER> --hostname forge.mrs.uppidi.com -R xpufx-org/paseo --envelope -b "Comment text"
 
 # Call raw API via fgjx (never use bare fgj api)
-fgjx api repos/xpufx/paseo-plugin-helper/issues/<NUMBER> --hostname forge.mrs.aager.de
+fgjx api repos/xpufx-org/paseo/issues/<NUMBER> --hostname forge.mrs.uppidi.com
 ```
 
 > [!IMPORTANT]
 > **Clean Markdown & Backticks**: When posting comments via shell or heredocs, do NOT double-escape backticks with backslashes (e.g. avoid `\`\`\`` or `\`code\``). Backslashes display literally on the Forgejo web UI. Use unescaped single quotes, heredocs (`cat << 'EOF'`), or raw file input (`-F file` or python) to preserve clean triple backticks (` ``` `).
 
 > [!NOTE]
-> Forgejo (`forge.mrs.aager.de`) is the **primary git remote (`origin`) and issues tracker**. All agent code pushes go to `origin` on Forgejo. Pushes to public GitHub are strictly manual and gated by human review.
+> Forgejo (`forge.mrs.uppidi.com`) is the **primary git remote (`origin`) and issues tracker**. All agent code pushes go to `origin` on Forgejo. Pushes to public GitHub are strictly manual and gated by human review.
 
 ---
 
@@ -51,7 +51,7 @@ fgjx api repos/xpufx/paseo-plugin-helper/issues/<NUMBER> --hostname forge.mrs.aa
 
 When referencing issues in comments, commit messages, or chat harness:
 1. **Instance-Qualified Links**: We may have multiple Forgejo/Git instances. Always format issue references with clickable markdown URLs including the instance descriptor, for example:
-   `[Issue #47 (forge.mrs)](https://forge.mrs.aager.de/xpufx/paseo-plugin-helper/issues/47)`
+   `[Issue #47 (forge.mrs)](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/47)`
 2. **Never echo redundant issue numbers**: Do not post naked `#47` inside comments on issue #47 itself without additional context. Reference external/cross-issue links with their full URL and repo/forge context.
 
 ---
@@ -60,7 +60,7 @@ When referencing issues in comments, commit messages, or chat harness:
 
 If an issue fix includes a code commit:
 1. **Always record the exact commit SHA and branch**:
-   `commit: abc1234 on branch main in forge.mrs.aager.de/xpufx/paseo-plugin-helper`
+   `commit: abc1234 on branch main in forge.mrs.uppidi.com/xpufx-org/paseo`
 2. **Public Mirroring**: Never push directly to GitHub without human instruction; code stays on Forgejo `origin`. For external repositories (like `paseo-x-comms`), state the repository origin remote + branch + SHA explicitly.
 3. **Anchored resolution explanations**: post the why + commit ref on the resolved issue itself, never as a loose top-level thread elsewhere.
 
@@ -95,7 +95,7 @@ Actual comment text comes first. The agent envelope is appended as a clean, sing
 > **No Standalone Script Creation**: Never create loose, one-off standalone scripts in `~/bin` or repo directories. Any agent/environment helper utility must be implemented as a scoped, parameterized subcommand inside `xpufx-tool` (with proper `argparse` argv handling), or embedded directly into `fgjx` if Forgejo-specific.
 
 > [!CAUTION]
-> **Stamps are convention-only, unverified**: the envelope name is resolved best-effort (daemon snapshot title when reachable, else env / provider session DB). The daemon title, the provider session title, and transient retitles can disagree, and nothing records who set a title — so a stamp may disagree with what the Paseo UI shows. Never treat a stamp as proof of which agent acted (see `xpufx/paseo#83` for the canonical-title work and the still-missing upstream title provenance). If a stamp looks wrong, check `paseo ls` / `paseo inspect <id>` before assuming attribution.
+> **Stamps are convention-only, unverified**: the envelope name is resolved best-effort (daemon snapshot title when reachable, else env / provider session DB). The daemon title, the provider session title, and transient retitles can disagree, and nothing records who set a title — so a stamp may disagree with what the Paseo UI shows. Never treat a stamp as proof of which agent acted (see `xpufx-org/paseo#83` for the canonical-title work and the still-missing upstream title provenance). If a stamp looks wrong, check `paseo ls` / `paseo inspect <id>` before assuming attribution.
 
 ---
 

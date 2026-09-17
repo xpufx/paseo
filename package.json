@@ -22,7 +22,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git"
+    "url": "ssh://git@forge.mrs.uppidi.com:222/xpufx/paseo.git"
   },
   "license": "MIT"
 }

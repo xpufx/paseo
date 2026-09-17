@@ -34,10 +34,10 @@ internal label scopes.
 
 Verdict per hit:
 - **Must go**: personal handles (`oktay`), private repo slugs (`2fado`),
-  internal infra (`forge.mrs.aager.de/...` registry or runner paths), private
+  internal infra (`forge.mrs.uppidi.com/...` registry or runner paths), private
   settings namespaces, hard-coded internal hostnames.
 - **May stay**: public URLs (`github.com/xpufx/...`), and
-  `forge.mrs.aager.de/xpufx/paseo` where it is the documented public mirror
+  `forge.mrs.uppidi.com/xpufx/paseo` where it is the documented public mirror
   source.
 
 Vendored helper copies (`plugins/*/{client,server,shared}/vendor/paseo-plugin-helper/`)
@@ -84,7 +84,7 @@ done
 ## 3. Open issues per plugin
 
 ```bash
-fgjx issue list --hostname forge.mrs.aager.de -R xpufx/paseo -s open --json
+fgjx issue list --hostname forge.mrs.uppidi.com -R xpufx/paseo -s open --json
 ```
 
 Group rows by `target/<plugin>`. Escalate anything that blocks release:
@@ -141,8 +141,8 @@ on `pull_request` and `push` to `main` (and manually via `workflow_dispatch`).
 It gates the tree the mirror *would* publish, in order:
 
 1. **Hygiene** — private-strings scan on `plugins/*` + `packages/*`
-   (`oktay`, `aager`, non-documented `mrs.aager.de` hosts) plus README presence.
-   `forge.mrs.aager.de/xpufx/paseo` remains allowed as the documented mirror
+   (`oktay`, `aager`, non-documented `mrs.uppidi.com` hosts) plus README presence.
+   `forge.mrs.uppidi.com/xpufx/paseo` remains allowed as the documented mirror
    source.
 2. **Vendor gate** — `node scripts/vendor-sync.mjs` materializes any legacy dev
    symlink, then `--check` must be clean and no vendored helper path may be a
