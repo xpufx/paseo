@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * The Forgejo webhook wire envelope: a `[forgejo-hook] ` prefixed JSON block
- * (xpufx/platform#2) followed by a blank line and the human `summarize()` line.
+ * (see hook-service history) followed by a blank line and the human `summarize()` line.
  * Pure parsing with no UI imports so the timeline transformer and its tests run
  * anywhere. Until the hook emits the envelope we also recognize today's
  * plain summary line and normalize both sources to one card shape.

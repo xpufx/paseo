@@ -1,7 +1,7 @@
 # `fgjx` (vendored example)
 
 `fgjx` is the Forgejo CLI wrapper the example Skills use for their "rich CLI"
-variant. It is a **vendored copy of `xpufx/platform/scripts/fgjx`** — the
+variant. It is a **sanitized copy of the `fgjx` wrapper** — the
 platform stays the source of truth, and this copy is synced by hand. Edit
 upstream first, then re-copy.
 
