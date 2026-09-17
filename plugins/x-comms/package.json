@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "description": "Cross-daemon agent conversation over Paseo Relay: a Paseo plugin that bundles the MCP server so agents on one daemon can talk to agents on another (relay offer or direct host).",
   "type": "module",
-  "private": true,
+  "private": false,
   "bin": {
     "paseo-x-comms": "./mcp/paseo-x-comms.mjs"
   },
@@ -39,6 +39,20 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/xpufx/paseo-x-comms.git"
-  }
+    "url": "git+https://github.com/xpufx/paseo.git"
+  },
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE",
+    "client",
+    "server",
+    "shared",
+    "mcp",
+    "docs",
+    "!**/*.test.ts",
+    "!**/*.test.tsx",
+    "!**/*.test.mjs",
+    "!**/.DS_Store"
+  ]
 }

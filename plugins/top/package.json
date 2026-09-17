@@ -1,6 +1,6 @@
 {
-  "name": "top",
-  "private": true,
+  "name": "@xpufx/paseo-top",
+  "private": false,
   "license": "MIT",
   "version": "0.4.0",
   "scripts": {
@@ -16,5 +16,22 @@
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
     "zod": "^4.4.3"
+  },
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE",
+    "client",
+    "server",
+    "shared",
+    "examples",
+    "!**/*.test.ts",
+    "!**/*.test.tsx",
+    "!**/*.test.mjs",
+    "!**/.DS_Store"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xpufx/paseo.git"
   }
 }

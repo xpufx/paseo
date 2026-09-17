@@ -1,6 +1,6 @@
 {
-  "name": "plugin-updates",
-  "private": true,
+  "name": "@xpufx/paseo-plugin-updates",
+  "private": false,
   "license": "MIT",
   "version": "0.1.0",
   "description": "Monitor installed Paseo plugins for git-source updates, with per-subdirectory status, source links, and one-click pulls.",
@@ -17,5 +17,21 @@
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
     "zod": "^4.4.3"
+  },
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE",
+    "client",
+    "server",
+    "shared",
+    "!**/*.test.ts",
+    "!**/*.test.tsx",
+    "!**/*.test.mjs",
+    "!**/.DS_Store"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xpufx/paseo.git"
   }
 }

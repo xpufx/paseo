@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Work with Forge/Gitea-family issues from inside Paseo via the embedded fetch API client.",
   "type": "module",
-  "private": true,
+  "private": false,
   "license": "MIT",
   "scripts": {
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
@@ -16,5 +16,23 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "typescript": "^5.9.3"
+  },
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE",
+    "client",
+    "server",
+    "shared",
+    "docs",
+    "examples",
+    "!**/*.test.ts",
+    "!**/*.test.tsx",
+    "!**/*.test.mjs",
+    "!**/.DS_Store"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xpufx/paseo.git"
   }
 }
