@@ -84,3 +84,4 @@ for the data model, RPC contracts, and UI surfaces, and
 [`docs/workflow.md`](./docs/workflow.md) for the end-to-end agent workflow
 (hook service, label usage, agent responsibilities, and what the plugin ships
 versus what an adopter supplies).
+<!-- plugin-updates demo: availability touch -->
