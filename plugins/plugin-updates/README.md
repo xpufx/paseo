@@ -84,6 +84,10 @@ paseo plugin add ./plugins/plugin-updates
 - Checks run against the plugin's install remote only, so a fork or mirror installed as the source is what gets compared.
 - Pulls run with `--ff-only`. A dirty working tree or a diverged branch must be reconciled manually before an update can apply.
 
+## Limitations
+
+- **Local git installs give no reliable installed-version check.** When a plugin is added from a local path or repo (`paseo plugin add ./plugins/plugin-updates`), no install ref or version is recorded, so the update status is best-effort — a working-tree comparison that may not reflect what is actually running. Install from a git remote + subpath for dependable version tracking.
+
 ## Development
 
 ```sh
