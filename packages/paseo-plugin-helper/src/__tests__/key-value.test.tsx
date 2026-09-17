@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { initClientHelpers, type HostLayout } from "../client/host.js";
 import { PluginThemeProvider, defaultDarkTheme } from "../client/theme/provider.js";
 import { resolveTypography } from "../client/theme/tokens.js";
+import { defaultFlair } from "../client/theme/flair.js";
 import { KeyValue, KeyValueGroup } from "../client/components/KeyValue.js";
 
 beforeEach(() => {
@@ -47,7 +48,7 @@ function withLayout(
 describe("KeyValue typography scale", () => {
   it("derives row label/value type from the resolved scale", () => {
     const layout: HostLayout = { compact: false, platform: "web" };
-    const scale = resolveTypography(layout, "comfortable");
+    const scale = resolveTypography(layout, defaultFlair.density);
 
     const r = render(
       withLayout(
@@ -168,7 +169,7 @@ describe("KeyValue row layout", () => {
 
   it("anchors the label and stacks subValue under a wrapping value", () => {
     const layout: HostLayout = { compact: false, platform: "web" };
-    const scale = resolveTypography(layout, "comfortable");
+    const scale = resolveTypography(layout, defaultFlair.density);
 
     const r = render(
       withLayout(

@@ -5,6 +5,7 @@ import { Text, View } from "react-native";
 import { defaultDarkTheme, PluginThemeProvider, usePluginTheme } from "../client/theme/provider.js";
 import { resolveTypography } from "../client/theme/tokens.js";
 import { COMPACT_FORM_FACTOR_WIDTH } from "../client/theme/responsive.js";
+import { defaultFlair } from "../client/theme/flair.js";
 
 interface Probe {
   body: number;
@@ -51,8 +52,8 @@ function measuringWrapper(renderer: TestRenderer.ReactTestRenderer) {
     .find((view) => typeof view.props.onLayout === "function")!;
 }
 
-const desktop = resolveTypography({ compact: false, platform: "web" }, "comfortable");
-const compact = resolveTypography({ compact: true, platform: "web" }, "comfortable");
+const desktop = resolveTypography({ compact: false, platform: "web" }, defaultFlair.density);
+const compact = resolveTypography({ compact: true, platform: "web" }, defaultFlair.density);
 
 describe("PluginThemeProvider compact resolution", () => {
   it("derives compact typography from a container width below the threshold", () => {

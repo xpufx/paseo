@@ -73,7 +73,24 @@ export interface ModalBodyProps {
   scrollRef?: Ref<ScrollViewInstance>;
 }
 
-export const ModalBodyScrollOwnerContext = createContext<"helper" | "host">("helper");
+/**
+ * Scroll-ownership signal for `ModalBody`.
+ *
+ * - `"helper"` — the default; `ModalBody` decides from the surface
+ *   (compact/mobile) and `scrollMode`.
+ * - `"host"` — an ancestor host view already provides the one scroller
+ *   (0.8 composer popovers). `ModalBody` renders plain content.
+ * - `"required"` — the ancestor has NO host scroller and the content is
+ *   host-sized, so `ModalBody` MUST own the scroll on every surface. Set by
+ *   `registerSidebarSurface` (a plugin surface is a full host page whose body
+ *   is not wrapped in a host scroller) and by `ModalContent`.
+ *
+ * Adding the `"required"` member is additive: the existing two values keep
+ * their meaning and the default stays `"helper"`.
+ */
+export type ModalBodyScrollOwner = "helper" | "host" | "required";
+
+export const ModalBodyScrollOwnerContext = createContext<ModalBodyScrollOwner>("helper");
 
 // The single documented home for the large dialog preset. Prefer
 // `ModalBody size="large"` over adding a per-plugin width/minWidth literal.
@@ -136,9 +153,13 @@ export function ModalBody({
   scrollRef,
 }: ModalBodyProps) {
   const { isCompact, isMobile, layout, padding, colors } = usePluginTheme();
-  const hostOwnsScroll = useContext(ModalBodyScrollOwnerContext) === "host";
+  const scrollOwner = useContext(ModalBodyScrollOwnerContext);
+  const hostOwnsScroll = scrollOwner === "host";
+  // "required": an ancestor proved the host supplies no scroller (plugin
+  // surface) — own the scroll on every surface, including non-compact desktop.
   const helperOwnsScroll =
-    !hostOwnsScroll && (scrollMode === "always" || isCompact || isMobile);
+    !hostOwnsScroll &&
+    (scrollOwner === "required" || scrollMode === "always" || isCompact || isMobile);
   // The large preset is the ONE documented place a plugin can ask for a wide
   // dialog frame. It is a desktop-only content minimum: the mobile sheet is
   // already full-bleed, and a composer popover viewport is host-owned and

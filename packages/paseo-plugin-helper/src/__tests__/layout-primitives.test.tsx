@@ -49,8 +49,8 @@ describe("Row", () => {
     const view = r.root.findAllByType(View as any)[0];
 
     expect(styleValue(view.props.style, "flexDirection")).toBe("row");
-    // comfortable + compact => padding.gap 8
-    expect(styleValue(view.props.style, "gap")).toBe(8);
+    // default density (compact) + compact surface => padding.gap 6
+    expect(styleValue(view.props.style, "gap")).toBe(6);
     expect(styleValue(view.props.style, "alignItems")).toBe("center");
     expect(styleValue(view.props.style, "justifyContent")).toBe("space-between");
   });
@@ -78,7 +78,7 @@ describe("Stack", () => {
     const view = r.root.findAllByType(View as any)[0];
 
     expect(styleValue(view.props.style, "flexDirection")).toBe("column");
-    expect(styleValue(view.props.style, "gap")).toBe(8);
+    expect(styleValue(view.props.style, "gap")).toBe(6);
     expect(styleValue(view.props.style, "alignItems")).toBe("flex-start");
   });
 

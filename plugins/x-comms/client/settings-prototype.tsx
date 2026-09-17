@@ -288,14 +288,23 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
               copyable
               truncate="end"
               truncateMaxLength={36}
+              layout="inline"
             />
-            <FormRow label="Health" description={enabled ? healthDetail : `Disabled in preferences · ${healthDetail}`}>
+            <FormRow
+              layout="inline"
+              label="Health"
+              description={enabled ? healthDetail : `Disabled in preferences · ${healthDetail}`}
+            >
               <StatusDot
                 variant={enabled ? (h?.reachable ? "success" : h ? "danger" : "neutral") : "neutral"}
                 size="sm"
               />
             </FormRow>
-            <FormRow label="Enabled" description="Include this daemon in the x-comms mesh.">
+            <FormRow
+              layout="inline"
+              label="Enabled"
+              description="Include this daemon in the x-comms mesh."
+            >
               <Toggle
                 value={enabled}
                 disabled={prefs.isPending}

@@ -14,13 +14,43 @@ Paseo exposes theme tokens (`PluginTheme`) through host props. `PluginThemeProvi
 ```ts
 export interface VisualFlair {
   radius?: "sharp" | "rounded" | "pill";      // Default: "rounded"
-  density?: "compact" | "comfortable" | "spacious"; // Default: "comfortable"
+  density?: "compact" | "comfortable" | "spacious"; // Default: "compact"
   surfaceStyle?: "flat" | "tinted" | "elevated";    // Default: "flat"
   accentColor?: string;                        // Custom brand hex (e.g. "#6366f1")
   borderWidth?: number;                        // Default: 1
   headingTransform?: "none" | "uppercase";     // Default: "none"
 }
 ```
+
+#### Density and the spacing scale
+
+Plugin surfaces are information-dense, so the **default density is `"compact"`**.
+`"comfortable"` and `"spacious"` are opt-in per plugin via
+`flair: { density: "comfortable" }`. Density feeds `resolvePadding`, which is
+the only source of card/body padding any helper primitive should consume:
+
+| Density       | horizontal (wide / compact) | vertical (wide / compact) | gap (wide / compact) |
+| ------------- | --------------------------- | ------------------------- | -------------------- |
+| `compact` (*) | 12 / 10                     | 8 / 6                     | 8 / 6                |
+| `comfortable` | 16 / 12                     | 14 / 10                   | 12 / 8               |
+| `spacious`    | 24 / 16                     | 20 / 14                   | 16 / 12              |
+
+(*) default
+
+Rules that keep vertical space honest:
+
+- Never hardcode a vertical padding/margin in a helper primitive — read
+  `padding.vertical` / `padding.gap` from `usePluginTheme()`. A literal `8`
+  silently ignores the active density.
+- Stacked label-above-value costs two text lines; use `KeyValue layout="inline"`
+  and `FormRow layout="inline"` whenever the control is a single short element
+  (`Toggle`, `StatusDot`, `Badge`, small `Button`).
+- Do not wrap helper primitives in extra `View`s that add their own gap or
+  padding. `Card` already applies `padding.vertical`, and `Card.Header` already
+  reserves its own bottom gap.
+- The free-standing scale for gaps inside a row/stack is
+  `spacing = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24 }`; prefer a token
+  over a raw pixel value.
 
 ### `usePluginTheme()`
 Hook providing resolved colors and utility functions inside any component wrapped by `PluginThemeProvider`:
@@ -233,10 +263,16 @@ registerSidebarSurface(plugin, {
   id: "my-surface",
   title: "Dashboard",
   icon: "LayoutDashboard",
-  flair: { density: "comfortable" },
+  flair: { density: "comfortable" }, // optional; default is "compact"
   Component: MyDashboardComponent,
 });
 ```
+
+A registered surface is a full host page: Paseo does **not** wrap the surface
+body in a host scroller. `registerSidebarSurface` therefore marks the subtree as
+helper-scroll-owned, so any `ModalBody` inside it owns the single scroll region on
+every platform — including a wide desktop window. Plugin surfaces get working
+scroll for free and must not add their own outer `ScrollView`.
 
 ### `registerCommandCenterItem(plugin, contribution)`
 Registers an entry in the host Ctrl+K command center. Thin pass-through that keeps plugins on the helper seam; `onSelect` receives `{ openSurface, openSettings }`.

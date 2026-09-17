@@ -14,8 +14,9 @@ export interface VisualFlair {
 
   /**
    * Spacing and typography density.
-   * - "compact": tight padding and smaller fonts
-   * - "comfortable": balanced defaults
+   * - "compact": tight padding and smaller fonts (the default — plugin UI is
+   *   dense by nature and generous padding wastes vertical space)
+   * - "comfortable": balanced, roomier defaults (opt in per plugin)
    * - "spacious": generous breathing room
    */
   density: DensityStyle;
@@ -47,7 +48,9 @@ export interface VisualFlair {
 
 export const defaultFlair: VisualFlair = {
   radius: "rounded",
-  density: "comfortable",
+  // Compact by default: plugin surfaces are information-dense, and the
+  // comfortable/spacious presets are opt-in per plugin. See xpufx-org/paseo#213.
+  density: "compact",
   surfaceStyle: "flat",
   borderWidth: 1,
   headingTransform: "none",
