@@ -49,19 +49,19 @@ See the complete step-by-step guide in the [write-mcp-provider skill](.agents/sk
 
 | File | Owns |
 |---|---|
-| `index.ts` | Wiring only — `handle(mcp.list)`, `handle(mcp.read)`, `handle(mcp.health)`, `handle(mcp.call_tool)`, `handle(mcp.diagnose)`, `addClientSide` |
-| `mcp.shared.ts` | zod RPC contracts & shared types (`ToolInfoSchema`, `callMcpTool`, etc.) |
-| `mcp.server.ts` | `discoverLiveServers()`, tool runner execution bridge, and polymorphic diagnostic handlers |
-| `discovery/extract.ts` | Universal heuristic MCP parser (JSON/JSONC, comments, trailing commas, URL safe) & candidate discovery |
-| `discovery/types.ts` | Core contracts (`McpProbe`, `ProbeContext`, `ProbeResult`) |
-| `providers/<id>.ts` | Per-CLI live probe — isolated, contract `McpProbe` (`antigravity.ts`, `claude.ts`, etc.) |
-| `providers/paseo.ts` | Dedicated host daemon probe discovering Paseo control plane & tools |
-| `providers/catalog.ts` | 1-line re-export catalog for zero-boilerplate probe registration |
-| `health/health.server.ts` | Generic MCP SDK client — `instructions`, schema-aware `tools`, and `callMcpServerTool` |
-| `mcp-query.client.tsx` | `useMcpQuery` shared pill/modal, 30m timer + manual Refresh |
-| `pill.client.tsx` | Pill, modal, server details, diagnostics, real-time search, and interactive Tool Runner UI |
-| `scripts/version.mjs` | Offline build-time version stamper (tag / beta-[hash]) |
-| `docs/TEST_METHODOLOGY.md` | Test procedures, adapter verification, and QA methodology |
+| [`index.ts`](index.ts) | Wiring only: `handle(mcp.list)`, `handle(mcp.read)`, `handle(mcp.health)`, `handle(mcp.call_tool)`, `handle(mcp.diagnose)`, `addClientSide` |
+| [`mcp.shared.ts`](mcp.shared.ts) | zod RPC contracts & shared types (`ToolInfoSchema`, `callMcpTool`, etc.) |
+| [`mcp.server.ts`](mcp.server.ts) | `discoverLiveServers()`, tool runner execution bridge, and polymorphic diagnostic handlers |
+| [`discovery/extract.ts`](discovery/extract.ts) | Universal heuristic MCP parser (JSON/JSONC, comments, trailing commas, URL safe) & candidate discovery |
+| [`discovery/types.ts`](discovery/types.ts) | Core contracts (`McpProbe`, `ProbeContext`, `ProbeResult`) |
+| [`providers/<id>.ts`](providers/) | Per-CLI live probe (isolated, contract `McpProbe`: `antigravity.ts`, `claude.ts`, etc.) |
+| [`providers/paseo.ts`](providers/paseo.ts) | Dedicated host daemon probe discovering Paseo control plane & tools |
+| [`providers/catalog.ts`](providers/catalog.ts) | 1-line re-export catalog for zero-boilerplate probe registration |
+| [`health/health.server.ts`](health/health.server.ts) | Generic MCP SDK client (`instructions`, schema-aware `tools`, and `callMcpServerTool`) |
+| [`mcp-query.client.tsx`](mcp-query.client.tsx) | `useMcpQuery` shared pill/modal, 30m timer + manual Refresh |
+| [`pill.client.tsx`](pill.client.tsx) | Pill, modal, server details, diagnostics, real-time search, and interactive Tool Runner UI |
+| [`scripts/version.mjs`](scripts/version.mjs) | Offline build-time version stamper (tag / beta-[hash]) |
+| [`docs/TEST_METHODOLOGY.md`](docs/TEST_METHODOLOGY.md) | Test procedures, adapter verification, and QA methodology |
 
 ## Install & Updates
 
