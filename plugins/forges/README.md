@@ -50,15 +50,17 @@ See [`docs/workflow.md`](./docs/workflow.md) for the end-to-end architecture and
 
 The plugin uses the Paseo 0.8 layout (`index.client.tsx` / `index.server.ts`
 entries, `client/` / `server/` / `shared/` split, manifest
-`requirements.paseo >= 0.8.0`). Install it from a checkout of this repository:
+`requirements.paseo >= 0.8.0`).
 
 ```sh
-paseo plugin add <your-source-or-remote> --path plugins/forges
+paseo plugin add xpufx/paseo --path plugins/forges
 ```
 
-`<your-source-or-remote>` is wherever you host the plugin (a local path, a git
-remote, or a registry reference) — the plugin has no dependency on this
-monorepo or on any particular host at runtime.
+Or from a local monorepo checkout:
+
+```sh
+paseo plugin add ./plugins/forges
+```
 
 ## Configuration
 
