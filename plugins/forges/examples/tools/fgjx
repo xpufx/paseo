@@ -1,7 +1,7 @@
 #!/bin/bash
 # fgjx: fills fgj display gaps via `fgj api` and adds agent lifecycle workflow extensions.
 #
-# Vendored example copy of xpufx/platform/scripts/fgjx, sanitized for publication
+# Sanitized example copy of the fgjx wrapper script
 # (see tools/README.md). fgjx is only a shim: `fgj` is the authenticated transport
 # that owns the host URL/token and performs the raw /api/v1 calls, so fgj must be
 # available or the wrapper cannot do anything.

@@ -33,6 +33,19 @@ GitLab would need a separate API client.
 Supported forges (verified live, anonymous reads): any Forgejo/Gitea-family
 host, including Forgejo, Gitea, and Codeberg.
 
+## Workflow Augmentation: Turn Issues into Agent Fleet Automation
+
+Out of the box, `forges` gives you in-app issue management, scoped label chips, and steering comments directly inside Paseo.
+
+When augmented with our scoped label taxonomy and lightweight webhook bridge ([`examples/hook-service/`](./examples/hook-service/)), `forges` becomes an autonomous agent coordination layer:
+
+- **Automated Webhook Ingestion:** New issues, label edits, or comments on your forge immediately dispatch events to your orchestrator agent via Paseo's agent transport.
+- **Autonomous Agent Handoffs:** Coding agents pick up assigned tickets, transition `state/` chips (`0-triage` → `1-wip` → `2-review` → `3-verify` → `4-done`), publish structured status envelopes, and pass attention back to the operator when human signoff is required.
+- **Drop-In Scoped Label Taxonomy:** Seed our four core scopes (`state/`, `priority/`, `attention/`, `spec/`) using the generic template in [`examples/labels/label-base.yaml`](./examples/labels/label-base.yaml).
+- **Adaptable Agent Skills:** Ships with zero-CLI skills (using plugin `/api/v1` RPCs directly) as well as CLI-assisted workflows ([`examples/skills/`](./examples/skills/)).
+
+See [`docs/workflow.md`](./docs/workflow.md) for the end-to-end architecture and [`examples/README.md`](./examples/README.md) for starter templates.
+
 ## Install
 
 The plugin uses the Paseo 0.8 layout (`index.client.tsx` / `index.server.ts`
