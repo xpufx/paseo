@@ -86,4 +86,3 @@ paseo plugin reload mcp-tools
 ```
 
 `pluginsEnabled: true` required. Use `paseo plugin logs mcp-tools` for diagnostics and runtime logs. Failed reload stays failed (Paseo doesn't restore).
-<!-- plugin-updates demo: availability touch -->
