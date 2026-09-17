@@ -1,10 +1,13 @@
 # plugin-updates
 
-Git-source update monitor for [Paseo](https://github.com/getpaseo/paseo) plugins (v0.8+).
+Git-source update monitor and updater for [Paseo](https://github.com/getpaseo/paseo) plugins (v0.8+).
 
-| main | updating |
-| ---- | -------- |
-| <img src="screenshots/plugin-updates-main.jpg" alt="Plugin updates — main view" width="300"> | <img src="screenshots/plugin-updates-action.jpg" alt="Plugin updates — updating" width="300"> |
+<table align="center">
+  <tr>
+    <td align="center"><strong>main</strong><br><img src="screenshots/plugin-updates-main.jpg" alt="Plugin updates — main view" width="300"></td>
+    <td align="center"><strong>updating</strong><br><img src="screenshots/plugin-updates-action.jpg" alt="Plugin updates — updating" width="300"></td>
+  </tr>
+</table>
 
 Adds a header button to every workspace that opens a popover listing the installed plugins. Each row reports whether the plugin's installed git source is current, behind, pinned, missing, or has no upstream, and offers a one-click update when a pullable change exists.
 
@@ -80,6 +83,10 @@ paseo plugin add ./plugins/plugin-updates
 - Open the button to see installed plugins, their status, and available updates, then use the row **Update** button or **Update all** to pull and reload.
 - Checks run against the plugin's install remote only, so a fork or mirror installed as the source is what gets compared.
 - Pulls run with `--ff-only`. A dirty working tree or a diverged branch must be reconciled manually before an update can apply.
+
+## Limitations
+
+- **Local git installs are report-only.** With no upstream remote or recorded ref, there is nothing to compare against or pull, so no **Update** button is offered for them. Use a git remote + subpath to get updates.
 
 ## Development
 
