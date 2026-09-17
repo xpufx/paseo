@@ -12,7 +12,8 @@
 #                    plugin dir, asserting status=running
 #   5. mirror push — only on an explicit `workflow_dispatch` with `mirror: true`,
 #                    after 3+4 pass, push the same scoped tree to the public
-#                    GitHub mirror with secrets.GITHUB_MIRROR_TOKEN. Never on a
+#                    GitHub mirror with secrets.FJ_GITHUB_MIRROR_TOKEN (Forgejo
+#                    reserves the `GITHUB_` secret prefix). Never on a
 #                    plain push: the gate verifies every push, the mirror moves
 #                    on demand.
 #
@@ -240,12 +241,12 @@ jobs:
       - name: Push staged tree to the public GitHub mirror (on demand)
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mirror == 'true' }}
         env:
-          GITHUB_MIRROR_TOKEN: ${{ secrets.GITHUB_MIRROR_TOKEN }}
+          GITHUB_MIRROR_TOKEN: ${{ secrets.FJ_GITHUB_MIRROR_TOKEN }}
         run: |
           set -euo pipefail
           if [ -z "${GITHUB_MIRROR_TOKEN:-}" ]; then
-            echo "::warning::GITHUB_MIRROR_TOKEN is not configured — the GitHub mirror was NOT pushed."
-            echo "::warning::Add repository/organization secret GITHUB_MIRROR_TOKEN (a GitHub fine-grained PAT with Contents: Read and write on xpufx/paseo) to enable the automatic mirror push."
+            echo "::warning::FJ_GITHUB_MIRROR_TOKEN is not configured — the GitHub mirror was NOT pushed."
+            echo "::warning::Add repository/organization secret FJ_GITHUB_MIRROR_TOKEN (a GitHub fine-grained PAT with Contents: Read and write on xpufx/paseo) to enable the automatic mirror push."
             exit 0
           fi
           # Authenticate without ever putting the token in a logged URL.
