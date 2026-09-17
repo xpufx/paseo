@@ -1,9 +1,5 @@
 # paseo-mcp-tools plugin
 
-<p align="center">
-  <img src="screenshots/paseo-mcp-tools-mobile.jpg" width="40%" alt="paseo-mcp-tools on mobile" />
-</p>
-
 Provides an inline UI for checking MCP servers available to an agent session with additional functionality per MCP. Uses the most authoritative list per provider CLI and verifies actual session inclusion with live probes.
 
 (**Paseo** is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions.)
@@ -24,13 +20,13 @@ Provides an inline UI for checking MCP servers available to an agent session wit
 
 ## Screenshots
 
-| MCP Overview & Status | Server Detail & Live Health |
-| :---: | :---: |
-| <img src="screenshots/paseo-mcp-tools-main.png" width="100%" alt="MCP Servers & Tools Overview" /> | <img src="screenshots/paseo-mcp-tools-detail.png" width="100%" alt="Server Details & Health" /> |
+| MCP Servers | Diagnostics | Settings |
+| :---: | :---: | :---: |
+| <img src="screenshots/mcp-servers.png" width="100%" alt="MCP Servers" /> | <img src="screenshots/mcp-diagnostic.png" width="100%" alt="Diagnostics" /> | <img src="screenshots/mcp-settings.png" width="100%" alt="Settings" /> |
 
-| Interactive Tool Runner & Execution | Host Probe Diagnostics |
+| Server Details | Tool Execution |
 | :---: | :---: |
-| <img src="screenshots/paseo-mcp-tools-execute.png" width="100%" alt="Interactive Tool Execution & Parameters" /> | <img src="screenshots/paseo-mcp-tools-diagnosis.png" width="100%" alt="Host Diagnostics" /> |
+| <img src="screenshots/mcp-server-details.png" width="100%" alt="Server Details" /> | <img src="screenshots/mcp-execute.png" width="100%" alt="Tool Execution" /> |
 
 ## Supported Providers
 
