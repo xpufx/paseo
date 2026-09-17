@@ -1,10 +1,8 @@
 # paseo-x-comms
 
-> **Status**: Coming soon / Work in progress.
+> **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
 > Tracks stable paseo (`@getpaseo/* 0.8.0`, manifest requires `paseo >= 0.8.0`). Expect breaking changes between versions.
-
-> Work in progress. Not all features work %100 as described.
 
 [paseo](https://paseo.sh) is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions. **paseo-x-comms** lets agents on one daemon talk to agents on another — even across hosts — via the daemon relay (WebSocket + E2EE) or direct TCP.
 
