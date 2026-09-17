@@ -22,7 +22,11 @@ Provides an inline UI for checking MCP servers available to an agent session wit
 
 | MCP Servers | Diagnostics | Settings |
 | :---: | :---: | :---: |
-| <img src="screenshots/mcp-servers.png" width="100%" alt="MCP Servers" /> | <img src="screenshots/mcp-diagnostic.png" width="100%" alt="MCP Diagnostics" /> | <img src="screenshots/mcp-settings.png" width="100%" alt="MCP Settings" /> |
+| <img src="screenshots/mcp-servers.png" width="100%" alt="MCP Servers" /> | <img src="screenshots/mcp-diagnostic.png" width="100%" alt="Diagnostics" /> | <img src="screenshots/mcp-settings.png" width="100%" alt="Settings" /> |
+
+| Server Details | Tool Execution |
+| :---: | :---: |
+| <img src="screenshots/mcp-server-details.png" width="100%" alt="Server Details" /> | <img src="screenshots/mcp-execute.png" width="100%" alt="Tool Execution" /> |
 
 ## Supported Providers
 
