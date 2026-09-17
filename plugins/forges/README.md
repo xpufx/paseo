@@ -2,11 +2,11 @@
 
 Work with Forge/Gitea-family issues from inside Paseo: list open issues for the
 repo backing a workspace, read an issue's body and comments (with parsed agent
-envelopes), change scoped labels, and post comments — all in plugin surfaces,
-no browser.
+envelopes), change scoped labels, and post comments, all in plugin surfaces
+with no browser. Augment with the provided webhook bridge and scoped labels
+to unlock autonomous agent orchestration.
 
 Pull requests, releases, actions, and everything else are out of scope for now.
-GitLab would need a separate API client.
 
 ## Highlights
 
@@ -24,11 +24,11 @@ GitLab would need a separate API client.
   all collections: each call returns **one page**, and the default page size is
   **server-defined and can change**. Treat every list as paged
   (`limit`/`page`, or follow `Link`/`X-Total-Count`) instead of assuming a
-  single call is complete — one unpaged call is never evidence of "no results".
+  single call is complete; one unpaged call is never evidence of "no results".
   A surface that lists results should page internally rather than render a
   truncated set (#189).
 - **Example skills.** Our agent workflow ships under `examples/` as a starting
-  point to adapt — see [`examples/README.md`](./examples/README.md).
+  point to adapt (see [`examples/README.md`](./examples/README.md)).
 
 Supported forges (verified live, anonymous reads): any Forgejo/Gitea-family
 host, including Forgejo, Gitea, and Codeberg.
