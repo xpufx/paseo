@@ -2,6 +2,14 @@
 
 Git-source update monitor for [Paseo](https://github.com/getpaseo/paseo) plugins (v0.8+).
 
+<p align="center">
+  <img src="screenshots/plugin-updates-main.jpg" alt="Plugin updates popover: installed plugins with per-plugin git status and an Update button" width="380">
+</p>
+
+<p align="center">
+  <img src="screenshots/plugin-updates-action.jpg" alt="Plugin updates: updating plugins in progress" width="380">
+</p>
+
 Adds a header button to every workspace that opens a popover listing the installed plugins. Each row reports whether the plugin's installed git source is current, behind, pinned, missing, or has no upstream, and offers a one-click update when a pullable change exists.
 
 > [!NOTE]
