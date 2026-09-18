@@ -8,7 +8,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { getClientHost, selectHostScrollView, type HostScrollView } from "../host.js";
+import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 import { spacing } from "../theme/tokens.js";
 import type { BadgeSize } from "./Badge.js";
@@ -48,10 +48,9 @@ export function Select({
   style,
 }: SelectProps) {
   const { Icon } = getClientHost();
-  const ResolvedScrollView = selectHostScrollView(
-    getClientHost(),
-    FallbackScrollView as unknown as HostScrollView,
-  );
+  // The dropdown option list is a bounded box nested inside the host sheet,
+  // so it scrolls with a plain React Native ScrollView — never the host
+  // sheet-gesture scroller (#219).
   const { colors, resolveRadius, typography, isCompact, touchTargetMin, alpha } =
     usePluginTheme();
   const [open, setOpen] = useState(false);
@@ -135,7 +134,7 @@ export function Select({
             },
           ]}
         >
-          <ResolvedScrollView
+          <FallbackScrollView
             nestedScrollEnabled
             keyboardShouldPersistTaps="handled"
             style={{ maxHeight: OPTION_LIST_MAX_HEIGHT }}
@@ -182,7 +181,7 @@ export function Select({
                 </Pressable>
               );
             })}
-          </ResolvedScrollView>
+          </FallbackScrollView>
         </View>
       ) : null}
     </View>

@@ -10,7 +10,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { getClientHost, selectHostScrollView, type HostScrollView } from "../host.js";
+import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 import { copyToClipboard } from "../utils/clipboard.js";
 
@@ -34,10 +34,10 @@ export function CodeBlock({
   textStyle,
 }: CodeBlockProps) {
   const { Icon, useToast } = getClientHost();
-  const ResolvedScrollView = selectHostScrollView(
-    getClientHost(),
-    FallbackScrollView as unknown as HostScrollView,
-  );
+  // Inner snippet scrollers are NEVER the host sheet scroller: the host
+  // ScrollView is a sheet-gesture pan controller, so using it horizontally or
+  // nested inside the host sheet collapses to height 0 / crashes the gesture
+  // handler (#219). Plain React Native ScrollViews own this bounded box.
   const { colors, resolveRadius, isCompact, touchTargetMin, alpha } = usePluginTheme();
   const toast = useToast();
   const [copied, setCopied] = useState(false);
@@ -122,12 +122,12 @@ export function CodeBlock({
         </View>
       )}
 
-      <ResolvedScrollView
+      <FallbackScrollView
         nestedScrollEnabled
         style={{ maxHeight }}
         contentContainerStyle={styles.scrollContent}
       >
-        <ResolvedScrollView horizontal showsHorizontalScrollIndicator>
+        <FallbackScrollView horizontal showsHorizontalScrollIndicator>
           <Text
             selectable
             style={[
@@ -142,8 +142,8 @@ export function CodeBlock({
           >
             {code}
           </Text>
-        </ResolvedScrollView>
-      </ResolvedScrollView>
+        </FallbackScrollView>
+      </FallbackScrollView>
     </View>
   );
 }

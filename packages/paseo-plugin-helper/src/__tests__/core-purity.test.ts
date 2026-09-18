@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -95,6 +95,21 @@ describe("core entry purity (headless runtime)", () => {
       if (/host-variables|getComputedStyle|documentElement/.test(body)) {
         violations.push(`${file}: CSS scraper`);
       }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it("inner components never resolve the host sheet scroller", () => {
+    // The host ScrollView is a vertical sheet-gesture controller: only the
+    // top-level scroll owners (ModalBody, ui/HostScroll) may resolve it.
+    // Inner/nested/horizontal scrollers (CodeBlock, Tabs, Select, …) must use
+    // plain React Native ScrollView or the sheet collapses on device (#219).
+    const dir = resolve(SRC, "client/components");
+    const violations: string[] = [];
+    for (const entry of readdirSync(dir)) {
+      if (!/\.(tsx?|jsx?)$/.test(entry)) continue;
+      const body = stripComments(readFileSync(join(dir, entry), "utf8"));
+      if (/selectHostScrollView/.test(body)) violations.push(entry);
     }
     expect(violations).toEqual([]);
   });

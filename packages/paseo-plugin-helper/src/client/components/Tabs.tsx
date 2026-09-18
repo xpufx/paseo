@@ -10,7 +10,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { getClientHost, selectHostScrollView, type HostScrollView } from "../host.js";
+import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 import {
   FALLBACK_ACCENT_FOREGROUND,
@@ -45,10 +45,9 @@ export function Tabs({
   style,
 }: TabsProps) {
   const { Icon } = getClientHost();
-  const ResolvedScrollView = selectHostScrollView(
-    getClientHost(),
-    FallbackScrollView as unknown as HostScrollView,
-  );
+  // The tab strip scrolls horizontally, so it must be a plain React Native
+  // ScrollView: the host ScrollView is a vertical sheet-gesture controller
+  // and collapses/crashes when used horizontally (#219).
   const { colors, resolveRadius, touchTargetMin, isCompact, alpha } = usePluginTheme();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const tabLayouts = useRef<Record<string, { x: number; width: number }>>({});
@@ -200,7 +199,7 @@ export function Tabs({
         style,
       ]}
     >
-      <ResolvedScrollView
+      <FallbackScrollView
         ref={scrollRef}
         horizontal
         nestedScrollEnabled={true}
@@ -211,7 +210,7 @@ export function Tabs({
         contentContainerStyle={styles.scrollContent}
       >
         {tabs.map((tab) => renderTab(tab))}
-      </ResolvedScrollView>
+      </FallbackScrollView>
 
     </View>
   );
