@@ -11,6 +11,9 @@ import {
   KeyValue,
   KeyValueGroup,
   Collapsible,
+  Row,
+  Stack,
+  SectionHeader,
   useRpcQuery,
   useRpcMutation,
   usePluginTheme,
@@ -25,8 +28,14 @@ import {
   type HookQueueItem,
 } from "../shared/hook-queue.js";
 
-export function HookQueueView({ onClose }: { onClose?: () => void }) {
-  const { colors } = usePluginTheme();
+export function HookQueueView({
+  onClose,
+  embedded = false,
+}: {
+  onClose?: () => void;
+  embedded?: boolean;
+}) {
+  const { colors, padding, isCompact } = usePluginTheme();
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [filterState, setFilterState] = useState<"all" | "active" | "busy" | "paused">("all");
@@ -119,102 +128,151 @@ export function HookQueueView({ onClose }: { onClose?: () => void }) {
 
   const totalDepth = queues.reduce((sum, item) => sum + item.depth, 0);
 
-  return (
-    <ModalBody>
+  const content = (
+    <View style={{ gap: padding.gap }}>
       {/* Front Desk & Daemon Status Header */}
-      <Card style={[styles.headerCard, { backgroundColor: colors.surface1 }]}>
-        <View style={styles.headerTop}>
-          <View style={styles.titleRow}>
-            <Text style={[styles.title, { color: colors.foreground }]}>Forge Webhook & Queues</Text>
-            {statusData?.error ? (
-              <Badge label="Daemon Unreachable" variant="danger" />
+      <Card variant="elevated">
+        <Card.Header
+          title="Forge Webhook & Queues"
+          subtitle={`Uptime: ${Math.round((statusData?.uptime ?? 0) / 60)} min · ${queues.length} registered repos`}
+          badge={
+            statusData?.error ? (
+              <Badge label="Unreachable" variant="danger" size="sm" dot />
             ) : isAllPaused ? (
-              <Badge label="All Queues Paused" variant="warning" />
+              <Badge label="All Paused" variant="warning" size="sm" dot />
             ) : (
-              <Badge label="Hook Active" variant="success" />
-            )}
-          </View>
-          <View style={styles.actionButtons}>
-            <Button
-              label={queuesLoading ? "Refreshing…" : "Refresh"}
-              variant="secondary"
-              onPress={refetchAll}
-            />
-            {isAllPaused ? (
+              <Badge label="Hook Active" variant="success" size="sm" dot />
+            )
+          }
+          action={
+            <Row gap="xs" align="center" wrap>
               <Button
-                label="Resume All"
-                variant="primary"
-                onPress={() => handleResume("all")}
+                label="Refresh"
+                size="sm"
+                variant="secondary"
+                loading={queuesLoading}
+                onPress={refetchAll}
               />
-            ) : (
+              {isAllPaused ? (
+                <Button
+                  label="Resume All"
+                  size="sm"
+                  variant="primary"
+                  onPress={() => handleResume("all")}
+                />
+              ) : (
+                <Button
+                  label="Pause All"
+                  size="sm"
+                  variant="danger"
+                  onPress={() => handlePause("all")}
+                />
+              )}
               <Button
-                label="Pause All"
-                variant="danger"
-                onPress={() => handlePause("all")}
+                label="Drain All"
+                size="sm"
+                variant="secondary"
+                onPress={() => handleDrain()}
               />
-            )}
-            <Button
-              label="Drain All"
-              variant="secondary"
-              onPress={() => handleDrain()}
-            />
-            {onClose ? <Button label="Close" variant="ghost" onPress={onClose} /> : null}
-          </View>
-        </View>
+              {onClose ? <Button label="Close" size="sm" variant="ghost" onPress={onClose} /> : null}
+            </Row>
+          }
+        />
 
-        <KeyValueGroup>
+        <KeyValueGroup columns={isCompact ? 1 : 3} collapse="compact" gap={padding.gap}>
           <KeyValue
+            layout="inline"
             label="Front Desk"
-            value={frontDesk?.agentId ?? "Not Registered"}
+            value={frontDesk?.agentId ? `${frontDesk.agentId.slice(0, 8)}…` : "Not Registered"}
             copyable={Boolean(frontDesk?.agentId)}
             mono
-            truncate="middle"
           />
-          <KeyValue label="Registered Repos" value={String(queues.length)} />
-          <KeyValue label="Total Queued Messages" value={String(totalDepth)} />
-          <KeyValue label="Uptime" value={`${Math.round((statusData?.uptime ?? 0) / 60)} min`} />
+          <KeyValue
+            layout="inline"
+            label="Total Queued"
+            value={String(totalDepth)}
+            valueStyle={totalDepth > 0 ? { color: colors.statusWarning } : undefined}
+          />
+          <KeyValue
+            layout="inline"
+            label="Uptime"
+            value={`${Math.round((statusData?.uptime ?? 0) / 60)} min`}
+          />
         </KeyValueGroup>
       </Card>
 
       {/* Filter and Search Controls */}
-      <View style={styles.searchRow}>
-        <View style={styles.searchContainer}>
+      <Row gap="xs" align="center" wrap>
+        <View style={{ flex: 1, minWidth: 180 }}>
           <SearchInput
             value={search}
             onChangeText={setSearch}
             placeholder="Filter by repository or agent ID…"
           />
         </View>
-        <View style={styles.filterChips}>
-          {(["all", "active", "busy", "paused"] as const).map((mode) => (
-            <Button
-              key={mode}
-              label={mode.charAt(0).toUpperCase() + mode.slice(1)}
-              variant={filterState === mode ? "primary" : "secondary"}
-              onPress={() => setFilterState(mode)}
-            />
-          ))}
-        </View>
-      </View>
+        <Row gap="xs" align="center" wrap>
+          {(["all", "active", "busy", "paused"] as const).map((mode) => {
+            const count =
+              mode === "all"
+                ? queues.length
+                : mode === "active"
+                  ? queues.filter((q) => q.depth > 0).length
+                  : mode === "busy"
+                    ? queues.filter((q) => q.isBusy).length
+                    : queues.filter((q) => q.paused).length;
+            return (
+              <Button
+                key={mode}
+                size="sm"
+                label={
+                  mode === "all"
+                    ? "All"
+                    : `${mode.charAt(0).toUpperCase() + mode.slice(1)} (${count})`
+                }
+                variant={filterState === mode ? "primary" : "ghost"}
+                onPress={() => setFilterState(mode)}
+              />
+            );
+          })}
+        </Row>
+      </Row>
+
+      <SectionHeader title="Queues" count={filteredQueues.length} />
 
       {/* Queue Cards List */}
       {filteredQueues.length === 0 ? (
         <EmptyState
           title="No queues match"
-          description={queues.length === 0 ? "No repository queues found on the daemon." : "Try adjusting your search or filters."}
+          description={
+            queues.length === 0
+              ? "No repository queues found on the daemon."
+              : "Try adjusting your search or filters."
+          }
         />
       ) : (
-        filteredQueues.map((item) => (
-          <QueueCard
-            key={item.key}
-            item={item}
-            onPause={() => handlePause(item.key)}
-            onResume={() => handleResume(item.key)}
-            onDrain={() => handleDrain(item.key)}
-            onCopyAgent={copyAgentId}
-          />
-        ))
+        <Stack gap="sm">
+          {filteredQueues.map((item) => (
+            <QueueCard
+              key={item.key}
+              item={item}
+              onPause={() => handlePause(item.key)}
+              onResume={() => handleResume(item.key)}
+              onDrain={() => handleDrain(item.key)}
+              onCopyAgent={copyAgentId}
+            />
+          ))}
+        </Stack>
       )}
+    </View>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <ModalBody size="large" refreshing={queuesLoading} onRefresh={refetchAll}>
+      {content}
     </ModalBody>
   );
 }
@@ -224,7 +282,7 @@ function QueueCard({
   onPause,
   onResume,
   onDrain,
-  onCopyAgent,
+  onCopyAgent: _onCopyAgent,
 }: {
   item: HookQueueItem;
   onPause: () => void;
@@ -232,75 +290,108 @@ function QueueCard({
   onDrain: () => void;
   onCopyAgent: (id: string) => void;
 }) {
-  const { colors } = usePluginTheme();
+  const { colors, padding, typography, resolveRadius, isCompact } = usePluginTheme();
 
   return (
-    <Card style={styles.queueCard}>
-      <View style={styles.cardHeader}>
-        <View style={styles.cardTitleCol}>
-          <Text style={[styles.repoKey, { color: colors.foreground }]}>{item.key}</Text>
-          <View style={styles.badgeRow}>
+    <Card variant="elevated">
+      <Card.Header
+        title={item.key}
+        badge={
+          <Row gap="xs" align="center" wrap>
             {item.paused ? (
-              <Badge label="Paused" variant="warning" />
+              <Badge label="Paused" variant="warning" size="sm" dot />
             ) : item.isBusy ? (
-              <Badge label={`Busy (attempt ${item.busyAttempts})`} variant="warning" />
+              <Badge label={`Busy (${item.busyAttempts})`} variant="warning" size="sm" dot />
             ) : item.depth > 0 ? (
-              <Badge label={`Queued: ${item.depth}`} variant="info" />
+              <Badge label={`${item.depth} queued`} variant="accent" size="sm" />
             ) : (
-              <Badge label="Idle / Empty" variant="neutral" />
+              <Badge label="Idle" variant="neutral" size="sm" dot />
             )}
             {item.dropped > 0 ? (
-              <Badge label={`Dropped: ${item.dropped}`} variant="danger" />
+              <Badge label={`${item.dropped} dropped`} variant="danger" size="sm" />
             ) : null}
-          </View>
-        </View>
+          </Row>
+        }
+        action={
+          <Row gap="xs" align="center">
+            {item.paused ? (
+              <Button label="Resume" size="sm" variant="primary" onPress={onResume} />
+            ) : (
+              <Button label="Pause" size="sm" variant="secondary" onPress={onPause} />
+            )}
+            <Button label="Drain" size="sm" variant="secondary" onPress={onDrain} />
+          </Row>
+        }
+      />
 
-        <View style={styles.cardActions}>
-          {item.paused ? (
-            <Button label="Resume" variant="primary" onPress={onResume} />
-          ) : (
-            <Button label="Pause" variant="secondary" onPress={onPause} />
-          )}
-          <Button label="Drain" variant="secondary" onPress={onDrain} />
-        </View>
-      </View>
-
-      <KeyValueGroup>
+      <KeyValueGroup columns={isCompact ? 1 : 2} collapse="compact" gap={padding.gap}>
         <KeyValue
-          label="Orchestrator Agent"
-          value={item.orchestrator?.agentId ?? "None (holding)"}
+          layout="inline"
+          label="Orchestrator"
+          value={
+            item.orchestrator?.agentId
+              ? `${item.orchestrator.agentId.slice(0, 8)}…`
+              : "None (holding)"
+          }
           copyable={Boolean(item.orchestrator?.agentId)}
           mono
-          truncate="middle"
         />
-        <KeyValue label="Queue Depth" value={String(item.depth)} />
+        <KeyValue
+          layout="inline"
+          label="Queue Depth"
+          value={String(item.depth)}
+          valueStyle={item.depth > 0 ? { color: colors.statusWarning } : undefined}
+        />
       </KeyValueGroup>
 
       {item.messages.length > 0 ? (
-        <Collapsible title={`Queued Messages (${item.messages.length})`} initiallyExpanded={false}>
-          <View style={styles.messageList}>
-            {item.messages.map((msg, idx) => (
-              <View
-                key={msg.id || idx}
-                style={[styles.messageItem, { borderLeftColor: colors.accent }]}
-              >
-                <View style={styles.msgMetaRow}>
-                  <Text style={[styles.msgId, { color: colors.foregroundMuted }]}>
-                    ID: {msg.id.slice(0, 10)}
-                  </Text>
-                  {msg.ts ? (
-                    <Text style={[styles.msgTs, { color: colors.foregroundMuted }]}>
-                      {new Date(msg.ts).toLocaleTimeString()}
+        <View style={{ marginTop: padding.gap }}>
+          <Collapsible
+            title={`Queued Messages (${item.messages.length})`}
+            badge={<Badge label={String(item.messages.length)} size="sm" variant="neutral" />}
+            initiallyExpanded={false}
+          >
+            <Stack gap="xs" style={{ marginTop: padding.gap }}>
+              {item.messages.map((msg, idx) => (
+                <View
+                  key={msg.id || idx}
+                  style={[
+                    styles.messageItem,
+                    {
+                      borderLeftColor: colors.accent,
+                      backgroundColor: colors.surface0,
+                      borderRadius: resolveRadius("sm"),
+                      paddingHorizontal: padding.horizontal / 2,
+                      paddingVertical: padding.vertical / 2,
+                    },
+                  ]}
+                >
+                  <Row justify="space-between" align="center" style={{ marginBottom: 2 }}>
+                    <Text
+                      style={[
+                        typography.caption,
+                        { color: colors.foregroundMuted, fontFamily: "monospace" },
+                      ]}
+                    >
+                      {msg.id.slice(0, 10)}
                     </Text>
-                  ) : null}
+                    {msg.ts ? (
+                      <Text style={[typography.caption, { color: colors.foregroundMuted }]}>
+                        {new Date(msg.ts).toLocaleTimeString()}
+                      </Text>
+                    ) : null}
+                  </Row>
+                  <Text
+                    style={[typography.caption, { color: colors.foreground }]}
+                    numberOfLines={3}
+                  >
+                    {msg.preview}
+                  </Text>
                 </View>
-                <Text style={[styles.msgPreview, { color: colors.foreground }]} numberOfLines={3}>
-                  {msg.preview}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </Collapsible>
+              ))}
+            </Stack>
+          </Collapsible>
+        </View>
       ) : null}
     </Card>
   );
@@ -315,100 +406,7 @@ export function ForgeHookQueueSurface() {
 }
 
 const styles = StyleSheet.create({
-  headerCard: {
-    padding: 12,
-    marginBottom: 12,
-    gap: 8,
-  },
-  headerTop: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  titleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  actionButtons: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
-  },
-  searchRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 12,
-    flexWrap: "wrap",
-  },
-  searchContainer: {
-    flex: 1,
-    minWidth: 200,
-  },
-  filterChips: {
-    flexDirection: "row",
-    gap: 6,
-  },
-  queueCard: {
-    padding: 12,
-    marginBottom: 10,
-    gap: 8,
-  },
-  cardHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 8,
-  },
-  cardTitleCol: {
-    flex: 1,
-    gap: 4,
-  },
-  repoKey: {
-    fontSize: 14,
-    fontWeight: "600",
-  },
-  badgeRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
-  },
-  cardActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  messageList: {
-    gap: 6,
-    marginTop: 6,
-  },
   messageItem: {
     borderLeftWidth: 3,
-    paddingLeft: 8,
-    paddingVertical: 4,
-  },
-  msgMetaRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 2,
-  },
-  msgId: {
-    fontSize: 10,
-    fontFamily: "monospace",
-  },
-  msgTs: {
-    fontSize: 10,
-  },
-  msgPreview: {
-    fontSize: 12,
   },
 });
