@@ -36,7 +36,13 @@ function Vital({
   return (
     <Row gap={4} align="center">
       <Icon name={icon} size={12} color={color} />
-      <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: "500" }}>
+      {/*
+       * Color MUST be applied to the label as well as the icon. A <Text> with
+       * no `color` falls back to React Native's default black and disappears on
+       * dark surfaces (xpufx-org/paseo#208). Reusing the icon's `color` keeps
+       * threshold states (e.g. CPU/RAM warning/danger) consistent for both.
+       */}
+      <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: "500", color }}>
         {children}
       </Text>
     </Row>
