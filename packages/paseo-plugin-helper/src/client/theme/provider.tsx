@@ -4,6 +4,7 @@ import React, {
   useContext,
   useMemo,
   useState,
+  useEffect,
   type ReactNode,
 } from "react";
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
@@ -81,19 +82,34 @@ export const defaultLightTheme: PluginTheme = {
   },
 };
 
-export function getDefaultTheme(): PluginTheme {
-  try {
-    const scheme = Appearance.getColorScheme?.();
-    if (scheme === "light") {
-      return defaultLightTheme;
-    }
-  } catch {
-    // Graceful fallback if Appearance is unavailable
+export function getDefaultTheme(scheme?: string): PluginTheme {
+  if (scheme === "light") {
+    return defaultLightTheme;
   }
   return defaultDarkTheme;
 }
 
-const initialDefaultTheme = getDefaultTheme();
+export function useAppearanceScheme(): [string | undefined, (s: string | undefined) => void] {
+  const [scheme, setScheme] = useState<string | undefined>(Appearance.getColorScheme?.() ?? undefined);
+  useEffect(() => {
+    const sub = Appearance.addChangeListener?.(({colorScheme}) => {
+      setScheme(colorScheme ?? undefined);
+    });
+    return () => {
+      // remove listener if possible
+      // Appearance.addChangeListener returns an object with remove method in RN
+      // but in web we may not have it; ignore safely
+      if (sub && typeof (sub as any).remove === "function") {
+        (sub as any).remove();
+      }
+    };
+  }, []);
+  return [scheme, setScheme];
+}
+
+const [initialScheme] = useAppearanceScheme();
+const initialDefaultTheme = getDefaultTheme(initialScheme);
+
 
 const PluginThemeContext = createContext<PluginThemeContextValue>({
   theme: initialDefaultTheme,
