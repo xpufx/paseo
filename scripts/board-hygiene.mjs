@@ -133,6 +133,40 @@ export function closedStaleLabels(issues) {
   return findings;
 }
 
+/** Default idle window before an `0-orchestrator` issue counts as stuck. */
+export const ORCHESTRATOR_IDLE_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * Open issue parked on `attention/0-orchestrator` with no recent activity.
+ *
+ * `0-orchestrator` means "you own it, don't let it sit" — it is a working state,
+ * not a resting one. An issue left there past the idle window is invisible: it
+ * is not in an agent queue (`attention/1-agent`) and not in the operator queue
+ * (`attention/2-user`), so nothing picks it up.
+ *
+ * The window matters: freshly-set `0-orchestrator` is legitimate (the
+ * orchestrator just took ownership). Only stale ones are findings.
+ *
+ * @param now injectable for tests
+ */
+export function orchestratorParked(issues, now = Date.now(), idleMs = ORCHESTRATOR_IDLE_MS) {
+  const findings = [];
+  for (const issue of issues) {
+    if (!labelNames(issue).includes("attention/0-orchestrator")) continue;
+    const updated = Date.parse(issue.updated_at ?? "");
+    if (Number.isNaN(updated)) continue;
+    const idleMinutes = Math.floor((now - updated) / 60000);
+    if (now - updated > idleMs) {
+      findings.push({
+        number: issue.number,
+        title: issue.title,
+        idleMinutes,
+      });
+    }
+  }
+  return findings;
+}
+
 function render(title, findings, describe) {
   if (findings.length === 0) {
     console.log(`  OK   ${title}`);
@@ -155,21 +189,31 @@ function main() {
 
   const open = openRoutingGaps(fetchIssues(opts, "open"));
   const closed = closedStaleLabels(fetchIssues(opts, "closed"));
+  const parked = orchestratorParked(fetchIssues(opts, "open"));
 
   if (opts.json) {
-    console.log(JSON.stringify({ openRoutingGaps: open, closedStaleLabels: closed }, null, 2));
-    return open.length + closed.length > 0 ? 1 : 0;
+    console.log(
+      JSON.stringify({ openRoutingGaps: open, closedStaleLabels: closed, orchestratorParked: parked }, null, 2),
+    );
+    return open.length + closed.length + parked.length > 0 ? 1 : 0;
   }
 
   if (opts.quiet) {
-    console.log(`board-hygiene: ${open.length} unrouted open, ${closed.length} stale closed`);
-    return open.length + closed.length > 0 ? 1 : 0;
+    console.log(
+      `board-hygiene: ${open.length} unrouted open, ${closed.length} stale closed, ${parked.length} parked on 0-orchestrator`,
+    );
+    return open.length + closed.length + parked.length > 0 ? 1 : 0;
   }
 
   console.log(`board-hygiene — ${opts.repo} @ ${opts.host}\n`);
   render("open issues missing attention/* and/or state/*", open, (f) => `missing ${f.missing.join(", ")}`);
   render("closed issues still carrying action signals", closed, (f) => f.stale.join(", "));
-  const total = open.length + closed.length;
+  render(
+    "open issues parked on attention/0-orchestrator past the idle window",
+    parked,
+    (f) => `idle ${f.idleMinutes}m`,
+  );
+  const total = open.length + closed.length + parked.length;
   console.log(
     total === 0 ? "\nBoard is clean." : `\n${total} finding(s) — see above.`,
   );

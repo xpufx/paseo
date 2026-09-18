@@ -8,7 +8,7 @@
  * `target/*` are classifications, not action signals; a closed issue keeping
  * them is correct (the rule applied throughout the #217 cleanup).
  */
-import { openRoutingGaps, closedStaleLabels } from "./board-hygiene.mjs";
+import { openRoutingGaps, closedStaleLabels, orchestratorParked } from "./board-hygiene.mjs";
 
 const mk = (number, title, labels) => ({ number, title, labels: labels.map((name) => ({ name })) });
 
@@ -47,6 +47,19 @@ check("keeps flag/security", closedStaleLabels([mk(15, "x", ["flag/security", "s
 check("keeps flag/evergreen", closedStaleLabels([mk(16, "x", ["flag/evergreen"])]).length === 0);
 check("keeps upstream/0-explore", closedStaleLabels([mk(17, "x", ["upstream/0-explore"])]).length === 0);
 check("keeps kind/target", closedStaleLabels([mk(18, "x", ["kind/bug", "target/top", "state/4-done"])]).length === 0);
+
+// --- parked on attention/0-orchestrator (idle window) ---
+const NOW = Date.parse("2026-09-18T08:00:00Z");
+const idle = (h) => new Date(NOW - h * 3600_000).toISOString();
+const mkAt = (number, labels, updated) => ({ number, title: "x", labels: labels.map((name) => ({ name })), updated_at: updated });
+
+check("flags 0-orchestrator idle > 2h", orchestratorParked([mkAt(20, ["attention/0-orchestrator"], idle(3))], NOW).length === 1);
+check("does not flag 0-orchestrator idle < 2h", orchestratorParked([mkAt(21, ["attention/0-orchestrator"], idle(1))], NOW).length === 0);
+check("boundary: exactly 2h is not yet flagged", orchestratorParked([mkAt(22, ["attention/0-orchestrator"], idle(2))], NOW).length === 0);
+check("ignores 1-agent even if stale", orchestratorParked([mkAt(23, ["attention/1-agent"], idle(9))], NOW).length === 0);
+check("ignores 2-user even if stale", orchestratorParked([mkAt(24, ["attention/2-user"], idle(9))], NOW).length === 0);
+check("reports idle minutes", orchestratorParked([mkAt(25, ["attention/0-orchestrator"], idle(5))], NOW)[0].idleMinutes >= 299);
+check("skips unparseable updated_at", orchestratorParked([mkAt(26, ["attention/0-orchestrator"], "not-a-date")], NOW).length === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
