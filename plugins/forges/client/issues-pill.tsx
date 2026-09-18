@@ -1094,6 +1094,7 @@ export function ForgeIssuesView({
   onClose?: () => void;
 }) {
   const { colors } = usePluginTheme();
+  const toast = useToast();
   const { data, isLoading, isError, refetch, isRefetching } = useOpenIssues(workspaceId);
   const access = useRepoAccess({
     repoPublic: data?.repoPublic,
@@ -1112,6 +1113,8 @@ export function ForgeIssuesView({
   const [forgeDraft, setForgeDraft] = useState<string | null>(null);
   const [tokenDraft, setTokenDraft] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState<string | null>(null);
+  const [forgeBusy, setForgeBusy] = useState(false);
+  const [forgeError, setForgeError] = useState<string | null>(null);
   const [formSaving, setFormSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const forgeTargets = forgeTargetsForWorkspace(settings, directory);
@@ -1139,25 +1142,43 @@ export function ForgeIssuesView({
       activeForgeByDirectory: { ...(settings.activeForgeByDirectory ?? {}), [directory]: value },
     });
   };
-  const addForge = () => {
-    if (!directory) return;
+  const addForge = async () => {
     const target = (forgeDraft ?? "").trim();
-    if (!isValidForgeTarget(target)) {
-      setFormError("Forge target must be a remote URL or owner/repo.");
+    if (!target) {
+      setForgeError("Enter a remote URL or owner/repo to add.");
       return;
     }
-    const list = forgeTargets.includes(target) ? forgeTargets : [...forgeTargets, target];
-    // Editing the list supersedes the legacy single remote: fold it into the
-    // list and clear the legacy key so the two sources cannot disagree.
-    const nextRemotes = { ...(settings.remotesByDirectory ?? {}) };
-    delete nextRemotes[directory];
-    updateSettings({
-      forgesByDirectory: { ...(settings.forgesByDirectory ?? {}), [directory]: list },
-      remotesByDirectory: nextRemotes,
-      activeForgeByDirectory: { ...(settings.activeForgeByDirectory ?? {}), [directory]: target },
-    });
-    setForgeDraft(null);
-    setFormError(null);
+    if (!isValidForgeTarget(target)) {
+      setForgeError("Forge target must be a remote URL or owner/repo, e.g. https://codeberg.org/owner/repo.");
+      return;
+    }
+    if (!directory) {
+      setForgeError("Workspace directory is still loading — try again in a moment.");
+      return;
+    }
+    setForgeBusy(true);
+    setForgeError(null);
+    try {
+      const alreadyWatched = forgeTargets.includes(target);
+      const list = alreadyWatched ? forgeTargets : [...forgeTargets, target];
+      // Editing the list supersedes the legacy single remote: fold it into the
+      // list and clear the legacy key so the two sources cannot disagree.
+      const nextRemotes = { ...(settings.remotesByDirectory ?? {}) };
+      delete nextRemotes[directory];
+      await updateSettingsAsync({
+        forgesByDirectory: { ...(settings.forgesByDirectory ?? {}), [directory]: list },
+        remotesByDirectory: nextRemotes,
+        activeForgeByDirectory: { ...(settings.activeForgeByDirectory ?? {}), [directory]: target },
+      });
+      setForgeDraft(null);
+      toast.show(alreadyWatched ? `Already watching ${target}` : `Added ${target}`, {
+        variant: "success",
+      });
+    } catch (error) {
+      setForgeError(error instanceof Error ? error.message : "Could not add forge");
+    } finally {
+      setForgeBusy(false);
+    }
   };
   const removeForge = (target: string) => {
     if (!directory) return;
@@ -1410,12 +1431,12 @@ export function ForgeIssuesView({
         <>
           {activeTab === "settings" ? (
             <>
-            <Card>
+            <Card variant="elevated">
               <Card.Header
-                title={displayName ? `Forge settings · ${displayName}` : "Forge settings"}
-                subtitle={activeForgeValue ? "Explicit forge selected" : "Derived from the git origin remote"}
+                title={displayName ? `Remotes & watch targets · ${displayName}` : "Remotes & watch targets"}
+                subtitle="What this workspace watches — active forge and known remotes"
                 badge={<ForgeCardChips host={activeForge?.host ?? effectiveHost} access={access} />}
-                icon="Settings"
+                icon="GitBranch"
               />
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
                 Pick which forge this workspace watches. Issues and search follow the
@@ -1429,13 +1450,21 @@ export function ForgeIssuesView({
                 onValueChange={selectForge}
                 disabled={!directory}
               />
+              {activeForgeInvalid ? (
+                <Text style={[styles.hint, { color: colors.foreground }]}>
+                  Selected forge is not a valid remote URL or owner/repo.
+                </Text>
+              ) : null}
               <FormRow
-                label="Add another forge"
-                description="Remote URL or owner/repo for a second forge, e.g. https://codeberg.org/owner/repo."
+                label="Add a remote"
+                description="Remote URL or owner/repo for another forge, e.g. https://codeberg.org/owner/repo."
               >
                 <TextInput
                   value={forgeDraft ?? ""}
-                  onChangeText={setForgeDraft}
+                  onChangeText={(value) => {
+                    setForgeDraft(value);
+                    if (forgeError) setForgeError(null);
+                  }}
                   placeholder="https://codeberg.org/owner/repo"
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -1445,15 +1474,21 @@ export function ForgeIssuesView({
                     size="sm"
                     variant="secondary"
                     icon="Plus"
-                    label="Add forge"
-                    disabled={!directory || !(forgeDraft ?? "").trim() || forgeDraftInvalid}
-                    onPress={addForge}
+                    label={forgeBusy ? "Adding…" : "Add remote"}
+                    disabled={!(forgeDraft ?? "").trim() || forgeBusy}
+                    loading={forgeBusy}
+                    onPress={() => { void addForge(); }}
                   />
                 </View>
               </FormRow>
               {forgeDraftInvalid ? (
                 <Text style={[styles.hint, { color: colors.foreground }]}>
                   Forge target must be a remote URL or owner/repo.
+                </Text>
+              ) : null}
+              {forgeError ? (
+                <Text style={[styles.hint, { color: colors.foreground }]}>
+                  {forgeError}
                 </Text>
               ) : null}
               {forgeTargets.length > 0 ? (
@@ -1477,12 +1512,27 @@ export function ForgeIssuesView({
                     </View>
                   ))}
                 </View>
-              ) : null}
+              ) : (
+                <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                  No remotes added yet — Auto uses the git origin remote.
+                </Text>
+              )}
               {derivedRemote && !activeForgeValue ? (
                 <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
                   Derived: {displayRemoteForApi(derivedRemote)}
                 </Text>
               ) : null}
+            </Card>
+            <Card>
+              <Card.Header
+                title="Authentication & workspace metadata"
+                subtitle="Saved together by the button below — not by adding a remote"
+                icon="ShieldCheck"
+              />
+              <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
+                These apply to the active forge above and are saved separately from
+                the remote list.
+              </Text>
               <Text style={[styles.hint, { color: colors.foregroundMuted }]}>
                 {effectiveHost
                   ? `API token for ${effectiveHost}. Leave empty to remove it.`
@@ -1509,11 +1559,6 @@ export function ForgeIssuesView({
                 autoCapitalize="none"
                 autoCorrect={false}
               />
-              {activeForgeInvalid ? (
-                <Text style={[styles.hint, { color: colors.foreground }]}>
-                  Selected forge is not a valid remote URL or owner/repo.
-                </Text>
-              ) : null}
               {failed && data?.error ? (
                 <Text style={[styles.hint, { color: colors.foreground }]}>
                   Forge unavailable: {data.error}
@@ -1531,7 +1576,7 @@ export function ForgeIssuesView({
               ) : null}
               <View style={styles.actions}>
                 <Button
-                  label={formSaving ? "Saving…" : "Save"}
+                  label={formSaving ? "Saving…" : "Save token & settings"}
                   variant="primary"
                   disabled={formSaving || !directory || activeForgeInvalid || (tokenDraft == null && nameValue === storedName) || (tokenDraft != null && !effectiveHost)}
                   loading={formSaving}
