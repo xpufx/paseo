@@ -51,6 +51,12 @@ const HEADER_MARQUEE_MS = 1000;
 const RECENT_LIMIT = 10;
 const OUTPUT_PREVIEW = 2000;
 const EXPIRY_URGENT_S = 30;
+// `CommandBox` renders a single-line, 2-line-clamped view. Heredocs, petition
+// scripts, and other long argv payloads lose their newlines and get clipped
+// there, so past this length (or on any embedded newline) we switch to the
+// scrollable, copyable `CodeBlock` instead.
+const COMMAND_MULTILINE_THRESHOLD = 140;
+const COMMAND_BLOCK_MAX_HEIGHT = 280;
 
 // Keep the approvals surface a readable centered column instead of stretching
 // edge-to-edge on large viewports. The cap lives in the helper
@@ -282,6 +288,56 @@ function SectionHeader({ title, count }: { title: string; count?: number }) {
   );
 }
 
+/**
+ * Join argv into one display/copy string without collapsing newlines. Mirrors
+ * `CommandBox`'s quoting for space-bearing args, but leaves multiline args raw
+ * so heredocs and petition blocks read verbatim.
+ */
+export function formatCommandBlock(argv: string[]): string {
+  return argv
+    .map((arg) => (arg.includes(" ") && !/[\r\n]/.test(arg) ? JSON.stringify(arg) : arg))
+    .join(" ");
+}
+
+/**
+ * True when a command should render as a scrollable code block instead of the
+ * 2-line `CommandBox`: any embedded newline, or a rendered length that would
+ * otherwise be clamped and unreadable.
+ */
+export function isMultilineCommand(argv: string[]): boolean {
+  if (argv.some((arg) => /[\r\n]/.test(arg))) return true;
+  return formatCommandBlock(argv).length > COMMAND_MULTILINE_THRESHOLD;
+}
+
+/**
+ * Renders short commands with the compact `CommandBox` and long/multiline ones
+ * with an expandable `CodeBlock` so the full payload preserves its newlines and
+ * stays copyable. Pending approvals open expanded (operator must read them);
+ * history opens collapsed to keep the timeline compact.
+ */
+function CommandView({
+  argv,
+  defaultExpanded = true,
+}: {
+  argv: string[];
+  defaultExpanded?: boolean;
+}) {
+  if (!isMultilineCommand(argv)) {
+    return <CommandBox argv={argv} />;
+  }
+  const code = formatCommandBlock(argv);
+  const lineCount = code.split("\n").length;
+  return (
+    <Collapsible
+      title={lineCount > 1 ? `Command · ${lineCount} lines` : "Command (long)"}
+      icon="Terminal"
+      initiallyExpanded={defaultExpanded}
+    >
+      <CodeBlock code={code} maxHeight={COMMAND_BLOCK_MAX_HEIGHT} copyable />
+    </Collapsible>
+  );
+}
+
 function ApprovalItem({
   item,
   deciding,
@@ -380,7 +436,7 @@ function ApprovalItem({
         />
       </View>
 
-      <CommandBox argv={item.argv} />
+      <CommandView argv={item.argv} />
 
       <View
         style={{
@@ -763,7 +819,7 @@ function ExecutingItem({  item,
         />
       </View>
 
-      {item.argv && item.argv.length > 0 ? <CommandBox argv={item.argv} /> : null}
+      {item.argv && item.argv.length > 0 ? <CommandView argv={item.argv} /> : null}
 
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
         {item.cwd ? (
@@ -877,7 +933,7 @@ function RecentItem({
         </Text>
       ) : null}
 
-      {!isNotify ? <CommandBox argv={item.argv} /> : null}
+      {!isNotify ? <CommandView argv={item.argv} defaultExpanded={false} /> : null}
 
       <KeyValueGroup columns={2}>
         <KeyValue label="By" value={item.by || "local"} />
