@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text } from "react-native";
 import { initClientHelpers } from "../client/host.js";
 import * as themeProvider from "../client/theme/provider.js";
 import { Tabs } from "../client/components/Tabs.js";
@@ -21,12 +21,13 @@ const colors: any = {
   statusDanger: "#ef4444",
 };
 
-function installStubs(isCompact = false) {
+function installStubs(isCompact = false, hostScrollView?: any) {
   initClientHelpers({
     Icon: (props: any) => React.createElement("mock-icon", { name: props.name }),
     Modal: Object.assign(() => null, { Content: () => null }),
     useRpc: () => async () => ({}),
     useToast: () => ({}),
+    ...(hostScrollView ? { ScrollView: hostScrollView } : {}),
   } as any);
   vi.spyOn(themeProvider, "usePluginTheme").mockReturnValue({
     theme: {} as any,
@@ -163,5 +164,27 @@ describe("Tabs component", () => {
     });
 
     expect(onTabChange).toHaveBeenCalledWith("settings");
+  });
+
+  it("scroll mode owns a plain React Native scroller, never the host sheet scroller (#219)", () => {
+    // Distinctive stub for the host sheet-gesture ScrollView: if the tab strip
+    // resolved it, this type would appear in the tree.
+    function HostSheetScrollView(props: any) {
+      return React.createElement("mock-host-sheet-scrollview", props);
+    }
+    installStubs(false, HostSheetScrollView as any);
+
+    const tree = render(
+      <Tabs
+        tabs={sampleTabs}
+        activeTab="system"
+        onTabChange={() => {}}
+        mode="scroll"
+      />
+    );
+
+    expect(tree.root.findAllByType(HostSheetScrollView)).toHaveLength(0);
+    // Exactly one plain React Native horizontal scroller carries the strip.
+    expect(tree.root.findAllByType(ScrollView)).toHaveLength(1);
   });
 });
