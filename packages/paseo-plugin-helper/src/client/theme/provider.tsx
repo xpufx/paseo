@@ -107,10 +107,7 @@ export function useAppearanceScheme(): [string | undefined, (s: string | undefin
   return [scheme, setScheme];
 }
 
-const [initialScheme] = useAppearanceScheme();
-const initialDefaultTheme = getDefaultTheme(initialScheme);
-
-
+const initialDefaultTheme = getDefaultTheme();
 const PluginThemeContext = createContext<PluginThemeContextValue>({
   theme: initialDefaultTheme,
   colors: initialDefaultTheme.colors,
@@ -146,6 +143,7 @@ export function PluginThemeProvider({
     typeof layout.width === "number" && layout.width > 0 ? layout.width : undefined;
   const needsMeasurement = hostWidth === undefined;
   const [measuredWidth, setMeasuredWidth] = useState<number | undefined>(undefined);
+  const [appearanceScheme] = useAppearanceScheme();
 
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     const width = event.nativeEvent?.layout?.width;
@@ -159,7 +157,7 @@ export function PluginThemeProvider({
     const flair: VisualFlair = { ...defaultFlair, ...userFlair };
     const hostVariables = readHostThemeVariables();
     const effectiveColors = mergeThemeColors(
-      getDefaultTheme().colors,
+      getDefaultTheme(appearanceScheme).colors,
       hostVariables.colors,
       theme.colors,
       flair.accentColor,
@@ -192,7 +190,7 @@ export function PluginThemeProvider({
       padding,
       typography,
     };
-  }, [theme, layout, userFlair, effectiveWidth]);
+  }, [theme, layout, userFlair, effectiveWidth, appearanceScheme]);
 
   return (
     <PluginThemeContext.Provider value={value}>
