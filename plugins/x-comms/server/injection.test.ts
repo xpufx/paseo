@@ -126,6 +126,20 @@ describe("mcp injection", () => {
     assert.equal(injectionServerName(() => null), INJECTION_FALLBACK_KEY);
   });
 
+  // Regression for #243: the injected server name is forwarded to provider ACP
+  // servers, and Gemini's validates it against ^[a-zA-Z0-9_-]+$. A dotted name
+  // fails session/new with JSON-RPC -32602 and breaks every newborn Antigravity
+  // agent. The other tests assert against the constant, so they pass with any
+  // separator; this one pins the actual constraint.
+  it("produces an ACP-safe server name (no dots, #243)", () => {
+    const ACP_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+    const name = injectionServerName(() => "srv_63JkwL0SFqJ6");
+    assert.equal(name, "x-comms_srv_63JkwL0SFqJ6");
+    assert.match(name, ACP_NAME_PATTERN);
+    assert.ok(!name.includes("."), `server name must not contain a dot: ${name}`);
+    assert.match(INJECTION_FALLBACK_KEY, ACP_NAME_PATTERN);
+  });
+
   it("builds a stdio config pointing at the bundled server", () => {
     withSandboxedHome(() => {
       const config = injectionServerConfig();
