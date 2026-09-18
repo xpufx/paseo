@@ -2,9 +2,10 @@
  * Paseo Plugin Helper - Root Entrypoint
  *
  * For platform-safe imports in your Paseo plugins, import directly from the subpaths:
- * - `paseo-plugin-helper/core`     -> Headless runtime: RPC contracts, query/mutation
- *   hooks, settings storage & sync, daemon lifecycle, MCP tools, pure formatters.
- *   Zero React Native UI, zero CSS scrapers, zero layout opinions (#219).
+ * - `paseo-plugin-helper/core`     -> Headless client-safe runtime: RPC contracts,
+ *   query/mutation hooks, settings sync hooks, pure formatters. Zero React
+ *   Native UI, zero node:* imports, zero CSS scrapers, zero layout opinions
+ *   (#219). Server-only code stays in `paseo-plugin-helper/server`.
  * - `paseo-plugin-helper/ui`       -> Host-delegating adapters (HostModalContent,
  *   HostScroll, upstream-shaped settings renderer) conforming to
  *   `@getpaseo/plugin/client/ui` and `@getpaseo/plugin/client/react-native`.

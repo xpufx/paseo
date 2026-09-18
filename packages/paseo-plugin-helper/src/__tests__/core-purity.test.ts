@@ -8,6 +8,10 @@ const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FORBIDDEN = [
   /from\s+["']react-native["']/,
   /require\(\s*["']react-native["']\s*\)/,
+  // Client/server boundary: node built-ins must never enter the client bundle.
+  /from\s+["']node:/,
+  /require\(\s*["']node:/,
+  /from\s+["'](fs|path|os|child_process|util|events|stream|crypto|readline|net|http|https|tty|v8|vm|zlib)["']/,
   /client\/theme\/host-variables/,
   /theme\/host-variables/,
   /getComputedStyle/,

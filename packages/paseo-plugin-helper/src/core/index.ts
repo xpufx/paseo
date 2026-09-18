@@ -1,12 +1,18 @@
 /**
- * Paseo Plugin Helper — Core Runtime (Headless).
+ * Paseo Plugin Helper — Core Runtime (Headless, CLIENT-SAFE).
  *
- * Import from `paseo-plugin-helper/core` for everything that is NOT UI:
- * RPC contracts & handlers, query/mutation hooks, settings storage & sync,
- * daemon lifecycle, MCP tool registration, and pure formatters.
+ * Import from `paseo-plugin-helper/core` for everything headless that must
+ * also load in the plugin CLIENT bundle: RPC contracts, query/mutation
+ * hooks, settings sync hooks, and pure formatters.
+ *
+ * Client/server boundary (#219): this entry MUST NOT re-export `../server/*`
+ * or `../mcp/*` — those pull `node:*` built-ins (fs, child_process, …) which
+ * the 0.8 client compiler rejects. Server-only primitives stay in
+ * `paseo-plugin-helper/server` (and MCP in `paseo-plugin-helper/mcp`).
  *
  * Purity contract (enforced by `src/__tests__/core-purity.test.ts`):
  * - No runtime import of `react-native` or any UI component.
+ * - No `node:*` (or bare Node builtin) imports.
  * - No DOM/CSS variable scraper (`theme/host-variables`).
  * - No layout opinions (`layout/`, `components/`, `ModalBody`, `maxContentWidth`).
  *
@@ -26,26 +32,6 @@ export * from "../shared/forge.js";
 export * from "../shared/custom-pills.js";
 export * from "../shared/suppressed.js";
 export * from "../shared/types.js";
-
-export * from "../server/storage.js";
-export * from "../server/settings.js";
-export * from "../server/shared-settings.js";
-export * from "../server/jsonc.js";
-export * from "../server/redact.js";
-export * from "../server/process.js";
-export * from "../server/system.js";
-export * from "../server/logger.js";
-export * from "../server/version.js";
-export * from "../server/network.js";
-export * from "../server/task.js";
-export * from "../server/mcp-config.js";
-export * from "../server/mcp-injection.js";
-export * from "../server/plugins.js";
-export * from "../server/rpc-guard.js";
-export * from "../server/agent.js";
-export * from "../server/workspace-beacon.js";
-
-export * from "../mcp/index.js";
 
 export {
   initClientHelpers,
