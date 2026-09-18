@@ -43,7 +43,7 @@ Poll active minion workers to inspect their local status:
 The Orchestrator inspects the affected repositories/worktrees:
 - **Git Tree Cleanliness**: Ensure no untracked files (`??`) or unstaged edits (`M`) remain in the agent's worktree.
 - **Commit History**: Verify changes are committed with semantic messages and proper issue references.
-- **Remote Push**: Confirm commits are pushed to `origin` on Forgejo (`ssh://git@forge.mrs.aager.de:222/...`).
+- **Remote Push**: Confirm commits are pushed to `origin` on Forgejo (`ssh://git@forge.mrs.uppidi.com:222/...`).
 - **Package Manifest & Versions**: Verify whether `package.json`, `paseo-plugin.json`, or exported version constants need a version bump.
 - **Build / Bundle Output**: Ensure build artifacts (`dist/`) are fresh and match source code.
 - **Daemon / Service Reloads**: Determine if running Paseo daemons or background systemd units need a restart or reload to pick up changes.

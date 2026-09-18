@@ -1,3 +1,50 @@
 node_modules/
-dist/
 *.log
+
+# OS & editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Secrets & credentials
+.env*
+!.env.example
+*.pem
+*.key
+*.id_rsa
+.npmrc
+*credentials*.json
+
+# Runtime daemon & scratch files
+.paseo/
+*.sock
+*.pid
+state/
+
+# Build & test caches
+*.tsbuildinfo
+.turbo/
+coverage/
+.vitest/
+
+# Plugin build artifacts (scoped — helper dist stays tracked for package exports)
+dist/
+!packages/paseo-plugin-helper/dist/
+plugins/*/dist/
+
+# Local agent guidance (per-machine, never committed)
+packages/paseo-plugin-helper/AGENTS.md
+.agents/
+.verify-tmp/
+
+# Vendor link-mode stash (dev-only, never committed — materialize before publish)
+*.link-bak/
+
+# Local opencode config (per-machine, never committed)
+opencode.jsonc
+
+# Serena per-project state (memories, caches — per-machine, never committed)
+.serena/
+scratch/
