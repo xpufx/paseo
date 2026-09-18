@@ -181,9 +181,16 @@ function ApprovalHeaderIconInner(props: PluginButtonIconProps) {
     const timer = setTimeout(() => {
       const reg = headerRegistry.get(workspaceId);
       if (!reg) return;
+      // Dedupe consecutive identical publishes, but always publish the first
+      // label of an effect run. Clearing the badge calls `show(undefined)`;
+      // with `last` starting `undefined`, a plain equality guard would treat
+      // that clear as a no-op and leave the stale `Pending (N)` label pinned
+      // after the queue drains (xpufx-org/paseo#238).
       let last: string | undefined;
+      let published = false;
       const show = (label: string | undefined) => {
-        if (label === last) return;
+        if (published && label === last) return;
+        published = true;
         last = label;
         try {
           reg.update({ label });
