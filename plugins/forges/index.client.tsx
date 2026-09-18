@@ -4,6 +4,7 @@ import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput
 import {
   initClientHelpers,
   registerComposerPill,
+  registerSidebarSurface,
 } from "paseo-plugin-helper/client";
 import {
   ISSUES_PILL_ID,
@@ -26,6 +27,10 @@ import {
   forgejoWebhookUserTransformer,
   forgejoWebhookRenderer,
 } from "./client/webhook-card.js";
+import {
+  ForgeHookQueuePanel,
+  ForgeHookQueueSurface,
+} from "./client/hook-queue-panel.js";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
@@ -81,7 +86,25 @@ export default function contribute(client: PluginClientContext) {
     Component: ForgeIssuesPanel,
   });
 
+  const removeQueuePanel = client.addWorkspacePanel({
+    id: "forges-queues",
+    title: "Forge Queues",
+    icon: "Layers",
+    context: "workspace",
+    locations: ["workspace", "explorer"],
+    Component: ForgeHookQueuePanel,
+  });
+
+  const removeQueueSurface = registerSidebarSurface(client, {
+    id: "queues",
+    title: "Forge Queues",
+    icon: "Layers",
+    Component: ForgeHookQueueSurface,
+  });
+
   return () => {
+    removeQueueSurface?.();
+    removeQueuePanel?.();
     removePanel();
     removePill();
     removeWebhookUser();
