@@ -361,4 +361,26 @@ export const Example = () => <View><Text>Example</Text><Button label="OK" /></Vi
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("flags host width caps and scroll hijacks, pointing at paseo-plugin-helper/ui", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-audit-host-"));
+
+    try {
+      fs.mkdirSync(path.join(tmpDir, "client"));
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "bad.tsx"),
+        `import { ModalBody } from "paseo-plugin-helper/client";\nexport const a = <ModalBody maxContentWidth={600} />;\nexport const b = <Modal.Content scrollable={false} />;`,
+      );
+
+      const report = auditProject(tmpDir);
+      const widthIssues = report.issues.filter((i) => i.ruleId === "no-helper-width-cap");
+      expect(widthIssues).toHaveLength(1);
+      expect(widthIssues[0].replacement).toContain("paseo-plugin-helper/ui");
+      const scrollIssues = report.issues.filter((i) => i.ruleId === "no-host-scroll-hijack");
+      expect(scrollIssues).toHaveLength(1);
+      expect(scrollIssues[0].replacement).toContain("paseo-plugin-helper/ui");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

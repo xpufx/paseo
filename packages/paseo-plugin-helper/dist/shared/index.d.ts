@@ -1,6 +1,7 @@
-export { C as CustomPillDefinition, d as CustomPillDefinitionSchema, e as CustomPillModal, f as CustomPillModalSchema, b as CustomPillState, g as CustomPillThresholds, h as CustomPillThresholdsSchema, D as DefineSettingsContractOptions, P as PlatformType, c as PluginTheme, R as ResponsiveLayout, a as SettingsContract, i as SettingsEmptyInput, j as SettingsEmptyInputSchema, S as StatusVariant, T as ThemeColors, k as defineSettingsContract, l as formatPillDisplay, p as parseNumericPillValue, r as resolveCustomPillStatus } from '../custom-pills-BRMMkgfE.js';
+export { C as CustomPillDefinition, a as CustomPillDefinitionSchema, b as CustomPillModal, c as CustomPillModalSchema, d as CustomPillState, e as CustomPillThresholds, f as CustomPillThresholdsSchema, P as PlatformType, g as PluginTheme, R as ResponsiveLayout, S as StatusVariant, T as ThemeColors, h as formatPillDisplay, p as parseNumericPillValue, r as resolveCustomPillStatus } from '../custom-pills-C98QP7Cg.js';
 export { D as DefineRpcOptions, P as PluginRpcContract, R as RpcInput, a as RpcOutput, d as defineContract, b as defineRpc } from '../rpc-D27pph91.js';
-export { a as ForgeKind, F as ForgeMarkInput, b as FormatBytesOptions, c as FormatCompactNumberOptions, M as MetricThresholds, R as ResolvedForgeMark, S as SuiteSettings, d as SuiteSettingsContract, e as SuiteSettingsSchema, g as TruncateOptions, T as TruncatePathOptions, f as forgeKindFromHost, h as formatBytes, j as formatCompactNumber, k as formatDuration, l as formatNumber, m as formatUptime, i as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark, o as resolveMetricStatus, s as stripAnsi, t as truncate, p as truncateMiddle, q as truncatePath } from '../forge-CRHP7iRo.js';
+export { F as ForgeKind, a as ForgeMarkInput, b as FormatBytesOptions, c as FormatCompactNumberOptions, M as MetricThresholds, R as ResolvedForgeMark, S as SuiteSettings, d as SuiteSettingsContract, e as SuiteSettingsSchema, T as TruncateOptions, f as TruncatePathOptions, g as forgeKindFromHost, h as formatBytes, i as formatCompactNumber, j as formatDuration, k as formatNumber, l as formatUptime, m as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark, o as resolveMetricStatus, s as stripAnsi, t as truncate, p as truncateMiddle, q as truncatePath } from '../forge-BMhLnv9s.js';
+export { D as DefineSettingsContractOptions, S as SettingsContract, a as SettingsEmptyInput, b as SettingsEmptyInputSchema, d as defineSettingsContract } from '../settings-CP1gv9q3.js';
 import 'zod';
 
 declare class TimeoutError extends Error {
@@ -13,18 +14,6 @@ declare class TimeoutError extends Error {
  * Automatically cleans up the timer on resolution or rejection.
  */
 declare function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label?: string): Promise<T>;
-
-interface SuppressedSink {
-    debug?(message: string, data?: unknown): void;
-    warn?(message: string, data?: unknown): void;
-}
-/**
- * Surfaces a caught/suppressed error to the plugin log at debug level
- * (warn when `level: "warn"`). Fire-and-forget `catch(() => undefined)`
- * sites should route through here so `paseo plugin logs` shows them
- * when dev debug logging is enabled.
- */
-declare function reportSuppressed(sink: Pick<SuppressedSink, "debug" | "warn"> | undefined, context: string, error: unknown, level?: "debug" | "warn"): void;
 
 /**
  * Text-run splitting for search highlighting, shared by every helper surface
@@ -47,5 +36,17 @@ interface HighlightPart {
 declare function splitHighlightParts(text: string, query: string): HighlightPart[];
 /** Whether `text` contains at least one occurrence of the trimmed `query`. */
 declare function hasHighlightMatch(text: string, query: string): boolean;
+
+interface SuppressedSink {
+    debug?(message: string, data?: unknown): void;
+    warn?(message: string, data?: unknown): void;
+}
+/**
+ * Surfaces a caught/suppressed error to the plugin log at debug level
+ * (warn when `level: "warn"`). Fire-and-forget `catch(() => undefined)`
+ * sites should route through here so `paseo plugin logs` shows them
+ * when dev debug logging is enabled.
+ */
+declare function reportSuppressed(sink: Pick<SuppressedSink, "debug" | "warn"> | undefined, context: string, error: unknown, level?: "debug" | "warn"): void;
 
 export { type HighlightPart, type SuppressedSink, TimeoutError, hasHighlightMatch, reportSuppressed, splitHighlightParts, withTimeout };

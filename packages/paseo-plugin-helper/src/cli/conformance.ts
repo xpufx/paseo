@@ -8,6 +8,8 @@ export const UI_CONFORMANCE_RULES = new Set([
   "no-bespoke-react-native-interactions",
   "no-bespoke-style-system",
   "no-hardcoded-modal-dimensions",
+  "no-helper-width-cap",
+  "no-host-scroll-hijack",
 ]);
 
 export function findPluginDirectories(pluginsDir: string): string[] {

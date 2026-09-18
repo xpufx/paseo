@@ -116,4 +116,16 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
     description: "Hardcoded rigid minWidth / minHeight (> 350) detected on modal or container style.",
     replacement: "Use fluid layout (e.g. minWidth: 0, flexShrink: 1) with ModalBody",
   },
+  "no-helper-width-cap": {
+    id: "no-helper-width-cap",
+    severity: "warn",
+    description: "Artificial content width cap (maxContentWidth) on a host-owned container.",
+    replacement: "HostModalContent from 'paseo-plugin-helper/ui' — the host owns the dialog frame",
+  },
+  "no-host-scroll-hijack": {
+    id: "no-host-scroll-hijack",
+    severity: "warn",
+    description: "Forced scrollable={false} on host Modal.Content with a helper-owned replacement scroller.",
+    replacement: "HostModalContent (modal contexts) or HostScroll (host surfaces) from 'paseo-plugin-helper/ui'",
+  },
 };

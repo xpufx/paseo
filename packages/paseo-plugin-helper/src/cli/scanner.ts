@@ -520,6 +520,34 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
         }
       }
     }
+
+    // Rule: no-helper-width-cap + no-host-scroll-hijack (#219).
+    // Plugin code must not cap host-owned dialog frames or replace the host
+    // scroller; the ui adapters (HostModalContent / HostScroll) delegate both.
+    if (isClientFile && !inTest && !inBuildOrTool) {
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) {
+          continue;
+        }
+        const widthCap = /maxContentWidth/.test(line);
+        const scrollHijack = /<Modal\.Content[^>]*scrollable=\{false\}/.test(line);
+        if (!widthCap && !scrollHijack) continue;
+        const rule = AUDIT_RULES[widthCap ? "no-helper-width-cap" : "no-host-scroll-hijack"];
+        issues.push({
+          ruleId: rule.id,
+          severity: rule.severity,
+          file: relPath,
+          line: i + 1,
+          column: line.indexOf(line.trim()),
+          message: rule.description,
+          codeSnippet: line.trim(),
+          replacement: rule.replacement,
+          docUrl: rule.docUrl,
+        });
+      }
+    }
   }
 
   // Project-level checks needing whole-tree knowledge.

@@ -1,5 +1,4 @@
-import { ZodType, z } from 'zod';
-import { P as PluginRpcContract } from './rpc-D27pph91.js';
+import { z } from 'zod';
 
 /**
  * Structural theme types for Paseo plugins.
@@ -33,44 +32,6 @@ interface ResponsiveLayout {
     height?: number;
 }
 type StatusVariant = "neutral" | "success" | "warning" | "danger" | "accent" | "info";
-
-declare const SettingsEmptyInputSchema: z.ZodOptional<z.ZodUnion<readonly [z.ZodVoid, z.ZodRecord<z.ZodString, z.ZodUnknown>]>>;
-type SettingsEmptyInput = z.infer<typeof SettingsEmptyInputSchema>;
-interface SettingsContract<TSettings extends Record<string, any>> {
-    readonly name: string;
-    readonly schema: ZodType<TSettings>;
-    readonly defaultSettings: TSettings;
-    readonly get: PluginRpcContract<ZodType<SettingsEmptyInput>, ZodType<TSettings>>;
-    readonly update: PluginRpcContract<ZodType<Partial<TSettings>>, ZodType<TSettings>>;
-    readonly reset: PluginRpcContract<ZodType<SettingsEmptyInput>, ZodType<TSettings>>;
-    readonly description?: string;
-}
-interface DefineSettingsContractOptions<TSettings extends Record<string, any>> {
-    /**
-     * Unique name for the settings domain (e.g. "top.settings" or "myplugin.config").
-     * Automatically normalizes invalid RPC characters.
-     */
-    name: string;
-    /**
-     * Zod Object schema representing the full settings shape.
-     * Use `.default(...)` on fields to provide default values.
-     */
-    schema: ZodType<TSettings> & {
-        partial?: () => ZodType<Partial<TSettings>>;
-    };
-    /**
-     * Optional default data override if schema fields do not all specify `.default()`.
-     */
-    defaultData?: Partial<TSettings>;
-    /**
-     * Optional human-readable description of the settings.
-     */
-    description?: string;
-}
-/**
- * Defines a pair of typed Paseo RPC contracts (get, update, reset) for plugin settings.
- */
-declare function defineSettingsContract<TSettings extends Record<string, any>>(options: DefineSettingsContractOptions<TSettings>): SettingsContract<TSettings>;
 
 declare const CustomPillThresholdsSchema: z.ZodObject<{
     warning: z.ZodOptional<z.ZodNumber>;
@@ -143,4 +104,4 @@ declare function resolveCustomPillStatus(numericValue: number | undefined, thres
  */
 declare function formatPillDisplay(rawValue: string, prefix?: string, suffix?: string): string;
 
-export { type CustomPillDefinition as C, type DefineSettingsContractOptions as D, type PlatformType as P, type ResponsiveLayout as R, type StatusVariant as S, type ThemeColors as T, type SettingsContract as a, type CustomPillState as b, type PluginTheme as c, CustomPillDefinitionSchema as d, type CustomPillModal as e, CustomPillModalSchema as f, type CustomPillThresholds as g, CustomPillThresholdsSchema as h, type SettingsEmptyInput as i, SettingsEmptyInputSchema as j, defineSettingsContract as k, formatPillDisplay as l, parseNumericPillValue as p, resolveCustomPillStatus as r };
+export { type CustomPillDefinition as C, type PlatformType as P, type ResponsiveLayout as R, type StatusVariant as S, type ThemeColors as T, CustomPillDefinitionSchema as a, type CustomPillModal as b, CustomPillModalSchema as c, type CustomPillState as d, type CustomPillThresholds as e, CustomPillThresholdsSchema as f, type PluginTheme as g, formatPillDisplay as h, parseNumericPillValue as p, resolveCustomPillStatus as r };
