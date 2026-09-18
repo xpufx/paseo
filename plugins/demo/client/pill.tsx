@@ -46,7 +46,7 @@ import {
   useRpcMutation,
   usePluginSettings,
 } from "paseo-plugin-helper/core";
-import { HostModalContent } from "paseo-plugin-helper/ui";
+import { HostModalSection } from "paseo-plugin-helper/ui";
 import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   getDemoDataRpc,
@@ -256,11 +256,13 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
       layout={layout}
       flair={activeFlair}
     >
-      {/* Host-owned scroll (#219): HostModalContent delegates the scroller to
-          the host Modal.Content instead of mounting a helper ScrollView, so no
-          second scroll region fights the sheet on compact/mobile. The navbar
-          renders inline as content; manual refresh lives in the banner card. */}
-      <HostModalContent>
+      {/* Pill-embedded content (#219): the pill host already provides the one
+          <Modal.Content> (modal paths) or no modal at all (0.8 popover), so
+          this must stay a plain fluid section — a nested <Modal.Content>
+          violates the host contract and crashes the plugin. hostScroll: true
+          below leaves the scroller to the host; manual refresh lives in the
+          banner card. */}
+      <HostModalSection>
         <View
           style={{
             width: "100%",
@@ -1221,7 +1223,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
           helper-demo v{data?.version ?? PLUGIN_VERSION} (tick #{data?.backgroundTicks ?? 0})
         </Text>
       </View>
-      </HostModalContent>
+      </HostModalSection>
     </PluginThemeProvider>
   );
 }
@@ -1232,6 +1234,7 @@ export function contributeClient(client: ComposerPillRegistrar) {
     title: "demo",
     modalTitle: "Showcase Demo",
     modalIcon: "Sliders",
+    hostScroll: true,
     flair: {
       radius: "rounded",
       density: "comfortable",

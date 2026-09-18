@@ -9,7 +9,8 @@ import '../host-DatQ2QJE.cjs';
 /**
  * Host-delegating modal content for `paseo-plugin-helper/ui`.
  *
- * Contract (the opposite of legacy `client/ModalContent`):
+ * Contract — ONLY for content rendered directly inside your OWN host
+ * `<Modal>` (e.g. x-comms style own-modal surfaces):
  * - Scroll ownership stays with the host: renders the injected host
  *   `<Modal.Content>` with its default `scrollable` behavior and adds NO
  *   helper-owned scroller, so sheet gestures, keyboard avoidance, and
@@ -19,10 +20,10 @@ import '../host-DatQ2QJE.cjs';
  *   fills it fluidly (`width: "100%"`).
  * - No theme scraping: colors come from the host `theme` prop via
  *   `PluginThemeProvider`, never from DOM CSS variables.
- *
- * Use this for modal contexts. For host surfaces that supply NO scroller
- * (sidebar surfaces, settings screens), render the host `ScrollView`
- * explicitly via `HostScroll` below instead.
+ * - NEVER render this inside `registerComposerPill` `renderModal`: the pill
+ *   host already provides the one `<Modal.Content>` (or no modal at all on
+ *   0.8 popovers), so a nested `<Modal.Content>` violates the host contract
+ *   and crashes the plugin. Use `HostModalSection` there instead.
  */
 declare function HostModalContent({ children, style, contentContainerStyle, }: {
     children: ReactNode;
@@ -41,5 +42,21 @@ declare function HostScroll({ children, style, contentContainerStyle, }: {
     style?: StyleProp<ViewStyle>;
     contentContainerStyle?: StyleProp<ViewStyle>;
 }): React__default.JSX.Element;
+/**
+ * Fluid inner content for pill-embedded modals (`registerComposerPill`
+ * `renderModal`).
+ *
+ * The pill host already provides the one `<Modal.Content>` (legacy/centered
+ * modal paths) or no modal at all (0.8 popover path, where the host owns the
+ * outer scroll). This renders a plain fluid `<View>` — no `<Modal.Content>`,
+ * no scroller, no width caps — so exactly one `<Modal.Content>` exists and
+ * nothing nests. Pair with `hostScroll: true` on the pill registration so
+ * the wrapper leaves scrolling to the host; without it the wrapper bounds
+ * the dialog (`scrollable={false}`) for legacy `ModalBody` content.
+ */
+declare function HostModalSection({ children, style, }: {
+    children: ReactNode;
+    style?: StyleProp<ViewStyle>;
+}): React__default.JSX.Element;
 
-export { HostModalContent, HostScroll };
+export { HostModalContent, HostModalSection, HostScroll };

@@ -1169,6 +1169,14 @@ interface PillLivePayload {
 }
 type PillLabelResolver = (context: PillLiveContext) => string | PillLivePayload | undefined | Promise<string | PillLivePayload | undefined>;
 type PillIconResolver = (context: PillLiveContext) => string | undefined | Promise<string | undefined>;
+/**
+ * Single precedence rule for pill modal scroll ownership (#219), shared by
+ * the centered and legacy modal wrappers so they cannot disagree.
+ * `true` delegates the scroller to the host `<Modal.Content>`; `false`
+ * (default) keeps the legacy bounded dialog for `ModalBody`-based content.
+ * Either way the wrapper renders exactly one `<Modal.Content>`.
+ */
+declare function resolvePillModalScrollable(hostScroll?: boolean): boolean;
 interface RegisterComposerPillOptions<TPayload = any> {
     /**
      * Unique ID for the pill (e.g. "paseo-top", "mcp-monitor").
@@ -1261,15 +1269,33 @@ interface RegisterComposerPillOptions<TPayload = any> {
      */
     popoverWidth?: number;
     /**
-      * Renders the content inside the controlled modal.
+     * Renders the content inside the controlled modal.
      * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
-      * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
-      * popover rendering this same content at the host surface width (expect a
-      * narrow column, not a wide modal); keep content vertically stacked and
-      * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
-      * popovers, so live pill text comes from `resolveLabel` instead.
+     * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
+     * popover rendering this same content at the host surface width (expect a
+     * narrow column, not a wide modal); keep content vertically stacked and
+     * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
+     * popovers, so live pill text comes from `resolveLabel` instead.
+     *
+     * The wrapper renders exactly one host `<Modal.Content>` around this output
+     * on the modal paths (legacy + centered). Never render another
+     * `<Modal.Content>` here — use `HostModalSection` from
+     * `paseo-plugin-helper/ui` for fluid content. (`HostModalContent` is only
+     * for plugins that open their OWN host `<Modal>`.)
      */
     renderModal?: (props: RenderModalProps<TPayload>) => ReactNode;
+    /**
+     * Host-owned scroll for the pill modal paths (#219).
+     * - `false` (default, legacy): the wrapper renders
+     *   `<Modal.Content scrollable={false}>` (bounded dialog) and
+     *   `ModalBody`-based content owns the one scroller.
+     * - `true`: the wrapper renders `<Modal.Content scrollable={true}>` so the
+     *   host scrolls, and `renderModal` must provide fluid content with NO
+     *   nested `<Modal.Content>` or scroller (`HostModalSection`).
+     * Exactly one `<Modal.Content>` is rendered in both modes. The 0.8 popover
+     * path is unaffected (plain host-owned container either way).
+     */
+    hostScroll?: boolean;
     /**
      * Makes the pill an action button instead of a tethered popover: pressing it
      * calls this and the host never mounts a popover. Use it to open a plugin
@@ -1468,4 +1494,4 @@ interface ForgeIconProps extends ForgeMarkInput {
  */
 declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseResponsiveResult, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, spacing, triggerHaptic, usePluginTheme, useResponsive };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseResponsiveResult, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolvePillModalScrollable, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, spacing, triggerHaptic, usePluginTheme, useResponsive };

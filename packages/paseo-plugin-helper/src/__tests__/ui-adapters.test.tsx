@@ -3,7 +3,7 @@ import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { ScrollView, Text, View } from "react-native";
 import { initClientHelpers } from "../client/host.js";
-import { HostModalContent, HostScroll } from "../ui/modal.js";
+import { HostModalContent, HostModalSection, HostScroll } from "../ui/modal.js";
 
 let hostContentProps: Record<string, unknown> | null = null;
 
@@ -55,6 +55,22 @@ describe("ui/HostModalContent host delegation", () => {
     );
     expect(r.root.findByProps({ testID: "host-modal-content" })).toBeTruthy();
     expect(r.root.findAllByType(ScrollView)).toHaveLength(0);
+  });
+});
+
+describe("ui/HostModalSection pill-embedded content", () => {
+  it("renders a plain fluid view with no Modal.Content and no scroller", () => {
+    const r = render(
+      <HostModalSection>
+        <Text>body</Text>
+      </HostModalSection>,
+    );
+    expect(r.root.findAllByType(ScrollView)).toHaveLength(0);
+    const view = r.root.findByType(View);
+    const style = Array.isArray(view.props.style)
+      ? Object.assign({}, ...view.props.style)
+      : (view.props.style ?? {});
+    expect(style.width).toBe("100%");
   });
 });
 
