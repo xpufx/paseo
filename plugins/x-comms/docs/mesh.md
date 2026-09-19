@@ -95,6 +95,14 @@ Implemented (`server/outbox.ts` + the plugin server, #12):
 - Scope: this covers plugin-server sends (panel/composer). Agent-initiated
   `x_comms_send` calls run in an ephemeral per-session MCP process and are not
   outboxed.
+- Delivery path (`conversation.send`): a target that resolves to THIS daemon's
+  serverId sends natively through the host `PaseoApi` (`server/local-send.ts`);
+  every remote target goes through the bundled MCP server, which stamps the
+  envelope and shells out to `paseo send --host`. `PaseoApi.send()` is bound to
+  one daemon connection and carries no host/`serverId` (`PaseoAgentSendOptions`
+  has only `messageId`/`images`/`attachments`), so there is no host-targeted SDK
+  call to replace the remote shell-out with. Both producers stamp the identical
+  version-4 envelope, so the wire contract is unchanged.
 - Not implemented: UUID-keyed idempotency. The conversation envelope has no
   message-id slot and receivers keep no seen-id set for messages, so a retry
   after an ambiguous failure can re-deliver. Adding it needs a wire-format

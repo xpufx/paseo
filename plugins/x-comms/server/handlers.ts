@@ -22,6 +22,7 @@ import {
 } from "./registry";
 import { serverPath } from "./server-status";
 import { readRelayStatus } from "./relay-status";
+import { resolveSendRoute, sendLocalNative } from "./local-send";
 
 // Startup check: validate whatever is already in the registry as soon as the
 // plugin backend loads, so a corrupt or invalid config is caught early and
@@ -169,10 +170,11 @@ export async function handleIntrospectAgents() {
 
 import { McpStdioClient } from "./mcp-client";
 
-// Sends go through the bundled paseo-x-comms server over stdio MCP,
+// Introduce sends go through the bundled paseo-x-comms server over stdio MCP,
 // so every message carries the meta envelope (sender identity) stamped by the
-// server itself. Each recipient gets the other party's address so a real
-// two-way reply is possible, not just two one-way drops.
+// server itself. (Local `conversation.send` targets skip this path and send
+// natively; see deliverConversationMessage.) Each recipient gets the other
+// party's address so a real two-way reply is possible, not just two one-way drops.
 export async function handleIntroduceAgents(input: {
   first: { daemon: string; agentId: string; shortId: string; name: string };
   second: { daemon: string; agentId: string; shortId: string; name: string };
@@ -268,11 +270,47 @@ export interface ConversationSendInput {
 }
 
 /**
- * The existing send path, unchanged: bundled server over stdio MCP, which
- * stamps the envelope and shells out to `paseo send`. Rejects on failure;
- * callers either record the send or hold it in the outbox for retry.
+ * Deliver to a target that resolves to THIS daemon: native SDK send. Falls
+ * back to null when the target is remote, so callers use the MCP/CLI path.
+ * `paseo` is required — without a local handle there is no native route.
  */
-async function deliverConversationMessage(input: ConversationSendInput): Promise<void> {
+async function tryDeliverLocalNative(
+  input: ConversationSendInput,
+  paseo: PaseoApi | null,
+): Promise<boolean> {
+  if (!paseo) return false;
+  const targetServerId = targetServerIdFor(input.daemon);
+  if (!targetServerId) return false;
+  let self: string | null = null;
+  try {
+    self = await localServerId();
+  } catch {
+    return false;
+  }
+  if (resolveSendRoute({ hasLocalPaseo: true, targetServerId, selfServerId: self }) !== "local") {
+    return false;
+  }
+  await sendLocalNative(paseo, {
+    agentId: input.agentId,
+    prompt: input.prompt,
+    fromAgentId: input.fromAgentId ?? null,
+    fromAgentName: input.fromAgentName ?? null,
+    targetDaemon: input.daemon,
+  });
+  return true;
+}
+
+/**
+ * Deliver a conversation message. Local targets go out natively via the host
+ * PaseoApi; remote targets go through the bundled MCP server, which stamps the
+ * envelope and shells out to `paseo send --host` (no host-targeted SDK call
+ * exists). Rejects on failure; callers record the send or hold it in the outbox.
+ */
+async function deliverConversationMessage(
+  input: ConversationSendInput,
+  paseo: PaseoApi | null = paseoRef,
+): Promise<void> {
+  if (await tryDeliverLocalNative(input, paseo)) return;
   let sendDaemon = daemonNameForServerId(input.daemon) ?? input.daemon;
   // Fallback: if daemon is a serverId (srv_…) and not in registry, scan registry values' offer serverId
   if (sendDaemon === input.daemon && input.daemon.startsWith("srv_")) {
@@ -297,7 +335,7 @@ async function deliverConversationMessage(input: ConversationSendInput): Promise
 export async function handleConversationSend(input: ConversationSendInput, context?: PluginHandlerContext) {
   rememberPaseo(context?.paseo);
   try {
-    await deliverConversationMessage(input);
+    await deliverConversationMessage(input, context?.paseo ?? paseoRef);
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause);
     const entry = await withOutboxLock(() => {
@@ -406,6 +444,20 @@ function writeUiPrefs(state: UiPrefsState): void {
 export function identityFor(daemon: string): string | null {
   const identities = readUiPrefs().daemonIdentities ?? {};
   return identities[daemon] ?? null;
+}
+
+/**
+ * The daemon serverId a send target resolves to, when it can be determined
+ * without a network probe: a raw `srv_…` id, a synced alias, or an embedded
+ * relay-offer id. A bare direct host has no identity, so it returns null and
+ * the send conservatively stays on the remote path.
+ */
+export function targetServerIdFor(daemon: string): string | null {
+  if (daemon.startsWith("srv_")) return daemon;
+  const byIdentity = identityFor(daemon);
+  if (byIdentity) return byIdentity;
+  const entry = readRegistry(currentRegistryPath()).daemons.find((d) => d.name === daemon);
+  return deriveHostFromValue(entry?.value ?? daemon);
 }
 
 // The registry is keyed by daemon *name*, but x-comms envelopes carry the
