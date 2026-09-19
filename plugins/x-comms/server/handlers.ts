@@ -10,7 +10,6 @@ import {
   daemonUpdateRpc,
   daemonRemoveRpc,
   daemonHealthRpc,
-  serverCheckRpc,
 } from "../shared/registry";
 import {
   parseRegistry,
@@ -248,31 +247,8 @@ export async function handleServerStatus() {
   }
 }
 
-// The server version this plugin is built against, bumped in lockstep with the
-// server release. Inlined (not in paseo-plugin.json, whose schema is strict)
-// so the version check can flag a mismatch with whatever server is installed.
-const EXPECTED_SERVER_VERSION = "0.3.0";
-
-function expectedServerVersion(): string {
-  return EXPECTED_SERVER_VERSION;
-}
-
-// Reports the version the bundled server carries and whether it matches the
-// plugin's expected version. The server always ships with the plugin, so this
-// is a passive sanity check, not a locate/install step.
-export async function handleServerCheck() {
-  try {
-    const path = serverPath();
-    const version = extractServerVersion(path);
-    const expected = expectedServerVersion();
-    return { path, located: true, version, expected, match: version !== null && version === expected, error: null };
-  } catch (cause) {
-    return { path: "", located: false, version: null, expected: expectedServerVersion(), match: false, error: cause instanceof Error ? cause.message : String(cause) };
-  }
-}
-
-// Sends a message to a specific agent on a daemon through the located server.
-// Reuses the same located-server path every other RPC uses.
+// Best-effort scrape of the version constant from the bundled server source;
+// a null version never fails the status diagnostic.
 function extractServerVersion(serverPath: string): string | null {
   try {
     const source = readFileSync(serverPath, "utf8");

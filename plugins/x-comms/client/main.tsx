@@ -36,7 +36,6 @@ import {
   daemonDumpRpc,
   identitySyncRpc,
   serverStatusRpc,
-  serverCheckRpc,
   introspectAgentsRpc,
   introduceAgentsRpc,
   directHostMismatch,
@@ -131,7 +130,6 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
   const callDump = useRpc(daemonDumpRpc);
   const callIdentitySync = useRpc(identitySyncRpc);
   const callStatus = useRpc(serverStatusRpc);
-  const callCheck = useRpc(serverCheckRpc);
   const callIntrospect = useRpc(introspectAgentsRpc);
   const callIntroduce = useRpc(introduceAgentsRpc);
   const [newName, setNewName] = useState("");
@@ -192,7 +190,6 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
   });
   const introduce = useMutation({ mutationFn: callIntroduce });
   const status = useQuery({ queryKey: ["server-status"], queryFn: () => callStatus({}) });
-  const check = useQuery({ queryKey: ["server-check"], queryFn: () => callCheck({}), retry: false });
   const add = useMutation({ mutationFn: callAdd });
   const update = useMutation({ mutationFn: callUpdate });
   const remove = useMutation({ mutationFn: callRemove });
@@ -503,25 +500,6 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
               mono
               copyable={Boolean(status.data)}
               truncate="path"
-            />
-            <KeyValue
-              label="Server check"
-              value={
-                check.data
-                  ? check.data.error
-                    ? `failed: ${check.data.error}`
-                    : check.data.match
-                      ? `v${check.data.version} (matches plugin v${check.data.expected})`
-                      : `v${check.data.version}, plugin expects v${check.data.expected}`
-                  : "pending…"
-              }
-              valueStyle={
-                check.data && !check.data.error && !check.data.match
-                  ? { color: colors.statusWarning }
-                  : check.data?.match
-                    ? { color: colors.statusSuccess }
-                    : undefined
-              }
             />
           </KeyValueGroup>
         </Collapsible>

@@ -290,19 +290,6 @@ export const identitySyncRpc = defineRpc({
   }),
 });
 
-export const serverCheckRpc = defineRpc({
-  name: "server.check",
-  input: z.object({}),
-  output: z.object({
-    path: z.string(),
-    located: z.boolean(),
-    version: z.string().nullable(),
-    expected: z.string(),
-    match: z.boolean(),
-    error: z.string().nullable(),
-  }),
-});
-
 export const conversationSendRpc = defineRpc({
   name: "conversation.send",
   input: z.object({

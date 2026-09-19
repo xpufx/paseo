@@ -6,7 +6,6 @@ import {
   handleDaemonRemove,
   handleDaemonHealth,
   handleServerStatus,
-  handleServerCheck,
   handleConversationSend,
   handleIntrospectAgents,
   handleIntroduceAgents,
@@ -33,7 +32,6 @@ import {
   daemonRemoveRpc,
   daemonHealthRpc,
   serverStatusRpc,
-  serverCheckRpc,
   conversationSendRpc,
   introspectAgentsRpc,
   introduceAgentsRpc,
@@ -55,7 +53,6 @@ export default function contribute(server: PluginServerContext) {
   server.handle(daemonRemoveRpc, handleDaemonRemove);
   server.handle(daemonHealthRpc, handleDaemonHealth);
   server.handle(serverStatusRpc, handleServerStatus);
-  server.handle(serverCheckRpc, handleServerCheck);
   server.handle(conversationSendRpc, handleConversationSend);
   server.handle(introspectAgentsRpc, handleIntrospectAgents);
   server.handle(introduceAgentsRpc, handleIntroduceAgents);

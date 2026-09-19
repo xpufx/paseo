@@ -26,7 +26,6 @@ import {
   directHostMismatch,
   identitySyncRpc,
   registryReadRpc,
-  serverCheckRpc,
   serverStatusRpc,
   snapshotRefreshRpc,
   uiPrefsGetRpc,
@@ -83,7 +82,6 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
   const callSnapshotRefresh = useRpc(snapshotRefreshRpc);
   const callIdentitySync = useRpc(identitySyncRpc);
   const callStatus = useRpc(serverStatusRpc);
-  const callCheck = useRpc(serverCheckRpc);
 
   const read = useQuery({ queryKey: ["registry-read"], queryFn: () => callRead({}) });
   const health = useQuery({
@@ -94,7 +92,6 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
   });
   const prefs = useQuery({ queryKey: ["ui-prefs"], queryFn: () => callPrefsGet({}) });
   const status = useQuery({ queryKey: ["server-status"], queryFn: () => callStatus({}) });
-  const check = useQuery({ queryKey: ["server-check"], queryFn: () => callCheck({}), retry: false });
 
   const [newName, setNewName] = useState("");
   const [newValue, setNewValue] = useState("");
@@ -126,7 +123,6 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
       setRefreshing(false);
       refetchAll();
       void status.refetch();
-      void check.refetch();
     },
     onError: () => setRefreshing(false),
   });
@@ -187,16 +183,6 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
       : null;
   const daemonCount = read.data?.daemons.length ?? 0;
 
-  const serverCheckValue = check.data
-    ? check.data.error
-      ? `failed: ${check.data.error}`
-      : check.data.version === null
-        ? "version unavailable"
-        : check.data.match
-          ? `v${check.data.version} (matches plugin v${check.data.expected})`
-          : `v${check.data.version}, plugin expects v${check.data.expected}`
-    : "pending…";
-
   return (
     <ModalBody
       headerMode="pinned"
@@ -230,17 +216,6 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
         <Card.Header
           title={status.data?.installed ? `Bundled server · v${status.data.version ?? "?"}` : "Bundled server"}
           subtitle={status.data?.error ?? status.data?.installPath ?? "Locating bundled server…"}
-          badge={
-            check.data?.error ? (
-              <Badge label="failed" variant="danger" dot />
-            ) : check.data?.match ? (
-              <Badge label="ok" variant="success" dot />
-            ) : check.data ? (
-              <Badge label="mismatch" variant="warning" dot />
-            ) : (
-              <Badge label="checking…" variant="neutral" dot />
-            )
-          }
         />
       </Card>
 
@@ -380,7 +355,6 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
               copyable={Boolean(status.data?.installPath)}
               truncate="path"
             />
-            <KeyValue label="Server check" value={serverCheckValue} mono />
           </KeyValueGroup>
         </Collapsible>
         <FormRow label="Presence announcements" description="Broadcast this daemon's agents to the x-comms mesh.">
