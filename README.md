@@ -52,6 +52,24 @@ npm run typecheck --workspace=plugins/top
 npm test --workspace=plugins/top
 ```
 
+## Plugin npm publishing (stage → upload → 2FA publish)
+
+Plugins are publish-ready as `@xpufx/paseo-<id>`; see `scripts/publish-npm.mjs`.
+The flow keeps proof-of-presence (npm 2FA/OTP) on the human while agents/CI do
+the mechanical work:
+
+```sh
+make npm-stage           # agent/CI: pack tarballs into publish-stage/ (no registry, no 2FA)
+# upload publish-stage/ as a CI artifact
+make npm-publish-dry     # human: print the exact publish commands
+make npm-publish         # human: npm publish --access public (prompts for OTP)
+```
+
+`node scripts/publish-npm.mjs` with no flags stays a credential-free dry run.
+Registry-native alternative (npm >= 11.19): the agent/CI runs
+`npm stage publish <tarball>` (no 2FA) and the human runs
+`npm stage approve <stage-id>` (2FA).
+
 ## Storage Namespace
 
 Plugin persistent storage converges on `~/.paseo/plugin-data/xpufx/<pluginId>/`, managed canonically by `paseo-plugin-helper`.

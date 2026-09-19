@@ -23,6 +23,9 @@ Thumbs.db
 *.pid
 state/
 
+# Staged npm publish artifacts (agent/CI upload; never committed)
+publish-stage/
+
 # Build & test caches
 *.tsbuildinfo
 .turbo/

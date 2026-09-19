@@ -51,6 +51,22 @@ vendor-link:
 vendor-check:
 	@node scripts/vendor-sync.mjs --check
 
+## npm-stage: Stage all plugin tarballs (agent/CI uploads the artifact; no 2FA)
+npm-stage:
+	@node scripts/publish-npm.mjs --stage
+
+## npm-publish-dry: Print the human npm publish commands from the staged tarballs
+npm-publish-dry:
+	@node scripts/publish-npm.mjs --publish --dry-run
+
+## npm-publish: Human publish of the staged tarballs (prompts for npm 2FA/OTP)
+npm-publish:
+	@node scripts/publish-npm.mjs --publish
+
+## npm-publish-test: Unit-test the stage/publish flow logic
+npm-publish-test:
+	@node scripts/publish-npm.test.mjs
+
 ## npm-push-helper-dry: Dry-run publish paseo-plugin-helper to npm
 npm-push-helper-dry:
 	@npm publish --workspace=packages/paseo-plugin-helper --access public --dry-run
@@ -110,3 +126,6 @@ help:
 	@echo "  make conformance - Check helper UI conformance for every plugin"
 	@echo "  make build     - Build packages and plugins"
 	@echo "  make cafe-submit PLUGIN=top CATEGORIES=monitoring - Emit Biome-clean paseo.cafe registry JSON"
+	@echo "  make npm-stage  - Stage plugin tarballs for an agent/CI upload (no 2FA)"
+	@echo "  make npm-publish - Human publish of staged tarballs (prompts for 2FA/OTP)"
+	@echo "  make npm-publish-dry - Print the human publish commands without publishing"
