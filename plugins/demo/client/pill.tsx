@@ -11,7 +11,6 @@ initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatLis
 import {
   registerComposerPill,
   PluginThemeProvider,
-  ModalBody,
   ActionBar,
   Card,
   Badge,
@@ -36,15 +35,18 @@ import {
   triggerHaptic,
   usePluginTheme,
   useResponsive,
-  useAutoRefreshQuery,
-  useRpcMutation,
-  usePluginSettings,
   type RenderModalProps,
   type RenderPillProps,
   type VisualFlair,
   type AttentionBeaconMode,
   type AttentionBeaconTone,
 } from "paseo-plugin-helper/client";
+import {
+  useAutoRefreshQuery,
+  useRpcMutation,
+  usePluginSettings,
+} from "paseo-plugin-helper/core";
+import { HostModalSection } from "paseo-plugin-helper/ui";
 import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   getDemoDataRpc,
@@ -54,7 +56,6 @@ import {
   demoBeaconBlinkContract,
   demoBeaconClearContract,
   demoSettingsContract,
-  resolveDemoHeaderMode,
   type DemoData,
 } from "../shared/demo.js";
 import { SharedSuiteCard } from "./suite-settings.js";
@@ -255,10 +256,23 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
       layout={layout}
       flair={activeFlair}
     >
-      <View style={{ flex: 1, minHeight: 0, width: "100%" }}>
-        <ModalBody
-        header={
-          settings.navigationStyle === "dropdown" ? (
+      {/* Pill-embedded content (#219): the pill host already provides the one
+          <Modal.Content> (modal paths) or no modal at all (0.8 popover), so
+          this must stay a plain fluid section — a nested <Modal.Content>
+          violates the host contract and crashes the plugin. hostScroll: true
+          below leaves the scroller to the host; manual refresh lives in the
+          banner card. */}
+      <HostModalSection>
+        <View
+          style={{
+            width: "100%",
+            backgroundColor: colors.surface0,
+            paddingHorizontal: 12,
+            paddingTop: 12,
+            paddingBottom: 6,
+          }}
+        >
+          {settings.navigationStyle === "dropdown" ? (
             // Dropdown navigation is composed from helper primitives: the
             // helper has no Select/menu primitive, so Collapsible provides the
             // disclosure header and Button rows make the options selectable.
@@ -300,22 +314,8 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
               }}
               mode="scroll"
             />
-          )
-        }
-        headerMode={resolveDemoHeaderMode(settings.navigationStyle)}
-        headerStyle={{
-          backgroundColor: colors.surface0,
-          paddingHorizontal: 12,
-          paddingTop: 12,
-          paddingBottom: 6,
-        }}
-        refreshing={isLoading}
-        onRefresh={async () => {
-          triggerHaptic("light");
-          setNavigationOpen(false);
-          await refetch();
-        }}
-      >
+          )}
+        </View>
       {/* Top Banner Card */}
       <Card variant="elevated">
         <Card.Header
@@ -339,6 +339,16 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
                 }}
               />
             ))}
+            <Button
+              label={isLoading ? "Refreshing..." : "Refresh"}
+              size="sm"
+              variant="secondary"
+              onPress={async () => {
+                triggerHaptic("light");
+                setNavigationOpen(false);
+                await refetch();
+              }}
+            />
           </ActionBar>
         </FormRow>
       </Card>
@@ -1213,8 +1223,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
           helper-demo v{data?.version ?? PLUGIN_VERSION} (tick #{data?.backgroundTicks ?? 0})
         </Text>
       </View>
-        </ModalBody>
-      </View>
+      </HostModalSection>
     </PluginThemeProvider>
   );
 }
@@ -1225,6 +1234,7 @@ export function contributeClient(client: ComposerPillRegistrar) {
     title: "demo",
     modalTitle: "Showcase Demo",
     modalIcon: "Sliders",
+    hostScroll: true,
     flair: {
       radius: "rounded",
       density: "comfortable",

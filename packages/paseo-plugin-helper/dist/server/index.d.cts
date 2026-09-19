@@ -1,6 +1,7 @@
 import { ZodType } from 'zod';
-import { a as SettingsContract, C as CustomPillDefinition, b as CustomPillState } from '../custom-pills-CnrXjVIR.cjs';
+import { S as SettingsContract } from '../settings-BNRcFeSP.cjs';
 import { SpawnOptions } from 'node:child_process';
+import { C as CustomPillDefinition, d as CustomPillState } from '../custom-pills-C98QP7Cg.cjs';
 import '../rpc-D27pph91.cjs';
 
 interface PluginStorageOptions<T> {

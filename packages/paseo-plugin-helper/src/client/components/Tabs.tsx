@@ -38,10 +38,7 @@ export interface TabsProps {
   style?: StyleProp<ViewStyle>;
 }
 
-/**
- * Minimal structural views of the DOM scroll node react-native-web exposes on
- * web. Declared locally so the helper keeps its ES2022-only lib (no DOM types).
- */
+/** Minimal structural views of the DOM scroll node react-native-web exposes. */
 interface WheelScrollEvent {
   deltaX?: number;
   deltaY?: number;
@@ -52,11 +49,7 @@ interface WheelScrollNode {
   scrollLeft: number;
   clientWidth: number;
   scrollWidth: number;
-  addEventListener(
-    type: "wheel",
-    listener: (event: WheelScrollEvent) => void,
-    options?: { passive?: boolean },
-  ): void;
+  addEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void, options?: { passive?: boolean }): void;
   removeEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void): void;
 }
 
@@ -72,9 +65,9 @@ export function Tabs({
   style,
 }: TabsProps) {
   const { Icon } = getClientHost();
-  // The tab strip scrolls horizontally, so it must own a plain React Native
-  // ScrollView: the host ScrollView is a vertical sheet-gesture controller and
-  // collapses / crashes when used as a nested horizontal scroller (#219).
+  // The tab strip scrolls horizontally, so it must be a plain React Native
+  // ScrollView: the host ScrollView is a vertical sheet-gesture controller
+  // and collapses/crashes when used horizontally (#219).
   const { colors, resolveRadius, touchTargetMin, isCompact, alpha } = usePluginTheme();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const tabLayouts = useRef<Record<string, { x: number; width: number }>>({});
@@ -111,11 +104,8 @@ export function Tabs({
     setViewportWidth(width);
   };
 
-  // Desktop web: a mouse wheel over a horizontal-only scroller does not scroll
-  // it natively (vertical delta has nowhere to go, so nothing moves). Attach a
-  // non-passive wheel listener to the strip's DOM node and translate vertical
-  // delta into horizontal scroll. The event is only consumed while the strip
-  // can still move that way, so the surrounding modal keeps scrolling at edges.
+  // Translate vertical mouse-wheel motion into horizontal tab-strip scrolling
+  // on web, while allowing the surrounding modal to scroll at either edge.
   useEffect(() => {
     if (shouldFit || Platform.OS !== "web") return;
     const instance = scrollRef.current as unknown as WheelScrollInstance | null;
@@ -124,7 +114,6 @@ export function Tabs({
     const onWheel = (event: WheelScrollEvent) => {
       const deltaX = event.deltaX ?? 0;
       const deltaY = event.deltaY ?? 0;
-      // Horizontal intent (trackpad swipe / shift+wheel) already scrolls.
       if (Math.abs(deltaY) <= Math.abs(deltaX)) return;
       const max = node.scrollWidth - node.clientWidth;
       const next = Math.min(Math.max(0, node.scrollLeft + deltaY), max);
@@ -237,7 +226,7 @@ export function Tabs({
     );
   }
 
-  // 2. SCROLL MODE: plain React Native horizontal scroller (see note above).
+  // 2. SCROLL MODE: plain React Native horizontal scroller.
   return (
     <View
       onLayout={handleContainerLayout}

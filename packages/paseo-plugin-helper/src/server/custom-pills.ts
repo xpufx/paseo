@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parseJsonc } from "./jsonc.js";
+import { safeExec } from "./process.js";
 import type { PluginLogger } from "./logger.js";
 import {
   CustomPillDefinitionSchema,

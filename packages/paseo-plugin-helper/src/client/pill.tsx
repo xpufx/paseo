@@ -58,6 +58,17 @@ export type PillIconResolver = (
   context: PillLiveContext,
 ) => string | undefined | Promise<string | undefined>;
 
+/**
+ * Single precedence rule for pill modal scroll ownership (#219), shared by
+ * the centered and legacy modal wrappers so they cannot disagree.
+ * `true` delegates the scroller to the host `<Modal.Content>`; `false`
+ * (default) keeps the legacy bounded dialog for `ModalBody`-based content.
+ * Either way the wrapper renders exactly one `<Modal.Content>`.
+ */
+export function resolvePillModalScrollable(hostScroll?: boolean): boolean {
+  return hostScroll === true;
+}
+
 let probeSequence = 0;
 
 const NOOP_SUBSCRIBE = (): (() => void) => () => {};
@@ -167,15 +178,34 @@ export interface RegisterComposerPillOptions<TPayload = any> {
   popoverWidth?: number;
 
   /**
-    * Renders the content inside the controlled modal.
+   * Renders the content inside the controlled modal.
    * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
-    * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
-    * popover rendering this same content at the host surface width (expect a
-    * narrow column, not a wide modal); keep content vertically stacked and
-    * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
-    * popovers, so live pill text comes from `resolveLabel` instead.
+   * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
+   * popover rendering this same content at the host surface width (expect a
+   * narrow column, not a wide modal); keep content vertically stacked and
+   * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
+   * popovers, so live pill text comes from `resolveLabel` instead.
+   *
+   * The wrapper renders exactly one host `<Modal.Content>` around this output
+   * on the modal paths (legacy + centered). Never render another
+   * `<Modal.Content>` here — use `HostModalSection` from
+   * `paseo-plugin-helper/ui` for fluid content. (`HostModalContent` is only
+   * for plugins that open their OWN host `<Modal>`.)
    */
   renderModal?: (props: RenderModalProps<TPayload>) => ReactNode;
+
+  /**
+   * Host-owned scroll for the pill modal paths (#219).
+   * - `false` (default, legacy): the wrapper renders
+   *   `<Modal.Content scrollable={false}>` (bounded dialog) and
+   *   `ModalBody`-based content owns the one scroller.
+   * - `true`: the wrapper renders `<Modal.Content scrollable={true}>` so the
+   *   host scrolls, and `renderModal` must provide fluid content with NO
+   *   nested `<Modal.Content>` or scroller (`HostModalSection`).
+   * Exactly one `<Modal.Content>` is rendered in both modes. The 0.8 popover
+   * path is unaffected (plain host-owned container either way).
+   */
+  hostScroll?: boolean;
 
   /**
    * Makes the pill an action button instead of a tethered popover: pressing it
@@ -418,7 +448,7 @@ export function registerComposerPill<TPayload = any>(
             open={centeredOpen}
             onOpenChange={(nextOpen: boolean) => setCenteredOpen(agentId, nextOpen)}
           >
-            <Modal.Content scrollable={false}>
+            <Modal.Content scrollable={resolvePillModalScrollable(options.hostScroll)}>
               {centeredOpen ? (
                 <PluginThemeProvider theme={theme} layout={layout} flair={options.flair}>
                   {options.renderModal({
@@ -556,7 +586,7 @@ export function registerComposerPill<TPayload = any>(
             }
           }}
         >
-          <Modal.Content scrollable={false}>
+          <Modal.Content scrollable={resolvePillModalScrollable(options.hostScroll)}>
             {open ? (
               <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
                 {options.renderModal?.({

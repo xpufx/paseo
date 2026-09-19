@@ -7,6 +7,8 @@ export default defineConfig({
     "server/index": "src/server/index.ts",
     "mcp/index": "src/mcp/index.ts",
     "shared/index": "src/shared/index.ts",
+    "core/index": "src/core/index.ts",
+    "ui/index": "src/ui/index.ts",
     "testing/index": "src/testing/index.ts",
     cli: "src/cli/index.ts",
   },
