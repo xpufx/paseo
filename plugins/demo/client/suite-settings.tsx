@@ -1,5 +1,5 @@
 import React from "react";
-import { Text, View } from "react-native";
+import { Text } from "react-native";
 import {
   ActionBar,
   Button,
@@ -14,7 +14,7 @@ import {
 } from "paseo-plugin-helper/client";
 
 export function SharedSuiteCard() {
-  const { colors } = usePluginTheme();
+  const { colors, typography } = usePluginTheme();
   const { settings, updateSettings, resetSettings, isUpdating } = useSuiteSettings({
     pollIntervalMs: 2000,
   });
@@ -43,7 +43,7 @@ export function SharedSuiteCard() {
         />
       </FormRow>
       <FormRow label="Density" description={`Active density: "${settings.density}"`}>
-        <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+        <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
           {(["compact", "comfortable", "spacious"] as const).map((d) => (
             <Button
               key={d}
@@ -56,10 +56,10 @@ export function SharedSuiteCard() {
               }}
             />
           ))}
-        </View>
+        </ActionBar>
       </FormRow>
       <ActionBar align="space-between">
-        <Text style={{ fontSize: 11, color: colors.foregroundMuted }}>
+        <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
           {isUpdating ? "Syncing to suite file..." : "Writes land in xpufx-suite/settings.json"}
         </Text>
         <Button

@@ -7,6 +7,7 @@ import type {
   HostSurfaceProps,
   PluginCleanup,
 } from "../client/host.js";
+import type { CommandCenterItemContribution } from "../client/command-center.js";
 
 export interface MockAgent extends HostAgentRef {
   [key: string]: any;
@@ -23,6 +24,7 @@ export interface MockClientContext {
   registeredPills: ComposerPillContribution[];
   registeredSurfaces: Array<{ id: string; Component: ComponentType<HostSurfaceProps> }>;
   registeredSettingsScreens: MockSettingsScreenContribution[];
+  registeredCommandCenterItems: CommandCenterItemContribution[];
   addComposerPill(contribution: ComposerPillContribution): PluginCleanup;
   openPanel(id: string, options?: unknown): void;
   rpc(contract: { name: string }, input: unknown): Promise<unknown>;
@@ -66,6 +68,7 @@ export function createMockClientContext(): MockClientContext {
   const registeredPills: ComposerPillContribution[] = [];
   const registeredSurfaces: Array<{ id: string; Component: ComponentType<HostSurfaceProps> }> = [];
   const registeredSettingsScreens: MockSettingsScreenContribution[] = [];
+  const registeredCommandCenterItems: CommandCenterItemContribution[] = [];
   const agentSubscribers = new Set<(update: HostAgentUpdate) => void>();
   const agents = new Map<string, MockAgent>();
 
@@ -73,6 +76,7 @@ export function createMockClientContext(): MockClientContext {
     registeredPills,
     registeredSurfaces,
     registeredSettingsScreens,
+    registeredCommandCenterItems,
 
     addComposerPill(contribution: ComposerPillContribution): PluginCleanup {
       registeredPills.push(contribution);
@@ -100,7 +104,13 @@ export function createMockClientContext(): MockClientContext {
     addSurface: () => noopCleanup,
     addSidebarItem: () => noopCleanup,
     addWorkspacePanel: () => noopCleanup,
-    addCommandCenterItem: () => noopCleanup,
+    addCommandCenterItem(contribution: CommandCenterItemContribution): PluginCleanup {
+      registeredCommandCenterItems.push(contribution);
+      return () => {
+        const index = registeredCommandCenterItems.indexOf(contribution);
+        if (index >= 0) registeredCommandCenterItems.splice(index, 1);
+      };
+    },
     addSlashCommand: () => noopCleanup,
     addAttachmentSource: () => noopCleanup,
     addTheme: () => noopCleanup,

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createPeriodicTask } from "../server/task.js";
+import { createPluginLogger } from "../server/logger.js";
+
+function loggerAt(minLevel: "debug" | "info") {
+  return createPluginLogger("test", { banner: false, version: "0.0.0-test", minLevel });
+}
 
 describe("server/task", () => {
   beforeEach(() => {
@@ -69,5 +74,63 @@ describe("server/task", () => {
     expect(onError).toHaveBeenCalledTimes(2);
 
     task.stop();
+  });
+
+  it("keeps suppressed errors silent at info level", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const task = createPeriodicTask({
+      intervalMs: 1000,
+      task: () => {
+        throw new Error("boom");
+      },
+      logger: loggerAt("info"),
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(spy).not.toHaveBeenCalled();
+
+    task.stop();
+    spy.mockRestore();
+  });
+
+  it("routes suppressed errors through the logger at debug level", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const task = createPeriodicTask({
+      intervalMs: 1000,
+      task: () => {
+        throw new Error("boom");
+      },
+      logger: loggerAt("debug"),
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("suppressed error (failure 1): boom"),
+    );
+
+    task.stop();
+    spy.mockRestore();
+  });
+
+  it("reports a throwing onError handler through the logger", async () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const task = createPeriodicTask({
+      intervalMs: 1000,
+      task: () => {
+        throw new Error("boom");
+      },
+      onError: () => {
+        throw new Error("handler-broke");
+      },
+      logger: loggerAt("debug"),
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("onError handler failed: handler-broke"),
+    );
+
+    task.stop();
+    spy.mockRestore();
   });
 });

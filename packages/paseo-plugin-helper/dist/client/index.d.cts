@@ -1,14 +1,18 @@
-import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, c as PluginTheme, a as SettingsContract, b as CustomPillState } from '../custom-pills-CnrXjVIR.cjs';
-import * as React from 'react';
+import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, g as PluginTheme, d as CustomPillState } from '../custom-pills-C98QP7Cg.cjs';
 import React__default, { ReactNode, Ref, ComponentType } from 'react';
-import { c as HostLayout, d as HostPillProps, e as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, f as HostAgentPanelProps, g as HostWorkspacePanelProps, h as HostToast, i as HostIconProps } from '../host-BsbqDlSJ.cjs';
-export { j as ClientHostDeps, k as ComposerPillButtonContribution, l as ComposerPillButtonDescriptor, m as ComposerPillButtonIcon, C as ComposerPillContribution, n as ComposerPillRegistration, o as ComposerPillRegistrationHandle, H as HostAgentRef, b as HostAgentUpdate, p as HostAgentsApi, q as HostCopyText, r as HostFlatList, s as HostIcon, t as HostModal, u as HostModalContentProps, v as HostModalProps, w as HostRpcContract, x as HostScrollView, y as HostTextInput, z as HostTheme, A as HostThemeColors, B as HostUseRpc, D as HostUseToast, E as getClientHost, F as getOptionalClientHost, G as initClientHelpers, I as isClientHostInitialized, J as selectHostScrollView } from '../host-BsbqDlSJ.cjs';
-import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView } from 'react-native';
-import { M as MetricThresholds, T as TruncatePathOptions, S as SuiteSettings } from '../suite-settings-DZeCSD6_.cjs';
-import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.cjs';
-import { UseMutationOptions, UseQueryOptions, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import * as _tanstack_query_core from '@tanstack/query-core';
+import { d as HostLayout, q as HostPillProps, r as ComposerPillRegistrar, P as PluginCleanup, o as HostSurfaceProps, t as HostAgentPanelProps, u as HostWorkspacePanelProps, h as HostToast, v as HostIconProps } from '../host-DatQ2QJE.cjs';
+export { C as ClientHostDeps, w as ComposerPillButtonContribution, x as ComposerPillButtonDescriptor, y as ComposerPillButtonIcon, p as ComposerPillContribution, z as ComposerPillRegistration, A as ComposerPillRegistrationHandle, B as ComposerPillSdkContribution, H as HostAgentRef, a as HostAgentUpdate, b as HostAgentsApi, c as HostCopyText, D as HostFlatList, E as HostIcon, F as HostModal, G as HostModalContentProps, I as HostModalProps, e as HostRpcContract, J as HostScrollView, K as HostTextInput, f as HostTheme, g as HostThemeColors, i as HostUseRpc, j as HostUseToast, k as getClientHost, l as getOptionalClientHost, m as initClientHelpers, n as isClientHostInitialized, s as selectHostScrollView } from '../host-DatQ2QJE.cjs';
+import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView, ImageStyle } from 'react-native';
+import { M as MetricThresholds, f as TruncatePathOptions, a as ForgeMarkInput, F as ForgeKind } from '../forge-CtVqWZsy.cjs';
+export { R as ResolvedForgeMark, g as forgeKindFromHost, m as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark } from '../forge-CtVqWZsy.cjs';
+export { C as CommandCenterCapabilities, a as CommandCenterContext, b as CommandCenterItemContribution, c as CommandCenterItemRegistrar, r as registerCommandCenterItem } from '../command-center-CycJXg00.cjs';
+export { R as REFRESH_INTERVALS, a as RefreshRate, b as RpcMutationOptions, c as RpcQueryOptions, U as UseAutoRefreshQueryOptions, d as UsePluginSettingsOptions, e as UsePluginSettingsResult, f as UseSharedPluginSettingsOptions, n as normalizeSnapshotScope, s as shallowEqualRecord, g as sharedSnapshotKey, h as shouldEmitSnapshotUpdate, u as useAutoRefreshQuery, i as usePluginSettings, j as useRpcMutation, k as useRpcQuery, l as useSharedPluginSettings, m as useSuiteSettings } from '../shared-settings-CFiLb5XU.cjs';
+export { H as HelperSettingsCardProps, a as HelperSettingsField, b as HelperSettingsFieldKind, c as HelperSettingsFieldOverrides, d as HelperSettingsInputProps, e as HelperSettingsRowBaseProps, f as HelperSettingsScreenContribution, g as HelperSettingsScreenRegistrar, h as HelperSettingsSectionProps, i as HelperSettingsSelectComponent, j as HelperSettingsSelectProps, k as HelperSettingsSwitchProps, l as HelperSettingsUiBundle, R as RegisterHelperSettingsScreenOptions, m as contractSchemaToFields, r as registerHelperSettingsScreen } from '../settings-screen-BWjaoR3s.cjs';
 import 'zod';
+import '../settings-BNRcFeSP.cjs';
+import '../rpc-D27pph91.cjs';
+import '@tanstack/query-core';
+import '@tanstack/react-query';
 
 type RadiusStyle = "sharp" | "rounded" | "pill";
 type DensityStyle = "compact" | "comfortable" | "spacious";
@@ -24,8 +28,9 @@ interface VisualFlair {
     radius: RadiusStyle;
     /**
      * Spacing and typography density.
-     * - "compact": tight padding and smaller fonts
-     * - "comfortable": balanced defaults
+     * - "compact": tight padding and smaller fonts (the default — plugin UI is
+     *   dense by nature and generous padding wastes vertical space)
+     * - "comfortable": balanced, roomier defaults (opt in per plugin)
      * - "spacious": generous breathing room
      */
     density: DensityStyle;
@@ -79,12 +84,35 @@ declare function getVariantPalette(variant: StatusVariant, colors: ThemeColors, 
 };
 
 /**
+ * Container width (px) at or below which a surface steps down to the compact
+ * scale. Mirrors the host's `COMPACT_FORM_FACTOR_WIDTH` so plugin typography
+ * in narrow popovers matches full-screen mobile surfaces.
+ */
+declare const COMPACT_FORM_FACTOR_WIDTH = 500;
+/**
+ * Resolves compact mode from the actual container width when it is known,
+ * falling back to the host's viewport-derived `compact` flag otherwise.
+ *
+ * A host-declared compact surface stays compact at any width; a known width at
+ * or below {@link COMPACT_FORM_FACTOR_WIDTH} forces compact even when the host
+ * viewport is wide (e.g. a narrow header-button popover on desktop).
+ */
+declare function resolveEffectiveCompact(layout: ResponsiveLayout, widthOverride?: number): boolean;
+/**
  * Checks if the current platform is mobile (iOS or Android).
  */
 declare function isMobilePlatform(platform: PlatformType): boolean;
 /**
- * Returns the recommended minimum interactive touch target size (in pt/px).
- * Ensures compliance with Apple HIG and Android Material guidelines (min 44pt).
+ * Interactive target floor for a compact surface on a non-mobile platform
+ * (e.g. a narrow desktop popover). Sits between the full-desktop floor and the
+ * 44pt touch target: a mouse pointer needs a little more room than a wide
+ * panel, but nothing like a finger-sized hit area.
+ */
+declare const COMPACT_DESKTOP_TOUCH_TARGET = 36;
+/**
+ * Returns the recommended minimum interactive target size (in pt/px).
+ * Real touch platforms follow Apple HIG / Android Material (min 44pt); a
+ * compact desktop surface gets a modest bump over the 28pt desktop floor.
  */
 declare function getTouchTargetMin(layout: ResponsiveLayout): number;
 /**
@@ -99,6 +127,36 @@ declare function resolvePadding(layout: ResponsiveLayout, density: DensityStyle)
     vertical: number;
     gap: number;
 };
+interface GridColumnOptions {
+    /** Requested (and maximum) column count. */
+    columns: number;
+    /** Horizontal gap between cells, in px. Default: 0. */
+    gap?: number;
+    /** Measured container width, when the host reports one. */
+    width?: number;
+    /**
+     * Minimum width each column should keep before wrapping to fewer columns.
+     * Only applied when a positive container width is known; `columns` stays the
+     * upper bound.
+     */
+    minColumnWidth?: number;
+    /**
+     * How a compact surface treats the requested column count.
+     * - "never" (default): keep the requested columns; flexbox wraps as needed.
+     * - "compact": collapse to a single column on a compact surface.
+     */
+    collapse?: "compact" | "never";
+    /** Whether the current surface is compact. */
+    isCompact?: boolean;
+}
+/**
+ * Resolves the effective column count for a responsive grid.
+ *
+ * A `minColumnWidth` plus a known container width yields as many columns as
+ * fit, capped at the requested count — so a narrow container wraps down to
+ * fewer columns instead of the requested count being forced through.
+ */
+declare function resolveGridColumns(options: GridColumnOptions): number;
 interface ResponsiveSelectOptions<T> {
     /**
      * Default fallback value, used on desktop/wide viewports if no more specific option matches.
@@ -144,6 +202,39 @@ declare const spacing: {
     readonly xl: 24;
 };
 type SpacingKey = keyof typeof spacing;
+/**
+ * A gap/size value: either a named spacing token or a raw px number. Layout
+ * primitives accept this so callers never have to invent their own scale.
+ */
+type SpacingValue = SpacingKey | number;
+/**
+ * Resolves a {@link SpacingValue} to px, falling back to the theme-derived
+ * value when the caller did not specify one.
+ */
+declare function resolveSpacing(value: SpacingValue | undefined, fallback: number): number;
+interface TypographyToken {
+    fontSize: number;
+    lineHeight: number;
+    fontWeight: "400" | "500" | "600" | "700";
+}
+interface TypographyScale {
+    title: TypographyToken;
+    heading: TypographyToken;
+    body: TypographyToken;
+    bodyStrong: TypographyToken;
+    /**
+     * Value text that pairs with a {@link TypographyScale.label}: same size as
+     * the label, normal weight, so a value never outranks its own label.
+     */
+    bodySmall: TypographyToken;
+    caption: TypographyToken;
+    label: TypographyToken;
+}
+/**
+ * Semantic text sizes keep helper components visually coherent while still
+ * allowing compact panes and plugin density preferences to breathe.
+ */
+declare function resolveTypography(layout: ResponsiveLayout, density: DensityStyle): TypographyScale;
 /** Fallback text color on accent fills when the host omits accentForeground. */
 declare const FALLBACK_ACCENT_FOREGROUND = "#ffffff";
 type ElevationLevel = "none" | "sm" | "md" | "lg";
@@ -227,10 +318,12 @@ interface PluginThemeContextValue {
         vertical: number;
         gap: number;
     };
+    typography: TypographyScale;
 }
 declare const defaultDarkTheme: PluginTheme;
 declare const defaultLightTheme: PluginTheme;
-declare function getDefaultTheme(): PluginTheme;
+declare function getDefaultTheme(scheme?: string): PluginTheme;
+declare function useAppearanceScheme(): [string | undefined, (s: string | undefined) => void];
 interface PluginThemeProviderProps {
     theme: PluginTheme;
     layout?: HostLayout;
@@ -276,7 +369,7 @@ interface UseResponsiveResult {
  */
 declare function useResponsive(): UseResponsiveResult;
 
-type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce";
+type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce" | "pulse";
 type AttentionBeaconTone = "warning" | "accent" | "danger";
 interface AttentionBeaconProps {
     children: ReactNode;
@@ -290,10 +383,12 @@ interface AttentionBeaconProps {
     accessibilityLabel?: string;
     testID?: string;
     badgeIcon?: string | ReactNode;
+    duration?: number;
+    easing?: (value: number) => number;
 }
-declare function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce";
+declare function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce" | "pulse";
 declare function resolveBeaconToneColor(colors: ThemeColors, tone?: AttentionBeaconTone, customColor?: string): string;
-declare function AttentionBeacon({ children, mode, tone, color, active, style, haloStyle, badgeStyle, accessibilityLabel, testID, badgeIcon, }: AttentionBeaconProps): React__default.JSX.Element;
+declare function AttentionBeacon({ children, mode, tone, color, active, style, haloStyle, badgeStyle, accessibilityLabel, testID, badgeIcon, duration, easing, }: AttentionBeaconProps): React__default.JSX.Element;
 
 type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 type ButtonSize = "sm" | "md" | "lg";
@@ -316,17 +411,37 @@ interface ButtonProps {
 }
 declare function Button({ label, variant, size, icon, iconPosition, onPress, disabled, loading, style, textStyle, accessibilityLabel, attention, }: ButtonProps): React__default.JSX.Element;
 
+interface InlineButtonProps {
+    label: string;
+    onPress?: () => void | Promise<void>;
+    icon?: string | ReactNode;
+    disabled?: boolean;
+    accessibilityLabel?: string;
+    style?: StyleProp<ViewStyle>;
+    textStyle?: StyleProp<TextStyle>;
+}
+/** Compact text/link action for inline cards and timeline content. */
+declare function InlineButton({ label, onPress, icon, disabled, accessibilityLabel, style, textStyle, }: InlineButtonProps): React__default.JSX.Element;
+
 type BadgeStyle = "tinted" | "outline" | "solid";
+type BadgeSize = "sm" | "md";
 interface BadgeProps {
     label: string;
     variant?: StatusVariant;
     styleVariant?: BadgeStyle;
+    size?: BadgeSize;
     icon?: string | ReactNode;
     dot?: boolean;
     style?: StyleProp<ViewStyle>;
     textStyle?: StyleProp<TextStyle>;
+    /**
+     * When set, every case-insensitive occurrence of the query inside `label` is
+     * painted with the accent highlight. The query is matched literally, never as
+     * a regular expression.
+     */
+    highlightQuery?: string;
 }
-declare function Badge({ label, variant, styleVariant, icon, dot, style, textStyle, }: BadgeProps): React__default.JSX.Element;
+declare function Badge({ label, variant, styleVariant, size, icon, dot, style, textStyle, highlightQuery, }: BadgeProps): React__default.JSX.Element;
 
 interface StatusDotProps {
     variant?: StatusVariant;
@@ -352,8 +467,13 @@ interface CardHeaderProps {
     style?: StyleProp<ViewStyle>;
     titleStyle?: StyleProp<TextStyle>;
     subtitleStyle?: StyleProp<TextStyle>;
+    /**
+     * When set, every case-insensitive (literal, non-regex) occurrence of the
+     * query inside `title` is painted with the accent highlight.
+     */
+    highlightQuery?: string;
 }
-declare function CardHeader({ title, subtitle, value, badge, action, icon, style, titleStyle, subtitleStyle, }: CardHeaderProps): React__default.JSX.Element;
+declare function CardHeader({ title, subtitle, value, badge, action, icon, style, titleStyle, subtitleStyle, highlightQuery, }: CardHeaderProps): React__default.JSX.Element;
 declare function Card({ children, variant, style, noPadding }: CardProps): React__default.JSX.Element;
 declare namespace Card {
     var Header: typeof CardHeader;
@@ -425,6 +545,28 @@ interface TextInputProps {
 }
 declare function TextInput({ value, onChangeText, label, placeholder, helperText, errorText, secureTextEntry, keyboardType, autoCapitalize, autoCorrect, disabled, mono, multiline, numberOfLines, style, inputStyle, onSubmitEditing, }: TextInputProps): React__default.JSX.Element;
 
+interface SelectOption {
+    label: string;
+    value: string;
+}
+interface SelectProps {
+    value: string;
+    options: SelectOption[];
+    onValueChange: (value: string) => void;
+    label?: string;
+    /** Compact/pill scale shared with {@link Badge}: `"md"` (default) or `"sm"`. */
+    size?: BadgeSize;
+    placeholder?: string;
+    disabled?: boolean;
+    style?: StyleProp<ViewStyle>;
+}
+/**
+ * Compact single-choice picker sized to sit inside a {@link FormRow}. The
+ * closed trigger stays one line tall; opening reveals a bounded, scrollable
+ * option list, so a long list degrades to scrolling rather than overflow.
+ */
+declare function Select({ value, options, onValueChange, label, size, placeholder, disabled, style, }: SelectProps): React__default.JSX.Element;
+
 interface ToggleProps {
     value: boolean;
     onValueChange: (next: boolean) => void;
@@ -453,6 +595,26 @@ interface CollapsibleProps {
     variant?: SurfaceStyle;
 }
 declare function resolveCollapsibleChevron(expanded: boolean): string;
+/**
+ * Container background for a Collapsible, honoring the same `SurfaceStyle`
+ * contract as `Card`:
+ * - "flat" (default): surface0, the normal page surface.
+ * - "elevated": surface1, so the card visibly lifts off the page.
+ * - "tinted": a faint accent wash.
+ *
+ * Before this existed, `variant="elevated"` only changed the border radius and
+ * the container stayed `surface0` — so a card placed on an already-`surface0`
+ * timeline read as a bleeding shaded band with no elevation (#208).
+ */
+declare function resolveCollapsibleSurface(colors: ThemeColors, alpha: (color: string, opacity: number) => string, variant?: SurfaceStyle): {
+    backgroundColor: string;
+    borderColor: string;
+};
+/**
+ * Header stripe background. Kept for backwards compatibility; prefer
+ * {@link resolveCollapsibleSurface} for the container and use this only for the
+ * pressed/unpressed header delta.
+ */
 declare function resolveCollapsibleHeaderBackground(colors: ThemeColors, pressed: boolean): string;
 declare function Collapsible({ title, subtitle, children, initiallyExpanded, isExpanded: controlledExpanded, onToggle, badge, headerRight, summary, icon, style, headerStyle, contentStyle, variant, }: CollapsibleProps): React__default.JSX.Element;
 
@@ -520,19 +682,39 @@ interface KeyValueProps {
     truncateMaxLength?: number;
     /** Custom options when truncate="path" */
     truncatePathOptions?: TruncatePathOptions;
+    /**
+     * "stacked" (default) keeps the existing label-above-value layout.
+     * "inline" renders label and value on one line, with the value truncating
+     * middle so the row stays a single text line.
+     */
+    layout?: "stacked" | "inline";
     stackOnCompact?: boolean;
     style?: StyleProp<ViewStyle>;
     labelStyle?: StyleProp<TextStyle>;
     valueStyle?: StyleProp<TextStyle>;
 }
-declare function KeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, truncatePathOptions, stackOnCompact, style, labelStyle, valueStyle, }: KeyValueProps): React__default.JSX.Element;
+declare function KeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, truncatePathOptions, layout, stackOnCompact, style, labelStyle, valueStyle, }: KeyValueProps): React__default.JSX.Element;
 interface KeyValueGroupProps {
     children: ReactNode;
     columns?: 1 | 2 | 3 | 4;
     gap?: number;
+    /**
+     * How a compact surface treats the column count.
+     * - "compact" (default): collapse to a single column on a compact surface —
+     *   the historical behavior.
+     * - "never": keep the requested column count on a compact surface.
+     */
+    collapse?: "compact" | "never";
+    /**
+     * Minimum width a column should keep. When set and the container width is
+     * known, the effective column count is capped so each column stays at least
+     * this wide, wrapping to fewer columns rather than collapsing to one.
+     * `columns` remains the upper bound.
+     */
+    minColumnWidth?: number;
     style?: StyleProp<ViewStyle>;
 }
-declare function KeyValueGroup({ children, columns, gap, style, }: KeyValueGroupProps): React__default.JSX.Element;
+declare function KeyValueGroup({ children, columns, gap, collapse, minColumnWidth, style, }: KeyValueGroupProps): React__default.JSX.Element;
 
 interface EmptyStateProps {
     icon?: string | ReactNode;
@@ -715,10 +897,74 @@ interface SectionHeaderProps {
 }
 declare function SectionHeader({ title, count, badgeVariant, style, textStyle, }: SectionHeaderProps): React__default.ReactElement | null;
 
+interface HighlightedTextProps {
+    /** Source text rendered as-is when no query is active. */
+    text: string;
+    /** Active search query; matched case-insensitively and never as a regex. */
+    query: string;
+    style?: StyleProp<TextStyle>;
+    /**
+     * Overrides the matched-run style. Defaults to the theme accent background
+     * with `accentForeground` text so a match reads as selected.
+     */
+    highlightStyle?: StyleProp<TextStyle>;
+    numberOfLines?: number;
+    selectable?: boolean;
+}
+/**
+ * `<Text>` that paints every case-insensitive occurrence of `query` with the
+ * accent background/foreground. The query is matched literally, so user input
+ * is never evaluated as a regular expression. Renders the plain text when the
+ * query is empty or absent.
+ */
+declare function HighlightedText({ text, query, style, highlightStyle, numberOfLines, selectable, }: HighlightedTextProps): React__default.JSX.Element;
+
+type ModalBodySize = "default" | "large";
 interface ModalBodyProps {
     children: ReactNode;
     style?: StyleProp<ViewStyle>;
     contentContainerStyle?: StyleProp<ViewStyle>;
+    header?: ReactNode;
+    headerStyle?: StyleProp<ViewStyle>;
+    /**
+     * Host dialog size preset. "default" (default) is fully fluid inside the
+     * host-allocated dialog. "large" opts into the helper's documented wide
+     * extent on desktop so data-dense modals/surfaces get room, and is ignored on
+     * mobile (the bottom sheet is already full-bleed) and inside composer
+     * popovers (the host owns that narrow viewport). Use this instead of adding a
+     * per-plugin width/minWidth literal; the host still owns the final size.
+     */
+    size?: ModalBodySize;
+    /**
+     * Optional upper bound (px) on the content column width. On large viewports
+     * the host still allocates a wide dialog, but the body's content column stays
+     * readable instead of stretching edge-to-edge: `width: "100%"` keeps it fluid
+     * below the cap and `alignSelf: "center"` centers the capped column. Undefined
+     * (default) preserves the fully fluid body. This does not dictate the dialog
+     * frame; widen the frame with `size` when dense content genuinely needs room.
+     */
+    maxContentWidth?: number;
+    /**
+     * "scroll" (default): header renders INSIDE the helper-owned compact/mobile
+     * ScrollView and moves with content. "pinned": header renders above that
+     * compact/mobile scroller; on desktop the host remains the scroll owner.
+     */
+    headerMode?: "pinned" | "scroll";
+    /**
+     * Scroll ownership override. "auto" (default) renders the helper-owned
+     * scroller only on compact/mobile surfaces and defers to the host elsewhere.
+     * "always" makes the helper the scroll owner on every surface; use it when
+     * the host supplies no scroller because the content view is bounded
+     * (`ModalContent` passes it for `<Modal.Content scrollable={false}>`).
+     */
+    scrollMode?: "auto" | "always";
+    /**
+     * When set, ModalBody logs measured layout values (viewport height,
+     * content height) via onLayout/onContentSizeChange under this tag, e.g.
+     * `[ModalBody:mcp] viewport=… content=…`. Use on-device to see which
+     * container actually scrolls instead of guessing from theory (#110).
+     */
+    debugTag?: string;
     extraBottomInset?: number;
     refreshing?: boolean;
     onRefresh?: () => void | Promise<void>;
@@ -726,7 +972,49 @@ interface ModalBodyProps {
     scrollRef?: Ref<ScrollView>;
 }
 /**
+ * Scroll-ownership signal for `ModalBody`.
+ *
+ * - `"helper"` — the default; `ModalBody` decides from the surface
+ *   (compact/mobile) and `scrollMode`.
+ * - `"host"` — an ancestor host view already provides the one scroller
+ *   (0.8 composer popovers). `ModalBody` renders plain content.
+ * - `"required"` — the ancestor has NO host scroller and the content is
+ *   host-sized, so `ModalBody` MUST own the scroll on every surface. Set by
+ *   `registerSidebarSurface` (a plugin surface is a full host page whose body
+ *   is not wrapped in a host scroller) and by `ModalContent`.
+ *
+ * Adding the `"required"` member is additive: the existing two values keep
+ * their meaning and the default stays `"helper"`.
+ */
+type ModalBodyScrollOwner = "helper" | "host" | "required";
+declare const ModalBodyScrollOwnerContext: React__default.Context<ModalBodyScrollOwner>;
+/**
  * Mobile-safe scrollable body for Paseo <Modal.Content>.
+ *
+ * Size contract: a modal takes the host-allocated dialog size and is fluid
+ * within it. `ModalBody` fills that allocation (`flex: 1`, `minHeight: 0`,
+ * `width: "100%"`) and never lets its children drive the dialog frame, so the
+ * modal stays stable while content loads, refreshes, or grows. Do not wrap it
+ * in a container that hardcodes `minWidth`/`minHeight`/`width`/`height` or that
+ * sizes itself to its children - that reintroduces content-driven resize/redraw.
+ * Shrinkable text uses `minWidth: 0` + `flexShrink: 1`, never a fixed dimension.
+ *
+ * Host behavior differs by platform: on desktop the host owns a bounded dialog
+ * and its outer scroll, so `ModalBody` renders plain content and adds no second
+ * scroll region. On mobile the host presents a bottom sheet
+ * (`AdaptiveModalSheet`) that already owns the viewport and sheet gesture, so
+ * `ModalBody` defers to a host-provided scroller (or a plain view) and only adds
+ * the safe bottom inset. Plugin code must not guess either size.
+ *
+ * Scroll ownership: ordinary compact/mobile modal content uses this helper
+ * scroller. A 0.8 composer popover is different: Paseo's MenuSurface already
+ * supplies the sole outer scroller, and registerComposerPill marks that
+ * subtree through ModalBodyScrollOwnerContext so this component renders plain
+ * content instead. Pass `scrollMode="always"` when the host content view is
+ * bounded and supplies no scroller (`ModalContent` does this), so the helper
+ * scrolls on desktop too instead of clipping the bounded dialog.
+ * "pinned" is opt-in. Desktop surfaces retain host-owned scrolling so they do
+ * not create a second scrollbar; web hosts pin the header with sticky layout.
  * Automatically calculates responsive bottom padding so controls are not cut off
  * by mobile home bars or virtual keyboards.
  * Supports pull-to-refresh on mobile via `refreshing` and `onRefresh`.
@@ -734,8 +1022,48 @@ interface ModalBodyProps {
  * integrated on Paseo v0.8), otherwise plain React Native ScrollView.
  * Pass `stickToEnd` for conversation-style views that track new content, or
  * `scrollRef` for imperative scrolling.
+ * Pass `header` for a pinned navbar (e.g. <Tabs>): it renders above the
+ * scroller in a flex column, so the header stays fixed while the body scrolls.
+ * Requires the host <Modal.Content scrollable={false}> so no outer sheet
+ * scroller drags the header along.
  */
-declare function ModalBody({ children, style, contentContainerStyle, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
+declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, headerMode, size, maxContentWidth, scrollMode, debugTag, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
+
+interface ModalContentProps extends Omit<ModalBodyProps, "scrollMode"> {
+    children: ReactNode;
+}
+/**
+ * Helper-owned modal body for plugins that open their own host `<Modal>`.
+ *
+ * Use this instead of the raw host `<Modal.Content>`: it wraps the host content
+ * view AND the shared `ModalBody` contract in one element, so a plugin cannot
+ * accidentally end up content-sized.
+ *
+ * Why the raw host `Modal.Content` resizes: Paseo maps
+ * `<Modal.Content scrollable={true}>` (the host default) to a desktop card with
+ * no explicit height, so the dialog grows/shrinks with its children on every
+ * data change. This wrapper always passes `scrollable={false}`, which makes the
+ * host allocate a bounded dialog (`desktopHeight: "85%"`). Because that host
+ * content view then supplies no scroller, the wrapper also forces
+ * `ModalBody scrollMode="always"`, so the helper owns the one scroll region on
+ * every surface and the bounded dialog scrolls instead of clipping.
+ *
+ * The size contract is `ModalBody`'s: it takes the host-allocated dialog size
+ * and is fluid within it; `size?: "default" | "large"` is the only size escape
+ * hatch. Do not add per-plugin width/minWidth/height literals around it.
+ *
+ * ```tsx
+ * <Modal title="…" open={open} onOpenChange={setOpen}>
+ *   <ModalContent size="default">
+ *     …cards, controls, rows; content never drives the dialog frame…
+ *   </ModalContent>
+ * </Modal>
+ * ```
+ *
+ * Accepts every `ModalBody` prop (header, headerMode, refreshing, onRefresh,
+ * stickToEnd, scrollRef, debugTag, style, contentContainerStyle, …).
+ */
+declare function ModalContent({ children, ...bodyProps }: ModalContentProps): React__default.JSX.Element;
 
 interface ActionBarProps {
     children: ReactNode;
@@ -753,9 +1081,74 @@ interface FormRowProps {
     label: string;
     description?: string;
     children: ReactNode;
+    /**
+     * "stacked" (default) keeps the historical label/description above the
+     * control. "inline" puts the label + description in a left column and the
+     * control on the right of the SAME line, which is what a short control
+     * (Toggle, StatusDot, Badge, small Button) wants. Stacking a one-line
+     * control under its label doubles a settings row's height for no gain
+     * (xpufx-org/paseo#213).
+     */
+    layout?: "stacked" | "inline";
     style?: StyleProp<ViewStyle>;
 }
-declare function FormRow({ label, description, children, style }: FormRowProps): React__default.JSX.Element;
+declare function FormRow({ label, description, children, layout, style, }: FormRowProps): React__default.JSX.Element;
+
+interface RowProps {
+    children?: ReactNode;
+    /** Gap between children: a spacing token or raw px. Defaults to the theme gap. */
+    gap?: SpacingValue;
+    /** Allow children to wrap onto the next line. Default: false. */
+    wrap?: boolean;
+    align?: ViewStyle["alignItems"];
+    justify?: ViewStyle["justifyContent"];
+    style?: StyleProp<ViewStyle>;
+    testID?: string;
+}
+/**
+ * Horizontal flexbox row with theme-derived gap. A thin vocabulary wrapper so
+ * plugins stop hand-rolling `<View style={{ flexDirection: "row", gap }}>`.
+ */
+declare function Row({ children, gap, wrap, align, justify, style, testID }: RowProps): React__default.JSX.Element;
+
+interface StackProps {
+    children?: ReactNode;
+    /** Gap between children: a spacing token or raw px. Defaults to the theme gap. */
+    gap?: SpacingValue;
+    align?: ViewStyle["alignItems"];
+    justify?: ViewStyle["justifyContent"];
+    style?: StyleProp<ViewStyle>;
+    testID?: string;
+}
+/**
+ * Vertical flexbox stack with theme-derived gap. The deliberate column default,
+ * named so it composes visually alongside {@link Row}.
+ */
+declare function Stack({ children, gap, align, justify, style, testID }: StackProps): React__default.JSX.Element;
+/** Explicit vertical-stack alias; identical to {@link Stack}. */
+declare const VStack: typeof Stack;
+
+interface GridProps {
+    children?: ReactNode;
+    /** Maximum column count. Default: 2. */
+    columns?: number;
+    /**
+     * Minimum width a column should keep. When set and the container width is
+     * known, the grid uses as many columns as fit (up to `columns`) and wraps
+     * down instead of collapsing to one.
+     */
+    minColumnWidth?: number;
+    /** Gap between cells: a spacing token or raw px. Defaults to the theme gap. */
+    gap?: SpacingValue;
+    style?: StyleProp<ViewStyle>;
+    testID?: string;
+}
+/**
+ * Width-aware wrapping grid. Cells keep a percentage basis driven by the
+ * effective column count, so they reflow across rows rather than stacking
+ * one-per-line or collapsing to a single column.
+ */
+declare function Grid({ children, columns, minColumnWidth, gap, style, testID }: GridProps): React__default.JSX.Element;
 
 interface RenderPillProps<TPayload = any> extends HostPillProps {
     isOpen: boolean;
@@ -771,6 +1164,20 @@ interface PillLiveContext {
     agentId: string;
     workspaceId: string;
 }
+interface PillLivePayload {
+    label?: string;
+    icon?: string;
+}
+type PillLabelResolver = (context: PillLiveContext) => string | PillLivePayload | undefined | Promise<string | PillLivePayload | undefined>;
+type PillIconResolver = (context: PillLiveContext) => string | undefined | Promise<string | undefined>;
+/**
+ * Single precedence rule for pill modal scroll ownership (#219), shared by
+ * the centered and legacy modal wrappers so they cannot disagree.
+ * `true` delegates the scroller to the host `<Modal.Content>`; `false`
+ * (default) keeps the legacy bounded dialog for `ModalBody`-based content.
+ * Either way the wrapper renders exactly one `<Modal.Content>`.
+ */
+declare function resolvePillModalScrollable(hostScroll?: boolean): boolean;
 interface RegisterComposerPillOptions<TPayload = any> {
     /**
      * Unique ID for the pill (e.g. "paseo-top", "mcp-monitor").
@@ -782,7 +1189,7 @@ interface RegisterComposerPillOptions<TPayload = any> {
     title: string;
     /**
      * Optional compact title shown in the composer trackbar when screen or track is narrow/mobile
-     * (when `layout.compact` is true). Defaults to `title`.
+     * (when `layout.compact` is true). Defaults to `title`.\
      */
     compactTitle?: string;
     /**
@@ -795,7 +1202,7 @@ interface RegisterComposerPillOptions<TPayload = any> {
      */
     icon?: string;
     /**
-     * Optional compact Lucide icon name shown when in compact mode. Defaults to `icon`.\
+     * Optional compact Lucide icon name shown when in compact mode. Defaults to `icon`.
      */
     compactIcon?: string;
     /**
@@ -825,34 +1232,89 @@ interface RegisterComposerPillOptions<TPayload = any> {
     }) => TPayload | undefined;
     /**
      * Custom pill body renderer if you want to replace the default pill layout.
-     * Receives `isOpen`, `open`, `close`, and `toggle` along with standard pill props.
+     * Receives `isOpen`, `open`, `close`, and `toggle` along with standard pill props.\
      */
     renderPill?: (props: RenderPillProps<TPayload>) => ReactNode;
     /**
-      * Resolves the live pill label on button-shaped hosts (Paseo 0.8+), where the
-      * pill body is host-rendered from a static `label` string and `renderPill`
-      * never mounts. Called once at registration and then every
-      * `refreshIntervalMs`. Keep it cheap and synchronous when possible; async
-      * resolvers are awaited. Returning `undefined` leaves the current label.
-      * Cycle modes can advance rotation state on each call.
-      */
-    resolveLabel?: (context: PillLiveContext) => string | undefined | Promise<string | undefined>;
+     * Resolves the live pill label (and optionally icon) on button-shaped hosts (Paseo 0.8+), where the
+     * pill body is host-rendered from a static `label` and `icon` string and `renderPill`
+     * never mounts. Called once at registration and then every
+     * `refreshIntervalMs`. Keep it cheap and synchronous when possible; async
+     * resolvers are awaited. Returning `undefined` leaves the current label/icon.
+     * Can return a plain string (label) or an object `{ label?: string; icon?: string }`.
+     * Cycle modes can advance rotation state on each call.
+     */
+    resolveLabel?: PillLabelResolver;
     /**
-      * Poll interval for `resolveLabel` on button-shaped hosts. Defaults to 5000ms
-      * when `resolveLabel` is set. Set to 0 to resolve once at registration.
-      * Ignored on legacy hosts (their `renderPill` re-renders via React state).
-      */
+     * Optional standalone resolver for the button icon on button-shaped hosts (Paseo 0.8+).
+     * Evaluated alongside `resolveLabel` on each tick.
+     */
+    resolveIcon?: PillIconResolver;
+    /**
+     * Poll interval for `resolveLabel` on button-shaped hosts. Defaults to 5000ms
+     * when `resolveLabel` or `resolveIcon` is set. Set to 0 to resolve once at registration.
+     * Ignored on legacy hosts (their `renderPill` re-renders via React state).
+     */
     refreshIntervalMs?: number;
     /**
-      * Renders the content inside the controlled modal.
-     * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
-      * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
-      * popover rendering this same content at the host surface width (expect a
-      * narrow column, not a wide modal); keep content vertically stacked and
-      * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
-      * popovers, so live pill text comes from `resolveLabel` instead.
+     * Fixed width, in pixels, for the anchored popover on non-compact hosts.
+     *
+     * Without it the popover is sized from its content, so any content that
+     * reflows (a measured table, a responsive group, a gauge that settles) can
+     * resize the surface under the pointer. Pinning the width makes the frame the
+     * authority and lets the content overflow into its own scroll/clip instead.
+     *
+     * Ignored on compact hosts, where the same content renders in a full-bleed
+     * bottom sheet. Clamped to the window width so a fixed width cannot overflow
+     * a narrow viewport.
      */
-    renderModal: (props: RenderModalProps<TPayload>) => ReactNode;
+    popoverWidth?: number;
+    /**
+     * Renders the content inside the controlled modal.
+     * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
+     * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
+     * popover rendering this same content at the host surface width (expect a
+     * narrow column, not a wide modal); keep content vertically stacked and
+     * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
+     * popovers, so live pill text comes from `resolveLabel` instead.
+     *
+     * The wrapper renders exactly one host `<Modal.Content>` around this output
+     * on the modal paths (legacy + centered). Never render another
+     * `<Modal.Content>` here — use `HostModalSection` from
+     * `paseo-plugin-helper/ui` for fluid content. (`HostModalContent` is only
+     * for plugins that open their OWN host `<Modal>`.)
+     */
+    renderModal?: (props: RenderModalProps<TPayload>) => ReactNode;
+    /**
+     * Host-owned scroll for the pill modal paths (#219).
+     * - `false` (default, legacy): the wrapper renders
+     *   `<Modal.Content scrollable={false}>` (bounded dialog) and
+     *   `ModalBody`-based content owns the one scroller.
+     * - `true`: the wrapper renders `<Modal.Content scrollable={true}>` so the
+     *   host scrolls, and `renderModal` must provide fluid content with NO
+     *   nested `<Modal.Content>` or scroller (`HostModalSection`).
+     * Exactly one `<Modal.Content>` is rendered in both modes. The 0.8 popover
+     * path is unaffected (plain host-owned container either way).
+     */
+    hostScroll?: boolean;
+    /**
+     * Makes the pill an action button instead of a tethered popover: pressing it
+     * calls this and the host never mounts a popover. Use it to open a plugin
+     * surface (`openSurface(id)`), which the host renders outside the composer —
+     * an agent-stream re-render of the composer then cannot remount it. Ignored
+     * when unset, in which case `renderModal` renders the popover.
+     */
+    onPress?: () => void | Promise<void>;
+    /**
+     * How an open pill presents.
+     * - `"popover"` (default): the host anchors `renderModal` to the pill. The
+     *   host may remount that subtree on every composer re-render, which can tear
+     *   an open popover down.
+     * - `"centered"`: the host `Modal` is rendered from the pill's always-mounted
+     *   icon and toggled by the pill press, so the surface is not a child of the
+     *   composer popover and a composer re-render does not unmount it.
+     */
+    presentation?: "popover" | "centered";
     /**
      * Called when a pill cannot be registered on the current host (for example
      * a host API mismatch). Reporting instead of throwing keeps the rest of the
@@ -893,8 +1355,22 @@ interface RegisterSidebarSurfaceOptions {
  * Registers a sidebar icon and corresponding full-page surface in a single call,
  * automatically injecting `<PluginThemeProvider>` with custom visual flair.
  * Works with both Paseo v0.7 PluginContext and Paseo v0.8 PluginClientContext.
+ *
+ * A sidebar surface is a full host page: Paseo routes to it directly and does
+ * NOT wrap the surface body in a host scroller (unlike `<Modal.Content>`, which
+ * bounds the dialog and supplies the outer scroll). Any `ModalBody` in the
+ * subtree would therefore pick the plain, non-scrolling branch on a
+ * non-compact desktop and clip overflowing content — the recurring
+ * "plugin page does not scroll" bug. Marking the subtree with the
+ * `"required"` scroll-owner context makes every `ModalBody` inside own the
+ * scroll on every surface, so plugins inherit working scroll with no
+ * per-plugin workaround.
+ *
+ * Returns an idempotent disposer that removes both the surface and the sidebar
+ * item, matching every other helper `add*` registration. Existing callers that
+ * ignore the return value are unaffected.
  */
-declare function registerSidebarSurface(plugin: SidebarSurfaceRegistrar, options: RegisterSidebarSurfaceOptions): void;
+declare function registerSidebarSurface(plugin: SidebarSurfaceRegistrar, options: RegisterSidebarSurfaceOptions): () => void;
 
 /**
  * Structural registrar interface satisfied by both Paseo v0.7 PluginContext
@@ -928,404 +1404,13 @@ declare function registerWorkspacePanel(plugin: WorkspacePanelRegistrar, options
  */
 declare function registerAgentPanel(plugin: WorkspacePanelRegistrar, options: RegisterAgentPanelOptions): void;
 
-type RpcQueryOptions<TOutput> = Omit<UseQueryOptions<TOutput, Error, TOutput, readonly unknown[]>, "queryKey" | "queryFn">;
-/**
- * Executes a Paseo RPC contract as a cached, reactive React Query.
- * Automatically hashes contract name and input arguments into query keys.
- */
-declare function useRpcQuery<TContract extends PluginRpcContract<any, any>, TInput = RpcInput<TContract>, TOutput = RpcOutput<TContract>>(contract: TContract, input: TInput, options?: RpcQueryOptions<TOutput>): UseQueryResult<TOutput, Error>;
-type RpcMutationOptions<TInput, TOutput> = UseMutationOptions<TOutput, Error, TInput, unknown>;
-/**
- * Executes a Paseo RPC contract as a mutation (for state changes, write operations).
- */
-declare function useRpcMutation<TContract extends PluginRpcContract<any, any>, TInput = RpcInput<TContract>, TOutput = RpcOutput<TContract>>(contract: TContract, options?: RpcMutationOptions<TInput, TOutput>): UseMutationResult<TOutput, Error, TInput, unknown>;
-
-type RefreshRate = "1s" | "2s" | "5s" | "10s" | "15s" | "30s" | "60s" | "5m" | "paused";
-declare const REFRESH_INTERVALS: Record<RefreshRate, number | false>;
-interface UseAutoRefreshQueryOptions<TOutput> extends RpcQueryOptions<TOutput> {
-    defaultRate?: RefreshRate;
-    /**
-     * Custom interval in milliseconds (overrides preset rates when not paused).
-     */
-    customIntervalMs?: number;
-    /**
-     * Whether the containing modal or panel is actively open/visible.
-     * If false, background refetching is automatically paused to conserve mobile CPU and battery.
-     */
-    isOpen?: boolean;
-}
-/**
- * Enhanced React Query hook for live polling metrics.
- * Automatically halts background polling when modal/panel is closed (`isOpen === false`),
- * and provides state controls for user-selectable refresh intervals ("1s", "5s", "30s", "paused", etc.).
- */
-declare function useAutoRefreshQuery<TContract extends PluginRpcContract<any, any>, TInput = RpcInput<TContract>, TOutput = RpcOutput<TContract>>(contract: TContract, input: TInput, options?: UseAutoRefreshQueryOptions<TOutput>): {
-    rate: RefreshRate;
-    setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
-    isPolling: boolean;
-    effectiveInterval: number | false;
-    data: TOutput;
-    error: Error;
-    isError: true;
-    isPending: false;
-    isLoading: false;
-    isLoadingError: false;
-    isRefetchError: true;
-    isSuccess: false;
-    isPlaceholderData: false;
-    status: "error";
-    dataUpdatedAt: number;
-    errorUpdatedAt: number;
-    failureCount: number;
-    failureReason: Error | null;
-    errorUpdateCount: number;
-    isFetched: boolean;
-    isFetchedAfterMount: boolean;
-    isFetching: boolean;
-    isInitialLoading: boolean;
-    isPaused: boolean;
-    isRefetching: boolean;
-    isStale: boolean;
-    isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
-} | {
-    rate: RefreshRate;
-    setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
-    isPolling: boolean;
-    effectiveInterval: number | false;
-    data: TOutput;
-    error: null;
-    isError: false;
-    isPending: false;
-    isLoading: false;
-    isLoadingError: false;
-    isRefetchError: false;
-    isSuccess: true;
-    isPlaceholderData: false;
-    status: "success";
-    dataUpdatedAt: number;
-    errorUpdatedAt: number;
-    failureCount: number;
-    failureReason: Error | null;
-    errorUpdateCount: number;
-    isFetched: boolean;
-    isFetchedAfterMount: boolean;
-    isFetching: boolean;
-    isInitialLoading: boolean;
-    isPaused: boolean;
-    isRefetching: boolean;
-    isStale: boolean;
-    isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
-} | {
-    rate: RefreshRate;
-    setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
-    isPolling: boolean;
-    effectiveInterval: number | false;
-    data: undefined;
-    error: Error;
-    isError: true;
-    isPending: false;
-    isLoading: false;
-    isLoadingError: true;
-    isRefetchError: false;
-    isSuccess: false;
-    isPlaceholderData: false;
-    status: "error";
-    dataUpdatedAt: number;
-    errorUpdatedAt: number;
-    failureCount: number;
-    failureReason: Error | null;
-    errorUpdateCount: number;
-    isFetched: boolean;
-    isFetchedAfterMount: boolean;
-    isFetching: boolean;
-    isInitialLoading: boolean;
-    isPaused: boolean;
-    isRefetching: boolean;
-    isStale: boolean;
-    isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
-} | {
-    rate: RefreshRate;
-    setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
-    isPolling: boolean;
-    effectiveInterval: number | false;
-    data: undefined;
-    error: null;
-    isError: false;
-    isPending: true;
-    isLoading: true;
-    isLoadingError: false;
-    isRefetchError: false;
-    isSuccess: false;
-    isPlaceholderData: false;
-    status: "pending";
-    dataUpdatedAt: number;
-    errorUpdatedAt: number;
-    failureCount: number;
-    failureReason: Error | null;
-    errorUpdateCount: number;
-    isFetched: boolean;
-    isFetchedAfterMount: boolean;
-    isFetching: boolean;
-    isInitialLoading: boolean;
-    isPaused: boolean;
-    isRefetching: boolean;
-    isStale: boolean;
-    isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
-} | {
-    rate: RefreshRate;
-    setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
-    isPolling: boolean;
-    effectiveInterval: number | false;
-    data: undefined;
-    error: null;
-    isError: false;
-    isPending: true;
-    isLoadingError: false;
-    isRefetchError: false;
-    isSuccess: false;
-    isPlaceholderData: false;
-    status: "pending";
-    dataUpdatedAt: number;
-    errorUpdatedAt: number;
-    failureCount: number;
-    failureReason: Error | null;
-    errorUpdateCount: number;
-    isFetched: boolean;
-    isFetchedAfterMount: boolean;
-    isFetching: boolean;
-    isLoading: boolean;
-    isInitialLoading: boolean;
-    isPaused: boolean;
-    isRefetching: boolean;
-    isStale: boolean;
-    isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
-} | {
-    rate: RefreshRate;
-    setRate: React.Dispatch<React.SetStateAction<RefreshRate>>;
-    isPolling: boolean;
-    effectiveInterval: number | false;
-    data: TOutput;
-    isError: false;
-    error: null;
-    isPending: false;
-    isLoading: false;
-    isLoadingError: false;
-    isRefetchError: false;
-    isSuccess: true;
-    isPlaceholderData: true;
-    status: "success";
-    dataUpdatedAt: number;
-    errorUpdatedAt: number;
-    failureCount: number;
-    failureReason: Error | null;
-    errorUpdateCount: number;
-    isFetched: boolean;
-    isFetchedAfterMount: boolean;
-    isFetching: boolean;
-    isInitialLoading: boolean;
-    isPaused: boolean;
-    isRefetching: boolean;
-    isStale: boolean;
-    isEnabled: boolean;
-    refetch: (options?: _tanstack_query_core.RefetchOptions) => Promise<_tanstack_query_core.QueryObserverResult<TOutput, Error>>;
-    fetchStatus: _tanstack_query_core.FetchStatus;
-};
-
-interface UsePluginSettingsOptions<TSettings> {
-    /**
-     * Optional initial settings data. Defaults to `contract.defaultSettings`.
-     */
-    initialData?: TSettings;
-    /**
-     * Whether to automatically refetch settings when the window/app regains focus.
-     * Defaults to true.
-     */
-    refetchOnWindowFocus?: boolean;
-    /**
-     * Stale time in milliseconds before settings are considered stale.
-     * Defaults to 0 so that newly opened modals/components always verify fresh
-     * state against the daemon without waiting.
-     */
-    staleTime?: number;
-    /**
-     * Whether to refetch settings every time a component mounts.
-     * Defaults to "always".
-     */
-    refetchOnMount?: boolean | "always";
-    /**
-     * Optional background polling interval in milliseconds.
-     * When specified, keeps multi-window and mobile/desktop clients automatically in sync.
-     */
-    refetchInterval?: number | false;
-    /**
-     * Callback invoked after a successful update.
-     */
-    onSuccess?: (updated: TSettings) => void;
-    /**
-     * Callback invoked when an update fails.
-     */
-    onError?: (error: Error, rollbackSettings?: TSettings) => void;
-}
-interface UsePluginSettingsResult<TSettings> {
-    /**
-     * Current settings object. Never undefined (falls back to initialData or contract.defaultSettings).
-     */
-    settings: TSettings;
-    /**
-     * Triggers an optimistic update and persists via RPC.
-     */
-    updateSettings: (updates: Partial<TSettings>) => void;
-    /**
-     * Async version of updateSettings that returns a promise of the updated settings.
-     */
-    updateSettingsAsync: (updates: Partial<TSettings>) => Promise<TSettings>;
-    /**
-     * Resets settings back to their default values.
-     */
-    resetSettings: () => Promise<TSettings>;
-    /**
-     * Whether the initial query is loading.
-     */
-    isLoading: boolean;
-    /**
-     * Whether an update mutation is currently in-flight.
-     */
-    isUpdating: boolean;
-    /**
-     * Whether the last query or mutation encountered an error.
-     */
-    isError: boolean;
-    /**
-     * Error object if any error occurred.
-     */
-    error: Error | null;
-    /**
-     * Refetches settings from the server.
-     */
-    refetch: () => Promise<unknown>;
-}
-/**
- * Reactive hook for managing plugin settings with optimistic updates,
- * error rollbacks, and automatic caching via React Query.
- */
-declare function usePluginSettings<TSettings extends Record<string, any>>(contract: SettingsContract<TSettings>, options?: UsePluginSettingsOptions<TSettings>): UsePluginSettingsResult<TSettings>;
-
-interface UseSharedPluginSettingsOptions<TSettings> extends UsePluginSettingsOptions<TSettings> {
-    /**
-     * Background polling interval keeping sibling plugins in sync when one of
-     * them writes the shared file outside this client's RPC round-trip.
-     * Defaults to 2000ms. Pass `false` to disable polling.
-     */
-    pollIntervalMs?: number | false;
-}
-/**
- * Reactive hook for suite-wide settings shared across independent sibling plugins.
- * Wraps usePluginSettings with sync-friendly defaults: always re-verifies on
- * mount and polls in the background so an update written by Plugin A appears
- * in Plugin B without a manual refresh.
- */
-declare function useSharedPluginSettings<TSettings extends Record<string, any>>(contract: SettingsContract<TSettings>, options?: UseSharedPluginSettingsOptions<TSettings>): UsePluginSettingsResult<TSettings>;
-/**
- * Convenience hook bound to the canonical xpufx suite settings contract.
- */
-declare function useSuiteSettings(options?: UseSharedPluginSettingsOptions<SuiteSettings>): UsePluginSettingsResult<SuiteSettings>;
-
-interface HelperSettingsCardProps {
-    children: ReactNode;
-    testID?: string;
-}
-interface HelperSettingsSectionProps {
-    title: string;
-    info?: ReactNode;
-    trailing?: ReactNode;
-    children: ReactNode;
-    testID?: string;
-}
-interface HelperSettingsRowBaseProps {
-    label: string;
-    hint?: string;
-    error?: string | null;
-    children?: ReactNode;
-    testID?: string;
-}
-interface HelperSettingsSwitchProps extends HelperSettingsRowBaseProps {
-    value: boolean;
-    onValueChange(value: boolean): void;
-    disabled?: boolean;
-}
-interface HelperSettingsSelectProps<Value extends string = string> extends HelperSettingsRowBaseProps {
-    value: Value;
-    options: readonly {
-        label: string;
-        value: Value;
-    }[];
-    onValueChange(value: Value): void;
-    disabled?: boolean;
-}
-interface HelperSettingsInputProps extends HelperSettingsRowBaseProps {
-    initialValue?: string;
-    onChangeText(text: string): void;
-    placeholder?: string;
-    disabled?: boolean;
-    secureTextEntry?: boolean;
-}
-type HelperSettingsSelectComponent = <Value extends string = string>(props: HelperSettingsSelectProps<Value>) => ReactNode;
-interface HelperSettingsUiBundle {
-    SettingsCard: ComponentType<HelperSettingsCardProps>;
-    SettingsSection: ComponentType<HelperSettingsSectionProps>;
-    SettingsSwitch: ComponentType<HelperSettingsSwitchProps>;
-    SettingsSelect: HelperSettingsSelectComponent;
-    SettingsInput: ComponentType<HelperSettingsInputProps>;
-}
-interface HelperSettingsScreenContribution {
-    id: string;
-    title: string;
-    icon: string;
-    Component: ComponentType<HostSurfaceProps>;
-}
-interface HelperSettingsScreenRegistrar {
-    addSettingsScreen(contribution: HelperSettingsScreenContribution): PluginCleanup;
-}
-type HelperSettingsFieldKind = "boolean" | "enum" | "string" | "number";
-interface HelperSettingsField {
-    key: string;
-    kind: HelperSettingsFieldKind;
-    label: string;
-    description?: string;
-    options?: string[];
-}
-interface HelperSettingsFieldOverrides {
-    labels?: Record<string, string>;
-    descriptions?: Record<string, string>;
-}
-declare function contractSchemaToFields(schema: unknown, overrides?: HelperSettingsFieldOverrides): HelperSettingsField[];
-interface RegisterHelperSettingsScreenOptions {
-    ui: HelperSettingsUiBundle;
-    id?: string;
-    title?: string;
-    icon?: string;
-    labels?: Record<string, string>;
-    descriptions?: Record<string, string>;
-}
-declare function registerHelperSettingsScreen<TSettings extends Record<string, any>>(client: HelperSettingsScreenRegistrar, contract: SettingsContract<TSettings>, options: RegisterHelperSettingsScreenOptions): PluginCleanup;
-
 interface CopyToClipboardOptions {
     toast?: HostToast;
     toastMessage?: string;
 }
 /**
  * Robust cross-platform clipboard copy helper for Paseo plugins.
- * Works seamlessly across React Native (Hermes / mobile), web, and desktop.
+ * Works seamlessly across React Native (mobile), web, and desktop.
  *
  * Precedence:
  * 1. Host copyText from initClientHelpers (Paseo v0.8, optional)
@@ -1358,6 +1443,9 @@ interface CustomPillModalContentProps {
 /**
  * Full modal inspection content for a custom metric pill.
  * Shows status, preformatted command output, last updated time, and quick actions.
+ *
+ * Sized by the host: the root fills the host-allocated modal frame (flex/fluid)
+ * so changing output never drives the dialog size.
  */
 declare function CustomPillModalContent({ state, onRefresh, isRefreshing, }: CustomPillModalContentProps): React__default.JSX.Element;
 interface RegisterCustomPillsOptions {
@@ -1385,4 +1473,26 @@ declare function registerCustomPills(client: ComposerPillRegistrar, options: Reg
 
 declare function Icon(props: HostIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, FormRow, type FormRowProps, type HapticFeedbackType, type HeadingTransform, type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillLiveContext, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, REFRESH_INTERVALS, type RadiusStyle, type RefreshRate, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterHelperSettingsScreenOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, type RpcMutationOptions, type RpcQueryOptions, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, type SidebarSurfaceRegistrar, type SpacingKey, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseResponsiveResult, type UseSharedPluginSettingsOptions, type VisualFlair, type WorkspacePanelRegistrar, alpha, contractSchemaToFields, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerHelperSettingsScreen, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveElevation, resolvePadding, resolveRadius, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAutoRefreshQuery, usePluginSettings, usePluginTheme, useResponsive, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
+/** Inline SVG data URI for a custom mark, tinted with the resolved color. */
+declare function forgeMarkSource(kind: ForgeKind, color: string): {
+    uri: string;
+} | null;
+interface ForgeIconProps extends ForgeMarkInput {
+    /** Icon box in points; defaults to 16 to match the host Lucide default. */
+    size?: number;
+    /** Mark color; defaults to the active theme foreground. */
+    color?: string;
+    style?: StyleProp<ImageStyle>;
+    /** Overrides the default forge-name accessibility label. */
+    accessibilityLabel?: string;
+}
+/**
+ * Shared forge brand mark. Resolves a host/kind to one mark and renders it:
+ * GitHub/GitLab/unknown delegate to the host Lucide set, while Codeberg,
+ * Forgejo and Gitea draw their official mono marks inline. On native, where
+ * Paseo plugin bundles cannot render SVG, custom marks fall back to their
+ * closest Lucide glyph so forges stay distinct.
+ */
+declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
+
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseResponsiveResult, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolvePillModalScrollable, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAppearanceScheme, usePluginTheme, useResponsive };

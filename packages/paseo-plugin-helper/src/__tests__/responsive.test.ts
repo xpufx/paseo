@@ -5,6 +5,7 @@ import {
   getTouchTargetMin,
   responsiveValue,
   resolvePadding,
+  COMPACT_DESKTOP_TOUCH_TARGET,
 } from "../client/theme/responsive.js";
 import type { ResponsiveLayout } from "../shared/types.js";
 
@@ -18,15 +19,28 @@ describe("Universal Responsive System", () => {
   });
 
   describe("getTouchTargetMin", () => {
-    it("enforces 44pt minimum on mobile or compact mode", () => {
-      expect(getTouchTargetMin({ compact: true, platform: "web" })).toBe(44);
+    it("enforces the 44pt touch target on mobile platforms", () => {
       expect(getTouchTargetMin({ compact: false, platform: "ios" })).toBe(44);
       expect(getTouchTargetMin({ compact: false, platform: "android" })).toBe(44);
       expect(getTouchTargetMin({ compact: true, platform: "ios" })).toBe(44);
+      expect(getTouchTargetMin({ compact: true, platform: "android" })).toBe(44);
+    });
+
+    it("gives a compact desktop surface a smaller-than-touch target", () => {
+      const target = getTouchTargetMin({ compact: true, platform: "web" });
+      expect(target).toBe(COMPACT_DESKTOP_TOUCH_TARGET);
+      expect(target).toBeLessThan(44);
+      expect(target).toBeGreaterThan(28);
     });
 
     it("allows 28pt on desktop non-compact mode", () => {
       expect(getTouchTargetMin({ compact: false, platform: "web" })).toBe(28);
+    });
+
+    it("keeps compact desktop a slightly larger target than full desktop", () => {
+      expect(getTouchTargetMin({ compact: true, platform: "web" })).toBeGreaterThan(
+        getTouchTargetMin({ compact: false, platform: "web" }),
+      );
     });
   });
 

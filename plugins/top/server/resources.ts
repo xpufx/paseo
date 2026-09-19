@@ -215,16 +215,26 @@ export async function getMcpPluginState(): Promise<McpPluginState> {
   return mcpStateInflight;
 }
 
+const SETTINGS_READ_LOG_INTERVAL_MS = 30_000;
+let lastSettingsReadLogAt = 0;
+
 export async function handleGetSettings(): Promise<TopSettings> {
   const data = await settingsStorage.readAsync();
-  log.info("Settings read requested", { settings: data });
+  // Reads arrive on every client mount/focus verification, so keep the
+  // observable signal but bound it: at most one line per interval, keys only
+  // on writes, never full payloads.
+  const now = Date.now();
+  if (now - lastSettingsReadLogAt > SETTINGS_READ_LOG_INTERVAL_MS) {
+    lastSettingsReadLogAt = now;
+    log.debug("Settings read requested");
+  }
   return data;
 }
 
 export async function handleUpdateSettings(patch: Partial<TopSettings>): Promise<TopSettings> {
-  log.info("Settings update requested", { patch });
+  log.info("Settings update requested", { keys: Object.keys(patch) });
   const updated = await settingsStorage.updateAsync((prev) => ({ ...prev, ...patch }));
-  log.info("Settings updated successfully", { updated });
+  log.info("Settings updated successfully");
   if (patch.customPillEnabled !== undefined || patch.showCustomPills !== undefined) {
     await refreshCustomPillConfigs();
   }
@@ -310,7 +320,9 @@ export async function handleGetSystemResources(input?: {
   const needBranch = !isSelective || fields.includes("branch");
   const needMcp = !isSelective || fields.includes("mcp");
 
-  const { running: mcpRunning, installed: mcpInstalled } = await getMcpPluginState();
+  const mcpState = needMcp ? await getMcpPluginState() : undefined;
+  const mcpRunning = mcpState?.running;
+  const mcpInstalled = mcpState?.installed;
 
   let branch: string | null | undefined = undefined;
   if (needBranch) {
@@ -539,6 +551,46 @@ export function summarizeTurnTimeline(timeline: readonly unknown[]): TurnActivit
     }
   }
   return { toolCalls, toolErrors, usage };
+}
+
+/**
+ * A terminal event whose turnId differs from the turn that turn_started opened
+ * cannot be that turn's end: on interrupt the daemon's rescue path emits an
+ * extra terminal after the real one, sometimes with no turnId at all. Providers
+ * that never tag turns (codex/pi) keep a null id, so null-over-null is not
+ * stale.
+ */
+export function isStaleTurnEnd(
+  activeTurnId: string | null | undefined,
+  eventTurnId: string | null,
+): boolean {
+  return activeTurnId != null && eventTurnId !== activeTurnId;
+}
+
+/** Upper bound on how long after a cancel the daemon's echo can still land. */
+export const INTERRUPT_ECHO_WINDOW_MS = 5_000;
+
+export interface InterruptEchoInput {
+  /** Wall time the last canceled terminal was recorded, or null if none. */
+  lastCanceledAt: number | null;
+  /** Lifetime user_message count seen on that canceled terminal's timeline. */
+  lastCanceledUserMessages: number | null;
+  /** Lifetime user_message count on the terminal under test. */
+  eventUserMessages: number;
+  now: number;
+}
+
+/**
+ * On interrupt the daemon/provider emits a second terminal for the turn the
+ * cancel already ended — typically a 0-duration `turn_completed` reusing a
+ * freshly minted turnId, or a `turn_canceled` with no turnId. It carries no new
+ * user message, so matching the timeline's user_message count against the
+ * cancel's identifies it as the same interrupt rather than a real follow-up.
+ */
+export function isInterruptEcho(input: InterruptEchoInput): boolean {
+  if (input.lastCanceledAt == null || input.lastCanceledUserMessages == null) return false;
+  if (input.now - input.lastCanceledAt > INTERRUPT_ECHO_WINDOW_MS) return false;
+  return input.eventUserMessages <= input.lastCanceledUserMessages;
 }
 
 let lastTurnTelemetry: TopTimelineTelemetryData | null = null;

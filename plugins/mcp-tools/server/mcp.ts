@@ -69,7 +69,11 @@ async function loadAgent(agentId: string, context: PluginHandlerContext) {
   const refreshed = await handle.refresh();
   const agent = refreshed?.agent ?? handle.current();
   if (!agent) throw new Error(`Agent not found: ${agentId}`);
-  return { provider: agent.provider, cwd: agent.cwd, handle, snapshot: agent };
+  const snapshot = agent as Record<string, unknown>;
+  const labelCandidates = ["providerLabel", "label", "displayName", "model"]
+    .map((k) => snapshot[k])
+    .filter((v): v is string => typeof v === "string" && v.length > 0);
+  return { provider: agent.provider, cwd: agent.cwd, handle, snapshot: agent, labelCandidates };
 }
 
 async function findStoredRecord(agentId: string): Promise<Record<string, unknown> | null> {
@@ -97,7 +101,7 @@ async function findStoredRecord(agentId: string): Promise<Record<string, unknown
 const PROBE_CACHE_TTL_MS = 60_000; // 1 minute TTL
 const probeCache = new Map<string, { timestamp: number; result: { servers: McpServer[]; error: string | null } }>();
 
-async function getCachedProviderProbe(agentId: string, provider: string, cwd: string, bypassCache = false) {
+async function getCachedProviderProbe(agentId: string, provider: string, cwd: string, bypassCache = false, labels: string[] = []) {
   const cacheKey = `${provider}:${cwd}`;
   const now = Date.now();
   const cached = probeCache.get(cacheKey);
@@ -106,7 +110,7 @@ async function getCachedProviderProbe(agentId: string, provider: string, cwd: st
     return cached.result;
   }
 
-  const probe = probeForProvider(provider);
+  const probe = probeForProvider(provider, ...labels);
   if (!probe) {
     return { servers: [], error: null };
   }
@@ -162,7 +166,7 @@ export async function discoverLiveServers(
       });
     }
 
-    const probeResult = await getCachedProviderProbe(agentId, agent.provider, agent.cwd, options.bypassCache);
+    const probeResult = await getCachedProviderProbe(agentId, agent.provider, agent.cwd, options.bypassCache, agent.labelCandidates);
     for (const s of probeResult.servers) {
       if (servers.some((existing) => existing.name === s.name)) continue;
       servers.push(s);
@@ -311,7 +315,7 @@ export function createDiagnoseMcpHandler() {
     }
 
     // 2. Run Provider Probe & Collect Diagnostic Steps Polymorphically
-    const probe = probeForProvider(agent.provider);
+    const probe = probeForProvider(agent.provider, ...agent.labelCandidates);
     let discoveredServerCount = 0;
     let probeError: string | null = null;
 

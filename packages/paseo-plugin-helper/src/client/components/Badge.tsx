@@ -3,32 +3,54 @@ import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle 
 import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 import { FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens.js";
+import { HighlightedText } from "./HighlightedText.js";
 import type { StatusVariant } from "../../shared/types.js";
 
 export type BadgeStyle = "tinted" | "outline" | "solid";
+export type BadgeSize = "sm" | "md";
 
 export interface BadgeProps {
   label: string;
   variant?: StatusVariant;
   styleVariant?: BadgeStyle;
+  size?: BadgeSize;
   icon?: string | ReactNode;
   dot?: boolean;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
+  /**
+   * When set, every case-insensitive occurrence of the query inside `label` is
+   * painted with the accent highlight. The query is matched literally, never as
+   * a regular expression.
+   */
+  highlightQuery?: string;
 }
 
 export function Badge({
   label,
   variant = "neutral",
   styleVariant = "tinted",
+  size = "md",
   icon,
   dot = false,
   style,
   textStyle,
+  highlightQuery,
 }: BadgeProps) {
   const { Icon } = getClientHost();
-  const { colors, flair, resolveRadius, getVariantPalette, getStatusColor, isCompact } =
+  const { colors, flair, resolveRadius, getVariantPalette, getStatusColor, typography } =
     usePluginTheme();
+  const caption = typography?.caption ?? {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: "400" as const,
+  };
+
+  const fontSize = size === "sm" ? 10 : caption.fontSize;
+  const lineHeight = size === "sm" ? 12 : caption.lineHeight;
+  const paddingVertical = size === "sm" ? 1 : Math.max(2, Math.floor(caption.lineHeight / 5));
+  const paddingHorizontal = size === "sm" ? 5 : caption.fontSize < 11 ? 6 : 8;
+  const iconSize = size === "sm" ? 10 : caption.fontSize < 11 ? 10 : 11;
 
   const radius = resolveRadius("pill");
   const palette = getVariantPalette(variant);
@@ -63,7 +85,7 @@ export function Badge({
     }
     if (!icon) return null;
     if (typeof icon === "string") {
-      return <Icon name={icon} size={isCompact ? 10 : 11} color={textColor} />;
+      return <Icon name={icon} size={iconSize} color={textColor} />;
     }
     return icon;
   };
@@ -76,8 +98,8 @@ export function Badge({
           backgroundColor: bg,
           borderColor: border,
           borderRadius: radius,
-          paddingVertical: isCompact ? 2 : 3,
-          paddingHorizontal: isCompact ? 6 : 8,
+          paddingVertical,
+          paddingHorizontal,
         },
         style,
       ]}
@@ -88,13 +110,14 @@ export function Badge({
           styles.text,
           {
             color: textColor,
-            fontSize: isCompact ? 10 : 11,
+            fontSize,
+            lineHeight,
             textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
           },
           textStyle,
         ]}
       >
-        {label}
+        {highlightQuery ? <HighlightedText text={label} query={highlightQuery} /> : label}
       </Text>
     </View>
   );

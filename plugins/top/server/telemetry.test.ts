@@ -18,9 +18,11 @@ import {
   DEFAULT_METRIC_SURFACES,
   isMcpSurfaceEnabled,
   customPillEffectiveEnabled,
+  resolveTimelineCadence,
+  shouldAppendTimelineForTurn,
   type McpStatusSnapshot,
 } from "../shared/resources";
-import { collectTurnTelemetry, countTurns, customPillPoller, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline } from "./resources";
+import { collectTurnTelemetry, countTurns, customPillPoller, isInterruptEcho, isStaleTurnEnd, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline } from "./resources";
 
 after(() => {
   customPillPoller.stop();
@@ -440,10 +442,11 @@ test("metric definitions, ids, defaults, and pill types stay in sync", () => {
       `metric ${id} needs a default surface target`,
     );
   }
-  // PillItemType lives in client code (RN imports) so it is compared by
-  // source text: a metric missing from either side breaks pills or settings.
+  // PillItemType lives in the RN-free pill-labels module (pill.tsx re-exports
+  // it), so it is compared by source text: a metric missing from either side
+  // breaks pills or settings.
   const pillSource = fs.readFileSync(
-    path.join(__dirname, "..", "client", "pill.tsx"),
+    path.join(__dirname, "..", "client", "pill-labels.ts"),
     "utf8",
   );
   const unionBody = pillSource.split("export type PillItemType =")[1].split(";")[0];
@@ -489,6 +492,46 @@ test("pill render uses definition icons and labels, never hardcoded literals", (
   );
 });
 
+test("every top pill variant shares one centered presentation model", () => {
+  const pillSource = fs.readFileSync(
+    path.join(__dirname, "..", "client", "pill.tsx"),
+    "utf8",
+  );
+  assert.ok(
+    !/presentation:\s*"popover"/.test(pillSource),
+    "no pill may force popover presentation; the model is centered",
+  );
+  assert.equal(
+    (pillSource.match(/registerComposerPill</g) ?? []).length,
+    1,
+    "registerComposerPill must only be called by the shared registerTopPill wrapper",
+  );
+  assert.equal(
+    (pillSource.match(/registerTopPill\(client, \{/g) ?? []).length,
+    3,
+    "main, per-metric, and custom pills must all register through registerTopPill",
+  );
+});
+
+test("timeline cadence gates the card: never, every turn, every Nth turn", () => {
+  assert.equal(shouldAppendTimelineForTurn(0, 1), false);
+  assert.equal(shouldAppendTimelineForTurn(0, 10), false);
+  assert.equal(shouldAppendTimelineForTurn(1, 1), true);
+  assert.equal(shouldAppendTimelineForTurn(1, 7), true);
+  assert.deepEqual([1, 2, 3, 4, 5, 6].map((i) => shouldAppendTimelineForTurn(3, i)), [
+    false, false, true, false, false, true,
+  ]);
+  assert.equal(resolveTimelineCadence({ timelineCadence: 0 }), 0);
+  assert.equal(resolveTimelineCadence({ timelineCadence: 5 }), 5);
+  assert.equal(resolveTimelineCadence({}), 1);
+  assert.equal(resolveTimelineCadence({ recordTurnTelemetry: false }), 0);
+  assert.equal(TopSettingsSchema.parse({}).timelineCadence, 1);
+  assert.equal(TopSettingsSchema.parse({ timelineCadence: 4 }).timelineCadence, 4);
+  assert.equal(TopSettingsSchema.parse({ recordTurnTelemetry: false }).timelineCadence, 0);
+  assert.throws(() => TopSettingsSchema.parse({ timelineCadence: 11 }));
+  assert.throws(() => TopSettingsSchema.parse({ timelineCadence: -1 }));
+});
+
 test("custom pill effective state follows master, overrides, then file default", () => {
   const pill = { id: "root-disk", enabled: true };
   assert.equal(customPillEffectiveEnabled(false, undefined, pill), false);
@@ -498,6 +541,73 @@ test("custom pill effective state follows master, overrides, then file default",
   assert.equal(customPillEffectiveEnabled(true, { other: false }, pill), true);
   assert.equal(
     customPillEffectiveEnabled(true, undefined, { id: "x", enabled: false }),
+    false,
+  );
+});
+
+test("stale terminal for a live turn is dropped, real terminals kept", () => {
+  // Rescue echo after a newer turn opened: no turnId, so it cannot be that turn.
+  assert.equal(isStaleTurnEnd("opencode-turn-5", null), true);
+  // Terminal carrying another turn's id.
+  assert.equal(isStaleTurnEnd("opencode-turn-5", "opencode-turn-4"), true);
+  // The live turn's own terminal is kept.
+  assert.equal(isStaleTurnEnd("opencode-turn-5", "opencode-turn-5"), false);
+  // Providers without turn ids (codex/pi) end an opened null-id turn normally.
+  assert.equal(isStaleTurnEnd(null, null), false);
+  // No turn_started observed (e.g. plugin reload mid-turn): keep the terminal.
+  assert.equal(isStaleTurnEnd(undefined, "opencode-turn-9"), false);
+});
+
+test("interrupt echo is dropped by matching the cancel's user_message count", () => {
+  const canceledAt = 1_000;
+  // 0-duration completed follow-up on a fresh turnId, no new user message.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 7,
+      now: canceledAt + 900,
+    }),
+    true,
+  );
+  // null-turnId echo arriving ~2s later.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 7,
+      now: canceledAt + 2_100,
+    }),
+    true,
+  );
+  // A real follow-up carries a new user message.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 8,
+      now: canceledAt + 900,
+    }),
+    false,
+  );
+  // No cancel recorded: nothing to echo.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: null,
+      lastCanceledUserMessages: null,
+      eventUserMessages: 0,
+      now: canceledAt,
+    }),
+    false,
+  );
+  // Beyond the rescue window the recorded state no longer applies.
+  assert.equal(
+    isInterruptEcho({
+      lastCanceledAt: canceledAt,
+      lastCanceledUserMessages: 7,
+      eventUserMessages: 7,
+      now: canceledAt + 6_000,
+    }),
     false,
   );
 });

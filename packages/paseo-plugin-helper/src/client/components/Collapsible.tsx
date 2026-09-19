@@ -33,6 +33,41 @@ export function resolveCollapsibleChevron(expanded: boolean): string {
   return expanded ? "ChevronDown" : "ChevronRight";
 }
 
+/**
+ * Container background for a Collapsible, honoring the same `SurfaceStyle`
+ * contract as `Card`:
+ * - "flat" (default): surface0, the normal page surface.
+ * - "elevated": surface1, so the card visibly lifts off the page.
+ * - "tinted": a faint accent wash.
+ *
+ * Before this existed, `variant="elevated"` only changed the border radius and
+ * the container stayed `surface0` — so a card placed on an already-`surface0`
+ * timeline read as a bleeding shaded band with no elevation (#208).
+ */
+export function resolveCollapsibleSurface(
+  colors: ThemeColors,
+  alpha: (color: string, opacity: number) => string,
+  variant: SurfaceStyle = "flat",
+): { backgroundColor: string; borderColor: string } {
+  switch (variant) {
+    case "elevated":
+      return { backgroundColor: colors.surface1, borderColor: colors.border };
+    case "tinted":
+      return {
+        backgroundColor: alpha(colors.accent, 0.04),
+        borderColor: alpha(colors.accent, 0.2),
+      };
+    case "flat":
+    default:
+      return { backgroundColor: colors.surface0, borderColor: colors.border };
+  }
+}
+
+/**
+ * Header stripe background. Kept for backwards compatibility; prefer
+ * {@link resolveCollapsibleSurface} for the container and use this only for the
+ * pressed/unpressed header delta.
+ */
 export function resolveCollapsibleHeaderBackground(
   colors: ThemeColors,
   pressed: boolean,
@@ -76,6 +111,7 @@ export function Collapsible({
 
   const isExpanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded;
   const radius = resolveRadius(variant === "elevated" ? "lg" : "md");
+  const surface = resolveCollapsibleSurface(colors, alpha, variant);
 
   const handlePress = () => {
     const next = !isExpanded;
@@ -99,9 +135,9 @@ export function Collapsible({
       style={[
         styles.container,
         {
-          borderColor: colors.border,
+          borderColor: surface.borderColor,
           borderRadius: radius,
-          backgroundColor: colors.surface0,
+          backgroundColor: surface.backgroundColor,
         },
         style,
       ]}
@@ -114,7 +150,11 @@ export function Collapsible({
           styles.header,
           {
             minHeight: Math.max(touchTargetMin, 36),
-            backgroundColor: resolveCollapsibleHeaderBackground(colors, pressed),
+            // Transparent by default: the container already carries the surface
+            // color. Painting the header with an opaque surface color is what
+            // made the first line read as a shaded band (#208). Only the
+            // pressed state tints, as interaction feedback.
+            backgroundColor: pressed ? alpha(colors.foreground, 0.06) : "transparent",
             cursor: "pointer" as never,
           },
           headerStyle,

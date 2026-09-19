@@ -2,12 +2,13 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { matchesFamily } from "./family";
 import type { McpProbe, McpServer, ProbeContext } from "../discovery/types";
 
 export const codexProbe: McpProbe = {
   id: "codex",
   label: "codex · live",
-  matches: (provider) => provider === "codex",
+  matches: (provider) => matchesFamily(provider, "codex"),
   async probe(ctx: ProbeContext) {
     const home = os.homedir();
     const candidatePaths = [

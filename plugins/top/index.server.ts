@@ -22,17 +22,25 @@ import {
   customPillPoller,
   collectTurnTelemetry,
   collectGitDiffStat,
+  countTurns,
   getLastLiveUsage,
+  isInterruptEcho,
+  isStaleTurnEnd,
   setLastLiveUsage,
   log,
 } from "./server/resources";
+import { resolveTimelineCadence, shouldAppendTimelineForTurn } from "./shared/resources";
 
 export default function contribute(server: PluginServerContext) {
   void customPillPoller.start();
 
   // Shed load instead of hanging the daemon RPC: saturated or slow handlers
   // answer from the last good snapshot (system-resources) or fail fast.
+  // WARNs are rate-limited (one per minute per cause): saturation fires once
+  // per poll tick per caller while the modal is open, which flooded the log.
   let lastSystemResources: SystemResources | null = null;
+  const lastWarnAt = { timeout: 0, saturated: 0 };
+  const WARN_COOLDOWN_MS = 60_000;
   const guardedSystemResources = guardRpcHandler(
     async (input: Parameters<typeof handleGetSystemResources>[0]) => {
       const resources = await handleGetSystemResources(input);
@@ -43,10 +51,18 @@ export default function contribute(server: PluginServerContext) {
       timeoutMs: 5000,
       maxInflight: 4,
       getStale: () => lastSystemResources,
-      onTimeout: ({ timeoutMs }) =>
-        log.warn("system-resources handler timed out", { timeoutMs }),
-      onSaturated: ({ maxInflight }) =>
-        log.warn("system-resources handler saturated, serving stale", { maxInflight }),
+      onTimeout: ({ timeoutMs }) => {
+        const now = Date.now();
+        if (now - lastWarnAt.timeout < WARN_COOLDOWN_MS) return;
+        lastWarnAt.timeout = now;
+        log.warn("system-resources handler timed out", { timeoutMs });
+      },
+      onSaturated: ({ maxInflight }) => {
+        const now = Date.now();
+        if (now - lastWarnAt.saturated < WARN_COOLDOWN_MS) return;
+        lastWarnAt.saturated = now;
+        log.warn("system-resources handler saturated, serving stale", { maxInflight });
+      },
     },
   );
 
@@ -60,9 +76,20 @@ export default function contribute(server: PluginServerContext) {
 
   const turnStartTimes = new Map<string, number>();
   const turnGitBefore = new Map<string, { insertions: number; deletions: number; filesChanged: number }>();
+  // Live turn per agent, set on turn_started and consumed by its terminal, used
+  // to drop terminals that cannot belong to it (see isStaleTurnEnd).
+  const activeTurnIds = new Map<string, string | null>();
+  // Time and timeline user_message count of the last canceled terminal, used to
+  // drop the daemon's extra interrupt terminal (see isInterruptEcho).
+  const lastCanceledAt = new Map<string, number>();
+  const lastCanceledUserMessages = new Map<string, number>();
+  // Per-agent turn counter for the timeline cadence option (0 = never,
+  // 1 = every turn, N>1 = every Nth turn). Counts deduped turn_ended events.
+  const turnCounters = new Map<string, number>();
 
   const unsubscribeTurnStarted = server.on("agent.turn_started", (event, context) => {
     turnStartTimes.set(event.agent.id, Date.now());
+    activeTurnIds.set(event.agent.id, event.turnId ?? null);
     if ((event.agent as any)?.lastUsage) {
       setLastLiveUsage((event.agent as any).lastUsage);
     }
@@ -95,19 +122,19 @@ export default function contribute(server: PluginServerContext) {
     }
   });
 
-  const unsubscribeTurnEnded = server.on("agent.turn_ended", async (event, context) => {
+  async function appendTurnCard(
+    event: any,
+    context: any,
+    startTime: number | undefined,
+    gitBefore: { insertions: number; deletions: number; filesChanged: number } | undefined,
+    turnIndex: number,
+  ): Promise<void> {
     try {
       const settings = await handleGetSettings();
-      if (settings.recordTurnTelemetry === false) {
-        turnStartTimes.delete(event.agent.id);
-        turnGitBefore.delete(event.agent.id);
+      const cadence = resolveTimelineCadence(settings);
+      if (!shouldAppendTimelineForTurn(cadence, turnIndex)) {
         return;
       }
-
-      const startTime = turnStartTimes.get(event.agent.id);
-      turnStartTimes.delete(event.agent.id);
-      const gitBefore = turnGitBefore.get(event.agent.id);
-      turnGitBefore.delete(event.agent.id);
       const durationMs = startTime ? Date.now() - startTime : undefined;
 
       let agentModel: string | null = null;
@@ -191,9 +218,70 @@ export default function contribute(server: PluginServerContext) {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  const unsubscribeTurnEnded = server.on("agent.turn_ended", (event, context) => {
+    const settingsPromise = handleGetSettings();
+    void settingsPromise.then((settings) => {
+      if (settings.recordTurnTelemetry === false) {
+        turnStartTimes.delete(event.agent.id);
+        turnGitBefore.delete(event.agent.id);
+        activeTurnIds.delete(event.agent.id);
+        lastCanceledAt.delete(event.agent.id);
+        lastCanceledUserMessages.delete(event.agent.id);
+        return;
+      }
+
+      // On interrupt the daemon emits a second terminal for the turn the cancel
+      // already ended. Skip it so the interrupt renders as one card.
+      const activeTurnId = activeTurnIds.get(event.agent.id);
+      const eventTurnId = event.turnId ?? null;
+      const eventUserMessages = countTurns(event.timeline) ?? 0;
+      const duplicate =
+        isStaleTurnEnd(activeTurnId, eventTurnId) ||
+        isInterruptEcho({
+          lastCanceledAt: lastCanceledAt.get(event.agent.id) ?? null,
+          lastCanceledUserMessages: lastCanceledUserMessages.get(event.agent.id) ?? null,
+          eventUserMessages,
+          now: Date.now(),
+        });
+      if (duplicate) {
+        log.info("Skipped duplicate turn-end telemetry", {
+          agentId: event.agent.id,
+          turnId: event.turnId,
+          activeTurnId: activeTurnId ?? null,
+        });
+        return;
+      }
+      activeTurnIds.delete(event.agent.id);
+      if (event.outcome.kind === "canceled") {
+        lastCanceledAt.set(event.agent.id, Date.now());
+        lastCanceledUserMessages.set(event.agent.id, eventUserMessages);
+      } else {
+        lastCanceledAt.delete(event.agent.id);
+        lastCanceledUserMessages.delete(event.agent.id);
+      }
+
+      const startTime = turnStartTimes.get(event.agent.id);
+      turnStartTimes.delete(event.agent.id);
+      const gitBefore = turnGitBefore.get(event.agent.id);
+      turnGitBefore.delete(event.agent.id);
+      const turnIndex = (turnCounters.get(event.agent.id) ?? 0) + 1;
+      turnCounters.set(event.agent.id, turnIndex);
+      void appendTurnCard(event, context, startTime, gitBefore, turnIndex);
+    }).catch((err) => {
+      log.warn("Failed to record turn telemetry", {
+        agentId: event.agent.id,
+        turnId: event.turnId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
 
   return () => {
+    activeTurnIds.clear();
+    lastCanceledAt.clear();
+    lastCanceledUserMessages.clear();
     customPillPoller.stop();
     unsubscribeTurnStarted();
     unsubscribeAgentCreated();

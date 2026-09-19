@@ -1,23 +1,20 @@
 import { ZodType } from 'zod';
-import { a as SettingsContract, C as CustomPillDefinition, b as CustomPillState } from '../custom-pills-CnrXjVIR.cjs';
+import { S as SettingsContract } from '../settings-BNRcFeSP.cjs';
 import { SpawnOptions } from 'node:child_process';
+import { C as CustomPillDefinition, d as CustomPillState } from '../custom-pills-C98QP7Cg.cjs';
 import '../rpc-D27pph91.cjs';
 
 interface PluginStorageOptions<T> {
     defaultData?: T;
     /**
      * Base directory override. When provided, storage is located at path.join(baseDir, pluginId).
-     * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "xpufx-plugins", pluginId).
+     * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "plugin-data/xpufx", pluginId).
      */
     baseDir?: string;
     /**
-     * Namespace directory under ~/.paseo. Defaults to "xpufx-plugins".
+     * Namespace directory under ~/.paseo. Defaults to "plugin-data/xpufx".
      */
     namespace?: string;
-    /**
-     * Legacy directory override for backward compatibility testing or custom setups.
-     */
-    legacyDir?: string;
     /**
      * Optional Zod schema to validate and parse data on read/write, automatically applying defaults.
      */
@@ -34,6 +31,7 @@ declare const DEFAULT_NAMESPACE_README = "# Paseo Plugins Storage (xpufx)\n\nThi
  * Scoped, atomic filesystem-backed document storage for Paseo daemon plugins.
  * Automatically handles directory creation, atomic temporary file swaps,
  * schema validation, default state fallback, and isolated namespace auditing.
+ * State lives under ~/.paseo/plugin-data/xpufx/<pluginId>/ by default.
  */
 declare class PluginStorage<T extends Record<string, any>> {
     readonly pluginId: string;
@@ -41,22 +39,18 @@ declare class PluginStorage<T extends Record<string, any>> {
     readonly pluginDir: string;
     readonly filePath: string;
     readonly namespaceDir: string | null;
-    readonly legacyPluginDir: string | null;
-    readonly legacyFilePath: string | null;
     readonly defaultData?: T;
     readonly schema?: ZodType<T>;
     constructor(pluginId: string, filename?: string, options?: PluginStorageOptions<T>);
     private ensureDir;
-    private checkMigrateLegacy;
-    private checkMigrateLegacyAsync;
     private getDefault;
     private parseData;
     /**
-     * Checks if the backing state file exists (in primary or legacy path).
+     * Checks if the backing state file exists.
      */
     exists(): boolean;
     /**
-     * Reads data synchronously. If file does not exist, checks legacy location or returns defaultData.
+     * Reads data synchronously. If file does not exist, returns defaultData.
      */
     read(): T;
     /**
@@ -134,6 +128,7 @@ interface SharedPluginSettingsOptions<TSettings extends Record<string, any>> {
         partial?: () => ZodType<Partial<TSettings>>;
     };
     defaultData?: Partial<TSettings>;
+    contract?: SettingsContract<TSettings>;
     contractName?: string;
     description?: string;
     namespace?: string;
@@ -164,7 +159,7 @@ interface SharedPluginSettings<TSettings extends Record<string, any>> {
 /**
  * Creates a suite-scoped settings store shared across independent sibling plugins.
  * Every plugin in the suite points at the same file
- * (`~/.paseo/xpufx-plugins/<suite>/<filename>`) through an atomic PluginStorage,
+ * (`~/.paseo/plugin-data/xpufx/<suite>/<filename>`) through an atomic PluginStorage,
  * so an update written by Plugin A is immediately readable by Plugin B.
  */
 declare function createSharedPluginSettings<TSettings extends Record<string, any>>(options: SharedPluginSettingsOptions<TSettings>): SharedPluginSettings<TSettings>;
@@ -261,6 +256,32 @@ declare class CpuSampler {
 declare function getSystemMetrics(sampler?: CpuSampler): SystemMetrics;
 
 type LogLevel = "debug" | "info" | "warn" | "error";
+/**
+ * Resolves the minimum log level from the environment. Precedence:
+ * `PASEO_PLUGIN_LOG_LEVEL` > `PASEO_LOG_LEVEL` > `PASEO_DEBUG=1` (debug).
+ * Returns undefined when nothing is set so callers can apply their default.
+ */
+declare function resolveMinLevelFromEnv(env?: NodeJS.ProcessEnv): LogLevel | undefined;
+/**
+ * True when running in production. Retained for callers that need a
+ * production check; note the default log level no longer keys off this.
+ */
+declare function isProductionEnv(env?: NodeJS.ProcessEnv): boolean;
+/**
+ * True only when `NODE_ENV` is explicitly a development value
+ * (`development`/`dev`). Unset, empty, `production`, and anything else
+ * (e.g. `test`) all count as quiet, so a shipped plugin defaults to info
+ * without any env var set.
+ */
+declare function isDevelopmentEnv(env?: NodeJS.ProcessEnv): boolean;
+/**
+ * Default rule (documented for operators):
+ * explicit `PASEO_PLUGIN_LOG_LEVEL`/`PASEO_LOG_LEVEL`/`PASEO_DEBUG` always wins;
+ * otherwise quiet (`info`) — including when no env var is set at all, so a
+ * shipped plugin never emits debug logs by default. Debug only when `NODE_ENV`
+ * is explicitly a development value (`development`/`dev`).
+ */
+declare function resolveDefaultMinLevel(env?: NodeJS.ProcessEnv): LogLevel;
 interface PluginLoggerOptions {
     /**
      * Version of the plugin.
@@ -277,7 +298,8 @@ interface PluginLoggerOptions {
      */
     subsystem?: string;
     /**
-     * Minimum log level to print. Defaults to "info" ("debug" logs will be suppressed).
+     * Minimum log level to print. Defaults to resolveDefaultMinLevel():
+     * info unless NODE_ENV is explicitly development (or an explicit level is set).
      */
     minLevel?: LogLevel;
     /**
@@ -290,6 +312,8 @@ interface PluginLogger {
     info(message: string, data?: unknown): void;
     warn(message: string, data?: unknown): void;
     error(message: string, data?: unknown): void;
+    /** Surfaces a caught/suppressed error at debug level so it reaches the plugin log. */
+    suppressed(context: string, error: unknown): void;
     child(subsystemOrOptions: string | Partial<PluginLoggerOptions>): PluginLogger;
 }
 /**
@@ -338,7 +362,7 @@ interface StampVersionOptions extends ResolveVersionOptions {
 }
 /**
  * Build-time utility to stamp the resolved version into a TypeScript file (e.g. `version.ts`),
- * allowing client code (React Native / Hermes) to import `PLUGIN_VERSION` directly without
+ * allowing client code (React Native) to import `PLUGIN_VERSION` directly without
  * needing `node:fs` or `process.cwd()` at runtime.
  */
 declare function stampVersion(options?: StampVersionOptions): {
@@ -370,6 +394,11 @@ interface PeriodicTaskOptions {
     onError?: (err: unknown, failureCount: number) => void;
     runImmediately?: boolean;
     maxBackoffMs?: number;
+    /**
+     * Logger for suppressed failures. Defaults to a level-gated
+     * `periodic-task` logger so debug lines stay silent unless debug is enabled.
+     */
+    logger?: PluginLogger;
 }
 interface PeriodicTaskHandle {
     stop: () => void;
@@ -752,6 +781,7 @@ interface BeaconBlinkOptions {
     b: BeaconLabelState;
     intervalMs?: number;
     rounds?: number;
+    restoreOnDone?: boolean;
 }
 interface BeaconClearOptions {
     workspaceId?: string;
@@ -808,10 +838,13 @@ declare class WorkspaceBeacon {
     private resolveTitle;
     private applyLabel;
     private detachLabel;
+    setOriginalTitle(workspaceId: string, title: string): void;
+    hasOriginalTitle(workspaceId: string): boolean;
+    getOriginalTitle(workspaceId: string): string | undefined;
     private applyTitle;
     private restoreTitle;
     private stopBlink;
 }
 declare function createWorkspaceBeacon(options?: WorkspaceBeaconOptions): WorkspaceBeacon;
 
-export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isDevelopmentEnv, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, isProductionEnv, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolveDefaultMinLevel, resolveMinLevelFromEnv, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };

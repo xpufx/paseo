@@ -1,0 +1,1730 @@
+import { z } from "zod";
+import {
+  defineContract,
+  defineSettingsContract,
+  normalizeForgeHost,
+  truncate,
+} from "paseo-plugin-helper/shared";
+
+export const FORGES_PLUGIN_ID = "forges";
+
+/**
+ * Label metadata as Forgejo's REST API returns it. `color` is a hex string
+ * without the leading `#`; `description` is the optional label tooltip.
+ */
+export const ForgeLabelSchema = z.object({
+  name: z.string(),
+  color: z.string().optional(),
+  description: z.string().optional(),
+});
+export type ForgeLabel = z.infer<typeof ForgeLabelSchema>;
+
+export const ForgeIssueSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  /** Label names view, kept for scope/priority/filter logic. */
+  labels: z.array(z.string()),
+  /** Full label objects (name/color/description) for rendering. */
+  labelDetails: z.array(ForgeLabelSchema).default([]),
+  updatedAt: z.string().optional(),
+});
+export type ForgeIssue = z.infer<typeof ForgeIssueSchema>;
+
+/** Normalize a Forgejo label color into `#rrggbb`, or null when unusable. */
+export function normalizeLabelColor(color: string | undefined | null): string | null {
+  if (typeof color !== "string") return null;
+  const hex = color.trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    return `#${hex.split("").map((char) => char + char).join("")}`.toLowerCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) return `#${hex}`.toLowerCase();
+  return null;
+}
+
+/** Text colors a label pill may use; black on light, white on dark. */
+export const LABEL_TEXT_ON_LIGHT = "#000000";
+export const LABEL_TEXT_ON_DARK = "#ffffff";
+
+/**
+ * Readable text color for a label background (WCAG relative luminance): light
+ * backgrounds take black text, dark ones white. Null when the background is not
+ * a usable hex color, so callers fall back to the neutral theme chip.
+ */
+export function labelTextColor(color: string | undefined | null): string | null {
+  const background = normalizeLabelColor(color);
+  if (!background) return null;
+  return relativeLuminance(background) > 0.45 ? LABEL_TEXT_ON_LIGHT : LABEL_TEXT_ON_DARK;
+}
+
+function relativeLuminance(hex: string): number {
+  const channel = (offset: number): number => {
+    const value = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+/** Scope and value halves of a scoped label name (`"state/1-wip"`). */
+export interface ScopedLabelParts {
+  scope: string;
+  value: string;
+}
+
+/**
+ * Split a scoped label name on its first `/` into scope and value. Null when
+ * the name is unscoped or the separator sits at either end.
+ */
+export function splitScopedLabel(name: string): ScopedLabelParts | null {
+  const slash = name.indexOf("/");
+  if (slash <= 0 || slash + 1 >= name.length) return null;
+  return { scope: name.slice(0, slash), value: name.slice(slash + 1) };
+}
+
+/**
+ * The darker shade Forgejo paints the scope half of a scoped label with.
+ * Mirrors the channel-proportional darkening in Gitea/Forgejo's `RenderLabel`
+ * so a scoped pill reads like the site's; null when the color is unusable.
+ */
+export function darkenLabelColor(color: string | undefined | null): string | null {
+  const background = normalizeLabelColor(color);
+  if (!background) return null;
+  const channels = [
+    parseInt(background.slice(1, 3), 16),
+    parseInt(background.slice(3, 5), 16),
+    parseInt(background.slice(5, 7), 16),
+  ];
+  const [r, g, b] = channels;
+  const brightness = (0.2126729 * r + 0.7151522 * g + 0.072175 * b) / 255;
+  const contrast = 0.01 + brightness * 0.03;
+  const darken = contrast + Math.max(brightness + contrast - 1, 0);
+  const factor = Math.max(brightness - darken, 0) / Math.max(brightness, 1 / 255);
+  return `#${channels
+    .map((channel) =>
+      Math.min(Math.round(channel * factor), 255)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
+}
+
+/**
+ * One segment of a label pill: the whole name of an unscoped label, or one
+ * side of a scoped name. Colors are absent when the forge gave none, in which
+ * case the segment falls back to the neutral theme chip.
+ */
+export interface LabelChipHalf {
+  text: string;
+  background?: string;
+  textColor?: string;
+}
+
+/**
+ * Longest value half a chip renders before it is tail-ellipsized. Scoped names
+ * such as `attention/0-orchestrator` are what widen a chip past a wrap line, so
+ * the value is bounded while the scope half stays whole and legible.
+ */
+export const LABEL_VALUE_MAX_LENGTH = 10;
+
+/**
+ * Compact one chip half for the wrapping label rows. A value wider than
+ * `LABEL_VALUE_MAX_LENGTH` is tail-ellipsized, so several chips share a line
+ * instead of one per row. Mirrors `shortLabelName` as a pure, unit-testable
+ * display transform; callers never print the raw label name.
+ */
+export function compactLabelValue(value: string): string {
+  return truncate(value, LABEL_VALUE_MAX_LENGTH);
+}
+
+/**
+ * How a label renders: a single-segment pill for an unscoped name, or a
+ * two-segment pill for a scoped name. A scoped name is always split, so the
+ * raw `scope/value` slash form is never rendered even when no color is known.
+ */
+export type LabelChipPlan =
+  | { kind: "single"; half: LabelChipHalf }
+  | { kind: "scoped"; scope: LabelChipHalf; value: LabelChipHalf };
+
+export function planLabelChip(label: ForgeLabel): LabelChipPlan {
+  const background = normalizeLabelColor(label.color);
+  const textColor = labelTextColor(label.color);
+  const parts = splitScopedLabel(label.name);
+  if (!parts) {
+    const text = compactLabelValue(label.name);
+    return {
+      kind: "single",
+      half:
+        background && textColor
+          ? { text, background, textColor }
+          : { text },
+    };
+  }
+  const value = compactLabelValue(parts.value);
+  if (!background || !textColor) {
+    return {
+      kind: "scoped",
+      scope: { text: parts.scope },
+      value: { text: value },
+    };
+  }
+  return {
+    kind: "scoped",
+    scope: {
+      text: parts.scope,
+      background: darkenLabelColor(label.color) ?? background,
+      textColor,
+    },
+    value: { text: value, background, textColor },
+  };
+}
+
+export const OpenIssuesInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  page: z.number().int().positive().default(1),
+});
+export type OpenIssuesInput = z.infer<typeof OpenIssuesInputSchema>;
+
+export const OpenIssuesOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable().default(null),
+  issues: z.array(ForgeIssueSchema),
+  openIssueCount: z.number().int().nonnegative().nullable().default(null),
+  page: z.number().int().positive().default(1),
+  hasMore: z.boolean().default(false),
+  derivedRemote: z.string().nullable().default(null),
+  remoteSource: z.enum(["explicit", "derived"]).nullable().default(null),
+  repoPublic: z.boolean().nullable().default(null),
+  tokenPresent: z.boolean().default(false),
+  tokenValid: z.boolean().nullable().default(null),
+  /** Repo-reported write capability; null when the host returned none (#193). */
+  repoWritePermission: z.boolean().nullable().default(null),
+  error: z.string().optional(),
+});
+export type OpenIssuesOutput = z.infer<typeof OpenIssuesOutputSchema>;
+
+export const openIssuesContract = defineContract({
+  name: "forge.open-issues",
+  description: "List open forge issues for the repo backing a workspace directory",
+  input: OpenIssuesInputSchema,
+  output: OpenIssuesOutputSchema,
+});
+
+export const SearchIssuesInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  query: z.string(),
+  page: z.number().int().positive().default(1),
+});
+export type SearchIssuesInput = z.infer<typeof SearchIssuesInputSchema>;
+
+export const SearchIssuesOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable().default(null),
+  // Live keyword search returns both open and closed issues, so the rows carry
+  // their own state instead of the open-only shape of `openIssuesContract`.
+  issues: z.array(ForgeIssueSchema),
+  page: z.number().int().positive().default(1),
+  hasMore: z.boolean().default(false),
+  error: z.string().optional(),
+});
+export type SearchIssuesOutput = z.infer<typeof SearchIssuesOutputSchema>;
+
+export const searchIssuesContract = defineContract({
+  name: "forge.search-issues",
+  description: "Keyword-search forge issues (open and closed) for the repo backing a workspace directory",
+  input: SearchIssuesInputSchema,
+  output: SearchIssuesOutputSchema,
+});
+
+/**
+ * Monotonic generation gate for debounced remote search (issue #139). Responses
+ * can settle out of order since each keystroke's query races on the network, so
+ * every dispatch takes a fresh generation and only the newest one may publish.
+ */
+export function createRemoteSearchGate(): {
+  begin: () => number;
+  accept: (generation: number) => boolean;
+} {
+  let latest = 0;
+  return {
+    begin: () => {
+      latest += 1;
+      return latest;
+    },
+    accept: (generation: number) => generation === latest,
+  };
+}
+
+/**
+ * Which issue list a search surface renders. The instant client-side filter is
+ * always the fallback; a remote result wins only when the toggle is on, it
+ * carried no error, and it was produced for the query currently in the box —
+ * so a slow response from an earlier keystroke never displaces fresher results.
+ */
+export function resolveIssueSearchLayer(input: {
+  query: string;
+  remoteEnabled: boolean;
+  remoteQuery: string | null;
+  remoteIssues: ForgeIssue[] | null;
+  remoteError: string | null;
+  clientIssues: ForgeIssue[];
+}): { issues: ForgeIssue[]; source: "client" | "remote" } {
+  const active = input.query.trim();
+  const isCurrent =
+    input.remoteEnabled &&
+    input.remoteIssues !== null &&
+    input.remoteError === null &&
+    input.remoteQuery !== null &&
+    input.remoteQuery === active;
+  if (isCurrent) return { issues: input.remoteIssues as ForgeIssue[], source: "remote" };
+  return { issues: input.clientIssues, source: "client" };
+}
+
+/**
+ * Workspace git-origin forge coordinates, separate from `openIssuesContract`.
+ * The settings form needs a host to key `tokensByHost` even while the issues
+ * query is loading, errored, or has no payload, so this probe never depends on
+ * the issues result.
+ */
+export const ForgeContextInputSchema = z.object({
+  directory: z.string().optional(),
+});
+export type ForgeContextInput = z.infer<typeof ForgeContextInputSchema>;
+
+export const ForgeContextOutputSchema = z.object({
+  directory: z.string().nullable().default(null),
+  derivedRemote: z.string().nullable().default(null),
+  derivedHost: z.string().nullable().default(null),
+  derivedRepo: z.string().nullable().default(null),
+});
+export type ForgeContextOutput = z.infer<typeof ForgeContextOutputSchema>;
+
+export const forgeContextContract = defineContract({
+  name: "forge.forge-context",
+  description: "Git-origin forge coordinates for a workspace, independent of issue queries",
+  input: ForgeContextInputSchema,
+  output: ForgeContextOutputSchema,
+});
+
+export interface ForgeRemote {
+  host: string;
+  owner: string;
+  repo: string;
+}
+
+/**
+ * Parse a git remote URL into forge coordinates. Handles
+ * git@host:owner/repo(.git), https://host/owner/repo(.git), and
+ * ssh://git@host/owner/repo(.git). Returns null when the URL does not
+ * carry an owner/repo path.
+ */
+export function parseForgeRemote(url: string | undefined | null): ForgeRemote | null {
+  if (!url || typeof url !== "string") return null;
+  const trimmed = url.trim().replace(/\/+$/, "");
+  const scp = trimmed.match(/^(?:[^@/]+@)?([^:/]+):(.+)$/);
+  let host: string | undefined;
+  let pathPart: string | undefined;
+  if (scp && !trimmed.includes("://")) {
+    host = scp[1];
+    pathPart = scp[2];
+  } else {
+    const withScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed)
+      ? trimmed
+      : `ssh://${trimmed}`;
+    try {
+      const parsed = new URL(withScheme);
+      host = parsed.hostname || undefined;
+      pathPart = parsed.pathname.replace(/^\/+/, "") || undefined;
+    } catch {
+      return null;
+    }
+  }
+  if (!host || !pathPart) return null;
+  const segments = pathPart.replace(/\.git$/, "").split("/").filter(Boolean);
+  if (segments.length < 2) return null;
+  const repo = segments.pop() as string;
+  const owner = segments.pop() as string;
+  return { host, owner, repo };
+}
+
+// ---------------------------------------------------------------------------
+// Explicit remote URL override (issue #109 operator redirect).
+// A workspace may pin its forge coordinates via the settings screen
+// instead of relying on the git origin remote (which can carry SSH
+// aliases unknown to the API client). Precedence: explicit config > git remote.
+// ---------------------------------------------------------------------------
+
+const BARE_REPO_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+export const ForgeSettingsSchema = z.object({
+  remotesByDirectory: z.record(z.string(), z.string()).default({}),
+  tokensByHost: z.record(z.string(), z.string()).default({}),
+  namesByDirectory: z.record(z.string(), z.string()).default({}),
+  // Multi-forge selection (issue #137): the forge remotes a workspace may
+  // watch, and which one is active. Explicit selection wins absolutely; when
+  // nothing is selected the server derives the remote from git origin.
+  forgesByDirectory: z.record(z.string(), z.array(z.string())).default({}),
+  activeForgeByDirectory: z.record(z.string(), z.string()).default({}),
+});
+export type ForgeSettings = z.infer<typeof ForgeSettingsSchema>;
+
+export const forgeSettingsContract = defineSettingsContract({
+  name: "forges.settings",
+  schema: ForgeSettingsSchema,
+  description: "Forges plugin settings: forge selection, remote overrides and host tokens",
+});
+
+export interface ResolvedForgeRepo {
+  host: string;
+  repo: string;
+}
+
+/**
+ * Resolve forge coordinates with explicit-config-wins precedence.
+ * The explicit value accepts every `parseForgeRemote` form
+ * (scp-like, ssh://, https://) plus a bare `owner/repo`, which borrows
+ * its host from the git remote. Returns null when neither yields coords.
+ */
+export function resolveForgeRepo(
+  explicitRemote: string | undefined | null,
+  gitRemoteUrl: string | undefined | null,
+): ResolvedForgeRepo | null {
+  const git = parseForgeRemote(gitRemoteUrl);
+  const explicit = typeof explicitRemote === "string" ? explicitRemote.trim() : "";
+  if (explicit) {
+    const parsed = parseForgeRemote(explicit);
+    if (parsed) return { host: parsed.host, repo: `${parsed.owner}/${parsed.repo}` };
+    if (BARE_REPO_PATTERN.test(explicit) && git) {
+      return { host: git.host, repo: explicit };
+    }
+  }
+  if (!git) return null;
+  return { host: git.host, repo: `${git.owner}/${git.repo}` };
+}
+
+export type ForgeTargetResolution =
+  | { ok: true; host: string; repo: string; source: "explicit" | "derived" }
+  | { ok: false; error: string };
+
+/**
+ * Strict forge-coordinate resolution for the server. An explicit target wins
+ * absolutely: when it is invalid the result is an error and git origin is
+ * NEVER consulted as a silent fallback. Git origin is only used to derive
+ * coordinates when nothing is explicit, or to supply the host for a bare
+ * `owner/repo` that the git remote can qualify.
+ */
+export function resolveForgeTarget(
+  explicitTarget: string | undefined | null,
+  gitRemoteUrl: string | undefined | null,
+): ForgeTargetResolution {
+  const explicit = typeof explicitTarget === "string" ? explicitTarget.trim() : "";
+  const git = parseForgeRemote(gitRemoteUrl);
+  if (explicit) {
+    const parsed = parseForgeRemote(explicit);
+    if (parsed) {
+      return { ok: true, host: parsed.host, repo: `${parsed.owner}/${parsed.repo}`, source: "explicit" };
+    }
+    if (BARE_REPO_PATTERN.test(explicit)) {
+      if (git) return { ok: true, host: git.host, repo: explicit, source: "explicit" };
+      return { ok: false, error: `Selected forge "${explicit}" needs a git origin remote to supply its host` };
+    }
+    return { ok: false, error: `Selected forge "${explicit}" is not a valid forge remote or owner/repo` };
+  }
+  if (!git) return { ok: false, error: "No forge repo found for this workspace" };
+  return { ok: true, host: git.host, repo: `${git.owner}/${git.repo}`, source: "derived" };
+}
+
+/** A forge target parses as a remote URL or a bare `owner/repo`. */
+export function isValidForgeTarget(target: string | undefined | null): boolean {
+  const value = typeof target === "string" ? target.trim() : "";
+  if (!value) return false;
+  return Boolean(parseForgeRemote(value)) || BARE_REPO_PATTERN.test(value);
+}
+
+/**
+ * Host whose token applies to a workspace's settings form. An explicit target
+ * that carries a host wins; a bare `owner/repo` — or anything unparseable —
+ * borrows the host of the git-derived remote. Null when neither yields a host,
+ * so the token field stays disabled instead of being keyed under a missing
+ * host. The derived remote is supplied independently of any issue query, so a
+ * stored token keeps displaying while issues load or fail (regression #152).
+ */
+export function effectiveForgeHost(
+  activeTarget: string | undefined | null,
+  derivedRemote: string | undefined | null,
+): string | null {
+  const derived = parseForgeRemote(derivedRemote)?.host ?? null;
+  const target = typeof activeTarget === "string" ? activeTarget.trim() : "";
+  if (!target) return derived;
+  return parseForgeRemote(target)?.host ?? derived;
+}
+
+/**
+ * Forge remotes a workspace may watch, in first-seen order. Configured targets
+ * come first, then the legacy single remote override, so pre-#137 installs keep
+ * their pinned remote without a settings migration write. Blank duplicates are
+ * dropped.
+ */
+export function forgeTargetsForWorkspace(
+  settings:
+    | Partial<Pick<ForgeSettings, "forgesByDirectory" | "remotesByDirectory">>
+    | undefined
+    | null,
+  directory: string | undefined | null,
+): string[] {
+  const dir = typeof directory === "string" ? directory.trim() : "";
+  if (!dir) return [];
+  const targets: string[] = [];
+  const push = (value: unknown) => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (trimmed && !targets.includes(trimmed)) targets.push(trimmed);
+  };
+  for (const target of settings?.forgesByDirectory?.[dir] ?? []) push(target);
+  push(settings?.remotesByDirectory?.[dir]);
+  return targets;
+}
+
+/**
+ * The workspace's explicitly selected forge target, or null to derive from the
+ * git origin remote. Explicit selection wins absolutely: a present-but-blank
+ * `activeForgeByDirectory` entry means "auto" and suppresses the legacy remote,
+ * while an absent entry falls back to the legacy remote for compatibility.
+ * The value is returned verbatim so an invalid selection fails loudly rather
+ * than silently deriving.
+ */
+export function activeForgeForDirectory(
+  settings:
+    | Partial<
+        Pick<
+          ForgeSettings,
+          "activeForgeByDirectory" | "forgesByDirectory" | "remotesByDirectory"
+        >
+      >
+    | undefined
+    | null,
+  directory: string | undefined | null,
+): string | null {
+  const dir = typeof directory === "string" ? directory.trim() : "";
+  if (!dir) return null;
+  const activeMap = settings?.activeForgeByDirectory;
+  if (activeMap && Object.prototype.hasOwnProperty.call(activeMap, dir)) {
+    const active = activeMap[dir];
+    return typeof active === "string" && active.trim() ? active.trim() : null;
+  }
+  const legacy = settings?.remotesByDirectory?.[dir];
+  return typeof legacy === "string" && legacy.trim() ? legacy.trim() : null;
+}
+
+export interface ForgeIssueLink {
+  host: string;
+  owner: string;
+  repo: string;
+  number: number;
+  /** Anchor comment id when the URL carries `#issuecomment-<id>`. */
+  commentId?: number;
+  url: string;
+}
+
+const ISSUE_URL_PATTERN =
+  /https?:\/\/([^/\s#?]+)\/([^/\s#?]+)\/([^/\s#?]+)\/issues\/(\d+)(?:#issuecomment-(\d+))?(?![/\w])/g;
+
+/**
+ * Extract issue URLs (host/owner/repo/issues/N) from chat text for the
+ * timeline linkifier. Returns one entry per match, in order.
+ */
+export function extractForgeIssueUrls(text: string | undefined | null): ForgeIssueLink[] {
+  if (!text || typeof text !== "string") return [];
+  const links: ForgeIssueLink[] = [];
+  ISSUE_URL_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = ISSUE_URL_PATTERN.exec(text)) !== null) {
+    links.push({
+      host: match[1],
+      owner: match[2],
+      repo: match[3],
+      number: Number(match[4]),
+      commentId: match[5] != null ? Number(match[5]) : undefined,
+      url: match[0],
+    });
+  }
+  return links;
+}
+
+/** Ranges of quoted content where bare-URL extraction must not match. */
+function quotedRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const push = (start: number, end: number) => {
+    if (end > start) ranges.push({ start, end });
+  };
+  const fencePattern = /```[\s\S]*?(?:```|$)/g;
+  let fence: RegExpExecArray | null;
+  while ((fence = fencePattern.exec(text)) !== null) push(fence.index, fence.index + fence[0].length);
+  const inFence = (index: number) => ranges.some((range) => index >= range.start && index < range.end);
+  const codePattern = /`[^`\n]+`/g;
+  let code: RegExpExecArray | null;
+  while ((code = codePattern.exec(text)) !== null) {
+    if (!inFence(code.index)) push(code.index, code.index + code[0].length);
+  }
+  const linkPattern = /\[([^\]\n]+)\]\(([^)\s]+)\)/g;
+  let link: RegExpExecArray | null;
+  while ((link = linkPattern.exec(text)) !== null) {
+    if (!inFence(link.index)) push(link.index, link.index + link[0].length);
+  }
+  return ranges;
+}
+
+/**
+ * Extract only bare issue URLs: markdown-linked `[text](url)` targets and
+ * quoted code are skipped because the card renders them inline instead of
+ * duplicating them as rows (#143).
+ */
+export function extractBareForgeIssueUrls(text: string | undefined | null): ForgeIssueLink[] {
+  if (!text || typeof text !== "string") return [];
+  const quoted = quotedRanges(text);
+  const inQuoted = (index: number) => quoted.some((range) => index >= range.start && index < range.end);
+  const links: ForgeIssueLink[] = [];
+  ISSUE_URL_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = ISSUE_URL_PATTERN.exec(text)) !== null) {
+    if (inQuoted(match.index)) continue;
+    links.push({
+      host: match[1],
+      owner: match[2],
+      repo: match[3],
+      number: Number(match[4]),
+      commentId: match[5] != null ? Number(match[5]) : undefined,
+      url: match[0],
+    });
+  }
+  return links;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-repo link classification (issue #108). A rendered issue link is only
+// `local` when BOTH its host and its owner/repo match the workspace's active
+// forge identity. Everything else — a different repo on the same host, the
+// same repo on a different host, or an unresolvable active target — is
+// `foreign`, so the marker errs toward warning the reader rather than falsely
+// claiming a link belongs to this workspace's board.
+// ---------------------------------------------------------------------------
+
+/** A workspace's active forge identity: host plus `owner/repo`. */
+export interface ForgeRepoIdentity {
+  host?: string | null;
+  repo?: string | null;
+}
+
+export type ForgeLinkScope = "local" | "foreign";
+
+function normalizeForgeRepo(repo: string | null | undefined): string | null {
+  if (!repo || typeof repo !== "string") return null;
+  const normalized = repo.trim().replace(/^\/+|\/+$/g, "").toLowerCase();
+  return normalized || null;
+}
+
+/** Classify an extracted issue link against the workspace's active forge. */
+export function classifyForgeLink(
+  link: Pick<ForgeIssueLink, "host" | "owner" | "repo">,
+  active: ForgeRepoIdentity | null | undefined,
+): ForgeLinkScope {
+  const linkHost = normalizeForgeHost(link.host);
+  const linkRepo = normalizeForgeRepo(`${link.owner}/${link.repo}`);
+  const activeHost = normalizeForgeHost(active?.host);
+  const activeRepo = normalizeForgeRepo(active?.repo);
+  if (!linkHost || !linkRepo || !activeHost || !activeRepo) return "foreign";
+  return linkHost === activeHost && linkRepo === activeRepo ? "local" : "foreign";
+}
+
+/** The issue link a URL points at, or null when it is not a forge issue URL. */
+export function forgeIssueLinkFromUrl(url: string | undefined | null): ForgeIssueLink | null {
+  return extractForgeIssueUrls(url)[0] ?? null;
+}
+
+/**
+ * Classify a raw URL for the markdown renderers: null when the URL is not a
+ * forge issue URL (so unrelated links stay unstyled), otherwise local/foreign
+ * against the active forge.
+ */
+export function classifyForgeUrl(
+  url: string | undefined | null,
+  active: ForgeRepoIdentity | null | undefined,
+): ForgeLinkScope | null {
+  const link = forgeIssueLinkFromUrl(url);
+  return link ? classifyForgeLink(link, active) : null;
+}
+
+/**
+ * Display form of a remote URL: the API speaks HTTPS, so scp-like and
+ * ssh:// remotes render as `https://host/owner/repo`. Unparseable input
+ * passes through untouched.
+ */
+export function displayRemoteForApi(url: string | undefined | null): string | null {
+  if (!url || typeof url !== "string" || !url.trim()) return null;
+  const parsed = parseForgeRemote(url);
+  if (!parsed) return url.trim();
+  return `https://${parsed.host}/${parsed.owner}/${parsed.repo}`;
+}
+
+/**
+ * Pill label for an issue count. Null (unknown) renders a placeholder,
+ * never a false zero.
+ */
+export function formatIssueCountLabel(count: number | null | undefined): string {
+  if (count == null) return "issues --";
+  return count === 1 ? "1 issue" : `${count} issues`;
+}
+
+// ---------------------------------------------------------------------------
+// Repo access state (issues #152, #193). Writes need an accepted token on BOTH
+// public and private repos, so edit capability derives from visibility AND
+// credential presence/validity, never from visibility alone. Since #193 it also
+// requires write capability on the repo, which is read from the repo response's
+// permission object rather than inferred from token validity. This is the
+// single source of truth both client pages render from.
+// ---------------------------------------------------------------------------
+
+export type ForgeVisibility = "public" | "private" | "unknown";
+export type ForgeAuthState =
+  | "authenticated"
+  | "lacks-write-scope"
+  | "invalid-token"
+  | "anonymous"
+  | "unknown";
+
+/**
+ * Write capability the host reported for the configured token against the repo.
+ * null means the host returned no permission object, so edit capability falls
+ * back to the bare token-validity heuristic (issue #193).
+ */
+export type ForgeRepoWritePermission = boolean | null;
+
+/**
+ * The scopes a Forgejo/Gitea token needs for this plugin's write surface,
+ * by forge family. `read:user` is what the identity probe (`GET /user`, still
+ * the fallback capability path) requires; a token accepted there without a
+ * write scope is valid but under-scoped, not rejected.
+ */
+export const FORGE_WRITE_SCOPES: Record<"forgejo" | "github" | "gitlab", string[]> = {
+  forgejo: ["read:user", "read:repository", "write:issue"],
+  github: ["read:user", "repo"],
+  gitlab: ["read_user", "read_api", "api"],
+};
+
+/** Human-readable minimum scopes for a forge, e.g. `read:user, read:repository, write:issue`. */
+export function forgeWriteScopeList(
+  family: "forgejo" | "github" | "gitlab" = "forgejo",
+): string {
+  return FORGE_WRITE_SCOPES[family].join(", ");
+}
+
+/**
+ * Resolve write capability from a forge repo payload (issue #193) so a
+ * host-accepted token that lacks write scope is not treated as edit-capable.
+ * One mapping per forge family keeps #137 multi-forge coherent:
+ * - Forgejo/Gitea and GitHub: `permissions.push` (or `permissions.admin`).
+ * - GitLab: `access_level >= 30` (Developer/maintainer; 30 is Developer).
+ * Returns null when the payload carries no recognizable permission object, so
+ * callers keep the token-validity fallback instead of guessing `false`.
+ */
+export function forgeCapabilityFromRepo(payload: unknown): ForgeRepoWritePermission {
+  if (!payload || typeof payload !== "object") return null;
+  const record = payload as Record<string, unknown>;
+  const permissions = record.permissions;
+  if (permissions && typeof permissions === "object") {
+    const perms = permissions as Record<string, unknown>;
+    if (typeof perms.push === "boolean" || typeof perms.admin === "boolean") {
+      return perms.push === true || perms.admin === true;
+    }
+  }
+  const accessLevel = record.access_level ?? record.accessLevel;
+  if (typeof accessLevel === "number") return accessLevel >= 30;
+  return null;
+}
+
+export interface ForgeAccessInput {
+  /** Anonymous repo probe: true public, false private/missing, null unknown. */
+  repoPublic?: boolean | null;
+  /** Whether a token is configured for the host at all. */
+  tokenPresent?: boolean | null;
+  /** Token probe: true accepted, false rejected, null not probed. */
+  tokenValid?: boolean | null;
+  /** Repo-reported write capability; null when the host returned none. */
+  repoWritePermission?: ForgeRepoWritePermission;
+}
+
+export interface ForgeAccessState {
+  visibility: ForgeVisibility;
+  auth: ForgeAuthState;
+  /** Labels and comments require an accepted, write-scoped token. */
+  canEdit: boolean;
+  /** Chip label for visibility, or null when unknown. */
+  visibilityLabel: string | null;
+  /** Chip label for auth state (always known). */
+  authLabel: string;
+  /** Lucide icon name for the auth chip. */
+  authIcon: string;
+  /** Status variant for the auth chip. */
+  authVariant: "success" | "danger" | "warning" | "neutral";
+  /** One-line human explanation shared by both pages. */
+  summary: string;
+  /** Minimum token scopes for the write surface, e.g. for a token hint. */
+  requiredScopes: string;
+}
+
+/**
+ * Derive the combined access state from the probes. `canEdit` requires an
+ * accepted token AND write capability: false when the host explicitly reports
+ * the token cannot push, and (issue #193) otherwise the bare validity result
+ * when the host returned no permission object.
+ */
+export function deriveForgeAccess(input: ForgeAccessInput = {}): ForgeAccessState {
+  const visibility: ForgeVisibility =
+    input.repoPublic === true
+      ? "public"
+      : input.repoPublic === false
+        ? "private"
+        : "unknown";
+
+  let auth: ForgeAuthState;
+  if (input.tokenValid === true) {
+    auth = input.repoWritePermission === false ? "lacks-write-scope" : "authenticated";
+  } else if (input.tokenPresent !== true) auth = "anonymous";
+  else if (input.tokenValid === false) auth = "invalid-token";
+  else auth = "unknown";
+
+  const canEdit = auth === "authenticated";
+
+  const visibilityLabel = visibility === "unknown" ? null : visibility;
+
+  let authLabel: string;
+  let authIcon: string;
+  let authVariant: ForgeAccessState["authVariant"];
+  if (auth === "authenticated") {
+    authLabel = "Authenticated";
+    authIcon = "KeyRound";
+    authVariant = "success";
+  } else if (auth === "lacks-write-scope") {
+    authLabel = "Token lacks write scope";
+    authIcon = "ShieldAlert";
+    authVariant = "warning";
+  } else if (auth === "invalid-token") {
+    authLabel = "Token rejected";
+    authIcon = "AlertTriangle";
+    authVariant = "danger";
+  } else if (auth === "anonymous") {
+    authLabel = "No token";
+    authIcon = "User";
+    authVariant = "neutral";
+  } else {
+    authLabel = "Token unverified";
+    authIcon = "AlertCircle";
+    authVariant = "warning";
+  }
+
+  return {
+    visibility,
+    auth,
+    canEdit,
+    visibilityLabel,
+    authLabel,
+    authIcon,
+    authVariant,
+    summary: accessSummary(visibility, auth),
+    requiredScopes: forgeWriteScopeList(),
+  };
+}
+
+/**
+ * Read-only explanation shared by every gated write surface. An under-scoped
+ * token names the missing scopes instead of an opaque failure; any other
+ * non-editable state falls back to the combined access summary.
+ */
+export function writeGateNotice(access: ForgeAccessState, capability: string): string {
+  if (access.auth === "lacks-write-scope") {
+    return `Read-only — this token cannot ${capability}; it lacks write scope. Add a token with ${access.requiredScopes}.`;
+  }
+  return `Read-only — ${capability} needs a valid token. ${access.summary}`;
+}
+
+function accessSummary(visibility: ForgeVisibility, auth: ForgeAuthState): string {
+  const scopeHint = `required scopes: ${forgeWriteScopeList()}.`;
+
+  const authClause =
+    auth === "authenticated"
+      ? "Token accepted with write scope — reads and edits enabled."
+      : auth === "lacks-write-scope"
+        ? `Token accepted but it cannot push — edits disabled; ${scopeHint}`
+        : auth === "invalid-token"
+          ? "Saved token was rejected — edits disabled."
+          : auth === "anonymous"
+            ? "No token saved — edits disabled."
+            : "Token state unverified — edits disabled.";
+
+  if (visibility === "public") {
+    return `Public repo — anonymous reads work. ${authClause}`;
+  }
+  if (visibility === "private") {
+    return `Private repo — a valid token is required for reads. ${authClause}`;
+  }
+  return `Repo visibility unknown (could not reach host). ${authClause}`;
+}
+
+/**
+ * Key under which a workspace's display name is persisted. A linked worktree
+ * shares its main checkout's name, so the project root wins when known and the
+ * workspace directory is the fallback. Trailing separators are trimmed so the
+ * read and write paths always agree.
+ */
+export function workspaceNameKey(
+  directory: string | undefined | null,
+  projectRootPath: string | undefined | null,
+): string {
+  const normalize = (value: string | undefined | null): string =>
+    typeof value === "string" ? value.trim().replace(/[\\/]+$/, "") : "";
+  return normalize(projectRootPath) || normalize(directory);
+}
+
+/**
+ * Display name for a workspace: explicit user label wins, otherwise the
+ * resolved repo (owner/repo) is inferred. Null when neither exists. The caller
+ * passes the same key `workspaceNameKey` produces on write.
+ */
+export function displayNameForDirectory(
+  settings: Pick<ForgeSettings, "namesByDirectory"> | undefined | null,
+  nameKey: string | undefined | null,
+  inferredRepo: string | undefined | null,
+): string | null {
+  if (nameKey) {
+    const stored = settings?.namesByDirectory?.[nameKey];
+    if (typeof stored === "string" && stored.trim()) return stored.trim();
+  }
+  if (typeof inferredRepo === "string" && inferredRepo.trim()) return inferredRepo.trim();
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Scoped label vocabularies (verified against the live board; see spec §4.1).
+// Gitea-family scoped labels are exclusive: applying one label in a scope evicts
+// the previous label in that scope at the DB level, so the client only ever
+// sends "add", never "remove".
+// ---------------------------------------------------------------------------
+
+export const STATE_ORDER = [
+  "state/0-triage",
+  "state/1-wip",
+  "state/2-review",
+  "state/3-verify",
+  "state/4-done",
+] as const;
+export type StateLabel = (typeof STATE_ORDER)[number];
+
+export const PRIORITY_ORDER = [
+  "priority/0-SOS",
+  "priority/1-high",
+  "priority/2-normal",
+  "priority/3-low",
+  "priority/4-backburner",
+] as const;
+export type PriorityLabel = (typeof PRIORITY_ORDER)[number];
+
+export const ATTENTION_LABELS = [
+  "attention/0-orchestrator",
+  "attention/1-agent",
+  "attention/2-user",
+  "attention/3-ignore",
+] as const;
+
+export const SPEC_LABELS = [
+  "spec/0-needed",
+  "spec/1-checklist",
+  "spec/2-approved",
+] as const;
+
+const STATE_SHORT: Record<string, string> = {
+  "state/0-triage": "Triage",
+  "state/1-wip": "WIP",
+  "state/2-review": "Review",
+  "state/3-verify": "Verify",
+  "state/4-done": "Done",
+};
+
+const PRIORITY_SHORT: Record<string, string> = {
+  "priority/0-SOS": "SOS",
+  "priority/1-high": "High",
+  "priority/2-normal": "Normal",
+  "priority/3-low": "Low",
+  "priority/4-backburner": "Parked",
+};
+
+/** Compact display alias for a scoped label ("state/1-wip" -> "WIP"). */
+export function shortLabelName(label: string): string {
+  return STATE_SHORT[label] ?? PRIORITY_SHORT[label] ?? label;
+}
+
+/** The issue's current `state/*` label, or null when it carries none. */
+export function currentStateLabel(labels: string[]): string | null {
+  for (const label of labels) {
+    if ((STATE_ORDER as readonly string[]).includes(label)) return label;
+  }
+  return null;
+}
+
+/** The issue's current `priority/*` label, defaulting to normal per spec §4.2. */
+export function currentPriorityLabel(labels: string[]): string {
+  for (const label of labels) {
+    if ((PRIORITY_ORDER as readonly string[]).includes(label)) return label;
+  }
+  return "priority/2-normal";
+}
+
+/** Next `state/*` promotion step, or null when already done. */
+export function nextStateLabel(labels: string[]): string | null {
+  const current = currentStateLabel(labels);
+  if (!current) return "state/1-wip";
+  const idx = (STATE_ORDER as readonly string[]).indexOf(current);
+  if (idx < 0 || idx + 1 >= STATE_ORDER.length) return null;
+  return STATE_ORDER[idx + 1];
+}
+
+// ---------------------------------------------------------------------------
+// Live label sync (issue #122, decision #121.2): the board is the source of
+// truth. Scopes are derived from the labels actually present on open issues,
+// not from the hardcoded vocabularies above (kept only as fallback/display).
+// ---------------------------------------------------------------------------
+
+/** Scope prefix of a `scope/name` label, or null for unscoped labels. */
+export function scopeOfLabel(label: string): string | null {
+  const slash = label.indexOf("/");
+  if (slash <= 0 || slash + 1 >= label.length) return null;
+  const scope = label.slice(0, slash);
+  if (!/^[A-Za-z0-9_.-]+$/.test(scope)) return null;
+  return scope;
+}
+
+/** Distinct scopes observed across a set of board labels, in first-seen order. */
+export function liveScopesFromLabels(allLabels: string[]): string[] {
+  const scopes: string[] = [];
+  for (const label of allLabels) {
+    const scope = scopeOfLabel(label);
+    if (scope && !scopes.includes(scope)) scopes.push(scope);
+  }
+  return scopes;
+}
+
+/** Distinct scopes observed across a list of issues. */
+export function liveScopesFromIssues(issues: Pick<ForgeIssue, "labels">[]): string[] {
+  return liveScopesFromLabels(issues.flatMap((issue) => issue.labels));
+}
+
+function rankOf(label: string | null, order: readonly string[]): number {
+  if (!label) return order.length;
+  const idx = (order as readonly string[]).indexOf(label);
+  return idx < 0 ? order.length : idx;
+}
+
+/**
+ * Rank open issues for display: priority first (SOS..backburner, unknown
+ * last), then state order (triage..done), then most recently updated.
+ */
+export function rankIssues<T extends Pick<ForgeIssue, "labels" | "updatedAt">>(issues: T[]): T[] {
+  return [...issues].sort((a, b) => {
+    const pri = rankOf(currentPriorityLabel(a.labels), PRIORITY_ORDER) -
+      rankOf(currentPriorityLabel(b.labels), PRIORITY_ORDER);
+    if (pri !== 0) return pri;
+    const state = rankOf(currentStateLabel(a.labels), STATE_ORDER) -
+      rankOf(currentStateLabel(b.labels), STATE_ORDER);
+    if (state !== 0) return state;
+    return (b.updatedAt ?? "").localeCompare(a.updatedAt ?? "");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Optional label-set install (issue #122, decision #121.3): ships our board
+// taxonomy as data a foreign board may install. Never applied automatically:
+// the client requires an explicit action plus a keep/replace choice, and the
+// server only ever writes after resolving an explicit forge target.
+// ---------------------------------------------------------------------------
+
+export interface LabelDefinition {
+  name: string;
+  color: string;
+  exclusive: boolean;
+  description: string;
+}
+
+/**
+ * Scope prefixes our workflow understands. Used as the fallback vocabulary
+ * when validating a set-label against a board, and to decide which existing
+ * labels an install may replace (see `planLabelSetInstall`).
+ */
+export const PASEO_LABEL_SCOPES = [
+  "state",
+  "priority",
+  "attention",
+  "spec",
+  "kind",
+  "target",
+  "format",
+  "size",
+  "dep",
+  "flag",
+] as const;
+
+const STATE_COLORS = ["#1d76db", "#0e7c6b", "#a6700b", "#6e40c9", "#1a7f37"];
+const PRIORITY_COLORS = ["#d1242f", "#e85d04", "#1d76db", "#59636e", "#8c959f"];
+
+const LABEL_DEFS: LabelDefinition[] = [
+  ...STATE_ORDER.map((name, i): LabelDefinition => ({
+    name,
+    color: STATE_COLORS[i] ?? "#59636e",
+    exclusive: true,
+    description: `Workflow state ${i}`,
+  })),
+  ...PRIORITY_ORDER.map((name, i): LabelDefinition => ({
+    name,
+    color: PRIORITY_COLORS[i] ?? "#59636e",
+    exclusive: true,
+    description: `Priority ${i}`,
+  })),
+  ...ATTENTION_LABELS.map((name): LabelDefinition => ({
+    name,
+    color: "#8250df",
+    exclusive: true,
+    description: "Who acts next",
+  })),
+  ...SPEC_LABELS.map((name): LabelDefinition => ({
+    name,
+    color: "#0e7c6b",
+    exclusive: true,
+    description: "Spec readiness",
+  })),
+];
+
+/** Our board taxonomy as installable data (see decision #121.3). */
+export function paseoLabelSet(): LabelDefinition[] {
+  return LABEL_DEFS.map((def) => ({ ...def }));
+}
+
+/** Scopes our installable set occupies; a `replace` removes only these. */
+export function paseoLabelScopes(): string[] {
+  const scopes: string[] = [];
+  for (const def of LABEL_DEFS) {
+    const scope = scopeOfLabel(def.name);
+    if (scope && !scopes.includes(scope)) scopes.push(scope);
+  }
+  return scopes;
+}
+
+export const INSTALL_LABEL_MODES = ["merge", "replace"] as const;
+export type InstallLabelMode = (typeof INSTALL_LABEL_MODES)[number];
+
+export interface ForgeLabelRef {
+  id?: number;
+  name: string;
+}
+
+export interface LabelSetPlan {
+  mode: InstallLabelMode;
+  /** Our labels the target is missing; safe to POST. */
+  create: LabelDefinition[];
+  /** Target labels to DELETE, scoped to what our taxonomy replaces. */
+  remove: ForgeLabelRef[];
+  /** Our labels the target already carries; left untouched. */
+  skip: string[];
+}
+
+/**
+ * Diff our taxonomy against a board's current labels.
+ *
+ * `merge` only creates missing labels. `replace` additionally removes the
+ * target's labels that share a scope with our installable set but are not
+ * part of it (e.g. a foreign `state/ready-for-review`); labels in unrelated
+ * scopes — and our own already-present labels — are never touched, so an
+ * install cannot silently destroy an unrelated vocabulary.
+ */
+export function planLabelSetInstall(
+  existing: ForgeLabelRef[],
+  mode: InstallLabelMode,
+): LabelSetPlan {
+  const desired = paseoLabelSet();
+  const desiredNames = new Set(desired.map((def) => def.name));
+  const existingNames = new Set(
+    existing.map((label) => label.name).filter((name): name is string => typeof name === "string"),
+  );
+  const ownScopes = new Set(paseoLabelScopes());
+  const remove =
+    mode === "replace"
+      ? existing.filter((label) => {
+          const scope = scopeOfLabel(label.name);
+          return scope !== null && ownScopes.has(scope) && !desiredNames.has(label.name);
+        })
+      : [];
+  const create = desired.filter((def) => !existingNames.has(def.name));
+  const skip = desired.filter((def) => existingNames.has(def.name)).map((def) => def.name);
+  return { mode, create, remove, skip };
+}
+
+export const InstallLabelsInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  // Required, no default: the keep/replace choice must never be implicit.
+  mode: z.enum(INSTALL_LABEL_MODES),
+});
+export type InstallLabelsInput = z.infer<typeof InstallLabelsInputSchema>;
+
+export const InstallLabelsOutputSchema = z.object({
+  host: z.string().nullable().default(null),
+  repo: z.string().nullable().default(null),
+  mode: z.enum(INSTALL_LABEL_MODES).nullable().default(null),
+  created: z.array(z.string()).default([]),
+  skipped: z.array(z.string()).default([]),
+  removed: z.array(z.string()).default([]),
+  error: z.string().optional(),
+});
+export type InstallLabelsOutput = z.infer<typeof InstallLabelsOutputSchema>;
+
+export const installLabelsContract = defineContract({
+  name: "forge.install-labels",
+  description: "Copy the Paseo label taxonomy onto the configured forge repo after an explicit user choice",
+  input: InstallLabelsInputSchema,
+  output: InstallLabelsOutputSchema,
+});
+
+// ---------------------------------------------------------------------------
+// Agent Envelope (parsed telemetry, spec §4.4).
+// Every agent comment ends with the stamped envelope footer:
+//   <sub>🤖 **<SessionTitle>** (`<shortId>`) · `<model>` ·
+//   `<repo>:<branch>` · _<UTC timestamp>_</sub>
+// ---------------------------------------------------------------------------
+
+export const AgentEnvelopeSchema = z.object({
+  commentId: z.number(),
+  sessionTitle: z.string(),
+  agentShortId: z.string(),
+  model: z.string().nullable().default(null),
+  repo: z.string().nullable().default(null),
+  branch: z.string().nullable().default(null),
+  postedAt: z.string().nullable().default(null),
+  commitShas: z.array(z.string().regex(/^[0-9a-f]{7,40}$/)).default([]),
+  paseoLinks: z.array(z.string()).default([]),
+  serverId: z.string().nullable().default(null),
+});
+export type AgentEnvelope = z.infer<typeof AgentEnvelopeSchema>;
+
+export const IssueCommentSchema = z.object({
+  id: z.number(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  body: z.string(),
+  url: z.string(),
+  envelope: AgentEnvelopeSchema.nullable().default(null),
+});
+export type IssueComment = z.infer<typeof IssueCommentSchema>;
+
+export const IssueDetailSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  labels: z.array(z.string()),
+  labelDetails: z.array(ForgeLabelSchema).default([]),
+  body: z.string(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  webUrl: z.string(),
+  comments: z.array(IssueCommentSchema),
+  envelopes: z.array(AgentEnvelopeSchema),
+});
+export type IssueDetail = z.infer<typeof IssueDetailSchema>;
+
+const ENVELOPE_FOOTER_PATTERN =
+  /<sub>\s*🤖\s*\*\*(.+?)\*\*\s*\(`([^`)]+)`\)\s*·\s*`([^`]+)`\s*·\s*`([^`]+)`\s*·\s*_([^_]+)_\s*<\/sub>/;
+
+/** Remove the agent envelope footer so comment bodies render without duplication. */
+export function stripAgentEnvelopeFooter(body: string | undefined | null): string {
+  if (!body || typeof body !== "string") return "";
+  return body.replace(ENVELOPE_FOOTER_PATTERN, "").replace(/---\s*$/, "").trim();
+}
+
+const SHA_PATTERN = /\b[0-9a-f]{7,40}\b/g;
+const PASEO_LINK_PATTERN = /paseo:\/\/[^\s)>\]]+/g;
+const PASEO_SERVER_PATTERN = /paseo:\/\/h\/([^/\s]+)\/agent\//;
+
+/**
+ * Parse the agent envelope footer of one comment body into structured
+ * telemetry. Returns null when the comment carries no parseable footer;
+ * envelope parsing never fails the detail RPC.
+ */
+export function parseAgentEnvelope(
+  commentId: number,
+  body: string | undefined | null,
+): AgentEnvelope | null {
+  if (!body || typeof body !== "string") return null;
+  const match = ENVELOPE_FOOTER_PATTERN.exec(body);
+  if (!match) return null;
+  const sessionTitle = match[1].trim();
+  const agentShortId = match[2].trim();
+  if (!sessionTitle || !agentShortId) return null;
+  const model = match[3].trim() || null;
+  const repoBranch = match[4].trim();
+  const postedAt = match[5].trim() || null;
+  let repo: string | null = null;
+  let branch: string | null = null;
+  if (repoBranch) {
+    const sep = repoBranch.lastIndexOf(":");
+    if (sep > 0) {
+      repo = repoBranch.slice(0, sep) || null;
+      branch = repoBranch.slice(sep + 1) || null;
+    } else {
+      branch = repoBranch;
+    }
+  }
+  const commitShas = Array.from(
+    new Set(
+      (body.match(SHA_PATTERN) ?? []).filter(
+        (sha) => sha !== agentShortId && /[0-9]/.test(sha) && /[a-f]/.test(sha),
+      ),
+    ),
+  );
+  const paseoLinks = Array.from(new Set(body.match(PASEO_LINK_PATTERN) ?? []));
+  const serverMatch = PASEO_SERVER_PATTERN.exec(paseoLinks[0] ?? "");
+  return {
+    commentId,
+    sessionTitle,
+    agentShortId,
+    model,
+    repo,
+    branch,
+    postedAt,
+    commitShas,
+    paseoLinks,
+    serverId: serverMatch ? serverMatch[1] : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Detail / write contracts (spec §5.2–§5.4).
+// Input accepts `issueNumber` (primary) with `number` as a deprecated alias
+// so spec-shaped payloads keep working; handlers normalize via
+// `normalizeIssueNumber`.
+// ---------------------------------------------------------------------------
+
+const IssueNumberInput = z
+  .object({
+    directory: z.string().optional(),
+    remoteUrl: z.string().optional(),
+    issueNumber: z.number().int().positive().optional(),
+    number: z.number().int().positive().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.issueNumber == null && value.number == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "issueNumber (or number) is required",
+      });
+    }
+  });
+export type IssueNumberInput = z.infer<typeof IssueNumberInput>;
+
+/** Resolve the canonical issue number from either input spelling. */
+export function normalizeIssueNumber(
+  input: IssueNumberInput | { issueNumber?: number; number?: number },
+): number | null {
+  const issueNumber = (input as { issueNumber?: unknown }).issueNumber;
+  if (typeof issueNumber === "number" && Number.isInteger(issueNumber) && issueNumber > 0) {
+    return issueNumber;
+  }
+  const legacy = (input as { number?: unknown }).number;
+  if (typeof legacy === "number" && Number.isInteger(legacy) && legacy > 0) {
+    return legacy;
+  }
+  return null;
+}
+
+export const IssueDetailInputSchema = IssueNumberInput;
+export type IssueDetailInput = z.infer<typeof IssueDetailInputSchema>;
+
+export const IssueDetailOutputSchema = z.object({
+  repo: z.string().nullable(),
+  issue: IssueDetailSchema.nullable(),
+  fetchedAt: z.string().datetime(),
+  repoPublic: z.boolean().nullable().default(null),
+  tokenPresent: z.boolean().default(false),
+  tokenValid: z.boolean().nullable().default(null),
+  /** Repo-reported write capability; null when the host returned none (#193). */
+  repoWritePermission: z.boolean().nullable().default(null),
+  error: z.string().optional(),
+});
+export type IssueDetailOutput = z.infer<typeof IssueDetailOutputSchema>;
+
+export const issueDetailContract = defineContract({
+  name: "forge.issue-detail",
+  description: "Full body, comments, and parsed Agent Envelopes for one issue",
+  input: IssueDetailInputSchema,
+  output: IssueDetailOutputSchema,
+});
+
+export const SetLabelInputSchema = IssueNumberInput.extend({
+  label: z.string().min(1).max(100),
+});
+export type SetLabelInput = z.infer<typeof SetLabelInputSchema>;
+
+export const SetLabelOutputSchema = z.object({
+  number: z.number(),
+  labels: z.array(z.string()),
+  error: z.string().optional(),
+});
+export type SetLabelOutput = z.infer<typeof SetLabelOutputSchema>;
+
+export const setLabelContract = defineContract({
+  name: "forge.set-label",
+  description: "Apply one scoped label; an exclusive scope evicts the rest",
+  input: SetLabelInputSchema,
+  output: SetLabelOutputSchema,
+});
+
+export const AddCommentInputSchema = IssueNumberInput.extend({
+  body: z.string().min(1).max(10000),
+});
+export type AddCommentInput = z.infer<typeof AddCommentInputSchema>;
+
+export const AddCommentOutputSchema = z.object({
+  number: z.number(),
+  commentId: z.number().nullable(),
+  error: z.string().optional(),
+});
+export type AddCommentOutput = z.infer<typeof AddCommentOutputSchema>;
+
+export const addCommentContract = defineContract({
+  name: "forge.add-comment",
+  description: "Post a quick comment (or steering note) to the issue thread",
+  input: AddCommentInputSchema,
+  output: AddCommentOutputSchema,
+});
+
+// ---------------------------------------------------------------------------
+// Create issue (issue #200). Mirrors the other write verbs: the daemon resolves
+// the active forge and attaches the token, and the client only ever sees the
+// resulting issue number. Validation lives in a pure function so the composer
+// and the handler reject the same payloads.
+// ---------------------------------------------------------------------------
+
+export const CREATE_ISSUE_TITLE_MAX = 200;
+export const CREATE_ISSUE_BODY_MAX = 10000;
+export const CREATE_ISSUE_LABEL_MAX = 50;
+
+export const CreateIssueInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  title: z.string(),
+  body: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+});
+export type CreateIssueInput = z.infer<typeof CreateIssueInputSchema>;
+
+export const CreateIssueOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable().default(null),
+  number: z.number().int().positive().nullable().default(null),
+  error: z.string().optional(),
+});
+export type CreateIssueOutput = z.infer<typeof CreateIssueOutputSchema>;
+
+export const createIssueContract = defineContract({
+  name: "forge.create-issue",
+  description: "Create a new issue on the configured forge repo",
+  input: CreateIssueInputSchema,
+  output: CreateIssueOutputSchema,
+});
+
+/**
+ * Validate a create-issue payload; null when it is well-formed. A title is
+ * required (issue #200); the body and labels stay optional.
+ */
+export function validateCreateIssueInput(input: {
+  title?: unknown;
+  body?: unknown;
+  labels?: unknown;
+}): string | null {
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  if (!title) return "Issue title must not be empty";
+  if (title.length > CREATE_ISSUE_TITLE_MAX) return "Issue title is too long";
+  const body = typeof input.body === "string" ? input.body : "";
+  if (body.length > CREATE_ISSUE_BODY_MAX) return "Issue description is too long";
+  if (input.labels !== undefined) {
+    if (!Array.isArray(input.labels)) return "Labels must be a list";
+    if (input.labels.length > CREATE_ISSUE_LABEL_MAX) return "Too many labels";
+    if (input.labels.some((label) => typeof label !== "string" || !label.trim())) {
+      return "Label must not be empty";
+    }
+  }
+  return null;
+}
+
+/** Split a free-text labels field into trimmed, de-duplicated, non-empty names. */
+export function parseLabelList(text: string | undefined | null): string[] {
+  if (!text || typeof text !== "string") return [];
+  const names: string[] = [];
+  for (const part of text.split(",")) {
+    const name = part.trim();
+    if (name && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+// ---------------------------------------------------------------------------
+// Markdown-lite (issue #136): focused renderer input for forge issue
+// descriptions/comments. Covers paragraphs, headings, unordered/ordered
+// list lines, Markdown links, inline code, bold/italic, and fenced code
+// blocks. Pure string parsing: no RPC, no side effects, no dependencies.
+// ---------------------------------------------------------------------------
+
+export type MarkdownLiteSpan =
+  | { kind: "text"; text: string }
+  | { kind: "bold"; text: string }
+  | { kind: "italic"; text: string }
+  | { kind: "code"; text: string }
+  | { kind: "link"; text: string; url: string };
+
+export type MarkdownLiteBlock =
+  | { kind: "paragraph"; spans: MarkdownLiteSpan[] }
+  | { kind: "heading"; level: 1 | 2 | 3; spans: MarkdownLiteSpan[] }
+  | { kind: "list"; ordered: boolean; items: MarkdownLiteSpan[][] }
+  | { kind: "code"; text: string; language?: string };
+
+const INLINE_PATTERN =
+  /(`[^`\n]+`)|(\[([^\]\n]+)\]\(([^)\s]+)\))|(\*\*([^*\n]+)\*\*)|(__([^_\n]+)__)|(\*([^*\n]+)\*)|(_([^_\n]+)_)/g;
+
+/** Split one line of prose into text/bold/italic/code/link spans. */
+export function parseMarkdownLiteInline(text: string): MarkdownLiteSpan[] {
+  if (!text) return [];
+  const spans: MarkdownLiteSpan[] = [];
+  let cursor = 0;
+  INLINE_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = INLINE_PATTERN.exec(text)) !== null) {
+    if (match.index > cursor) {
+      spans.push({ kind: "text", text: text.slice(cursor, match.index) });
+    }
+    if (match[1]) {
+      spans.push({ kind: "code", text: match[1].slice(1, -1) });
+    } else if (match[2]) {
+      spans.push({ kind: "link", text: match[3], url: match[4] });
+    } else if (match[5]) {
+      spans.push({ kind: "bold", text: match[6] });
+    } else if (match[7]) {
+      spans.push({ kind: "bold", text: match[8] });
+    } else if (match[9]) {
+      spans.push({ kind: "italic", text: match[10] });
+    } else if (match[11]) {
+      spans.push({ kind: "italic", text: match[12] });
+    }
+    cursor = match.index + match[0].length;
+  }
+  if (cursor < text.length) {
+    spans.push({ kind: "text", text: text.slice(cursor) });
+  }
+  return spans.filter((span) => {
+    if (span.kind === "link") return span.text.length > 0 && span.url.length > 0;
+    return span.text.length > 0;
+  });
+}
+
+const HEADING_PATTERN = /^(#{1,3})\s+(.+?)\s*$/;
+const UNORDERED_PATTERN = /^\s*[-*]\s+(.+)$/;
+const ORDERED_PATTERN = /^\s*\d+[.)]\s+(.+)$/;
+const FENCE_PATTERN = /^\s*```\s*([A-Za-z0-9_+-]*)\s*$/;
+
+/** Split a Markdown body into render blocks for the compact composer view. */
+export function parseMarkdownLite(body: string | undefined | null): MarkdownLiteBlock[] {
+  if (!body || typeof body !== "string") return [];
+  const blocks: MarkdownLiteBlock[] = [];
+  const paragraph: string[] = [];
+  const flushParagraph = () => {
+    if (paragraph.length === 0) return;
+    const text = paragraph.join("\n").trim();
+    paragraph.length = 0;
+    if (!text) return;
+    blocks.push({ kind: "paragraph", spans: parseMarkdownLiteInline(text) });
+  };
+  const closeList = (list: MarkdownLiteBlock | null) => {
+    if (list && list.kind === "list" && list.items.length > 0) blocks.push(list);
+  };
+  let openList: MarkdownLiteBlock | null = null;
+  let fenceLanguage: string | undefined;
+  let fenceLines: string[] | null = null;
+  for (const rawLine of body.split(/\r?\n/)) {
+    const fence = FENCE_PATTERN.exec(rawLine);
+    if (fence) {
+      if (fenceLines == null) {
+        flushParagraph();
+        closeList(openList);
+        openList = null;
+        fenceLanguage = fence[1] || undefined;
+        fenceLines = [];
+      } else {
+        blocks.push({
+          kind: "code",
+          text: fenceLines.join("\n").replace(/\n$/, ""),
+          ...(fenceLanguage ? { language: fenceLanguage } : {}),
+        });
+        fenceLanguage = undefined;
+        fenceLines = null;
+      }
+      continue;
+    }
+    if (fenceLines != null) {
+      fenceLines.push(rawLine);
+      continue;
+    }
+    if (!rawLine.trim()) {
+      flushParagraph();
+      closeList(openList);
+      openList = null;
+      continue;
+    }
+    const heading = HEADING_PATTERN.exec(rawLine);
+    if (heading) {
+      flushParagraph();
+      closeList(openList);
+      openList = null;
+      blocks.push({
+        kind: "heading",
+        level: heading[1].length as 1 | 2 | 3,
+        spans: parseMarkdownLiteInline(heading[2]),
+      });
+      continue;
+    }
+    const unordered = UNORDERED_PATTERN.exec(rawLine);
+    const ordered = unordered ? null : ORDERED_PATTERN.exec(rawLine);
+    if (unordered || ordered) {
+      flushParagraph();
+      const isOrdered = !unordered;
+      const content = (unordered?.[1] ?? ordered?.[1] ?? "").trim();
+      if (!content) continue;
+      if (!openList || openList.kind !== "list" || openList.ordered !== isOrdered) {
+        closeList(openList);
+        openList = { kind: "list", ordered: isOrdered, items: [] };
+      }
+      (openList as { kind: "list"; ordered: boolean; items: MarkdownLiteSpan[][] }).items.push(
+        parseMarkdownLiteInline(content),
+      );
+      continue;
+    }
+    closeList(openList);
+    openList = null;
+    paragraph.push(rawLine);
+  }
+  if (fenceLines != null) {
+    blocks.push({
+      kind: "code",
+      text: fenceLines.join("\n").replace(/\n$/, ""),
+      ...(fenceLanguage ? { language: fenceLanguage } : {}),
+    });
+  }
+  flushParagraph();
+  closeList(openList);
+  return blocks;
+}
+// The autonomous board check stamps a raw text delta into chat
+// ("[Autonomous Trigger] Forgejo Board Alert: ..."). The composer view
+// restyles it as a structured card; this parser extracts the payload so
+// the timeline transformer can build typed renderer data. Pure string
+// parsing: no RPC, no side effects.
+// ---------------------------------------------------------------------------
+
+export const BoardAlertIssueSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  labels: z.array(z.string()).default([]),
+  action: z.string().default(""),
+  url: z.string().url().optional(),
+});
+export type BoardAlertIssue = z.infer<typeof BoardAlertIssueSchema>;
+
+export const BoardAlertSchema = z.object({
+  headline: z.string(),
+  issues: z.array(BoardAlertIssueSchema),
+});
+export type BoardAlert = z.infer<typeof BoardAlertSchema>;
+
+export const boardAlertTimelineSchema = z.object({
+  headline: z.string(),
+  issues: z.array(BoardAlertIssueSchema),
+});
+export type BoardAlertTimelineData = z.infer<typeof boardAlertTimelineSchema>;
+
+const BOARD_ALERT_MARKERS = ["forgejo board alert", "forgejo board actionable delta"];
+
+const BOARD_ISSUE_LINE = /^\s*[-*]\s*issue\s*#(\d+)\s*:\s*(.+?)\s*$/i;
+const BOARD_LABELS_LINE = /^\s*labels\s*:\s*(.+?)\s*$/i;
+const BOARD_ACTION_LINE = /^\s*action\s*:\s*(.+?)\s*$/i;
+
+/** True when chat text carries a board-alert delta dump. */
+export function isBoardAlertText(text: string | undefined | null): boolean {
+  if (!text || typeof text !== "string") return false;
+  const lower = text.toLowerCase();
+  return BOARD_ALERT_MARKERS.some((marker) => lower.includes(marker));
+}
+
+/**
+ * Parse a raw board-alert dump into structured card data.
+ * Returns null when the text is not a board alert or carries no issues.
+ */
+export function parseBoardAlert(text: string | undefined | null): BoardAlert | null {
+  if (!isBoardAlertText(text)) return null;
+  const body = text as string;
+  const linksByNumber = new Map<number, string>();
+  for (const link of extractForgeIssueUrls(body)) {
+    if (!linksByNumber.has(link.number)) linksByNumber.set(link.number, link.url);
+  }
+  const lines = body.split(/\r?\n/);
+  const issues: BoardAlertIssue[] = [];
+  let current: { number: number; title: string; labels: string[]; action: string; url?: string } | null = null;
+  const flush = () => {
+    if (current) {
+      const parsed = BoardAlertIssueSchema.safeParse(current);
+      if (parsed.success) issues.push(parsed.data);
+      current = null;
+    }
+  };
+  for (const line of lines) {
+    const issueMatch = BOARD_ISSUE_LINE.exec(line);
+    if (issueMatch) {
+      flush();
+      const number = Number(issueMatch[1]);
+      const rawTitle = issueMatch[2].trim();
+      const urlInTitle = extractForgeIssueUrls(rawTitle)[0]?.url;
+      const title = urlInTitle ? rawTitle.replace(urlInTitle, "").replace(/\s{2,}/g, " ").trim() : rawTitle;
+      current = {
+        number,
+        title,
+        labels: [],
+        action: "",
+        ...(linksByNumber.get(number) ? { url: linksByNumber.get(number) as string } : {}),
+      };
+      continue;
+    }
+    if (!current) continue;
+    const labelsMatch = BOARD_LABELS_LINE.exec(line);
+    if (labelsMatch) {
+      current.labels = labelsMatch[1]
+        .split(",")
+        .map((label) => label.trim())
+        .filter(Boolean);
+      continue;
+    }
+    const actionMatch = BOARD_ACTION_LINE.exec(line);
+    if (actionMatch) {
+      current.action = actionMatch[1].trim();
+    }
+  }
+  flush();
+  if (issues.length === 0) return null;
+  const headlineMatch = /forgejo board alert\s*:?\s*([^\n]*)/i.exec(body);
+  const headline = headlineMatch?.[1]?.trim() || "New actionable items detected";
+  return { headline, issues };
+}

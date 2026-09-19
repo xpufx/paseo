@@ -1,0 +1,820 @@
+# Native Forge Workflow GUI Plugin for Paseo
+
+**Status:** specification (implements [Issue #56 (forge.example.com)](https://forge.example.com/your-org/your-repo/issues/56));
+the auth/data-path, label, and install sections below track the shipped
+implementation as of the standalone-release pass for [Issue #121 (forge.example.com)](https://forge.example.com/your-org/your-repo/issues/121)
+**Scope:** `plugins/forges` (`paseo-forges`) server + client, built only on
+`paseo-plugin-helper` primitives — no Paseo host/SDK changes
+**Auth model:** daemon-side token in plugin settings; all forge access goes
+through the embedded TypeScript `fetch` client (`server/forge-client.ts`).
+There is no `fgj`/`fgjx` subprocess dependency and no host dotfile coupling.
+
+> Historical note: an earlier revision specified a `fgjx`/`fgj` subprocess
+> data path. That design is superseded — see §3.
+
+---
+
+## 1. Problem statement
+
+The operator (`@your-org`) and the Orchestrator must leave the Paseo
+desktop/mobile client and open an external web browser to inspect issues,
+review agent deliverables, advance label state, or cross-reference agent IDs
+and commit hashes. Every context switch breaks the orchestration loop:
+triage happens in the browser, steering happens in chat, and neither side sees
+the other.
+
+A native GUI plugin keeps the whole loop inside Paseo: the issue queue, the
+issue detail (with parsed Agent Envelope telemetry), one-click scoped label
+toggles, and quick comments all live in plugin surfaces powered by
+`paseo-plugin-helper`.
+
+### What already exists (reuse, do not duplicate)
+
+`plugins/forges` (`paseo-forges`) already ships the thin end of this wedge:
+
+- Server: `forge.open-issues` contract (`shared/issues.ts`) + `handleOpenIssues`
+  (`server/issues.ts`) — resolves owner/repo from the workspace directory's
+  git `origin` remote, calls the embedded forge (Gitea-family) fetch client, and never
+  throws (failures surface as an `error` field so the pill renders a
+  placeholder).
+- Shared: `parseForgeRemote`, `extractForgeIssueUrls` (timeline
+  linkifier), `formatIssueCountLabel` (null count renders `"issues --"`
+  placeholder, never a false zero).
+- Client: composer pill (`GitPullRequest` icon, 15 s label poll / 30 s query
+  poll) + issues modal (`Tabs`, `SearchInput`, `Card`, `EmptyState`, copy the
+  `[#N title](url)` markdown ref — push-to-composer is unavailable on the 0.8
+  SDK, so copy-and-paste remains the handoff).
+
+This spec extends that plugin with four new RPC contracts and three new UI
+surfaces. All shared parsing helpers (`parseForgeRemote`,
+`extractForgeIssueUrls`) are reused as-is.
+
+---
+
+## 2. Goals / non-goals
+
+### Goals
+
+1. **Board overview in-client.** Searchable queue of open issues sorted by the
+   deterministic priority tuple (§4.3), with quick-filters for `state/*` and
+   `priority/*` buckets — no browser required for triage.
+2. **Issue detail in-client.** Full markdown body, comment thread, and parsed
+   Agent Envelope cards (agent id, provider/model, branch, commit SHAs,
+   `paseo://` session link) in one inspection modal.
+3. **One-click label state toggles.** Scoped `state/`–`priority/`–`attention/`–`spec/`
+   selectors that rely on Gitea-family native exclusive auto-eviction (apply the new
+   label; the old one in the same scope evicts itself — zero `--remove-label`
+   calls).
+4. **Quick comments from the client.** Operator steering posted straight into
+   the issue thread without leaving Paseo.
+5. **Token-in-settings auth.** The daemon stores a per-host API token in
+   plugin settings; the client never sees it and no host CLI/dotfile is
+   required.
+6. **Deep links.** Agent IDs resolve to `paseo://h/<serverId>/agent/<agentId>`
+   sessions; commit SHAs resolve to local `git log` / web viewer.
+
+### Non-goals
+
+- No new Paseo SDK surface (`initClientHelpers` four-field shape unchanged;
+  `registerComposerPill` / `registerSidebarSurface` used as documented).
+- No push-to-composer (0.8 SDK exposes no composer-insert API — same
+  limitation the current issues modal already documents).
+- No actionable toasts (see the
+  [toast-to-approval spec](./toast-to-approval.md) for the split-surface
+  approval pattern if a signoff flow is needed later).
+- No plugin-specific logic in `paseo-plugin-helper` — any generally reusable
+  parsing (envelope regex, priority-rank comparator) ships in the helper only
+  if a second consumer needs it; until then it lives in `plugins/forges`.
+- No implementation in this spec phase — schemas, method names, and layouts
+  only.
+
+---
+
+## 3. Authentication & data path
+
+### 3.1 Token source (daemon-side plugin settings)
+
+All forge access goes through the embedded TypeScript client
+(`server/forge-client.ts`), which speaks the Gitea-family `/api/v1` over
+`fetch` with a 15 s abort timeout. There is no subprocess and no host
+CLI/dotfile dependency: the plugin works on a machine that has never had
+`fgj`/`fgjx` or `~/.config/fgj`.
+
+The token lives in daemon-side plugin settings, keyed by host
+(`ForgeSettings.tokensByHost`), and is read by `tokenForHost(host)` in
+`server/settings.ts`:
+
+1. Resolve repo coordinates without shelling: read `<directory>/.git/config`
+   directly and parse the `origin` URL with `parseForgeRemote` (handles
+   `git@host:owner/repo`, `https://host/owner/repo`, `ssh://git@host/...`);
+   an explicit per-workspace forge target wins absolutely (issue #109/#137).
+2. Construct `new ForgeClient({ host, token: await tokenForHost(host) })`.
+   The token is attached only as an `Authorization: token <t>` header on
+   `fetch` calls that run in the daemon; it is never serialized into an RPC
+   payload and never reaches the client.
+3. Endpoints: `GET /repos/{owner}/{repo}/issues` (list),
+   `GET /repos/{owner}/{repo}/issues/{n}` + `/comments` (detail/labels),
+   `PATCH /repos/{owner}/{repo}/issues/{n}` (label writes), and
+   `POST /repos/{owner}/{repo}/issues/{n}/comments` (comments). Repo labels
+   (`GET`/`POST/DELETE /repos/{owner}/{repo}/labels`) back the optional label
+   install (§5.5).
+4. Handlers never throw: failures return a typed `error` field and the client
+   renders `EmptyState` + Retry (per `docs/surfaces.md` — data absent with a
+   live source renders the empty state, never a crash). Unauthenticated public
+   repos stay readable; writes require an accepted, write-scoped token on both
+   public and private repos (issues #152, #193). Edit capability is derived
+   from the repo response's permission object (`forgeCapabilityFromRepo`:
+   Forgejo/GitHub `permissions.push`/`admin`, GitLab `access_level >= 30`),
+   with bare token validity as the fallback when a host returns none. The
+   minimum Forgejo/Gitea scopes are `read:user`, `read:repository`, and
+   `write:issue`; a valid token without write scope surfaces as
+   **"token lacks write scope"** (`auth: "lacks-write-scope"`), never as
+   edits-enabled.
+
+Why embedded fetch over a subprocess: the plugin needs no preinstalled CLI or
+credential store, auth is explicit and daemon-scoped, and the API surface is
+versioned with the plugin instead of tracking a host binary.
+
+### 3.2 Caching & polling
+
+- There is no daemon-side board cache: reads are served live from the API.
+- Client-side: `useRpcQuery` for reads with a 30 s `refetchInterval` (the
+  issues list), plus a manual Refresh; the settings form queries
+  `forge.forge-context` independently so the token/host fields render while
+  issues load or fail (regression #152). Writes go through `useRpcMutation`
+  and refetch the board/detail on success.
+- Handlers stay cheap because each query is one or two API calls; a failed
+  list is logged once per host/repo, then demoted to debug to avoid log spam.
+
+---
+
+## 4. Data models
+
+All schemas are Zod, defined in `plugins/forges/shared/` (importable by both
+server and client), built with `defineContract` from
+`paseo-plugin-helper/shared`.
+
+### 4.1 Scoped label vocabularies (fallback + display data)
+
+Gitea-family scoped labels are exclusive: applying one label in a scope evicts the
+previous label in that scope at the DB level. The board is the source of truth
+for which scopes exist (decision #121.2): the client derives live scopes from
+the labels actually present on the returned issues (`liveScopesFromIssues`),
+and the canonical lists below are used only as fallback vocabulary and for
+display aliases. On a write, `handleSetLabel` sends the new label plus an
+explicit removal of any existing label in the same scope, so the result is
+correct even for boards whose scope names differ from ours. Canonical scopes
+and ranks:
+
+```ts
+export const StateRank = {
+  "state/0-triage": 0,
+  "state/1-wip": 1,
+  "state/2-review": 2,
+  "state/3-verify": 3,
+  "state/4-done": 4,
+} as const;
+
+export const PriorityRank = {
+  "priority/0-SOS": 0,
+  "priority/1-high": 1,
+  "priority/2-normal": 2,
+  "priority/3-low": 3,
+  "priority/4-backburner": 4,
+} as const;
+
+export const AttentionScope = [
+  "attention/0-orchestrator",
+  "attention/1-agent",
+  "attention/2-user",
+  "attention/3-ignore",
+] as const;
+
+export const SpecScope = [
+  "spec/0-needed",
+  "spec/1-checklist",
+  "spec/2-approved",
+] as const;
+```
+
+> [!NOTE]
+> Label-name discrepancy: the issue body §2 cites shorthand names
+> (`state/wip`, `state/ready-for-review`, `state/verify`,
+> `state/confirmed-done`, `attention/0-agent`, `attention/1-user`). The live
+> board (verified via API at spec time) uses the numbered forms above
+> (`state/1-wip`, `state/2-review`, `state/3-verify`, `state/4-done`;
+> `attention/0-orchestrator` … `attention/3-ignore`). This spec norms on the
+> live names; the client renders short display aliases (`WIP`, `Review`,
+> `Verify`, `Done`) so the UI stays compact.
+
+### 4.2 Board item
+
+```ts
+export const BoardIssueSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  labels: z.array(z.string()),
+  priorityRank: z.number().int().min(0).max(4),
+  stateRank: z.number().int().min(0).max(4).nullable(),
+  attention: z.string().nullable().default(null),
+  updatedAt: z.string().optional(),
+  commentCount: z.number().int().nonnegative().default(0),
+});
+export type BoardIssue = z.infer<typeof BoardIssueSchema>;
+```
+
+- Issues carrying **no** `priority/*` label sort as `priority/2-normal`
+  (rank 2); issues with no `state/*` label carry `stateRank: null` and sort
+  after ranked states within the same priority band.
+- Closed issues are excluded from the overview (the `state/4-done` filter
+  shows open issues labeled done; true closed state is a separate query
+  flag — see `includeClosed` in §5.1).
+
+### 4.3 Sort tuple
+
+The overview is sorted by the deterministic tuple
+`(priorityRank, stateRank ?? 99, updatedAt desc)`:
+
+1. `priorityRank` ascending (`0-SOS` preempts everything).
+2. `stateRank` ascending within a band — `3-verify` (needs a human) surfaces
+   above `1-wip` (already owned), so operator attention lands where it
+   unblocks work. `null` ranks last.
+3. `updatedAt` descending (most recently active first) as the final tiebreak.
+
+`size/*` (`0-cheap` … `3-chunk`) and `dep/blocker` are exposed on the card as
+badges but do **not** enter the sort key in v1 (open question §10.3).
+
+### 4.4 Agent Envelope (parsed telemetry)
+
+Every agent comment ends with the envelope footer stamped by the team's
+issue-comment tool (see the coding-agent example skill):
+
+```markdown
+---
+<sub>🤖 **<SessionTitle>** (`<shortId>`) · `<model>` · `<repo>:<branch>` · _<UTC timestamp>_</sub>
+```
+
+Verified live example (`#77`):
+
+```markdown
+<sub>🤖 **Update legacy react-native specifier to client** (`d705b95`) · `muse-spark-1.3-contributor` · `paseo:main` · _2026-09-12 12:13 UTC_</sub>
+```
+
+Parsed schema (server-side, pure function, unit-tested):
+
+```ts
+export const AgentEnvelopeSchema = z.object({
+  commentId: z.number(),
+  sessionTitle: z.string(),
+  agentShortId: z.string(),
+  model: z.string().nullable().default(null),
+  repo: z.string().nullable().default(null),
+  branch: z.string().nullable().default(null),
+  postedAt: z.string().nullable().default(null),
+  commitShas: z.array(z.string().regex(/^[0-9a-f]{7,40}$/)).default([]),
+  paseoLinks: z.array(z.string().url().or(z.string().startsWith("paseo://"))).default([]),
+  serverId: z.string().nullable().default(null),
+});
+export type AgentEnvelope = z.infer<typeof AgentEnvelopeSchema>;
+```
+
+- `commitShas`: full 40-char and short 7+ char hex hashes found in the comment
+  body (code-fenced blocks included — agents report SHAs in both prose and
+  `commit:` lines).
+- `paseoLinks`: `paseo://h/<serverId>/agent/<agentId>` deep links found in
+  the body; `serverId` is extracted from the first one when present.
+- Unparseable footers are skipped (the comment still renders as plain
+  markdown); envelope parsing never fails the detail RPC.
+
+### 4.5 Issue detail
+
+```ts
+export const IssueCommentSchema = z.object({
+  id: z.number(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  body: z.string(),
+  envelope: AgentEnvelopeSchema.nullable().default(null),
+});
+
+export const IssueDetailSchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  state: z.string(),
+  labels: z.array(z.string()),
+  body: z.string(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  webUrl: z.string().url(),
+  comments: z.array(IssueCommentSchema),
+  envelopes: z.array(AgentEnvelopeSchema),
+});
+```
+
+---
+
+## 5. Server RPC interface
+
+Four contracts, namespaced `forge.*`, registered on the daemon
+`PluginContext` next to the existing `forge.open-issues` handler (which
+stays untouched for backward compatibility — the pill keeps working during
+migration).
+
+```ts
+import { z } from "zod";
+import { defineContract } from "paseo-plugin-helper/shared";
+```
+
+### 5.1 `forge.board-overview` (read)
+
+```ts
+export const boardOverviewContract = defineContract({
+  name: "forge.board-overview",
+  description: "Open issues sorted by the (priority, state, recency) tuple",
+  input: z.object({
+    directory: z.string().optional(),
+    stateFilter: z.enum(["all", "state/0-triage", "state/1-wip",
+      "state/2-review", "state/3-verify", "state/4-done"]).default("all"),
+    priorityFilter: z.enum(["all", "priority/0-SOS", "priority/1-high",
+      "priority/2-normal", "priority/3-low",
+      "priority/4-backburner"]).default("all"),
+    query: z.string().max(200).default(""),
+    includeClosed: z.boolean().default(false),
+    limit: z.number().int().min(1).max(200).default(100),
+  }),
+  output: z.object({
+    repo: z.string().nullable(),
+    issues: z.array(BoardIssueSchema),
+    verifyCount: z.number().int().nonnegative(),
+    wipCount: z.number().int().nonnegative(),
+    fetchedAt: z.string().datetime(),
+    error: z.string().optional(),
+  }),
+});
+```
+
+- Filtering is server-side (single fetch, cheap in-memory partition) so the
+  pill's `verifyCount` and the dashboard always agree — same predicates, same
+  data (per `docs/surfaces.md`).
+- `query` matches issue number (`"56"` / `"#56"`), title substring, or label
+  substring (case-insensitive) — the same matcher the current modal uses
+  client-side, moved server-side so sidebar and modal share it.
+- `verifyCount` = open issues with `state/3-verify`; `wipCount` = open issues
+  with `state/1-wip`. Returned on every call so the pill never needs a second
+  round-trip.
+
+### 5.2 `forge.issue-detail` (read)
+
+```ts
+export const issueDetailContract = defineContract({
+  name: "forge.issue-detail",
+  description: "Full body, comments, and parsed Agent Envelopes for one issue",
+  input: z.object({
+    directory: z.string().optional(),
+    number: z.number().int().positive(),
+  }),
+  output: z.object({
+    repo: z.string().nullable(),
+    issue: IssueDetailSchema.nullable(),
+    fetchedAt: z.string().datetime(),
+    error: z.string().optional(),
+  }),
+});
+```
+
+- Unknown number → `{ issue: null, error: "Issue #N not found in <repo>" }`
+  (typed null, never a throw — the modal renders `EmptyState`).
+- Envelopes are parsed server-side (Node regex) so the client receives
+  structured cards with zero parsing logic.
+
+### 5.3 `forge.set-label` (write)
+
+```ts
+export const setLabelContract = defineContract({
+  name: "forge.set-label",
+  description: "Apply one scoped label; an exclusive scope evicts the rest",
+  input: z.object({
+    directory: z.string().optional(),
+    number: z.number().int().positive(),
+    label: z.string().min(1),
+  }),
+  output: z.object({
+    number: z.number(),
+    labels: z.array(z.string()),
+    error: z.string().optional(),
+  }),
+});
+```
+
+- Implemented by fetching the issue, computing the current label list, and
+  `PATCH`ing the issue with the new label added plus any same-scope mate
+  removed (the embedded client's `setLabels`). Gitea-family exclusivity alone would
+  also evict a scope mate, but the explicit remove keeps the write correct on
+  boards with non-canonical scope names.
+- `label` is validated against the live board scopes (fallback: the known
+  vocabularies in §4.1) before any API call; unknown scopes return `{ error }`
+  without touching the API.
+- On success returns the fresh label list and refetches the board/detail
+  client-side.
+- Input accepts `issueNumber` (primary) with `number` as a deprecated alias;
+  handlers normalize via `normalizeIssueNumber`.
+
+### 5.4 `forge.add-comment` (write)
+
+```ts
+export const addCommentContract = defineContract({
+  name: "forge.add-comment",
+  description: "Post a quick comment (or steering note) to the issue thread",
+  input: z.object({
+    directory: z.string().optional(),
+    number: z.number().int().positive(),
+    body: z.string().min(1).max(10000),
+  }),
+  output: z.object({
+    number: z.number(),
+    commentId: z.number().nullable(),
+    error: z.string().optional(),
+  }),
+});
+```
+
+- Implemented with `POST /repos/{owner}/{repo}/issues/{n}/comments` via the
+  embedded client (`addComment`). The plugin does **not** append an agent
+  envelope — quick comments are operator steering, stamped with the sender's
+  identity by the API.
+- Empty/whitespace-only bodies are rejected client-side (button disabled) and
+  server-side (`min(1)` after trim).
+- Input accepts `issueNumber` (primary) with `number` as a deprecated alias.
+
+### 5.5 `forge.install-labels` (operator-only, not shipped)
+
+> Operator-gated, not registered: the optional label-set install is kept in the
+> codebase for our own board but excluded from the release surface (issue #163).
+> `index.server.ts` deliberately omits `handleInstallLabels`, so the RPC is not
+> reachable by end users, and the Settings card does not render. The contract,
+> handler, and planner below remain as the internals.
+
+```ts
+export const installLabelsContract = defineContract({
+  name: "forge.install-labels",
+  description: "Copy the Paseo label taxonomy onto the configured forge repo after an explicit user choice",
+  input: z.object({
+    directory: z.string().optional(),
+    remoteUrl: z.string().optional(),
+    mode: z.enum(["merge", "replace"]),
+  }),
+  output: z.object({
+    host: z.string().nullable(),
+    repo: z.string().nullable(),
+    mode: z.enum(["merge", "replace"]).nullable(),
+    created: z.array(z.string()),
+    skipped: z.array(z.string()),
+    removed: z.array(z.string()),
+    error: z.string().optional(),
+  }),
+});
+```
+
+- Keeps our taxonomy as installable data (`paseoLabelSet()`): `state/`,
+  `priority/`, `attention/`, `spec/`. The install is **never automatic** — the
+  pre-gate client required an explicit action plus a keep/replace choice, and
+  the server only writes after resolving an explicit forge target.
+- `mode` is required with no default so the choice can never be implicit.
+  `merge` only creates missing labels. `replace` additionally deletes the
+  target's labels that share a scope with our set but are not in it (e.g. a
+  foreign `state/ready-for-review`); labels in other scopes and unscoped
+  labels are never touched. See `planLabelSetInstall` in `shared/issues.ts`.
+- Requires a saved daemon-side token; a missing token fails closed
+  (`{ error }`) without any write. Results are reported as created/removed/
+  skipped name lists.
+
+---
+
+## 6. Client UI surfaces
+
+All components use only documented helper primitives. Entry point calls
+`initClientHelpers({ Icon, Modal, useRpc, useToast })` once (unchanged).
+
+### 6.1 Status count pill (composer trackbar)
+
+Extends the existing `forges-issues` pill; no second pill:
+
+- Wide label: `"3 verify · 12 open"` (verify-first — the operator's most
+  valuable glance). Compact label: `"3v"`.
+- Data: `useRpcQuery(boardOverviewContract, { directory })`, reusing the
+  existing 15 s label poll / 30 s query poll cadence.
+- Visibility rule (per `docs/surfaces.md`): `verifyCount > 0` → label as
+  above; zero verify but live source → `"12 open"`; source dead/unknown →
+  existing `"issues --"` placeholder. Never a `0 verify` chip.
+- Tap opens the Queue Dashboard modal (§6.2) pre-filtered to
+  `state/3-verify` when `verifyCount > 0`, else unfiltered.
+
+### 6.2 Queue Dashboard (modal + sidebar)
+
+Registered **twice** from one shared component tree:
+
+- Modal: `registerComposerPill(..., { renderModal: (props) =>
+  <ForgeBoardModal {...props} /> })` — replaces the current
+  `ForgeIssuesModal` list tab, keeping `SearchInput` + copy-ref behavior.
+- Sidebar: `registerSidebarSurface(plugin, { id: "forge-board",
+  title: "Board", icon: "KanbanSquare", Component: ForgeBoardSurface })` —
+  full-height surface for sustained triage (desktop split-pane friendly).
+
+Layout (shared `<BoardView>` used by both, responsive via `useResponsive()`):
+
+```
+┌──────────────────────────────────────────────┐
+│ Card.Header: "Board · owner/repo"            │
+│   badge: "3 verify" (warning dot) / hidden   │
+├──────────────────────────────────────────────┤
+│ Tabs: [Queue] [Verify n] [WIP n] [Search]    │
+│   shortLabels: Queue/Verify/WIP/Search       │
+├──────────────────────────────────────────────┤
+│ (Search tab) SearchInput "Filter #number…"   │
+│ Priority filter row: [SOS][High][Normal]…    │
+│   (ghost Buttons, single-select, All reset)  │
+├──────────────────────────────────────────────┤
+│ DataTable (desktop) / card list (compact):   │
+│   #N │ Title + label Badges │ 💬n │ updated  │
+│   via <Responsive desktop card-list>         │
+├──────────────────────────────────────────────┤
+│ ActionBar: [Refresh secondary] [Close ghost] │
+│   (modal only; sidebar omits Close)          │
+└──────────────────────────────────────────────┘
+```
+
+- Rows: `DataTable` with `keyExtractor={(i) => String(i.number)}` on desktop;
+  automatic card-list reflow on compact (built into `DataTable`). Row tap →
+  opens Issue Inspection (§6.3) with `{ number }` payload. Copy-ref button
+  per row (existing `issueMarkdownRef` behavior preserved).
+- State/priority badges: `Badge` per label (`priority/0-SOS` → `danger`,
+  `state/3-verify` → `warning`, `state/1-wip` → `info`, rest `neutral`).
+- Filters are `Tabs` (state scope) + single-select ghost `Button` row
+  (priority scope) + `SearchInput` (query) — all three map 1:1 onto the
+  `board-overview` input, so sidebar and modal can never disagree.
+- Empty states: `EmptyState` (`"CheckCircle2"` / `"No open issues"`;
+  `"Search"` / `"No matches"` with query echo) — same copy as today.
+
+### 6.3 Issue Inspection modal
+
+`renderModal` payload `{ number }` (from board row tap or pill shortcut).
+`useAutoRefreshQuery(issueDetailContract, { directory, number },
+{ defaultRate: "30s", isOpen })`.
+
+```
+┌──────────────────────────────────────────────┐
+│ Card.Header: "#56 Title…" (truncate helper)  │
+│   badges: state Badge + priority Badge       │
+├──────────────────────────────────────────────┤
+│ Tabs: [Overview] [Comments n] [Envelopes m]  │
+│       [Labels]                               │
+├─ Overview ───────────────────────────────────┤
+│ KeyValueGroup(2): Author │ Updated │ State…  │
+│ Markdown body (RN text; fenced blocks via    │
+│   CodeBlock w/ copy; issue URLs linkified    │
+│   via extractForgeIssueUrls)                 │
+│ Envelopes preview: latest AgentEnvelopeCard  │
+├─ Comments ───────────────────────────────────┤
+│ Comment cards (author, timestamp, body)      │
+│ Quick-comment composer: TextInput (multiline)│
+│   + Button "Post" (useRpcMutation add-       │
+│   comment; disabled when empty/pending)      │
+├─ Envelopes ──────────────────────────────────┤
+│ AgentEnvelopeCard × m:                       │
+│   Card + Card.Header (session title, agent   │
+│     ShortId Badge mono copyable, model       │
+│     Badge)                                   │
+│   KeyValue: Branch (copyable mono) │ Posted  │
+│   Commit SHAs: one CommandBox per SHA        │
+│     (copy button; tap → §7.2)                │
+│   paseo:// link Button "Open agent session"  │
+│     (ghost w/ ExternalLink icon; tap → §7.1) │
+│   EmptyState "Cpu"/"No agent activity yet"   │
+│     when m = 0                               │
+├─ Labels ─────────────────────────────────────┤
+│ Scoped toggle groups (one row per scope):    │
+│   State:    [Triage][WIP][Review][Verify]…   │
+│   Priority: [SOS][High][Normal][Low][Parked] │
+│   Attention:[Orches.][Agent][User][Ignore]   │
+│   Spec:     [Needed][Checklist][Approved]    │
+│ Active label per scope: primary Button; rest │
+│   ghost. Tap → useRpcMutation set-label;     │
+│   isPending disables the group.              │
+│ Signoff row: Button "Post verify request"    │
+│   (add-comment w/ canned "Ready for human    │
+│   verification" template — operator opt-in)  │
+└──────────────────────────────────────────────┘
+```
+
+- Markdown rendering: plain React Native `Text` + `CodeBlock` for fenced
+  sections + pressable link spans for issue URLs / `paseo://` / SHAs. No new
+  markdown dependency (zero native modules).
+- Optimistic label UI: the tapped button shows `loading` until the mutation
+  settles, then query invalidation repaints the group from server truth — no
+  client-side label prediction (exclusivity edge cases stay server-side).
+- The Labels tab is the Orchestrator Approval Panel's v1: state promotion
+  (`1-wip` → `2-review` → `3-verify`) and review-verdict comments cover the
+  Agent-vs-Operator handoff the issue asks for, without inventing a new
+  approval primitive (defer full signoff flow to the toast-to-approval
+  pattern if needed).
+
+---
+
+## 7. Deep linking & telemetry
+
+### 7.1 Agent session links (`paseo://h/<serverId>/agent/<agentId>`)
+
+- Tap handler: `Linking.openURL("paseo://h/<serverId>/agent/<agentId>")`
+  (same `Linking` mechanism the current row-tap uses for `https://` URLs).
+- Fallback: on failure, `copyToClipboard(link)` + toast (`"Session link
+  copied"`) so the operator can paste it into a connected client.
+- Envelopes without a `paseo://` link (older comments, e.g. `#77`) render
+  the agent ShortId as a copyable mono `KeyValue` instead of a dead button —
+  surfaces rule: absent data with a live source renders the copyable value,
+  never a broken action.
+
+### 7.2 Commit SHA links
+
+Tap on a SHA `CommandBox`:
+
+1. Preferred: open the repo web commit view
+   `https://<host>/<owner>/<repo>/commit/<sha>` via `Linking.openURL`
+   (coordinates already known from `resolveRepo`).
+2. Long-press (or secondary button): copy the full SHA to clipboard.
+3. v2 (Phase 3): `git -C <directory> show --stat <sha>` via a new
+   `forge.commit-stat` read contract — specified but not required for v1.
+
+### 7.3 Worktree / branch display
+
+Branch names from envelopes render as copyable mono text (`CommandBox`
+single-line variant). No checkout action in v1 — branch teleportation stays
+with the agent harness (open question §10.4).
+
+---
+
+## 8. Lifecycle state machine (label transitions)
+
+```
+                    set-label                 set-label
+  0-triage ───────────────────▶ 1-wip ───────────────────▶ 2-review
+     │                             │                             │
+     │ attention/1-agent           │ agent posts completion      │ orchestrator approves /
+     │ (claim)                     │ envelope + sets             │ requests changes
+     ▼                             ▼                             ▼
+  (operator triage)              2-review ◀────────────────── 1-wip (rework)
+                                        │
+                                        │ operator verifies / approves
+                                        ▼
+                                     3-verify ── human closes ──▶ (closed)
+                                        │
+                                        │ changes requested
+                                        ▼
+                                      1-wip
+```
+
+Invariants:
+
+1. Client sends only `set-label` adds; Gitea-family exclusive scopes guarantee
+   single-occupancy per scope — the client never issues removes.
+2. Agents and the Orchestrator never close issues (coding-agent skill §6):
+   `state/4-done` is an open label; closing is the human operator's word.
+3. `flag/stop-work` short-circuits everything: when present, the Labels tab
+   disables all toggle groups and renders a `danger` banner (circuit breaker
+   is board-global, not per-transition).
+4. `attention/3-ignore` suppresses the issue in the default Queue tab
+   (server-side exclusion unless `query` matches — deterministic triage
+   parity), unless `priority/0-SOS` is also present (SOS outranks ignore).
+
+---
+
+## 9. Error handling matrix
+
+| Situation | Behavior |
+|---|---|
+| No git remote / unparseable origin | `{ repo: null, error }` → `EmptyState` "No forge repo for this workspace" (existing behavior, kept) |
+| API unreachable / no token for a private repo | `{ error: "Issue list unavailable" }` → `EmptyState` + Retry; pill falls back to `"issues --"` placeholder |
+| Unknown issue number | `{ issue: null, error }` → `EmptyState` "Issue #N not found in repo" |
+| `set-label` with out-of-vocabulary label | Rejected before spawn; `{ error }` surfaced via mutation `onError`; toggle group re-enables |
+| `set-label` race (two operators, same scope) | Last write wins at the host; query invalidation repaints from server truth — no client prediction to unwind |
+| `add-comment` empty body | Button disabled client-side; `min(1)` server-side rejects as typed error |
+| `add-comment` failure (network/auth) | Mutation `onError` → toast; composer text preserved (never cleared on failure) |
+| Envelope footer unparseable | Comment renders as plain markdown; `envelopes` omits it; detail RPC still succeeds |
+| `paseo://` open fails (no handler) | Copy link to clipboard + toast; never a dead tap |
+| Storage write fails (board cache) | Serve last good cache with stale `fetchedAt`; `Card.Header` subtitle shows "updated Xm ago" via `formatDuration` |
+
+---
+
+## 10. Phased roadmap
+
+### Phase 0 — This spec (done when merged)
+
+Spec file + board review. Labels advance `spec/1-checklist` →
+`spec/2-approved`, `state/1-wip` → `state/2-review` on the tracking issue.
+No code touched.
+
+### Phase 1 — Architecture & data path (shipped)
+
+- [x] `shared/issues.ts`: label vocabularies + ranks, issue/detail/envelope
+      schemas, envelope parser, sort-tuple comparator, contracts (§4–§5).
+- [x] `server/forge-client.ts`: embedded Gitea-family `/api/v1` fetch client
+      (list/detail/comments/labels, repo probe, token probe).
+- [x] `server/issues.ts` + `server/settings.ts`: repo resolution (`.git/config`
+      parse, explicit-target precedence), host-keyed daemon-side tokens,
+      `set-label` / `add-comment` / `install-labels` handlers. No subprocess.
+- [x] Unit tests: envelope parser, sort tuple (SOS-first, verify-before-wip,
+      recency tiebreak), scope-vocabulary guard, link classification, label-set
+      planning.
+- [x] Keep `forge.open-issues` contract; new contracts register alongside.
+
+### Phase 2 — Client UI surfaces
+
+- [ ] `<BoardView>` shared tree (`Card`, `Tabs`, `SearchInput`, `DataTable`,
+      `Badge`, `EmptyState`, `ActionBar`) + `ForgeBoardModal` (replaces list
+      tab content) + `ForgeBoardSurface` via `registerSidebarSurface`.
+- [ ] Pill upgrade: verify-first label (`"3 verify · 12 open"` / `"3v"`),
+      tap-through to pre-filtered dashboard.
+- [ ] `<IssueDetailModal>` with four tabs + `<AgentEnvelopeCard>` +
+      `<ScopedLabelGroup>` + quick-comment composer (`TextInput` multiline +
+      `useRpcMutation`).
+- [ ] Compact-portrait pass (`useResponsive` / `select`: table → cards,
+      full labels → `shortLabel`, `touchTargetMin` 44pt on toggles).
+
+### Phase 3 — Deep linking & telemetry
+
+- [ ] `paseo://` tap-through with clipboard fallback (§7.1).
+- [ ] Commit SHA → web commit view + long-press copy (§7.2).
+- [ ] Optional `forge.commit-stat` read contract (`git show --stat`) if
+      operator review needs diff summaries in-client.
+
+### Phase 4 — Hardening & parity
+
+- [ ] `flag/stop-work` banner + toggle-group disable; `attention/3-ignore`
+      exclusion rule (§8.4).
+- [ ] Closed-app honesty: board cache renders instantly with "updated Xm ago"
+      subtitle while the 60 s refresh runs (mirrors the toast-to-approval
+      durable-queue principle).
+- [ ] Gap suite: every new badge/count renders through shared predicates on
+      both pill and dashboard (per `docs/surfaces.md` rules for new metrics).
+
+### Open questions (implementation phase)
+
+1. Should the envelope parser / sort comparator move into
+   `paseo-plugin-helper/shared` for reuse by other plugins (e.g. an
+   Orchestrator dashboard)? Recommendation: keep in `plugins/forges` until
+   a second consumer exists.
+2. Should `forge.commit-stat` be part of v1? Recommendation: no — web-view
+   link + copy covers review; diff-in-client is Phase 3 stretch.
+3. Should `size/*` (effort) and `dep/blocker` enter the sort key?
+   Recommendation: badges only in v1; revisit after operator feedback.
+4. Branch teleportation (tap branch → open/attach workspace)? Recommendation:
+   explicitly out of scope — stays with the agent harness.
+
+---
+
+## 11. Testing plan
+
+- **Server:** pure shared functions unit-tested directly (`node --test` via
+  `esbuild`); the fetch client is exercised through its parsing helpers.
+  Assert board sort order, live scope derivation, scope-vocabulary rejection,
+  label-set planning (`merge` vs `replace`), detail null-form for unknown
+  numbers, and comment/commentId passthrough.
+- **Parser:** envelope footer fixtures (live `#77` footer, multi-SHA body,
+  `paseo://` body, malformed footer → skipped, no footer → `null`).
+- **Client:** mock `useRpc` doubles. Assert pill label variants
+  (`"3 verify · 12 open"` / `"12 open"` / `"issues --"`), tab filters map to
+  contract input, row tap opens detail payload, label tap fires
+  `set-label { number, label }` with group disabled while pending, empty
+  comment disables Post, failed comment preserves composer text.
+- **Surfaces:** pill and dashboard fed by the same mocked overview payload;
+  assert counts agree (gap-suite style, per `docs/surfaces.md`).
+
+---
+
+## 12. Acceptance criteria
+
+- [ ] Board overview renders the open queue sorted by
+      `(priorityRank, stateRank, updatedAt desc)` with state/priority filters
+      and `#N`/title/label search — no browser needed for triage.
+- [ ] Issue detail shows body, comment thread, and structured Agent Envelope
+      cards (agent id, model, branch, SHAs, `paseo://` link) in-client.
+- [ ] Scoped label toggles advance `state/`–`priority/`–`attention/`–`spec/`
+      with single taps; the write adds the label and removes any same-scope
+      mate, and the UI repaints from server truth after each mutation.
+- [ ] Quick comments post operator steering into the thread; composer text
+      survives failures.
+- [ ] Auth uses a daemon-side token saved per host in plugin settings; the
+      token never reaches the client and no `fgj` config or host CLI is
+      required.
+- [ ] Pill shows verify-first counts (`"3 verify · 12 open"` / `"3v"`) and
+      deep-opens the pre-filtered dashboard; zero-verify hides the verify
+      chip (never `0 verify`).
+- [ ] Agent ID taps resolve to `paseo://` sessions (clipboard fallback);
+      SHA taps open the web commit view (long-press copies).
+- [ ] Built only from documented helper primitives; `initClientHelpers`
+      shape unchanged; zero new SDK imports; client uses no Node
+      built-ins.
+- [ ] `forge.open-issues` contract and current pill behavior preserved
+      throughout migration.

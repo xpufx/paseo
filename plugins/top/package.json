@@ -1,23 +1,37 @@
 {
-  "name": "top",
-  "private": true,
-  "version": "0.3.0",
+  "name": "@xpufx/paseo-top",
+  "private": false,
+  "license": "MIT",
+  "version": "0.4.0",
   "scripts": {
-    "build": "node -e \"import('paseo-plugin-helper/server').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
-    "pretypecheck": "npm run build",
+    "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npx tsx --test server/telemetry.test.ts client/pill-labels.test.ts"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.8.0-beta.1",
+    "@getpaseo/plugin": "0.8.0",
     "@tanstack/react-query": "^5.90.11",
-    "@types/react": "~19.2.0",
+    "@types/react": "^19.0.10",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
     "zod": "^4.4.3"
   },
-  "dependencies": {
-    "paseo-plugin-helper": "file:../../../../../../tmp/paseo-plugin-helper-0.4.0-beta.11.tgz"
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE",
+    "client",
+    "server",
+    "shared",
+    "examples",
+    "!**/*.test.ts",
+    "!**/*.test.tsx",
+    "!**/*.test.mjs",
+    "!**/.DS_Store"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xpufx/paseo.git"
   }
 }

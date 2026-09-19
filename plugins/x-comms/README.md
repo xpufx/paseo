@@ -1,12 +1,14 @@
 # paseo-x-comms
 
-> Tracks the latest paseo beta (`@getpaseo/* 0.8.0-beta.1`, manifest requires `paseo >= 0.8.0`). Expect breaking changes between versions.
+> **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
-> Work in progress. Not all features work %100 as described.
+> Tracks stable paseo (`@getpaseo/* 0.8.0`, manifest requires `paseo >= 0.8.0`). Expect breaking changes between versions.
 
 [paseo](https://paseo.sh) is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions. **paseo-x-comms** lets agents on one daemon talk to agents on another — even across hosts — via the daemon relay (WebSocket + E2EE) or direct TCP.
 
 Scope: x-comms links one owner's daemons through one client UI. Pairing is explicit and local; stranger federation is out of scope (an experimental flag at most, post-1.0).
+
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
 
 This repo ships two things:
 
@@ -33,7 +35,7 @@ The plugin lives at the repo root (`paseo-plugin.json` id `x-comms`):
 paseo plugin add xpufx/paseo-x-comms
 ```
 
-Paseo runs a node binary check plus a single `npm install` at the repo root (see `paseo-plugin.json` build), which pulls both plugin deps (`@getpaseo/plugin`, `@getpaseo/client`, `@getpaseo/protocol`, `paseo-plugin-helper`, `react-native`, etc.) and server deps (`@modelcontextprotocol/sdk`, `zod`) into one tree. The server is spawned from `./mcp` and resolves deps from that shared tree.
+The plugin requires **npm** and **Node.js** (v18+) in `$PATH`: the server bundle uses `@getpaseo/client` and `@getpaseo/protocol`, so `paseo-plugin.json` declares `npm install` as its install build command. `paseo-plugin-helper` is vendored under `client/`, `server/`, `shared/` and bundled from source. The MCP server is spawned from `./mcp` and resolves its deps (`@modelcontextprotocol/sdk`, `zod`, etc.) from the installed tree.
 
 To update:
 
@@ -72,6 +74,15 @@ Every `x_comms_send` prepends one line:
 `sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `sentAt`. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
 
 Tools (via the embedded server) are `x_comms_list_daemons`, `x_comms_add_daemon`, `x_comms_remove_daemon`, `x_comms_list_agents`, `x_comms_inspect`, `x_comms_send`, `x_comms_logs`, `x_comms_wait`, `x_comms_list_permissions`, `x_comms_allow_permission`, `x_comms_deny_permission` — see [mcp/README.md#tools](mcp/README.md#tools) for the reference. The plugin's conversation/panel UI wraps `send`/`logs`/`wait`/permissions for interactive use.
+
+### Outbox: retry, expiry, notification
+
+The plugin server keeps an **outbox** (the plugin state dir's `outbox.json`) for messages whose send failed. Held messages are retried over the same `x_comms_send` path with exponential backoff (5s doubling to a 60s cap), swept on a 15s periodic pass, and retried immediately when a peer is observed reconnecting (health/snapshot reachability flip).
+
+A held message expires after **10 minutes** by default (configurable in the settings surface, `outboxExpirySeconds`, clamped to 10s–24h). On expiry the sender is notified by appending an `x-comms-outbox-notice` timeline item with the reason; the message is then dropped.
+
+**Idempotency is not implemented.** The conversation protocol has no message-UUID slot and the receiver keeps no seen-id set for messages, so a retry after an ambiguous failure (send succeeded, acknowledgement lost) can re-deliver. Adding it would need a wire-format change; tracked separately.
+
 
 ## Repository layout
 

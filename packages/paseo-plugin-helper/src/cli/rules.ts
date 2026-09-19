@@ -92,4 +92,40 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
     replacement: "Call initClientHelpers({ Icon, Modal, useRpc, useToast }) once in the client entry with version-correct SDK imports",
     docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/client.md",
   },
+  "no-bare-react-native-ui": {
+    id: "no-bare-react-native-ui",
+    severity: "warn",
+    description: "Bare React Native UI primitive imported in plugin client code.",
+    replacement: "Import ModalBody, Toggle, TextInput, Button from 'paseo-plugin-helper/client'",
+  },
+  "no-bespoke-react-native-interactions": {
+    id: "no-bespoke-react-native-interactions",
+    severity: "warn",
+    description: "Raw React Native Pressable interaction imported in plugin client code.",
+    replacement: "Use Button, Tabs, FormRow, Collapsible, or another paseo-plugin-helper/client interaction primitive",
+  },
+  "no-bespoke-style-system": {
+    id: "no-bespoke-style-system",
+    severity: "warn",
+    description: "React Native StyleSheet styling imported in plugin client code.",
+    replacement: "Use paseo-plugin-helper/client layout and component primitives; retain only small local composition styles when no helper exists",
+  },
+  "no-hardcoded-modal-dimensions": {
+    id: "no-hardcoded-modal-dimensions",
+    severity: "warn",
+    description: "Hardcoded rigid minWidth / minHeight (> 350) detected on modal or container style.",
+    replacement: "Use fluid layout (e.g. minWidth: 0, flexShrink: 1) with ModalBody",
+  },
+  "no-helper-width-cap": {
+    id: "no-helper-width-cap",
+    severity: "warn",
+    description: "Artificial content width cap (maxContentWidth) on a host-owned container.",
+    replacement: "HostModalContent from 'paseo-plugin-helper/ui' — the host owns the dialog frame",
+  },
+  "no-host-scroll-hijack": {
+    id: "no-host-scroll-hijack",
+    severity: "warn",
+    description: "Forced scrollable={false} on host Modal.Content with a helper-owned replacement scroller.",
+    replacement: "HostModalContent (modal contexts) or HostScroll (host surfaces) from 'paseo-plugin-helper/ui'",
+  },
 };

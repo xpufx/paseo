@@ -9,16 +9,20 @@
     "plugins/top",
     "plugins/mcp-tools",
     "plugins/x-comms",
-    "plugins/forgejo",
-    "plugins/demo"
+    "plugins/forges",
+    "plugins/demo",
+    "plugins/slash",
+    "plugins/plugin-updates",
+    "plugins/twofado"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "doctor:live": "node scripts/doctor-live.mjs"
   },
   "repository": {
     "type": "git",
-    "url": "ssh://git@forge.mrs.aager.de:222/xpufx/paseo.git"
+    "url": "ssh://git@forge.mrs.uppidi.com:222/xpufx/paseo.git"
   },
   "license": "MIT"
 }

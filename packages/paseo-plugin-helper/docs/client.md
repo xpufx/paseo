@@ -2,7 +2,7 @@
 
 The `client` module provides React Native UI primitives, layout containers, and lifecycle registration engines designed to integrate natively into Paseo's mobile and desktop environments.
 
-It guarantees zero Node built-in imports, ensuring compliance with Hermes and Paseo's client plugin compiler.
+It guarantees zero Node built-in imports, ensuring compliance with Paseo's client plugin compiler.
 
 ---
 
@@ -14,13 +14,43 @@ Paseo exposes theme tokens (`PluginTheme`) through host props. `PluginThemeProvi
 ```ts
 export interface VisualFlair {
   radius?: "sharp" | "rounded" | "pill";      // Default: "rounded"
-  density?: "compact" | "comfortable" | "spacious"; // Default: "comfortable"
+  density?: "compact" | "comfortable" | "spacious"; // Default: "compact"
   surfaceStyle?: "flat" | "tinted" | "elevated";    // Default: "flat"
   accentColor?: string;                        // Custom brand hex (e.g. "#6366f1")
   borderWidth?: number;                        // Default: 1
   headingTransform?: "none" | "uppercase";     // Default: "none"
 }
 ```
+
+#### Density and the spacing scale
+
+Plugin surfaces are information-dense, so the **default density is `"compact"`**.
+`"comfortable"` and `"spacious"` are opt-in per plugin via
+`flair: { density: "comfortable" }`. Density feeds `resolvePadding`, which is
+the only source of card/body padding any helper primitive should consume:
+
+| Density       | horizontal (wide / compact) | vertical (wide / compact) | gap (wide / compact) |
+| ------------- | --------------------------- | ------------------------- | -------------------- |
+| `compact` (*) | 12 / 10                     | 8 / 6                     | 8 / 6                |
+| `comfortable` | 16 / 12                     | 14 / 10                   | 12 / 8               |
+| `spacious`    | 24 / 16                     | 20 / 14                   | 16 / 12              |
+
+(*) default
+
+Rules that keep vertical space honest:
+
+- Never hardcode a vertical padding/margin in a helper primitive — read
+  `padding.vertical` / `padding.gap` from `usePluginTheme()`. A literal `8`
+  silently ignores the active density.
+- Stacked label-above-value costs two text lines; use `KeyValue layout="inline"`
+  and `FormRow layout="inline"` whenever the control is a single short element
+  (`Toggle`, `StatusDot`, `Badge`, small `Button`).
+- Do not wrap helper primitives in extra `View`s that add their own gap or
+  padding. `Card` already applies `padding.vertical`, and `Card.Header` already
+  reserves its own bottom gap.
+- The free-standing scale for gaps inside a row/stack is
+  `spacing = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24 }`; prefer a token
+  over a raw pixel value.
 
 ### `usePluginTheme()`
 Hook providing resolved colors and utility functions inside any component wrapped by `PluginThemeProvider`:
@@ -35,7 +65,20 @@ const {
   alpha,             // Helper: alpha(hexColor, opacityNumber) -> hex with alpha
   resolveRadius,     // Helper: resolveRadius("sm" | "md" | "lg" | "pill") -> number
   resolvePadding,    // Helper: resolvePadding("sm" | "md" | "lg") -> number
+  typography,        // Semantic title/heading/body/label/caption text styles
 } = usePluginTheme();
+```
+
+The `typography` scale is derived from the active compact layout and visual
+density. Prefer these semantic styles over inventing per-component font sizes
+so plugin surfaces remain visually consistent:
+
+```tsx
+const { colors, typography } = usePluginTheme();
+
+<Text style={[typography.heading, { color: colors.foreground }]}>
+  Repository
+</Text>
 ```
 
 ---
@@ -95,20 +138,11 @@ Or via render prop:
 ### `initClientHelpers({ Icon, Modal, useRpc, useToast })`
 Required once per plugin client entry, before any other helper client API is
 used. The helper never imports the Paseo SDK itself, so one published build
-runs on both Paseo v0.7 and v0.8: the plugin supplies the host
+runs on Paseo >= 0.8.0: the plugin supplies the host
 implementations using whichever specifiers match its installed SDK.
 
 ```tsx
-// Paseo v0.7
-import { useRpc } from "@getpaseo/plugin";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers } from "paseo-plugin-helper/client";
-
-initClientHelpers({ Icon, Modal, useRpc, useToast });
-```
-
-```tsx
-// Paseo v0.8
+// Paseo 0.8
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers } from "paseo-plugin-helper/client";
@@ -116,13 +150,13 @@ import { initClientHelpers } from "paseo-plugin-helper/client";
 initClientHelpers({ Icon, Modal, useRpc, useToast });
 ```
 
-On Paseo v0.8 the host also owns scrolling, input, and clipboard primitives
+On Paseo 0.8 the host also owns scrolling, input, and clipboard primitives
 with sheet-gesture and keyboard integration. Pass them as optional extras;
 every helper falls back to plain React Native when they are absent, so the
 four-field call above keeps working unchanged:
 
 ```tsx
-// Paseo v0.8 with host-owned primitives
+// Paseo 0.8 with host-owned primitives
 import { useRpc } from "@getpaseo/plugin/client";
 import {
   Icon,
@@ -157,9 +191,11 @@ Scroll resolution follows one rule (`selectHostScrollView` in
 `src/client/host.ts`): injected host component wins, plain React Native is
 the fallback, so pre-0.8 hosts scroll exactly as before:
 
-- `ModalBody`: desktop always scrolls; on compact viewports it uses the host
-  scroller (with pull-to-refresh) when injected, otherwise the legacy flat
-  `View` that defers to the host sheet and avoids the double-scroll trap.
+- `ModalBody`: compact/mobile viewports use the helper's host-aware scroller
+  (with pull-to-refresh); desktop renders a plain content view so the host
+  modal or surface remains the single scroll owner and nested desktop scroll
+  regions do not appear. Composer popovers on Paseo 0.8 also render plain
+  content because Paseo's `MenuSurface` already supplies the scroll owner.
 - `Tabs` (scroll mode) and `CodeBlock` (vertical + horizontal) render through
   the resolved scroller, keeping `nestedScrollEnabled`/`directionalLockEnabled`
   for the fallback path.
@@ -178,7 +214,7 @@ up immediately in development rather than as a silent blank pill.
 ### `registerComposerPill(client, options)`
 Handles the complete lifecycle of injecting a composer pill for each active agent, subscribing to agent updates, opening modals, and unmounting cleanly.
 
-Works on both host generations: legacy `{Component, onPress}` pills (Paseo 0.7 and beta apps) and `button`-descriptor pills with anchored popovers (Paseo 0.8+), detected once with a throwaway probe registration that is removed immediately. Pass `onError({ agentId, workspaceId, error })` to surface registration failures in your own UI instead of throwing out of plugin setup. On 0.8 hosts the modal becomes an anchored popover driven by the host, so `renderPill` custom bodies and programmatic `open`/`toggle` only apply on legacy hosts; `title`, `icon`, and `renderModal` work on both. Live pill text on 0.8 hosts comes from `resolveLabel({ agentId, workspaceId })`, called once at registration and polled every `refreshIntervalMs` (default 5000, `0` for once-only); each resolved string is pushed via the registration `update({ label })`. Returning `undefined` keeps the current label. Expect a narrow popover column, not a wide modal, so keep `renderModal` content vertically stacked.
+Works on both host generations: legacy `{Component, onPress}` pills (pre-0.8 hosts) and `button`-descriptor pills with anchored popovers (Paseo 0.8+), detected once with a throwaway probe registration that is removed immediately. Pass `onError({ agentId, workspaceId, error })` to surface registration failures in your own UI instead of throwing out of plugin setup. On 0.8 hosts the modal becomes an anchored popover driven by the host, so `renderPill` custom bodies and programmatic `open`/`toggle` only apply on legacy hosts; `title`, `icon`, and `renderModal` work on both. Live pill text on 0.8 hosts comes from `resolveLabel({ agentId, workspaceId })`, called once at registration and polled every `refreshIntervalMs` (default 5000, `0` for once-only); each resolved string is pushed via the registration `update({ label })`. Returning `undefined` keeps the current label. Expect a narrow popover column, not a wide modal, so keep `renderModal` content vertically stacked.
 
 Supports declarative **compact props** so default pills automatically shrink to fit narrow mobile/split-screen tracks without truncating:
 
@@ -227,8 +263,32 @@ registerSidebarSurface(plugin, {
   id: "my-surface",
   title: "Dashboard",
   icon: "LayoutDashboard",
-  flair: { density: "comfortable" },
+  flair: { density: "comfortable" }, // optional; default is "compact"
   Component: MyDashboardComponent,
+});
+```
+
+A registered surface is a full host page: Paseo does **not** wrap the surface
+body in a host scroller. `registerSidebarSurface` therefore marks the subtree as
+helper-scroll-owned, so any `ModalBody` inside it owns the single scroll region on
+every platform — including a wide desktop window. Plugin surfaces get working
+scroll for free and must not add their own outer `ScrollView`.
+
+### `registerCommandCenterItem(plugin, contribution)`
+Registers an entry in the host Ctrl+K command center. Thin pass-through that keeps plugins on the helper seam; `onSelect` receives `{ openSurface, openSettings }`.
+
+```tsx
+import { registerCommandCenterItem } from "paseo-plugin-helper/client";
+
+registerCommandCenterItem(plugin, {
+  id: "open-my-surface",
+  title: "My surface",
+  icon: "LayoutDashboard",
+  keywords: ["dashboard", "console"],
+  context: "global", // "global" | "workspace" | "agent"
+  onSelect({ openSurface }) {
+    openSurface("my-surface");
+  },
 });
 ```
 
@@ -286,6 +346,34 @@ Form input with label, placeholder, helper or error text, secure text entry, and
 />
 ```
 
+### `<Select>`
+Compact single-choice picker sized for `<FormRow>`. The closed trigger is one
+line tall; opening reveals a bounded, scrollable option list, so a long list
+degrades to scrolling instead of overflow. Themed through the same tokens as
+`TextInput`/`Badge`; callers supply no styling.
+
+```tsx
+<Select
+  label="RPC operation"
+  value={operation}
+  options={rpcOptions.map((name) => ({ label: name, value: name }))}
+  onValueChange={setOperation}
+  placeholder="Choose an operation…"
+  size="md" // "md" (default, theme caption metrics) | "sm" (10/12 Badge scale)
+  disabled={isLocked}
+/>
+```
+
+#### Properties:
+- `value`: Currently selected value; a free-text value that is not in `options` is surfaced on the trigger instead of the placeholder.
+- `options`: `{ label, value }[]` choices.
+- `onValueChange`: Fired with the new value on selection; the list closes.
+- `label`: Optional accessible label (composed with the current value).
+- `size`: `"md"` (default) or `"sm"`, reusing the `Badge` size scale.
+- `placeholder`: Shown when `value` is empty (default `"Select…"`).
+- `disabled`: Blocks opening and mutes the trigger. A trigger with no options is also inert.
+- `style`: Escape-hatch override for the container.
+
 ### `<Toggle>`
 Accessible boolean switch with minimum 44pt touch boundary and custom visual flair theme support.
 
@@ -309,14 +397,40 @@ Accordion container with chevron rotation, badges, and smooth expand/collapse.
 
 ### `<Badge>`
 Status indicator chip with automatic contrast styling.
+
 ```tsx
 <Badge label="Online" variant="success" style="tinted" dot />
 <Badge label="Warning" variant="warning" style="outline" />
 <Badge label="Error" variant="danger" style="solid" />
+<Badge label="bug" variant="neutral" size="sm" />
 ```
 
+#### Properties:
+- `label`: Chip text.
+- `variant`: `StatusVariant` controlling the palette (`neutral` default).
+- `styleVariant`: `"tinted"` (default), `"outline"`, or `"solid"`.
+- `size`: `"md"` (default, theme caption metrics) or `"sm"` — a compact pill with 10/12 type, `paddingVertical: 1`, `paddingHorizontal: 5`, and a 10px icon.
+- `icon`: Lucide icon name or custom node rendered before the label.
+- `dot`: Renders a status dot instead of an icon.
+- `style` / `textStyle`: Escape-hatch overrides layered on top of the size metrics.
+- `highlightQuery`: When set, every case-insensitive (literal, non-regex) occurrence of the query inside `label` is painted with the accent highlight.
+
+### `<HighlightedText>`
+`<Text>` that paints every case-insensitive occurrence of a search query with the theme accent background/foreground. The query is matched literally via `indexOf` (never compiled as a regular expression), so user input cannot inject a pattern. When the query is empty or absent the text renders unchanged. Pair it with `splitHighlightParts(text, query)` / `hasHighlightMatch(text, query)` from `paseo-plugin-helper/shared` when you need the runs or a boolean without rendering.
+
+```tsx
+<HighlightedText text={issue.title} query={query} style={styles.title} />
+```
+
+#### Properties:
+- `text`: Source text; rendered as-is when no query is active.
+- `query`: Active search query. Matched case-insensitively and literally.
+- `style`: Escape-hatch text style applied to the outer `<Text>`.
+- `highlightStyle`: Overrides the matched-run style (defaults to accent background + `accentForeground`).
+- `numberOfLines` / `selectable`: Forwarded to the underlying `<Text>`.
+
 ### `<Card>`
-Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips.
+Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips. `<Card.Header highlightQuery={q}>` highlights case-insensitive, literal matches of `q` inside the title.
 ```tsx
 <Card variant="tinted" padding="md">
   <Card.Header
@@ -329,7 +443,7 @@ Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`f
 ```
 
 ### `<Tabs>`
-Segmented horizontal tab selector designed for Paseo modal and surface environments. Features automatic fitting on mobile with `shortLabel` support and elevated edge navigation chevrons when scrolling. On Paseo v0.8 the tab ribbon renders inside the host `ScrollView`, so sheet gestures work without extra capture handling.
+Segmented horizontal tab selector designed for Paseo modal and surface environments. Features automatic fitting on mobile with `shortLabel` support and elevated edge navigation chevrons when scrolling. On Paseo 0.8 the tab ribbon renders inside the host `ScrollView`, so sheet gestures work without extra capture handling.
 
 ```tsx
 <Tabs
@@ -365,6 +479,25 @@ Displays key/value metadata. Automatically stacks vertically on compact/mobile s
   <KeyValue label="RAM Used" value="3.2 GB" />
   <KeyValue label="Endpoint" value="https://api.example.com/v1" copyable mono />
   <KeyValue label="Uptime" value="3d 4h" />
+</KeyValueGroup>
+```
+
+#### Collapse control
+By default a compact surface still collapses the group to a single column (the
+historical behavior, preserved for existing consumers). Two optional props let a
+group keep its columns when there is room:
+
+- `collapse`: `"compact"` (default) collapses to one column on a compact
+  surface; `"never"` keeps the requested `columns`.
+- `minColumnWidth`: when set and the container width is known, the effective
+  column count is capped so each column stays at least this wide — it wraps to
+  fewer columns instead of collapsing to one. `columns` remains the upper bound.
+
+```tsx
+// Stay 2-up in a compact popover as long as each cell has 220px.
+<KeyValueGroup columns={2} collapse="never" minColumnWidth={220}>
+  <KeyValue layout="inline" label="Version" value={sha} mono />
+  <KeyValue layout="inline" label="Remote" value={remote} mono />
 </KeyValueGroup>
 ```
 
@@ -440,21 +573,210 @@ Placeholder view for empty lists or zero-state panels.
 />
 ```
 
+### `<ForgeIcon>`
+One shared forge brand mark so plugins never carry their own per-forge icon
+tables. Pass a forge `host` and/or an explicit `kind`; the resolver decides
+which mark to draw.
+
+GitHub and GitLab stay on the host Lucide set (`Github`, `Gitlab`), and any
+unrecognised host falls back to `Globe`. Codeberg, Forgejo and Gitea have no
+Lucide equivalent, so the helper draws their official mono marks inline as an
+SVG data URI on web/Electron. On native — where Paseo plugin bundles cannot
+render SVG — those three fall back to a distinct Lucide glyph
+(`Mountain`/`Hammer`/`Coffee`) so forges stay distinguishable.
+
+```tsx
+import { ForgeIcon, resolveForgeMark } from "paseo-plugin-helper/client";
+
+// host-driven (e.g. parsed from a remote URL)
+<ForgeIcon host="codeberg.org" size={16} color={colors.foreground} />
+
+// explicit forge identity when the host is a self-hosted unknown
+<ForgeIcon host="forge.example.com" kind="forgejo" size={16} />
+
+// pure, testable resolution for shared/server code
+const mark = resolveForgeMark({ host: "gitea.com" });
+// { kind: "gitea", label: "Gitea", lucideName: "Coffee", custom: true }
+```
+
+The pure resolver is also exported from `paseo-plugin-helper/shared` as
+`resolveForgeMark`, `forgeKindFromHost`, `normalizeForgeHost` and `isForgeKind`
+(plus the `ForgeKind` / `ResolvedForgeMark` types), so host→mark logic can live
+in a plugin's shared layer without importing React.
+
+### `<AttentionBeacon>`
+Wraps any child and animates it to draw attention. Modes:
+`radar` (expanding halo, default), `ring` (alias of `radar`), `glow`
+(breathing halo behind the child), `badge` (pulsing corner pip, optional
+`badgeIcon` string or node), `bounce` (vertical nudge), and `pulse`
+(opacity animated directly on the child — no halo, so the wrapped icon
+keeps its own shape).
+
+`pulse` is the mode to use when the attention target is itself an icon
+whose shape must not change (e.g. a header icon gated on a pending count
+or health state). `glow` renders a halo *behind* the child and `StatusDot`
+is dot-only, so neither fits that case. `tone`/`color` resolve from the
+same theme tokens as every other mode; `duration` (default `900`ms) and
+`easing` (default linear) tune the pulse loop; `active={false}` renders
+the child inert with no animation.
+```tsx
+<AttentionBeacon
+  mode="pulse"
+  tone="warning" // "warning" | "accent" | "danger", or color="#eab308"
+  active={pendingCount > 0}
+  duration={900}
+  testID="header-beacon"
+>
+  <Icon name="Bell" size={16} color={colors.foreground} />
+</AttentionBeacon>
+```
+
 ---
 
 ## 4. Layout Primitives
 
-### `<ModalBody>`
-A scrollable container for `<Modal.Content>` that automatically applies bottom padding (`paddingBottom: 48` on mobile) to clear OS home navigation bars and keyboards.
-Supports native pull-to-refresh on mobile via `refreshing` and `onRefresh`.
+### `<Row>`, `<Stack>` / `<VStack>`, `<Grid>`
+Thin, themed flexbox wrappers. They exist so plugins compose horizontally and
+wrap instead of authoring everything as a vertical stack of hand-rolled
+`<View style={{ flexDirection: "row", gap }}>`. `gap` defaults to the active
+theme's `padding.gap`; pass a spacing token (`"xs" | "sm" | "md" | "lg" | "xl"`)
+or a raw px number to override.
 
 ```tsx
-<Modal.Content>
-  <ModalBody refreshing={isRefetching} onRefresh={refetch}>
-    {/* controls and cards */}
-  </ModalBody>
-</Modal.Content>
+import { Grid, MetricGauge, Row, Stack, StatusDot, Text } from "paseo-plugin-helper/client";
+
+<Row align="center" gap="sm" wrap>
+  <StatusDot variant="success" />
+  <Text>Build passing</Text>
+</Row>
+
+<Stack gap="xs">
+  <Text>Title</Text>
+  <Text>Subtitle</Text>
+</Stack>
+
+<Grid columns={4} minColumnWidth={180}>
+  <MetricGauge value={12} label="CPU" />
+  <MetricGauge value={64} label="RAM" />
+</Grid>
 ```
+
+- `Row`: `flexDirection: "row"`; optional `wrap`, `align`, `justify`.
+- `Stack` (alias `VStack`): the deliberate column default; optional `align`,
+  `justify`.
+- `Grid`: wrapping row grid. `columns` caps the count (default `2`);
+  `minColumnWidth` makes it width-aware — as many columns as fit, wrapping the
+  rest. It never collapses to one column on a compact surface.
+
+
+### `<ModalBody>`
+
+A scrollable container for `<Modal.Content>` that automatically applies bottom padding (`paddingBottom: 48` on mobile) to clear OS home navigation bars and keyboards.
+Supports native pull-to-refresh on mobile via `refreshing` and `onRefresh`.
+Pass `header` with `headerMode="pinned"` for a fixed tab/navigation bar. On
+desktop, the host remains the scroll owner and the web header uses sticky
+positioning; on compact/mobile, the header stays above the helper scroller:
+
+#### Modal size contract
+
+Every plugin modal takes the **host-allocated dialog size** and is fluid within
+it. The helper enforces the contract, so plugins never size their own frame:
+
+- **Fill the allocation, don't dictate it.** `ModalBody` is
+  `flex: 1 / minHeight: 0 / width: "100%"`. Keep every wrapper between the host
+  and `ModalBody` equally fluid (`flex: 1`, `minHeight: 0`, `width: "100%"`).
+- **No content-driven resizing.** Children must never determine the dialog's
+  width or height. A root that sizes itself to its children makes the modal
+  visibly resize/redraw as data loads, polls, or grows.
+- **No hardcoded modal dimensions.** Do not put `minWidth`, `minHeight`, `width`,
+  or `height` literals on a modal/surface container. For text that must be able
+  to shrink, use `minWidth: 0` + `flexShrink: 1`. The audit rule
+  `no-hardcoded-modal-dimensions` flags the large cases.
+- **No nested scrollers.** Let the host own the outer scroll on desktop and the
+  bottom sheet own it on mobile; use `ModalBody` for the body instead of wrapping
+  it in another `ScrollView` (a bounded inner `ScrollView` inside `Modal.Content`
+  is still a content-driven height - drop it and let the host scroll).
+
+#### Host behavior: desktop dialog vs mobile sheet
+
+| Surface | Host owns | `ModalBody` renders |
+| --- | --- | --- |
+| Desktop dialog | Bounded dialog size + outer scroll | Plain content view (no second scrollbar; sticky web header for `headerMode="pinned"`) |
+| Mobile bottom sheet (`AdaptiveModalSheet`) | Sheet viewport + sheet gesture + `BottomSheetScrollView` | Host-aware scroller when the helper owns scroll, plain view when the host does; adds the safe bottom inset |
+| 0.8 composer popover | `MenuSurface` / `FloatingScrollView` | Plain content (`ModalBodyScrollOwnerContext` marks the subtree) |
+
+Because the host allocates the size, a plugin cannot request a different dialog
+frame from plugin code - content simply flows into whatever the host gives it.
+
+Scroll ownership defaults to `scrollMode="auto"`: the helper scrolls on
+compact/mobile surfaces and defers to the host on desktop. Pass
+`scrollMode="always"` only when the host supplies no scroller because the content
+view is bounded (`ModalContent` does this for its bound `<Modal.Content>`); it
+makes the helper own the desktop scroller so nothing is clipped.
+
+#### Requesting a wider dialog: `size`
+
+When a genuinely data-dense modal/surface needs more room, use the single
+documented preset instead of a per-plugin literal:
+
+```tsx
+// Default: fully fluid inside the host allocation.
+<ModalBody>...</ModalBody>
+
+// Wide extent for tables, logs, or dense dashboards.
+<ModalBody size="large">...</ModalBody>
+```
+
+`size="large"` applies the helper's documented minimum width on desktop only.
+It is ignored on mobile (the bottom sheet is already full-bleed) and inside
+composer popovers (the host owns that narrow viewport). The host still owns the
+final size, so `large` is a request for room, not a hardcoded frame. Do not add
+`size`-related width/minWidth literals in plugin code; widen here instead.
+
+#### Constraining content width: `maxContentWidth`
+
+`size` widens the *dialog*; `maxContentWidth` caps the *content column* inside
+it so settings and forms stay readable on large viewports instead of stretching
+edge-to-edge. It is additive and defaults to the fully fluid body:
+
+```tsx
+// Host allocates a wide dialog; content stays a centered ~600px column.
+<ModalBody maxContentWidth={600}>...</ModalBody>
+```
+
+The helper applies `width: "100%"` (fluid below the cap) and
+`alignSelf: "center"` (centered above it) to its single content column, in both
+the host-owned and helper-owned scroll paths. It does not dictate the dialog
+frame, so it composes with `size` and the rest of the size contract. Prefer this
+over a per-plugin wrapper carrying a `maxWidth` literal.
+
+```tsx
+<ModalBody
+  header={<Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab} />}
+  headerMode="pinned"
+>
+  {/* moving page content */}
+</ModalBody>
+```
+
+```tsx
+// Inside a host-provided modal (registerComposerPill `renderModal`), the helper
+// already owns `<Modal.Content scrollable={false}>` — just render `ModalBody`:
+<ModalBody refreshing={isRefetching} onRefresh={refetch}>
+  {/* controls and cards */}
+</ModalBody>
+```
+
+When the plugin opens its own host `<Modal>`, render `<ModalContent>` (next
+section) instead of a raw `<Modal.Content>`, so the host content view gets the
+same bounded allocation.
+
+For composer popovers, do not add another `ScrollView` around `ModalBody`.
+`registerComposerPill` marks the popover subtree with
+`ModalBodyScrollOwnerContext`, allowing Paseo's outer `FloatingScrollView` or
+`BottomSheetScrollView` to own scrolling on both desktop and mobile. Keep the
+popover wrapper unconstrained: fixed heights and `overflow: hidden` can clip
+content before the host scroller measures it.
 
 For conversation-style views that track new content, pass `stickToEnd` to
 auto-scroll to the bottom on content size changes, or pass `scrollRef` for
@@ -467,6 +789,37 @@ imperative scrolling:
   ))}
 </ModalBody>
 ```
+
+### `<ModalContent>`
+Helper-owned replacement for the raw host `<Modal.Content>` when a plugin
+renders its own host `<Modal>`. It always passes `scrollable={false}` to the
+host content view and renders the shared `<ModalBody>` contract inside it, so
+the dialog always takes the host-allocated size and can never end up
+content-sized.
+
+Why this exists: Paseo's host maps the default `<Modal.Content scrollable>` to a
+desktop card with no explicit height, so a plugin using the raw host content
+view gets a dialog that resizes/redraws with its children. `scrollable={false}`
+makes the host allocate a bounded dialog (`desktopHeight: "85%"`). Because that
+bounded host content view supplies no scroller, `ModalContent` also forces
+`ModalBody scrollMode="always"`, so the helper owns the single scroll region on
+every surface (desktop included) and long content scrolls instead of clipping.
+
+```tsx
+import { Modal } from "@getpaseo/plugin/client/react-native";
+import { ModalContent } from "paseo-plugin-helper/client";
+
+<Modal title="My modal" open={open} onOpenChange={setOpen}>
+  <ModalContent header={<Tabs … />} headerMode="pinned">
+    {/* content */}
+  </ModalContent>
+</Modal>;
+```
+
+`ModalContent` accepts every `ModalBody` prop (`header`, `headerMode`,
+`refreshing`, `onRefresh`, `stickToEnd`, `scrollRef`, `debugTag`, `style`,
+`contentContainerStyle`, …), so `size?: "default" | "large"` remains the only
+size escape hatch. Do not put a raw `<Modal.Content>` in plugin client code.
 
 ### `<ActionBar>`
 Toolbar container that renders buttons in a row with spacing on desktop, and automatically stacks them vertically with full width on mobile or compact panels.
@@ -556,8 +909,50 @@ function SettingsTab() {
 }
 ```
 
+### `useSharedPluginSettings(contract, options?)`
+Reactive hook for suite-wide settings shared by independently installed sibling plugins. It wraps
+`usePluginSettings` with sync-friendly defaults (`staleTime: 0`, `refetchOnMount: "always"`,
+`refetchOnWindowFocus: true`) plus a 2 s background poll, so a value written by another plugin
+appears without a reload or reopening the modal. Set `pollIntervalMs: false` to disable polling.
+
+```tsx
+import { useSharedPluginSettings } from "paseo-plugin-helper/client";
+import { suiteSettingsContract } from "../shared/suite-settings.js";
+
+const { settings, updateSettings } = useSharedPluginSettings(suiteSettingsContract);
+```
+
+`useSuiteSettings(options?)` is the same hook bound to the canonical `SuiteSettingsContract`.
+Server-side setup lives in `createSharedPluginSettings` (see `docs/server.md` section 15).
+
 ### `registerHelperSettingsScreen(client, contract, options)`
 Turns a settings contract built by `defineSettingsContract` into a native Paseo settings screen with zero hand-written JSX. Field mapping follows the Zod object schema: boolean fields render as Switch, `z.enum` fields render as Select, string and number fields render as Input. Schema `.describe()` text is used for labels and hints when present, otherwise the field name is used. Unsupported field shapes are skipped with a logged warning and never throw. Values bind through the existing `usePluginSettings(contract)` hook, so the host `useRpc` injected via `initClientHelpers` is reused with no new plumbing. Number fields ignore unparseable keystrokes and keep the last good value, so `NaN` is never written back.
+
+### Shared snapshot keys and no-op guards (`snapshot.ts`)
+When pill, modal, and surface views render one host snapshot, route them
+through a single workspace-scoped cache identity. `sharedSnapshotKey`
+normalizes blank directories to the host-wide entry so `undefined`, `null`,
+and `""` never fragment the cache, and `normalizeSnapshotScope` keeps
+per-workspace entries separate. Keep selective server-side field params out
+of the client key; fetch the shared snapshot and derive per-item views from
+it. Settings listeners and live-label caches should gate fan-out with
+`shouldEmitSnapshotUpdate` (backed by `shallowEqualRecord`): React Query
+returns fresh object identities on every background refetch, and notifying
+on identity alone causes redraw loops with no value change.
+
+```tsx
+import { sharedSnapshotKey, shouldEmitSnapshotUpdate } from "paseo-plugin-helper/client";
+
+const key = sharedSnapshotKey(myStatusContract.name, workspaceDirectory);
+const query = useRpcQuery(myStatusContract, key[1], { refetchInterval: 5000 });
+
+useEffect(() => {
+  if (shouldEmitSnapshotUpdate(prevRef.current, settings)) {
+    prevRef.current = settings;
+    notifySettingsChanged(settings);
+  }
+}, [settings]);
+```
 
 Like `initClientHelpers`, the helper client imports zero Paseo SDK modules. The SDK settings UI components arrive as an explicit `options.ui` bundle supplied by the plugin from its own SDK version:
 
@@ -641,9 +1036,9 @@ with `~/...`) rather than as a raw absolute path.
 ## 7. Utilities
 
 ### `copyToClipboard(text, options?)`
-Universal cross-platform copy function for Paseo plugins. Works reliably across React Native (Hermes / mobile webviews / touch events), desktop, and modern secure browsers.
+Universal cross-platform copy function for Paseo plugins. Works reliably across React Native (mobile webviews / touch events), desktop, and modern secure browsers.
 Automatically integrates with Paseo's `useToast()` to display a toast notification on success.
-Tier order: host `copyText` from `initClientHelpers` (Paseo v0.8, when supplied), then React Native Clipboard, then `navigator.clipboard`, then an `execCommand` fallback.
+Tier order: host `copyText` from `initClientHelpers` (Paseo 0.8, when supplied), then React Native Clipboard, then `navigator.clipboard`, then an `execCommand` fallback.
 
 ```tsx
 import { copyToClipboard, useToast } from "paseo-plugin-helper/client";
@@ -671,3 +1066,16 @@ const handlePress = () => {
 ```
 
 
+# Inline actions
+
+Use `InlineButton` for compact links and actions inside timeline cards or
+dense content. It keeps touch targets, accent styling, and accessibility
+consistent without requiring each plugin to hand-roll a `Pressable`.
+
+```tsx
+<InlineButton
+  label="Open issue"
+  icon="ExternalLink"
+  onPress={() => Linking.openURL(url)}
+/>
+```

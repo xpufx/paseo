@@ -1,12 +1,13 @@
 import os from "node:os";
 import path from "node:path";
+import { matchesFamily } from "./family";
 import { discoverFromCandidates } from "../discovery/extract";
 import type { McpProbe, ProbeContext } from "../discovery/types";
 
 export const piProbe: McpProbe = {
   id: "pi",
   label: "pi · live",
-  matches: (provider) => provider === "pi",
+  matches: (provider) => matchesFamily(provider, "pi"),
   async probe(ctx: ProbeContext) {
     const home = os.homedir();
     const envDir = process.env.PI_CODING_AGENT_DIR?.trim()

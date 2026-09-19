@@ -1,8 +1,16 @@
 import React, { useMemo, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { useAgent, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { alpha, usePluginSettings } from "paseo-plugin-helper/client";
+import {
+  Badge,
+  Collapsible,
+  PluginThemeProvider,
+  ProgressBar,
+  Row,
+  Stack,
+  usePluginSettings,
+} from "paseo-plugin-helper/client";
 import { formatBytes, formatUptime, truncatePath } from "paseo-plugin-helper/shared";
 import {
   isTimelineEnabled,
@@ -12,9 +20,34 @@ import {
   type MetricId,
   type TopTimelineTelemetryData,
 } from "../shared/resources";
-import { formatCompactTokens } from "./pill-labels";
+import { formatCompactTokens, type TopAgentSnapshot } from "./pill-labels";
 
 export { TIMELINE_RENDERED_METRICS };
+
+function Vital({
+  icon,
+  color,
+  children,
+}: {
+  icon: string;
+  color: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Row gap={4} align="center">
+      <Icon name={icon} size={12} color={color} />
+      {/*
+       * Color MUST be applied to the label as well as the icon. A <Text> with
+       * no `color` falls back to React Native's default black and disappears on
+       * dark surfaces (xpufx-org/paseo#208). Reusing the icon's `color` keeps
+       * threshold states (e.g. CPU/RAM warning/danger) consistent for both.
+       */}
+      <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: "500", color }}>
+        {children}
+      </Text>
+    </Row>
+  );
+}
 
 export function TopTimelineTelemetryCard({
   item,
@@ -24,243 +57,28 @@ export function TopTimelineTelemetryCard({
 }: PluginTimelineItemProps<TopTimelineTelemetryData>) {
   const data = item.data;
   const [isExpanded, setIsExpanded] = useState(false);
-  const liveUsage = useAgent(data.agentId, (a: any) => a?.lastUsage);
-  const inputTokens = data.inputTokens ?? (liveUsage as any)?.inputTokens;
-  const outputTokens = data.outputTokens ?? (liveUsage as any)?.outputTokens;
+  const liveUsage = useAgent(data.agentId, (a: TopAgentSnapshot) => a.lastUsage);
+  const inputTokens = data.inputTokens ?? liveUsage?.inputTokens;
+  const outputTokens = data.outputTokens ?? liveUsage?.outputTokens;
   const cachedTokens =
     data.cachedTokens ??
-    (data as any)?.cachedInputTokens ??
-    (liveUsage as any)?.cachedInputTokens ??
-    (liveUsage as any)?.cachedTokens;
+    data.cachedInputTokens ??
+    liveUsage?.cachedInputTokens ??
+    liveUsage?.cachedTokens;
   const contextUsedTokens =
     data.contextUsedTokens ??
-    (liveUsage as any)?.contextWindowUsedTokens ??
-    (liveUsage as any)?.contextUsedTokens;
+    liveUsage?.contextWindowUsedTokens ??
+    liveUsage?.contextUsedTokens;
   const contextMaxTokens =
     data.contextMaxTokens ??
-    (liveUsage as any)?.contextWindowMaxTokens ??
-    (liveUsage as any)?.contextMaxTokens;
+    liveUsage?.contextWindowMaxTokens ??
+    liveUsage?.contextMaxTokens;
   const costUsd =
-    data.costUsd ?? (liveUsage as any)?.totalCostUsd ?? (liveUsage as any)?.costUsd;
+    data.costUsd ?? liveUsage?.totalCostUsd ?? liveUsage?.costUsd;
   const { settings } = usePluginSettings(topSettingsContract);
   const surfaces = settings.metricSurfaces;
-  const show = (id: MetricId) =>
-    !surfaces || isTimelineEnabled(surfaces[id]);
+  const show = (id: MetricId) => !surfaces || isTimelineEnabled(surfaces[id]);
   const showMcp = isMcpSurfaceEnabled(settings, "timeline", data.mcpInstalled, data.mcpRunning);
-
-  const styles = useMemo(() => {
-    const isFailed = data.outcomeKind === "failed";
-    return StyleSheet.create({
-      card: {
-        backgroundColor: theme.colors.surface1,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: isFailed ? theme.colors.statusDanger : theme.colors.border,
-        padding: layout.compact ? 6 : 8,
-        marginVertical: 2,
-      },
-      header: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        marginBottom: 6,
-      },
-      headerLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-      },
-      chevronBadge: {
-        width: 20,
-        height: 20,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: alpha(theme.colors.accent, 0.25),
-        backgroundColor: alpha(theme.colors.accent, 0.12),
-        alignItems: "center",
-        justifyContent: "center",
-      },
-      expandedDetails: {
-        marginTop: 6,
-        paddingTop: 6,
-      },
-      title: {
-        fontSize: 12,
-        fontWeight: "600",
-        color: theme.colors.foreground,
-      },
-      durationBadge: {
-        backgroundColor: theme.colors.surface2,
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-      },
-      durationText: {
-        fontSize: 10,
-        fontWeight: "500",
-        color: theme.colors.foregroundMuted,
-      },
-      headerRight: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-      },
-      timeText: {
-        fontSize: 10,
-        color: theme.colors.foregroundMuted,
-      },
-      vitalsRow: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        alignItems: "center",
-        justifyContent: "flex-start",
-        gap: 8,
-      },
-      vitalChip: {
-        flexDirection: "row",
-        alignItems: "center",
-        flexGrow: 1,
-        maxWidth: 110,
-        justifyContent: "center",
-        gap: 4,
-      },
-      vitalText: {
-        fontSize: 11,
-        fontWeight: "500",
-      },
-      tokenSection: {
-        marginTop: 6,
-        paddingTop: 6,
-        borderTopWidth: 1,
-        borderTopColor: theme.colors.border,
-        gap: 4,
-      },
-      tokenHeader: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-      },
-      tokenHeaderLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-      },
-      tokenHeaderTitle: {
-        fontSize: 10,
-        fontWeight: "600",
-        color: theme.colors.foregroundMuted,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-      },
-      tokenCostText: {
-        fontSize: 10,
-        fontWeight: "600",
-        color: theme.colors.foreground,
-      },
-      contextContainer: {
-        marginVertical: 2,
-        gap: 2,
-      },
-      contextLabelRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-      },
-      contextLabelGroup: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 8,
-        flexShrink: 1,
-      },
-      contextLabel: {
-        fontSize: 10,
-        color: theme.colors.foregroundMuted,
-      },
-      contextValue: {
-        fontSize: 10,
-        fontWeight: "600",
-        color: theme.colors.foreground,
-      },
-      progressBarTrack: {
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: theme.colors.surface2,
-        overflow: "hidden",
-      },
-      progressBarFill: {
-        height: "100%",
-        borderRadius: 3,
-      },
-      tokenPillsRow: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        alignItems: "center",
-        gap: 6,
-      },
-      viaTopText: {
-        fontSize: 10,
-        color: theme.colors.foregroundMuted,
-        fontStyle: "italic",
-      },
-      tokenTitle: {
-        fontSize: 10,
-        fontWeight: "600",
-        color: theme.colors.foregroundMuted,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-      },
-      tokenUnavailableText: {
-        fontSize: 10,
-        fontStyle: "italic",
-        color: theme.colors.foregroundMuted,
-      },
-      turnDetailsRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: 12,
-        marginTop: 2,
-      },
-      turnDetailsItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-      },
-      turnDetailsText: {
-        fontSize: 11,
-        color: theme.colors.foreground,
-      },
-      tokenBadge: {
-        flexDirection: "row",
-        alignItems: "center",
-        backgroundColor: theme.colors.surface2,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: 4,
-      },
-      tokenBadgeLabel: {
-        fontSize: 9,
-        color: theme.colors.foregroundMuted,
-      },
-      tokenBadgeValue: {
-        fontSize: 9,
-        fontWeight: "600",
-        color: theme.colors.foreground,
-      },
-      errorContainer: {
-        marginTop: 8,
-        padding: 6,
-        borderRadius: 4,
-        backgroundColor: theme.colors.surface2,
-        borderLeftWidth: 3,
-        borderLeftColor: theme.colors.statusDanger,
-      },
-      errorText: {
-        fontSize: 11,
-        color: theme.colors.statusDanger,
-      },
-    });
-  }, [data.outcomeKind, theme, layout.compact]);
 
   const outcomeConfig = useMemo(() => {
     switch (data.outcomeKind) {
@@ -326,13 +144,6 @@ export function TopTimelineTelemetryCard({
     return Math.round(((contextUsedTokens ?? 0) / contextMaxTokens) * 100);
   }, [contextUsedTokens, contextMaxTokens]);
 
-  const contextBarColor = useMemo(() => {
-    if (contextPercent == null) return theme.colors.accent ?? theme.colors.foreground;
-    if (contextPercent >= 85) return theme.colors.statusDanger;
-    if (contextPercent >= 70) return theme.colors.statusWarning;
-    return theme.colors.statusSuccess;
-  }, [contextPercent, theme.colors]);
-
   const hasTokenDetails =
     inputTokens != null ||
     outputTokens != null ||
@@ -341,452 +152,313 @@ export function TopTimelineTelemetryCard({
     contextMaxTokens != null ||
     costUsd != null;
 
+  const canceledText =
+    data.outcomeKind === "canceled"
+      ? !/^cancel/i.test(data.outcomeError ?? "")
+        ? `Canceled${data.outcomeError ? `: ${data.outcomeError}` : ""}`
+        : (data.outcomeError ?? "Canceled")
+      : "";
+
   return (
-    <View style={styles.card}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={isExpanded ? "Collapse timeline details" : "Expand timeline details"}
-        onPress={() => setIsExpanded((v) => !v)}
-        style={({ pressed }) => ({
-          cursor: "pointer",
-          backgroundColor: pressed ? theme.colors.surface2 : "transparent",
-          padding: 4,
-          borderRadius: 6,
-        })}
-      >
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <View style={styles.chevronBadge}>
-              <Icon
-                name={isExpanded ? "ChevronDown" : "ChevronRight"}
-                size={14}
-                color={theme.colors.foregroundMuted}
-              />
-            </View>
+    <PluginThemeProvider theme={theme} layout={layout}>
+      <Collapsible
+        variant="elevated"
+        isExpanded={isExpanded}
+        onToggle={setIsExpanded}
+        style={data.outcomeKind === "failed" ? { borderColor: theme.colors.statusDanger } : undefined}
+        title={
+          <Row gap={6} align="center">
             <Icon name={outcomeConfig.icon} size={14} color={outcomeConfig.color} />
-            <Text style={styles.title}>{outcomeConfig.label}</Text>
-            {data.durationMs != null && (
-              <View style={styles.durationBadge}>
-                <Text style={styles.durationText}>
-                  {(data.durationMs / 1000).toFixed(1)}s
+            <Text style={{ fontSize: 12, fontWeight: "600", color: theme.colors.foreground }}>
+              {outcomeConfig.label}
+            </Text>
+            {data.durationMs != null ? (
+              <Badge label={`${(data.durationMs / 1000).toFixed(1)}s`} variant="neutral" />
+            ) : null}
+          </Row>
+        }
+        headerRight={
+          <Row gap={6} align="center">
+            {timeLabel !== "" ? (
+              <Text style={{ fontSize: 10, color: theme.colors.foregroundMuted }}>{timeLabel}</Text>
+            ) : null}
+            <Text
+              style={{
+                fontSize: 10,
+                color: theme.colors.foregroundMuted,
+                fontStyle: "italic",
+              }}
+            >
+              via top
+            </Text>
+          </Row>
+        }
+        summary={
+          !isExpanded && data.outcomeKind === "canceled" ? (
+            <Text numberOfLines={2} style={{ fontSize: 11, color: theme.colors.statusDanger }}>
+              {canceledText}
+            </Text>
+          ) : undefined
+        }
+      >
+        <Stack gap={6}>
+          <Row wrap gap={8} align="center">
+            {show("cpu_ram") && (
+              <Vital icon="Cpu" color={cpuColor}>
+                CPU {data.cpuPercent}%
+              </Vital>
+            )}
+
+            {show("cpu_ram") && (
+              <Vital icon="Database" color={memColor}>
+                RAM {formatBytes(data.memUsedBytes)} ({data.memPercent}%)
+              </Vital>
+            )}
+
+            {show("load") && (
+              <Vital icon="Activity" color={theme.colors.foreground}>
+                Load {data.loadAvg1m.toFixed(2)}
+              </Vital>
+            )}
+
+            {showMcp && (
+              <Vital
+                icon="Server"
+                color={
+                  data.mcpTotal == null
+                    ? theme.colors.foregroundMuted
+                    : (data.mcpHealthy ?? 0) === data.mcpTotal
+                      ? theme.colors.statusSuccess
+                      : theme.colors.statusWarning
+                }
+              >
+                {data.mcpTotal != null ? `MCP ${data.mcpHealthy ?? 0}/${data.mcpTotal}` : "MCP --"}
+              </Vital>
+            )}
+
+            {show("agent_id") && (
+              <Vital icon="Fingerprint" color={theme.colors.foreground}>
+                {data.agentId && data.agentId.length > 7
+                  ? data.agentId.slice(0, 7)
+                  : (data.agentId ?? "--")}
+              </Vital>
+            )}
+
+            {show("agent") && (
+              <Vital
+                icon="Bot"
+                color={data.agentModel ? theme.colors.foreground : theme.colors.foregroundMuted}
+              >
+                {data.agentModel ?? "model --"}
+              </Vital>
+            )}
+
+            {show("agent_provider") && (
+              <Vital
+                icon="Globe"
+                color={
+                  data.agentProvider ? theme.colors.foreground : theme.colors.foregroundMuted
+                }
+              >
+                {data.agentProvider ?? "provider --"}
+              </Vital>
+            )}
+
+            {show("agent_title") && (
+              <Vital
+                icon="Tag"
+                color={data.agentTitle ? theme.colors.foreground : theme.colors.foregroundMuted}
+              >
+                {data.agentTitle ?? "title --"}
+              </Vital>
+            )}
+
+            {show("branch") && (
+              <Vital
+                icon="GitBranch"
+                color={data.branch ? theme.colors.foreground : theme.colors.foregroundMuted}
+              >
+                {data.branch ?? "branch --"}
+              </Vital>
+            )}
+
+            {show("worktree") && (
+              <Vital
+                icon="Folder"
+                color={data.worktree ? theme.colors.foreground : theme.colors.foregroundMuted}
+              >
+                {data.worktree ? truncatePath(data.worktree, 20) : "worktree --"}
+              </Vital>
+            )}
+
+            {show("uptime") && (
+              <Vital icon="Clock" color={theme.colors.foreground}>
+                {data.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "--"}
+              </Vital>
+            )}
+
+            {show("changes") && (
+              <Vital icon="GitCommitHorizontal" color={theme.colors.foreground}>
+                {(data.gitFilesChanged ?? 0) > 0
+                  ? `±${data.gitFilesChanged} files +${data.gitInsertions ?? 0}/-${data.gitDeletions ?? 0}`
+                  : "No changes"}
+              </Vital>
+            )}
+
+            {show("tokens") && (
+              <Vital
+                icon="Coins"
+                color={
+                  totalTokens != null || contextUsedTokens != null
+                    ? theme.colors.foreground
+                    : theme.colors.foregroundMuted
+                }
+              >
+                {contextUsedTokens != null && contextMaxTokens
+                  ? `${formatCompactTokens(contextUsedTokens)}/${formatCompactTokens(contextMaxTokens)}${contextPercent != null ? ` (${contextPercent}% ctx)` : ""}`
+                  : totalTokens != null
+                    ? `${formatCompactTokens(totalTokens)} tok`
+                    : contextUsedTokens != null
+                      ? `${formatCompactTokens(contextUsedTokens)} ctx`
+                      : "tok --"}
+              </Vital>
+            )}
+
+            {show("tools") && (
+              <Vital icon="Sigma" color={theme.colors.foreground}>
+                {data.toolCalls != null
+                  ? `${data.toolCalls}${data.toolErrors ? ` (${data.toolErrors} err)` : ""}`
+                  : "tools --"}
+              </Vital>
+            )}
+
+            {show("turns") && (
+              <Vital
+                icon="Repeat"
+                color={data.turnCount != null ? theme.colors.foreground : theme.colors.foregroundMuted}
+              >
+                {data.turnCount != null ? `${data.turnCount} turns` : "turns --"}
+              </Vital>
+            )}
+          </Row>
+
+          {show("tokens") && hasTokenDetails ? (
+            <Stack gap={8}>
+              <Row justify="space-between" align="center">
+                <Row gap={4} align="center">
+                  <Icon name="Coins" size={12} color={theme.colors.foregroundMuted} />
+                  <Text style={sectionTitleStyle(theme.colors)}>Tokens & Context</Text>
+                </Row>
+                {costUsd != null && (
+                  <Text style={{ fontSize: 10, fontWeight: "600", color: theme.colors.foreground }}>
+                    ${costUsd < 0.01 ? costUsd.toFixed(4) : costUsd.toFixed(2)}
+                  </Text>
+                )}
+              </Row>
+
+              {contextMaxTokens != null && contextMaxTokens > 0 ? (
+                <Stack gap={4}>
+                  <Row justify="space-between" align="center">
+                    <Text style={{ fontSize: 10, color: theme.colors.foregroundMuted }}>
+                      Context Window
+                    </Text>
+                    <Text style={{ fontSize: 10, fontWeight: "600", color: theme.colors.foreground }}>
+                      {formatCompactTokens(contextUsedTokens ?? 0)} /{" "}
+                      {formatCompactTokens(contextMaxTokens)} ({contextPercent}%)
+                    </Text>
+                  </Row>
+                  <ProgressBar
+                    value={contextPercent ?? 0}
+                    thresholds={{ warning: 70, danger: 85 }}
+                    height={6}
+                  />
+                </Stack>
+              ) : contextUsedTokens != null ? (
+                <Text style={{ fontSize: 10, color: theme.colors.foreground }}>
+                  {formatCompactTokens(contextUsedTokens)} tokens
                 </Text>
-              </View>
-            )}
-          </View>
-          <View style={styles.headerRight}>
-            {timeLabel !== "" && <Text style={styles.timeText}>{timeLabel}</Text>}
-            <Text style={styles.viaTopText}>via top</Text>
-          </View>
-        </View>
-      </Pressable>
+              ) : null}
 
-      <View style={styles.vitalsRow}>
-
-        {show("cpu_ram") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Cpu" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1} style={[styles.vitalText, { color: cpuColor }]}>
-              CPU {data.cpuPercent}%
-            </Text>
-          </View>
-        )}
-
-        {show("cpu_ram") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Database" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1} style={[styles.vitalText, { color: memColor }]}>
-              RAM {formatBytes(data.memUsedBytes)} ({data.memPercent}%)
-            </Text>
-          </View>
-        )}
-
-        {show("load") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Activity" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1} style={[styles.vitalText, { color: theme.colors.foreground }]}>
-              Load {data.loadAvg1m.toFixed(2)}
-            </Text>
-          </View>
-        )}
-
-        {showMcp && (
-          <View style={styles.vitalChip}>
-            <Icon name="Server" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color:
-                    data.mcpTotal == null
-                      ? theme.colors.foregroundMuted
-                      : (data.mcpHealthy ?? 0) === data.mcpTotal
-                        ? theme.colors.statusSuccess
-                        : theme.colors.statusWarning,
-                },
-              ]}
-            >
-              {data.mcpTotal != null
-                ? `MCP ${data.mcpHealthy ?? 0}/${data.mcpTotal}`
-                : "MCP --"}
-            </Text>
-          </View>
-        )}
-
-        {show("agent_id") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Fingerprint" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1} style={[styles.vitalText, { color: theme.colors.foreground }]}>
-              {data.agentId && data.agentId.length > 7 ? data.agentId.slice(0, 7) : (data.agentId ?? "--")}
-            </Text>
-          </View>
-        )}
-
-        {show("agent") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Bot" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color: data.agentModel
-                    ? theme.colors.foreground
-                    : theme.colors.foregroundMuted,
-                },
-              ]}
-            >
-              {data.agentModel ?? "model --"}
-            </Text>
-          </View>
-        )}
-
-        {show("agent_provider") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Globe" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color: data.agentProvider
-                    ? theme.colors.foreground
-                    : theme.colors.foregroundMuted,
-                },
-              ]}
-            >
-              {data.agentProvider ?? "provider --"}
-            </Text>
-          </View>
-        )}
-
-        {show("agent_title") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Tag" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color: data.agentTitle
-                    ? theme.colors.foreground
-                    : theme.colors.foregroundMuted,
-                },
-              ]}
-            >
-              {data.agentTitle ?? "title --"}
-            </Text>
-          </View>
-        )}
-
-        {show("branch") && (
-          <View style={styles.vitalChip}>
-            <Icon name="GitBranch" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color: data.branch
-                    ? theme.colors.foreground
-                    : theme.colors.foregroundMuted,
-                },
-              ]}
-            >
-              {data.branch ?? "branch --"}
-            </Text>
-          </View>
-        )}
-
-        {show("worktree") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Folder" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color: data.worktree
-                    ? theme.colors.foreground
-                    : theme.colors.foregroundMuted,
-                },
-              ]}
-            >
-              {data.worktree ? truncatePath(data.worktree, 20) : "worktree --"}
-            </Text>
-          </View>
-        )}
-
-        {show("uptime") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Clock" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1} style={[styles.vitalText, { color: theme.colors.foreground }]}>
-              {data.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "--"}
-            </Text>
-          </View>
-        )}
-
-        {show("changes") && (
-          <View style={styles.vitalChip}>
-            <Icon
-              name="GitCommitHorizontal"
-              size={12}
-              color={theme.colors.foregroundMuted}
-            />
-            <Text numberOfLines={1} style={[styles.vitalText, { color: theme.colors.foreground }]}>
-              {(data.gitFilesChanged ?? 0) > 0
-                ? `±${data.gitFilesChanged} files +${data.gitInsertions ?? 0}/-${data.gitDeletions ?? 0}`
-                : "No changes"}
-            </Text>
-          </View>
-        )}
-
-        {show("tokens") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Coins" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color:
-                    totalTokens != null || contextUsedTokens != null
-                      ? theme.colors.foreground
-                      : theme.colors.foregroundMuted,
-                },
-              ]}
-            >
-              {contextUsedTokens != null && contextMaxTokens
-                ? `${formatCompactTokens(contextUsedTokens)}/${formatCompactTokens(contextMaxTokens)}${contextPercent != null ? ` (${contextPercent}% ctx)` : ""}`
-                : totalTokens != null
-                  ? `${formatCompactTokens(totalTokens)} tok`
-                  : contextUsedTokens != null
-                    ? `${formatCompactTokens(contextUsedTokens)} ctx`
-                    : "tok --"}
-            </Text>
-          </View>
-        )}
-
-        {show("tools") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Sigma" size={12} color={theme.colors.foregroundMuted} />
-            {data.toolCalls != null ? (
-              <Text numberOfLines={1} style={styles.vitalText}>
-                <Text style={{ color: theme.colors.foreground }}>{data.toolCalls}</Text>
-                {data.toolErrors ? (
-                  <>
-                    <Text style={{ color: theme.colors.foregroundMuted }}>/</Text>
-                    <Text style={{ color: theme.colors.statusDanger }}>{data.toolErrors}</Text>
-                  </>
-                ) : null}
+              <Row wrap gap={6} align="center">
+                {inputTokens != null && (
+                  <Badge label={`In: ${inputTokens.toLocaleString()}`} variant="neutral" />
+                )}
+                {outputTokens != null && (
+                  <Badge label={`Out: ${outputTokens.toLocaleString()}`} variant="neutral" />
+                )}
+                {cachedTokens != null && (
+                  <Badge label={`Cache: ${cachedTokens.toLocaleString()}`} variant="neutral" />
+                )}
+              </Row>
+            </Stack>
+          ) : show("tokens") ? (
+            <Row justify="space-between" align="center">
+              <Text style={sectionTitleStyle(theme.colors)}>Tokens & Context</Text>
+              <Text
+                style={{
+                  fontSize: 10,
+                  fontStyle: "italic",
+                  color: theme.colors.foregroundMuted,
+                }}
+              >
+                Not reported by provider
               </Text>
-            ) : (
-              <Text numberOfLines={1} style={[styles.vitalText, { color: theme.colors.foregroundMuted }]}>
-                tools --
-              </Text>
-            )}
-          </View>
-        )}
+            </Row>
+          ) : null}
 
-        {show("turns") && (
-          <View style={styles.vitalChip}>
-            <Icon name="Repeat" size={12} color={theme.colors.foregroundMuted} />
-            <Text numberOfLines={1}
-              style={[
-                styles.vitalText,
-                {
-                  color:
-                    data.turnCount != null
-                      ? theme.colors.foreground
-                      : theme.colors.foregroundMuted,
-                },
-              ]}
-            >
-              {data.turnCount != null ? `${data.turnCount} turns` : "turns --"}
-            </Text>
-          </View>
-        )}
-      </View>
-
-      {isExpanded && (
-        <View style={styles.expandedDetails}>
-      {show("tokens") && hasTokenDetails ? (
-        <View style={styles.tokenSection}>
-          <View style={styles.tokenHeader}>
-            <View style={styles.tokenHeaderLeft}>
-              <Icon name="Coins" size={12} color={theme.colors.foregroundMuted} />
-              <Text style={styles.tokenHeaderTitle}>Tokens & Context</Text>
-            </View>
-            {costUsd != null && (
-              <Text style={styles.tokenCostText}>
-                ${costUsd < 0.01 ? costUsd.toFixed(4) : costUsd.toFixed(2)}
-              </Text>
-            )}
-          </View>
-
-          {contextMaxTokens != null && contextMaxTokens > 0 ? (
-            <View style={styles.contextContainer}>
-              <View style={styles.contextLabelRow}>
-                <View style={styles.contextLabelGroup}>
-                  <Text style={styles.contextLabel}>Context Window</Text>
-                  <View style={styles.tokenPillsRow}>
-                    {inputTokens != null && (
-                      <View style={styles.tokenBadge}>
-                        <Text style={styles.tokenBadgeLabel}>In: </Text>
-                        <Text style={styles.tokenBadgeValue}>{inputTokens.toLocaleString()}</Text>
-                      </View>
-                    )}
-                    {outputTokens != null && (
-                      <View style={styles.tokenBadge}>
-                        <Text style={styles.tokenBadgeLabel}>Out: </Text>
-                        <Text style={styles.tokenBadgeValue}>{outputTokens.toLocaleString()}</Text>
-                      </View>
-                    )}
-                    {cachedTokens != null && (
-                      <View style={styles.tokenBadge}>
-                        <Text style={styles.tokenBadgeLabel}>Cache: </Text>
-                        <Text style={styles.tokenBadgeValue}>{cachedTokens.toLocaleString()}</Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-                <Text style={styles.contextValue}>
-                  {formatCompactTokens(contextUsedTokens ?? 0)} / {formatCompactTokens(contextMaxTokens)} ({contextPercent}%)
-                </Text>
-              </View>
-              <View style={styles.progressBarTrack}>
-                <View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: `${Math.min(100, Math.max(0, contextPercent ?? 0))}%`,
-                      backgroundColor: contextBarColor,
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-          ) : contextUsedTokens != null ? (
-            <View style={styles.contextLabelRow}>
-              <View style={styles.contextLabelGroup}>
-                <Text style={styles.contextLabel}>Context Used</Text>
-                <View style={styles.tokenPillsRow}>
-                  {inputTokens != null && (
-                    <View style={styles.tokenBadge}>
-                      <Text style={styles.tokenBadgeLabel}>In: </Text>
-                      <Text style={styles.tokenBadgeValue}>{inputTokens.toLocaleString()}</Text>
-                    </View>
-                  )}
-                  {outputTokens != null && (
-                    <View style={styles.tokenBadge}>
-                      <Text style={styles.tokenBadgeLabel}>Out: </Text>
-                      <Text style={styles.tokenBadgeValue}>{outputTokens.toLocaleString()}</Text>
-                    </View>
-                  )}
-                  {cachedTokens != null && (
-                    <View style={styles.tokenBadge}>
-                      <Text style={styles.tokenBadgeLabel}>Cache: </Text>
-                      <Text style={styles.tokenBadgeValue}>{cachedTokens.toLocaleString()}</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-              <Text style={styles.contextValue}>
-                {formatCompactTokens(contextUsedTokens)} tokens
-              </Text>
-            </View>
-          ) : (
-            <View style={styles.tokenPillsRow}>
-              {inputTokens != null && (
-                <View style={styles.tokenBadge}>
-                  <Text style={styles.tokenBadgeLabel}>In: </Text>
-                  <Text style={styles.tokenBadgeValue}>{inputTokens.toLocaleString()}</Text>
-                </View>
+          <Stack gap={4}>
+            <Text style={sectionTitleStyle(theme.colors)}>Turn Details</Text>
+            <Row wrap gap={12} align="center">
+              <Vital icon="Cpu" color={theme.colors.foreground}>
+                {data.agentModel ?? "Unknown model"} ({data.agentProvider ?? "default"})
+              </Vital>
+              {data.toolCalls != null && (
+                <Vital icon="Sigma" color={theme.colors.foreground}>
+                  {data.toolCalls} calls
+                  {data.toolErrors ? `, ${data.toolErrors} failed` : ""}
+                </Vital>
               )}
-              {outputTokens != null && (
-                <View style={styles.tokenBadge}>
-                  <Text style={styles.tokenBadgeLabel}>Out: </Text>
-                  <Text style={styles.tokenBadgeValue}>{outputTokens.toLocaleString()}</Text>
-                </View>
+              {(data.gitInsertions != null || data.gitDeletions != null) && (
+                <Vital icon="GitCommitHorizontal" color={theme.colors.foreground}>
+                  +{data.gitInsertions ?? 0} -{data.gitDeletions ?? 0}
+                </Vital>
               )}
-              {cachedTokens != null && (
-                <View style={styles.tokenBadge}>
-                  <Text style={styles.tokenBadgeLabel}>Cache: </Text>
-                  <Text style={styles.tokenBadgeValue}>{cachedTokens.toLocaleString()}</Text>
-                </View>
-              )}
-            </View>
-          )}
-        </View>
-      ) : (
-        show("tokens") && (
-          <View style={styles.tokenSection}>
-            <View style={styles.tokenHeader}>
-              <Text style={styles.tokenTitle}>Tokens & Context</Text>
-              <Text style={styles.tokenUnavailableText}>Not reported by provider</Text>
-            </View>
-          </View>
-        )
-      )}
-      <View style={styles.tokenSection}>
-        <View style={styles.tokenHeader}>
-          <Text style={styles.tokenTitle}>Turn Details</Text>
-        </View>
-        <View style={styles.turnDetailsRow}>
-          <View style={styles.turnDetailsItem}>
-            <Icon name="Cpu" size={12} color={theme.colors.foregroundMuted} />
-            <Text style={styles.turnDetailsText}>
-              {data.agentModel ?? "Unknown model"} ({data.agentProvider ?? "default"})
-            </Text>
-          </View>
-          {data.toolCalls != null && (
-            <View style={styles.turnDetailsItem}>
-              <Icon name="Sigma" size={12} color={theme.colors.foregroundMuted} />
-              <Text style={styles.turnDetailsText}>
-                {data.toolCalls} calls
-                {data.toolErrors ? (
-                  <>
-                    {", "}
-                    <Text style={{ color: theme.colors.statusDanger }}>{data.toolErrors} failed</Text>
-                  </>
-                ) : null}
+            </Row>
+          </Stack>
+
+          {data.outcomeError && (
+            <View
+              style={{
+                padding: 6,
+                borderRadius: 4,
+                backgroundColor: theme.colors.surface2,
+                borderLeftWidth: 3,
+                borderLeftColor: theme.colors.statusDanger,
+              }}
+            >
+              <Text numberOfLines={2} style={{ fontSize: 11, color: theme.colors.statusDanger }}>
+                {data.outcomeError}
               </Text>
             </View>
           )}
-          {(data.gitInsertions != null || data.gitDeletions != null) && (
-            <View style={styles.turnDetailsItem}>
-              <Icon name="GitCommitHorizontal" size={12} color={theme.colors.foregroundMuted} />
-              <Text style={styles.turnDetailsText}>
-                +{data.gitInsertions ?? 0} -{data.gitDeletions ?? 0}
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-
-      {data.outcomeError && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText} numberOfLines={2}>
-            {data.outcomeError}
-          </Text>
-        </View>
-      )}
-        </View>
-      )}
-    </View>
+        </Stack>
+      </Collapsible>
+    </PluginThemeProvider>
   );
+}
+
+const styles = {
+  // Layout-only. Color MUST come from the theme: a raw style without `color`
+  // falls back to React Native's default black and vanishes in dark mode
+  // (xpufx-org/paseo#208). Use `sectionTitleStyle(colors)` at call sites.
+  sectionTitle: {
+    fontSize: 10,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+} as const;
+
+function sectionTitleStyle(colors: { foregroundMuted: string }) {
+  return [styles.sectionTitle, { color: colors.foregroundMuted }];
 }

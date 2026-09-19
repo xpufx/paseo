@@ -3,6 +3,73 @@ import { resolvePluginVersion } from "./version.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
+const LEVEL_SEVERITY: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+};
+
+function isLogLevel(value: unknown): value is LogLevel {
+  return (
+    value === "debug" || value === "info" || value === "warn" || value === "error"
+  );
+}
+
+/**
+ * Resolves the minimum log level from the environment. Precedence:
+ * `PASEO_PLUGIN_LOG_LEVEL` > `PASEO_LOG_LEVEL` > `PASEO_DEBUG=1` (debug).
+ * Returns undefined when nothing is set so callers can apply their default.
+ */
+export function resolveMinLevelFromEnv(
+  env: NodeJS.ProcessEnv = process.env,
+): LogLevel | undefined {
+  const raw = env.PASEO_PLUGIN_LOG_LEVEL ?? env.PASEO_LOG_LEVEL;
+  if (typeof raw === "string" && isLogLevel(raw.trim().toLowerCase())) {
+    return raw.trim().toLowerCase() as LogLevel;
+  }
+  const debugFlag = env.PASEO_DEBUG ?? env.PASEO_PLUGIN_DEBUG;
+  if (
+    typeof debugFlag === "string" &&
+    ["1", "true", "yes", "debug"].includes(debugFlag.trim().toLowerCase())
+  ) {
+    return "debug";
+  }
+  return undefined;
+}
+
+/**
+ * True when running in production. Retained for callers that need a
+ * production check; note the default log level no longer keys off this.
+ */
+export function isProductionEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.NODE_ENV ?? "").trim().toLowerCase() === "production";
+}
+
+/**
+ * True only when `NODE_ENV` is explicitly a development value
+ * (`development`/`dev`). Unset, empty, `production`, and anything else
+ * (e.g. `test`) all count as quiet, so a shipped plugin defaults to info
+ * without any env var set.
+ */
+export function isDevelopmentEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const nodeEnv = (env.NODE_ENV ?? "").trim().toLowerCase();
+  return nodeEnv === "development" || nodeEnv === "dev";
+}
+
+/**
+ * Default rule (documented for operators):
+ * explicit `PASEO_PLUGIN_LOG_LEVEL`/`PASEO_LOG_LEVEL`/`PASEO_DEBUG` always wins;
+ * otherwise quiet (`info`) — including when no env var is set at all, so a
+ * shipped plugin never emits debug logs by default. Debug only when `NODE_ENV`
+ * is explicitly a development value (`development`/`dev`).
+ */
+export function resolveDefaultMinLevel(
+  env: NodeJS.ProcessEnv = process.env,
+): LogLevel {
+  return resolveMinLevelFromEnv(env) ?? (isDevelopmentEnv(env) ? "debug" : "info");
+}
+
 export interface PluginLoggerOptions {
   /**
    * Version of the plugin.
@@ -22,7 +89,8 @@ export interface PluginLoggerOptions {
   subsystem?: string;
 
   /**
-   * Minimum log level to print. Defaults to "info" ("debug" logs will be suppressed).
+   * Minimum log level to print. Defaults to resolveDefaultMinLevel():
+   * info unless NODE_ENV is explicitly development (or an explicit level is set).
    */
   minLevel?: LogLevel;
 
@@ -37,15 +105,10 @@ export interface PluginLogger {
   info(message: string, data?: unknown): void;
   warn(message: string, data?: unknown): void;
   error(message: string, data?: unknown): void;
+  /** Surfaces a caught/suppressed error at debug level so it reaches the plugin log. */
+  suppressed(context: string, error: unknown): void;
   child(subsystemOrOptions: string | Partial<PluginLoggerOptions>): PluginLogger;
 }
-
-const LEVEL_SEVERITY: Record<LogLevel, number> = {
-  debug: 10,
-  info: 20,
-  warn: 30,
-  error: 40,
-};
 
 function formatData(data: unknown): string {
   if (data === undefined) return "";
@@ -80,7 +143,7 @@ export function createPluginLogger(
   const {
     banner = true,
     subsystem,
-    minLevel = "info",
+    minLevel = resolveDefaultMinLevel(),
     meta = {},
   } = options;
 
@@ -130,6 +193,10 @@ export function createPluginLogger(
     },
     error(message: string, data?: unknown) {
       emit("error", message, data);
+    },
+    suppressed(context: string, error: unknown) {
+      const detail = error instanceof Error ? error.message : String(error);
+      emit("debug", `${context}: ${detail}`, error);
     },
     child(subsystemOrOptions: string | Partial<PluginLoggerOptions>): PluginLogger {
       const childOptions: PluginLoggerOptions =

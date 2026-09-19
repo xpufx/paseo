@@ -1,11 +1,11 @@
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import {
   initClientHelpers,
   type ComposerPillRegistrar,
 } from "paseo-plugin-helper/client";
 
-initClientHelpers({ Icon, Modal, useRpc, useToast });
+initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import { useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { Modal } from "@getpaseo/plugin/client/react-native";
@@ -840,6 +840,7 @@ function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
           repository="https://github.com/xpufx/paseo-mcp-tools"
           issues="https://github.com/xpufx/paseo-mcp-tools/issues"
           license="MIT"
+          density="tiny"
           extraItems={[
             { label: "Servers", value: `${query.data?.servers.length ?? 0}`, copyable: false },
             { label: "Provider", value: query.data?.provider ?? "unknown", copyable: true },

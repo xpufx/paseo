@@ -1,0 +1,28 @@
+[Unit]
+Description=Forge webhook receiver (forges plugin bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Replace with the unprivileged account that owns the secret and state dir.
+User=forge-hook
+Group=forge-hook
+WorkingDirectory=/opt/forge-hook
+# Copy hook.env.example to /etc/forge-hook/hook.env and edit the placeholders.
+EnvironmentFile=/etc/forge-hook/hook.env
+ExecStart=/usr/bin/node /opt/forge-hook/hook-server.mjs
+Restart=on-failure
+RestartSec=5
+
+# Hardening. Keep this after you have confirmed the paths exist.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# The state dir must be writable; match HOOK_STATE_DIR in the environment file.
+ReadWritePaths=/var/lib/forge-hook
+StateDirectory=forge-hook
+
+[Install]
+WantedBy=multi-user.target

@@ -1,4 +1,5 @@
 export * from "./Button.js";
+export * from "./InlineButton.js";
 export * from "./AttentionBeacon.js";
 export * from "./Badge.js";
 export * from "./StatusDot.js";
@@ -7,6 +8,7 @@ export * from "./Tabs.js";
 export * from "./CodeBlock.js";
 export * from "./SearchInput.js";
 export * from "./TextInput.js";
+export * from "./Select.js";
 export * from "./Toggle.js";
 export * from "./Collapsible.js";
 export * from "./ProgressBar.js";
@@ -19,3 +21,4 @@ export * from "./AboutSection.js";
 export * from "./TruncatedText.js";
 export * from "./CommandBox.js";
 export * from "./SectionHeader.js";
+export * from "./HighlightedText.js";

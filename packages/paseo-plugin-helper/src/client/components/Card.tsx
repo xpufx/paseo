@@ -2,6 +2,7 @@ import React, { type ReactNode } from "react";
 import { StyleSheet, Text, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
 import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
+import { HighlightedText } from "./HighlightedText.js";
 import type { SurfaceStyle } from "../theme/flair.js";
 
 export interface CardProps {
@@ -21,6 +22,11 @@ export interface CardHeaderProps {
   style?: StyleProp<ViewStyle>;
   titleStyle?: StyleProp<TextStyle>;
   subtitleStyle?: StyleProp<TextStyle>;
+  /**
+   * When set, every case-insensitive (literal, non-regex) occurrence of the
+   * query inside `title` is painted with the accent highlight.
+   */
+  highlightQuery?: string;
 }
 
 export function CardHeader({
@@ -33,12 +39,21 @@ export function CardHeader({
   style,
   titleStyle,
   subtitleStyle,
+  highlightQuery,
 }: CardHeaderProps) {
   const { Icon } = getClientHost();
-  const { colors, flair, isCompact } = usePluginTheme();
+  const { colors, flair, typography, padding } = usePluginTheme();
 
   return (
-    <View style={[styles.headerContainer, style]}>
+    <View
+      style={[
+        styles.headerContainer,
+        // Density-aware gap below the header. A hardcoded 8 wasted vertical
+        // space under the compact preset (xpufx-org/paseo#213).
+        { marginBottom: padding.gap },
+        style,
+      ]}
+    >
       <View style={styles.headerLeft}>
         {icon ? <Icon name={icon} size={15} color={colors.foregroundMuted} /> : null}
         <View style={styles.titleColumn}>
@@ -47,20 +62,20 @@ export function CardHeader({
               styles.headerTitle,
               {
                 color: colors.foreground,
-                fontSize: isCompact ? 12 : 13,
+                ...typography.heading,
                 textTransform:
                   flair.headingTransform === "uppercase" ? "uppercase" : "none",
               },
               titleStyle,
             ]}
           >
-            {title}
+            {highlightQuery ? <HighlightedText text={title} query={highlightQuery} /> : title}
           </Text>
           {subtitle ? (
             <Text
               style={[
                 styles.headerSubtitle,
-                { color: colors.foregroundMuted, fontSize: 11 },
+                { color: colors.foregroundMuted, ...typography.caption },
                 subtitleStyle,
               ]}
             >
@@ -76,7 +91,7 @@ export function CardHeader({
           <Text
             style={[
               styles.headerValue,
-              { color: colors.foreground, fontSize: isCompact ? 12 : 13 },
+              { color: colors.foreground, ...typography.bodyStrong },
             ]}
           >
             {value}
@@ -139,7 +154,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     flexWrap: "wrap",
-    marginBottom: 8,
     gap: 8,
     width: "100%",
   },

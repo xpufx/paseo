@@ -3,12 +3,21 @@ import {
   demoSettingsContract,
   getDemoDataRpc,
   triggerDemoActionRpc,
+  demoAgentIdentityContract,
+  demoBeaconSetContract,
+  demoBeaconBlinkContract,
+  demoBeaconClearContract,
 } from "./shared/demo.js";
 import {
   handleGetDemoData,
   handleTriggerDemoAction,
+  handleGetAgentIdentity,
+  handleDemoBeaconSet,
+  handleDemoBeaconBlink,
+  handleDemoBeaconClear,
   settingsHandlers,
   backgroundWorker,
+  demoBeacon,
   log,
 } from "./server/demo.js";
 import { suiteSettings, suiteSettingsHandlers } from "./server/suite-settings.js";
@@ -22,11 +31,16 @@ export default function contribute(server: PluginServerContext) {
   server.handle(suiteSettings.contract.reset, suiteSettingsHandlers.reset);
   server.handle(getDemoDataRpc, handleGetDemoData);
   server.handle(triggerDemoActionRpc, handleTriggerDemoAction);
+  server.handle(demoAgentIdentityContract, handleGetAgentIdentity);
+  server.handle(demoBeaconSetContract, handleDemoBeaconSet);
+  server.handle(demoBeaconBlinkContract, handleDemoBeaconBlink);
+  server.handle(demoBeaconClearContract, handleDemoBeaconClear);
 
-  log.info("Helper demo v8 server handlers registered");
+  log.info("Helper demo server handlers registered");
 
   return () => {
     backgroundWorker.stop();
-    log.info("Helper demo v8 server background task stopped");
+    demoBeacon.stopAll();
+    log.info("Helper demo server background task stopped");
   };
 }

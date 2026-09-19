@@ -1,15 +1,30 @@
-import React, { createContext, useContext, useMemo, type ReactNode } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  useEffect,
+  type ReactNode,
+} from "react";
+import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import type { PluginTheme } from "../../shared/types.js";
 import type { HostLayout } from "../host.js";
 import { Appearance } from "react-native";
 import { defaultFlair, resolveRadius, type VisualFlair } from "./flair.js";
 import { alpha, getContrastColor, getStatusColor, getVariantPalette } from "./color-utils.js";
-import { getTouchTargetMin, isMobilePlatform, resolvePadding } from "./responsive.js";
+import {
+  getTouchTargetMin,
+  isMobilePlatform,
+  resolveEffectiveCompact,
+  resolvePadding,
+} from "./responsive.js";
 import {
   mergeThemeColors,
   readHostThemeVariables,
   type HostFontVariables,
 } from "./host-variables.js";
+import { resolveTypography, type TypographyScale } from "./tokens.js";
 import type { ResponsiveLayout, StatusVariant, ThemeColors } from "../../shared/types.js";
 
 export interface PluginThemeContextValue {
@@ -27,6 +42,7 @@ export interface PluginThemeContextValue {
   getVariantPalette: (variant: StatusVariant) => { bg: string; text: string; border: string };
   resolveRadius: (size?: "xs" | "sm" | "md" | "lg" | "pill") => number;
   padding: { horizontal: number; vertical: number; gap: number };
+  typography: TypographyScale;
 }
 
 const defaultLayout: ResponsiveLayout = {
@@ -66,20 +82,32 @@ export const defaultLightTheme: PluginTheme = {
   },
 };
 
-export function getDefaultTheme(): PluginTheme {
-  try {
-    const scheme = Appearance.getColorScheme?.();
-    if (scheme === "light") {
-      return defaultLightTheme;
-    }
-  } catch {
-    // Graceful fallback if Appearance is unavailable
+export function getDefaultTheme(scheme?: string): PluginTheme {
+  if (scheme === "light") {
+    return defaultLightTheme;
   }
   return defaultDarkTheme;
 }
 
-const initialDefaultTheme = getDefaultTheme();
+export function useAppearanceScheme(): [string | undefined, (s: string | undefined) => void] {
+  const [scheme, setScheme] = useState<string | undefined>(Appearance.getColorScheme?.() ?? undefined);
+  useEffect(() => {
+    const sub = Appearance.addChangeListener?.(({colorScheme}) => {
+      setScheme(colorScheme ?? undefined);
+    });
+    return () => {
+      // remove listener if possible
+      // Appearance.addChangeListener returns an object with remove method in RN
+      // but in web we may not have it; ignore safely
+      if (sub && typeof (sub as any).remove === "function") {
+        (sub as any).remove();
+      }
+    };
+  }, []);
+  return [scheme, setScheme];
+}
 
+const initialDefaultTheme = getDefaultTheme();
 const PluginThemeContext = createContext<PluginThemeContextValue>({
   theme: initialDefaultTheme,
   colors: initialDefaultTheme.colors,
@@ -95,6 +123,7 @@ const PluginThemeContext = createContext<PluginThemeContextValue>({
   getVariantPalette: (v) => getVariantPalette(v, initialDefaultTheme.colors),
   resolveRadius: (s) => resolveRadius("rounded", s),
   padding: resolvePadding(defaultLayout, "comfortable"),
+  typography: resolveTypography(defaultLayout, "comfortable"),
 });
 
 export interface PluginThemeProviderProps {
@@ -110,26 +139,45 @@ export function PluginThemeProvider({
   flair: userFlair,
   children,
 }: PluginThemeProviderProps) {
+  const hostWidth =
+    typeof layout.width === "number" && layout.width > 0 ? layout.width : undefined;
+  const needsMeasurement = hostWidth === undefined;
+  const [measuredWidth, setMeasuredWidth] = useState<number | undefined>(undefined);
+  const [appearanceScheme] = useAppearanceScheme();
+
+  const handleLayout = useCallback((event: LayoutChangeEvent) => {
+    const width = event.nativeEvent?.layout?.width;
+    if (typeof width !== "number" || width <= 0) return;
+    setMeasuredWidth((prev) => (prev === width ? prev : width));
+  }, []);
+
+  const effectiveWidth = hostWidth ?? measuredWidth;
+
   const value = useMemo<PluginThemeContextValue>(() => {
     const flair: VisualFlair = { ...defaultFlair, ...userFlair };
     const hostVariables = readHostThemeVariables();
     const effectiveColors = mergeThemeColors(
-      getDefaultTheme().colors,
+      getDefaultTheme(appearanceScheme).colors,
       hostVariables.colors,
       theme.colors,
       flair.accentColor,
     );
 
-    const isCompact = Boolean(layout.compact);
-    const isMobile = isMobilePlatform(layout.platform);
-    const touchTargetMin = getTouchTargetMin(layout);
-    const padding = resolvePadding(layout, flair.density);
+    const isCompact = resolveEffectiveCompact(layout, effectiveWidth);
+    const effectiveLayout: ResponsiveLayout =
+      effectiveWidth !== undefined
+        ? { ...layout, width: effectiveWidth, compact: isCompact }
+        : { ...layout, compact: isCompact };
+    const isMobile = isMobilePlatform(effectiveLayout.platform);
+    const touchTargetMin = getTouchTargetMin(effectiveLayout);
+    const padding = resolvePadding(effectiveLayout, flair.density);
+    const typography = resolveTypography(effectiveLayout, flair.density);
 
     return {
       theme,
       colors: effectiveColors,
       fonts: hostVariables.fonts,
-      layout,
+      layout: effectiveLayout,
       flair,
       isCompact,
       isMobile,
@@ -140,11 +188,26 @@ export function PluginThemeProvider({
       getVariantPalette: (v) => getVariantPalette(v, effectiveColors, flair.accentColor),
       resolveRadius: (size = "md") => resolveRadius(flair.radius, size),
       padding,
+      typography,
     };
-  }, [theme, layout, userFlair]);
+  }, [theme, layout, userFlair, effectiveWidth, appearanceScheme]);
 
-  return <PluginThemeContext.Provider value={value}>{children}</PluginThemeContext.Provider>;
+  return (
+    <PluginThemeContext.Provider value={value}>
+      {needsMeasurement ? (
+        <View style={styles.measureContainer} onLayout={handleLayout}>
+          {children}
+        </View>
+      ) : (
+        children
+      )}
+    </PluginThemeContext.Provider>
+  );
 }
+
+const styles = StyleSheet.create({
+  measureContainer: { flex: 1 },
+});
 
 export function usePluginTheme(): PluginThemeContextValue {
   return useContext(PluginThemeContext);

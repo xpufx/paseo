@@ -156,13 +156,33 @@ export const daemonProbeRpc = defineRpc({
 export const uiPrefsGetRpc = defineRpc({
   name: "ui.prefs.get",
   input: z.object({}),
-  output: z.object({ prereqsCollapsed: z.boolean(), presenceEnabled: z.boolean(), injectionEnabled: z.boolean() }),
+  output: z.object({
+    prereqsCollapsed: z.boolean(),
+    presenceEnabled: z.boolean(),
+    injectionEnabled: z.boolean(),
+    // Optional so a client still validates against a daemon that has not yet
+    // been reloaded with the outbox expiry field.
+    outboxExpirySeconds: z.number().int().positive().optional(),
+    daemonEnabled: z.record(z.string(), z.boolean()).optional(),
+  }),
 });
 
 export const uiPrefsSetRpc = defineRpc({
   name: "ui.prefs.set",
-  input: z.object({ prereqsCollapsed: z.boolean(), presenceEnabled: z.boolean().optional(), injectionEnabled: z.boolean().optional() }),
-  output: z.object({ prereqsCollapsed: z.boolean(), presenceEnabled: z.boolean(), injectionEnabled: z.boolean() }),
+  input: z.object({
+    prereqsCollapsed: z.boolean(),
+    presenceEnabled: z.boolean().optional(),
+    injectionEnabled: z.boolean().optional(),
+    outboxExpirySeconds: z.number().int().positive().optional(),
+    daemonEnabled: z.record(z.string(), z.boolean()).optional(),
+  }),
+  output: z.object({
+    prereqsCollapsed: z.boolean(),
+    presenceEnabled: z.boolean(),
+    injectionEnabled: z.boolean(),
+    outboxExpirySeconds: z.number().int().positive().optional(),
+    daemonEnabled: z.record(z.string(), z.boolean()).optional(),
+  }),
 });
 
 export const snapshotRefreshRpc = defineRpc({

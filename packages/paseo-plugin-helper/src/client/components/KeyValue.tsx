@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
+import { resolveGridColumns } from "../theme/responsive.js";
 import { spacing } from "../theme/tokens.js";
 import { copyToClipboard } from "../utils/clipboard.js";
 import {
@@ -34,6 +35,12 @@ export interface KeyValueProps {
   truncateMaxLength?: number;
   /** Custom options when truncate="path" */
   truncatePathOptions?: TruncatePathOptions;
+  /**
+   * "stacked" (default) keeps the existing label-above-value layout.
+   * "inline" renders label and value on one line, with the value truncating
+   * middle so the row stays a single text line.
+   */
+  layout?: "stacked" | "inline";
   stackOnCompact?: boolean;
   style?: StyleProp<ViewStyle>;
   labelStyle?: StyleProp<TextStyle>;
@@ -49,13 +56,14 @@ export function KeyValue({
   truncate: truncateProp = false,
   truncateMaxLength = 32,
   truncatePathOptions,
+  layout = "stacked",
   stackOnCompact = true,
   style,
   labelStyle,
   valueStyle,
 }: KeyValueProps) {
   const { Icon, useToast } = getClientHost();
-  const { colors, flair, isCompact, touchTargetMin, fonts } = usePluginTheme();
+  const { colors, flair, isCompact, touchTargetMin, fonts, typography } = usePluginTheme();
   const toast = useToast();
   const [copied, setCopied] = useState(false);
 
@@ -113,6 +121,68 @@ export function KeyValue({
     </Pressable>
   ) : null;
 
+  if (layout === "inline") {
+    return (
+      <View
+        style={[
+          styles.container,
+          styles.inlineContainer,
+          { paddingVertical: isCompact ? spacing.xs : spacing.sm },
+          style,
+        ]}
+      >
+        <Text
+          style={[
+            styles.inlineLabel,
+            {
+              color: colors.foregroundMuted,
+              ...typography.label,
+              textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
+            },
+            labelStyle,
+          ]}
+        >
+          {label}
+        </Text>
+
+        <Text
+          selectable
+          numberOfLines={1}
+          ellipsizeMode="middle"
+          style={[
+            styles.inlineValueText,
+            {
+              color: colors.foreground,
+              ...typography.bodySmall,
+              fontFamily,
+            },
+            valueStyle,
+          ]}
+        >
+          {displayValue}
+        </Text>
+
+        {subValue ? (
+          <Text
+            selectable
+            numberOfLines={1}
+            style={[
+              styles.inlineSubValue,
+              {
+                color: colors.foregroundMuted,
+                ...typography.caption,
+              },
+            ]}
+          >
+            {subValue}
+          </Text>
+        ) : null}
+
+        {copyButton}
+      </View>
+    );
+  }
+
   if (shouldStack) {
     return (
       <View
@@ -129,7 +199,7 @@ export function KeyValue({
               styles.label,
               {
                 color: colors.foregroundMuted,
-                fontSize: 11,
+                ...typography.label,
                 textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
               },
               labelStyle,
@@ -146,8 +216,7 @@ export function KeyValue({
             styles.stackedValueText,
             {
               color: colors.foreground,
-              fontSize: 13,
-              lineHeight: 19,
+              ...typography.bodySmall,
               fontFamily,
             },
             valueStyle,
@@ -162,8 +231,7 @@ export function KeyValue({
               styles.subValue,
               {
                 color: colors.foregroundMuted,
-                fontSize: 11,
-                lineHeight: 15,
+                ...typography.caption,
               },
             ]}
           >
@@ -189,7 +257,7 @@ export function KeyValue({
           styles.label,
           {
             color: colors.foregroundMuted,
-            fontSize: 12,
+            ...typography.label,
             textTransform: flair.headingTransform === "uppercase" ? "uppercase" : "none",
           },
           labelStyle,
@@ -199,28 +267,38 @@ export function KeyValue({
       </Text>
 
       <View style={styles.rowValueWrapper}>
-        <Text
-          selectable
-          style={[
-            styles.rowValueText,
-            {
-              color: colors.foreground,
-              fontSize: 13,
-              fontFamily,
-            },
-            valueStyle,
-          ]}
-        >
-          {displayValue}
-        </Text>
+        <View style={styles.rowValueLine}>
+          <Text
+            selectable
+            style={[
+              styles.rowValueText,
+              {
+                color: colors.foreground,
+                ...typography.bodySmall,
+                fontFamily,
+              },
+              valueStyle,
+            ]}
+          >
+            {displayValue}
+          </Text>
 
-        {subValue && (
-          <Text style={[styles.subValue, { color: colors.foregroundMuted, fontSize: 11 }]}>
+          {copyButton}
+        </View>
+
+        {subValue ? (
+          <Text
+            style={[
+              styles.subValue,
+              {
+                color: colors.foregroundMuted,
+                ...typography.caption,
+              },
+            ]}
+          >
             {subValue}
           </Text>
-        )}
-
-        {copyButton}
+        ) : null}
       </View>
     </View>
   );
@@ -230,6 +308,20 @@ export interface KeyValueGroupProps {
   children: ReactNode;
   columns?: 1 | 2 | 3 | 4;
   gap?: number;
+  /**
+   * How a compact surface treats the column count.
+   * - "compact" (default): collapse to a single column on a compact surface —
+   *   the historical behavior.
+   * - "never": keep the requested column count on a compact surface.
+   */
+  collapse?: "compact" | "never";
+  /**
+   * Minimum width a column should keep. When set and the container width is
+   * known, the effective column count is capped so each column stays at least
+   * this wide, wrapping to fewer columns rather than collapsing to one.
+   * `columns` remains the upper bound.
+   */
+  minColumnWidth?: number;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -237,10 +329,19 @@ export function KeyValueGroup({
   children,
   columns = 2,
   gap = spacing.md,
+  collapse = "compact",
+  minColumnWidth,
   style,
 }: KeyValueGroupProps) {
-  const { isCompact } = usePluginTheme();
-  const effectiveColumns = isCompact ? 1 : columns;
+  const { isCompact, layout } = usePluginTheme();
+  const effectiveColumns = resolveGridColumns({
+    columns,
+    gap,
+    width: layout.width,
+    minColumnWidth,
+    collapse,
+    isCompact,
+  });
 
   const childArray = React.Children.toArray(children).filter(Boolean);
 
@@ -251,7 +352,7 @@ export function KeyValueGroup({
           key={index}
           style={{
             flexGrow: 1,
-            flexShrink: 0,
+            flexShrink: 1,
             flexBasis: `${Math.floor(100 / effectiveColumns) - 2}%`,
           }}
         >
@@ -268,7 +369,7 @@ const styles = StyleSheet.create({
   },
   rowContainer: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     gap: 12,
   },
@@ -284,19 +385,45 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   stackedValueText: {
-    fontWeight: "600",
     width: "100%",
   },
+  inlineContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  inlineLabel: {
+    flexShrink: 0,
+  },
+  inlineValueText: {
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  inlineSubValue: {
+    flexShrink: 0,
+  },
   rowValueWrapper: {
+    flexDirection: "column",
+    alignItems: "flex-end",
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  rowValueLine: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    flexShrink: 1,
     gap: 6,
+    flexShrink: 1,
+    minWidth: 0,
+    maxWidth: "100%",
   },
   rowValueText: {
-    fontWeight: "600",
     flexShrink: 1,
+    minWidth: 0,
+    textAlign: "right",
   },
   groupContainer: {
     flexDirection: "row",
@@ -304,10 +431,12 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   label: {
-    fontWeight: "500",
+    flexShrink: 1,
+    minWidth: 0,
   },
   subValue: {
-    fontWeight: "400",
+    flexShrink: 1,
+    minWidth: 0,
   },
   copyBtn: {
     padding: 3,

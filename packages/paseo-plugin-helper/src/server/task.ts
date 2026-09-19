@@ -1,9 +1,16 @@
+import { createPluginLogger, type PluginLogger } from "./logger.js";
+
 export interface PeriodicTaskOptions {
   intervalMs: number;
   task: () => Promise<void> | void;
   onError?: (err: unknown, failureCount: number) => void;
   runImmediately?: boolean;
   maxBackoffMs?: number;
+  /**
+   * Logger for suppressed failures. Defaults to a level-gated
+   * `periodic-task` logger so debug lines stay silent unless debug is enabled.
+   */
+  logger?: PluginLogger;
 }
 
 export interface PeriodicTaskHandle {
@@ -25,10 +32,18 @@ export function createPeriodicTask(options: PeriodicTaskOptions): PeriodicTaskHa
     maxBackoffMs = 60000,
   } = options;
 
-  let timer: NodeJS.Timeout | null = null;
+  let timer: any = null;
   let running = true;
   let inFlight = false;
   let failureCount = 0;
+
+  let taskLogger: PluginLogger | undefined;
+  function taskLog(): PluginLogger {
+    taskLogger ??= options.logger
+      ? options.logger.child("periodic-task")
+      : createPluginLogger("periodic-task", { banner: false });
+    return taskLogger;
+  }
 
   async function execute() {
     if (!running || inFlight) return;
@@ -42,9 +57,16 @@ export function createPeriodicTask(options: PeriodicTaskOptions): PeriodicTaskHa
       if (onError) {
         try {
           onError(err, failureCount);
-        } catch {
-          // Prevent onError handler from breaking task loop
+        } catch (suppressed) {
+          // Prevent onError handler from breaking task loop, but stay visible in dev logs.
+          taskLog().debug(
+            `onError handler failed: ${suppressed instanceof Error ? suppressed.message : String(suppressed)}`,
+          );
         }
+      } else {
+        taskLog().debug(
+          `suppressed error (failure ${failureCount}): ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     } finally {
       inFlight = false;

@@ -10,29 +10,32 @@
 > [!NOTE]
 > **Developer Library**: `paseo-plugin-helper` is an npm developer toolkit / SDK used by plugin authors (it is **not** a standalone Paseo plugin itself and cannot be installed directly via `paseo plugin add`).
 >
-> **Compatibility**: one published build runs on **Paseo v0.7 and v0.8**. `paseo-plugin-helper/client` imports zero Paseo SDK modules and instead receives `Icon`, `Modal`, `useRpc`, and `useToast` via a single `initClientHelpers()` call in the plugin client entry (see `docs/client.md`). `server`, `shared`, `mcp`, and `testing` carry no SDK imports at all.
+> **Compatibility**: one published build runs on **Paseo >= 0.8.0**. `paseo-plugin-helper/client` imports zero Paseo SDK modules and instead receives `Icon`, `Modal`, `useRpc`, and `useToast` via a single `initClientHelpers()` call in the plugin client entry (see `docs/client.md`). `server`, `shared`, `mcp`, and `testing` carry no SDK imports at all.
 
 ---
 
 ## Features
 
-- 📝 **Structured Logging & Identity**: `createPluginLogger` automatically prints an informative startup banner with plugin identity/version in Paseo GUI logs and keeps log lines unfragmented.
-- 🏷️ **Version Resolution & Stamping**: Auto-extracts plugin version from `package.json` + Git tags (`resolvePluginVersion`) and generates static TypeScript versions for Hermes client bundles (`stampVersion`).
-- 📱 **Mobile & Desktop First**: Automatically scales touch targets (min 44pt on iOS/Android or narrow panes), avoids bottom-bar clipping, and reflows layouts between desktop and mobile.
-- 📐 **Mobile Modal Gesture Architecture**: Solves nested horizontal scrolling and double-scroll issues inside Paseo mobile bottom sheets implicitly using `ModalBody` non-nested rendering and `Tabs` edge navigation.
-- 🎨 **Configurable Visual Flair**: Authors can customize corner radii (`sharp`, `rounded`, `pill`), information density, surface treatments, and brand accents while honoring Paseo's light/dark themes.
+- **Structured Logging & Identity**: `createPluginLogger` automatically prints an informative startup banner with plugin identity/version in Paseo GUI logs and keeps log lines unfragmented.
+- **Version Resolution & Stamping**: Auto-extracts plugin version from `package.json` + Git tags (`resolvePluginVersion`) and generates static TypeScript versions for client bundles (`stampVersion`).
+- **Mobile & Desktop First**: Automatically scales touch targets (min 44pt on iOS/Android or narrow panes), avoids bottom-bar clipping, and reflows layouts between desktop and mobile.
+- **Mobile Modal Gesture Architecture**: Solves nested horizontal scrolling and double-scroll issues inside Paseo mobile bottom sheets implicitly using `ModalBody` non-nested rendering and `Tabs` edge navigation.
+- **Configurable Visual Flair**: Authors can customize corner radii (`sharp`, `rounded`, `pill`), information density, surface treatments, and brand accents while honoring Paseo's light/dark themes.
+- **Inline Actions**: `InlineButton` provides an accessible, compact link/action primitive for timeline cards and dense inline content without bespoke `Pressable` implementations.
+- **Shared Forge Marks**: `<ForgeIcon>` resolves a host/kind to one brand mark — Lucide `Github`/`Gitlab`, helper-drawn official mono marks for `Codeberg`/`Forgejo`/`Gitea`, and a generic fallback — so plugins stop duplicating per-forge icon tables.
+- **Layout Vocabulary**: `Row`, `Stack`/`VStack`, and `Grid` replace hand-rolled flexbox `View` styles with theme-derived gaps and width-aware wrapping, while `KeyValueGroup` gains `collapse`/`minColumnWidth` so compact surfaces stay multi-column when there is room.
 - ℹ️ **Plugin About & Diagnostics Card**: `<AboutSection>` standardizes plugin branding, license tags, version badges, external navigation buttons, 1-tap "Copy Diagnostics" for issue triage, and auto-resolves official GitHub logos from author or repository URLs.
-- 💊 **Composer Pill Lifecycle Engine**: Complete management of agent subscriptions, pill contributions, and modal states in one function call (`registerComposerPill`).
-- 🖥️ **Panels & Surfaces**: One-line registration for sidebar surfaces (`registerSidebarSurface`) and panels (`registerWorkspacePanel`, `registerAgentPanel`) with automatic theme and flair propagation.
-- 🔌 **Zero-Dependency MCP Client**: Built-in stdio client (`McpClient`) with stderr ring buffering, non-JSON stdout line filtering, cross-platform process tree cleanup, and fallback ping readiness checks.
-- 🛠️ **Agent MCP Config Writer**: `upsertMcpServer` and `removeMcpServer` safely register plugin or Gateway MCP servers into Claude Desktop, Claude Code, OpenCode, Cursor, and Gemini configs with JSONC parsing, atomic writes, deep-equality idempotency, and automated backups.
-- ⚡ **React Query RPC Bridge**: `useRpcQuery` & `useRpcMutation` with automatic caching, refetching, and input hashing.
-- 🔌 **Plugin Query & Lifecycle Helpers**: `listPlugins`, `getPluginInfo`, `isPluginRunning`, and `isPluginInstalled` inspect active daemon state and cross-plugin availability with status filtering and built-in TTL caching.
-- ⚙️ **End-to-End Settings System**: Type-safe settings flow from Zod schema (`defineSettingsContract`) to atomic daemon storage (`registerSettingsRpc`) and optimistic React Native UI state (`usePluginSettings`).
-- 💾 **Daemon State & File Storage**: Atomic, temporary-swap file storage (`PluginStorage`) preventing corruption during power cuts or crashes.
-- 🔒 **Security & Redaction**: Deep secret masking for Bearer tokens, API keys, and connection credentials (`redactSecrets`).
-- 🔍 **Deterministic Plugin Audit CLI**: `npx paseo-plugin-helper audit` scans plugin codebases to detect raw bespoke patterns (manual subscriptions, raw filesystem writes, unformatted console logs, raw MCP spawns) and recommends drop-in helper replacements.
-- 🧪 **Mock Testing Harness**: In-memory mocks for `PluginClientContext` and `PluginContext` for testing plugins in Vitest / Jest.
+- **Composer Pill Lifecycle Engine**: Complete management of agent subscriptions, pill contributions, and modal states in one function call (`registerComposerPill`).
+- **Panels & Surfaces**: One-line registration for sidebar surfaces (`registerSidebarSurface`), panels (`registerWorkspacePanel`, `registerAgentPanel`), and Ctrl+K command-center items (`registerCommandCenterItem`) with automatic theme and flair propagation.
+- **Zero-Dependency MCP Client**: Built-in stdio client (`McpClient`) with stderr ring buffering, non-JSON stdout line filtering, cross-platform process tree cleanup, and fallback ping readiness checks.
+- **Agent MCP Config Writer**: `upsertMcpServer` and `removeMcpServer` safely register plugin or Gateway MCP servers into Claude Desktop, Claude Code, OpenCode, Cursor, and Gemini configs with JSONC parsing, atomic writes, deep-equality idempotency, and automated backups.
+- **React Query RPC Bridge**: `useRpcQuery` & `useRpcMutation` with automatic caching, refetching, and input hashing.
+- **Plugin Query & Lifecycle Helpers**: `listPlugins`, `getPluginInfo`, `isPluginRunning`, and `isPluginInstalled` inspect active daemon state and cross-plugin availability with status filtering and built-in TTL caching.
+- **End-to-End Settings System**: Type-safe settings flow from Zod schema (`defineSettingsContract`) to atomic daemon storage (`registerSettingsRpc`) and optimistic React Native UI state (`usePluginSettings`).
+- **Daemon State & File Storage**: Atomic, temporary-swap file storage (`PluginStorage`) preventing corruption during power cuts or crashes.
+- **Security & Redaction**: Deep secret masking for Bearer tokens, API keys, and connection credentials (`redactSecrets`).
+- **Deterministic Plugin Audit CLI**: `npx paseo-plugin-helper audit` scans plugin codebases to detect raw bespoke patterns (manual subscriptions, raw filesystem writes, unformatted console logs, raw MCP spawns) and recommends drop-in helper replacements.
+- **Mock Testing Harness**: In-memory mocks for `PluginClientContext` and `PluginContext` for testing plugins in Vitest / Jest.
 
 ---
 
@@ -42,12 +45,38 @@ To guarantee compliance with Paseo's bundler and compiler rules (no Node builtin
 
 | Subpath | Target Platform | Description | Docs |
 | :--- | :--- | :--- | :--- |
-| `paseo-plugin-helper/client` | React Native / Hermes | UI components, visual flair provider, pill engine, panels, React Query hooks | [docs/client.md](docs/client.md) |
+| `paseo-plugin-helper/client` | React Native | UI components, visual flair provider, pill engine, panels, React Query hooks | [docs/client.md](docs/client.md) |
 | `paseo-plugin-helper/server` | Node.js 20+ | `createPluginLogger`, `resolvePluginVersion`, `stampVersion`, `getSystemMetrics`, `PluginStorage`, `safeSpawn`, `redactSecrets` | [docs/server.md](docs/server.md) |
 | `paseo-plugin-helper/mcp` | Node.js 20+ | Zero-dependency stdio `McpClient`, ring buffer, process tree killer | [docs/mcp.md](docs/mcp.md) |
 | `paseo-plugin-helper/cli` | Node.js 20+ | `auditProject` programmatic scanner and reporting | [docs/cli.md](docs/cli.md) |
 | `paseo-plugin-helper/shared` | Universal | `defineContract`, formatters (`formatBytes`, `formatUptime`, `resolveMetricStatus`) | [docs/shared.md](docs/shared.md) |
 | `paseo-plugin-helper/testing` | Universal | Mock client and server contexts for unit and integration testing | [docs/testing.md](docs/testing.md) |
+
+## Capability Map
+
+One picture of what the library gives you — scan down, spot the verb you need, grep the docs for it:
+
+```mermaid
+flowchart TB
+    H["paseo-plugin-helper\nwhat you get"]
+
+    H --> RPC["RPC contracts\ndefineContract • defineSettingsContract\nuseRpcQuery • useRpcMutation\nuseAutoRefreshQuery"]
+    H --> UI["UI components\nCard • Badge • Button • Tabs\nMetricGauge • ProgressBar\nDataTable • SearchInput\nHighlightedText\nToggle • TextInput • Select • FormRow\nModalBody • ActionBar\nRow • Stack • Grid\nAboutSection • EmptyState\nStatusDot • ForgeIcon • AttentionBeacon"]
+    H --> PILL["Surfaces\nregisterComposerPill\nregisterSidebarSurface\nregisterWorkspacePanel\nregisterAgentPanel"]
+    H --> SET["Settings\nusePluginSettings\nuseSharedPluginSettings\nuseSuiteSettings"]
+    H --> SRV["Daemon utilities\ncreatePluginLogger • PluginStorage\nregisterSettingsRpc\ngetSystemMetrics • safeSpawn\nredactSecrets • guardRpcHandler"]
+    H --> MCP["MCP\nMcpClient • upsertMcpServer\nremoveMcpServer"]
+    H --> FMT["Formatters\nformatBytes • formatUptime\nformatDuration • truncate"]
+    H --> CLI["CLI\naudit • conformance"]
+```
+
+---
+
+## Bundle Posture (Tree-Shaking & Minification)
+
+Builds run through tsup with `treeshake: true` and `minify: true` (sourcemaps on, `.d.ts` unaffected); the package declares `"sideEffects": false` so bundlers may drop unused modules. All module-level state is inert until an exported function runs: no CSS/polyfill imports, no DOM/global writes at import time (the icon name-cache `Set` and `globalThis`/`process.env` reads all live inside functions), and every `console.*` call sits behind a runtime code path. Import via the subpaths above to narrow what each plugin pulls.
+
+What the helper cannot decide: final per-plugin bundle size is set by the Paseo daemon's own esbuild pass at plugin install time (its minify/tree-shaking settings are host-side). What we guarantee: shipped `dist` is already minified, side-effect-free per module, and split by entry point so the daemon bundler has the smallest possible input to work with.
 
 ---
 
@@ -156,6 +185,54 @@ merges static defaults, live Paseo 0.8 CSS variables (`--background`,
 theme in that order, so surfaces track host dark/light switches with no
 plugin code.
 
+### 1c. Composing Layout: `Row`, `Stack`, `Grid`
+
+Stop hand-rolling `<View style={{ flexDirection: "row", gap }}>` and stacking
+everything one-per-line. The three layout primitives are thin flexbox wrappers
+whose default `gap` comes from the active theme
+(`usePluginTheme().padding.gap`), so spacing tracks host density with no
+literals:
+
+```tsx
+import { Button, Grid, MetricGauge, Row, Stack, StatusDot, Text } from "paseo-plugin-helper/client";
+
+// Horizontal: status dot + title + action on one line.
+<Row align="center" gap="sm">
+  <StatusDot variant="success" />
+  <Text>Build passing</Text>
+  <Button label="Retry" variant="ghost" size="sm" onPress={retry} />
+</Row>
+
+// Vertical: the deliberate column default.
+<Stack>
+  <Text>Title</Text>
+  <Text>Subtitle</Text>
+</Stack>
+
+// Width-aware grid: four-up when it fits, wrapping down as the surface narrows.
+<Grid columns={4} minColumnWidth={180}>
+  <MetricGauge value={12} label="CPU" />
+  <MetricGauge value={64} label="RAM" />
+</Grid>
+```
+
+`Row` accepts `wrap`, `align`, and `justify`; `Stack` (alias `VStack`) is the
+column counterpart. `gap` is a spacing token (`"xs" | "sm" | "md" | "lg" | "xl"`)
+or a raw px number, defaulting to the theme gap. `Grid` never collapses to a
+single column: with `minColumnWidth` it uses as many columns as fit (capped by
+`columns`) and wraps the rest.
+
+`<KeyValueGroup>` keeps its compact-aware default (one column on a compact
+surface) for existing consumers, but now exposes `collapse` and `minColumnWidth`:
+
+```tsx
+// Stay 2-up even in a compact popover, as long as each cell has 220px.
+<KeyValueGroup columns={2} collapse="never" minColumnWidth={220}>
+  <KeyValue layout="inline" label="Version" value={sha} mono />
+  <KeyValue layout="inline" label="Remote" value={remote} mono />
+</KeyValueGroup>
+```
+
 ---
 
 ```ts
@@ -218,6 +295,66 @@ export const contributePlugin: PluginContribution = (plugin) => {
 
 ---
 
+## Modal Size Contract
+
+Modals do not size themselves. Every plugin modal takes the **host-allocated
+dialog size** and is fluid within it:
+
+- **Fill it, don't dictate it**: `ModalBody` is `flex: 1 / minHeight: 0 /
+  width: "100%"`; keep every wrapper between the host and `ModalBody` fluid too.
+- **No content-driven resizing**: a root that sizes to its children makes the
+  dialog visibly resize/redraw as data loads or grows. That is the anti-pattern
+  this contract removes.
+- **No hardcoded modal dimensions**: no `minWidth`/`minHeight`/fixed `width`/
+  `height` literals on modal or surface containers. Shrinkable text uses
+  `minWidth: 0` + `flexShrink: 1`.
+- **No nested scrollers**: the host owns the outer scroll on desktop and the
+  bottom sheet owns it on mobile; use `ModalBody` instead of adding another
+  `ScrollView`.
+
+On desktop the host presents a bounded dialog and owns scrolling; on mobile the
+host presents an `AdaptiveModalSheet` bottom sheet that owns the viewport and
+sheet gesture. Plugins get neither to guess: they just stay fluid inside
+whatever the host allocates.
+
+When a data-dense modal genuinely needs more room, pass the one documented
+preset `ModalBody size="large"` (desktop-only wide extent; ignored on mobile
+sheets and composer popovers) instead of adding a per-plugin width literal. In
+the other direction, `ModalBody maxContentWidth={n}` caps and centers the
+content column so settings/forms do not stretch edge-to-edge on large viewports;
+both are helper-owned, so plugin code adds no width literals. See
+[`docs/client.md`](docs/client.md) for the full contract and the `ModalBody`
+API.
+
+### Opening your own `<Modal>`: use `<ModalContent>`, not `<Modal.Content>`
+
+Plugins that render their own host `<Modal>` must not hand it the raw host
+`<Modal.Content>`. Paseo's host defaults `Modal.Content` to `scrollable`, which
+renders a **content-sized** desktop card — so the dialog resizes on every data
+change (the inconsistency between `top` and the other surfaces).
+
+`ModalContent` is the helper-owned replacement: it always passes
+`scrollable={false}` (the host then allocates a bounded dialog) and renders the
+shared `ModalBody` contract inside it, so a plugin using it cannot end up
+content-sized.
+
+```tsx
+import { Modal } from "@getpaseo/plugin/client/react-native";
+import { ModalContent } from "paseo-plugin-helper/client";
+
+<Modal title="My modal" open={open} onOpenChange={setOpen}>
+  <ModalContent>{/* content */}</ModalContent>
+</Modal>;
+```
+
+`ModalContent` accepts every `ModalBody` prop, so `size?: "default" | "large"`
+stays the only size escape hatch. Raw `<Modal.Content>` is only for non-plugin
+surfaces; plugin client code should use `ModalContent`.
+
+The bounded host content view supplies no scroller, so `ModalContent` forces
+`ModalBody scrollMode="always"`: the helper owns the one scroll region on every
+surface (desktop included) and the bounded dialog scrolls instead of clipping.
+
 ## Mobile Modal Gesture Architecture & `<Tabs>`
 
 ### The Challenge with Nested Scrolling in Paseo Modals
@@ -265,60 +402,17 @@ const tabs: TabItem[] = [
 
 ## Interactive Showcase Demo
 
-The repository includes a runnable reference plugin in [`demo/`](demo/README.md) (`helper-demo`) demonstrating all components, responsive mobile bottom-sheet behaviors, an interactive Visual Flair Studio, and the `<AboutSection>` component with auto-resolved GitHub branding. See the [**Demo README**](demo/README.md) for installation and walkthrough details.
-
----
-
-## Issues-Centered Workflow
-
-Day-to-day coordination runs on Forgejo issues, not chat. Agents work in
-silence, report via issue comments, and move their own cards through labels.
-Chat is for decisions, approvals, and escalations only.
-
-The [`fgjx` wrapper](https://forge.mrs.aager.de/xpufx/paseo-plugin-helper/issues/23)
-fills gaps in the `fgj` CLI that matter for this flow: labeled issue
-listings and views, query flags (`--not-by`, `--sort`, `--since`), and
-`--help` patched so agents discover the extensions. Everything else passes
-straight through to `fgj`.
-
-```bash
-fgjx issue list --sort updated --not-by xpufx   # what moved without you
-fgjx issue view 12                              # labels, body, comments
-```
-
-### Scoped Label Taxonomy
-
-All repository workflows use two-tone exclusive scoped labels (`scope/name`):
-
-| Scope | Labels | Purpose & Lifecycle |
-| :--- | :--- | :--- |
-| **Priority** | `priority/0-SOS`, `priority/1-high`, `priority/2-normal`, `priority/3-low`, `priority/4-backburner` | Urgency tier (`0-SOS` preempts all tasks immediately). |
-| **State** | `state/0-triage`, `state/1-wip`, `state/2-review`, `state/3-verify`, `state/4-done` | Execution stage lifecycle. |
-| **Spec** | `spec/0-needed`, `spec/1-checklist`, `spec/2-approved` | Shaping gate (`spec/2-approved` allows autonomous coding). |
-| **Format** | `format/0-needed`, `format/1-ok` | Presentation and markdown quality check. |
-| **Size** | `size/0-cheap`, `size/1-medium`, `size/2-expensive`, `size/3-chunk` | Cognitive effort; `size/3-chunk` halts implementation to slice PRs. |
-| **Linked** | `linked/0-needs-split`, `linked/1-peer`, `linked/2-done` | Cluster coordination (`0-needs-split` splits domain; `1-peer` syncs via `Linked: #...`). |
-| **Dep** | `dep/blocker`, `dep/blocked` | Hard issue dependencies. |
-| **Review** | `review/0-needed`, `review/1-changes-requested`, `review/2-approved` | Formal diff and architectural signoff gate. |
-| **Verify** | `verify/automated-ok`, `verify/needs-device` | Automated suites pass vs physical desktop/hardware verification needed. |
-| **Upstream** | `upstream/0-explore`, `upstream/1-blocked`, `upstream/2-aligned` | Upstream Paseo core tracking and alignment. |
-| **Attention** | `attention/0-orchestrator`, `attention/1-agent`, `attention/2-user`, `attention/3-ignore` | Signal target (`0-orchestrator` requests triage; `1-agent` requests worker claim). |
-| **Flags** | `flag/evergreen`, `flag/security`, `flag/stop-work`, `flag/wont-do`, `flag/audit` | Behavioral flags (`stop-work` is a hard circuit breaker). |
-| **Target** | `target/helper`, `target/top`, `target/x-comms`, `target/mcp-tools`, `target/forgejo`, `target/monorepo`, `target/daemon`, `target/paseo-plugin` | Domain or package boundary. |
-
-Label combinations steer autonomous agents deterministically: an issue requires `state/0-triage` + `spec/2-approved` (or `attention/1-agent`) without blocking labels (`dep/blocked`, `flag/stop-work`, `size/3-chunk`, `linked/0-needs-split`, `attention/0-orchestrator`) to qualify for autonomous claim.
-
----
+Live Showcase coverage lives in the monorepo's `plugins/demo` conformance testbed (all components, responsive behaviors, Flair Studio, `AboutSection` branding). The legacy `demo/` reference tree was removed.
 
 ## Documentation
 
 Comprehensive API and module documentation:
 
-- 📖 [Client Design System & Lifecycles (`docs/client.md`)](docs/client.md)
-- 📖 [Server Daemon Utilities (`docs/server.md`)](docs/server.md)
-- 📖 [MCP Client & Transports (`docs/mcp.md`)](docs/mcp.md)
-- 📖 [Shared Types & Formatters (`docs/shared.md`)](docs/shared.md)
-- 📖 [Testing Harness (`docs/testing.md`)](docs/testing.md)
+- [Client Design System & Lifecycles (`docs/client.md`)](docs/client.md)
+- [Server Daemon Utilities (`docs/server.md`)](docs/server.md)
+- [MCP Client & Transports (`docs/mcp.md`)](docs/mcp.md)
+- [Shared Types & Formatters (`docs/shared.md`)](docs/shared.md)
+- [Testing Harness (`docs/testing.md`)](docs/testing.md)
 
 ---
 
@@ -326,7 +420,13 @@ Comprehensive API and module documentation:
 
 Plugins powered by `paseo-plugin-helper`:
 
-- 📊 [**`paseo-top`**](https://github.com/xpufx/paseo-top) – Real-time system resource monitor (CPU, memory, load average) for Paseo composers with responsive charts, cards, and warning thresholds.
+- [**`paseo-top`**](https://github.com/xpufx/paseo/tree/main/plugins/top) – Real-time system resource monitor (CPU, memory, load average) for Paseo composers with responsive charts, cards, and warning thresholds.
+- [**`paseo-helper-demo`**](https://github.com/xpufx/paseo-helper-demo) – Interactive showcase and reference implementation for the helper: live pill, metrics, typed RPC actions, and persisted settings.
+- [**`paseo-forges`**](https://github.com/xpufx/paseo-forges) (coming soon) – Work with Forge/Gitea-family issues from inside Paseo via the embedded fetch API client.
+- [**`paseo-mcp-tools`**](https://github.com/xpufx/paseo-mcp-tools) – Inline UI for checking MCP servers available to an agent session, with live probes verifying actual session inclusion.
+- [**`paseo-slash`**](https://github.com/xpufx/paseo-slash) (coming soon) – Slash commands and macros with an interactive console, registered straight into the composer.
+- [**`paseo-x-comms`**](https://github.com/xpufx/paseo-x-comms) – Cross-daemon agent conversations over Paseo Relay, bundling its own MCP server.
+- [**`twofado`**](https://github.com/xpufx/twofado) (coming soon) – Out-of-band human approval for agent command execution: the agent petitions, your phone buzzes over Telegram, you tap, it runs.
 
 ---
 

@@ -1,23 +1,20 @@
 import React, { useEffect, useRef, useState, type ComponentType, type Ref } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView as FallbackScrollView,
   StyleSheet,
   Text,
   View,
   type LayoutChangeEvent,
-  type NativeScrollEvent,
-  type NativeSyntheticEvent,
   type ScrollView as ScrollViewInstance,
-  type ScrollViewProps,
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { getClientHost, selectHostScrollView, type HostScrollView } from "../host.js";
+import { getClientHost } from "../host.js";
 import { usePluginTheme } from "../theme/provider.js";
 import {
   FALLBACK_ACCENT_FOREGROUND,
-  resolveElevation,
   spacing,
 } from "../theme/tokens.js";
 
@@ -41,6 +38,25 @@ export interface TabsProps {
   style?: StyleProp<ViewStyle>;
 }
 
+/** Minimal structural views of the DOM scroll node react-native-web exposes. */
+interface WheelScrollEvent {
+  deltaX?: number;
+  deltaY?: number;
+  preventDefault(): void;
+}
+
+interface WheelScrollNode {
+  scrollLeft: number;
+  clientWidth: number;
+  scrollWidth: number;
+  addEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void, options?: { passive?: boolean }): void;
+  removeEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void): void;
+}
+
+interface WheelScrollInstance {
+  getScrollableNode?(): WheelScrollNode | null;
+}
+
 export function Tabs({
   tabs,
   activeTab,
@@ -49,31 +65,18 @@ export function Tabs({
   style,
 }: TabsProps) {
   const { Icon } = getClientHost();
-  const ResolvedScrollView = selectHostScrollView(
-    getClientHost(),
-    FallbackScrollView as unknown as HostScrollView,
-  );
+  // The tab strip scrolls horizontally, so it must be a plain React Native
+  // ScrollView: the host ScrollView is a vertical sheet-gesture controller
+  // and collapses/crashes when used horizontally (#219).
   const { colors, resolveRadius, touchTargetMin, isCompact, alpha } = usePluginTheme();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const tabLayouts = useRef<Record<string, { x: number; width: number }>>({});
   const [viewportWidth, setViewportWidth] = useState<number>(0);
-  const [contentWidth, setContentWidth] = useState<number>(0);
-  const [canScrollLeft, setCanScrollLeft] = useState<boolean>(false);
-  const [canScrollRight, setCanScrollRight] = useState<boolean>(false);
 
   const radius = resolveRadius("sm");
 
   // On compact/mobile or with <= 4 tabs, auto mode defaults to full-width fitting track
   const shouldFit = mode === "fit" || (mode === "auto" && (isCompact || tabs.length <= 4));
-
-  // Current scroll position tracker
-  const currentScrollX = useRef<number>(0);
-
-  const checkOverflow = (cWidth: number, vWidth: number, scrollX: number) => {
-    if (vWidth <= 0 || cWidth <= 0) return;
-    setCanScrollLeft(scrollX > 4);
-    setCanScrollRight(scrollX + vWidth < cWidth - 4);
-  };
 
   // Accurately center the active tab inside the viewport ONLY when activeTab changes
   const prevActiveTab = useRef<string>(activeTab);
@@ -87,11 +90,9 @@ export function Tabs({
           x: targetX,
           animated: true,
         });
-        currentScrollX.current = targetX;
-        checkOverflow(contentWidth, viewportWidth, targetX);
       }
     }
-  }, [activeTab, shouldFit, viewportWidth, contentWidth]);
+  }, [activeTab, shouldFit, viewportWidth]);
 
   const handleTabLayout = (tabId: string, event: LayoutChangeEvent) => {
     const { x, width } = event.nativeEvent.layout;
@@ -101,29 +102,28 @@ export function Tabs({
   const handleContainerLayout = (event: LayoutChangeEvent) => {
     const width = event.nativeEvent.layout.width;
     setViewportWidth(width);
-    checkOverflow(contentWidth, width, currentScrollX.current);
   };
 
-  const handleContentSizeChange = (cWidth: number) => {
-    setContentWidth(cWidth);
-    checkOverflow(cWidth, viewportWidth, currentScrollX.current);
-  };
-
-  const handleScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-    const x = contentOffset.x;
-    currentScrollX.current = x;
-    checkOverflow(contentSize.width, layoutMeasurement.width, x);
-  };
-
-  const scrollByDelta = (delta: number) => {
-    const nextX = Math.max(0, currentScrollX.current + delta);
-    scrollRef.current?.scrollTo({
-      x: nextX,
-      animated: true,
-    });
-    currentScrollX.current = nextX;
-  };
+  // Translate vertical mouse-wheel motion into horizontal tab-strip scrolling
+  // on web, while allowing the surrounding modal to scroll at either edge.
+  useEffect(() => {
+    if (shouldFit || Platform.OS !== "web") return;
+    const instance = scrollRef.current as unknown as WheelScrollInstance | null;
+    const node = instance?.getScrollableNode?.() ?? (instance as unknown as WheelScrollNode | null);
+    if (!node || typeof node.addEventListener !== "function") return;
+    const onWheel = (event: WheelScrollEvent) => {
+      const deltaX = event.deltaX ?? 0;
+      const deltaY = event.deltaY ?? 0;
+      if (Math.abs(deltaY) <= Math.abs(deltaX)) return;
+      const max = node.scrollWidth - node.clientWidth;
+      const next = Math.min(Math.max(0, node.scrollLeft + deltaY), max);
+      if (next === node.scrollLeft) return;
+      event.preventDefault();
+      node.scrollLeft = next;
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [shouldFit]);
 
   const renderTab = (tab: TabItem) => {
     const isActive = tab.id === activeTab;
@@ -149,7 +149,11 @@ export function Tabs({
               : pressed
                 ? alpha(colors.surface2, 0.5)
                 : "transparent",
-            paddingHorizontal: shouldFit ? (isCompact ? spacing.sm : spacing.md) : spacing.md,
+            paddingHorizontal: shouldFit
+              ? isCompact
+                ? (tabs.length > 3 ? spacing.xs : spacing.sm)
+                : (tabs.length >= 3 ? spacing.sm : spacing.md)
+              : spacing.md,
             paddingVertical: isCompact ? spacing.xs : spacing.sm,
           },
         ]}
@@ -222,7 +226,7 @@ export function Tabs({
     );
   }
 
-  // 2. SCROLL MODE: Closed outer frame with host-gesture ScrollView & Navigation Arrows
+  // 2. SCROLL MODE: plain React Native horizontal scroller.
   return (
     <View
       onLayout={handleContainerLayout}
@@ -236,57 +240,19 @@ export function Tabs({
         style,
       ]}
     >
-      {/* Left Scroll Arrow (Visible on both Desktop & Mobile when scrollable) */}
-      {canScrollLeft && (
-        <Pressable
-          onPress={() => scrollByDelta(-(viewportWidth * 0.7 || 140))}
-          style={[
-            styles.arrowButton,
-            styles.arrowLeft,
-            {
-              backgroundColor: alpha(colors.surface2, 0.92),
-              borderColor: colors.border,
-            },
-          ]}
-          accessibilityLabel="Scroll tabs left"
-        >
-          <Icon name="ChevronLeft" size={14} color={colors.foreground} />
-        </Pressable>
-      )}
-
-      <ResolvedScrollView
+      <FallbackScrollView
         ref={scrollRef}
         horizontal
         nestedScrollEnabled={true}
         directionalLockEnabled={true}
         keyboardShouldPersistTaps="handled"
-        onScroll={handleScroll}
-        onContentSizeChange={handleContentSizeChange}
-        scrollEventThrottle={16}
         showsHorizontalScrollIndicator={!isCompact}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
         {tabs.map((tab) => renderTab(tab))}
-      </ResolvedScrollView>
+      </FallbackScrollView>
 
-      {/* Right Scroll Arrow (Visible on both Desktop & Mobile when scrollable) */}
-      {canScrollRight && (
-        <Pressable
-          onPress={() => scrollByDelta(viewportWidth * 0.7 || 140)}
-          style={[
-            styles.arrowButton,
-            styles.arrowRight,
-            {
-              backgroundColor: alpha(colors.surface2, 0.92),
-              borderColor: colors.border,
-            },
-          ]}
-          accessibilityLabel="Scroll tabs right"
-        >
-          <Icon name="ChevronRight" size={14} color={colors.foreground} />
-        </Pressable>
-      )}
     </View>
   );
 }
@@ -302,6 +268,7 @@ const styles = StyleSheet.create({
   },
   trackFit: {
     flexDirection: "row",
+    flexWrap: "nowrap",
     alignItems: "center",
     width: "100%",
     padding: 3,
@@ -321,16 +288,21 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
+    gap: 4,
+    overflow: "hidden",
   },
   tabFit: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   tabScroll: {
     flexShrink: 0,
   },
   tabText: {
     textAlign: "center",
+    flexShrink: 1,
+    minWidth: 0,
   },
   badge: {
     borderRadius: 9999,
@@ -343,23 +315,5 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 10,
     fontWeight: "700",
-  },
-  arrowButton: {
-    position: "absolute",
-    zIndex: 20,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    top: 5,
-    ...resolveElevation("sm"),
-  },
-  arrowLeft: {
-    left: 4,
-  },
-  arrowRight: {
-    right: 4,
   },
 });

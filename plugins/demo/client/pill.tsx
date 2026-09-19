@@ -1,26 +1,16 @@
-import React, { useState } from "react";
-import { StyleSheet, Text, View, Pressable } from "react-native";
+import React, { useEffect, useState } from "react";
+import { Text, View } from "react-native";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, useToast } from "@getpaseo/plugin/client/react-native";
-import {
-  SettingsCard,
-  SettingsSection,
-  SettingsSwitch,
-  SettingsSelect,
-  SettingsInput,
-} from "@getpaseo/plugin/client/ui";
+import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import {
   initClientHelpers,
   type ComposerPillRegistrar,
 } from "paseo-plugin-helper/client";
 
-initClientHelpers({ Icon, Modal, useRpc, useToast });
+initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import {
   registerComposerPill,
-  registerHelperSettingsScreen,
-  type HelperSettingsScreenRegistrar,
   PluginThemeProvider,
-  ModalBody,
   ActionBar,
   Card,
   Badge,
@@ -31,6 +21,7 @@ import {
   MetricGauge,
   ProgressBar,
   DataTable,
+  Tabs,
   SearchInput,
   EmptyState,
   CodeBlock,
@@ -38,24 +29,32 @@ import {
   FormRow,
   TextInput,
   AboutSection,
-  Responsive,
   AttentionBeacon,
+  Collapsible,
+  SectionHeader,
   triggerHaptic,
   usePluginTheme,
   useResponsive,
-  useAutoRefreshQuery,
-  useRpcMutation,
-  usePluginSettings,
   type RenderModalProps,
   type RenderPillProps,
   type VisualFlair,
   type AttentionBeaconMode,
   type AttentionBeaconTone,
 } from "paseo-plugin-helper/client";
+import {
+  useAutoRefreshQuery,
+  useRpcMutation,
+  usePluginSettings,
+} from "paseo-plugin-helper/core";
+import { HostModalSection } from "paseo-plugin-helper/ui";
 import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import {
   getDemoDataRpc,
   triggerDemoActionRpc,
+  demoAgentIdentityContract,
+  demoBeaconSetContract,
+  demoBeaconBlinkContract,
+  demoBeaconClearContract,
   demoSettingsContract,
   type DemoData,
 } from "../shared/demo.js";
@@ -65,7 +64,7 @@ import { PLUGIN_VERSION } from "../shared/version.js";
 const EMPTY_PARAMS = {};
 
 function DemoPill({ isOpen }: RenderPillProps) {
-  const { colors } = usePluginTheme();
+  const { colors, typography } = usePluginTheme();
   const { isCompact } = useResponsive();
   const { settings } = usePluginSettings(demoSettingsContract);
   const { data, isLoading } = useAutoRefreshQuery(getDemoDataRpc, EMPTY_PARAMS, {
@@ -75,19 +74,28 @@ function DemoPill({ isOpen }: RenderPillProps) {
   const cpu = data?.cpuUsagePercent ?? 0;
   const isAlert = cpu > settings.highCpuThreshold;
 
+  // Raw View/Text composition: the host composer bar has no helper surface for
+  // pill content, so only the compositor row and inline text spans stay local.
   return (
-    <View style={styles.pillRow}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 6 }}>
       <StatusDot variant={isAlert ? "danger" : "success"} pulse={isAlert} />
       {isCompact ? (
         // Mobile / Compact track: ultra-compact layout to prevent truncation!
-        <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
-          <Text style={{ color: colors.foreground, fontWeight: "600" }}>
-            {isLoading ? "..." : `${cpu}%`}
-          </Text>
+        <Text
+          numberOfLines={1}
+          style={[
+            { ...typography.caption, color: colors.foreground, fontWeight: "600", flexShrink: 1 },
+            isOpen && { opacity: 0.85 },
+          ]}
+        >
+          {isLoading ? "..." : `${cpu}%`}
         </Text>
       ) : (
         // Desktop wide track: full descriptive label
-        <Text numberOfLines={1} style={[styles.pillText, isOpen && styles.pillTextActive]}>
+        <Text
+          numberOfLines={1}
+          style={[{ ...typography.caption, flexShrink: 1 }, isOpen && { opacity: 0.85 }]}
+        >
           <Text style={{ color: colors.accent, fontWeight: "600" }}>
             {settings.accentPillLabel}
           </Text>
@@ -103,11 +111,12 @@ function DemoPill({ isOpen }: RenderPillProps) {
   );
 }
 
-function DemoModal({ close }: RenderModalProps) {
-  const { colors, theme, layout } = usePluginTheme();
+function DemoModal({ close, workspaceId }: RenderModalProps) {
+  const { colors, theme, layout, typography, touchTargetMin } = usePluginTheme();
   const { isCompact } = useResponsive();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<string>("gauges");
-  const [menuOpen, setMenuOpen] = useState<boolean>(false);
+  const [navigationOpen, setNavigationOpen] = useState<boolean>(false);
 
   const showcaseTabs = [
     { id: "gauges", label: "Gauges & Hardware", shortLabel: "Gauges" },
@@ -135,6 +144,12 @@ function DemoModal({ close }: RenderModalProps) {
     isUpdating: isSettingsUpdating,
   } = usePluginSettings(demoSettingsContract);
 
+  // An open in-flow dropdown must not survive a navigation-style switch with
+  // stale state; the menu unmounts but the flag would reopen it on return.
+  useEffect(() => {
+    setNavigationOpen(false);
+  }, [settings.navigationStyle]);
+
   const {
     data,
     isLoading,
@@ -152,7 +167,63 @@ function DemoModal({ close }: RenderModalProps) {
       onSuccess: (res) => {
         triggerHaptic("success");
         setActionFeedback(res.message);
+        toast.show(res.message, { variant: "success" });
         refetch();
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const [beaconFeedback, setBeaconFeedback] = useState<string | null>(null);
+  const [showEnvelope, setShowEnvelope] = useState<boolean>(false);
+
+  const { data: agentData, isLoading: isAgentLoading } = useAutoRefreshQuery(
+    demoAgentIdentityContract,
+    EMPTY_PARAMS,
+    { defaultRate: "5s" }
+  );
+  const agentIdentity = agentData?.identity ?? null;
+
+  const { mutate: setBeacon, isPending: isBeaconSetPending } = useRpcMutation(
+    demoBeaconSetContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("success");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "success" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const { mutate: blinkBeacon, isPending: isBeaconBlinkPending } = useRpcMutation(
+    demoBeaconBlinkContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("success");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "success" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
+      },
+    }
+  );
+
+  const { mutate: clearBeacon, isPending: isBeaconClearPending } = useRpcMutation(
+    demoBeaconClearContract,
+    {
+      onSuccess: (res) => {
+        triggerHaptic("light");
+        setBeaconFeedback(res.message);
+        toast.show(res.message, { variant: "info" });
+      },
+      onError: (err) => {
+        toast.error(err.message);
       },
     }
   );
@@ -185,124 +256,109 @@ function DemoModal({ close }: RenderModalProps) {
       layout={layout}
       flair={activeFlair}
     >
-      <ModalBody
-        refreshing={isLoading}
-        onRefresh={async () => {
-          triggerHaptic("light");
-          await refetch();
-        }}
-      >
+      {/* Pill-embedded content (#219): the pill host already provides the one
+          <Modal.Content> (modal paths) or no modal at all (0.8 popover), so
+          this must stay a plain fluid section — a nested <Modal.Content>
+          violates the host contract and crashes the plugin. hostScroll: true
+          below leaves the scroller to the host; manual refresh lives in the
+          banner card. */}
+      <HostModalSection>
+        <View
+          style={{
+            width: "100%",
+            backgroundColor: colors.surface0,
+            paddingHorizontal: 12,
+            paddingTop: 12,
+            paddingBottom: 6,
+          }}
+        >
+          {settings.navigationStyle === "dropdown" ? (
+            // Dropdown navigation is composed from helper primitives: the
+            // helper has no Select/menu primitive, so Collapsible provides the
+            // disclosure header and Button rows make the options selectable.
+            <Collapsible
+              title={showcaseTabs.find((tab) => tab.id === activeTab)?.label ?? activeTab}
+              icon="Sliders"
+              isExpanded={navigationOpen}
+              onToggle={(expanded) => {
+                triggerHaptic("light");
+                setNavigationOpen(expanded);
+              }}
+              style={{ width: "100%", marginTop: 10 }}
+            >
+              <ActionBar direction="column" align="flex-start" style={{ marginTop: 0, gap: 4 }}>
+                {showcaseTabs.map((tab) => (
+                  <Button
+                    key={tab.id}
+                    label={tab.label}
+                    size="sm"
+                    variant={tab.id === activeTab ? "primary" : "ghost"}
+                    accessibilityLabel={`Show ${tab.label}`}
+                    style={{ width: "100%" }}
+                    onPress={() => {
+                      triggerHaptic("light");
+                      setActiveTab(tab.id);
+                      setNavigationOpen(false);
+                    }}
+                  />
+                ))}
+              </ActionBar>
+            </Collapsible>
+          ) : (
+            <Tabs
+              tabs={showcaseTabs}
+              activeTab={activeTab}
+              onTabChange={(tab) => {
+                triggerHaptic("light");
+                setActiveTab(tab);
+              }}
+              mode="scroll"
+            />
+          )}
+        </View>
       {/* Top Banner Card */}
       <Card variant="elevated">
-        <View style={styles.headerRow}>
-          <View style={styles.titleCol}>
-            <Text style={[styles.headerTitle, { color: colors.foreground }]}>
-              Helper Showcase
-            </Text>
-            <Text style={[styles.headerSubtitle, { color: colors.foregroundMuted }]}>
-              v0.2 UI Design System & Daemon Primitives
-            </Text>
-          </View>
-          <Badge
-            variant="accent"
-            label={`Polling ${rate}`}
-          />
-        </View>
+        <Card.Header
+          title="Helper Showcase"
+          subtitle="v0.2 UI Design System & Daemon Primitives"
+          badge={<Badge variant="accent" label={`Polling ${rate}`} />}
+        />
 
         {/* Refresh Interval Selector */}
-        <View style={styles.rateControlRow}>
-          <Text style={[styles.rateLabel, { color: colors.foregroundMuted }]}>
-            Auto Refresh:
-          </Text>
-          {(["1s", "2s", "5s", "paused"] as const).map((r) => (
+        <FormRow label="Auto Refresh" description={`Polling ${rate}`}>
+          <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
+            {(["1s", "2s", "5s", "paused"] as const).map((r) => (
+              <Button
+                key={r}
+                label={r}
+                size="sm"
+                variant={rate === r ? "primary" : "ghost"}
+                onPress={() => {
+                  triggerHaptic("light");
+                  setRate(r);
+                }}
+              />
+            ))}
             <Button
-              key={r}
-              label={r}
+              label={isLoading ? "Refreshing..." : "Refresh"}
               size="sm"
-              variant={rate === r ? "primary" : "ghost"}
-              onPress={() => {
+              variant="secondary"
+              onPress={async () => {
                 triggerHaptic("light");
-                setRate(r);
+                setNavigationOpen(false);
+                await refetch();
               }}
             />
-          ))}
-        </View>
-
-        </Card>
-
-      {/* Showcase view dropdown selector */}
-      <View style={styles.dropdownWrap}>
-        <Pressable
-          onPress={() => {
-            triggerHaptic("light");
-            setMenuOpen((v) => !v);
-          }}
-          accessibilityLabel="Select showcase view"
-          accessibilityRole="button"
-          style={[
-            styles.dropdownTrigger,
-            {
-              backgroundColor: colors.surface1,
-              borderColor: colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.dropdownTriggerLabel, { color: colors.foreground }]} numberOfLines={1}>
-            {showcaseTabs.find((t) => t.id === activeTab)?.label ?? activeTab}
-          </Text>
-          <Text style={[styles.dropdownChevron, { color: colors.foregroundMuted }]}>
-            {menuOpen ? "▴" : "▾"}
-          </Text>
-        </Pressable>
-        {menuOpen && (
-          <View
-            style={[
-              styles.dropdownMenu,
-              { backgroundColor: colors.surface1, borderColor: colors.border },
-            ]}
-          >
-            {showcaseTabs.map((tab) => {
-              const selected = tab.id === activeTab;
-              return (
-                <Pressable
-                  key={tab.id}
-                  onPress={() => {
-                    triggerHaptic("light");
-                    setActiveTab(tab.id);
-                    setMenuOpen(false);
-                  }}
-                  accessibilityLabel={`Show ${tab.label}`}
-                  accessibilityRole="button"
-                  style={[
-                    styles.dropdownItem,
-                    selected && {
-                      backgroundColor: colors.surface2,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownItemLabel,
-                      { color: selected ? colors.accent : colors.foreground },
-                      selected && styles.dropdownItemLabelActive,
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {tab.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      </View>
+          </ActionBar>
+        </FormRow>
+      </Card>
 
       {/* TAB 1: GAUGES & HARDWARE */}
       {activeTab === "gauges" && (
         <>
           <Card variant="elevated">
             <Card.Header title="Metric Gauges" />
-            <View style={styles.gaugesContainer}>
+            <ActionBar align="center" direction="row" style={{ marginTop: 0 }}>
               <MetricGauge
                 value={data?.cpuUsagePercent ?? 0}
                 label="CPU Load"
@@ -318,7 +374,7 @@ function DemoModal({ close }: RenderModalProps) {
                 label="Disk I/O"
                 size={74}
               />
-            </View>
+            </ActionBar>
           </Card>
 
           <Card variant="elevated">
@@ -375,7 +431,7 @@ function DemoModal({ close }: RenderModalProps) {
               label="Corner Radius"
               description={`Active preset: "${settings.flairRadius}"`}
             >
-              <View style={styles.segmentRow}>
+              <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
                 {(["sharp", "rounded", "pill"] as const).map((r) => (
                   <Button
                     key={r}
@@ -388,7 +444,7 @@ function DemoModal({ close }: RenderModalProps) {
                     }}
                   />
                 ))}
-              </View>
+              </ActionBar>
             </FormRow>
 
             {/* Information Density Selector */}
@@ -396,7 +452,7 @@ function DemoModal({ close }: RenderModalProps) {
               label="Layout Density"
               description={`Active density: "${settings.flairDensity}"`}
             >
-              <View style={styles.segmentRow}>
+              <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
                 {(["compact", "comfortable", "spacious"] as const).map((d) => (
                   <Button
                     key={d}
@@ -409,7 +465,7 @@ function DemoModal({ close }: RenderModalProps) {
                     }}
                   />
                 ))}
-              </View>
+              </ActionBar>
             </FormRow>
 
             {/* Surface Styling Selector */}
@@ -417,7 +473,7 @@ function DemoModal({ close }: RenderModalProps) {
               label="Surface Treatment"
               description={`Active surface: "${settings.flairSurface}"`}
             >
-              <View style={styles.segmentRow}>
+              <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
                 {(["flat", "tinted", "elevated"] as const).map((s) => (
                   <Button
                     key={s}
@@ -430,7 +486,7 @@ function DemoModal({ close }: RenderModalProps) {
                     }}
                   />
                 ))}
-              </View>
+              </ActionBar>
             </FormRow>
 
             {/* Border Width Stepper / Selector */}
@@ -438,7 +494,7 @@ function DemoModal({ close }: RenderModalProps) {
               label="Border Width"
               description={`Container outline stroke: ${settings.flairBorderWidth}px`}
             >
-              <View style={styles.segmentRow}>
+              <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
                 {[0, 1, 2, 3].map((w) => (
                   <Button
                     key={w}
@@ -451,7 +507,7 @@ function DemoModal({ close }: RenderModalProps) {
                     }}
                   />
                 ))}
-              </View>
+              </ActionBar>
             </FormRow>
 
             {/* Brand Accent Color Swatches */}
@@ -459,7 +515,7 @@ function DemoModal({ close }: RenderModalProps) {
               label="Brand Accent Color"
               description={`Current accent: ${settings.flairAccentColor}`}
             >
-              <View style={styles.swatchesRow}>
+              <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
                 {[
                   { label: "Indigo", color: "#6366f1" },
                   { label: "Emerald", color: "#10b981" },
@@ -470,22 +526,30 @@ function DemoModal({ close }: RenderModalProps) {
                 ].map((swatch) => {
                   const isSelected = settings.flairAccentColor.toLowerCase() === swatch.color.toLowerCase();
                   return (
-                    <Pressable
+                    <Button
                       key={swatch.color}
+                      size="sm"
+                      accessibilityLabel={`Select ${swatch.label} accent color`}
                       onPress={() => {
                         triggerHaptic("light");
                         updateSettings({ flairAccentColor: swatch.color });
                       }}
-                      style={[
-                        styles.colorSwatch,
-                        { backgroundColor: swatch.color },
-                        isSelected && styles.colorSwatchActive,
-                      ]}
-                      accessibilityLabel={`Select ${swatch.label} accent color`}
+                      style={{
+                        backgroundColor: swatch.color,
+                        borderColor: isSelected ? colors.foreground : "transparent",
+                        borderWidth: 2,
+                        borderRadius: 9999,
+                        width: touchTargetMin,
+                        height: touchTargetMin,
+                        minWidth: touchTargetMin,
+                        minHeight: touchTargetMin,
+                        paddingHorizontal: 0,
+                        paddingVertical: 0,
+                      }}
                     />
                   );
                 })}
-              </View>
+              </ActionBar>
             </FormRow>
 
             {/* Uppercase Header Switch */}
@@ -550,11 +614,13 @@ function DemoModal({ close }: RenderModalProps) {
                       header: "Service",
                       flex: 2,
                       render: (item) => (
+                        // Raw View/Text: DataTable column render slots have no
+                        // helper cell-text primitive, so this composite stays local.
                         <View>
-                          <Text style={[styles.tableNameText, { color: colors.foreground }]}>
+                          <Text style={[{ color: colors.foreground, ...typography.bodyStrong }]}>
                             {item.name}
                           </Text>
-                          <Text style={[styles.tableSubText, { color: colors.foregroundMuted }]}>
+                          <Text style={[{ color: colors.foregroundMuted, ...typography.caption }]}>
                             {item.category}
                           </Text>
                         </View>
@@ -565,7 +631,7 @@ function DemoModal({ close }: RenderModalProps) {
                       header: "Load",
                       align: "right",
                       render: (item) => (
-                        <Text style={[styles.tableMetricText, { color: colors.foreground }]}>
+                        <Text style={[{ color: colors.foreground, ...typography.bodyStrong }]}>
                           {item.loadPercent}%
                         </Text>
                       ),
@@ -577,11 +643,13 @@ function DemoModal({ close }: RenderModalProps) {
                       header: "Service",
                       flex: 2,
                       render: (item) => (
+                        // Raw View/Text: DataTable column render slots have no
+                        // helper cell-text primitive, so this composite stays local.
                         <View>
-                          <Text style={[styles.tableNameText, { color: colors.foreground }]}>
+                          <Text style={[{ color: colors.foreground, ...typography.bodyStrong }]}>
                             {item.name}
                           </Text>
-                          <Text style={[styles.tableSubText, { color: colors.foregroundMuted }]}>
+                          <Text style={[{ color: colors.foregroundMuted, ...typography.caption }]}>
                             {item.category}
                           </Text>
                         </View>
@@ -603,7 +671,7 @@ function DemoModal({ close }: RenderModalProps) {
                       header: "Load",
                       align: "right",
                       render: (item) => (
-                        <Text style={[styles.tableMetricText, { color: colors.foreground }]}>
+                        <Text style={[{ color: colors.foreground, ...typography.bodyStrong }]}>
                           {item.loadPercent}%
                         </Text>
                       ),
@@ -636,7 +704,7 @@ function DemoModal({ close }: RenderModalProps) {
             />
 
             {actionFeedback ? (
-              <Text style={[styles.feedbackText, { color: colors.statusSuccess }]}>
+              <Text style={{ color: colors.statusSuccess, ...typography.bodyStrong, marginTop: 6 }}>
                 {actionFeedback}
               </Text>
             ) : null}
@@ -656,6 +724,53 @@ function DemoModal({ close }: RenderModalProps) {
       {/* TAB: ATTENTION & BEACONS */}
       {activeTab === "attention" && (
         <>
+          <Card variant="elevated">
+            <Card.Header
+              title="Workspace Beacon"
+              subtitle="Live workspace-row status ticker driven by createWorkspaceBeacon()"
+            />
+            {/* Raw Text: the helper has no standalone caption/paragraph
+                primitive, so explanatory copy stays local and uses typography. */}
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, marginTop: 8 }}>
+              Targets this workspace ({workspaceId}). Watch the workspace row chip and title while
+              triggering.
+            </Text>
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
+              <Button
+                label={isBeaconSetPending ? "Setting..." : "Set Status Beacon"}
+                variant="primary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("medium");
+                  setBeacon({ workspaceId, name: "DEMO:ACTIVE", color: "sky" });
+                }}
+              />
+              <Button
+                label={isBeaconBlinkPending ? "Blinking..." : "Blink Beacon (5 rounds)"}
+                variant="secondary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("medium");
+                  blinkBeacon({ workspaceId, rounds: 5 });
+                }}
+              />
+              <Button
+                label={isBeaconClearPending ? "Clearing..." : "Clear Beacon"}
+                variant="ghost"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("light");
+                  clearBeacon({ workspaceId, name: "DEMO:ACTIVE" });
+                }}
+              />
+            </ActionBar>
+            {beaconFeedback ? (
+              <Text style={{ color: colors.statusSuccess, ...typography.bodyStrong, marginTop: 6 }}>
+                {beaconFeedback}
+              </Text>
+            ) : null}
+          </Card>
+
           <Card variant="elevated">
             <Card.Header
               title="Attention Playground"
@@ -678,7 +793,7 @@ function DemoModal({ close }: RenderModalProps) {
               label="Beacon Mode"
               description={`Active mode: "${beaconMode}"`}
             >
-              <View style={styles.segmentRow}>
+              <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
                 {(["radar", "glow", "badge", "bounce"] as const).map((m) => (
                   <Button
                     key={m}
@@ -691,14 +806,14 @@ function DemoModal({ close }: RenderModalProps) {
                     }}
                   />
                 ))}
-              </View>
+              </ActionBar>
             </FormRow>
 
             <FormRow
               label="Beacon Tone"
               description={`Active tone token: "${beaconTone === "warning" ? "statusWarning" : beaconTone}"`}
             >
-              <View style={styles.segmentRow}>
+              <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
                 {(
                   [
                     { token: "statusWarning", tone: "warning" },
@@ -717,7 +832,7 @@ function DemoModal({ close }: RenderModalProps) {
                     }}
                   />
                 ))}
-              </View>
+              </ActionBar>
             </FormRow>
           </Card>
 
@@ -726,30 +841,24 @@ function DemoModal({ close }: RenderModalProps) {
               title="Button attention prop"
               subtitle="Direct attention across button variants"
             />
-            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
-              Primary
-            </Text>
-            <View style={styles.beaconRow}>
+            <SectionHeader title="Primary" />
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               <Button label="Radar" variant="primary" size="sm" attention={attentionOn ? "radar" : undefined} />
               <Button label="Glow" variant="primary" size="sm" attention={attentionOn ? "glow" : undefined} />
               <Button label="Bounce" variant="primary" size="sm" attention={attentionOn ? "bounce" : undefined} />
-            </View>
-            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
-              Danger
-            </Text>
-            <View style={styles.beaconRow}>
+            </ActionBar>
+            <SectionHeader title="Danger" />
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               <Button label="Radar" variant="danger" size="sm" attention={attentionOn ? "radar" : undefined} />
               <Button label="Glow" variant="danger" size="sm" attention={attentionOn ? "glow" : undefined} />
               <Button label="Bounce" variant="danger" size="sm" attention={attentionOn ? "bounce" : undefined} />
-            </View>
-            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
-              Secondary / Ghost
-            </Text>
-            <View style={styles.beaconRow}>
+            </ActionBar>
+            <SectionHeader title="Secondary / Ghost" />
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               <Button label="Radar" variant="secondary" size="sm" attention={attentionOn ? "radar" : undefined} />
               <Button label="Default (true)" variant="ghost" size="sm" attention={attentionOn ? true : undefined} />
-            </View>
-            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+            </ActionBar>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, marginTop: 8 }}>
               Button accepts boolean | radar | glow | bounce. badge and ring are wrapper-only via AttentionBeacon.
             </Text>
           </Card>
@@ -759,44 +868,40 @@ function DemoModal({ close }: RenderModalProps) {
               title="Beacon Wrappers"
               subtitle="AttentionBeacon around arbitrary components (playground-driven)"
             />
-            <View style={styles.beaconGroup}>
-              <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
-                <Card>
-                  <Card.Header
-                    title="Urgent Review Required"
-                    subtitle="Simulated verdict awaiting operator"
-                  />
-                  <KeyValue
-                    label="Awaiting"
-                    value="Command execution verdict"
-                    subValue="twofado-style urgent prompt"
-                  />
-                  <ActionBar align="flex-start">
-                    <Button label="Approve" variant="primary" size="sm" />
-                    <Button label="Deny" variant="danger" size="sm" />
-                  </ActionBar>
-                </Card>
-              </AttentionBeacon>
-            </View>
-            <View style={[styles.beaconRow, styles.beaconGroup]}>
+            <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
+              <Card>
+                <Card.Header
+                  title="Urgent Review Required"
+                  subtitle="Simulated verdict awaiting operator"
+                />
+                <KeyValue
+                  label="Awaiting"
+                  value="Command execution verdict"
+                  subValue="twofado-style urgent prompt"
+                />
+                <ActionBar align="flex-start">
+                  <Button label="Approve" variant="primary" size="sm" />
+                  <Button label="Deny" variant="danger" size="sm" />
+                </ActionBar>
+              </Card>
+            </AttentionBeacon>
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
                 <Badge label="Wrapped Badge" variant="warning" />
               </AttentionBeacon>
               <AttentionBeacon mode={beaconMode} tone={beaconTone} active={attentionOn}>
-                <Pressable
+                <Button
+                  label={`Custom clickable (${beaconPresses})`}
+                  variant="secondary"
+                  size="sm"
+                  accessibilityLabel="Custom beacon-wrapped clickable"
                   onPress={() => {
                     triggerHaptic("medium");
                     setBeaconPresses((n) => n + 1);
                   }}
-                  style={[styles.beaconPressable, { borderColor: colors.border }]}
-                  accessibilityLabel="Custom beacon-wrapped clickable"
-                >
-                  <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>
-                    Custom clickable ({beaconPresses})
-                  </Text>
-                </Pressable>
+                />
               </AttentionBeacon>
-            </View>
+            </ActionBar>
           </Card>
 
           <Card variant="elevated">
@@ -804,48 +909,77 @@ function DemoModal({ close }: RenderModalProps) {
               title="Mode x Tone Matrix"
               subtitle="All four modes side by side in the playground tone"
             />
-            <View style={styles.beaconRow}>
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               {(["radar", "glow", "badge", "bounce"] as const).map((m) => (
                 <AttentionBeacon key={m} mode={m} tone={beaconTone} active={attentionOn}>
                   <Badge label={m} variant="accent" />
                 </AttentionBeacon>
               ))}
-            </View>
-            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
-              Tones in playground mode
-            </Text>
-            <View style={styles.beaconRow}>
+            </ActionBar>
+            <SectionHeader title="Tones in playground mode" />
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               {(["warning", "accent", "danger"] as const).map((t) => (
                 <AttentionBeacon key={t} mode={beaconMode} tone={t} active={attentionOn}>
                   <Badge label={t === "warning" ? "statusWarning" : t} variant={t} />
                 </AttentionBeacon>
               ))}
-            </View>
-            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
-              Ring alias equivalence
-            </Text>
-            <View style={styles.beaconRow}>
+            </ActionBar>
+            <SectionHeader title="Ring alias equivalence" />
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               <AttentionBeacon mode="radar" tone={beaconTone} active={attentionOn}>
                 <Badge label="radar" variant="accent" />
               </AttentionBeacon>
               <AttentionBeacon mode="ring" tone={beaconTone} active={attentionOn}>
                 <Badge label="ring" variant="accent" />
               </AttentionBeacon>
-            </View>
-            <Text style={[styles.beaconCaption, { color: colors.foregroundMuted }]}>
+            </ActionBar>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, marginTop: 8 }}>
               ring normalizes to radar; both halos pulse identically.
             </Text>
-            <Text style={[styles.beaconSectionLabel, { color: colors.foreground }]}>
-              Badge with icon
+            <SectionHeader title="Badge with icon" />
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, marginTop: 8 }}>
+              Badge accepts string host icons and custom emoji/graphic nodes via the icon prop, plus a dot variant.
             </Text>
-            <View style={styles.beaconRow}>
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
+              <Badge icon="Bell" label="Bell Icon" variant="danger" />
+              <Badge icon="Flame" label="Flame Icon" variant="warning" />
+              <Badge
+                icon={<Text style={{ fontSize: typography.caption.fontSize }}>🚀</Text>}
+                label="Emoji Graphic"
+                variant="accent"
+              />
+              <Badge
+                icon={<Text style={{ fontSize: typography.caption.fontSize }}>⚡</Text>}
+                label="Zap Graphic"
+                variant="success"
+              />
+              <Badge dot label="Status Dot" variant="info" />
+            </ActionBar>
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
               <AttentionBeacon mode="badge" tone="danger" active={attentionOn}>
-                <Badge label="bell" variant="danger" />
+                <Badge icon="Bell" label="Bell Icon" variant="danger" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="warning" active={attentionOn}>
+                <Badge icon="Flame" label="Flame Icon" variant="warning" />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="accent" active={attentionOn}>
+                <Badge
+                  icon={<Text style={{ fontSize: typography.caption.fontSize }}>🚀</Text>}
+                  label="Emoji Graphic"
+                  variant="accent"
+                />
+              </AttentionBeacon>
+              <AttentionBeacon mode="badge" tone="accent" active={attentionOn}>
+                <Badge
+                  icon={<Text style={{ fontSize: typography.caption.fontSize }}>⚡</Text>}
+                  label="Zap Graphic"
+                  variant="success"
+                />
               </AttentionBeacon>
               <AttentionBeacon mode="badge" tone={beaconTone} active={attentionOn}>
-                <Badge label="plain pip" variant="accent" />
+                <Badge dot label="Status Dot" variant="info" />
               </AttentionBeacon>
-            </View>
+            </ActionBar>
           </Card>
         </>
       )}
@@ -870,6 +1004,32 @@ function DemoModal({ close }: RenderModalProps) {
                 updateSettings({ showCpuUsage: val });
               }}
             />
+          </FormRow>
+
+          <FormRow
+            label="Navigation Style"
+            description="Choose tabs or a readable dropdown for the showcase navbar"
+          >
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
+              <Button
+                label="Tabs"
+                size="sm"
+                variant={settings.navigationStyle === "tabs" ? "primary" : "secondary"}
+                onPress={() => {
+                  triggerHaptic("light");
+                  updateSettings({ navigationStyle: "tabs" });
+                }}
+              />
+              <Button
+                label="Dropdown"
+                size="sm"
+                variant={settings.navigationStyle === "dropdown" ? "primary" : "secondary"}
+                onPress={() => {
+                  triggerHaptic("light");
+                  updateSettings({ navigationStyle: "dropdown" });
+                }}
+              />
+            </ActionBar>
           </FormRow>
 
           <FormRow
@@ -898,7 +1058,7 @@ function DemoModal({ close }: RenderModalProps) {
           </FormRow>
 
           <ActionBar align="space-between">
-            <Text style={{ fontSize: 11, color: colors.foregroundMuted }}>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
               {isSettingsUpdating ? "Saving to disk..." : "Saved to settings.json atomically"}
             </Text>
             <Button
@@ -953,13 +1113,89 @@ function DemoModal({ close }: RenderModalProps) {
 
       {/* TAB 6: ABOUT PLUGIN */}
       {activeTab === "about" && (
+        <>
+        <Card variant="elevated">
+          <Card.Header
+            title="Agent Identity & Session"
+            subtitle="Self-inspection via getAgentIdentity()"
+          />
+          {isAgentLoading ? (
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, marginTop: 8 }}>
+              Resolving agent identity...
+            </Text>
+          ) : !agentIdentity ? (
+            <EmptyState
+              icon="Bot"
+              title="No Active Agent Session"
+              description="Running outside an active agent session. Identity resolves via getAgentIdentity() when a session envelope is present."
+            />
+          ) : (
+            <>
+              <KeyValueGroup columns={isCompact ? 1 : 2}>
+                <KeyValue
+                  label="Active Agent ID"
+                  value={agentIdentity.id ?? "—"}
+                  copyable={Boolean(agentIdentity.id)}
+                />
+                <KeyValue
+                  label="Session Name"
+                  value={agentIdentity.name ?? "—"}
+                  copyable={Boolean(agentIdentity.name)}
+                />
+                <KeyValue
+                  label="Model"
+                  value={agentIdentity.model ?? "—"}
+                  copyable={Boolean(agentIdentity.model)}
+                />
+                <KeyValue
+                  label="Provider"
+                  value={agentIdentity.provider ?? "—"}
+                  copyable={Boolean(agentIdentity.provider)}
+                />
+                <KeyValue
+                  label="Repo"
+                  value={agentIdentity.repo ?? "—"}
+                  copyable={Boolean(agentIdentity.repo)}
+                />
+                <KeyValue
+                  label="Branch"
+                  value={agentIdentity.branch ?? "—"}
+                  copyable={Boolean(agentIdentity.branch)}
+                />
+              </KeyValueGroup>
+              {agentIdentity.envelopeText ? (
+                <>
+                  <ActionBar align="flex-start" direction="row" style={{ marginTop: 0 }}>
+                    <Badge label="Audit envelope present" variant="success" />
+                    <Button
+                      label={showEnvelope ? "Hide Envelope" : "Inspect Envelope"}
+                      size="sm"
+                      variant="secondary"
+                      onPress={() => {
+                        triggerHaptic("light");
+                        setShowEnvelope((v) => !v);
+                      }}
+                    />
+                  </ActionBar>
+                  {showEnvelope ? (
+                    <CodeBlock
+                      language="bash"
+                      code={agentIdentity.envelopeText}
+                      copyable
+                    />
+                  ) : null}
+                </>
+              ) : null}
+            </>
+          )}
+        </Card>
         <AboutSection
           name="Paseo Helper Demo"
           description="Interactive design system showcase and daemon runtime verification suite for paseo-plugin-helper."
           version={data?.version ?? PLUGIN_VERSION}
           author="xpufx"
-          repository="https://github.com/xpufx/paseo-plugin-helper"
-          issues="https://github.com/xpufx/paseo-plugin-helper/issues"
+          repository="https://github.com/xpufx/paseo-helper-demo"
+          issues="https://github.com/xpufx/paseo-helper-demo/issues"
           license="MIT"
           extraItems={[
             { label: "Daemon Verified Port", value: `${data?.daemonPort ?? 4280}`, copyable: true },
@@ -967,6 +1203,7 @@ function DemoModal({ close }: RenderModalProps) {
             { label: "Background Uptime", value: `${Math.round(data?.uptimeSeconds ?? 0)}s` },
           ]}
         />
+        </>
       )}
 
       {/* Footer */}
@@ -981,22 +1218,23 @@ function DemoModal({ close }: RenderModalProps) {
         />
       </ActionBar>
 
-      <View style={styles.versionFooter}>
-        <Text style={[styles.versionText, { color: colors.foregroundMuted }]}>
+      <View style={{ alignItems: "center", paddingVertical: 8 }}>
+        <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontFamily: "monospace" }}>
           helper-demo v{data?.version ?? PLUGIN_VERSION} (tick #{data?.backgroundTicks ?? 0})
         </Text>
       </View>
-    </ModalBody>
+      </HostModalSection>
     </PluginThemeProvider>
   );
 }
 
-export function contributeClient(client: ComposerPillRegistrar & HelperSettingsScreenRegistrar) {
+export function contributeClient(client: ComposerPillRegistrar) {
   const removePill = registerComposerPill(client, {
     id: "helper-demo",
     title: "demo",
     modalTitle: "Showcase Demo",
     modalIcon: "Sliders",
+    hostScroll: true,
     flair: {
       radius: "rounded",
       density: "comfortable",
@@ -1005,181 +1243,7 @@ export function contributeClient(client: ComposerPillRegistrar & HelperSettingsS
     renderPill: (props) => <DemoPill {...props} />,
     renderModal: (props) => <DemoModal {...props} />,
   });
-  const removeSettingsScreen = registerHelperSettingsScreen(client, demoSettingsContract, {
-    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
-    id: "helper-demo-settings",
-    title: "Demo settings",
-    icon: "Sliders",
-  });
   return () => {
     removePill();
-    removeSettingsScreen();
   };
 }
-
-const styles = StyleSheet.create({
-  pillRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 6,
-  },
-  pillText: {
-    fontSize: 11,
-    flexShrink: 1,
-  },
-  pillTextActive: {
-    opacity: 0.85,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    flexWrap: "wrap",
-    gap: 8,
-    width: "100%",
-  },
-  titleCol: {
-    gap: 2,
-    flexShrink: 1,
-  },
-  headerTitle: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-  headerSubtitle: {
-    fontSize: 11,
-    opacity: 0.7,
-  },
-  rateControlRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginTop: 10,
-    flexWrap: "wrap",
-  },
-  rateLabel: {
-    fontSize: 11,
-    marginRight: 4,
-  },
-  gaugesContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    paddingVertical: 6,
-  },
-  tableNameText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  tableSubText: {
-    fontSize: 11,
-  },
-  tableMetricText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  feedbackText: {
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 6,
-  },
-  versionFooter: {
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  versionText: {
-    fontSize: 10,
-    fontFamily: "monospace",
-  },
-  segmentRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
-  },
-  swatchesRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-    paddingVertical: 4,
-  },
-  colorSwatch: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "transparent",
-  },
-  colorSwatchActive: {
-    borderColor: "#ffffff",
-    transform: [{ scale: 1.15 }],
-  },
-  beaconRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "wrap",
-    marginTop: 8,
-  },
-  beaconGroup: {
-    marginTop: 10,
-  },
-  beaconSectionLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 10,
-  },
-  beaconCaption: {
-    fontSize: 11,
-    marginTop: 8,
-  },
-  beaconPressable: {
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  dropdownWrap: {
-    width: "100%",
-    marginTop: 10,
-    zIndex: 10,
-  },
-  dropdownTrigger: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    width: "100%",
-  },
-  dropdownTriggerLabel: {
-    fontSize: 13,
-    fontWeight: "600",
-    flexShrink: 1,
-  },
-  dropdownChevron: {
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  dropdownMenu: {
-    borderWidth: 1,
-    borderRadius: 10,
-    marginTop: 6,
-    overflow: "hidden",
-    width: "100%",
-  },
-  dropdownItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    width: "100%",
-  },
-  dropdownItemLabel: {
-    fontSize: 13,
-  },
-  dropdownItemLabelActive: {
-    fontWeight: "700",
-  },
-});

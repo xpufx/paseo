@@ -3,8 +3,9 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Clipboard, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Clipboard, Pressable, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
+import { ModalContent, TextInput } from "paseo-plugin-helper/client";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
 import { formatCounterparty, formatPeerDisplay, splitCounterparty, useCounterpartyLabel, usePeerDisplay, type CounterpartyRef } from "./peer-label";
@@ -363,16 +364,8 @@ export function CrossDaemonConversation({
         value={draft}
         onChangeText={setDraftCached}
         placeholder="Message the selected counterparty…"
-        placeholderTextColor={theme.colors.foregroundMuted}
-        style={{
-          borderWidth: 1,
-          borderColor: theme.colors.border,
-          borderRadius: 6,
-          padding: 10,
-          color: theme.colors.foreground,
-          fontSize: 13,
-          marginBottom: 8,
-        }}
+        style={{ marginBottom: 8 }}
+        inputStyle={{ fontSize: 13 }}
         multiline
       />
       <Pressable
@@ -420,10 +413,10 @@ export function CrossDaemonConversation({
         </View>
       ) : null}
       <Modal title="New conversation" open={pickerOpen} onOpenChange={setPickerOpen}>
-        <Modal.Content>
+        <ModalContent>
           {introspect.isPending ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Loading agents…</Text> : null}
           {introspect.error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{String(introspect.error)}</Text> : null}
-          <ScrollView style={{ maxHeight: 420 }}>
+          <View>
             {(introspect.data?.daemons ?? []).map((daemon) => (
               <View key={daemon.name}>
                 <Text style={{ color: daemon.reachable ? theme.colors.accent : theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 10, textTransform: "uppercase" as const }}>
@@ -446,9 +439,9 @@ export function CrossDaemonConversation({
                 ))}
               </View>
             ))}
-          </ScrollView>
+          </View>
           <ViaXComms theme={theme} />
-        </Modal.Content>
+        </ModalContent>
       </Modal>
       <ViaXComms theme={theme} />
     </View>

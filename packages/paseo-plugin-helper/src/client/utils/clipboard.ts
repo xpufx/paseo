@@ -8,7 +8,7 @@ export interface CopyToClipboardOptions {
 
 /**
  * Robust cross-platform clipboard copy helper for Paseo plugins.
- * Works seamlessly across React Native (Hermes / mobile), web, and desktop.
+ * Works seamlessly across React Native (mobile), web, and desktop.
  *
  * Precedence:
  * 1. Host copyText from initClientHelpers (Paseo v0.8, optional)

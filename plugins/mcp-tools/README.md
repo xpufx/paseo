@@ -1,12 +1,22 @@
 # paseo-mcp-tools plugin
 
-<p align="center">
-  <img src="screenshots/paseo-mcp-tools-mobile.jpg" width="40%" alt="paseo-mcp-tools on mobile" />
-</p>
+> **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
-Provides an inline UI for checking MCP servers available to an agent session with additional functionality per MCP. Uses the most authoritative list per provider CLI and verifies actual session inclusion with live probes.
+Provides an inline UI for checking MCP servers available to an agent session with additional functionality per MCP, such as listing and directly executing MCP tools with auto-generated input forms. Uses the most authoritative list per provider CLI and verifies actual session inclusion with live probes.
 
 (**Paseo** is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions.)
+
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
+
+## Screenshots
+
+| MCP Servers | Diagnostics | Settings |
+| :---: | :---: | :---: |
+| <img src="screenshots/mcp-servers.png" width="100%" alt="MCP Servers" /> | <img src="screenshots/mcp-diagnostic.png" width="100%" alt="Diagnostics" /> | <img src="screenshots/mcp-settings.png" width="100%" alt="Settings" /> |
+
+| Server Details | Tool Execution |
+| :---: | :---: |
+| <img src="screenshots/mcp-server-details.png" width="100%" alt="Server Details" /> | <img src="screenshots/mcp-execute.png" width="100%" alt="Tool Execution" /> |
 
 ## What it does
 
@@ -17,16 +27,6 @@ Provides an inline UI for checking MCP servers available to an agent session wit
 - **Interactive Tool Runner (User Execution)**: Users can execute any discovered MCP tool directly from the UI without prompting the agent. Features a dynamic schema-driven form with `*REQUIRED` validation, type coercion (boolean, number, object, array, union/nullable types), live tool execution via host RPC (`mcp.call_tool`), and output inspection with 1-tap clipboard copying.
 - **Real-Time Tool Search**: Server Detail view features a real-time search input filtering across tool names and descriptions, making servers with large command sets (like Paseo, Forgejo, Chrome DevTools) fast and easy to navigate.
 - **Diagnostics**: Full polymorphic probe checklist verifying paths, permissions, and agent records across hosts.
-
-## Screenshots
-
-| MCP Overview & Status | Server Detail & Live Health |
-| :---: | :---: |
-| <img src="screenshots/paseo-mcp-tools-main.png" width="100%" alt="MCP Servers & Tools Overview" /> | <img src="screenshots/paseo-mcp-tools-detail.png" width="100%" alt="Server Details & Health" /> |
-
-| Interactive Tool Runner & Execution | Host Probe Diagnostics |
-| :---: | :---: |
-| <img src="screenshots/paseo-mcp-tools-execute.png" width="100%" alt="Interactive Tool Execution & Parameters" /> | <img src="screenshots/paseo-mcp-tools-diagnosis.png" width="100%" alt="Host Diagnostics" /> |
 
 ## Supported Providers
 
@@ -51,19 +51,19 @@ See the complete step-by-step guide in the [write-mcp-provider skill](.agents/sk
 
 | File | Owns |
 |---|---|
-| `index.ts` | Wiring only — `handle(mcp.list)`, `handle(mcp.read)`, `handle(mcp.health)`, `handle(mcp.call_tool)`, `handle(mcp.diagnose)`, `addClientSide` |
-| `mcp.shared.ts` | zod RPC contracts & shared types (`ToolInfoSchema`, `callMcpTool`, etc.) |
-| `mcp.server.ts` | `discoverLiveServers()`, tool runner execution bridge, and polymorphic diagnostic handlers |
-| `discovery/extract.ts` | Universal heuristic MCP parser (JSON/JSONC, comments, trailing commas, URL safe) & candidate discovery |
-| `discovery/types.ts` | Core contracts (`McpProbe`, `ProbeContext`, `ProbeResult`) |
-| `providers/<id>.ts` | Per-CLI live probe — isolated, contract `McpProbe` (`antigravity.ts`, `claude.ts`, etc.) |
-| `providers/paseo.ts` | Dedicated host daemon probe discovering Paseo control plane & tools |
-| `providers/catalog.ts` | 1-line re-export catalog for zero-boilerplate probe registration |
-| `health/health.server.ts` | Generic MCP SDK client — `instructions`, schema-aware `tools`, and `callMcpServerTool` |
-| `mcp-query.client.tsx` | `useMcpQuery` shared pill/modal, 30m timer + manual Refresh |
-| `pill.client.tsx` | Pill, modal, server details, diagnostics, real-time search, and interactive Tool Runner UI |
-| `scripts/version.mjs` | Offline build-time version stamper (tag / beta-[hash]) |
-| `docs/TEST_METHODOLOGY.md` | Test procedures, adapter verification, and QA methodology |
+| [`index.ts`](index.ts) | Wiring only: `handle(mcp.list)`, `handle(mcp.read)`, `handle(mcp.health)`, `handle(mcp.call_tool)`, `handle(mcp.diagnose)`, `addClientSide` |
+| [`mcp.shared.ts`](mcp.shared.ts) | zod RPC contracts & shared types (`ToolInfoSchema`, `callMcpTool`, etc.) |
+| [`mcp.server.ts`](mcp.server.ts) | `discoverLiveServers()`, tool runner execution bridge, and polymorphic diagnostic handlers |
+| [`discovery/extract.ts`](discovery/extract.ts) | Universal heuristic MCP parser (JSON/JSONC, comments, trailing commas, URL safe) & candidate discovery |
+| [`discovery/types.ts`](discovery/types.ts) | Core contracts (`McpProbe`, `ProbeContext`, `ProbeResult`) |
+| [`providers/<id>.ts`](providers/) | Per-CLI live probe (isolated, contract `McpProbe`: `antigravity.ts`, `claude.ts`, etc.) |
+| [`providers/paseo.ts`](providers/paseo.ts) | Dedicated host daemon probe discovering Paseo control plane & tools |
+| [`providers/catalog.ts`](providers/catalog.ts) | 1-line re-export catalog for zero-boilerplate probe registration |
+| [`health/health.server.ts`](health/health.server.ts) | Generic MCP SDK client (`instructions`, schema-aware `tools`, and `callMcpServerTool`) |
+| [`mcp-query.client.tsx`](mcp-query.client.tsx) | `useMcpQuery` shared pill/modal, 30m timer + manual Refresh |
+| [`pill.client.tsx`](pill.client.tsx) | Pill, modal, server details, diagnostics, real-time search, and interactive Tool Runner UI |
+| [`scripts/version.mjs`](scripts/version.mjs) | Offline build-time version stamper (tag / beta-[hash]) |
+| [`docs/TEST_METHODOLOGY.md`](docs/TEST_METHODOLOGY.md) | Test procedures, adapter verification, and QA methodology |
 
 ## Install & Updates
 

@@ -35,6 +35,7 @@ export interface BeaconBlinkOptions {
   b: BeaconLabelState;
   intervalMs?: number;
   rounds?: number;
+  restoreOnDone?: boolean;
 }
 
 export interface BeaconClearOptions {
@@ -191,6 +192,17 @@ export class WorkspaceBeacon {
       if (timer) clearInterval(timer);
       const current = this.blinkTimers.get(key);
       if (current?.finish === finish) this.blinkTimers.delete(key);
+      if (options.restoreOnDone) {
+        void this.clear({
+          workspaceId,
+          name: options.a.name ?? options.b.name,
+          restoreTitle: true,
+        }).catch((err) =>
+          this.logger?.debug?.(
+            `WorkspaceBeacon blink restore failed: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
+      }
       resolveDone();
     };
 
@@ -207,14 +219,21 @@ export class WorkspaceBeacon {
         }
         const state = states[count % 2];
         count += 1;
-        void this.set({ ...state, workspaceId: state.workspaceId ?? workspaceId ?? "" }).catch(() => undefined);
+        void this.set({ ...state, workspaceId: state.workspaceId ?? workspaceId ?? "" }).catch((err) =>
+          this.logger?.debug?.(
+            `WorkspaceBeacon blink tick failed: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        );
         if (count >= totalRounds) {
           finish();
         }
       };
       let count = 0;
       void this.set({ ...states[0], workspaceId: states[0].workspaceId ?? workspaceId ?? "" }).catch(
-        () => undefined,
+        (err) =>
+          this.logger?.debug?.(
+            `WorkspaceBeacon blink tick failed: ${err instanceof Error ? err.message : String(err)}`,
+          ),
       );
       count = 1;
       if (count >= totalRounds) {
@@ -223,7 +242,10 @@ export class WorkspaceBeacon {
         timer = setInterval(tick, intervalMs);
         this.blinkTimers.set(key, { timer, finish });
       }
-    } catch {
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon blink setup failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       finish();
     }
 
@@ -264,8 +286,10 @@ export class WorkspaceBeacon {
       clearInterval(entry.timer);
       try {
         entry.finish();
-      } catch {
-        // ignore finish errors during teardown
+      } catch (err) {
+        this.logger?.debug?.(
+          `WorkspaceBeacon stopAll finish failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
     this.blinkTimers.clear();
@@ -274,7 +298,7 @@ export class WorkspaceBeacon {
   private resolveTitle(options: BeaconLabelState): string | undefined {
     if (options.title !== undefined) return options.title;
     if (options.titleSuffix === undefined) return undefined;
-    const base = this.baseTitle ?? this.originalTitles.get(options.workspaceId ?? "") ?? "";
+    const base = this.originalTitles.get(options.workspaceId ?? "") ?? this.baseTitle ?? "";
     return `${base}${options.titleSuffix}`;
   }
 
@@ -322,19 +346,34 @@ export class WorkspaceBeacon {
         );
       }
       return false;
-    } catch {
+    } catch (err) {
+      this.logger?.debug?.(
+        `WorkspaceBeacon detachLabel failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       return false;
     }
+  }
+
+  setOriginalTitle(workspaceId: string, title: string): void {
+    this.originalTitles.set(workspaceId, title);
+  }
+
+  hasOriginalTitle(workspaceId: string): boolean {
+    return this.originalTitles.has(workspaceId);
+  }
+
+  getOriginalTitle(workspaceId: string): string | undefined {
+    return this.originalTitles.get(workspaceId);
   }
 
   private async applyTitle(workspaceId: string | undefined, title: string): Promise<boolean> {
     const handle = this.workspaceHandle;
     if (!handle || !isFunction(handle.setTitle)) return false;
     const key = workspaceId ?? "";
-    if (!this.originalTitles.has(key) && this.baseTitle === undefined) {
-      this.originalTitles.set(key, "");
-    } else if (!this.originalTitles.has(key) && this.baseTitle !== undefined) {
-      this.originalTitles.set(key, this.baseTitle);
+    if (!this.originalTitles.has(key)) {
+      if (this.baseTitle !== undefined) {
+        this.originalTitles.set(key, this.baseTitle);
+      }
     }
     return safeInvoke(() => (handle.setTitle as (t: string) => unknown)(title), this.logger);
   }
@@ -349,7 +388,12 @@ export class WorkspaceBeacon {
       () => (handle.setTitle as (t: string) => unknown)(original),
       this.logger,
     );
-    if (ok) this.originalTitles.delete(key);
+    if (ok) {
+      this.originalTitles.delete(key);
+      if (this.baseTitle === original) {
+        this.baseTitle = undefined;
+      }
+    }
     return ok;
   }
 
@@ -360,8 +404,10 @@ export class WorkspaceBeacon {
       this.blinkTimers.delete(key);
       try {
         entry.finish();
-      } catch {
-        // superseded blink: ignore
+      } catch (err) {
+        this.logger?.debug?.(
+          `WorkspaceBeacon stopBlink finish failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
   }

@@ -1,4 +1,7 @@
 import type { PlatformType } from "../../shared/types.js";
+import type { DensityStyle } from "./flair.js";
+import type { ResponsiveLayout } from "../../shared/types.js";
+import { resolveEffectiveCompact } from "./responsive.js";
 
 /**
  * Standard spacing scale (pt/px) shared by every helper surface.
@@ -14,6 +17,78 @@ export const spacing = {
 } as const;
 
 export type SpacingKey = keyof typeof spacing;
+
+/**
+ * A gap/size value: either a named spacing token or a raw px number. Layout
+ * primitives accept this so callers never have to invent their own scale.
+ */
+export type SpacingValue = SpacingKey | number;
+
+/**
+ * Resolves a {@link SpacingValue} to px, falling back to the theme-derived
+ * value when the caller did not specify one.
+ */
+export function resolveSpacing(value: SpacingValue | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  return typeof value === "number" ? value : spacing[value];
+}
+
+export interface TypographyToken {
+  fontSize: number;
+  lineHeight: number;
+  fontWeight: "400" | "500" | "600" | "700";
+}
+
+export interface TypographyScale {
+  title: TypographyToken;
+  heading: TypographyToken;
+  body: TypographyToken;
+  bodyStrong: TypographyToken;
+  /**
+   * Value text that pairs with a {@link TypographyScale.label}: same size as
+   * the label, normal weight, so a value never outranks its own label.
+   */
+  bodySmall: TypographyToken;
+  caption: TypographyToken;
+  label: TypographyToken;
+}
+
+/**
+ * Semantic text sizes keep helper components visually coherent while still
+ * allowing compact panes and plugin density preferences to breathe.
+ */
+export function resolveTypography(
+  layout: ResponsiveLayout,
+  density: DensityStyle,
+): TypographyScale {
+  const compact = resolveEffectiveCompact(layout);
+  const densityStep = density === "compact" ? -1 : density === "spacious" ? 1 : 0;
+  const size = (regular: number, minimum = 10) =>
+    Math.max(minimum, regular + (compact ? -1 : 0) + densityStep);
+
+  const label: TypographyToken = {
+    fontSize: size(12, 11),
+    lineHeight: size(16, 14),
+    fontWeight: "600",
+  };
+  // Derived, not a fresh literal: a paired value shares the label's metrics
+  // and drops to normal weight, so it can never render larger than its label.
+  const bodySmall: TypographyToken = {
+    fontSize: label.fontSize,
+    lineHeight: label.lineHeight,
+    fontWeight: "400",
+  };
+
+  return {
+    title: { fontSize: size(16, 14), lineHeight: size(22, 18), fontWeight: "600" },
+    heading: { fontSize: size(14, 12), lineHeight: size(20, 16), fontWeight: "600" },
+    body: { fontSize: size(13, 12), lineHeight: size(19, 16), fontWeight: "400" },
+    bodyStrong: { fontSize: size(13, 12), lineHeight: size(19, 16), fontWeight: "600" },
+    bodySmall,
+    caption: { fontSize: size(11, 10), lineHeight: size(15, 14), fontWeight: "400" },
+    label,
+  };
+}
 
 /** Fallback text color on accent fills when the host omits accentForeground. */
 export const FALLBACK_ACCENT_FOREGROUND = "#ffffff";

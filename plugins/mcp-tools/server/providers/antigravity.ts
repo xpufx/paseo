@@ -1,12 +1,13 @@
 import os from "node:os";
 import path from "node:path";
+import { matchesFamily } from "./family";
 import { discoverFromCandidates } from "../discovery/extract";
 import type { McpProbe, ProbeContext } from "../discovery/types";
 
 export const antigravityProbe: McpProbe = {
   id: "antigravity",
   label: "antigravity · live",
-  matches: (provider) => provider === "antigravity" || provider === "antigravity-acp",
+  matches: (provider) => matchesFamily(provider, "antigravity"),
   async probe(ctx: ProbeContext) {
     const home = os.homedir();
     return discoverFromCandidates("antigravity", [

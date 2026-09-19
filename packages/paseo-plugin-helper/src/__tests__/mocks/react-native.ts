@@ -51,11 +51,20 @@ export const Platform = {
 
 export const Appearance = {
   getColorScheme: () => "dark" as const,
+  addChangeListener: (cb: (arg: {colorScheme: string}) => void) => {
+    // Immediately invoke with current scheme
+    cb({colorScheme: "dark"});
+    return { remove: () => {} };
+  },
 };
+
+export const useColorScheme = () => Appearance.getColorScheme?.();
 
 export const Dimensions = {
   get: () => ({ width: 800, height: 600, scale: 1, fontScale: 1 }),
 };
+
+export const useWindowDimensions = () => ({ width: 800, height: 600, scale: 1, fontScale: 1 });
 
 export const Linking = {
   openURL: async (_url: string) => {},
@@ -92,6 +101,7 @@ export default {
   Platform,
   Appearance,
   Dimensions,
+  useWindowDimensions,
   Linking,
   PanResponder,
   Animated,

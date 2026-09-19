@@ -15,6 +15,7 @@ export interface SharedPluginSettingsOptions<TSettings extends Record<string, an
   filename?: string;
   schema: ZodType<TSettings> & { partial?: () => ZodType<Partial<TSettings>> };
   defaultData?: Partial<TSettings>;
+  contract?: SettingsContract<TSettings>;
   contractName?: string;
   description?: string;
   namespace?: string;
@@ -59,7 +60,7 @@ function safeSerialize(value: unknown): string {
 /**
  * Creates a suite-scoped settings store shared across independent sibling plugins.
  * Every plugin in the suite points at the same file
- * (`~/.paseo/xpufx-plugins/<suite>/<filename>`) through an atomic PluginStorage,
+ * (`~/.paseo/plugin-data/xpufx/<suite>/<filename>`) through an atomic PluginStorage,
  * so an update written by Plugin A is immediately readable by Plugin B.
  */
 export function createSharedPluginSettings<TSettings extends Record<string, any>>(
@@ -77,12 +78,14 @@ export function createSharedPluginSettings<TSettings extends Record<string, any>
   } = options;
   const contractName = options.contractName ?? `${suite}.shared-settings`;
 
-  const contract = defineSettingsContract({
-    name: contractName,
-    schema,
-    ...(defaultData !== undefined ? { defaultData } : {}),
-    ...(description !== undefined ? { description } : {}),
-  });
+  const contract =
+    options.contract ??
+    defineSettingsContract({
+      name: contractName,
+      schema,
+      ...(defaultData !== undefined ? { defaultData } : {}),
+      ...(description !== undefined ? { description } : {}),
+    });
 
   const storage = new PluginStorage<TSettings>(suite, filename, {
     ...(namespace !== undefined ? { namespace } : {}),
@@ -117,6 +120,7 @@ export function createSharedPluginSettings<TSettings extends Record<string, any>
 
   function scheduleEmit(): void {
     if (debounceTimer) clearTimeout(debounceTimer);
+    // @ts-ignore
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       try {
@@ -146,7 +150,8 @@ export function createSharedPluginSettings<TSettings extends Record<string, any>
 
   function disposeWatcher(): void {
     if (debounceTimer) {
-      clearTimeout(debounceTimer);
+// @ts-ignore
+    clearTimeout(debounceTimer);
       debounceTimer = null;
     }
     if (watcher) {
