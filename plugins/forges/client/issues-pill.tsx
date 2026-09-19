@@ -1408,7 +1408,7 @@ export function ForgeIssuesView({
       scrollRef={scrollRef}
     >
       {activeTab === "queues" ? (
-        <HookQueueView onClose={onClose} />
+        <HookQueueView onClose={onClose} embedded />
       ) : selected != null ? (
         <>
           <IssueDetailView
