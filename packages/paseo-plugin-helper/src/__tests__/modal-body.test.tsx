@@ -177,6 +177,24 @@ describe("ModalBody size contract", () => {
     expect(style.alignSelf).toBeUndefined();
   });
 
+  it("keeps the content column fluid on a mobile sheet narrower than the cap", () => {
+    // The mobile bottom sheet is full-bleed and the cap is an upper bound only:
+    // width:"100%" stays below it, so maxWidth 600 never constrains a phone
+    // sheet (and the column must not shrink-wrap to its children). #202.
+    installStubs(true, true);
+    const r = render(
+      <ModalBody maxContentWidth={600}>
+        <Text>body</Text>
+      </ModalBody>,
+    );
+    const style = flatten(r.root.findAllByType(ScrollView)[0].props.contentContainerStyle);
+    expect(style.width).toBe("100%");
+    expect(style.maxWidth).toBe(600);
+    expect(style.marginLeft).toBe("auto");
+    expect(style.marginRight).toBe("auto");
+    expect(style.alignSelf).toBeUndefined();
+  });
+
   it("adds no numeric content-width cap by default", () => {
     installStubs(false, false);
     const r = render(

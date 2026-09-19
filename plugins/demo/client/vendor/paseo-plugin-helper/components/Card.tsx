@@ -43,7 +43,7 @@ export function CardHeader({
   highlightQuery,
 }: CardHeaderProps) {
   const { Icon } = getClientHost();
-  const { colors, flair, typography, padding } = usePluginTheme();
+  const { colors, flair, typography, padding, isCompact } = usePluginTheme();
 
   return (
     <View
@@ -52,10 +52,16 @@ export function CardHeader({
         // Density-aware gap below the header. A hardcoded 8 wasted vertical
         // space under the compact preset (xpufx-org/paseo#213).
         { marginBottom: padding.gap },
+        // On a compact/narrow surface, stack the title block above the action
+        // row instead of sharing one line. Sharing the line lets a wide action
+        // group (badges + toggle + buttons) hold its intrinsic width while the
+        // title column collapses to its longest word, wrapping one character
+        // per line and spilling the actions past the card (xpufx-org/paseo#202).
+        isCompact && styles.headerContainerCompact,
         style,
       ]}
     >
-      <View style={styles.headerLeft}>
+      <View style={[styles.headerLeft, isCompact && styles.headerLeftCompact]}>
         {icon ? <Icon name={icon} size={15} color={colors.foregroundMuted} /> : null}
         <View style={styles.titleColumn}>
           <Text
@@ -90,7 +96,7 @@ export function CardHeader({
         </View>
       </View>
 
-      <View style={styles.headerRight}>
+      <View style={[styles.headerRight, isCompact && styles.headerRightCompact]}>
         {badge ? <View style={{ marginRight: 6 }}>{badge}</View> : null}
         {typeof value === "string" || typeof value === "number" ? (
           <Text
@@ -162,12 +168,31 @@ const styles = StyleSheet.create({
     gap: 8,
     width: "100%",
   },
+  headerContainerCompact: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    justifyContent: "flex-start",
+    flexWrap: "nowrap",
+  },
   headerLeft: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    flex: 1,
+    // `flex: 1` written out: the compact override has to reset the basis too,
+    // and `flex` + explicit flex* keys in one flattened style is ambiguous.
+    flexGrow: 1,
     flexShrink: 1,
+    flexBasis: 0,
+    minWidth: 0,
+  },
+  // Release `flex: 1` (basis 0) in the stacked column so the title block takes
+  // the full width and wraps at word boundaries instead of collapsing to its
+  // longest word.
+  headerLeftCompact: {
+    flexGrow: 0,
+    flexShrink: 0,
+    flexBasis: "auto",
+    width: "100%",
   },
   titleColumn: {
     gap: 1,
@@ -184,6 +209,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 6,
     flexShrink: 0,
+  },
+  // The action group may wrap onto multiple lines once the title owns its own
+  // row; letting it shrink + wrap keeps a long badge/toggle/button set inside
+  // the card instead of overflowing it.
+  headerRightCompact: {
+    flexShrink: 1,
+    flexWrap: "wrap",
+    justifyContent: "flex-start",
+    minWidth: 0,
   },
   headerValue: {
     fontWeight: "600",
