@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, type ComponentType, type Ref } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView as FallbackScrollView,
   StyleSheet,
@@ -10,7 +11,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { getClientHost, selectHostScrollView, type HostScrollView } from "../host";
+import { getClientHost } from "../host";
 import { usePluginTheme } from "../theme/provider";
 import {
   FALLBACK_ACCENT_FOREGROUND,
@@ -37,6 +38,25 @@ export interface TabsProps {
   style?: StyleProp<ViewStyle>;
 }
 
+/** Minimal structural views of the DOM scroll node react-native-web exposes. */
+interface WheelScrollEvent {
+  deltaX?: number;
+  deltaY?: number;
+  preventDefault(): void;
+}
+
+interface WheelScrollNode {
+  scrollLeft: number;
+  clientWidth: number;
+  scrollWidth: number;
+  addEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void, options?: { passive?: boolean }): void;
+  removeEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void): void;
+}
+
+interface WheelScrollInstance {
+  getScrollableNode?(): WheelScrollNode | null;
+}
+
 export function Tabs({
   tabs,
   activeTab,
@@ -45,10 +65,9 @@ export function Tabs({
   style,
 }: TabsProps) {
   const { Icon } = getClientHost();
-  const ResolvedScrollView = selectHostScrollView(
-    getClientHost(),
-    FallbackScrollView as unknown as HostScrollView,
-  );
+  // The tab strip scrolls horizontally, so it must be a plain React Native
+  // ScrollView: the host ScrollView is a vertical sheet-gesture controller
+  // and collapses/crashes when used horizontally (#219).
   const { colors, resolveRadius, touchTargetMin, isCompact, alpha } = usePluginTheme();
   const scrollRef = useRef<ScrollViewInstance>(null);
   const tabLayouts = useRef<Record<string, { x: number; width: number }>>({});
@@ -84,6 +103,27 @@ export function Tabs({
     const width = event.nativeEvent.layout.width;
     setViewportWidth(width);
   };
+
+  // Translate vertical mouse-wheel motion into horizontal tab-strip scrolling
+  // on web, while allowing the surrounding modal to scroll at either edge.
+  useEffect(() => {
+    if (shouldFit || Platform.OS !== "web") return;
+    const instance = scrollRef.current as unknown as WheelScrollInstance | null;
+    const node = instance?.getScrollableNode?.() ?? (instance as unknown as WheelScrollNode | null);
+    if (!node || typeof node.addEventListener !== "function") return;
+    const onWheel = (event: WheelScrollEvent) => {
+      const deltaX = event.deltaX ?? 0;
+      const deltaY = event.deltaY ?? 0;
+      if (Math.abs(deltaY) <= Math.abs(deltaX)) return;
+      const max = node.scrollWidth - node.clientWidth;
+      const next = Math.min(Math.max(0, node.scrollLeft + deltaY), max);
+      if (next === node.scrollLeft) return;
+      event.preventDefault();
+      node.scrollLeft = next;
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [shouldFit]);
 
   const renderTab = (tab: TabItem) => {
     const isActive = tab.id === activeTab;
@@ -186,7 +226,7 @@ export function Tabs({
     );
   }
 
-  // 2. SCROLL MODE: Host-gesture horizontal ScrollView
+  // 2. SCROLL MODE: plain React Native horizontal scroller.
   return (
     <View
       onLayout={handleContainerLayout}
@@ -200,7 +240,7 @@ export function Tabs({
         style,
       ]}
     >
-      <ResolvedScrollView
+      <FallbackScrollView
         ref={scrollRef}
         horizontal
         nestedScrollEnabled={true}
@@ -211,7 +251,7 @@ export function Tabs({
         contentContainerStyle={styles.scrollContent}
       >
         {tabs.map((tab) => renderTab(tab))}
-      </ResolvedScrollView>
+      </FallbackScrollView>
 
     </View>
   );

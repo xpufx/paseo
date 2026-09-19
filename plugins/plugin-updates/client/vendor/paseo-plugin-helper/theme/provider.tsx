@@ -4,6 +4,7 @@ import React, {
   useContext,
   useMemo,
   useState,
+  useEffect,
   type ReactNode,
 } from "react";
 import { StyleSheet, View, type LayoutChangeEvent } from "react-native";
@@ -81,20 +82,32 @@ export const defaultLightTheme: PluginTheme = {
   },
 };
 
-export function getDefaultTheme(): PluginTheme {
-  try {
-    const scheme = Appearance.getColorScheme?.();
-    if (scheme === "light") {
-      return defaultLightTheme;
-    }
-  } catch {
-    // Graceful fallback if Appearance is unavailable
+export function getDefaultTheme(scheme?: string): PluginTheme {
+  if (scheme === "light") {
+    return defaultLightTheme;
   }
   return defaultDarkTheme;
 }
 
-const initialDefaultTheme = getDefaultTheme();
+export function useAppearanceScheme(): [string | undefined, (s: string | undefined) => void] {
+  const [scheme, setScheme] = useState<string | undefined>(Appearance.getColorScheme?.() ?? undefined);
+  useEffect(() => {
+    const sub = Appearance.addChangeListener?.(({colorScheme}) => {
+      setScheme(colorScheme ?? undefined);
+    });
+    return () => {
+      // remove listener if possible
+      // Appearance.addChangeListener returns an object with remove method in RN
+      // but in web we may not have it; ignore safely
+      if (sub && typeof (sub as any).remove === "function") {
+        (sub as any).remove();
+      }
+    };
+  }, []);
+  return [scheme, setScheme];
+}
 
+const initialDefaultTheme = getDefaultTheme();
 const PluginThemeContext = createContext<PluginThemeContextValue>({
   theme: initialDefaultTheme,
   colors: initialDefaultTheme.colors,
@@ -130,6 +143,7 @@ export function PluginThemeProvider({
     typeof layout.width === "number" && layout.width > 0 ? layout.width : undefined;
   const needsMeasurement = hostWidth === undefined;
   const [measuredWidth, setMeasuredWidth] = useState<number | undefined>(undefined);
+  const [appearanceScheme] = useAppearanceScheme();
 
   const handleLayout = useCallback((event: LayoutChangeEvent) => {
     const width = event.nativeEvent?.layout?.width;
@@ -143,7 +157,7 @@ export function PluginThemeProvider({
     const flair: VisualFlair = { ...defaultFlair, ...userFlair };
     const hostVariables = readHostThemeVariables();
     const effectiveColors = mergeThemeColors(
-      getDefaultTheme().colors,
+      getDefaultTheme(appearanceScheme).colors,
       hostVariables.colors,
       theme.colors,
       flair.accentColor,
@@ -176,7 +190,7 @@ export function PluginThemeProvider({
       padding,
       typography,
     };
-  }, [theme, layout, userFlair, effectiveWidth]);
+  }, [theme, layout, userFlair, effectiveWidth, appearanceScheme]);
 
   return (
     <PluginThemeContext.Provider value={value}>

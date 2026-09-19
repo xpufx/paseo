@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, type ComponentType, type Ref } from "react";
 import {
+  Platform,
   Pressable,
   ScrollView as FallbackScrollView,
   StyleSheet,
@@ -35,6 +36,25 @@ export interface TabsProps {
   onTabChange: (tabId: string) => void;
   mode?: "auto" | "fit" | "scroll";
   style?: StyleProp<ViewStyle>;
+}
+
+/** Minimal structural views of the DOM scroll node react-native-web exposes. */
+interface WheelScrollEvent {
+  deltaX?: number;
+  deltaY?: number;
+  preventDefault(): void;
+}
+
+interface WheelScrollNode {
+  scrollLeft: number;
+  clientWidth: number;
+  scrollWidth: number;
+  addEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void, options?: { passive?: boolean }): void;
+  removeEventListener(type: "wheel", listener: (event: WheelScrollEvent) => void): void;
+}
+
+interface WheelScrollInstance {
+  getScrollableNode?(): WheelScrollNode | null;
 }
 
 export function Tabs({
@@ -83,6 +103,27 @@ export function Tabs({
     const width = event.nativeEvent.layout.width;
     setViewportWidth(width);
   };
+
+  // Translate vertical mouse-wheel motion into horizontal tab-strip scrolling
+  // on web, while allowing the surrounding modal to scroll at either edge.
+  useEffect(() => {
+    if (shouldFit || Platform.OS !== "web") return;
+    const instance = scrollRef.current as unknown as WheelScrollInstance | null;
+    const node = instance?.getScrollableNode?.() ?? (instance as unknown as WheelScrollNode | null);
+    if (!node || typeof node.addEventListener !== "function") return;
+    const onWheel = (event: WheelScrollEvent) => {
+      const deltaX = event.deltaX ?? 0;
+      const deltaY = event.deltaY ?? 0;
+      if (Math.abs(deltaY) <= Math.abs(deltaX)) return;
+      const max = node.scrollWidth - node.clientWidth;
+      const next = Math.min(Math.max(0, node.scrollLeft + deltaY), max);
+      if (next === node.scrollLeft) return;
+      event.preventDefault();
+      node.scrollLeft = next;
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, [shouldFit]);
 
   const renderTab = (tab: TabItem) => {
     const isActive = tab.id === activeTab;
@@ -185,7 +226,7 @@ export function Tabs({
     );
   }
 
-  // 2. SCROLL MODE: Host-gesture horizontal ScrollView
+  // 2. SCROLL MODE: plain React Native horizontal scroller.
   return (
     <View
       onLayout={handleContainerLayout}

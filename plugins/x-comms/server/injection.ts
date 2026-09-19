@@ -15,12 +15,17 @@ import { stateDir } from "./registry.ts";
 const log = createPluginLogger("paseo-x-comms", { subsystem: "injection" });
 
 /**
- * Injection key scheme: `x-comms.<serverId>`, namespaced per daemon so key
+ * Injection key scheme: `x-comms_<serverId>`, namespaced per daemon so key
  * collisions are impossible by construction and the owning daemon is visible
  * in agent configs (the visibility layer reads this back). Falls back to
  * plain `x-comms` only when the local server id is unreadable.
+ *
+ * The separator MUST be `_` (or `-`), never `.`: the name is forwarded to
+ * provider ACP servers, and Gemini's validates it against `^[a-zA-Z0-9_-]+$`.
+ * A dotted name makes `session/new` fail with JSON-RPC -32602 "Invalid params",
+ * which breaks every newborn Antigravity agent (#243).
  */
-export const INJECTION_KEY_PREFIX = "x-comms.";
+export const INJECTION_KEY_PREFIX = "x-comms_";
 export const INJECTION_FALLBACK_KEY = "x-comms";
 
 export function readLocalServerId(): string | null {

@@ -194,6 +194,9 @@ function prune(pluginRoot, tree) {
       // The "mcp" helper tree lives under server/vendor/.../mcp; the
       // "server" prune pass must not treat it as dead server files.
       if (tree === "server" && dir === dstDir && e.isDirectory() && e.name === "mcp") continue;
+      // The client-side core and ui trees are colocated under the client
+      // vendor root, but have their own source trees and prune passes.
+      if (tree === "client" && dir === dstDir && e.isDirectory() && (e.name === "core" || e.name === "ui")) continue;
       const d = path.join(dir, e.name);
       const s = path.join(srcDir, path.relative(dstDir, d));
       if (e.isDirectory()) {

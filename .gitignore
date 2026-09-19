@@ -36,6 +36,8 @@ plugins/*/dist/
 
 # Local agent guidance (per-machine, never committed)
 packages/paseo-plugin-helper/AGENTS.md
+.agents/
+.verify-tmp/
 
 # Vendor link-mode stash (dev-only, never committed — materialize before publish)
 *.link-bak/
@@ -45,3 +47,4 @@ opencode.jsonc
 
 # Serena per-project state (memories, caches — per-machine, never committed)
 .serena/
+scratch/

@@ -231,11 +231,15 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
                     </Text>
                     <Row gap={24} align="center" style={styles.metricTargets}>
                       <Row gap={6} align="center">
-                        <Text style={styles.metricTargetLabel}>Pill</Text>
+                        <Text style={[styles.metricTargetLabel, { color: colors.foreground }]}>
+                          Pill
+                        </Text>
                         <Toggle value={boxes.pill} onValueChange={(val) => setBox("pill", val)} />
                       </Row>
                       <Row gap={6} align="center">
-                        <Text style={styles.metricTargetLabel}>Timeline</Text>
+                        <Text style={[styles.metricTargetLabel, { color: colors.foreground }]}>
+                          Timeline
+                        </Text>
                         <Toggle
                           value={boxes.timeline && !def.pillOnly}
                           disabled={!!def.pillOnly}

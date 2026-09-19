@@ -172,11 +172,22 @@ export function ModalBody({
     getOptionalClientHost(),
     FallbackScrollView as unknown as HostScrollView,
   );
-  // Optional readability cap on the content column. `width: "100%"` keeps the
-  // column fluid under the cap; `alignSelf: "center"` centers it over the cap.
+  // Optional readability cap on the content column.
+  //
+  // `width: "100%"` keeps the column fluid up to the cap. Centering must use
+  // auto side margins, NOT `alignSelf: "center"`: on a ScrollView content
+  // container `alignSelf` stops the column stretching to the viewport, so it
+  // sizes to its children instead — a wrapping pill row then grows as wide as
+  // its pills and never wraps (reported as "pills row rigid" on x-comms).
+  // Auto margins center the column while preserving full-width stretch.
   const columnStyle =
     maxContentWidth !== undefined
-      ? ({ width: "100%", maxWidth: maxContentWidth, alignSelf: "center" } as ViewStyle)
+      ? ({
+          width: "100%",
+          maxWidth: maxContentWidth,
+          marginLeft: "auto",
+          marginRight: "auto",
+        } as ViewStyle)
       : undefined;
   const innerRef = useRef<ScrollViewInstance>(null);
 

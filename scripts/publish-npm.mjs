@@ -125,7 +125,10 @@ function main() {
   assertCleanTree();
   for (const m of manifests) {
     console.log(`[publish-npm] publishing ${m.publishAs}@${m.version} from ${m.dir}`);
-    execFileSync("npm", ["publish", "--access", "public"], { cwd: path.resolve(m.dir), stdio: "inherit" });
+    const publishArgs = ["publish", "--access", "public"];
+    const otpArg = args.find(a => a.startsWith("--otp="));
+    if (otpArg) publishArgs.push(otpArg);
+    execFileSync("npm", publishArgs, { cwd: path.resolve(m.dir), stdio: "inherit" });
   }
 }
 

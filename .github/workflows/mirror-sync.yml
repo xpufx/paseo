@@ -1,0 +1,122 @@
+name: Two-Way Repo Mirror & Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      direction:
+        description: 'Sync Direction'
+        required: true
+        type: choice
+        default: 'prv-to-public'
+        options:
+          - 'prv-to-public'  # xpufx/paseo-prv -> xpufx/paseo
+          - 'public-to-prv'  # xpufx/paseo -> xpufx/paseo-prv
+          - 'custom'         # Custom source and target specified below
+      custom_source:
+        description: 'Custom source repository (owner/repo, if direction is custom)'
+        required: false
+        default: 'xpufx/paseo-prv'
+        type: string
+      custom_target:
+        description: 'Custom target repository (owner/repo, if direction is custom)'
+        required: false
+        default: 'xpufx/paseo'
+        type: string
+      ref:
+        description: 'Git branch or ref to mirror (e.g. main, dev)'
+        required: true
+        default: 'main'
+        type: string
+      sync_tags:
+        description: 'Also synchronize git tags'
+        required: false
+        default: false
+        type: boolean
+      force:
+        description: 'Force push (use with extreme caution)'
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: 'Dry run (simulate without pushing)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  mirror:
+    name: Mirror Repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve Source and Target Repositories
+        id: resolve
+        run: |
+          DIRECTION="${{ inputs.direction }}"
+          if [ "$DIRECTION" = "prv-to-public" ]; then
+            SRC="xpufx/paseo-prv"
+            DST="xpufx/paseo"
+          elif [ "$DIRECTION" = "public-to-prv" ]; then
+            SRC="xpufx/paseo"
+            DST="xpufx/paseo-prv"
+          elif [ "$DIRECTION" = "custom" ]; then
+            SRC="${{ inputs.custom_source }}"
+            DST="${{ inputs.custom_target }}"
+          else
+            echo "::error::Unknown direction $DIRECTION"
+            exit 1
+          fi
+
+          if [ -z "$SRC" ] || [ -z "$DST" ]; then
+            echo "::error::Source and target repositories must not be empty"
+            exit 1
+          fi
+
+          if [ "$SRC" = "$DST" ]; then
+            echo "::error::Source and target repositories cannot be identical ($SRC)"
+            exit 1
+          fi
+
+          echo "src=$SRC" >> $GITHUB_OUTPUT
+          echo "dst=$DST" >> $GITHUB_OUTPUT
+          echo "Resolved mirror: $SRC -> $DST (ref: ${{ inputs.ref }})"
+
+      - name: Checkout Source Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.resolve.outputs.src }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.PASEO_MIRROR_TOKEN || secrets.GH_PAT || secrets.PASEO_PRV_TOKEN || github.token }}
+
+      - name: Configure Destination Remote & Push
+        env:
+          DST_REPO: ${{ steps.resolve.outputs.dst }}
+          TARGET_REF: ${{ inputs.ref }}
+          SYNC_TAGS: ${{ inputs.sync_tags }}
+          IS_FORCE: ${{ inputs.force }}
+          IS_DRY_RUN: ${{ inputs.dry_run }}
+          TOKEN: ${{ secrets.PASEO_MIRROR_TOKEN || secrets.GH_PAT || secrets.PASEO_PRV_TOKEN || github.token }}
+        run: |
+          echo "Setting up destination remote for ${DST_REPO}..."
+          git remote add destination "https://x-access-token:${TOKEN}@github.com/${DST_REPO}.git"
+
+          PUSH_FLAGS=()
+          if [ "$IS_DRY_RUN" = "true" ]; then
+            PUSH_FLAGS+=("--dry-run")
+            echo "Running in DRY-RUN mode..."
+          fi
+
+          if [ "$IS_FORCE" = "true" ]; then
+            PUSH_FLAGS+=("--force")
+            echo "WARNING: Force push enabled!"
+          fi
+
+          echo "Pushing ref ${TARGET_REF} to ${DST_REPO}..."
+          git push "${PUSH_FLAGS[@]}" destination "${TARGET_REF}:${TARGET_REF}"
+
+          if [ "$SYNC_TAGS" = "true" ]; then
+            echo "Synchronizing tags..."
+            git push "${PUSH_FLAGS[@]}" --tags destination
+          fi
+
+          echo "Mirror operation completed successfully."

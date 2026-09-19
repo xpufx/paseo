@@ -26,6 +26,11 @@ test:
 conformance:
 	@node packages/paseo-plugin-helper/bin/paseo-plugin-helper.js conformance --all plugins --strict
 
+## board-hygiene: Flag board issues whose labels contradict their state (#217)
+board-hygiene:
+	@node scripts/board-hygiene.test.mjs
+	@node scripts/board-hygiene.mjs
+
 ## build: Build helper and compile plugin bundles
 build:
 	@npm run build --workspaces --if-present

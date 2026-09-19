@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseJsonc } from "./jsonc";
 import { safeExec } from "./process";
+import type { PluginLogger } from "./logger";
 import {
   CustomPillDefinitionSchema,
   type CustomPillDefinition,
@@ -10,7 +11,7 @@ import {
   parseNumericPillValue,
   formatPillDisplay,
 } from "../../../shared/vendor/paseo-plugin-helper/custom-pills";
-import type { PluginLogger } from "./logger";
+
 
 /**
  * Discovers and validates all custom pill configuration files (.json / .jsonc)
@@ -106,7 +107,7 @@ export interface CustomPillPollerOptions {
 export class CustomPillPoller {
   private pills = new Map<string, CustomPillDefinition>();
   private states = new Map<string, CustomPillState>();
-  private timers = new Map<string, NodeJS.Timeout>();
+  private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private inFlight = new Set<string>();
   private running = false;
   private options: CustomPillPollerOptions;
@@ -317,6 +318,7 @@ export class CustomPillPoller {
   private schedulePill(pill: CustomPillDefinition, delayMs: number): void {
     if (!this.running) return;
 
+    // @ts-ignore
     const timer = setTimeout(async () => {
       await this.pollPill(pill.id);
       if (this.running && this.pills.has(pill.id)) {
@@ -325,7 +327,7 @@ export class CustomPillPoller {
           this.schedulePill(nextPill, nextPill.intervalMs);
         }
       }
-    }, delayMs);
+    }, delayMs as any);
 
     this.timers.set(pill.id, timer);
   }

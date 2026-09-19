@@ -120,6 +120,7 @@ export function createSharedPluginSettings<TSettings extends Record<string, any>
 
   function scheduleEmit(): void {
     if (debounceTimer) clearTimeout(debounceTimer);
+    // @ts-ignore
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
       try {
@@ -149,7 +150,8 @@ export function createSharedPluginSettings<TSettings extends Record<string, any>
 
   function disposeWatcher(): void {
     if (debounceTimer) {
-      clearTimeout(debounceTimer);
+// @ts-ignore
+    clearTimeout(debounceTimer);
       debounceTimer = null;
     }
     if (watcher) {

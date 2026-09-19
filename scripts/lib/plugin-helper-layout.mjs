@@ -14,12 +14,13 @@
 
 import path from "node:path";
 
-// Per-plugin helper src trees to vendor. "mcp" is server-side (node-only) and
-// lands in <plugin>/server/vendor/paseo-plugin-helper/mcp/.
+// Per-plugin helper src trees to vendor. "core" and "ui" are client-side
+// exports and are colocated under <plugin>/client/vendor; "mcp" is server-side
+// (node-only) and lands in <plugin>/server/vendor/paseo-plugin-helper/mcp/.
 export const PLUGINS = {
   "top": ["client", "server", "shared"],
   "mcp-tools": ["client", "server", "shared", "mcp"],
-  "demo": ["client", "server", "shared"],
+  "demo": ["client", "core", "ui", "server", "shared"],
   "forges": ["client", "server", "shared"],
   "slash": ["client", "server", "shared"],
   "x-comms": ["client", "server", "shared", "mcp"],
@@ -27,12 +28,15 @@ export const PLUGINS = {
   "plugin-updates": ["client", "server", "shared"],
 };
 
-export const TREES = ["client", "server", "shared", "mcp"];
+export const TREES = ["client", "core", "ui", "server", "shared", "mcp"];
 export const DEST_ROOT = "vendor/paseo-plugin-helper";
 
 // Destination dir for a helper src tree inside a plugin.
 export function destDir(pluginRoot, srcTree) {
   if (srcTree === "mcp") return path.join(pluginRoot, "server", DEST_ROOT, "mcp");
+  if (srcTree === "core" || srcTree === "ui") {
+    return path.join(pluginRoot, "client", DEST_ROOT, srcTree);
+  }
   return path.join(pluginRoot, srcTree, DEST_ROOT);
 }
 
