@@ -40,6 +40,18 @@ make doctor     # Freshness diagnostic for helper build and running daemons
 make reload     # Auto-rebuild helper, stamp git versions, and reload daemons
 ```
 
+## Branch & Backport Policy
+
+- **`main`** — SDK 0.9 mainline. Feature work targets here.
+- **`release/0.8`** — SDK 0.8 maintenance. Preserved baseline; only necessary
+  bug/security fixes.
+
+Normal PRs target `main`; only bug/security fixes are backported to
+`release/0.8`, generally landing on `main` first. Milestones: 0.8.x fixes →
+`0.8.x Maintenance`; 0.9 work → `0.9.0 Features` / `0.9.0 Migration`.
+
+See [`docs/branch-policy.md`](docs/branch-policy.md) for details.
+
 ## Deepwiki Link
 
 [xpufx/paseo](https://deepwiki.com/xpufx/paseo)
