@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { hasHighlightMatch, splitHighlightParts } from "../shared/highlight.js";
+import {
+  hasFuzzyHighlight,
+  hasHighlightMatch,
+  splitHighlightParts,
+} from "../shared/highlight.js";
 
 describe("splitHighlightParts", () => {
   it("splits every case-insensitive occurrence and preserves source casing", () => {
@@ -41,16 +45,66 @@ describe("splitHighlightParts", () => {
     expect(splitHighlightParts("", "bug")).toEqual([{ text: "", matched: false }]);
   });
 
-  it("returns no match run when the query is absent", () => {
-    expect(splitHighlightParts("Bug", "feature")).toEqual([{ text: "Bug", matched: false }]);
+  it("highlights word-start tokens when the literal query is absent", () => {
+    // The phrase `meta-analysis` is not a literal substring of the text, but
+    // both tokens start words, so each is painted.
+    expect(splitHighlightParts("metadata analysis", "meta-analysis")).toEqual([
+      { text: "meta", matched: true },
+      { text: "data ", matched: false },
+      { text: "analysis", matched: true },
+    ]);
+  });
+
+  it("highlights a token that fills the whole field", () => {
+    // A single matched run must not be mistaken for "no match".
+    expect(splitHighlightParts("analysis", "meta-analysis")).toEqual([
+      { text: "analysis", matched: true },
+    ]);
+  });
+
+  it("leaves the text unmatched when nothing tokenizes to a hit", () => {
+    // Default: small fields (label chips, body spans) must not all light up.
+    // `eta` occurs only mid-word and `zzz` is absent, so nothing is painted.
+    expect(splitHighlightParts("metadata", "eta-zzz")).toEqual([
+      { text: "metadata", matched: false },
+    ]);
+    expect(splitHighlightParts("Bug", "feature")).toEqual([
+      { text: "Bug", matched: false },
+    ]);
+  });
+
+  it("falls back to the whole field only when opted in", () => {
+    // A fuzzy result may match on text the query never contains; the primary
+    // label opts in so the row still reads as matched.
+    expect(splitHighlightParts("Bug", "feature", { fallbackToWholeField: true })).toEqual([
+      { text: "Bug", matched: true },
+    ]);
+    expect(splitHighlightParts("café", "xyz", { fallbackToWholeField: true })).toEqual([
+      { text: "café", matched: true },
+    ]);
   });
 });
 
 describe("hasHighlightMatch", () => {
-  it("mirrors the splitter's literal, case-insensitive contract", () => {
+  it("keeps the literal, case-insensitive contract", () => {
     expect(hasHighlightMatch("Fix the FIXER", "fix")).toBe(true);
     expect(hasHighlightMatch("a.b", "a.b")).toBe(true);
     expect(hasHighlightMatch("axb", "a.b")).toBe(false);
     expect(hasHighlightMatch("anything", "  ")).toBe(false);
+    // A fuzzy token hit is not a literal substring.
+    expect(hasHighlightMatch("bug report", "bug-typo")).toBe(false);
+  });
+});
+
+describe("hasFuzzyHighlight", () => {
+  it("matches a token at a word start but not mid-word", () => {
+    expect(hasFuzzyHighlight("metadata analysis", "meta-analysis")).toBe(true);
+    expect(hasFuzzyHighlight("metadata", "eta-zzz")).toBe(false);
+  });
+
+  it("prefers a literal hit and ignores whole-field fallback", () => {
+    expect(hasFuzzyHighlight("a.b", "a.b")).toBe(true);
+    expect(hasFuzzyHighlight("Bug", "feature")).toBe(false);
+    expect(hasFuzzyHighlight("anything", "  ")).toBe(false);
   });
 });

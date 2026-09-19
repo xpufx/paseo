@@ -413,24 +413,27 @@ Status indicator chip with automatic contrast styling.
 - `icon`: Lucide icon name or custom node rendered before the label.
 - `dot`: Renders a status dot instead of an icon.
 - `style` / `textStyle`: Escape-hatch overrides layered on top of the size metrics.
-- `highlightQuery`: When set, every case-insensitive (literal, non-regex) occurrence of the query inside `label` is painted with the accent highlight.
+- `highlightQuery`: When set, every case-insensitive (literal, non-regex) occurrence of the query inside `label` is painted with the accent highlight, with the same token fuzzy fallback as `<HighlightedText>`. Pair it with `highlightFuzzyFallback` to mark the whole label when no literal or token hit exists.
 
 ### `<HighlightedText>`
-`<Text>` that paints every case-insensitive occurrence of a search query with the theme accent background/foreground. The query is matched literally via `indexOf` (never compiled as a regular expression), so user input cannot inject a pattern. When the query is empty or absent the text renders unchanged. Pair it with `splitHighlightParts(text, query)` / `hasHighlightMatch(text, query)` from `paseo-plugin-helper/shared` when you need the runs or a boolean without rendering.
+`<Text>` that paints every case-insensitive occurrence of a search query with the theme accent background/foreground. The query is matched literally via `indexOf` (never compiled as a regular expression), so user input cannot inject a pattern. When the literal query is absent — a fuzzy search result — the splitter highlights the query's multi-character tokens at word starts; with no token hit either nothing is painted, unless `fuzzyFallback` marks the whole field. When the query is empty or absent the text renders unchanged. Pair it with `splitHighlightParts(text, query, options?)` / `hasHighlightMatch(text, query)` / `hasFuzzyHighlight(text, query)` from `paseo-plugin-helper/shared` when you need the runs or a boolean without rendering.
 
 ```tsx
-<HighlightedText text={issue.title} query={query} style={styles.title} />
+<HighlightedText text={issue.title} query={query} fuzzyFallback style={styles.title} />
 ```
 
 #### Properties:
 - `text`: Source text; rendered as-is when no query is active.
-- `query`: Active search query. Matched case-insensitively and literally.
+- `query`: Active search query. Matched case-insensitively and literally, with a token fuzzy fallback.
+- `fuzzyFallback`: When true, a query with no literal or token hit marks the whole text. Use it on the primary label (row/detail title), not on every small field.
 - `style`: Escape-hatch text style applied to the outer `<Text>`.
 - `highlightStyle`: Overrides the matched-run style (defaults to accent background + `accentForeground`).
 - `numberOfLines` / `selectable`: Forwarded to the underlying `<Text>`.
 
+Shared matchers: `splitHighlightParts` returns the matched/unmatched runs (pass `{ fallbackToWholeField: true }` for the whole-field fallback); `hasHighlightMatch` is the literal, case-insensitive test; `hasFuzzyHighlight` adds the word-start token fallback but never the whole-field fallback, so it pinpoints the row or section that genuinely mentions a fuzzy query (used for go-to-match in forges).
+
 ### `<Card>`
-Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips. `<Card.Header highlightQuery={q}>` highlights case-insensitive, literal matches of `q` inside the title.
+Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips. `<Card.Header highlightQuery={q}>` highlights case-insensitive matches of `q` inside the title, with the same token/whole-field fuzzy fallback as `<HighlightedText>`.
 ```tsx
 <Card variant="tinted" padding="md">
   <Card.Header

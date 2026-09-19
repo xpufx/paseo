@@ -24,7 +24,8 @@ export interface CardHeaderProps {
   subtitleStyle?: StyleProp<TextStyle>;
   /**
    * When set, every case-insensitive (literal, non-regex) occurrence of the
-   * query inside `title` is painted with the accent highlight.
+   * query inside `title` is painted with the accent highlight. With no literal
+   * or token hit the whole title is marked, so a fuzzy match still reads.
    */
   highlightQuery?: string;
 }
@@ -69,7 +70,11 @@ export function CardHeader({
               titleStyle,
             ]}
           >
-            {highlightQuery ? <HighlightedText text={title} query={highlightQuery} /> : title}
+            {highlightQuery ? (
+              <HighlightedText text={title} query={highlightQuery} fuzzyFallback />
+            ) : (
+              title
+            )}
           </Text>
           {subtitle ? (
             <Text

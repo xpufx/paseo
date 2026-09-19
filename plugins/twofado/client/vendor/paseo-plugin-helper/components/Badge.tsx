@@ -24,6 +24,11 @@ export interface BadgeProps {
    * a regular expression.
    */
   highlightQuery?: string;
+  /**
+   * With `highlightQuery`, marks the whole label when the query has neither a
+   * literal nor a token hit — for a single primary chip, not a chip list.
+   */
+  highlightFuzzyFallback?: boolean;
 }
 
 export function Badge({
@@ -36,6 +41,7 @@ export function Badge({
   style,
   textStyle,
   highlightQuery,
+  highlightFuzzyFallback,
 }: BadgeProps) {
   const { Icon } = getClientHost();
   const { colors, flair, resolveRadius, getVariantPalette, getStatusColor, typography } =
@@ -117,7 +123,15 @@ export function Badge({
           textStyle,
         ]}
       >
-        {highlightQuery ? <HighlightedText text={label} query={highlightQuery} /> : label}
+        {highlightQuery ? (
+          <HighlightedText
+            text={label}
+            query={highlightQuery}
+            fuzzyFallback={highlightFuzzyFallback}
+          />
+        ) : (
+          label
+        )}
       </Text>
     </View>
   );

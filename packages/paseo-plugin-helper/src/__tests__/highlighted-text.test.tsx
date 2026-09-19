@@ -56,7 +56,7 @@ describe("<HighlightedText>", () => {
     expect(matched.map((t) => t.props.children)).toEqual(["Fix", "Fix"]);
   });
 
-  it("renders plain text when the query does not match", () => {
+  it("renders plain text when the query has no literal or token hit", () => {
     const renderer = render(
       React.createElement(HighlightedText, { text: "Fix the Fixer", query: "docs" }),
     );
@@ -64,5 +64,30 @@ describe("<HighlightedText>", () => {
       .findAllByType(Text as any)
       .filter((t) => styleValue(t.props.style, "backgroundColor") === "#3b82f6");
     expect(matched).toHaveLength(0);
+  });
+
+  it("falls back to the whole field for a fuzzy query when fuzzyFallback is set", () => {
+    const renderer = render(
+      React.createElement(HighlightedText, {
+        text: "Fix the Fixer",
+        query: "docs",
+        fuzzyFallback: true,
+      }),
+    );
+    const matched = renderer.root
+      .findAllByType(Text as any)
+      .filter((t) => styleValue(t.props.style, "backgroundColor") === "#3b82f6");
+    expect(matched).toHaveLength(1);
+    expect(matched[0].props.children).toBe("Fix the Fixer");
+  });
+
+  it("highlights a whole token when the fuzzy query is a prefix of a word", () => {
+    const renderer = render(
+      React.createElement(HighlightedText, { text: "read the metadata now", query: "meta" }),
+    );
+    const matched = renderer.root
+      .findAllByType(Text as any)
+      .filter((t) => styleValue(t.props.style, "backgroundColor") === "#3b82f6");
+    expect(matched.map((t) => t.props.children)).toEqual(["meta"]);
   });
 });

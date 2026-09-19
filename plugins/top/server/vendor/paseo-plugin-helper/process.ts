@@ -66,7 +66,7 @@ export function safeSpawn(
     let stderr = "";
     let exited = false;
     let timedOut = false;
-    let timer: NodeJS.Timeout | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     if (timeoutMs > 0) {
       timer = setTimeout(() => {
@@ -137,7 +137,7 @@ export function safeExec(
     let stderr = "";
     let exited = false;
     let timedOut = false;
-    let timer: NodeJS.Timeout | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
 
     if (timeoutMs > 0) {
       timer = setTimeout(() => {

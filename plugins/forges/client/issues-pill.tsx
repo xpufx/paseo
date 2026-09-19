@@ -32,7 +32,7 @@ import {
   type RenderModalProps,
   type RenderPillProps,
 } from "paseo-plugin-helper/client";
-import { hasHighlightMatch } from "paseo-plugin-helper/shared";
+import { hasFuzzyHighlight } from "paseo-plugin-helper/shared";
 import { HookQueueView } from "./hook-queue-panel.js";
 import {
   ATTENTION_LABELS,
@@ -484,6 +484,7 @@ function IssueRow({
         <HighlightedText
           text={title}
           query={query ?? ""}
+          fuzzyFallback
           style={[styles.rowTitle, { color: colors.foreground }]}
         />
         <LabelChipList labels={labels} style={styles.rowLabels} query={query} />
@@ -877,15 +878,18 @@ function IssueDetailView({
     repoWritePermission: detail.data?.repoWritePermission,
   });
   // Go-to-match (issue #190): section offsets reported relative to the detail
-  // root, then resolved to the first section that contains the query. Only the
-  // helper-owned scroller can move; when the host owns it this is a no-op.
+  // root, then resolved to the first section that contains the query. The
+  // predicate is fuzzy-tolerant (literal or whole-token), and a fuzzy result
+  // with no pinpointable section still lands on the detail root, so open/scroll
+  // never silently fails. Only the helper-owned scroller can move; when the host
+  // owns it this is a no-op.
   const detailTop = React.useRef(0);
   const titleY = React.useRef<number | null>(null);
   const bodyY = React.useRef<number | null>(null);
   const commentsY = React.useRef<number | null>(null);
   const commentYs = React.useRef(new Map<number, number>());
   const firstCommentMatch = issue
-    ? issue.comments.findIndex((comment) => hasHighlightMatch(comment.body, query))
+    ? issue.comments.findIndex((comment) => hasFuzzyHighlight(comment.body, query))
     : -1;
   useMatchScrollTarget(
     scrollRef,
@@ -894,12 +898,12 @@ function IssueDetailView({
       if (!issue) return null;
       const top = detailTop.current;
       if (
-        hasHighlightMatch(issue.title, query) ||
-        issue.labels.some((label) => hasHighlightMatch(label, query))
+        hasFuzzyHighlight(issue.title, query) ||
+        issue.labels.some((label) => hasFuzzyHighlight(label, query))
       ) {
         return top + (titleY.current ?? 0);
       }
-      if (hasHighlightMatch(issue.body, query)) {
+      if (hasFuzzyHighlight(issue.body, query)) {
         return top + (bodyY.current ?? 0);
       }
       if (firstCommentMatch >= 0) {
@@ -907,7 +911,7 @@ function IssueDetailView({
         if (commentY == null) return null;
         return top + (commentsY.current ?? 0) + commentY;
       }
-      return null;
+      return top;
     },
   );
 
