@@ -12,16 +12,37 @@
  * the whole field when not even a token hits (`fallbackToWholeField`); callers
  * that paint many small runs leave it off. `hasFuzzyHighlight` is the
  * whole-surface test for go-to-match.
+ *
+ * `normalizeSearchQuery` strips surrounding quotes and whitespace for the local
+ * filter/highlight paths; remote search keeps the raw query.
  */
 
 export interface HighlightPart {
   /** The run's source text, in its original casing. */
   text: string;
-  /** True when this run is an occurrence of the (trimmed) query. */
+  /** True when this run is an occurrence of the (normalized) query. */
   matched: boolean;
 }
 
 const TOKEN_PATTERN = /[^\p{L}\p{N}]+/u;
+
+/**
+ * Normalize a search query for local matching and highlighting: trim, then peel
+ * any surrounding pair of matching single/double quotes (`"meta"`, `'meta'`,
+ * `""meta""`). Remote forge search keeps the raw query — Forgejo treats quotes
+ * as a phrase operator — so only the local paths normalize, letting quoted and
+ * unquoted input filter and paint identically. A lone quote is left intact.
+ */
+export function normalizeSearchQuery(query: string): string {
+  let value = query.trim();
+  while (value.length >= 2) {
+    const first = value[0];
+    const last = value[value.length - 1];
+    if ((first !== '"' && first !== "'") || first !== last) break;
+    value = value.slice(1, -1).trim();
+  }
+  return value;
+}
 
 export interface HighlightOptions {
   /**
@@ -59,9 +80,9 @@ function firstTokenStart(haystack: string, token: string, from: number): number 
 
 /**
  * Split `text` into alternating unmatched/matched runs for every
- * case-insensitive occurrence of `query`. Surrounding whitespace on the query
- * is ignored; an empty or whitespace-only query (or empty text) yields the
- * whole text as a single unmatched run.
+ * case-insensitive occurrence of `query`. Surrounding whitespace and matching
+ * surrounding quotes on the query are ignored; an empty or whitespace-only
+ * query (or empty text) yields the whole text as a single unmatched run.
  *
  * When the literal query is absent the splitter highlights the query's
  * multi-character tokens at word starts. If no token hits either, the text is
@@ -73,7 +94,7 @@ export function splitHighlightParts(
   query: string,
   options: HighlightOptions = {},
 ): HighlightPart[] {
-  const needle = query.trim().toLowerCase();
+  const needle = normalizeSearchQuery(query).toLowerCase();
   if (!needle || !text) return [{ text, matched: false }];
   const haystack = text.toLowerCase();
   if (haystack.includes(needle)) return splitLiteralParts(text, haystack, needle);
@@ -143,7 +164,7 @@ function splitTokenParts(
  * fallback.
  */
 export function hasHighlightMatch(text: string, query: string): boolean {
-  const needle = query.trim().toLowerCase();
+  const needle = normalizeSearchQuery(query).toLowerCase();
   return needle.length > 0 && text.toLowerCase().includes(needle);
 }
 
@@ -155,7 +176,7 @@ export function hasHighlightMatch(text: string, query: string): boolean {
  * than every field.
  */
 export function hasFuzzyHighlight(text: string, query: string): boolean {
-  const needle = query.trim().toLowerCase();
+  const needle = normalizeSearchQuery(query).toLowerCase();
   if (!needle || !text) return false;
   const haystack = text.toLowerCase();
   if (haystack.includes(needle)) return true;

@@ -3,6 +3,7 @@ import {
   defineContract,
   defineSettingsContract,
   normalizeForgeHost,
+  normalizeSearchQuery,
   truncate,
 } from "paseo-plugin-helper/shared";
 
@@ -254,6 +255,25 @@ export function createRemoteSearchGate(): {
     },
     accept: (generation: number) => generation === latest,
   };
+}
+
+/**
+ * Instant client-side filter for the loaded issues snapshot: a bare number
+ * (`#123` or `123`) matches the issue number by prefix; otherwise the query
+ * matches anywhere in the title or a label. The query is normalized first
+ * (`normalizeSearchQuery`), so `meta` and `"meta"` filter identically while the
+ * raw, quoted query still goes to the remote forge (which reads quotes as a
+ * phrase operator).
+ */
+export function issueMatchesQuery(issue: ForgeIssue, query: string): boolean {
+  const q = normalizeSearchQuery(query).toLowerCase();
+  if (!q) return true;
+  const digits = q.startsWith("#") ? q.slice(1) : q;
+  if (/^\d+$/.test(digits) && String(issue.number).startsWith(digits)) return true;
+  return (
+    issue.title.toLowerCase().includes(q) ||
+    issue.labels.some((label) => label.toLowerCase().includes(q))
+  );
 }
 
 /**

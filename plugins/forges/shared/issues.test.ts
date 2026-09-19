@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, FORGE_WRITE_SCOPES, ForgeIssueSchema, forgeCapabilityFromRepo, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, forgeWriteScopeList, isBoardAlertText, isValidForgeTarget, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, createIssueContract, parseLabelList, splitScopedLabel, validateCreateIssueInput, workspaceNameKey, writeGateNotice, type ForgeIssue } from "./issues.ts";import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, FORGE_WRITE_SCOPES, ForgeIssueSchema, forgeCapabilityFromRepo, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, forgeWriteScopeList, isBoardAlertText, isValidForgeTarget, issueMatchesQuery, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, createIssueContract, parseLabelList, splitScopedLabel, validateCreateIssueInput, workspaceNameKey, writeGateNotice, type ForgeIssue } from "./issues.ts";import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
 const REAL_HOST = "forge.example.com";
@@ -874,6 +874,39 @@ describe("createRemoteSearchGate", () => {
   it("lets the initial generation through", () => {
     const gate = createRemoteSearchGate();
     assert.equal(gate.accept(gate.begin()), true);
+  });
+});
+
+describe("issueMatchesQuery", () => {
+  const issue: ForgeIssue = {
+    number: 190,
+    title: "Meta issue tracker",
+    state: "open",
+    labels: ["state/1-wip"],
+    labelDetails: [],
+  };
+
+  it("matches numbers by prefix and titles/labels by substring", () => {
+    assert.equal(issueMatchesQuery(issue, "#19"), true);
+    assert.equal(issueMatchesQuery(issue, "190"), true);
+    assert.equal(issueMatchesQuery(issue, "tracker"), true);
+    assert.equal(issueMatchesQuery(issue, "state/1"), true);
+    assert.equal(issueMatchesQuery(issue, "absent"), false);
+  });
+
+  it("strips surrounding quotes so quoted and unquoted queries filter identically", () => {
+    for (const quoted of ['"meta"', "'meta'", '  "meta"  ', '""meta""']) {
+      assert.equal(issueMatchesQuery(issue, quoted), issueMatchesQuery(issue, "meta"), quoted);
+    }
+    assert.equal(issueMatchesQuery(issue, '"meta"'), true);
+    assert.equal(issueMatchesQuery(issue, "'tracker'"), true);
+    // Stripping quotes must not make a genuinely absent term match.
+    assert.equal(issueMatchesQuery(issue, '"nope"'), false);
+  });
+
+  it("matches every issue for an empty or quote-only query", () => {
+    assert.equal(issueMatchesQuery(issue, ""), true);
+    assert.equal(issueMatchesQuery(issue, '""'), true);
   });
 });
 

@@ -90,4 +90,16 @@ describe("<HighlightedText>", () => {
       .filter((t) => styleValue(t.props.style, "backgroundColor") === "#3b82f6");
     expect(matched.map((t) => t.props.children)).toEqual(["meta"]);
   });
+
+  it("strips surrounding quotes so a quoted query paints like its unquoted form", () => {
+    const renderer = render(
+      React.createElement(HighlightedText, { text: 'read the "metadata" now', query: '"meta"' }),
+    );
+    const matched = renderer.root
+      .findAllByType(Text as any)
+      .filter((t) => styleValue(t.props.style, "backgroundColor") === "#3b82f6");
+    // The literal `"meta"` (with quotes) is absent, so the token fallback paints
+    // `meta` inside `"metadata"` exactly as an unquoted query would.
+    expect(matched.map((t) => t.props.children)).toEqual(["meta"]);
+  });
 });

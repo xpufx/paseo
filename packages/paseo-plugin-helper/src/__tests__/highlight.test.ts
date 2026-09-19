@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   hasFuzzyHighlight,
   hasHighlightMatch,
+  normalizeSearchQuery,
   splitHighlightParts,
 } from "../shared/highlight.js";
 
@@ -73,6 +74,23 @@ describe("splitHighlightParts", () => {
     ]);
   });
 
+  it("strips surrounding quotes so quoted and unquoted queries match alike", () => {
+    expect(splitHighlightParts("read the metadata now", '"meta"')).toEqual([
+      { text: "read the ", matched: false },
+      { text: "meta", matched: true },
+      { text: "data now", matched: false },
+    ]);
+    expect(splitHighlightParts("read the metadata now", "'meta'")).toEqual(
+      splitHighlightParts("read the metadata now", "meta"),
+    );
+    expect(splitHighlightParts("Fix the Fixer", ' "fix" ')).toEqual([
+      { text: "Fix", matched: true },
+      { text: " the ", matched: false },
+      { text: "Fix", matched: true },
+      { text: "er", matched: false },
+    ]);
+  });
+
   it("falls back to the whole field only when opted in", () => {
     // A fuzzy result may match on text the query never contains; the primary
     // label opts in so the row still reads as matched.
@@ -93,6 +111,25 @@ describe("hasHighlightMatch", () => {
     expect(hasHighlightMatch("anything", "  ")).toBe(false);
     // A fuzzy token hit is not a literal substring.
     expect(hasHighlightMatch("bug report", "bug-typo")).toBe(false);
+    // Surrounding quotes are stripped for the local literal test.
+    expect(hasHighlightMatch("read the metadata", '"meta"')).toBe(true);
+    expect(hasHighlightMatch("read the metadata", "'meta'")).toBe(true);
+  });
+});
+
+describe("normalizeSearchQuery", () => {
+  it("trims and peels matching surrounding quotes", () => {
+    expect(normalizeSearchQuery('  "meta"  ')).toBe("meta");
+    expect(normalizeSearchQuery("'meta'")).toBe("meta");
+    expect(normalizeSearchQuery('""meta""')).toBe("meta");
+    expect(normalizeSearchQuery("meta")).toBe("meta");
+    expect(normalizeSearchQuery("  ")).toBe("");
+  });
+
+  it("leaves lone quotes, mismatched pairs, and inner quotes intact", () => {
+    expect(normalizeSearchQuery('"meta')).toBe('"meta');
+    expect(normalizeSearchQuery("meta'")).toBe("meta'");
+    expect(normalizeSearchQuery("\"me'ta\"")).toBe("me'ta");
   });
 });
 
@@ -100,6 +137,12 @@ describe("hasFuzzyHighlight", () => {
   it("matches a token at a word start but not mid-word", () => {
     expect(hasFuzzyHighlight("metadata analysis", "meta-analysis")).toBe(true);
     expect(hasFuzzyHighlight("metadata", "eta-zzz")).toBe(false);
+  });
+
+  it("treats a quoted query like its unquoted form", () => {
+    expect(hasFuzzyHighlight("metadata", '"meta"')).toBe(true);
+    expect(hasFuzzyHighlight("metadata", "'meta'")).toBe(true);
+    expect(hasFuzzyHighlight("metadata", '"zzz"')).toBe(false);
   });
 
   it("prefers a literal hit and ignores whole-field fallback", () => {

@@ -430,7 +430,7 @@ Status indicator chip with automatic contrast styling.
 - `highlightStyle`: Overrides the matched-run style (defaults to accent background + `accentForeground`).
 - `numberOfLines` / `selectable`: Forwarded to the underlying `<Text>`.
 
-Shared matchers: `splitHighlightParts` returns the matched/unmatched runs (pass `{ fallbackToWholeField: true }` for the whole-field fallback); `hasHighlightMatch` is the literal, case-insensitive test; `hasFuzzyHighlight` adds the word-start token fallback but never the whole-field fallback, so it pinpoints the row or section that genuinely mentions a fuzzy query (used for go-to-match in forges).
+Shared matchers: `splitHighlightParts` returns the matched/unmatched runs (pass `{ fallbackToWholeField: true }` for the whole-field fallback); `hasHighlightMatch` is the literal, case-insensitive test; `hasFuzzyHighlight` adds the word-start token fallback but never the whole-field fallback, so it pinpoints the row or section that genuinely mentions a fuzzy query (used for go-to-match in forges). All three strip surrounding whitespace and matching single/double quotes via `normalizeSearchQuery(query)` first — so `meta` and `"meta"` behave identically — while the raw query is what callers hand to a remote forge search.
 
 ### `<Card>`
 Adaptive container styled according to the active `VisualFlair.surfaceStyle` (`flat`, `tinted`, or `elevated`). Includes a compound `<Card.Header>` for structured headers with titles, icons, and action chips. `<Card.Header highlightQuery={q}>` highlights case-insensitive matches of `q` inside the title, with the same token/whole-field fuzzy fallback as `<HighlightedText>`.

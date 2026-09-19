@@ -32,7 +32,7 @@ import {
   type RenderModalProps,
   type RenderPillProps,
 } from "paseo-plugin-helper/client";
-import { hasFuzzyHighlight } from "paseo-plugin-helper/shared";
+import { hasFuzzyHighlight, normalizeSearchQuery } from "paseo-plugin-helper/shared";
 import { HookQueueView } from "./hook-queue-panel.js";
 import {
   ATTENTION_LABELS,
@@ -61,6 +61,7 @@ import {
   type ForgeSettings,
   type InstallLabelMode,
   issueDetailContract,
+  issueMatchesQuery,
   nextStateLabel,
   openIssuesContract,
   parseMarkdownLite,
@@ -146,17 +147,6 @@ export function ForgePill({ workspaceId, isOpen }: RenderPillProps) {
         {label}
       </Text>
     </View>
-  );
-}
-
-function issueMatchesQuery(issue: ForgeIssue, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  const digits = q.startsWith("#") ? q.slice(1) : q;
-  if (/^\d+$/.test(digits) && String(issue.number).startsWith(digits)) return true;
-  return (
-    issue.title.toLowerCase().includes(q) ||
-    issue.labels.some((label) => label.toLowerCase().includes(q))
   );
 }
 
@@ -1366,7 +1356,9 @@ export function ForgeIssuesView({
     [query, remoteSearch, remoteQuery, remoteResultQuery, remoteIssues, remoteError, clientIssues],
   );
   const issues = searchLayer.issues;
-  const activeQuery = debouncedQuery.trim();
+  // Local filter/highlight use the normalized (quote-stripped) query so `meta`
+  // and `"meta"` behave identically; the remote search keeps the raw query.
+  const activeQuery = normalizeSearchQuery(debouncedQuery);
   const scrollRef = React.useRef<ScrollViewInstance | null>(null);
   const listTop = React.useRef(0);
   const rowTops = React.useRef(new Map<number, number>());
