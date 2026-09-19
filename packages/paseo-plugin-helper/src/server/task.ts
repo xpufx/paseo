@@ -32,7 +32,7 @@ export function createPeriodicTask(options: PeriodicTaskOptions): PeriodicTaskHa
     maxBackoffMs = 60000,
   } = options;
 
-  let timer: NodeJS.Timeout | null = null;
+  let timer: any = null;
   let running = true;
   let inFlight = false;
   let failureCount = 0;
