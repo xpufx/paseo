@@ -7,12 +7,10 @@
 # with a `host`-backend label executes the steps directly on the host, which is
 # faster and cheaper for small operations.
 #
-# RUNNER LABEL (verify before relying on it): a host runner is registered with a
-# label of the form `<name>:host`, e.g. `self-hosted:host` (the canonical
-# Forgejo example). `runs-on` matches the label NAME only, so `self-hosted`
-# below targets `self-hosted:host`. If this instance's host runner uses a
-# different label name, change `self-hosted` to match it. No `container:` block
-# is present on purpose: that is what selects the host backend.
+# RUNNER LABEL: this instance's host runner is registered as
+# `runner-local-shell` (host backend, no container). `runs-on` matches the
+# label name. No `container:` block is present on purpose: that is what selects
+# the host backend.
 #
 # RUNTIME DEPENDENCIES: host mode runs on the host, so the host itself must
 # provide `curl` and `jq`. The workflow fails loudly if either is missing.
@@ -51,7 +49,7 @@ on:
 jobs:
   triage:
     name: Ensure attention/0-orchestrator for human activity
-    runs-on: self-hosted # host runner label; must be `<name>:host` (e.g. self-hosted:host)
+    runs-on: runner-local-shell # host runner label; no container
     steps:
       - name: Set attention/0-orchestrator (human only)
         env:
