@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { useAgent, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/react-native";
+import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   Badge,
+  Button,
   Collapsible,
   PluginThemeProvider,
   ProgressBar,
@@ -12,6 +13,7 @@ import {
   usePluginSettings,
 } from "paseo-plugin-helper/client";
 import { formatBytes, formatUptime, truncatePath } from "paseo-plugin-helper/shared";
+import { buildTelemetryCopyText } from "./telemetry-copy";
 import {
   isTimelineEnabled,
   isMcpSurfaceEnabled,
@@ -57,6 +59,7 @@ export function TopTimelineTelemetryCard({
 }: PluginTimelineItemProps<TopTimelineTelemetryData>) {
   const data = item.data;
   const [isExpanded, setIsExpanded] = useState(false);
+  const toast = useToast();
   const liveUsage = useAgent(data.agentId, (a: TopAgentSnapshot) => a.lastUsage);
   const inputTokens = data.inputTokens ?? liveUsage?.inputTokens;
   const outputTokens = data.outputTokens ?? liveUsage?.outputTokens;
@@ -144,6 +147,14 @@ export function TopTimelineTelemetryCard({
     return Math.round(((contextUsedTokens ?? 0) / contextMaxTokens) * 100);
   }, [contextUsedTokens, contextMaxTokens]);
 
+  const onCopy = useCallback(() => {
+    const text = buildTelemetryCopyText({ data, liveUsage, timeLabel });
+    copyText(text).then(
+      () => toast.show("Copied timeline card", { variant: "success" }),
+      () => toast.error("Copy failed"),
+    );
+  }, [data, liveUsage, timeLabel, toast]);
+
   const hasTokenDetails =
     inputTokens != null ||
     outputTokens != null ||
@@ -191,6 +202,20 @@ export function TopTimelineTelemetryCard({
             >
               via top
             </Text>
+            {/*
+             * Explicit copy affordance. Web's selection-copy handler only
+             * rebuilds clipboard content for `[data-testid="assistant-message"]`
+             * selections, so styled timeline items copy nothing
+             * (xpufx-org/paseo#278). This bypasses the gate with the plugin's
+             * own copyText.
+             */}
+            <Button
+              icon="Copy"
+              size="sm"
+              variant="ghost"
+              onPress={onCopy}
+              accessibilityLabel="Copy timeline card"
+            />
           </Row>
         }
         summary={
