@@ -1,11 +1,11 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
 import { useAgent, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
-import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
   Badge,
-  Button,
   Collapsible,
+  CopyButton,
   PluginThemeProvider,
   ProgressBar,
   Row,
@@ -59,7 +59,6 @@ export function TopTimelineTelemetryCard({
 }: PluginTimelineItemProps<TopTimelineTelemetryData>) {
   const data = item.data;
   const [isExpanded, setIsExpanded] = useState(false);
-  const toast = useToast();
   const liveUsage = useAgent(data.agentId, (a: TopAgentSnapshot) => a.lastUsage);
   const inputTokens = data.inputTokens ?? liveUsage?.inputTokens;
   const outputTokens = data.outputTokens ?? liveUsage?.outputTokens;
@@ -147,13 +146,10 @@ export function TopTimelineTelemetryCard({
     return Math.round(((contextUsedTokens ?? 0) / contextMaxTokens) * 100);
   }, [contextUsedTokens, contextMaxTokens]);
 
-  const onCopy = useCallback(() => {
-    const text = buildTelemetryCopyText({ data, liveUsage, timeLabel });
-    copyText(text).then(
-      () => toast.show("Copied timeline card", { variant: "success" }),
-      () => toast.error("Copy failed"),
-    );
-  }, [data, liveUsage, timeLabel, toast]);
+  const getCopyText = useCallback(
+    () => buildTelemetryCopyText({ data, liveUsage, timeLabel }),
+    [data, liveUsage, timeLabel],
+  );
 
   const hasTokenDetails =
     inputTokens != null ||
@@ -206,15 +202,16 @@ export function TopTimelineTelemetryCard({
              * Explicit copy affordance. Web's selection-copy handler only
              * rebuilds clipboard content for `[data-testid="assistant-message"]`
              * selections, so styled timeline items copy nothing
-             * (xpufx-org/paseo#278). This bypasses the gate with the plugin's
-             * own copyText.
+             * (xpufx-org/paseo#278). The helper CopyButton bypasses that gate
+             * with the helper's own clipboard path. Empty labels keep the
+             * header compact: the icon flips Copy -> Check on success.
              */}
-            <Button
-              icon="Copy"
-              size="sm"
-              variant="ghost"
-              onPress={onCopy}
+            <CopyButton
+              getText={getCopyText}
+              label=""
+              copiedLabel=""
               accessibilityLabel="Copy timeline card"
+              toastMessage="timeline card"
             />
           </Row>
         }

@@ -474,6 +474,20 @@ Monospace viewer with safe nested horizontal scrolling and a 1-tap clipboard cop
 <CodeBlock code={sourceCode} language="typescript" title="index.ts" maxHeight={240} />
 ```
 
+### `<CopyButton>`
+Standalone clipboard affordance for styled/plugin surfaces that the host's
+selection-copy handler ignores. It uses the helper's host `copyText` /
+`copyToClipboard` path and flips Copy → Check / "Copied!" on success.
+```tsx
+// Lazy text is resolved at press time, so a growing digest stays current.
+<CopyButton getText={() => buildDigest(data)} toastMessage="timeline card" />
+
+// Or copy a literal string.
+<CopyButton text={sha} accessibilityLabel="Copy commit SHA" />
+```
+Set `label=""` / `copiedLabel=""` for an icon-only control, and `variant="secondary"`
+for a bordered chip instead of the default ghost styling.
+
 ### `<KeyValue>` & `<KeyValueGroup>`
 Displays key/value metadata. Automatically stacks vertically on compact/mobile screens and aligns horizontally on desktop. Use `<KeyValueGroup>` for responsive multi-column metric grids.
 ```tsx

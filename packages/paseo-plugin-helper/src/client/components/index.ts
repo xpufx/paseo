@@ -6,6 +6,7 @@ export * from "./StatusDot.js";
 export * from "./Card.js";
 export * from "./Tabs.js";
 export * from "./CodeBlock.js";
+export * from "./CopyButton.js";
 export * from "./SearchInput.js";
 export * from "./TextInput.js";
 export * from "./Select.js";

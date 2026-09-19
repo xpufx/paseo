@@ -6,6 +6,7 @@ export * from "./StatusDot";
 export * from "./Card";
 export * from "./Tabs";
 export * from "./CodeBlock";
+export * from "./CopyButton";
 export * from "./SearchInput";
 export * from "./TextInput";
 export * from "./Select";
