@@ -13,19 +13,17 @@ import {
   KeyValue,
   KeyValueGroup,
   PluginThemeProvider,
-  ProgressBar,
   Row,
   SectionHeader,
   StatusDot,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { ActivityIndicator, Linking, Text, View } from "react-native";
+import { NATIVE_PLUGIN_UPDATE_BLOCKER } from "../shared/native-lifecycle";
 import {
   pluginUpdatesCheckRpc,
-  pluginUpdatesUpdateAllRpc,
-  pluginUpdatesUpdateRpc,
   resolveSourceRef,
   shortHash,
   type PluginUpdate,
@@ -102,14 +100,8 @@ function hashValue(value: string | null): string | null {
 
 function PluginRow({
   plugin,
-  updating,
-  forceNeeded,
-  onUpdate,
 }: {
   plugin: PluginUpdate;
-  updating: boolean;
-  forceNeeded: boolean;
-  onUpdate: (pluginId: string, force: boolean) => void;
 }) {
   const { colors, typography, padding } = usePluginTheme();
   const detail = fallbackDetail(plugin);
@@ -138,16 +130,6 @@ function PluginRow({
             />
           ) : null}
           {plugin.dirty === true && !isOrphan ? <Badge label="dirty" variant="warning" dot /> : null}
-          {plugin.updateAvailable && !isOrphan ? (
-            <Button
-              label={forceNeeded ? "Force update" : "Update"}
-              variant={forceNeeded ? "primary" : "secondary"}
-              size="sm"
-              loading={updating}
-              disabled={updating}
-              onPress={() => onUpdate(plugin.id, forceNeeded)}
-            />
-          ) : null}
         </Row>
         <Text selectable numberOfLines={detailLines} style={{ color: colors.foregroundMuted, ...typography.caption }}>
           {detail}
@@ -252,100 +234,20 @@ export function PluginUpdatesIcon(props: PluginButtonIconProps) {
   );
 }
 
-interface Failure {
-  pluginId: string;
-  error: string;
-  requiresForce: boolean;
-}
-
 function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
   const { colors, typography, padding } = usePluginTheme();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const query = usePluginUpdates(props.workspaceId);
-  const update = useRpc(pluginUpdatesUpdateRpc);
-  const updateAll = useRpc(pluginUpdatesUpdateAllRpc);
-  const [activeUpdate, setActiveUpdate] = useState<string | "all" | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [failures, setFailures] = useState<Failure[]>([]);
 
   const plugins = query.data?.plugins ?? [];
   const rows = partitionedRows(plugins);
   const orphanSection = buildOrphanSection(plugins);
   const staleCount = plugins.filter((plugin) => plugin.updateAvailable).length;
-  const forceCount = failures.filter((failure) => failure.requiresForce).length;
-
   const refresh = async () => {
     try {
-      setFailures([]);
       await query.refetch();
     } catch (error) {
       toast.show(error instanceof Error ? error.message : String(error), { variant: "error" });
-    }
-  };
-
-  const recordFailure = (failure: Failure) => {
-    setFailures((current) => [
-      ...current.filter((item) => item.pluginId !== failure.pluginId),
-      failure,
-    ]);
-  };
-
-  const clearFailure = (pluginId: string) => {
-    setFailures((current) => current.filter((failure) => failure.pluginId !== pluginId));
-  };
-
-  const runUpdate = async (pluginId: string, force = false) => {
-    setActiveUpdate(pluginId);
-    setProgress(0.25);
-    try {
-      const result = await update({ workspaceId: props.workspaceId, pluginId, force });
-      if (result.status === "error") {
-        recordFailure({
-          pluginId,
-          error: result.error || "Update failed",
-          requiresForce: result.requiresForce === true,
-        });
-        toast.show(result.error || `Failed to update ${pluginId}`, { variant: "error" });
-      } else {
-        clearFailure(pluginId);
-        toast.show(`${pluginId} updated`, { variant: "success" });
-      }
-      setProgress(1);
-      await queryClient.invalidateQueries({ queryKey: [...QUERY_KEY, props.workspaceId] });
-    } catch (error) {
-      toast.show(error instanceof Error ? error.message : String(error), { variant: "error" });
-    } finally {
-      setActiveUpdate(null);
-    }
-  };
-
-  const runUpdateAll = async (force = false) => {
-    setActiveUpdate("all");
-    setProgress(0.1);
-    try {
-      const result = await updateAll({ workspaceId: props.workspaceId, force });
-      const failed = result.results.filter((item) => item.status === "error");
-      setFailures(
-        failed.map((item) => ({
-          pluginId: item.pluginId,
-          error: item.error || "Update failed",
-          requiresForce: item.requiresForce === true,
-        })),
-      );
-      setProgress(1);
-      if (failed.length > 0) {
-        toast.show(`${failed.length} plugin update${failed.length === 1 ? "" : "s"} failed`, {
-          variant: "error",
-        });
-      } else {
-        toast.show("All plugins updated", { variant: "success" });
-      }
-      await queryClient.invalidateQueries({ queryKey: [...QUERY_KEY, props.workspaceId] });
-    } catch (error) {
-      toast.show(error instanceof Error ? error.message : String(error), { variant: "error" });
-    } finally {
-      setActiveUpdate(null);
     }
   };
 
@@ -368,7 +270,10 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.foreground, ...typography.heading }}>Plugin updates</Text>
             <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-              {query.isFetching ? "Checking installed plugins…" : `${staleCount} update${staleCount === 1 ? "" : "s"} available`}
+              {query.isFetching ? "Checking installed plugins…" : `${staleCount} remote change${staleCount === 1 ? "" : "s"} detected`}
+            </Text>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+              Diagnostics only — {NATIVE_PLUGIN_UPDATE_BLOCKER}
             </Text>
           </View>
           <Button
@@ -376,12 +281,11 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
             variant="ghost"
             size="sm"
             loading={query.isFetching}
-            disabled={query.isFetching || activeUpdate !== null}
+            disabled={query.isFetching}
             accessibilityLabel="Refresh plugin update check"
             onPress={refresh}
           />
         </Row>
-        {activeUpdate ? <ProgressBar value={progress} autoStatusColor label="Updating plugins" showValueText /> : null}
         {query.isLoading && !query.data ? (
           <View style={{ alignItems: "center", paddingVertical: padding.vertical * 2 }}>
             <ActivityIndicator color={colors.foregroundMuted} />
@@ -394,58 +298,11 @@ function PluginUpdatesPopoverInner(props: PluginButtonContentProps) {
               <PluginRow
                 key={plugin.id}
                 plugin={plugin}
-                updating={activeUpdate === plugin.id}
-                forceNeeded={failures.some((failure) => failure.pluginId === plugin.id && failure.requiresForce)}
-                onUpdate={runUpdate}
               />
             ))}
             {orphanSection ? <OrphanSection section={orphanSection} /> : null}
           </>
         )}
-        {failures.map((failure) => (
-          <Card key={`failure-${failure.pluginId}`} variant="elevated">
-            <View style={{ gap: padding.gap }}>
-              <Row align="center">
-                <StatusDot variant="danger" />
-                <Text style={{ color: colors.statusDanger, ...typography.bodyStrong, flex: 1 }}>
-                  {failure.pluginId} update failed
-                </Text>
-                {failure.requiresForce ? (
-                  <Button
-                    label="Force"
-                    variant="secondary"
-                    size="sm"
-                    loading={activeUpdate === failure.pluginId}
-                    disabled={activeUpdate !== null}
-                    onPress={() => runUpdate(failure.pluginId, true)}
-                  />
-                ) : null}
-              </Row>
-              <Text selectable style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                {failure.error}
-              </Text>
-            </View>
-          </Card>
-        ))}
-        {forceCount > 0 ? (
-          <Button
-            label="Force update all"
-            variant="secondary"
-            icon="AlertTriangle"
-            loading={activeUpdate === "all"}
-            disabled={activeUpdate !== null}
-            onPress={() => runUpdateAll(true)}
-          />
-        ) : staleCount > 1 ? (
-          <Button
-            label={`Update all (${staleCount})`}
-            variant="primary"
-            icon="DownloadCloud"
-            loading={activeUpdate === "all"}
-            disabled={activeUpdate !== null}
-            onPress={() => runUpdateAll(false)}
-          />
-        ) : null}
       </ScrollView>
     </PluginThemeProvider>
   );

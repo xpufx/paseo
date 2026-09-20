@@ -3,10 +3,10 @@
   "private": false,
   "license": "MIT",
   "version": "0.1.0",
-  "description": "Monitor installed Paseo plugins for git-source updates, with per-subdirectory status, source links, and one-click pulls.",
+  "description": "Read-only monitor for installed Paseo plugin source status, links, and per-subdirectory Git diagnostics.",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npx tsx --test shared/updates.test.ts server/updates.test.ts client/orphans.test.ts",
+    "test": "npm run typecheck && npx tsx --test shared/updates.test.ts shared/native-lifecycle.test.ts server/updates.test.ts client/orphans.test.ts",
     "test:vitest": "npm run typecheck && vitest run --config vitest.config.ts"
   },
   "devDependencies": {
