@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { parseArgs, pluginIds, manifestFor, readiness, resolvePublishPlan } from "./publish-npm.mjs";
+import { parseArgs, pluginIds, manifestFor, readiness, resolvePublishPlan, stagePackages } from "./publish-npm.mjs";
 
 let pass = 0;
 let fail = 0;
@@ -76,6 +76,27 @@ function withTempStage(run) {
 }
 
 const demo = manifestFor("demo");
+
+// --- stagePackages: a restage clears all prior package output ---
+withTempStage((dir) => {
+  const dest = path.join(dir, "demo");
+  fs.mkdirSync(path.join(dest, "package"), { recursive: true });
+  fs.writeFileSync(path.join(dest, "package", "stale.js"), "stale");
+  fs.writeFileSync(path.join(dest, "previous.tgz"), "stale");
+  fs.writeFileSync(path.join(dest, "stale-note.txt"), "stale");
+  const filename = "paseo-helper-demo-current.tgz";
+  const staged = stagePackages([demo], {
+    outDir: dir,
+    pack: (_manifest, { destination }) => {
+      fs.writeFileSync(path.join(destination, filename), "current");
+      return { filename, shasum: "current-sha", integrity: "current-integrity", size: 7, unpackedSize: 7, files: [] };
+    },
+  });
+  check("restage removes stale extracted and non-tarball output", JSON.stringify(fs.readdirSync(dest)) === JSON.stringify([filename]));
+  check("restage records only the current tarball", staged.packages[0].tarball === path.join("demo", filename));
+});
+
+// --- resolvePublishPlan: staged tarballs win over dirs ---
 withTempStage((dir) => {
   fs.mkdirSync(path.join(dir, "demo"), { recursive: true });
   fs.writeFileSync(path.join(dir, "demo", "demo.tgz"), "fake");
