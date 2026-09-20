@@ -33,6 +33,34 @@ export type CrossDaemonEnvelope = z.infer<typeof EnvelopeSchema>;
 export type MessageDirection = "incoming" | "outgoing";
 
 /**
+ * Produce the version-4 wire prefix shared by every x-comms delivery route.
+ * Keeping this browser-safe lets an interactive client send retain the same
+ * attribution contract as the server and MCP routes.
+ */
+export function buildXCommsEnvelope(args: {
+  sender: {
+    agentId: string | null;
+    agentName: string | null;
+    host: string;
+    daemonServerId: string | null;
+    cwd: string | null;
+  };
+  target: { daemon: string | null; agentId: string | null };
+  sentAt: string;
+}): string {
+  return `${META_PREFIX}${JSON.stringify({
+    xComms: {
+      version: 4,
+      type: "x-comms.message",
+      direction: "outgoing",
+      sender: args.sender,
+      target: args.target,
+      sentAt: args.sentAt,
+    },
+  })}`;
+}
+
+/**
  * Viewer-relative direction. The wire envelope stamps direction "outgoing"
  * from the sender's side, so only a message from self counts as user-sent.
  */

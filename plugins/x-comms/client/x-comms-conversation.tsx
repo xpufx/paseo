@@ -1,4 +1,4 @@
-import { usePaseo, useRpc } from "@getpaseo/plugin/client";
+import { getPaseoClient, useHosts, usePaseo, useRpc } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -6,13 +6,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Clipboard, Pressable, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
 import { ModalContent, TextInput } from "paseo-plugin-helper/client";
+import { buildXCommsEnvelope } from "../shared/envelope";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
+import { listConfiguredHostAgents, sendConfiguredHostAgent } from "./configured-hosts";
 import { formatCounterparty, formatPeerDisplay, splitCounterparty, useCounterpartyLabel, usePeerDisplay, type CounterpartyRef } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 
 const draftCache = new Map<string, string>();
-const targetCache = new Map<string, ConversationPartner | null>();
+type SelectedTarget = ConversationPartner & { configuredHostServerId?: string };
+
+const targetCache = new Map<string, SelectedTarget | null>();
 const sentCache = new Map<string, Map<string, ConversationMessage[]>>();
 
 function PeerText({ counterparty }: { counterparty: CounterpartyRef }) {
@@ -89,6 +93,9 @@ export function CrossDaemonConversation({
   onSent?: () => void;
 }) {
   const paseo = usePaseo();
+  // This hook is deliberately confined to the mounted client surface. Server,
+  // MCP, outbox, and peer-channel code retain their existing routes.
+  const hosts = useHosts();
   const callSend = useRpc(conversationSendRpc);
   const callIntrospect = useRpc(introspectAgentsRpc);
   const callRegistryRead = useRpc(registryReadRpc);
@@ -126,7 +133,7 @@ export function CrossDaemonConversation({
     [serverIdByName],
   );
   const [draft, setDraft] = useState(() => draftCache.get(agentId) ?? "");
-  const [target, setTarget] = useState<ConversationPartner | null>(() => targetCache.get(agentId) ?? null);
+  const [target, setTarget] = useState<SelectedTarget | null>(() => targetCache.get(agentId) ?? null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const queryClient = useQueryClient();
@@ -146,18 +153,48 @@ export function CrossDaemonConversation({
     queryFn: () => callIntrospect({}),
     staleTime: 30000,
   });
+  const hostStatusKey = useMemo(
+    () => hosts.map((host) => [host.serverId, host.status] as const),
+    [hosts],
+  );
+  const configuredHosts = useQuery({
+    queryKey: ["x-comms-configured-hosts", hostStatusKey],
+    // getPaseoClient is called only in this query, when the host is online.
+    // A status transition changes the query key and drops the old borrowed API.
+    queryFn: () => listConfiguredHostAgents(hosts, getPaseoClient),
+    refetchOnWindowFocus: false,
+  });
 
   const [lastSent, setLastSent] = useState<{ at: string; to: string } | null>(null);
   const [sentTick, setSentTick] = useState(0);
   const send = useMutation({
-    mutationFn: () =>
-      callSend({
-        daemon: target?.counterparty.daemonServerId ?? target?.counterparty.daemon ?? "",
-        agentId: target?.counterparty.agentId ?? "",
+    mutationFn: async () => {
+      if (!target) throw new Error("Choose a target before sending.");
+      if (target.configuredHostServerId) {
+        // Acquire immediately before send. A configured host can disconnect or
+        // release an earlier borrowed API while this surface remains mounted.
+        const stamped = `${buildXCommsEnvelope({
+          sender: { agentId, agentName: "User", host: "paseo-client", daemonServerId: null, cwd: null },
+          target: { daemon: target.configuredHostServerId, agentId: target.counterparty.agentId },
+          sentAt: new Date().toISOString(),
+        })}\n\n${draft}`;
+        await sendConfiguredHostAgent({
+          serverId: target.configuredHostServerId,
+          agentId: target.counterparty.agentId ?? "",
+          message: stamped,
+          getClient: getPaseoClient,
+        });
+        return { ok: true, error: null };
+      }
+      // Existing registry/MCP relay and direct-peer route stays exactly here.
+      return callSend({
+        daemon: target.counterparty.daemonServerId ?? target.counterparty.daemon ?? "",
+        agentId: target.counterparty.agentId ?? "",
         prompt: draft,
         fromAgentId: agentId,
         fromAgentName: "User",
-      }),
+      });
+    },
     onSuccess: (data) => {
       if (data.ok && target) {
         const now = new Date().toISOString();
@@ -187,7 +224,7 @@ export function CrossDaemonConversation({
     draftCache.set(agentId, v);
     setDraft(v);
   }, [agentId]);
-  const setTargetCached = useCallback((c: ConversationPartner | null) => {
+  const setTargetCached = useCallback((c: SelectedTarget | null) => {
     targetCache.set(agentId, c);
     setTarget(c);
   }, [agentId]);
@@ -206,6 +243,22 @@ export function CrossDaemonConversation({
     });
     setPickerOpen(false);
   }, [setTargetCached, serverIdByName]);
+  const pickConfiguredHostAgent = useCallback((host: { serverId: string }, selectedAgent: { agentId: string; name: string }) => {
+    const counterparty = {
+      daemon: host.serverId,
+      daemonServerId: host.serverId,
+      agentId: selectedAgent.agentId,
+      agentName: selectedAgent.name,
+    };
+    setTargetCached({
+      conversationId: threadKeyForCounterparty(counterparty),
+      counterparty,
+      lastActivity: new Date().toISOString(),
+      messageCount: 0,
+      configuredHostServerId: host.serverId,
+    });
+    setPickerOpen(false);
+  }, [setTargetCached]);
 
   return (
     <View style={{ padding: 12, flex: 1 }}>
@@ -414,6 +467,39 @@ export function CrossDaemonConversation({
       ) : null}
       <Modal title="New conversation" open={pickerOpen} onOpenChange={setPickerOpen}>
         <ModalContent>
+          <View>
+            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 4, textTransform: "uppercase" as const }}>
+              Configured hosts
+            </Text>
+            {hosts.map((host) => {
+              const hostAgents = configuredHosts.data?.find((entry) => entry.host.serverId === host.serverId);
+              const unavailable = host.status !== "online";
+              return (
+                <View key={host.serverId}>
+                  <Text style={{ color: unavailable ? theme.colors.foregroundMuted : theme.colors.accent, fontSize: 12, fontWeight: "700" as const, marginTop: 10 }}>
+                    {host.label} ({host.serverId}) · {host.status}{unavailable ? " (unavailable)" : ""}
+                  </Text>
+                  {host.status === "online" && configuredHosts.isPending ? (
+                    <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, paddingLeft: 10 }}>Loading agents…</Text>
+                  ) : null}
+                  {hostAgents?.error ? (
+                    <Text style={{ color: theme.colors.statusDanger, fontSize: 12, paddingLeft: 10 }}>Unavailable: {hostAgents.error}</Text>
+                  ) : null}
+                  {hostAgents?.agents.map((configuredAgent) => (
+                    <Pressable
+                      key={`${configuredAgent.serverId}/${configuredAgent.agentId}`}
+                      onPress={() => pickConfiguredHostAgent(host, configuredAgent)}
+                      style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingLeft: 10 }, pressed && { opacity: 0.7 }]}
+                    >
+                      <Text style={{ color: theme.colors.foreground, fontSize: 13, flexShrink: 1 }}>
+                        {configuredAgent.name} ({configuredAgent.agentId}){configuredAgent.status ? ` · ${configuredAgent.status}` : ""}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              );
+            })}
+          </View>
           {introspect.isPending ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Loading agents…</Text> : null}
           {introspect.error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{String(introspect.error)}</Text> : null}
           <View>
