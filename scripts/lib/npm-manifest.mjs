@@ -17,6 +17,9 @@ export const OPTIONAL_DIRS = ["mcp", "docs", "examples", "scripts"];
 /** Root-level files every plugin package must publish. */
 export const REQUIRED_FILES = ["paseo-plugin.json", "README.md", "LICENSE"];
 
+/** Root entry points accepted by the Paseo source loader. */
+export const ENTRYPOINT_FILES = ["index.client.ts", "index.client.tsx", "index.server.ts", "index.server.tsx"];
+
 /**
  * Negation patterns applied to every package. `*.test.*` covers the plugin test
  * suites and the helper's vendored tests; `.DS_Store` and `node_modules` are
@@ -52,6 +55,7 @@ export function filesAllowlist(existingPaths) {
   const present = new Set(existingPaths);
   return [
     ...REQUIRED_FILES.filter((f) => present.has(f)),
+    ...ENTRYPOINT_FILES.filter((f) => present.has(f)),
     ...REQUIRED_DIRS.filter((d) => present.has(d)),
     ...OPTIONAL_DIRS.filter((d) => present.has(d)),
     ...TEST_EXCLUDES,
