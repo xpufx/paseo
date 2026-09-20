@@ -38,6 +38,7 @@ jobs:
       # Deterministic cache inside the throwaway container. `npm pack` reads the
       # local plugin dirs only — no registry contact.
       npm_config_cache: /tmp/paseo-npm-pack-cache
+      NPM_TOKEN: ${{ secrets.NPM_STAGE || secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,9 +81,7 @@ jobs:
         # prompt. A human later runs `npm stage approve <id>` (2FA) to promote.
         # Requires the NPM_TOKEN repo secret and an explicit manual dispatch.
         # Routine push/PR runs stay credential-free local pack verification.
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        if: github.event_name == 'workflow_dispatch' && env.NPM_TOKEN != ''
+        if: github.event_name == 'workflow_dispatch' && (secrets.NPM_STAGE != '' || secrets.NPM_TOKEN != '')
         run: |
           set -euo pipefail
           test -f publish-stage/manifest.json || { echo "::error::manifest missing"; exit 1; }
@@ -137,8 +136,6 @@ jobs:
 
       - name: Job summary — staged packages and the human publish path
         if: always()
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           {
