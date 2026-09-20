@@ -1186,6 +1186,26 @@ describe("label render path", () => {
   });
 });
 
+describe("row title highlight fallback (issue #190)", () => {
+  const clientDir = [
+    join(process.cwd(), "client"),
+    join(process.cwd(), "plugins", "forges", "client"),
+  ].find((dir) => existsSync(dir));
+  assert.ok(clientDir, "forges client directory not found");
+  const source = readFileSync(join(clientDir, "issues-pill.tsx"), "utf8");
+  // The row title renders through HighlightedText; the whole-field fallback is
+  // what painted the entire title when the query matched only a label.
+  const rowTitle = source.match(/<HighlightedText[^>]*text=\{title\}[\s\S]*?\/>/);
+
+  it("renders the row title with the highlight primitive", () => {
+    assert.ok(rowTitle, "row title must render via HighlightedText");
+  });
+
+  it("never opts the row title into the whole-field fallback", () => {
+    assert.doesNotMatch(rowTitle![0], /\bfuzzyFallback\b/);
+  });
+});
+
 describe("create issue contract + validation (issue #200)", () => {
   it("requires a non-empty title", () => {
     assert.equal(validateCreateIssueInput({}), "Issue title must not be empty");

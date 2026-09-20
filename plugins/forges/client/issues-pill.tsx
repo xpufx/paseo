@@ -471,10 +471,15 @@ function IssueRow({
         label={state === "closed" ? "Closed" : "Open"}
       />
       <Pressable style={styles.rowBody} onPress={() => onSelect(number)} hitSlop={4}>
+        {/*
+         * The row title must not opt into the whole-field fallback: it is one of
+         * several fields, and a query that matches only a label must not light
+         * the whole title. Literal/token hits still paint; label chips carry the
+         * match for everything else.
+         */}
         <HighlightedText
           text={title}
           query={query ?? ""}
-          fuzzyFallback
           style={[styles.rowTitle, { color: colors.foreground }]}
         />
         <LabelChipList labels={labels} style={styles.rowLabels} query={query} />
