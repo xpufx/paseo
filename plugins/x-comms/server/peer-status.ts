@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import { createPluginLogger } from "paseo-plugin-helper/server";
-import { withTimeout } from "paseo-plugin-helper/shared";
+import { createPluginLogger } from "./vendor/paseo-plugin-helper/index";
+import { withTimeout } from "../shared/vendor/paseo-plugin-helper/async";
 import { currentRegistryPath, readRegistry } from "./registry";
 import { resolvePeerTarget } from "./peer-channel";
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { PluginStorage } from "paseo-plugin-helper/server";
+import { PluginStorage } from "./vendor/paseo-plugin-helper/index";
 
 /**
  * Outbox for outbound conversation messages that could not be delivered.

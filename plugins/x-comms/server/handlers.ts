@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createPeriodicTask, createPluginLogger, safeSpawn } from "paseo-plugin-helper/server";
+import { createPeriodicTask, createPluginLogger, safeSpawn } from "./vendor/paseo-plugin-helper/index";
 import type { PaseoApi } from "@getpaseo/client";
-import { withTimeout } from "paseo-plugin-helper/shared";
+import { withTimeout } from "../shared/vendor/paseo-plugin-helper/async";
 import { getSnapshotFresh, agentCountFor, refreshSnapshot, initializeSnapshot } from "./snapshot";
 import {
   registryReadRpc,
@@ -397,7 +397,7 @@ export async function handleDaemonProbe(input: { value: string }) {
 
 
 
-import { PluginStorage } from "paseo-plugin-helper/server";
+import { PluginStorage } from "./vendor/paseo-plugin-helper/index";
 import { resolveFeatureFlags, resolveInjectionEnabled, resolveOutboxExpiryMs, resolvePresenceEnabled, applyFeaturePrefsUpdate } from "./settings.ts";
 import {
   OUTBOX_POLL_INTERVAL_MS,

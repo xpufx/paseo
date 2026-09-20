@@ -19,7 +19,7 @@ import {
   Tabs,
   TextInput,
   usePluginTheme,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 import { formatPeerDisplay } from "./peer-label";
 import { PeerStatusSurface } from "./peer-status";
 import { SettingsPrototype } from "./settings-prototype";

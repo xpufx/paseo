@@ -14,7 +14,18 @@ import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PACKAGES = [
-  { id: "x-comms", name: "@xpufx/paseo-x-comms", paseo: ">=0.9.0-beta.2", runtime: ["@getpaseo/client/internal/daemon-client", "@getpaseo/protocol/daemon-endpoints", "@modelcontextprotocol/sdk/server/mcp.js", "zod"] },
+  {
+    id: "x-comms",
+    name: "@xpufx/paseo-x-comms",
+    paseo: ">=0.9.0-beta.2",
+    runtime: [
+      "@getpaseo/client/internal/daemon-client",
+      "@getpaseo/plugin/server",
+      "@getpaseo/protocol/daemon-endpoints",
+      "@modelcontextprotocol/sdk/server/mcp.js",
+      "zod",
+    ],
+  },
   { id: "top", name: "@xpufx/paseo-top", paseo: ">=0.8.0", runtime: [] },
   { id: "plugin-updates", name: "@xpufx/paseo-plugin-updates", paseo: ">=0.8.0", runtime: [] },
 ];
@@ -75,6 +86,32 @@ function assertSafeNpmBuild({ id, manifest }) {
   }
 }
 
+function assertRuntimeDependencies(pluginDir, plugin) {
+  if (plugin.id !== "x-comms") return;
+  const pkg = JSON.parse(fs.readFileSync(path.join(pluginDir, "package.json"), "utf8"));
+  assert.equal(pkg.engines?.node, ">=18", "x-comms: package must declare the supported Node floor");
+  for (const dependency of ["@getpaseo/plugin", "zod"]) {
+    assert(pkg.dependencies?.[dependency], `x-comms: ${dependency} must be a production dependency`);
+    assert(!pkg.devDependencies?.[dependency], `x-comms: ${dependency} must not be a development dependency`);
+  }
+}
+
+function assertVendoredHelperImports(pluginDir, plugin) {
+  if (plugin.id !== "x-comms") return;
+  const stack = ["client", "server", "shared"].map((dir) => path.join(pluginDir, dir));
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) stack.push(entryPath);
+      else if (/\.[cm]?[jt]sx?$/.test(entry.name)) {
+        const source = fs.readFileSync(entryPath, "utf8");
+        assert(!source.includes('from "paseo-plugin-helper'), `x-comms: ${path.relative(pluginDir, entryPath)} bypasses its vendored helper`);
+      }
+    }
+  }
+}
+
 function assertLifecycleGuard(tmp) {
   const fixture = path.join(tmp, "lifecycle-fixture");
   const consumer = path.join(tmp, "lifecycle-consumer");
@@ -115,6 +152,8 @@ function smoke(plugin, tmp) {
   const { manifestPath, manifest } = readManifest(pluginDir);
   assert.equal(manifest.id, plugin.id, `${plugin.id}: installed manifest ID is wrong`);
   assert.equal(manifest.requirements?.paseo, plugin.paseo, `${plugin.id}: Paseo floor is wrong`);
+  assertRuntimeDependencies(pluginDir, plugin);
+  assertVendoredHelperImports(pluginDir, plugin);
   assert(!fs.existsSync(path.join(pluginDir, "node_modules", "typescript")), `${plugin.id}: dev dependency typescript was installed`);
   assertSafeNpmBuild({ id: plugin.id, manifest });
   for (const specifier of plugin.runtime) {

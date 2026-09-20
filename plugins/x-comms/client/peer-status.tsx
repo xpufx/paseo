@@ -13,7 +13,7 @@ import {
   StatusDot,
   usePluginTheme,
   useRpcQuery,
-} from "paseo-plugin-helper/client";
+} from "./vendor/paseo-plugin-helper/index";
 import { formatPeerDisplay } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 import { peerStatusRpc } from "../shared/registry";

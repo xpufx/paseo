@@ -1,5 +1,5 @@
-import { McpClient } from "paseo-plugin-helper/mcp";
-import { createPluginLogger } from "paseo-plugin-helper/server";
+import { McpClient } from "./vendor/paseo-plugin-helper/mcp/index";
+import { createPluginLogger } from "./vendor/paseo-plugin-helper/index";
 
 const log = createPluginLogger("paseo-x-comms", { subsystem: "mcp-client" });
 
