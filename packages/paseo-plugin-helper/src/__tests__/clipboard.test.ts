@@ -61,6 +61,18 @@ describe("clipboardTierOrder", () => {
     ).toEqual(["rnAsync", "execCommand"]);
   });
 
+  it("skips BOTH RN paths on a DOM even when setStringAsync exists (unverifiable execCommand)", () => {
+    const order = clipboardTierOrder({
+      ...baseEnv,
+      hasRnClipboard: true,
+      hasRnSetStringAsync: true,
+      isDom: true,
+    });
+    expect(order).not.toContain("rnAsync");
+    expect(order).not.toContain("rnSync");
+    expect(order).toEqual(["execCommand"]);
+  });
+
   it("always ends with the execCommand fallback", () => {
     expect(clipboardTierOrder(baseEnv)).toEqual(["execCommand"]);
   });
@@ -170,5 +182,29 @@ describe("copyToClipboard", () => {
     });
 
     expect(await copyToClipboard("stale-would-remain")).toBe(false);
+  });
+
+  it("uses the checked execCommand on a DOM even when a fake RN-web setStringAsync exists", async () => {
+    initClientHelpers({ ...fourFieldHost });
+    // A web bundle that exposes a setStringAsync whose fallback is an
+    // unverifiable execCommand (expo-clipboard on web) must NOT fake success:
+    // the digest still has to reach the checked execCommand path.
+    const rn = { Clipboard: { setStringAsync: vi.fn().mockResolvedValue(true) } };
+    vi.mock("react-native", () => rn);
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(globalThis, "document", {
+      value: {
+        createElement: () => ({ style: {}, focus: () => {}, select: () => {} }),
+        body: { appendChild: () => {}, removeChild: () => {} },
+        execCommand,
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    const result = await copyToClipboard("digest-not-fake");
+    expect(result).toBe(true);
+    expect(rn.Clipboard.setStringAsync).not.toHaveBeenCalled();
+    expect(execCommand).toHaveBeenCalledWith("copy");
   });
 });

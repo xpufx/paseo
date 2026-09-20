@@ -24,16 +24,23 @@ export interface ClipboardEnvironment {
  * `react-native-web` `Clipboard.setString` reports success even when its
  * `document.execCommand("copy")` fails, which leaves the previous clipboard
  * item in place while the UI claims success (xpufx-org/paseo#278); it is only
- * usable off-DOM (native), where it is the real platform clipboard. In a DOM
- * the checked `execCommand` fallback is preferred to that unverifiable path.
+ * usable off-DOM (native), where it is the real platform clipboard. The same
+ * applies to any `setStringAsync` whose DOM fallback is that unverified
+ * `execCommand`. In a DOM the checked `execCommand` fallback is preferred to
+ * those unverifiable paths.
  */
 export function clipboardTierOrder(env: ClipboardEnvironment): ClipboardTier[] {
   const tiers: ClipboardTier[] = [];
   if (env.hasNavigatorClipboard) tiers.push("navigator");
   if (env.hasHostCopyText) tiers.push("host");
-  if (env.hasRnSetStringAsync) {
+  // On a DOM both RN-web paths are unverifiable: `setString` reports success
+  // even when its `execCommand` no-ops, and a `setStringAsync` that falls back
+  // to it does the same. Off-DOM they are the real native clipboard, so they
+  // lead there; on a DOM only the checked `execCommand` fallback is honest.
+  const rnDomOk = !env.isDom;
+  if (env.hasRnSetStringAsync && rnDomOk) {
     tiers.push("rnAsync");
-  } else if (env.hasRnClipboard && !env.isDom) {
+  } else if (env.hasRnClipboard && rnDomOk) {
     tiers.push("rnSync");
   }
   tiers.push("execCommand");
