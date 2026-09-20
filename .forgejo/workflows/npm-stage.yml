@@ -1,0 +1,118 @@
+# CI half of the npm stage → upload → human-publish handoff
+# (xpufx-org/paseo#211).
+#
+# Operator clarification: the npm **stage** step belongs in CI because it needs
+# no 2FA and touches no registry. Only the human **publish** step needs 2FA, and
+# it stays manual (`make npm-publish`). This workflow therefore never sets an npm
+# token, never authenticates, and never runs a publish command.
+#
+# `node scripts/publish-npm.mjs --stage` packs every plugin directory into
+# `publish-stage/<id>/<tarball>`, writes `manifest.json` (publish name, version,
+# tarball path, shasum, integrity, git commit) and a human-facing `PUBLISH.md`,
+# and refuses a dirty tree. The output is inert: nothing has contacted the
+# registry. This job uploads the whole directory as an artifact, so a human
+# downloads it and runs the 2FA publish locally.
+#
+# Triggers: push to main stages the tree that would be published; pull_request
+# exercises the same flow on the change that touches it (the artifact is an
+# inert tarball set, so a pre-merge run is safe); workflow_dispatch allows a
+# manual re-stage. Runner conventions (runs-on label, registry image) are copied
+# from install-smoke.yml.
+name: npm stage (publishable tarballs)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  npm-stage:
+    name: Stage publishable plugin tarballs
+    runs-on: alpine-docker
+    # Clean Ubuntu 24.04 + Node 22 + git/make/jq image, same as install-smoke.
+    container:
+      image: forge.mrs.uppidi.com/oktay/runner-containers/ubuntu-podman-builder:latest
+    env:
+      # Deterministic cache inside the throwaway container. `npm pack` reads the
+      # local plugin dirs only — no registry contact.
+      npm_config_cache: /tmp/paseo-npm-pack-cache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          git --version
+
+      - name: Unit-test the stage/publish logic
+        run: node scripts/publish-npm.test.mjs
+
+      - name: Stage plugin tarballs (no registry, no credentials)
+        run: make npm-stage
+
+      - name: Assert the stage is complete and self-consistent
+        run: |
+          set -euo pipefail
+          test -f publish-stage/manifest.json || { echo "::error::publish-stage/manifest.json missing"; exit 1; }
+          test -f publish-stage/PUBLISH.md || { echo "::error::publish-stage/PUBLISH.md missing"; exit 1; }
+          node -e '
+            const fs = require("fs");
+            const manifest = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
+            const packages = Array.isArray(manifest.packages) ? manifest.packages : [];
+            if (packages.length === 0) { console.error("::error::no packages staged"); process.exit(1); }
+            let bad = 0;
+            for (const p of packages) {
+              const file = `publish-stage/${p.tarball}`;
+              if (!fs.existsSync(file)) { console.error(`::error::missing staged tarball ${file}`); bad = 1; }
+              if (!p.shasum || !p.version || !p.publishAs) { console.error(`::error::incomplete manifest entry for ${p.id}`); bad = 1; }
+            }
+            if (bad) process.exit(1);
+            console.log(`staged ${packages.length} package(s) from ${manifest.gitBranch ?? "?"}@${String(manifest.gitCommit ?? "?").slice(0, 12)}`);
+          '
+
+      - name: Upload publish-stage/ artifact
+        # The Forgejo-maintained fork has the GHES check removed; the upstream
+        # actions/upload-artifact@v4 refuses non-GitHub servers. Pinned to the
+        # v4.3.1 commit rather than the movable `v4` tag, per Forgejo's own
+        # testing.yml warning that a tag can resolve to a commit without the
+        # compatibility patch.
+        uses: https://data.forgejo.org/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e
+        with:
+          name: publish-stage
+          path: publish-stage/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Job summary — staged packages and the human publish path
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## npm stage — publishable tarballs only (no registry, no 2FA)"
+            echo
+            if [ -f publish-stage/manifest.json ]; then
+              node -e '
+                const fs = require("fs");
+                const m = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
+                console.log(`Staged \`${m.gitBranch ?? "?"}@${String(m.gitCommit ?? "?").slice(0, 12)}\` at ${m.stagedAt}.`);
+                console.log();
+                console.log("| package | version | tarball | shasum |");
+                console.log("| --- | --- | --- | --- |");
+                for (const p of m.packages) console.log(`| \`${p.publishAs}\` | \`${p.version}\` | \`${p.tarball}\` | \`${p.shasum}\` |`);
+              '
+            else
+              echo "No stage was produced in this run."
+            fi
+            echo
+            echo "Download the \`publish-stage\` artifact, then publish from your workstation (prompts for npm 2FA/OTP):"
+            echo
+            echo '```sh'
+            echo "node scripts/publish-npm.mjs --publish"
+            echo '```'
+            echo
+            echo "This job never authenticates and never publishes — 2FA stays manual."
+          } >> "$GITHUB_STEP_SUMMARY"
