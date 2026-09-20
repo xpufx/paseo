@@ -78,9 +78,10 @@ make npm-publish         # human: npm publish --access public (prompts for OTP)
 ```
 
 `node scripts/publish-npm.mjs` with no flags stays a credential-free dry run.
-Registry-native alternative (npm >= 11.19): the agent/CI runs
-`npm stage publish <tarball>` (no 2FA) and the human runs
-`npm stage approve <stage-id>` (2FA).
+Registry-native alternative (npm >= 11.19): only an explicitly dispatched
+`npm stage` workflow with the `NPM_TOKEN` repository secret runs
+`npm stage publish <tarball>` (no 2FA). It skips versions already pending in
+npm staging; the human runs `npm stage approve <stage-id>` (2FA).
 
 ## Native npm acquisition support
 

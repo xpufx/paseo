@@ -4,20 +4,20 @@
 #   1. Local pack: `node scripts/publish-npm.mjs --stage` packs every plugin
 #      directory into `publish-stage/<id>/<tarball>` + `manifest.json` +
 #      `PUBLISH.md`, and refuses a dirty tree. This is inert — no registry.
-#   2. npm-native staged publishing (when the NPM_STAGE secret is set): `npm
+#   2. npm-native staged publishing (only on an explicit workflow dispatch with
+#      the NPM_TOKEN secret): `npm
 #      stage publish <tarball>` (npm >= 11.19) puts each version into the
 #      registry's staging area (not publicly visible) WITHOUT a 2FA prompt.
 #      A human later runs `npm stage approve <id>` (2FA) to promote to live.
 #
 # The 2FA publish/approve step stays manual and on the human. The job never
-# runs `npm publish`; it only stages. Skipped for the stage-publish step when
-# the secret is absent, so a PR run still exercises the local stage/artifact
-# path without a token.
+# runs `npm publish`; it only stages. Push and PR runs always exercise only the
+# local pack/artifact path; registry staging requires a manual dispatch and a
+# token.
 #
-# Triggers: push to main stages the tree that would be published; pull_request
-# exercises the same flow on the change that touches it; workflow_dispatch
-# allows a manual re-stage. Runner conventions (runs-on label, registry image)
-# are copied from install-smoke.yml.
+# Triggers: push to main and pull_request exercise the local pack/artifact
+# verification; workflow_dispatch additionally allows a registry stage. Runner
+# conventions (runs-on label, registry image) are copied from install-smoke.yml.
 name: npm stage (publishable tarballs)
 
 on:
@@ -78,12 +78,11 @@ jobs:
         # npm >= 11.19 staged publishing: `npm stage publish` puts each tarball
         # into the registry's staging area (not publicly visible) without a 2FA
         # prompt. A human later runs `npm stage approve <id>` (2FA) to promote.
-        # Requires the NPM_STAGE token secret (repo secrets). Skipped when the
-        # secret is absent so a PR run still exercises the local stage/artifact
-        # path without a token.
+        # Requires the NPM_TOKEN repo secret and an explicit manual dispatch.
+        # Routine push/PR runs stay credential-free local pack verification.
         env:
-          NPM_TOKEN: ${{ secrets.NPM_STAGE }}
-        if: env.NPM_TOKEN != ''
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        if: github.event_name == 'workflow_dispatch' && env.NPM_TOKEN != ''
         run: |
           set -euo pipefail
           test -f publish-stage/manifest.json || { echo "::error::manifest missing"; exit 1; }
@@ -97,9 +96,30 @@ jobs:
           npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
           # Authenticate for `npm stage publish` (any token type works, no 2FA).
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
-          jq -e -r '.packages[].tarball | "publish-stage/\(.)"' publish-stage/manifest.json | while read -r tarball; do
-            echo "staging $tarball"
-            npm stage publish "$tarball" --access public
+          # A version cannot be staged twice. Query each package first so a
+          # repeated manual dispatch is idempotent, while making it clear that
+          # an existing stage is not a fresh publish.
+          jq -e -r '.packages[] | [.publishAs, .version, .tarball] | @tsv' publish-stage/manifest.json | while IFS="$(printf '\t')" read -r package_name version tarball; do
+            stage_list="$(mktemp)"
+            trap 'rm -f "$stage_list"' EXIT
+            npm stage list "$package_name" --json > "$stage_list"
+            if node - "$stage_list" "$package_name" "$version" <<'NODE_EOF'
+              const fs = require("fs");
+              const [stageListPath, packageName, version] = process.argv.slice(2);
+              const stages = JSON.parse(fs.readFileSync(stageListPath, "utf8"));
+              const existing = stages.filter((stage) => stage.packageName === packageName && stage.version === version);
+              if (existing.length === 0) process.exit(1);
+              console.log(`Skipping ${packageName}@${version}: already staged (${existing.map((stage) => stage.id).join(", ")}); not a fresh stage.`);
+          NODE_EOF
+            then
+              rm -f "$stage_list"
+              trap - EXIT
+              continue
+            fi
+            rm -f "$stage_list"
+            trap - EXIT
+            echo "staging $package_name@$version from publish-stage/$tarball"
+            npm stage publish "publish-stage/$tarball" --access public
           done
 
       - name: Upload publish-stage/ artifact
@@ -118,7 +138,7 @@ jobs:
       - name: Job summary — staged packages and the human publish path
         if: always()
         env:
-          NPM_TOKEN: ${{ secrets.NPM_STAGE }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
           {
@@ -138,7 +158,7 @@ jobs:
               echo "No stage was produced in this run."
             fi
             echo
-            if [ -n "${NPM_TOKEN:-}" ]; then
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ -n "${NPM_TOKEN:-}" ]; then
               echo "Staged to npmjs (npm-native). Approve to promote to live (2FA) from your workstation:"
               echo
               echo '```sh'
