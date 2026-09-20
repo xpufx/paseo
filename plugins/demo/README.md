@@ -55,3 +55,24 @@ The modal navbar renders two ways, switchable in the Settings tab (`navigationSt
 - `helper-demo.agent-identity`: active agent identity/session for self-inspection.
 - `helper-demo.beacon-set` / `beacon-blink` / `beacon-clear`: workspace status beacon control.
 - `helper-demo.settings`: persisted settings (`showCpuUsage`, `accentPillLabel`, `pollingRate`, `navigationStyle`, `highCpuThreshold`, flair fields).
+
+## TEMP: upstream server settings handle (issue #62)
+
+A **temporary** sidebar page (`Server Settings (temp)`) demonstrates the
+upstream server-side settings handle added in Paseo `0.9.0-beta.1` (upstream
+PR #4674), *not* our helper's `PluginStorage`/`registerSettingsRpc` layer:
+
+- `index.server.ts` calls `server.registerSettings(defineSettings({ id: "server-demo", ... }))`
+  and keeps the returned `PluginSettings` handle.
+- The daemon reads through `handle.read()` and subscribes through
+  `handle.subscribe()` (see `server/server-settings.ts`).
+- The page (`client/server-settings.tsx`) renders the daemon's handle state
+  (`status` / `revision` / `values` / `subscribe()` event count) and writes the
+  same document through the host's auto-registered `settings.server-demo.*` RPC.
+- The document lives at `~/.paseo/plugin-settings/paseo-helper-demo/server-demo.json`.
+
+On hosts older than `0.9.0-beta.1`, `registerSettings()` returns `void`; the page
+then reports the handle as unavailable and points at the SDK version. This page
+is scaffolding for the #62 demo and is not wired into the pill/modal surfaces.
+
+Tests: `npm test --workspace plugins/demo` (or `npx vitest run` in `plugins/demo`).

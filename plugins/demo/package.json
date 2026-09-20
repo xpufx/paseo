@@ -5,7 +5,8 @@
   "version": "0.2.0",
   "scripts": {
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
   },
   "devDependencies": {
     "@getpaseo/plugin": "0.9.0-beta.2",
@@ -14,6 +15,7 @@
     "react": "19.1.0",
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
+    "vitest": "^3.0.0",
     "zod": "^4.4.3"
   },
   "files": [

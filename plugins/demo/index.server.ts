@@ -21,8 +21,16 @@ import {
   log,
 } from "./server/demo.js";
 import { suiteSettings, suiteSettingsHandlers } from "./server/suite-settings.js";
+import { demoSettingsSnapshotContract } from "./shared/server-settings.js";
+import {
+  handleGetServerSettingsSnapshot,
+  registerDemoServerSettings,
+} from "./server/server-settings.js";
 
 export default function contribute(server: PluginServerContext) {
+  // TEMP DEMO (issue #62): upstream registerSettings() -> read()/subscribe().
+  const serverSettings = registerDemoServerSettings(server);
+  server.handle(demoSettingsSnapshotContract, handleGetServerSettingsSnapshot);
   server.handle(demoSettingsContract.get, settingsHandlers.get);
   server.handle(demoSettingsContract.update, settingsHandlers.update);
   server.handle(demoSettingsContract.reset, settingsHandlers.reset);
@@ -41,6 +49,7 @@ export default function contribute(server: PluginServerContext) {
   return () => {
     backgroundWorker.stop();
     demoBeacon.stopAll();
+    serverSettings.dispose();
     log.info("Helper demo server background task stopped");
   };
 }
