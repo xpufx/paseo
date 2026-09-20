@@ -82,6 +82,15 @@ Registry-native alternative (npm >= 11.19): the agent/CI runs
 `npm stage publish <tarball>` (no 2FA) and the human runs
 `npm stage approve <stage-id>` (2FA).
 
+## Native npm acquisition support
+
+Published plugins are tested with Node.js **18 or later** by
+`npm run test:npm-acquisition`: each package is packed, installed into a new
+consumer with production dependencies only and lifecycle scripts disabled, and
+then only its `paseo-plugin.json` build commands run. `top` and
+`plugin-updates` support Paseo **>= 0.8.0**. `x-comms` uses the 0.9 multi-host
+client/protocol APIs and requires Paseo **>= 0.9.0-beta.2**.
+
 ## Storage Namespace
 
 Plugin persistent storage converges on `~/.paseo/plugin-data/xpufx/<pluginId>/`, managed canonically by `paseo-plugin-helper`.
