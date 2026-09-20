@@ -52,8 +52,8 @@ jobs:
           # into a user-writable prefix and prepend it to PATH for later steps.
           if ! npm stage --help >/dev/null 2>&1; then
             npm install --prefix "$HOME/npm" npm@latest >/dev/null 2>&1
-            echo "$HOME/npm/bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/npm/bin:$PATH"
+            echo "$HOME/npm/node_modules/.bin" >> "$GITHUB_PATH"
+            export PATH="$HOME/npm/node_modules/.bin:$PATH"
           fi
           npm --version
           npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
