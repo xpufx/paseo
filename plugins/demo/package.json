@@ -22,6 +22,8 @@
     "paseo-plugin.json",
     "README.md",
     "LICENSE",
+    "index.client.tsx",
+    "index.server.ts",
     "client",
     "server",
     "shared",

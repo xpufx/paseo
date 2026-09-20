@@ -3,12 +3,12 @@
  *
  * Run: node scripts/publish-npm.test.mjs
  *
- * Pure/logic coverage only: argument parsing, readiness classification, and
- * stage-manifest resolution (including the stale/missing refusals). The actual
- * `npm pack` and registry contact are exercised by the dry-run and --stage
- * commands in the PR verification, not here.
+ * Covers argument parsing, readiness classification, packed entry points, and
+ * stage-manifest resolution (including the stale/missing refusals). Registry
+ * publication remains outside this test suite.
  */
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -60,6 +60,7 @@ check("top publish name is scoped", top.publishAs === "@xpufx/paseo-top");
 check("top is not private", top.isPrivate === false);
 check("top has a version", typeof top.version === "string");
 check("top files ship sources", top.files.includes("client") && top.files.includes("server") && top.files.includes("shared"));
+check("top files ship source entry points", top.files.includes("index.client.tsx") && top.files.includes("index.server.ts"));
 check("top files exclude tests", top.files.includes("!**/*.test.ts"));
 check("private blocks readiness", readiness({ ...top, isPrivate: true }).some((p) => p.includes("private")));
 check("missing version blocks readiness", readiness({ ...top, version: undefined }).some((p) => p.includes("version")));
@@ -76,6 +77,25 @@ function withTempStage(run) {
 }
 
 const demo = manifestFor("demo");
+check("demo files ship source entry points", demo.files.includes("index.client.tsx") && demo.files.includes("index.server.ts"));
+for (const id of ids) {
+  const manifest = manifestFor(id);
+  const sourceEntries = fs
+    .readdirSync(manifest.dir)
+    .filter((file) => /^(index\.client|index\.server)\.tsx?$/.test(file));
+  check(
+    `${id} package files ship all source entry points`,
+    sourceEntries.length > 0 && sourceEntries.every((file) => manifest.pkg.files?.includes(file)),
+  );
+  const packed = JSON.parse(
+    execFileSync("npm", ["pack", path.resolve(manifest.dir), "--json", "--dry-run"], { encoding: "utf8" }),
+  )[0];
+  const packedPaths = new Set(packed.files.map((file) => file.path));
+  check(
+    `${id} npm pack ships all source entry points`,
+    sourceEntries.length > 0 && sourceEntries.every((file) => packedPaths.has(file)),
+  );
+}
 
 // --- stagePackages: a restage clears all prior package output ---
 withTempStage((dir) => {
