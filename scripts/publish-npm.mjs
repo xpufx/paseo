@@ -214,14 +214,17 @@ export function stagePackages(manifests, opts) {
   fs.mkdirSync(outDir, { recursive: true });
   const packages = [];
   for (const m of manifests) {
-    const dest = path.join(outDir, m.id);
-    fs.mkdirSync(dest, { recursive: true });
-    // Drop tarballs from a previous stage so the artifact cannot carry a stale
-    // version alongside the current one.
-    for (const entry of fs.readdirSync(dest)) {
-      if (entry.endsWith(".tgz")) fs.rmSync(path.join(dest, entry));
+    const dest = path.resolve(outDir, m.id);
+    const relativeDest = path.relative(outDir, dest);
+    if (!relativeDest || relativeDest === ".." || relativeDest.startsWith(`..${path.sep}`) || path.isAbsolute(relativeDest)) {
+      throw new Error(`refusing to clear staging destination outside ${outDir}: ${m.id}`);
     }
-    const info = pack(m, { destination: dest });
+    // npm pack writes only the tarball, so start each package directory fresh.
+    // This also removes extracted output (such as package/) from an earlier
+    // stage, making the handoff artifact unambiguous.
+    fs.rmSync(dest, { recursive: true, force: true });
+    fs.mkdirSync(dest, { recursive: true });
+    const info = (opts.pack ?? pack)(m, { destination: dest });
     const tarball = path.join(m.id, info.filename);
     packages.push({
       id: m.id,
