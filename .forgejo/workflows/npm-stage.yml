@@ -47,16 +47,6 @@ jobs:
           node --version
           npm --version
           git --version
-          # `npm stage publish` requires npm >= 11.19 (Node 22 ships npm 10.x).
-          # The runner is non-root, so a global install would EACCES; install
-          # into a user-writable prefix and prepend it to PATH for later steps.
-          if ! npm stage --help >/dev/null 2>&1; then
-            npm install --prefix "$HOME/npm" npm@latest >/dev/null 2>&1
-            echo "$HOME/npm/node_modules/.bin" >> "$GITHUB_PATH"
-            export PATH="$HOME/npm/node_modules/.bin:$PATH"
-          fi
-          npm --version
-          npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
 
       - name: Unit-test the stage/publish logic
         run: node scripts/publish-npm.test.mjs
@@ -97,6 +87,14 @@ jobs:
         run: |
           set -euo pipefail
           test -f publish-stage/manifest.json || { echo "::error::manifest missing"; exit 1; }
+          # `npm stage publish` needs npm >= 11.19; the container ships npm 10.
+          # Install a recent npm into a user-writable prefix (runner is
+          # non-root). Only this step uses it, so the earlier pack step keeps
+          # the container npm (10.x) and its `npm pack --json` output shape.
+          npm install --prefix "$HOME/npm" npm@latest >/dev/null 2>&1
+          export PATH="$HOME/npm/node_modules/.bin:$PATH"
+          npm --version
+          npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
           # Authenticate for `npm stage publish` (any token type works, no 2FA).
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
           node -e '
