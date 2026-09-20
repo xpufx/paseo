@@ -21,6 +21,7 @@ import {
   usePluginTheme,
 } from "paseo-plugin-helper/client";
 import { formatPeerDisplay } from "./peer-label";
+import { PeerStatusSurface } from "./peer-status";
 import { SettingsPrototype } from "./settings-prototype";
 import { ViaXComms } from "./via-x-comms";
 import {
@@ -96,9 +97,11 @@ function HealthBadge({
 // #97: the operator asked for an entirely new prototype surface alongside the
 // current one. MainSurface keeps the existing page as the default "Current" tab
 // and renders the helper-primitives prototype behind the marked "Prototype" tab.
+// #7 adds a third "Peers" tab: the known daemon registry with a live per-peer
+// daemon.get_status probe. It is additive — the other two tabs are untouched.
 export function MainSurface(props: PluginSurfaceProps) {
   const { colors } = usePluginTheme();
-  const [surface, setSurface] = useState<"current" | "prototype">("current");
+  const [surface, setSurface] = useState<"current" | "prototype" | "peers">("current");
   return (
     <View style={{ flex: 1, minHeight: 0, width: "100%", backgroundColor: colors.surface0 }}>
       <View style={{ paddingHorizontal: 12, paddingTop: 12 }}>
@@ -106,12 +109,19 @@ export function MainSurface(props: PluginSurfaceProps) {
           tabs={[
             { id: "current", label: "Current" },
             { id: "prototype", label: "Prototype", badge: "new" },
+            { id: "peers", label: "Peers" },
           ]}
           activeTab={surface}
-          onTabChange={(id) => setSurface(id === "prototype" ? "prototype" : "current")}
+          onTabChange={(id) => setSurface(id === "prototype" ? "prototype" : id === "peers" ? "peers" : "current")}
         />
       </View>
-      {surface === "current" ? <CurrentSurface {...props} /> : <SettingsPrototype {...props} />}
+      {surface === "current" ? (
+        <CurrentSurface {...props} />
+      ) : surface === "prototype" ? (
+        <SettingsPrototype {...props} />
+      ) : (
+        <PeerStatusSurface {...props} />
+      )}
     </View>
   );
 }

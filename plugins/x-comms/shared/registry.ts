@@ -78,6 +78,45 @@ export const daemonHealthRpc = defineRpc({
   }),
 });
 
+/**
+ * Live per-peer probe for the known-daemon surface (#7). One entry per
+ * registry daemon; each carries its own reachability so an unreachable host
+ * never fails the whole list. Identity/relay fields come from the peer's own
+ * `daemon.get_status`; the hub relationship is best-effort and stays null when
+ * the peer does not support it.
+ */
+export const peerStatusRpc = defineRpc({
+  name: "peer.status",
+  input: z.object({}),
+  output: z.object({
+    results: z.array(
+      z.object({
+        name: z.string(),
+        value: z.string(),
+        valid: z.boolean(),
+        reachable: z.boolean(),
+        error: z.string().nullable(),
+        transport: z.enum(["relay", "direct", "unknown"]),
+        // Identity from the peer's own daemon.get_status (handshake serverId
+        // is the fallback when the status payload omits it).
+        serverId: z.string().nullable(),
+        hostname: z.string().nullable(),
+        version: z.string().nullable(),
+        pid: z.number().nullable(),
+        listen: z.string().nullable(),
+        relayEnabled: z.boolean().nullable(),
+        relayEndpoint: z.string().nullable(),
+        providerCount: z.number().nullable(),
+        providersAvailable: z.number().nullable(),
+        hubState: z.string().nullable(),
+        hubDaemonId: z.string().nullable(),
+        hubOrigin: z.string().nullable(),
+        hubLastError: z.string().nullable(),
+      }),
+    ),
+  }),
+});
+
 export const serverStatusRpc = defineRpc({
   name: "server.status",
   input: z.object({}),

@@ -22,6 +22,7 @@ The plugin embeds the MCP server and adds the X-comms UI. Agents get `x_comms_*`
 ### What you get
 
 * **Main surface — X-comms** (`client/main.tsx`, surfaced via `index.client.tsx` sidebar item): registered daemons list with health (reachable/unreachable + agent count), add/edit/remove with host-form validation and reachability probe, refresh (identity + snapshot), server version check, introduce-agents picker, debug dump per daemon.
+* **Peers surface** (`client/peer-status.tsx`, the "Peers" tab): the known daemon registry rendered with a live per-peer `daemon.get_status` probe — up/down plus identity (`serverId`, `version`, `listen`, relay, provider count, hub relationship). Each host is probed independently (relay or direct), so an unreachable peer shows as down without failing the surface. Polls every 30 s via `peer.status`.
 * **Composer pill** (`client/x-comms-pill.tsx`): one `X-comms` pill per agent in the composer; opens the conversation panel for that agent.
 * **Agent panel** (`client/x-comms-panel.tsx` / `x-comms-timeline.tsx` / `x-comms-conversation.tsx`, plus `x-comms-tool-call.tsx` and `via-x-comms.tsx`): per-agent conversation view with timeline rendering of the `[x-comms]` envelope, send/reply, wait, and permission handling. Timeline transformers/renderers registered in `index.client.tsx` render envelopes and tool calls inline in agent timelines.
 * **Server side** (`index.server.ts` + `server/`): registry, health, settings, presence announce/retract/list, and MCP injection handlers.

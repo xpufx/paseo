@@ -25,6 +25,7 @@ import {
   stopOutboxWorker,
 } from "./server/handlers";
 import { maybeRegisterInjection, toInjectionServer } from "./server/injection";
+import { handlePeerStatus } from "./server/peer-status";
 import {
   registryReadRpc,
   daemonAddRpc,
@@ -44,6 +45,7 @@ import {
   presenceAnnounceRpc,
   presenceRetractRpc,
   presenceListRpc,
+  peerStatusRpc,
 } from "./shared/registry";
 
 export default function contribute(server: PluginServerContext) {
@@ -65,6 +67,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(presenceAnnounceRpc, handlePresenceAnnounce);
   server.handle(presenceRetractRpc, handlePresenceRetract);
   server.handle(presenceListRpc, handlePresenceList);
+  server.handle(peerStatusRpc, handlePeerStatus);
   server.on("agent.created", ({ agent }, context) => {
     rememberPaseo(context.paseo);
     void onLocalAgentCreated(agent).catch(() => {});
