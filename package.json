@@ -18,6 +18,7 @@
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "test:npm-acquisition": "node scripts/npm-acquisition-smoke.mjs",
     "doctor:live": "node scripts/doctor-live.mjs"
   },
   "repository": {

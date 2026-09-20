@@ -2,6 +2,6 @@
   "id": "x-comms",
   "requirements": { "paseo": ">=0.9.0-beta.2" },
   "build": [
-    ["npm", "install", "--omit=dev", "--no-audit", "--no-fund", "--no-workspaces"]
+    ["npm", "install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--no-workspaces"]
   ]
 }
