@@ -33,7 +33,8 @@ export const TEST_EXCLUDES = ["!**/*.test.ts", "!**/*.test.tsx", "!**/*.test.mjs
  * bare names like `top` are taken on the public registry.
  */
 export function publishName(pluginId, scope = "@xpufx") {
-  return `${scope}/paseo-${pluginId}`;
+  const base = pluginId.replace(/^paseo-/, "");
+  return `${scope}/paseo-${base}`;
 }
 
 /**
