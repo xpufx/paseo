@@ -2,7 +2,7 @@
   "name": "@xpufx/paseo-top",
   "private": false,
   "license": "MIT",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "scripts": {
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit",

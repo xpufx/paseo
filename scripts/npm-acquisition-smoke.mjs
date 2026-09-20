@@ -11,9 +11,17 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { rewrittenPackingManifest } from "./publish-npm.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const PACKAGES = [
+  { id: "demo", manifestId: "paseo-helper-demo", name: "@xpufx/paseo-helper-demo", paseo: ">=0.8.0", runtime: [] },
+  { id: "forges", name: "@xpufx/paseo-forges", paseo: ">=0.8.0", runtime: [] },
+  { id: "mcp-tools", name: "@xpufx/paseo-mcp-tools", paseo: ">=0.8.0", runtime: [] },
+  { id: "plugin-updates", name: "@xpufx/paseo-plugin-updates", paseo: ">=0.8.0", runtime: [] },
+  { id: "slash", name: "@xpufx/paseo-slash", paseo: ">=0.8.0", runtime: [] },
+  { id: "top", name: "@xpufx/paseo-top", paseo: ">=0.8.0", runtime: [] },
+  { id: "twofado", name: "@xpufx/paseo-twofado", paseo: ">=0.8.0", runtime: [] },
   {
     id: "x-comms",
     name: "@xpufx/paseo-x-comms",
@@ -26,8 +34,6 @@ const PACKAGES = [
       "zod",
     ],
   },
-  { id: "top", name: "@xpufx/paseo-top", paseo: ">=0.8.0", runtime: [] },
-  { id: "plugin-updates", name: "@xpufx/paseo-plugin-updates", paseo: ">=0.8.0", runtime: [] },
 ];
 
 function fail(message) {
@@ -44,9 +50,14 @@ function run(command, args, cwd, env) {
 }
 
 function pack(plugin, dir) {
-  const output = run("npm", ["pack", path.join(ROOT, "plugins", plugin.id), "--json", "--pack-destination", dir], ROOT);
-  const info = JSON.parse(output)[0];
-  return { ...info, tarball: path.join(dir, info.filename) };
+  const { manifest, root } = rewrittenPackingManifest({ id: plugin.id, dir: path.join(ROOT, "plugins", plugin.id) });
+  try {
+    const output = run("npm", ["pack", manifest.dir, "--json", "--pack-destination", dir], ROOT);
+    const info = JSON.parse(output)[0];
+    return { ...info, tarball: path.join(dir, info.filename) };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 }
 
 function assertPackedContents(info, plugin) {
@@ -97,7 +108,6 @@ function assertRuntimeDependencies(pluginDir, plugin) {
 }
 
 function assertVendoredHelperImports(pluginDir, plugin) {
-  if (plugin.id !== "x-comms") return;
   const stack = ["client", "server", "shared"].map((dir) => path.join(pluginDir, dir));
   while (stack.length > 0) {
     const current = stack.pop();
@@ -105,8 +115,9 @@ function assertVendoredHelperImports(pluginDir, plugin) {
       const entryPath = path.join(current, entry.name);
       if (entry.isDirectory()) stack.push(entryPath);
       else if (/\.[cm]?[jt]sx?$/.test(entry.name)) {
+        if (entryPath.includes(`${path.sep}vendor${path.sep}paseo-plugin-helper${path.sep}`)) continue;
         const source = fs.readFileSync(entryPath, "utf8");
-        assert(!source.includes('from "paseo-plugin-helper'), `x-comms: ${path.relative(pluginDir, entryPath)} bypasses its vendored helper`);
+        assert(!/(["'])paseo-plugin-helper(?:\/|\1)/.test(source), `${plugin.id}: ${path.relative(pluginDir, entryPath)} bypasses its vendored helper`);
       }
     }
   }
@@ -150,7 +161,7 @@ function smoke(plugin, tmp) {
   run("npm", ["install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", info.tarball], consumer);
   const pluginDir = path.join(consumer, "node_modules", ...plugin.name.split("/"));
   const { manifestPath, manifest } = readManifest(pluginDir);
-  assert.equal(manifest.id, plugin.id, `${plugin.id}: installed manifest ID is wrong`);
+  assert.equal(manifest.id, plugin.manifestId ?? plugin.id, `${plugin.id}: installed manifest ID is wrong`);
   assert.equal(manifest.requirements?.paseo, plugin.paseo, `${plugin.id}: Paseo floor is wrong`);
   assertRuntimeDependencies(pluginDir, plugin);
   assertVendoredHelperImports(pluginDir, plugin);

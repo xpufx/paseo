@@ -50,10 +50,12 @@
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { filesAllowlist, publishName, REQUIRED_FILES } from "./lib/npm-manifest.mjs";
+import { hasBareHelperSpecifier, rewriteBareSpecifiers } from "./lib/plugin-helper-layout.mjs";
 
 const PLUGIN_DIR = "plugins";
 const DEFAULT_STAGE_DIR = "publish-stage";
@@ -196,6 +198,42 @@ function pack(m, { dryRun = false, destination } = {}) {
   return JSON.parse(out)[0];
 }
 
+const SOURCE_FILE_RE = /\.[cm]?[jt]sx?$/;
+
+/**
+ * Copy a plugin to an isolated packing tree and rewrite its live workspace
+ * helper imports to the committed vendored copies. The source tree is never
+ * modified: only the exact files handed to `npm pack` are rewritten.
+ */
+export function rewrittenPackingManifest(m) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-publish-pack-"));
+  const pluginRoot = path.join(root, m.id);
+  fs.cpSync(m.dir, pluginRoot, {
+    recursive: true,
+    filter: (source) => !["node_modules", ".git"].includes(path.basename(source)),
+  });
+
+  const stack = [pluginRoot];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (SOURCE_FILE_RE.test(entry.name)) {
+        if (entryPath.includes(`${path.sep}vendor${path.sep}paseo-plugin-helper${path.sep}`)) continue;
+        const source = fs.readFileSync(entryPath, "utf8");
+        const rewritten = rewriteBareSpecifiers(source, entryPath, pluginRoot);
+        if (hasBareHelperSpecifier(rewritten)) {
+          throw new Error(`a bare paseo-plugin-helper specifier survived the publish rewrite in ${entryPath}`);
+        }
+        if (rewritten !== source) fs.writeFileSync(entryPath, rewritten);
+      }
+    }
+  }
+  return { manifest: { ...m, dir: pluginRoot }, root };
+}
+
 function gitValue(args) {
   try {
     return execFileSync("git", args, { encoding: "utf8" }).trim();
@@ -224,7 +262,13 @@ export function stagePackages(manifests, opts) {
     // stage, making the handoff artifact unambiguous.
     fs.rmSync(dest, { recursive: true, force: true });
     fs.mkdirSync(dest, { recursive: true });
-    const info = (opts.pack ?? pack)(m, { destination: dest });
+    const { manifest: packingManifest, root } = rewrittenPackingManifest(m);
+    let info;
+    try {
+      info = (opts.pack ?? pack)(packingManifest, { destination: dest });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
     const tarball = path.join(m.id, info.filename);
     packages.push({
       id: m.id,
