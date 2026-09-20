@@ -59,7 +59,7 @@ jobs:
           set -euo pipefail
           test -f publish-stage/manifest.json || { echo "::error::publish-stage/manifest.json missing"; exit 1; }
           test -f publish-stage/PUBLISH.md || { echo "::error::publish-stage/PUBLISH.md missing"; exit 1; }
-          node -e '
+          node <<'NODE_EOF'
             const fs = require("fs");
             const manifest = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
             const packages = Array.isArray(manifest.packages) ? manifest.packages : [];
@@ -72,7 +72,7 @@ jobs:
             }
             if (bad) process.exit(1);
             console.log(`staged ${packages.length} package(s) from ${manifest.gitBranch ?? "?"}@${String(manifest.gitCommit ?? "?").slice(0, 12)}`);
-          '
+          NODE_EOF
 
       - name: Stage to npmjs Staged Packages (npm-native, no 2FA)
         # npm >= 11.19 staged publishing: `npm stage publish` puts each tarball
@@ -97,11 +97,7 @@ jobs:
           npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
           # Authenticate for `npm stage publish` (any token type works, no 2FA).
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
-          node -e '
-            const fs = require("fs");
-            const m = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
-            for (const p of m.packages) console.log(`publish-stage/${p.tarball}`);
-          ' | while read -r tarball; do
+          jq -e -r '.packages[].tarball | "publish-stage/\(.)"' publish-stage/manifest.json | while read -r tarball; do
             echo "staging $tarball"
             npm stage publish "$tarball" --access public
           done
@@ -129,15 +125,15 @@ jobs:
             echo "## npm stage — staged plugin tarballs"
             echo
             if [ -f publish-stage/manifest.json ]; then
-              node -e '
-                const fs = require("fs");
-                const m = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
-                console.log(`Staged \`${m.gitBranch ?? "?"}@${String(m.gitCommit ?? "?").slice(0, 12)}\` at ${m.stagedAt}.`);
-                console.log();
-                console.log("| package | version | tarball | shasum |");
-                console.log("| --- | --- | --- | --- |");
-                for (const p of m.packages) console.log(`| \`${p.publishAs}\` | \`${p.version}\` | \`${p.tarball}\` | \`${p.shasum}\` |`);
-              '
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
+            console.log("Staged " + (m.gitBranch || "?") + "@" + String(m.gitCommit || "?").slice(0, 12) + " at " + m.stagedAt + ".");
+            console.log();
+            console.log("| package | version | tarball | shasum |");
+            console.log("| --- | --- | --- | --- |");
+            for (const p of m.packages) console.log("| " + String.fromCharCode(96) + p.publishAs + String.fromCharCode(96) + " | " + String.fromCharCode(96) + p.version + String.fromCharCode(96) + " | " + String.fromCharCode(96) + p.tarball + String.fromCharCode(96) + " | " + String.fromCharCode(96) + p.shasum + String.fromCharCode(96) + " |");
+          '
             else
               echo "No stage was produced in this run."
             fi
