@@ -1,23 +1,23 @@
-# CI half of the npm stage → upload → human-publish handoff
-# (xpufx-org/paseo#211).
+# CI half of the npm stage → human-approve handoff (xpufx-org/paseo#211).
 #
-# Operator clarification: the npm **stage** step belongs in CI because it needs
-# no 2FA and touches no registry. Only the human **publish** step needs 2FA, and
-# it stays manual (`make npm-publish`). This workflow therefore never sets an npm
-# token, never authenticates, and never runs a publish command.
+# Two stage paths, one job:
+#   1. Local pack: `node scripts/publish-npm.mjs --stage` packs every plugin
+#      directory into `publish-stage/<id>/<tarball>` + `manifest.json` +
+#      `PUBLISH.md`, and refuses a dirty tree. This is inert — no registry.
+#   2. npm-native staged publishing (when the NPM_STAGE secret is set): `npm
+#      stage publish <tarball>` (npm >= 11.19) puts each version into the
+#      registry's staging area (not publicly visible) WITHOUT a 2FA prompt.
+#      A human later runs `npm stage approve <id>` (2FA) to promote to live.
 #
-# `node scripts/publish-npm.mjs --stage` packs every plugin directory into
-# `publish-stage/<id>/<tarball>`, writes `manifest.json` (publish name, version,
-# tarball path, shasum, integrity, git commit) and a human-facing `PUBLISH.md`,
-# and refuses a dirty tree. The output is inert: nothing has contacted the
-# registry. This job uploads the whole directory as an artifact, so a human
-# downloads it and runs the 2FA publish locally.
+# The 2FA publish/approve step stays manual and on the human. The job never
+# runs `npm publish`; it only stages. Skipped for the stage-publish step when
+# the secret is absent, so a PR run still exercises the local stage/artifact
+# path without a token.
 #
 # Triggers: push to main stages the tree that would be published; pull_request
-# exercises the same flow on the change that touches it (the artifact is an
-# inert tarball set, so a pre-merge run is safe); workflow_dispatch allows a
-# manual re-stage. Runner conventions (runs-on label, registry image) are copied
-# from install-smoke.yml.
+# exercises the same flow on the change that touches it; workflow_dispatch
+# allows a manual re-stage. Runner conventions (runs-on label, registry image)
+# are copied from install-smoke.yml.
 name: npm stage (publishable tarballs)
 
 on:
@@ -47,6 +47,12 @@ jobs:
           node --version
           npm --version
           git --version
+          # `npm stage publish` requires npm >= 11.19 (Node 22 ships npm 10.x).
+          if ! npm stage --help >/dev/null 2>&1; then
+            npm install -g npm@latest >/dev/null 2>&1
+          fi
+          npm --version
+          npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
 
       - name: Unit-test the stage/publish logic
         run: node scripts/publish-npm.test.mjs
@@ -74,6 +80,30 @@ jobs:
             console.log(`staged ${packages.length} package(s) from ${manifest.gitBranch ?? "?"}@${String(manifest.gitCommit ?? "?").slice(0, 12)}`);
           '
 
+      - name: Stage to npmjs Staged Packages (npm-native, no 2FA)
+        # npm >= 11.19 staged publishing: `npm stage publish` puts each tarball
+        # into the registry's staging area (not publicly visible) without a 2FA
+        # prompt. A human later runs `npm stage approve <id>` (2FA) to promote.
+        # Requires the NPM_STAGE token secret (repo secrets). Skipped when the
+        # secret is absent so a PR run still exercises the local stage/artifact
+        # path without a token.
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_STAGE }}
+        if: env.NPM_TOKEN != ''
+        run: |
+          set -euo pipefail
+          test -f publish-stage/manifest.json || { echo "::error::manifest missing"; exit 1; }
+          # Authenticate for `npm stage publish` (any token type works, no 2FA).
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
+            for (const p of m.packages) console.log(`publish-stage/${p.tarball}`);
+          ' | while read -r tarball; do
+            echo "staging $tarball"
+            npm stage publish "$tarball" --access public
+          done
+
       - name: Upload publish-stage/ artifact
         # The Forgejo-maintained fork has the GHES check removed; the upstream
         # actions/upload-artifact@v4 refuses non-GitHub servers. Pinned to the
@@ -89,10 +119,12 @@ jobs:
 
       - name: Job summary — staged packages and the human publish path
         if: always()
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_STAGE }}
         run: |
           set -euo pipefail
           {
-            echo "## npm stage — publishable tarballs only (no registry, no 2FA)"
+            echo "## npm stage — staged plugin tarballs"
             echo
             if [ -f publish-stage/manifest.json ]; then
               node -e '
@@ -108,11 +140,21 @@ jobs:
               echo "No stage was produced in this run."
             fi
             echo
-            echo "Download the \`publish-stage\` artifact, then publish from your workstation (prompts for npm 2FA/OTP):"
+            if [ -n "${NPM_TOKEN:-}" ]; then
+              echo "Staged to npmjs (npm-native). Approve to promote to live (2FA) from your workstation:"
+              echo
+              echo '```sh'
+              echo "npm stage list"
+              echo "npm stage view <stage-id>"
+              echo "npm stage approve <stage-id>"
+              echo '```'
+            else
+              echo "Download the \`publish-stage\` artifact, then publish from your workstation (prompts for npm 2FA/OTP):"
+              echo
+              echo '```sh'
+              echo "node scripts/publish-npm.mjs --publish"
+              echo '```'
+            fi
             echo
-            echo '```sh'
-            echo "node scripts/publish-npm.mjs --publish"
-            echo '```'
-            echo
-            echo "This job never authenticates and never publishes — 2FA stays manual."
+            echo "The 2FA publish/approve step stays manual on the human."
           } >> "$GITHUB_STEP_SUMMARY"
