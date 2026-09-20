@@ -2,7 +2,7 @@
   "name": "@xpufx/paseo-twofado",
   "private": false,
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit"

@@ -2,7 +2,7 @@
   "name": "@xpufx/paseo-slash",
   "private": false,
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests"

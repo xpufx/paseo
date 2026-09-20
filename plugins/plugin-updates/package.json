@@ -2,7 +2,7 @@
   "name": "@xpufx/paseo-plugin-updates",
   "private": false,
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read-only monitor for installed Paseo plugin source status, links, and per-subdirectory Git diagnostics.",
   "scripts": {
     "typecheck": "tsc --noEmit",
