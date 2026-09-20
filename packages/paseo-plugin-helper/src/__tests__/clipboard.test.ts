@@ -1,5 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { copyToClipboard } from "../client/utils/clipboard.js";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  clipboardTierOrder,
+  copyToClipboard,
+  type ClipboardEnvironment,
+} from "../client/utils/clipboard.js";
 import { initClientHelpers } from "../client/host.js";
 
 const fourFieldHost = {
@@ -9,10 +13,68 @@ const fourFieldHost = {
   useToast: (() => ({})) as any,
 };
 
+const baseEnv: ClipboardEnvironment = {
+  hasNavigatorClipboard: false,
+  hasHostCopyText: false,
+  hasRnClipboard: false,
+  hasRnSetStringAsync: false,
+  isDom: true,
+};
+
+function defineNavigatorClipboard(writeText: (text: string) => Promise<void>) {
+  Object.defineProperty(globalThis, "navigator", {
+    value: { clipboard: { writeText } },
+    configurable: true,
+    writable: true,
+  });
+}
+
+describe("clipboardTierOrder", () => {
+  it("prefers the rejecting navigator API over the host callback", () => {
+    expect(
+      clipboardTierOrder({ ...baseEnv, hasNavigatorClipboard: true, hasHostCopyText: true }),
+    ).toEqual(["navigator", "host", "execCommand"]);
+  });
+
+  it("uses the host callback when navigator clipboard is unavailable", () => {
+    expect(clipboardTierOrder({ ...baseEnv, hasHostCopyText: true })).toEqual([
+      "host",
+      "execCommand",
+    ]);
+  });
+
+  it("skips the silent RN-web setString on DOM, but keeps the checked execCommand fallback", () => {
+    const order = clipboardTierOrder({ ...baseEnv, hasRnClipboard: true, isDom: true });
+    expect(order).not.toContain("rnSync");
+    expect(order).toEqual(["execCommand"]);
+  });
+
+  it("uses the native RN setString off-DOM", () => {
+    expect(
+      clipboardTierOrder({ ...baseEnv, hasRnClipboard: true, hasRnSetStringAsync: false, isDom: false }),
+    ).toEqual(["rnSync", "execCommand"]);
+  });
+
+  it("prefers the checked RN async API over the sync one", () => {
+    expect(
+      clipboardTierOrder({ ...baseEnv, hasRnClipboard: true, hasRnSetStringAsync: true, isDom: false }),
+    ).toEqual(["rnAsync", "execCommand"]);
+  });
+
+  it("always ends with the execCommand fallback", () => {
+    expect(clipboardTierOrder(baseEnv)).toEqual(["execCommand"]);
+  });
+});
+
 describe("copyToClipboard", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     initClientHelpers({ ...fourFieldHost });
+  });
+
+  afterEach(() => {
+    delete (globalThis as any).navigator;
+    delete (globalThis as any).document;
   });
 
   it("returns false for null or undefined input", async () => {
@@ -20,15 +82,9 @@ describe("copyToClipboard", () => {
     expect(await copyToClipboard(undefined as any)).toBe(false);
   });
 
-  it("copies via navigator.clipboard when available", async () => {
+  it("copies the passed string via navigator.clipboard", async () => {
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(globalThis, "navigator", {
-      value: {
-        clipboard: { writeText: writeTextMock },
-      },
-      configurable: true,
-      writable: true,
-    });
+    defineNavigatorClipboard(writeTextMock);
 
     const toastShow = vi.fn();
     const result = await copyToClipboard("hello-world", {
@@ -43,13 +99,7 @@ describe("copyToClipboard", () => {
 
   it("supports Paseo toast.copied callback", async () => {
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(globalThis, "navigator", {
-      value: {
-        clipboard: { writeText: writeTextMock },
-      },
-      configurable: true,
-      writable: true,
-    });
+    defineNavigatorClipboard(writeTextMock);
 
     const toastCopied = vi.fn();
     const result = await copyToClipboard("123", {
@@ -61,48 +111,38 @@ describe("copyToClipboard", () => {
     expect(toastCopied).toHaveBeenCalledWith("Host");
   });
 
-  it("prefers host copyText over navigator.clipboard when supplied", async () => {
+  it("prefers navigator.clipboard over host copyText when both are supplied", async () => {
     const hostCopy = vi.fn().mockResolvedValue(undefined);
     initClientHelpers({ ...fourFieldHost, copyText: hostCopy });
     const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(globalThis, "navigator", {
-      value: {
-        clipboard: { writeText: writeTextMock },
-      },
-      configurable: true,
-      writable: true,
-    });
+    defineNavigatorClipboard(writeTextMock);
 
-    const result = await copyToClipboard("host-first");
+    const result = await copyToClipboard("nav-first");
     expect(result).toBe(true);
-    expect(hostCopy).toHaveBeenCalledWith("host-first");
-    expect(writeTextMock).not.toHaveBeenCalled();
+    expect(writeTextMock).toHaveBeenCalledWith("nav-first");
+    expect(hostCopy).not.toHaveBeenCalled();
   });
 
-  it("falls through to navigator.clipboard when host copyText rejects", async () => {
-    const hostCopy = vi.fn().mockRejectedValue(new Error("denied"));
+  it("falls through to host copyText when navigator.clipboard rejects", async () => {
+    const hostCopy = vi.fn().mockResolvedValue(undefined);
     initClientHelpers({ ...fourFieldHost, copyText: hostCopy });
-    const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(globalThis, "navigator", {
-      value: {
-        clipboard: { writeText: writeTextMock },
-      },
-      configurable: true,
-      writable: true,
-    });
+    const writeTextMock = vi.fn().mockRejectedValue(new Error("denied"));
+    defineNavigatorClipboard(writeTextMock);
 
     const result = await copyToClipboard("fallback-next");
     expect(result).toBe(true);
-    expect(hostCopy).toHaveBeenCalledWith("fallback-next");
     expect(writeTextMock).toHaveBeenCalledWith("fallback-next");
+    expect(hostCopy).toHaveBeenCalledWith("fallback-next");
   });
 
-  it("keeps working with the original four-field init and no host copyText", async () => {
+  it("copies the passed string through execCommand when the async APIs are unavailable", async () => {
     initClientHelpers({ ...fourFieldHost });
-    const writeTextMock = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(globalThis, "navigator", {
+    const execCommand = vi.fn(() => true);
+    Object.defineProperty(globalThis, "document", {
       value: {
-        clipboard: { writeText: writeTextMock },
+        createElement: () => ({ style: {}, focus: () => {}, select: () => {} }),
+        body: { appendChild: () => {}, removeChild: () => {} },
+        execCommand,
       },
       configurable: true,
       writable: true,
@@ -110,6 +150,25 @@ describe("copyToClipboard", () => {
 
     const result = await copyToClipboard("plain-init");
     expect(result).toBe(true);
-    expect(writeTextMock).toHaveBeenCalledWith("plain-init");
+    expect(execCommand).toHaveBeenCalledWith("copy");
+  });
+
+  it("reports failure (never a silent success) when every tier fails", async () => {
+    initClientHelpers({ ...fourFieldHost });
+    const hostCopy = vi.fn().mockRejectedValue(new Error("denied"));
+    initClientHelpers({ ...fourFieldHost, copyText: hostCopy });
+    const writeTextMock = vi.fn().mockRejectedValue(new Error("denied"));
+    defineNavigatorClipboard(writeTextMock);
+    Object.defineProperty(globalThis, "document", {
+      value: {
+        createElement: () => ({ style: {}, focus: () => {}, select: () => {} }),
+        body: { appendChild: () => {}, removeChild: () => {} },
+        execCommand: () => false,
+      },
+      configurable: true,
+      writable: true,
+    });
+
+    expect(await copyToClipboard("stale-would-remain")).toBe(false);
   });
 });

@@ -6,15 +6,47 @@ export interface CopyToClipboardOptions {
   toastMessage?: string;
 }
 
+export type ClipboardTier = "navigator" | "host" | "rnAsync" | "rnSync" | "execCommand";
+
+export interface ClipboardEnvironment {
+  hasNavigatorClipboard: boolean;
+  hasHostCopyText: boolean;
+  hasRnClipboard: boolean;
+  hasRnSetStringAsync: boolean;
+  isDom: boolean;
+}
+
+/**
+ * Deterministic tier order for an explicit copy.
+ *
+ * Web's `navigator.clipboard.writeText` is the only API that rejects when the
+ * clipboard did not change, so it leads. The synchronous
+ * `react-native-web` `Clipboard.setString` reports success even when its
+ * `document.execCommand("copy")` fails, which leaves the previous clipboard
+ * item in place while the UI claims success (xpufx-org/paseo#278); it is only
+ * usable off-DOM (native), where it is the real platform clipboard. In a DOM
+ * the checked `execCommand` fallback is preferred to that unverifiable path.
+ */
+export function clipboardTierOrder(env: ClipboardEnvironment): ClipboardTier[] {
+  const tiers: ClipboardTier[] = [];
+  if (env.hasNavigatorClipboard) tiers.push("navigator");
+  if (env.hasHostCopyText) tiers.push("host");
+  if (env.hasRnSetStringAsync) {
+    tiers.push("rnAsync");
+  } else if (env.hasRnClipboard && !env.isDom) {
+    tiers.push("rnSync");
+  }
+  tiers.push("execCommand");
+  return tiers;
+}
+
 /**
  * Robust cross-platform clipboard copy helper for Paseo plugins.
  * Works seamlessly across React Native (mobile), web, and desktop.
  *
- * Precedence:
- * 1. Host copyText from initClientHelpers (Paseo v0.8, optional)
- * 2. React Native's Clipboard (react-native / react-native-web)
- * 3. Web navigator.clipboard.writeText (modern secure web contexts)
- * 4. Fallback: document.execCommand("copy") (older web / non-secure contexts)
+ * Tier order comes from `clipboardTierOrder`; every tier reports failure
+ * honestly so a denied or blocked write never leaves the previous clipboard
+ * item behind under a fake success.
  */
 export async function copyToClipboard(
   text: string,
@@ -22,68 +54,78 @@ export async function copyToClipboard(
 ): Promise<boolean> {
   if (text === null || text === undefined) return false;
   const str = String(text);
-  let success = false;
 
-  // 1. Try host copyText when the plugin supplied it via initClientHelpers.
-  // Rejection falls through to the remaining tiers.
+  const globalObj = typeof globalThis !== "undefined" ? (globalThis as any) : {};
+
+  let rn: any;
   try {
-    const copyText = getOptionalClientHost()?.copyText;
-    if (copyText) {
-      await copyText(str);
-      success = true;
-    }
+    rn = require("react-native");
   } catch {
-    // Ignore host copy failure and fall through
+    // Ignore require error if not in RN context
   }
+  const rnClipboard = rn?.Clipboard;
+  const rnSetStringAsync =
+    typeof rnClipboard?.setStringAsync === "function" ? rnClipboard.setStringAsync : undefined;
+  const rnSetString =
+    typeof rnClipboard?.setString === "function" ? rnClipboard.setString : undefined;
+  const copyText = getOptionalClientHost()?.copyText;
 
-  // 2. Try React Native Clipboard (works in React Native / react-native-web)
-  if (!success) {
-    try {
-      const rn = require("react-native");
-      if (rn?.Clipboard?.setString) {
-        rn.Clipboard.setString(str);
-        success = true;
-      }
-    } catch {
-      // Ignore require error if not in RN context
-    }
-  }
+  const isDom =
+    typeof globalObj.document !== "undefined" &&
+    typeof globalObj.document?.createElement === "function";
 
-  // 3. Try modern Web navigator.clipboard
-  if (!success) {
-    try {
-      const globalObj = typeof globalThis !== "undefined" ? (globalThis as any) : {};
-      if (globalObj.navigator?.clipboard?.writeText) {
-        await globalObj.navigator.clipboard.writeText(str);
-        success = true;
-      }
-    } catch {
-      // Ignore web clipboard error
-    }
-  }
+  const tiers = clipboardTierOrder({
+    hasNavigatorClipboard: Boolean(globalObj.navigator?.clipboard?.writeText),
+    hasHostCopyText: Boolean(copyText),
+    hasRnClipboard: Boolean(rnSetStringAsync ?? rnSetString),
+    hasRnSetStringAsync: Boolean(rnSetStringAsync),
+    isDom,
+  });
 
-  // 4. Try document.execCommand fallback
-  if (!success) {
+  let success = false;
+  for (const tier of tiers) {
+    if (success) break;
     try {
-      const globalObj = typeof globalThis !== "undefined" ? (globalThis as any) : {};
-      const doc = globalObj.document;
-      if (doc?.createElement && doc?.body) {
-        const textarea = doc.createElement("textarea");
-        textarea.value = str;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        textarea.style.left = "-9999px";
-        doc.body.appendChild(textarea);
-        textarea.focus();
-        textarea.select();
-        const res = doc.execCommand("copy");
-        doc.body.removeChild(textarea);
-        if (res) {
+      switch (tier) {
+        case "navigator":
+          await globalObj.navigator.clipboard.writeText(str);
           success = true;
+          break;
+        case "host":
+          if (copyText) {
+            await copyText(str);
+            success = true;
+          }
+          break;
+        case "rnAsync":
+          // Expo's async API returns a boolean; a rejected promise falls through.
+          success = (await rnSetStringAsync(str)) !== false;
+          break;
+        case "rnSync":
+          // Only reached off-DOM, where this is the native platform clipboard.
+          rnSetString(str);
+          success = true;
+          break;
+        case "execCommand": {
+          const doc = globalObj.document;
+          if (doc?.createElement && doc?.body) {
+            const textarea = doc.createElement("textarea");
+            textarea.value = str;
+            textarea.style.position = "fixed";
+            textarea.style.opacity = "0";
+            textarea.style.left = "-9999px";
+            doc.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            const res = doc.execCommand("copy");
+            doc.body.removeChild(textarea);
+            success = res === true;
+          }
+          break;
         }
       }
     } catch {
-      // Ignore fallback error
+      // Tier failed; try the next one.
     }
   }
 
