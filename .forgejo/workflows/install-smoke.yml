@@ -63,8 +63,20 @@ on:
 
 jobs:
   install-smoke:
-    name: Install plugins on a clean runner
+    name: Install plugins with Paseo ${{ matrix.paseo-version }}
     runs-on: alpine-docker
+    # Keep the supported stable line visible without allowing it to block the
+    # current beta release gate. `fail-fast: false` ensures a 0.8 regression
+    # never prevents the gating beta lane from reporting its result.
+    continue-on-error: ${{ matrix.allow-failure }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - paseo-version: 0.8.0
+            allow-failure: true
+          - paseo-version: 0.9.0-beta.2
+            allow-failure: false
     # Clean Ubuntu 24.04 + Node 22 + git/make/jq image. A fresh container per
     # run is the point: no reused node_modules and no pre-existing daemon state.
     container:
@@ -210,13 +222,13 @@ jobs:
           echo "ref=${REF}" >> "$GITHUB_OUTPUT"
           echo "plugins=${PLUGINS}" >> "$GITHUB_OUTPUT"
 
-      - name: Install published Paseo CLI
+      - name: Install Paseo CLI ${{ matrix.paseo-version }}
         run: |
           set -euo pipefail
           if [ "$(id -u)" -eq 0 ]; then
-            npm i -g @getpaseo/cli
+            npm i -g @getpaseo/cli@${{ matrix.paseo-version }}
           else
-            sudo npm i -g @getpaseo/cli
+            sudo npm i -g @getpaseo/cli@${{ matrix.paseo-version }}
           fi
           paseo --version
 
@@ -259,11 +271,21 @@ jobs:
           mirror-ref: ${{ steps.source.outputs.ref }}
           plugins: ${{ steps.source.outputs.plugins }}
 
+      # Legacy compatibility is informational: make a failed 0.8 observation
+      # conspicuous in the run while `continue-on-error` keeps the beta gate
+      # authoritative. The warning links the maintainer directly to its ticket.
+      - name: Report Paseo 0.8 compatibility failure
+        if: ${{ always() && matrix.allow-failure && failure() }}
+        run: |
+          echo "::warning title=Paseo 0.8.0 install smoke failed::The legacy compatibility lane failed. See https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/296."
+
       # On-demand only: the gate verifies every push/PR, but the public mirror
       # moves only when dispatched with `mirror: true`, after the staged-tree
       # smoke above passed. A missing secret is a warning, not a failure.
       - name: Push staged tree to the public GitHub mirror (on demand)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mirror == 'true' }}
+        # Publishing remains a single, current-version gate: the legacy 0.8
+        # compatibility observation must never publish a second mirror commit.
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.mirror == 'true' && matrix.allow-failure == false }}
         env:
           GITHUB_MIRROR_TOKEN: ${{ secrets.FJ_GITHUB_MIRROR_TOKEN }}
         run: |
