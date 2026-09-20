@@ -20,12 +20,21 @@ test("copy text leads with the turn outcome and short agent id", () => {
   assert.match(text, /^Turn Completed\n17:00:00\nAgent abcdef1/);
 });
 
-test("copy text is the digest, never a bare issue URL", () => {
+test("copy text retains an issue URL as a reference and includes the rendered body", () => {
   const text = buildTelemetryCopyText({
-    data: { ...base, turnId: "https://forge.mrs.uppidi.com/xpufx-org/runner-containers/issues/2" },
+    data: {
+      ...base,
+      turnId: "https://forge.mrs.uppidi.com/xpufx-org/runner-containers/issues/2",
+      agentTitle: "Repair copied timeline body",
+    },
     timeLabel: "17:00:00",
   });
   assert.match(text, /^Turn Completed/);
+  assert.match(text, /Reference https:\/\/forge\.mrs\.uppidi\.com\/xpufx-org\/runner-containers\/issues\/2/);
+  assert.match(text, /Title Repair copied timeline body/);
+  assert.match(text, /CPU 12%/);
+  assert.match(text, /RAM 1\.0 GB \(12\.5%\)/);
+  assert.match(text, /Load 0\.42/);
   assert.doesNotMatch(text, /^https?:\/\//);
 });
 

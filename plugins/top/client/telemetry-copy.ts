@@ -1,4 +1,4 @@
-import { formatUptime } from "paseo-plugin-helper/shared";
+import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import { formatCompactTokens, type TopAgentSnapshot } from "./pill-labels";
 import type { TopTimelineTelemetryData } from "../shared/resources";
 
@@ -55,8 +55,15 @@ export function buildTelemetryCopyText({ data, liveUsage, timeLabel }: Telemetry
   const time = timeLabel ?? data.timestamp;
   if (time) lines.push(time);
 
+  // `turnId` is normally an opaque id, but some providers use the source
+  // issue URL. Keep it as a labeled reference: it is useful context, but it
+  // must never become the whole clipboard payload.
+  if (data.turnId) lines.push(`Reference ${data.turnId}`);
+
   const id = shortAgentId(data.agentId);
   if (id) lines.push(`Agent ${id}`);
+
+  if (data.agentTitle) lines.push(`Title ${data.agentTitle}`);
 
   const model = data.agentModel ?? undefined;
   const provider = data.agentProvider ?? undefined;
@@ -66,6 +73,13 @@ export function buildTelemetryCopyText({ data, liveUsage, timeLabel }: Telemetry
 
   if (data.branch) lines.push(`Branch ${data.branch}`);
   if (data.worktree) lines.push(`Worktree ${data.worktree}`);
+
+  // These are the first row of the rendered card body. Keep their labels and
+  // formatting aligned with the card so Copy is a human-readable export of
+  // what the operator sees, rather than just an identifier or URL.
+  lines.push(`CPU ${data.cpuPercent}%`);
+  lines.push(`RAM ${formatBytes(data.memUsedBytes)} (${data.memPercent}%)`);
+  lines.push(`Load ${data.loadAvg1m.toFixed(2)}`);
 
   const totalTokens =
     inputTokens != null || outputTokens != null
