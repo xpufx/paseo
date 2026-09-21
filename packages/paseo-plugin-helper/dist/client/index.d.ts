@@ -440,8 +440,13 @@ interface BadgeProps {
      * a regular expression.
      */
     highlightQuery?: string;
+    /**
+     * With `highlightQuery`, marks the whole label when the query has neither a
+     * literal nor a token hit — for a single primary chip, not a chip list.
+     */
+    highlightFuzzyFallback?: boolean;
 }
-declare function Badge({ label, variant, styleVariant, size, icon, dot, style, textStyle, highlightQuery, }: BadgeProps): React__default.JSX.Element;
+declare function Badge({ label, variant, styleVariant, size, icon, dot, style, textStyle, highlightQuery, highlightFuzzyFallback, }: BadgeProps): React__default.JSX.Element;
 
 interface StatusDotProps {
     variant?: StatusVariant;
@@ -469,7 +474,8 @@ interface CardHeaderProps {
     subtitleStyle?: StyleProp<TextStyle>;
     /**
      * When set, every case-insensitive (literal, non-regex) occurrence of the
-     * query inside `title` is painted with the accent highlight.
+     * query inside `title` is painted with the accent highlight. With no literal
+     * or token hit the whole title is marked, so a fuzzy match still reads.
      */
     highlightQuery?: string;
 }
@@ -509,6 +515,55 @@ interface CodeBlockProps {
     textStyle?: StyleProp<TextStyle>;
 }
 declare function CodeBlock({ code, language, title, maxHeight, copyable, style, textStyle, }: CodeBlockProps): React__default.JSX.Element;
+
+type CopyButtonSize = "sm" | "md";
+type CopyButtonVariant = "ghost" | "secondary";
+interface CopyButtonFeedback {
+    icon: string;
+    label: string;
+}
+/**
+ * Pure idle/copied visual state, split out so the feedback contract is
+ * testable without a renderer or a clipboard. Callers may override the idle
+ * `icon`/`label`; the copied state is always the Check/"Copied!" affordance.
+ */
+declare function resolveCopyButtonFeedback(copied: boolean, options?: {
+    icon?: string;
+    label?: string;
+    copiedLabel?: string;
+}): CopyButtonFeedback;
+interface CopyButtonProps {
+    /** Literal text to copy. Ignored when `getText` is provided. */
+    text?: string;
+    /** Lazy/Promise text source, resolved at press time. Takes precedence over `text`. */
+    getText?: () => string | Promise<string>;
+    /** Idle button label. Defaults to "Copy". */
+    label?: string;
+    /** Label shown after a successful copy. Defaults to "Copied!". */
+    copiedLabel?: string;
+    /** Icon name for the idle state. Defaults to "Copy". */
+    icon?: string;
+    size?: CopyButtonSize;
+    variant?: CopyButtonVariant;
+    accessibilityLabel?: string;
+    /** Forwarded to the clipboard toast (e.g. "timeline card"). */
+    toastMessage?: string;
+    /** How long the Check/"Copied!" feedback stays up. Defaults to 2000ms. */
+    feedbackDurationMs?: number;
+    disabled?: boolean;
+    style?: StyleProp<ViewStyle>;
+    textStyle?: StyleProp<TextStyle>;
+}
+/**
+ * Explicit copy affordance for styled/plugin surfaces.
+ *
+ * Web's selection-copy handler only rebuilds clipboard content for
+ * `[data-testid="assistant-message"]` selections, so styled timeline, telemetry,
+ * and panel content copies nothing (xpufx-org/paseo#278). This bypasses that
+ * gate with the helper's host `copyText` / `copyToClipboard` path and shows
+ * Check/"Copied!" feedback, matching CodeBlock's pattern.
+ */
+declare function CopyButton({ text, getText, label, copiedLabel, icon, size, variant, accessibilityLabel, toastMessage, feedbackDurationMs, disabled, style, textStyle, }: CopyButtonProps): React__default.ReactElement | null;
 
 interface SearchInputProps {
     value: string;
@@ -900,7 +955,11 @@ declare function SectionHeader({ title, count, badgeVariant, style, textStyle, }
 interface HighlightedTextProps {
     /** Source text rendered as-is when no query is active. */
     text: string;
-    /** Active search query; matched case-insensitively and never as a regex. */
+    /**
+     * Active search query; matched case-insensitively and never as a regex. When
+     * the literal query is absent the query's tokens are highlighted, so a fuzzy
+     * result still reads.
+     */
     query: string;
     style?: StyleProp<TextStyle>;
     /**
@@ -910,14 +969,22 @@ interface HighlightedTextProps {
     highlightStyle?: StyleProp<TextStyle>;
     numberOfLines?: number;
     selectable?: boolean;
+    /**
+     * When true, a query with no literal or token hit marks the whole text, so a
+     * fuzzy search result still reads as matched. Use it on the primary label
+     * (row/detail title) rather than every small field.
+     */
+    fuzzyFallback?: boolean;
 }
 /**
  * `<Text>` that paints every case-insensitive occurrence of `query` with the
  * accent background/foreground. The query is matched literally, so user input
- * is never evaluated as a regular expression. Renders the plain text when the
- * query is empty or absent.
+ * is never evaluated as a regular expression. When the literal query is absent
+ * the splitter highlights the query's tokens; `fuzzyFallback` additionally
+ * marks the whole text when even a token misses, so a fuzzy result is not left
+ * silently unmarked. Renders the plain text when the query is empty or absent.
  */
-declare function HighlightedText({ text, query, style, highlightStyle, numberOfLines, selectable, }: HighlightedTextProps): React__default.JSX.Element;
+declare function HighlightedText({ text, query, style, highlightStyle, numberOfLines, selectable, fuzzyFallback, }: HighlightedTextProps): React__default.JSX.Element;
 
 type ModalBodySize = "default" | "large";
 interface ModalBodyProps {
@@ -1385,6 +1452,8 @@ interface RegisterWorkspacePanelOptions {
     icon: string;
     Component: ComponentType<HostWorkspacePanelProps>;
     flair?: VisualFlair;
+    /** Host locations in which the panel should be available. */
+    locations?: string[];
 }
 interface RegisterAgentPanelOptions {
     id: string;
@@ -1397,7 +1466,7 @@ interface RegisterAgentPanelOptions {
  * Registers a workspace-scoped panel with automatic `<PluginThemeProvider>` injection.
  * Works with both Paseo v0.7 PluginContext and Paseo v0.8 PluginClientContext.
  */
-declare function registerWorkspacePanel(plugin: WorkspacePanelRegistrar, options: RegisterWorkspacePanelOptions): void;
+declare function registerWorkspacePanel(plugin: WorkspacePanelRegistrar, options: RegisterWorkspacePanelOptions): () => void;
 /**
  * Registers an agent-scoped panel with automatic `<PluginThemeProvider>` injection.
  * Works with both Paseo v0.7 PluginContext and Paseo v0.8 PluginClientContext.
@@ -1408,15 +1477,33 @@ interface CopyToClipboardOptions {
     toast?: HostToast;
     toastMessage?: string;
 }
+type ClipboardTier = "navigator" | "host" | "rnAsync" | "rnSync" | "execCommand";
+interface ClipboardEnvironment {
+    hasNavigatorClipboard: boolean;
+    hasHostCopyText: boolean;
+    hasRnClipboard: boolean;
+    hasRnSetStringAsync: boolean;
+    isDom: boolean;
+}
+/**
+ * Deterministic tier order for an explicit copy.
+ *
+ * Web's `navigator.clipboard.writeText` is the only API that rejects when the
+ * clipboard did not change, so it leads. The synchronous
+ * `react-native-web` `Clipboard.setString` reports success even when its
+ * `document.execCommand("copy")` fails, which leaves the previous clipboard
+ * item in place while the UI claims success (xpufx-org/paseo#278); it is only
+ * usable off-DOM (native), where it is the real platform clipboard. In a DOM
+ * the checked `execCommand` fallback is preferred to that unverifiable path.
+ */
+declare function clipboardTierOrder(env: ClipboardEnvironment): ClipboardTier[];
 /**
  * Robust cross-platform clipboard copy helper for Paseo plugins.
  * Works seamlessly across React Native (mobile), web, and desktop.
  *
- * Precedence:
- * 1. Host copyText from initClientHelpers (Paseo v0.8, optional)
- * 2. React Native's Clipboard (react-native / react-native-web)
- * 3. Web navigator.clipboard.writeText (modern secure web contexts)
- * 4. Fallback: document.execCommand("copy") (older web / non-secure contexts)
+ * Tier order comes from `clipboardTierOrder`; every tier reports failure
+ * honestly so a denied or blocked write never leaves the previous clipboard
+ * item behind under a fake success.
  */
 declare function copyToClipboard(text: string, options?: CopyToClipboardOptions): Promise<boolean>;
 
@@ -1495,4 +1582,4 @@ interface ForgeIconProps extends ForgeMarkInput {
  */
 declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseResponsiveResult, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolvePillModalScrollable, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAppearanceScheme, usePluginTheme, useResponsive };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, type ClipboardEnvironment, type ClipboardTier, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, CopyButton, type CopyButtonFeedback, type CopyButtonProps, type CopyButtonSize, type CopyButtonVariant, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseResponsiveResult, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, clipboardTierOrder, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveCopyButtonFeedback, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolvePillModalScrollable, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAppearanceScheme, usePluginTheme, useResponsive };
