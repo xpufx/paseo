@@ -7,7 +7,7 @@ import {
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Text, View } from "react-native";
 import { Modal } from "@getpaseo/plugin/client/react-native";
 import {
   AboutSection,
@@ -463,8 +463,9 @@ function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
                   {filteredTools.map((toolName) => {
                     const details = health?.toolDetails?.find((d) => d.name === toolName);
                     return (
-                      <Pressable
+                      <Button
                         key={toolName}
+                        variant="ghost"
                         onPress={() => openToolRunner(toolName)}
                         style={{
                           flexDirection: "row",
@@ -475,6 +476,7 @@ function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
                           backgroundColor: colors.foregroundMuted + "10",
                           borderWidth: 1,
                           borderColor: colors.foregroundMuted + "18",
+                          justifyContent: "flex-start",
                         }}
                       >
                         <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -494,7 +496,7 @@ function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
                           <Icon name="Play" size={10} color={colors.accent} />
                           <Text style={{ color: colors.accent, fontSize: 11, fontWeight: "600" }}>Run</Text>
                         </View>
-                      </Pressable>
+                      </Button>
                     );
                   })}
                 </View>
@@ -567,13 +569,21 @@ function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
                 {items.map((s) => {
                   const h = healthMap.get(s.id) ?? healthMap.get(s.name);
                   return (
-                    <Pressable
+                    <Button
                       key={s.id}
+                      variant="ghost"
                       onPress={() => {
                         triggerHaptic("light");
                         void openDetail(s.id);
                       }}
-                      style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.foregroundMuted + "18" }}
+                      style={{
+                        paddingVertical: 8,
+                        borderBottomWidth: 1,
+                        borderBottomColor: colors.foregroundMuted + "18",
+                        borderRadius: 0,
+                        alignItems: "stretch",
+                        justifyContent: "flex-start",
+                      }}
                     >
                       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
                         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
@@ -595,7 +605,7 @@ function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
                       <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginTop: 2 }} numberOfLines={2}>
                         {s.description || s.command || s.url || "—"}
                       </Text>
-                    </Pressable>
+                    </Button>
                   );
                 })}
               </View>
