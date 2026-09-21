@@ -28,7 +28,6 @@ import {
   forgejoWebhookRenderer,
 } from "./client/webhook-card.js";
 import {
-  forgejoNotificationTransformer,
   forgejoNotificationRenderer,
 } from "./client/notification-card.js";
 import {
@@ -43,7 +42,6 @@ export default function contribute(client: PluginClientContext) {
   // messages carry a bare issue URL the linkifier would otherwise claim.
   const removeWebhookUser = client.addTimelineTransformer(forgejoWebhookUserTransformer);
   const removeWebhookRenderer = client.addTimelineRenderer(forgejoWebhookRenderer);
-  const removeNotification = client.addTimelineTransformer(forgejoNotificationTransformer);
   const removeNotificationRenderer = client.addTimelineRenderer(forgejoNotificationRenderer);
   const removeUserLink = client.addTimelineTransformer(forgeLinkUserTransformer);
   const removeAssistantLink = client.addTimelineTransformer(forgeLinkAssistantTransformer);
@@ -115,7 +113,6 @@ export default function contribute(client: PluginClientContext) {
     removePill();
     removeWebhookUser();
     removeWebhookRenderer();
-    removeNotification();
     removeNotificationRenderer();
     removeUserLink();
     removeAssistantLink();

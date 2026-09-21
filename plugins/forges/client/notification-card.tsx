@@ -3,29 +3,20 @@ import { Text, View } from "react-native";
 import type {
   PluginTimelineItemProps,
   PluginTimelineRendererContribution,
-  PluginTimelineTransformerContribution,
 } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { Badge } from "paseo-plugin-helper/client";
 import {
   forgejoNotificationCardSchema,
-  forgejoNotificationItem,
   type ForgejoNotificationCardData,
 } from "../shared/notification.js";
 
 /**
- * Forgejo digest notifications are emitted as host `notification` rows rather
- * than chat messages. Turn them into a typed card without claiming unrelated
+ * The host's notification rows are not transformable timeline items. This
+ * renderer remains presentation-only: a host-supported producer may emit the
+ * typed `forgejo-notification` item, but forges must not claim generic host
  * notifications (including provider errors and other plugins' notices).
  */
-export const forgejoNotificationTransformer: PluginTimelineTransformerContribution<"notification"> = {
-  id: "forgejo-notification",
-  query: { itemType: "notification" },
-  transform({ item }) {
-    return forgejoNotificationItem(item);
-  },
-};
-
 function levelColor(
   theme: PluginTimelineItemProps<ForgejoNotificationCardData>["theme"],
   level: ForgejoNotificationCardData["level"],

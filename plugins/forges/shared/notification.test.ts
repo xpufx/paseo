@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   FORGEJO_DIGEST_PREFIX,
   forgejoNotificationCardSchema,
@@ -36,7 +36,20 @@ describe("Forgejo digest notification timeline item", () => {
     );
   });
 
-  it("registers the notification transformer and renderer", () => {
+  it("reproduces the host rejection for notification transformer queries", () => {
+    const registerTimelineTransformer = (contribution: { id: string; query: { itemType: string } }) => {
+      if (contribution.query.itemType === "notification") {
+        throw new Error(`Timeline transformer ${contribution.id} has invalid item type: ${contribution.query.itemType}`);
+      }
+    };
+
+    assert.throws(
+      () => registerTimelineTransformer({ id: "forgejo-notification", query: { itemType: "notification" } }),
+      /Timeline transformer forgejo-notification has invalid item type: notification/,
+    );
+  });
+
+  it("registers the digest renderer without querying host notifications", () => {
     const candidates = [
       join(process.cwd(), "index.client.tsx"),
       join(process.cwd(), "plugins/forges/index.client.tsx"),
@@ -44,7 +57,11 @@ describe("Forgejo digest notification timeline item", () => {
     const path = candidates.find((candidate) => existsSync(candidate));
     assert.ok(path, "index.client.tsx not found");
     const source = readFileSync(path as string, "utf8");
-    assert.match(source, /addTimelineTransformer\(forgejoNotificationTransformer\)/);
     assert.match(source, /addTimelineRenderer\(forgejoNotificationRenderer\)/);
+    assert.doesNotMatch(source, /addTimelineTransformer\(forgejoNotificationTransformer\)/);
+    assert.doesNotMatch(source, /forgejoNotificationTransformer/);
+
+    const cardSource = readFileSync(join(dirname(path as string), "client", "notification-card.tsx"), "utf8");
+    assert.doesNotMatch(cardSource, /itemType:\s*["']notification["']/);
   });
 });
