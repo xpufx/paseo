@@ -35,6 +35,12 @@ import {
   triggerHaptic,
   usePluginTheme,
   useResponsive,
+  inputRecipe,
+  cardRecipe,
+  buttonRecipe,
+  tabStripRecipe,
+  tabItemRecipe,
+  badgeRecipe,
   type RenderModalProps,
   type RenderPillProps,
   type VisualFlair,
@@ -120,6 +126,7 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
 
   const showcaseTabs = [
     { id: "gauges", label: "Gauges & Hardware", shortLabel: "Gauges" },
+    { id: "recipes", label: "Headless Style Recipes", shortLabel: "Recipes" },
     { id: "flair", label: "Visual Flair Studio", shortLabel: "Flair" },
     { id: "data", label: "Data Table", shortLabel: "Data" },
     { id: "controls", label: "Interactive Controls", shortLabel: "Controls" },
@@ -130,6 +137,9 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
     { id: "about", label: "About Plugin", shortLabel: "About" },
   ];
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [recipeInputText, setRecipeInputText] = useState<string>("Interacting here does not dismiss the modal");
+  const [recipeSubTab, setRecipeSubTab] = useState<string>("active");
+  const [recipeButtonClicks, setRecipeButtonClicks] = useState<number>(0);
   const [liveStream, setLiveStream] = useState<boolean>(true);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [attentionOn, setAttentionOn] = useState<boolean>(true);
@@ -414,6 +424,131 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
               value={data ? formatUptime(data.uptimeSeconds) : "..."}
             />
           </Card>
+        </>
+      )}
+
+      {/* TAB: HEADLESS STYLE RECIPES */}
+      {activeTab === "recipes" && (
+        <>
+          <Card variant="elevated">
+            <Card.Header
+              title="Pure Headless Style Recipes"
+              subtitle="Zero-overhead style objects driving raw React Native markup"
+            />
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, marginTop: 4 }}>
+              Pure style recipe functions (inputRecipe, cardRecipe, buttonRecipe, tabStripRecipe, tabItemRecipe, badgeRecipe) mapping Theme / PluginTheme tokens directly to standard React Native style objects.
+            </Text>
+          </Card>
+
+          {/* Raw View Card styled with cardRecipe */}
+          <View style={cardRecipe(theme, "elevated")}>
+            <View style={cardRecipe(theme).header}>
+              <Text style={cardRecipe(theme).headerTitle}>Raw View Card (cardRecipe)</Text>
+              <View style={badgeRecipe(theme, "accent")}>
+                <View style={badgeRecipe(theme, "accent").dot} />
+                <Text style={badgeRecipe(theme, "accent").text}>cardRecipe("elevated")</Text>
+              </View>
+            </View>
+            <Text style={{ color: colors.foregroundMuted, ...typography.bodySmall, marginBottom: 10 }}>
+              Plain View container styled with cardRecipe(theme, "elevated") without wrapping in Helper Card.
+            </Text>
+
+            {/* TextInput styled with inputRecipe */}
+            <View style={inputRecipe(theme).container}>
+              <Text style={inputRecipe(theme).label}>Input Style Recipe (inputRecipe)</Text>
+              <TextInput
+                style={inputRecipe(theme, { mono: true }).input}
+                value={recipeInputText}
+                onChangeText={setRecipeInputText}
+                placeholder="Type inside modal (verifying event isolation)..."
+              />
+              <Text style={inputRecipe(theme).hint}>
+                Typing or selecting text inside this input does not bubble to host modal trigger (#347).
+              </Text>
+            </View>
+
+            {/* Action Bar with buttons using buttonRecipe styles */}
+            <ActionBar align="flex-start" direction="row" style={{ marginTop: 12 }}>
+              <Button
+                label={`Primary Action (${recipeButtonClicks})`}
+                variant="primary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("light");
+                  setRecipeButtonClicks((c) => c + 1);
+                }}
+              />
+              <Button
+                label="Secondary Reset"
+                variant="secondary"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("light");
+                  setRecipeButtonClicks(0);
+                }}
+              />
+              <Button
+                label="Danger Toast"
+                variant="danger"
+                size="sm"
+                onPress={() => {
+                  triggerHaptic("medium");
+                  toast.show("Action clicked from recipe showcase", { variant: "error" });
+                }}
+              />
+            </ActionBar>
+          </View>
+
+          {/* Raw Tab Strip styled with tabStripRecipe & tabItemRecipe */}
+          <View style={cardRecipe(theme, "flat")}>
+            <View style={cardRecipe(theme).header}>
+              <Text style={cardRecipe(theme).headerTitle}>Raw Tab Strip (tabStripRecipe)</Text>
+            </View>
+            <View style={tabStripRecipe(theme).frame}>
+              <View style={tabStripRecipe(theme).track}>
+                {(["all", "active", "archived"] as const).map((subTab) => {
+                  const isActive = recipeSubTab === subTab;
+                  return (
+                    <Button
+                      key={subTab}
+                      label={subTab.charAt(0).toUpperCase() + subTab.slice(1)}
+                      size="sm"
+                      variant={isActive ? "primary" : "ghost"}
+                      onPress={() => {
+                        triggerHaptic("light");
+                        setRecipeSubTab(subTab);
+                      }}
+                    />
+                  );
+                })}
+              </View>
+            </View>
+          </View>
+
+          {/* Raw Badges styled with badgeRecipe */}
+          <View style={cardRecipe(theme, "tinted")}>
+            <View style={cardRecipe(theme).header}>
+              <Text style={cardRecipe(theme).headerTitle}>Raw Badges (badgeRecipe)</Text>
+            </View>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              {(["success", "warning", "danger", "accent", "neutral"] as const).map((variant) => (
+                <View key={variant} style={badgeRecipe(theme, variant).container}>
+                  <View style={badgeRecipe(theme, variant).dot} />
+                  <Text style={badgeRecipe(theme, variant).text}>{variant}</Text>
+                </View>
+              ))}
+              <View style={badgeRecipe(theme, { variant: "success", styleVariant: "solid" }).container}>
+                <Text style={badgeRecipe(theme, { variant: "success", styleVariant: "solid" }).text}>
+                  solid
+                </Text>
+              </View>
+              <View style={badgeRecipe(theme, { variant: "accent", styleVariant: "outline" }).container}>
+                <Text style={badgeRecipe(theme, { variant: "accent", styleVariant: "outline" }).text}>
+                  outline
+                </Text>
+              </View>
+            </View>
+          </View>
         </>
       )}
 

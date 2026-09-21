@@ -1,10 +1,12 @@
-import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, g as PluginTheme, d as CustomPillState } from '../custom-pills-C98QP7Cg.cjs';
+import { D as DensityStyle, S as SurfaceStyle, o as BadgeSize, p as ButtonProps, q as SpacingValue, V as VisualFlair } from '../recipes-DEz7ysLY.cjs';
+export { A as AttentionBeacon, s as AttentionBeaconMode, u as AttentionBeaconProps, v as AttentionBeaconTone, w as Badge, x as BadgeProps, B as BadgeRecipeOptions, a as BadgeRecipeResult, y as BadgeStyle, z as Button, E as ButtonAttention, b as ButtonRecipeOptions, c as ButtonRecipeResult, F as ButtonSize, G as ButtonVariant, C as CardRecipeOptions, d as CardRecipeResult, H as ElevationLevel, J as ElevationStyle, K as FALLBACK_ACCENT_FOREGROUND, L as HeadingTransform, M as HostFontVariables, N as HostThemeVariables, I as InputRecipeOptions, e as InputRecipeResult, P as PASEO_HOST_CSS_VARIABLES, O as PaseoHostCssVariable, Q as PluginThemeContextValue, R as PluginThemeProvider, U as PluginThemeProviderProps, W as RadiusStyle, X as SpacingKey, T as TabItemRecipeOptions, f as TabItemRecipeResult, g as TabStripRecipeOptions, h as TabStripRecipeResult, i as ThemeInput, Y as TypographyScale, Z as TypographyToken, j as badgeRecipe, k as buttonRecipe, l as cardRecipe, _ as defaultDarkTheme, $ as defaultFlair, a0 as defaultLightTheme, a1 as elevationForPlatform, a2 as getDefaultTheme, m as inputRecipe, a3 as mergeThemeColors, a4 as normalizeBeaconMode, a5 as readHostThemeVariables, a6 as resolveBeaconToneColor, a7 as resolveButtonAttentionMode, a8 as resolveButtonAttentionTone, a9 as resolveElevation, aa as resolveRadius, ab as resolveSpacing, r as resolveThemeColors, ac as resolveTypography, ad as spacing, t as tabItemRecipe, n as tabStripRecipe, ae as useAppearanceScheme, af as usePluginTheme } from '../recipes-DEz7ysLY.cjs';
+import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, d as CustomPillState } from '../custom-pills-C98QP7Cg.cjs';
 import React__default, { ReactNode, Ref, ComponentType } from 'react';
-import { d as HostLayout, q as HostPillProps, r as ComposerPillRegistrar, P as PluginCleanup, o as HostSurfaceProps, t as HostAgentPanelProps, u as HostWorkspacePanelProps, h as HostToast, v as HostIconProps } from '../host-DatQ2QJE.cjs';
-export { C as ClientHostDeps, w as ComposerPillButtonContribution, x as ComposerPillButtonDescriptor, y as ComposerPillButtonIcon, p as ComposerPillContribution, z as ComposerPillRegistration, A as ComposerPillRegistrationHandle, B as ComposerPillSdkContribution, H as HostAgentRef, a as HostAgentUpdate, b as HostAgentsApi, c as HostCopyText, D as HostFlatList, E as HostIcon, F as HostModal, G as HostModalContentProps, I as HostModalProps, e as HostRpcContract, J as HostScrollView, K as HostTextInput, f as HostTheme, g as HostThemeColors, i as HostUseRpc, j as HostUseToast, k as getClientHost, l as getOptionalClientHost, m as initClientHelpers, n as isClientHostInitialized, s as selectHostScrollView } from '../host-DatQ2QJE.cjs';
 import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView, ImageStyle } from 'react-native';
 import { M as MetricThresholds, f as TruncatePathOptions, a as ForgeMarkInput, F as ForgeKind } from '../forge-CtVqWZsy.cjs';
 export { R as ResolvedForgeMark, g as forgeKindFromHost, m as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark } from '../forge-CtVqWZsy.cjs';
+import { q as HostPillProps, r as ComposerPillRegistrar, P as PluginCleanup, o as HostSurfaceProps, t as HostAgentPanelProps, u as HostWorkspacePanelProps, h as HostToast, v as HostIconProps } from '../host-DatQ2QJE.cjs';
+export { C as ClientHostDeps, w as ComposerPillButtonContribution, x as ComposerPillButtonDescriptor, y as ComposerPillButtonIcon, p as ComposerPillContribution, z as ComposerPillRegistration, A as ComposerPillRegistrationHandle, B as ComposerPillSdkContribution, H as HostAgentRef, a as HostAgentUpdate, b as HostAgentsApi, c as HostCopyText, D as HostFlatList, E as HostIcon, d as HostLayout, F as HostModal, G as HostModalContentProps, I as HostModalProps, e as HostRpcContract, J as HostScrollView, K as HostTextInput, f as HostTheme, g as HostThemeColors, i as HostUseRpc, j as HostUseToast, k as getClientHost, l as getOptionalClientHost, m as initClientHelpers, n as isClientHostInitialized, s as selectHostScrollView } from '../host-DatQ2QJE.cjs';
 export { C as CommandCenterCapabilities, a as CommandCenterContext, b as CommandCenterItemContribution, c as CommandCenterItemRegistrar, r as registerCommandCenterItem } from '../command-center-CycJXg00.cjs';
 export { R as REFRESH_INTERVALS, a as RefreshRate, b as RpcMutationOptions, c as RpcQueryOptions, U as UseAutoRefreshQueryOptions, d as UsePluginSettingsOptions, e as UsePluginSettingsResult, f as UseSharedPluginSettingsOptions, n as normalizeSnapshotScope, s as shallowEqualRecord, g as sharedSnapshotKey, h as shouldEmitSnapshotUpdate, u as useAutoRefreshQuery, i as usePluginSettings, j as useRpcMutation, k as useRpcQuery, l as useSharedPluginSettings, m as useSuiteSettings } from '../shared-settings-CFiLb5XU.cjs';
 export { H as HelperSettingsCardProps, a as HelperSettingsField, b as HelperSettingsFieldKind, c as HelperSettingsFieldOverrides, d as HelperSettingsInputProps, e as HelperSettingsRowBaseProps, f as HelperSettingsScreenContribution, g as HelperSettingsScreenRegistrar, h as HelperSettingsSectionProps, i as HelperSettingsSelectComponent, j as HelperSettingsSelectProps, k as HelperSettingsSwitchProps, l as HelperSettingsUiBundle, R as RegisterHelperSettingsScreenOptions, m as contractSchemaToFields, r as registerHelperSettingsScreen } from '../settings-screen-BWjaoR3s.cjs';
@@ -13,50 +15,6 @@ import '../settings-BNRcFeSP.cjs';
 import '../rpc-D27pph91.cjs';
 import '@tanstack/query-core';
 import '@tanstack/react-query';
-
-type RadiusStyle = "sharp" | "rounded" | "pill";
-type DensityStyle = "compact" | "comfortable" | "spacious";
-type SurfaceStyle = "flat" | "tinted" | "elevated";
-type HeadingTransform = "none" | "uppercase";
-interface VisualFlair {
-    /**
-     * Corner radius preset for interactive elements and containers.
-     * - "sharp": 2-3px (terminal / technical flair)
-     * - "rounded": 6-8px (default Paseo native flair)
-     * - "pill": 9999px (soft / playful flair)
-     */
-    radius: RadiusStyle;
-    /**
-     * Spacing and typography density.
-     * - "compact": tight padding and smaller fonts (the default — plugin UI is
-     *   dense by nature and generous padding wastes vertical space)
-     * - "comfortable": balanced, roomier defaults (opt in per plugin)
-     * - "spacious": generous breathing room
-     */
-    density: DensityStyle;
-    /**
-     * Surface background styling for cards, panels, and modal boxes.
-     * - "flat": pure surface0 with border
-     * - "tinted": subtle tinted foreground / accent wash
-     * - "elevated": uses surface1 / surface2 hierarchy
-     */
-    surfaceStyle: SurfaceStyle;
-    /**
-     * Optional custom brand accent color (e.g. "#10b981", "#3b82f6").
-     * Overrides Paseo's theme.colors.accent within this plugin.
-     */
-    accentColor?: string;
-    /**
-     * Default border width for cards and bordered elements (default: 1).
-     */
-    borderWidth: number;
-    /**
-     * Text transform for section headers and meta labels.
-     */
-    headingTransform: HeadingTransform;
-}
-declare const defaultFlair: VisualFlair;
-declare function resolveRadius(radius: RadiusStyle, size?: "xs" | "sm" | "md" | "lg" | "pill"): number;
 
 /**
  * Converts a hex color and opacity (0.0 to 1.0) into an 8-character hex or rgba string.
@@ -189,150 +147,6 @@ interface ResponsiveSelectOptions<T> {
  */
 declare function responsiveSelect<T>(layout: ResponsiveLayout, options: ResponsiveSelectOptions<T>): T | undefined;
 
-/**
- * Standard spacing scale (pt/px) shared by every helper surface.
- * Density rule: compact viewports step exactly one rung down the scale.
- */
-declare const spacing: {
-    readonly xxs: 2;
-    readonly xs: 4;
-    readonly sm: 8;
-    readonly md: 12;
-    readonly lg: 16;
-    readonly xl: 24;
-};
-type SpacingKey = keyof typeof spacing;
-/**
- * A gap/size value: either a named spacing token or a raw px number. Layout
- * primitives accept this so callers never have to invent their own scale.
- */
-type SpacingValue = SpacingKey | number;
-/**
- * Resolves a {@link SpacingValue} to px, falling back to the theme-derived
- * value when the caller did not specify one.
- */
-declare function resolveSpacing(value: SpacingValue | undefined, fallback: number): number;
-interface TypographyToken {
-    fontSize: number;
-    lineHeight: number;
-    fontWeight: "400" | "500" | "600" | "700";
-}
-interface TypographyScale {
-    title: TypographyToken;
-    heading: TypographyToken;
-    body: TypographyToken;
-    bodyStrong: TypographyToken;
-    /**
-     * Value text that pairs with a {@link TypographyScale.label}: same size as
-     * the label, normal weight, so a value never outranks its own label.
-     */
-    bodySmall: TypographyToken;
-    caption: TypographyToken;
-    label: TypographyToken;
-}
-/**
- * Semantic text sizes keep helper components visually coherent while still
- * allowing compact panes and plugin density preferences to breathe.
- */
-declare function resolveTypography(layout: ResponsiveLayout, density: DensityStyle): TypographyScale;
-/** Fallback text color on accent fills when the host omits accentForeground. */
-declare const FALLBACK_ACCENT_FOREGROUND = "#ffffff";
-type ElevationLevel = "none" | "sm" | "md" | "lg";
-interface ElevationStyle {
-    shadowColor: string;
-    shadowOpacity: number;
-    shadowRadius: number;
-    shadowOffset: {
-        width: number;
-        height: number;
-    };
-    elevation: number;
-}
-/**
- * Standard shadow/elevation presets. shadowColor lives here once so client
- * components never hardcode their own.
- */
-declare function resolveElevation(level: ElevationLevel): ElevationStyle;
-/**
- * Native `elevation` is Android-only; iOS renders the shadow props.
- * Kept as a helper so call sites read consistently.
- */
-declare function elevationForPlatform(level: ElevationLevel, platform: PlatformType): ElevationStyle;
-
-/**
- * Paseo 0.8 host theme variables. On web hosts the live theme is exposed as
- * CSS custom properties on the document root; this map binds each variable
- * to the semantic ThemeColors slot it feeds.
- */
-declare const PASEO_HOST_CSS_VARIABLES: {
-    readonly "--background": "surface0";
-    readonly "--foreground": "foreground";
-    readonly "--muted": "foregroundMuted";
-    readonly "--accent": "accent";
-    readonly "--accent-foreground": "accentForeground";
-    readonly "--border": "border";
-};
-type PaseoHostCssVariable = keyof typeof PASEO_HOST_CSS_VARIABLES;
-interface HostFontVariables {
-    sans?: string;
-    mono?: string;
-}
-interface HostThemeVariables {
-    colors: Partial<ThemeColors>;
-    fonts: HostFontVariables;
-}
-/**
- * Reads the live Paseo 0.8 host variables. Returns empty slots outside a DOM
- * runtime so native callers merge to static defaults untouched.
- */
-declare function readHostThemeVariables(): HostThemeVariables;
-/**
- * Pure merge for the provider: static defaults lose to live host variables,
- * which lose to the injected host theme, which loses to the flair accent.
- * Runtime `undefined` slots are skipped so a partial host theme falls back
- * instead of blanking a slot. Exported for tests; the provider applies it
- * inside useMemo.
- */
-declare function mergeThemeColors(defaults: ThemeColors, hostVariables: Partial<ThemeColors>, injected: ThemeColors, accentOverride?: string): ThemeColors;
-
-interface PluginThemeContextValue {
-    theme: PluginTheme;
-    colors: ThemeColors;
-    fonts: HostFontVariables;
-    layout: ResponsiveLayout;
-    flair: VisualFlair;
-    isCompact: boolean;
-    isMobile: boolean;
-    touchTargetMin: number;
-    alpha: (color: string, opacity: number) => string;
-    getContrastColor: (bgHex: string, light?: string, dark?: string) => string;
-    getStatusColor: (variant: StatusVariant) => string;
-    getVariantPalette: (variant: StatusVariant) => {
-        bg: string;
-        text: string;
-        border: string;
-    };
-    resolveRadius: (size?: "xs" | "sm" | "md" | "lg" | "pill") => number;
-    padding: {
-        horizontal: number;
-        vertical: number;
-        gap: number;
-    };
-    typography: TypographyScale;
-}
-declare const defaultDarkTheme: PluginTheme;
-declare const defaultLightTheme: PluginTheme;
-declare function getDefaultTheme(scheme?: string): PluginTheme;
-declare function useAppearanceScheme(): [string | undefined, (s: string | undefined) => void];
-interface PluginThemeProviderProps {
-    theme: PluginTheme;
-    layout?: HostLayout;
-    flair?: Partial<VisualFlair>;
-    children: ReactNode;
-}
-declare function PluginThemeProvider({ theme, layout, flair: userFlair, children, }: PluginThemeProviderProps): React__default.JSX.Element;
-declare function usePluginTheme(): PluginThemeContextValue;
-
 interface UseResponsiveResult {
     /**
      * Whether the container or viewport is in compact mode (narrow trackbar, mobile screen, or split-pane).
@@ -369,48 +183,6 @@ interface UseResponsiveResult {
  */
 declare function useResponsive(): UseResponsiveResult;
 
-type AttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce" | "pulse";
-type AttentionBeaconTone = "warning" | "accent" | "danger";
-interface AttentionBeaconProps {
-    children: ReactNode;
-    mode?: AttentionBeaconMode;
-    tone?: AttentionBeaconTone;
-    color?: string;
-    active?: boolean;
-    style?: StyleProp<ViewStyle>;
-    haloStyle?: StyleProp<ViewStyle>;
-    badgeStyle?: StyleProp<ViewStyle>;
-    accessibilityLabel?: string;
-    testID?: string;
-    badgeIcon?: string | ReactNode;
-    duration?: number;
-    easing?: (value: number) => number;
-}
-declare function normalizeBeaconMode(mode?: AttentionBeaconMode): "radar" | "glow" | "badge" | "bounce" | "pulse";
-declare function resolveBeaconToneColor(colors: ThemeColors, tone?: AttentionBeaconTone, customColor?: string): string;
-declare function AttentionBeacon({ children, mode, tone, color, active, style, haloStyle, badgeStyle, accessibilityLabel, testID, badgeIcon, duration, easing, }: AttentionBeaconProps): React__default.JSX.Element;
-
-type ButtonVariant = "primary" | "secondary" | "danger" | "ghost";
-type ButtonSize = "sm" | "md" | "lg";
-type ButtonAttention = boolean | "radar" | "glow" | "bounce";
-declare function resolveButtonAttentionMode(attention?: ButtonAttention): AttentionBeaconMode | null;
-declare function resolveButtonAttentionTone(variant: ButtonVariant): AttentionBeaconTone;
-interface ButtonProps {
-    label?: string;
-    variant?: ButtonVariant;
-    size?: ButtonSize;
-    icon?: string | ReactNode;
-    iconPosition?: "left" | "right";
-    onPress?: () => void | Promise<void>;
-    disabled?: boolean;
-    loading?: boolean;
-    style?: StyleProp<ViewStyle>;
-    textStyle?: StyleProp<TextStyle>;
-    accessibilityLabel?: string;
-    attention?: ButtonAttention;
-}
-declare function Button({ label, variant, size, icon, iconPosition, onPress, disabled, loading, style, textStyle, accessibilityLabel, attention, }: ButtonProps): React__default.JSX.Element;
-
 interface InlineButtonProps {
     label: string;
     onPress?: () => void | Promise<void>;
@@ -422,31 +194,6 @@ interface InlineButtonProps {
 }
 /** Compact text/link action for inline cards and timeline content. */
 declare function InlineButton({ label, onPress, icon, disabled, accessibilityLabel, style, textStyle, }: InlineButtonProps): React__default.JSX.Element;
-
-type BadgeStyle = "tinted" | "outline" | "solid";
-type BadgeSize = "sm" | "md";
-interface BadgeProps {
-    label: string;
-    variant?: StatusVariant;
-    styleVariant?: BadgeStyle;
-    size?: BadgeSize;
-    icon?: string | ReactNode;
-    dot?: boolean;
-    style?: StyleProp<ViewStyle>;
-    textStyle?: StyleProp<TextStyle>;
-    /**
-     * When set, every case-insensitive occurrence of the query inside `label` is
-     * painted with the accent highlight. The query is matched literally, never as
-     * a regular expression.
-     */
-    highlightQuery?: string;
-    /**
-     * With `highlightQuery`, marks the whole label when the query has neither a
-     * literal nor a token hit — for a single primary chip, not a chip list.
-     */
-    highlightFuzzyFallback?: boolean;
-}
-declare function Badge({ label, variant, styleVariant, size, icon, dot, style, textStyle, highlightQuery, highlightFuzzyFallback, }: BadgeProps): React__default.JSX.Element;
 
 interface StatusDotProps {
     variant?: StatusVariant;
@@ -1582,4 +1329,4 @@ interface ForgeIconProps extends ForgeMarkInput {
  */
 declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, AttentionBeacon, type AttentionBeaconMode, type AttentionBeaconProps, type AttentionBeaconTone, Badge, type BadgeProps, type BadgeSize, type BadgeStyle, Button, type ButtonAttention, type ButtonProps, type ButtonSize, type ButtonVariant, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, type ClipboardEnvironment, type ClipboardTier, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, CopyButton, type CopyButtonFeedback, type CopyButtonProps, type CopyButtonSize, type CopyButtonVariant, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, type DensityStyle, type ElevationLevel, type ElevationStyle, EmptyState, type EmptyStateProps, FALLBACK_ACCENT_FOREGROUND, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, type HeadingTransform, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, type HostFontVariables, HostIconProps, HostLayout, HostPillProps, HostSurfaceProps, type HostThemeVariables, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, PASEO_HOST_CSS_VARIABLES, type PaseoHostCssVariable, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, type PluginThemeContextValue, PluginThemeProvider, type PluginThemeProviderProps, ProgressBar, type ProgressBarProps, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, type SpacingKey, type SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, type SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type TypographyScale, type TypographyToken, type UseResponsiveResult, VStack, type VisualFlair, type WorkspacePanelRegistrar, alpha, clipboardTierOrder, copyToClipboard, defaultDarkTheme, defaultFlair, defaultLightTheme, elevationForPlatform, forgeMarkSource, formatCommandLine, getContrastColor, getDefaultTheme, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, mergeThemeColors, normalizeBeaconMode, readHostThemeVariables, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveBeaconToneColor, resolveButtonAttentionMode, resolveButtonAttentionTone, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveCopyButtonFeedback, resolveEffectiveCompact, resolveElevation, resolveGridColumns, resolvePadding, resolvePillModalScrollable, resolveRadius, resolveSpacing, resolveTypography, responsiveSelect, responsiveValue, spacing, triggerHaptic, useAppearanceScheme, usePluginTheme, useResponsive };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, BadgeSize, ButtonProps, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, type ClipboardEnvironment, type ClipboardTier, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, CopyButton, type CopyButtonFeedback, type CopyButtonProps, type CopyButtonSize, type CopyButtonVariant, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, DensityStyle, EmptyState, type EmptyStateProps, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, HostIconProps, HostPillProps, HostSurfaceProps, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, ProgressBar, type ProgressBarProps, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseResponsiveResult, VStack, VisualFlair, type WorkspacePanelRegistrar, alpha, clipboardTierOrder, copyToClipboard, forgeMarkSource, formatCommandLine, getContrastColor, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveCopyButtonFeedback, resolveEffectiveCompact, resolveGridColumns, resolvePadding, resolvePillModalScrollable, responsiveSelect, responsiveValue, triggerHaptic, useResponsive };

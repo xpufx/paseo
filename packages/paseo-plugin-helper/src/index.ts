@@ -17,3 +17,4 @@
  */
 
 export * from "./shared/index.js";
+export * from "./client/styles/index.js";

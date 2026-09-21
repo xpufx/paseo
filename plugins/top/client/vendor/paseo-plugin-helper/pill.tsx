@@ -439,30 +439,60 @@ export function registerComposerPill<TPayload = any>(
           color={theme.colors.foreground}
         />
       );
+      const stopBubbling = (e: any) => {
+        if (e && typeof e.stopPropagation === "function") {
+          e.stopPropagation();
+        }
+      };
+
+      const eventBoundaryProps = {
+        onClick: stopBubbling,
+        onMouseDown: stopBubbling,
+        onMouseUp: stopBubbling,
+        onPointerDown: stopBubbling,
+        onPointerUp: stopBubbling,
+        onTouchStart: stopBubbling,
+        onTouchEnd: stopBubbling,
+        onKeyDown: stopBubbling,
+        onKeyUp: stopBubbling,
+      };
+
       return (
         <>
           {icon}
-          <Modal
-            title={options.modalTitle ?? options.title}
-            icon={modalIconElement}
-            open={centeredOpen}
-            onOpenChange={(nextOpen: boolean) => setCenteredOpen(agentId, nextOpen)}
+          <View
+            onStartShouldSetResponder={() => true}
+            onTouchEnd={stopBubbling}
+            {...(eventBoundaryProps as any)}
           >
-            <Modal.Content scrollable={resolvePillModalScrollable(options.hostScroll)}>
-              {centeredOpen ? (
-                <PluginThemeProvider theme={theme} layout={layout} flair={options.flair}>
-                  {options.renderModal({
-                    agentId,
-                    workspaceId: props.workspaceId ?? "",
-                    theme,
-                    layout,
-                    host: props.host ?? { id: "", label: "" },
-                    close: () => setCenteredOpen(agentId, false),
-                  })}
-                </PluginThemeProvider>
-              ) : null}
-            </Modal.Content>
-          </Modal>
+            <Modal
+              title={options.modalTitle ?? options.title}
+              icon={modalIconElement}
+              open={centeredOpen}
+              onOpenChange={(nextOpen: boolean) => setCenteredOpen(agentId, nextOpen)}
+            >
+              <Modal.Content scrollable={resolvePillModalScrollable(options.hostScroll)}>
+                {centeredOpen ? (
+                  <View
+                    onStartShouldSetResponder={() => true}
+                    onTouchEnd={stopBubbling}
+                    {...(eventBoundaryProps as any)}
+                  >
+                    <PluginThemeProvider theme={theme} layout={layout} flair={options.flair}>
+                      {options.renderModal({
+                        agentId,
+                        workspaceId: props.workspaceId ?? "",
+                        theme,
+                        layout,
+                        host: props.host ?? { id: "", label: "" },
+                        close: () => setCenteredOpen(agentId, false),
+                      })}
+                    </PluginThemeProvider>
+                  </View>
+                ) : null}
+              </Modal.Content>
+            </Modal>
+          </View>
         </>
       );
     };

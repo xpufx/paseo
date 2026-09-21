@@ -1,4 +1,5 @@
 export * from "./theme/index";
+export * from "./styles/index";
 export * from "./components/index";
 export * from "./layout/index";
 export * from "./pill";
