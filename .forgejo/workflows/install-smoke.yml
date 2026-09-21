@@ -105,7 +105,10 @@ jobs:
         env:
           RUNNER_OS: ${{ runner.os }}
           RUNNER_ARCH: ${{ runner.arch }}
+          FORGEJO_VARS_RUNNER_HOST: ${{ vars.XP_RUNNER_HOST }}
+          FORGEJO_ENV_RUNNER_HOST: ${{ env.XP_RUNNER_HOST }}
         run: |
+          XP_RUNNER_HOST="${XP_RUNNER_HOST:-${FORGEJO_VARS_RUNNER_HOST:-${FORGEJO_ENV_RUNNER_HOST:-}}}"
           runner_host="${XP_RUNNER_HOST:-<unset>}"
           printf 'Runner OS: %s\nRunner architecture: %s\nRunner host: %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host"
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then

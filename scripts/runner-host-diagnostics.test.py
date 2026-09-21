@@ -29,6 +29,21 @@ class RunnerHostDiagnosticsTests(unittest.TestCase):
         self.assertEqual(configured.stdout, "builder-west-01")
         self.assertEqual(unset.stdout, "<unset>")
 
+    def test_context_and_env_fallbacks(self):
+        command = '''
+XP_RUNNER_HOST="${XP_RUNNER_HOST:-${FORGEJO_VARS_RUNNER_HOST:-${FORGEJO_ENV_RUNNER_HOST:-}}}"
+runner_host="${XP_RUNNER_HOST:-<unset>}"
+printf %s "$runner_host"
+'''
+        for env_dict, expected in [
+            ({"XP_RUNNER_HOST": "host-env"}, "host-env"),
+            ({"FORGEJO_VARS_RUNNER_HOST": "var-host"}, "var-host"),
+            ({"FORGEJO_ENV_RUNNER_HOST": "context-env-host"}, "context-env-host"),
+            ({}, "<unset>"),
+        ]:
+            res = subprocess.run(["sh", "-ceu", command], env=env_dict, check=True, capture_output=True, text=True)
+            self.assertEqual(res.stdout, expected)
+
     def test_every_shared_job_reports_and_summarizes_the_host(self):
         for workflow in WORKFLOWS:
             contents = workflow.read_text(encoding="utf-8")
