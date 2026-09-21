@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync, existsSync, renameSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, renameSync, mkdirSync, watch, type FSWatcher } from "node:fs";
 export { directHostMismatch } from "../shared/registry.ts";
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 
 // All plugin state lives under a single namespaced subdir of paseo's home
 // (~/.paseo/paseo-x-comms/) rather than littering ~/.paseo root.
@@ -18,6 +18,158 @@ export function migrateFromRoot(oldName: string, newPath: string): void {
   if (!existsSync(oldPath) || existsSync(newPath)) return;
   mkdirSync(stateDir(), { recursive: true });
   renameSync(oldPath, newPath);
+}
+
+export interface RegistryDaemon {
+  name: string;
+  value: string;
+  valid: boolean;
+  error: string | null;
+  source?: "registry" | "configured-host";
+  serverId?: string | null;
+  status?: string | null;
+}
+
+export function currentHostsPath(): string {
+  const env = process.env.PASEO_HOSTS_FILE;
+  if (env && env.length > 0) return env;
+  return join(homedir(), ".paseo", "hosts.json");
+}
+
+export function parseConfiguredHosts(content: string): {
+  ok: boolean;
+  hosts: RegistryDaemon[];
+  parseError: string | null;
+} {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch (cause) {
+    return {
+      ok: false,
+      hosts: [],
+      parseError: cause instanceof Error ? cause.message : String(cause),
+    };
+  }
+
+  const items: Array<Record<string, unknown>> = [];
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
+      if (typeof item === "string") {
+        items.push({ endpoint: item });
+      } else if (item && typeof item === "object") {
+        items.push(item as Record<string, unknown>);
+      }
+    }
+  } else if (parsed && typeof parsed === "object") {
+    const rawObj = parsed as Record<string, unknown>;
+    if (Array.isArray(rawObj.hosts)) {
+      for (const item of rawObj.hosts) {
+        if (item && typeof item === "object") {
+          items.push(item as Record<string, unknown>);
+        }
+      }
+    } else {
+      for (const [key, val] of Object.entries(rawObj)) {
+        if (typeof val === "string") {
+          items.push({ name: key, endpoint: val });
+        } else if (val && typeof val === "object") {
+          items.push({ name: key, ...(val as Record<string, unknown>) });
+        }
+      }
+    }
+  } else {
+    return { ok: false, hosts: [], parseError: "configured hosts must be a JSON array or object" };
+  }
+
+  const hosts: RegistryDaemon[] = [];
+  for (const item of items) {
+    const endpointRaw = item.endpoint ?? item.target ?? item.url ?? item.offer;
+    const value = typeof endpointRaw === "string" ? endpointRaw.trim() : "";
+    const serverId = typeof item.serverId === "string" ? item.serverId.trim() : (deriveHostFromValue(value) ?? null);
+    const status = typeof item.status === "string" ? item.status.trim() : "online";
+    const rawName = item.label ?? item.name ?? serverId;
+    const name =
+      typeof rawName === "string" && rawName.trim().length > 0
+        ? rawName.trim()
+        : (serverId ?? "unnamed-host");
+
+    if (!value) {
+      hosts.push({
+        name,
+        value: "",
+        valid: false,
+        error: "missing endpoint / host value",
+        source: "configured-host",
+        serverId,
+        status,
+      });
+      continue;
+    }
+
+    const checked = validateDaemonHost(value);
+    hosts.push({
+      name,
+      value,
+      valid: checked.valid,
+      error: checked.error,
+      source: "configured-host",
+      serverId,
+      status,
+    });
+  }
+
+  return { ok: true, hosts, parseError: null };
+}
+
+export function loadConfiguredHosts(hostsPath: string = currentHostsPath()): RegistryDaemon[] {
+  if (!existsSync(hostsPath)) return [];
+  try {
+    const content = readFileSync(hostsPath, "utf8");
+    const parsed = parseConfiguredHosts(content);
+    return parsed.ok ? parsed.hosts : [];
+  } catch {
+    return [];
+  }
+}
+
+let activeWatcher: FSWatcher | null = null;
+
+export function startConfiguredHostsWatcher(
+  hostsPath: string = currentHostsPath(),
+  onChange?: (hosts: RegistryDaemon[]) => void,
+): () => void {
+  stopConfiguredHostsWatcher();
+  const dir = dirname(hostsPath);
+  if (!existsSync(dir)) {
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch {}
+  }
+
+  const reload = () => {
+    const hosts = loadConfiguredHosts(hostsPath);
+    onChange?.(hosts);
+  };
+
+  try {
+    activeWatcher = watch(dir, (eventType, filename) => {
+      if (!filename || filename === basename(hostsPath)) {
+        reload();
+      }
+    });
+  } catch {}
+
+  return () => stopConfiguredHostsWatcher();
+}
+
+export function stopConfiguredHostsWatcher(): void {
+  if (activeWatcher) {
+    try {
+      activeWatcher.close();
+    } catch {}
+    activeWatcher = null;
+  }
 }
 
 /** The plausible canonical forms paseo classifies as --host targets. */
@@ -99,16 +251,47 @@ export function validateDaemonName(name: string): { valid: boolean; error: strin
   return { valid: true, error: null };
 }
 
-/** Reads + validates the registry file, returning the entry list only. */
+export interface ReadRegistryOptions {
+  includeConfiguredHosts?: boolean;
+  hostsPath?: string;
+}
+
+/** Reads + validates the registry file, merging configured hosts unless excluded. */
 export function readRegistry(
   path: string,
-): { ok: boolean; exists: boolean; parseError: string | null; daemons: Array<{ name: string; value: string; valid: boolean; error: string | null }> } {
+  options?: ReadRegistryOptions,
+): { ok: boolean; exists: boolean; parseError: string | null; daemons: RegistryDaemon[] } {
+  const includeHosts = options?.includeConfiguredHosts !== false;
   if (!existsSync(path)) {
-    return { ok: true, exists: false, parseError: null, daemons: [] };
+    const configuredHosts = includeHosts ? loadConfiguredHosts(options?.hostsPath) : [];
+    return { ok: true, exists: false, parseError: null, daemons: configuredHosts };
   }
   const content = readFileSync(path, "utf8");
   const parsed = parseRegistry(content);
-  return { ok: parsed.ok, exists: true, parseError: parsed.parseError, daemons: parsed.daemons };
+  if (!parsed.ok) {
+    return { ok: false, exists: true, parseError: parsed.parseError, daemons: [] };
+  }
+  const manualDaemons: RegistryDaemon[] = parsed.daemons.map((d) => ({
+    ...d,
+    source: "registry" as const,
+    serverId: deriveHostFromValue(d.value) ?? null,
+  }));
+
+  if (!includeHosts) {
+    return { ok: true, exists: true, parseError: null, daemons: manualDaemons };
+  }
+
+  const configuredHosts = loadConfiguredHosts(options?.hostsPath);
+  const manualNames = new Set(manualDaemons.map((d) => d.name));
+  const merged: RegistryDaemon[] = [...manualDaemons];
+
+  for (const host of configuredHosts) {
+    if (!manualNames.has(host.name)) {
+      merged.push(host);
+    }
+  }
+
+  return { ok: true, exists: true, parseError: null, daemons: merged };
 }
 
 /**
@@ -123,9 +306,9 @@ export function mutateRegistry(
   saved: boolean;
   error: string | null;
   registryPath: string;
-  daemons: Array<{ name: string; value: string; valid: boolean; error: string | null }>;
+  daemons: RegistryDaemon[];
 } {
-  const current = readRegistry(path);
+  const current = readRegistry(path, { includeConfiguredHosts: false });
   if (!current.ok) {
     return {
       saved: false,
@@ -149,7 +332,13 @@ export function mutateRegistry(
     };
   }
 
-  const entries = Object.entries(next).map(([name, value]) => ({ name, value, ...validateDaemonHost(value) }));
+  const entries: RegistryDaemon[] = Object.entries(next).map(([name, value]) => ({
+    name,
+    value,
+    ...validateDaemonHost(value),
+    source: "registry" as const,
+    serverId: deriveHostFromValue(value) ?? null,
+  }));
   const invalid = entries.find((entry) => !entry.valid);
   if (invalid) {
     return {
@@ -176,12 +365,12 @@ export function mutateRegistry(
   }
   if (JSON.stringify(sortEntries(current.daemons)) === JSON.stringify(sortEntries(entries))) {
     // No change; still report success so the UI can settle.
-    return { saved: true, error: null, registryPath: path, daemons: entries };
+    return { saved: true, error: null, registryPath: path, daemons: readRegistry(path).daemons };
   }
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    return { saved: true, error: null, registryPath: path, daemons: entries };
+    return { saved: true, error: null, registryPath: path, daemons: readRegistry(path).daemons };
   } catch (cause) {
     return {
       saved: false,

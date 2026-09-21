@@ -40,6 +40,10 @@ const REMOTES_FILE =
   process.env.PASEO_X_COMMS_REMOTES ||
   join(REMOTES_DIR, "registry.json");
 
+const HOSTS_FILE =
+  process.env.PASEO_HOSTS_FILE ||
+  join(homedir(), ".paseo", "hosts.json");
+
 const PASEO = process.env.PASEO_X_COMMS_PASEO || "paseo";
 const DEFAULT_TIMEOUT_MS = Number(process.env.PASEO_X_COMMS_TIMEOUT_MS || 120000);
 
@@ -48,7 +52,50 @@ const EXTENSIONS_DIR =
 
 // daemons registry
 
-function loadDaemons() {
+function deriveHostFromOffer(value) {
+  const match = String(value).match(/#offer=([A-Za-z0-9_-]+)/);
+  if (!match) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(match[1], "base64").toString("utf8"));
+    return typeof payload.serverId === "string" ? payload.serverId : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadConfiguredHosts() {
+  if (!existsSync(HOSTS_FILE)) return {};
+  try {
+    const raw = JSON.parse(readFileSync(HOSTS_FILE, "utf8"));
+    const map = {};
+    const items = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === "object"
+      ? Array.isArray(raw.hosts)
+        ? raw.hosts
+        : Object.entries(raw).map(([key, val]) =>
+            typeof val === "string"
+              ? { name: key, endpoint: val }
+              : { name: key, ...(val && typeof val === "object" ? val : {}) },
+          )
+      : [];
+    for (const h of items) {
+      if (!h) continue;
+      const endpoint =
+        h.endpoint ?? h.target ?? h.url ?? h.offer ?? (typeof h === "string" ? h : null);
+      if (!endpoint || typeof endpoint !== "string") continue;
+      const name = h.label ?? h.name ?? h.serverId ?? deriveHostFromOffer(endpoint);
+      if (name && typeof name === "string") {
+        map[name.trim()] = endpoint.trim();
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function loadManualDaemons() {
   if (!existsSync(REMOTES_FILE)) return {};
   try {
     return JSON.parse(readFileSync(REMOTES_FILE, "utf8"));
@@ -57,7 +104,13 @@ function loadDaemons() {
   }
 }
 
-function saveDaemons(daemons) {
+function loadDaemons() {
+  const manual = loadManualDaemons();
+  const configured = loadConfiguredHosts();
+  return { ...configured, ...manual };
+}
+
+function saveManualDaemons(daemons) {
   mkdirSync(dirname(REMOTES_FILE), { recursive: true });
   writeFileSync(REMOTES_FILE, JSON.stringify(daemons, null, 2) + "\n", "utf8");
 }
@@ -211,7 +264,14 @@ async function senderMetaBlock(signal, target = {}, sender = {}, messageId = nul
 // tools
 
 const TOOL_SCHEMAS = {
-  listDaemons: {},
+  listDaemons: {
+    detailed: z
+      .boolean()
+      .optional()
+      .describe(
+        "If true, returns detailed metadata objects including daemon name, host target, serverId, status, and source.",
+      ),
+  },
   addDaemon: {
     name: z.string(),
     offer: z
@@ -442,8 +502,29 @@ async function handleSend(input, signal) {
 function registerTools(server) {
   registerTool(
     `${PREFIX}list_daemons`,
-    { title: "List daemons", description: "List configured paseo daemons (names only).", inputSchema: TOOL_SCHEMAS.listDaemons },
-    () => result(Object.keys(loadDaemons())),
+    {
+      title: "List daemons",
+      description: "List configured paseo daemons (names only by default, or detailed objects when detailed: true).",
+      inputSchema: TOOL_SCHEMAS.listDaemons,
+    },
+    (input) => {
+      const daemons = loadDaemons();
+      if (!input?.detailed) {
+        return result(Object.keys(daemons));
+      }
+      const manual = loadManualDaemons();
+      const details = Object.entries(daemons).map(([name, target]) => {
+        const isManual = manual[name] !== undefined;
+        return {
+          name,
+          target,
+          status: "online",
+          serverId: deriveHostFromOffer(target),
+          source: isManual ? "registry" : "configured-host",
+        };
+      });
+      return result(details);
+    },
   );
 
   registerTool(
@@ -455,10 +536,10 @@ function registerTools(server) {
       inputSchema: TOOL_SCHEMAS.addDaemon,
     },
     (input) => {
-      const daemons = loadDaemons();
-      daemons[input.name] = input.offer;
-      saveDaemons(daemons);
-      return result({ ok: true, daemons: Object.keys(daemons) });
+      const manual = loadManualDaemons();
+      manual[input.name] = input.offer;
+      saveManualDaemons(manual);
+      return result({ ok: true, daemons: Object.keys(loadDaemons()) });
     },
   );
 
@@ -470,11 +551,19 @@ function registerTools(server) {
       inputSchema: TOOL_SCHEMAS.removeDaemon,
     },
     (input) => {
-      const daemons = loadDaemons();
-      if (!(input.name in daemons)) throw new Error(`unknown daemon '${input.name}'`);
-      delete daemons[input.name];
-      saveDaemons(daemons);
-      return result({ ok: true, daemons: Object.keys(daemons) });
+      const manual = loadManualDaemons();
+      if (manual[input.name] === undefined) {
+        const configured = loadConfiguredHosts();
+        if (configured[input.name] !== undefined) {
+          throw new Error(
+            `cannot remove '${input.name}': daemon is managed via configured hosts (~/.paseo/hosts.json)`,
+          );
+        }
+        throw new Error(`unknown daemon '${input.name}'`);
+      }
+      delete manual[input.name];
+      saveManualDaemons(manual);
+      return result({ ok: true, daemons: Object.keys(loadDaemons()) });
     },
   );
 

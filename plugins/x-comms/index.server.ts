@@ -24,6 +24,7 @@ import {
   rememberPaseo,
   stopOutboxWorker,
 } from "./server/handlers";
+import { startConfiguredHostsWatcher } from "./server/registry";
 import { maybeRegisterInjection, toInjectionServer } from "./server/injection";
 import { handlePeerStatus } from "./server/peer-status";
 import {
@@ -77,7 +78,9 @@ export default function contribute(server: PluginServerContext) {
     void onLocalAgentArchived(agent).catch(() => {});
   });
   const removeInjection = maybeRegisterInjection(toInjectionServer(server), { enabled: injectionEnabled() });
+  const stopHostsWatcher = startConfiguredHostsWatcher();
   return () => {
+    stopHostsWatcher();
     stopOutboxWorker();
     removeInjection();
   };

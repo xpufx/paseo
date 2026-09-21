@@ -6,6 +6,8 @@ const DaemonEntrySchema = z.object({
   value: z.string(),
   valid: z.boolean(),
   error: z.string().nullable(),
+  source: z.enum(["registry", "configured-host"]).optional(),
+  status: z.string().nullable().optional(),
 });
 
 export const registryReadRpc = defineRpc({
