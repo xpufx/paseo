@@ -57,6 +57,16 @@ jobs:
     name: Ensure attention/0-orchestrator for human activity
     runs-on: runner-local-shell # host runner label; no container
     steps:
+      - name: Report runner diagnostics
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          runner_host="${XP_RUNNER_HOST:-<unset>}"
+          printf 'Runner OS: %s\nRunner architecture: %s\nRunner host: %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Set attention/0-orchestrator (human only)
         env:
           # Forgejo auto-injects the run's own task token under these names; it

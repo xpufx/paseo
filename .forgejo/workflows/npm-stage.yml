@@ -40,6 +40,17 @@ jobs:
       npm_config_cache: /tmp/paseo-npm-pack-cache
       NPM_TOKEN: ${{ secrets.NPM_STAGE || secrets.NPM_TOKEN }}
     steps:
+      - name: Report runner diagnostics
+        env:
+          RUNNER_OS: ${{ runner.os }}
+          RUNNER_ARCH: ${{ runner.arch }}
+        run: |
+          runner_host="${XP_RUNNER_HOST:-<unset>}"
+          printf 'Runner OS: %s\nRunner architecture: %s\nRunner host: %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - uses: actions/checkout@v4
 
       - name: Toolchain
