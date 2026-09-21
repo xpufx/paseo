@@ -1053,7 +1053,7 @@ interface ModalBodyProps {
  * Adding the `"required"` member is additive: the existing two values keep
  * their meaning and the default stays `"helper"`.
  */
-type ModalBodyScrollOwner = "helper" | "host" | "required";
+type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
 declare const ModalBodyScrollOwnerContext: React__default.Context<ModalBodyScrollOwner>;
 /**
  * Mobile-safe scrollable body for Paseo <Modal.Content>.
@@ -1098,31 +1098,29 @@ declare function ModalBody({ children, style, contentContainerStyle, header, hea
 
 interface ModalContentProps extends Omit<ModalBodyProps, "scrollMode"> {
     children: ReactNode;
+    /**
+     * Whether the host owns the outer scroll container.
+     * Defaults to `true` so host desktop mouse wheel, trackpad, and mobile bottom
+     * sheet gestures scroll natively without fighting an inner scroller.
+     * Set to `false` only if the modal contains a custom internal scroller
+     * (e.g. virtualized list or canvas).
+     */
+    scrollable?: boolean;
 }
 /**
  * Helper-owned modal body for plugins that open their own host `<Modal>`.
  *
- * Use this instead of the raw host `<Modal.Content>`: it wraps the host content
- * view AND the shared `ModalBody` contract in one element, so a plugin cannot
- * accidentally end up content-sized.
+ * Delegates scroll ownership to the host `<Modal.Content>` (scrollable by default)
+ * so desktop mouse wheel, trackpad, and mobile bottom sheet gestures scroll
+ * natively under Paseo host rules without fighting an inner scroller.
  *
- * Why the raw host `Modal.Content` resizes: Paseo maps
- * `<Modal.Content scrollable={true}>` (the host default) to a desktop card with
- * no explicit height, so the dialog grows/shrinks with its children on every
- * data change. This wrapper always passes `scrollable={false}`, which makes the
- * host allocate a bounded dialog (`desktopHeight: "85%"`). Because that host
- * content view then supplies no scroller, the wrapper also forces
- * `ModalBody scrollMode="always"`, so the helper owns the one scroll region on
- * every surface and the bounded dialog scrolls instead of clipping.
- *
- * The size contract is `ModalBody`'s: it takes the host-allocated dialog size
- * and is fluid within it; `size?: "default" | "large"` is the only size escape
- * hatch. Do not add per-plugin width/minWidth/height literals around it.
+ * Sizing stays fluid within the host-allocated modal frame, respecting
+ * `size?: "default" | "large"`.
  *
  * ```tsx
  * <Modal title="…" open={open} onOpenChange={setOpen}>
  *   <ModalContent size="default">
- *     …cards, controls, rows; content never drives the dialog frame…
+ *     …cards, controls, rows…
  *   </ModalContent>
  * </Modal>
  * ```
@@ -1130,7 +1128,7 @@ interface ModalContentProps extends Omit<ModalBodyProps, "scrollMode"> {
  * Accepts every `ModalBody` prop (header, headerMode, refreshing, onRefresh,
  * stickToEnd, scrollRef, debugTag, style, contentContainerStyle, …).
  */
-declare function ModalContent({ children, ...bodyProps }: ModalContentProps): React__default.JSX.Element;
+declare function ModalContent({ children, scrollable, ...bodyProps }: ModalContentProps): React__default.JSX.Element;
 
 interface ActionBarProps {
     children: ReactNode;
@@ -1493,8 +1491,10 @@ interface ClipboardEnvironment {
  * `react-native-web` `Clipboard.setString` reports success even when its
  * `document.execCommand("copy")` fails, which leaves the previous clipboard
  * item in place while the UI claims success (xpufx-org/paseo#278); it is only
- * usable off-DOM (native), where it is the real platform clipboard. In a DOM
- * the checked `execCommand` fallback is preferred to that unverifiable path.
+ * usable off-DOM (native), where it is the real platform clipboard. The same
+ * applies to any `setStringAsync` whose DOM fallback is that unverified
+ * `execCommand`. In a DOM the checked `execCommand` fallback is preferred to
+ * those unverifiable paths.
  */
 declare function clipboardTierOrder(env: ClipboardEnvironment): ClipboardTier[];
 /**

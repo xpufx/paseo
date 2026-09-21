@@ -480,7 +480,7 @@ export function registerComposerPill<TPayload = any>(
     host?: { id: string; label: string };
     close: () => void;
   }) {
-    const { width: windowWidth } = useWindowDimensions();
+    const { width: windowWidth, height: windowHeight } = useWindowDimensions();
     // The anchored popover is otherwise sized from its content, so reflowing
     // content can move the frame under the pointer. Pin it to an explicit width
     // (clamped to the viewport) and let children overflow into their own
@@ -489,6 +489,11 @@ export function registerComposerPill<TPayload = any>(
       !props.layout.compact && options.popoverWidth
         ? Math.max(0, Math.min(options.popoverWidth, windowWidth - 24))
         : undefined;
+    // The host remains the scroll owner, but it needs a finite child extent to
+    // establish the popover viewport. Do not add overflow clipping or an inner
+    // ScrollView here: either would compete with the host's popover/sheet
+    // scroller.
+    const frameMaxHeight = Math.max(1, Math.min(560, windowHeight * 0.8));
     // Layout effect, not effect: the flag must be set in the same commit the
     // popover mounts, before any label timer can interleave. An effect runs
     // after paint, leaving a window where one tick can still publish and
@@ -508,8 +513,14 @@ export function registerComposerPill<TPayload = any>(
     };
     return (
       <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
-        <View style={[styles.popoverContainer, frameWidth ? { width: frameWidth } : null]}>
-          <ModalBodyScrollOwnerContext.Provider value="host">
+        <View
+          style={{
+            ...styles.popoverContainer,
+            maxHeight: frameMaxHeight,
+            ...(frameWidth ? { width: frameWidth } : null),
+          }}
+        >
+          <ModalBodyScrollOwnerContext.Provider value="popover">
             {options.renderModal?.({ ...pillProps, close: props.close })}
           </ModalBodyScrollOwnerContext.Provider>
         </View>

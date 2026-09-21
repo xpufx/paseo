@@ -6,7 +6,7 @@ const source = readFileSync(new URL("./x-comms-conversation.tsx", import.meta.ur
 
 describe("new conversation picker", () => {
   it("uses the host modal scroller and semantic pressable rows", () => {
-    assert.match(source, /<Modal\.Content>/);
+    assert.match(source, /<ModalContent[^>]*size="large"/);
     assert.match(source, /accessibilityLabel=\{`Start a conversation with \$\{configuredAgent\.name\}/);
     assert.match(source, /accessibilityLabel=\{`Start a conversation with \$\{a\.name\}/);
     assert.equal((source.match(/accessibilityRole="button"/g) ?? []).length >= 2, true);

@@ -103,8 +103,10 @@ describe("0.8 popover scroll ownership (#110)", () => {
     const scrolls = renderer.root.findAllByType(ScrollView);
     expect(scrolls.length).toBe(0);
 
-    // The helper must not impose a fixed height or clipping overflow: Paseo's
-    // FloatingScrollView/BottomSheetScrollView owns the viewport.
+    // The helper supplies only a finite max-height so Paseo can establish its
+    // viewport; it must not impose a fixed height, clipping, or an inner
+    // ScrollView that would take ownership from FloatingScrollView/
+    // BottomSheetScrollView.
     const views = renderer.root.findAllByType(View);
     const containers = views.filter((v: any) => {
       const s = v.props.style;
@@ -112,12 +114,17 @@ describe("0.8 popover scroll ownership (#110)", () => {
       return flat && flat.width === "100%";
     });
     expect(containers.length).toBeGreaterThan(0);
+    expect(containers.some((c: any) => {
+      const s: any = Array.isArray(c.props.style)
+        ? Object.assign({}, ...c.props.style)
+        : c.props.style;
+      return typeof s.maxHeight === "number" && s.maxHeight > 0;
+    })).toBe(true);
     for (const c of containers) {
       const s: any = Array.isArray(c.props.style)
         ? Object.assign({}, ...c.props.style)
         : c.props.style;
       expect(s.height).toBeUndefined();
-      expect(s.maxHeight).toBeUndefined();
       expect(s.overflow).toBeUndefined();
     }
     cleanup();

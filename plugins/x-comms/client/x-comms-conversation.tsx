@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Clipboard, Pressable, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
-import { TextInput } from "./vendor/paseo-plugin-helper/index";
+import { ModalContent, TextInput } from "./vendor/paseo-plugin-helper/index";
 import { buildXCommsEnvelope } from "../shared/envelope";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
@@ -477,12 +477,7 @@ export function CrossDaemonConversation({
         </View>
       ) : null}
       <Modal title="New conversation" open={pickerOpen} onOpenChange={setPickerOpen}>
-        {/*
-         * ModalContent makes the host allocate a bounded frame and owns the
-         * single picker scroller. This keeps long host/agent lists reachable
-         * without a nested sheet scroller on either desktop or mobile.
-         */}
-        <Modal.Content>
+        <ModalContent size="large">
           <View>
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 4, textTransform: "uppercase" as const }}>
               Configured hosts
@@ -551,7 +546,7 @@ export function CrossDaemonConversation({
             ))}
           </View>
           <ViaXComms theme={theme} />
-        </Modal.Content>
+        </ModalContent>
       </Modal>
       <ViaXComms theme={theme} />
     </View>

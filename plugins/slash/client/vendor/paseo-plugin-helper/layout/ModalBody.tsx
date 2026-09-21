@@ -88,7 +88,7 @@ export interface ModalBodyProps {
  * Adding the `"required"` member is additive: the existing two values keep
  * their meaning and the default stays `"helper"`.
  */
-export type ModalBodyScrollOwner = "helper" | "host" | "required";
+export type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
 
 export const ModalBodyScrollOwnerContext = createContext<ModalBodyScrollOwner>("helper");
 
@@ -154,7 +154,7 @@ export function ModalBody({
 }: ModalBodyProps) {
   const { isCompact, isMobile, layout, padding, colors } = usePluginTheme();
   const scrollOwner = useContext(ModalBodyScrollOwnerContext);
-  const hostOwnsScroll = scrollOwner === "host";
+  const hostOwnsScroll = scrollOwner === "host" || scrollOwner === "popover";
   // "required": an ancestor proved the host supplies no scroller (plugin
   // surface) — own the scroll on every surface, including non-compact desktop.
   const helperOwnsScroll =
@@ -165,7 +165,7 @@ export function ModalBody({
   // already full-bleed, and a composer popover viewport is host-owned and
   // intentionally narrow, so both ignore the preset.
   const sizeStyle =
-    size === "large" && !isMobile && !isCompact && !hostOwnsScroll
+    size === "large" && !isMobile && !isCompact && scrollOwner !== "popover"
       ? styles.largeDialog
       : undefined;
   const ResolvedScrollView = selectHostScrollView(

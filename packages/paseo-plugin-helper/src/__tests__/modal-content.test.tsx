@@ -63,17 +63,17 @@ const flatten = (style: unknown): Record<string, unknown> => {
 };
 
 describe("ModalContent host allocation", () => {
-  it("always disables host content scrolling so the desktop card is bounded", () => {
+  it("enables host content scrolling by default so the desktop card scrolls natively", () => {
     installStubs(false, false);
     render(
       <ModalContent>
         <Text>body</Text>
       </ModalContent>,
     );
-    expect(hostContentProps?.scrollable).toBe(false);
+    expect(hostContentProps?.scrollable).toBe(true);
   });
 
-  it("renders the shared ModalBody so content cannot drive the frame", () => {
+  it("renders the shared ModalBody without adding a nested scroller when host scrolls", () => {
     installStubs(false, false);
     const r = render(
       <ModalContent>
@@ -81,13 +81,9 @@ describe("ModalContent host allocation", () => {
       </ModalContent>,
     );
     expect(r.root.findByProps({ testID: "host-modal-content" })).toBeTruthy();
-    // The host content view is bounded, so ModalContent forces the helper to
-    // own the scroller even on a non-compact desktop surface.
-    const scroller = r.root.findAllByType(ScrollView)[0];
-    const style = flatten(scroller.props.style);
-    expect(style.flex).toBe(1);
-    expect(style.minHeight).toBe(0);
-    expect(style.width).toBe("100%");
+    // Host content view owns the scroller, so ModalBody renders plain content without
+    // a competing inner ScrollView.
+    expect(r.root.findAllByType(ScrollView)).toHaveLength(0);
   });
 
   it("forwards the size preset to ModalBody", () => {
@@ -101,10 +97,10 @@ describe("ModalContent host allocation", () => {
     expect(wide.length).toBeGreaterThan(0);
   });
 
-  it("defers to the host scroller on compact hosts instead of sizing to content", () => {
-    installStubs(true, false);
+  it("allows opt-out via scrollable={false} when plugin owns internal scroller", () => {
+    installStubs(false, false);
     const r = render(
-      <ModalContent>
+      <ModalContent scrollable={false}>
         <Text>body</Text>
       </ModalContent>,
     );
