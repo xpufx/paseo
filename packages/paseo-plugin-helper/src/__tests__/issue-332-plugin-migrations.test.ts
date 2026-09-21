@@ -10,7 +10,7 @@ function source(...parts: string[]): string {
   return fs.readFileSync(path.join(root, ...parts), "utf8");
 }
 
-describe("#332 helper UI migrations", () => {
+describe("#219 remaining helper UI migrations", () => {
   it("keeps top's composer and sidebar on helper-owned contracts without a width cap", () => {
     const pill = source("plugins", "top", "client", "pill.tsx");
     const surface = source("plugins", "top", "client", "surface.tsx");
