@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -201,6 +202,19 @@ describe("mcp injection", () => {
       const [script] = entry?.args ?? [];
       assert.ok(script, "hook must inject the server script");
       assert.ok(!script.includes("/checkout/"), `injected path must not rot on update: ${script}`);
+    });
+  });
+
+  it("stable bundled server has valid JavaScript syntax and exactly one shebang (#359)", () => {
+    withSandboxedHome(() => {
+      const config = injectionServerConfig();
+      const [script] = config.args ?? [];
+      assert.ok(script && existsSync(script), "stable server must exist");
+      const lines = readFileSync(script, "utf8").split("\n");
+      assert.equal(lines[0], "#!/usr/bin/env node");
+      assert.notEqual(lines[1], "#!/usr/bin/env node", "bundled file must not have double shebang (#359)");
+      const check = spawnSync(process.execPath, ["--check", script], { encoding: "utf8" });
+      assert.equal(check.status, 0, `node --check failed: ${check.stderr}`);
     });
   });
 });
