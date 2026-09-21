@@ -1,6 +1,6 @@
 # paseo-top
 
-Live host system resource monitor and telemetry provider for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
+Live host system resource monitor and telemetry provider for [Paseo](https://github.com/getpaseo/paseo).
 
 Displays real-time host metrics, session metadata, turn telemetry, and custom pill widgets directly in the composer track bar without cluttering the interface. Automatically stamps performance summaries into agent conversation timelines and provides an interactive modal dashboard with live gauges.
 
@@ -81,18 +81,16 @@ Clicking the pill opens a native dashboard with:
 
 ## Installation
 
-Install using the native Paseo monorepo subpath syntax:
+Install from npm:
 
-```bash
-paseo plugin add xpufx/paseo --path plugins/top
+```sh
+paseo plugin add npm:@xpufx/paseo-top
 ```
 
-For local development:
+Or install directly from the Git repository:
 
-```bash
-git clone git@github.com:xpufx/paseo.git
-cd paseo
-paseo plugin add ./plugins/top
+```sh
+paseo plugin add xpufx/paseo --path plugins/top
 ```
 
 ## Development

@@ -1,6 +1,6 @@
 # plugin-updates
 
-Read-only Git-source update monitor for [Paseo](https://github.com/getpaseo/paseo) plugins (v0.8+).
+Read-only Git-source update monitor for [Paseo](https://github.com/getpaseo/paseo) plugins.
 
 <table align="center">
   <tr>
@@ -47,7 +47,7 @@ Each row resolves the plugin to its git repository root, ref, and subdirectory, 
 
 ### 5. Native lifecycle blocker
 
-The 0.9.0-beta.2 daemon client has native plugin preview/proposal/apply/reload methods, but they are not exposed through the plugin-facing `PaseoApi` returned by `getPaseoClient(serverId)`. The server lifecycle API is limited to agent/workspace events. Consequently this plugin deliberately has no update action for managed Git or npm sources, local directories, or self-update: it never spawns `paseo plugin update`, pulls, or reloads another plugin.
+The daemon client has native plugin preview/proposal/apply/reload methods, but they are not exposed through the plugin-facing `PaseoApi` returned by `getPaseoClient(serverId)`. The server lifecycle API is limited to agent/workspace events. Consequently this plugin deliberately has no update action for managed Git or npm sources, local directories, or self-update: it never spawns `paseo plugin update`, pulls, or reloads another plugin.
 
 `useHosts()` is not an update lifecycle API. Choosing a configured host could operate on a different daemon than the installation being displayed, so it is never used as a targeting substitute. Use the host's own plugin management UI/CLI to review and apply updates. The Git diagnostics remain available because native source metadata does not expose their per-subdirectory tree/ref comparison.
 
@@ -60,16 +60,22 @@ The 0.9.0-beta.2 daemon client has native plugin preview/proposal/apply/reload m
 
 ## Installation
 
-Install from the public monorepo subpath (GitHub shorthand):
+Install from npm:
+
+```sh
+paseo plugin add npm:@xpufx/paseo-plugin-updates
+```
+
+Or install directly from the Git repository:
 
 ```sh
 paseo plugin add xpufx/paseo --path plugins/plugin-updates
 ```
 
 > [!NOTE]
-> Bare `owner/repo` shorthand resolves against **GitHub** only. For any other forge, pass the full git URL instead, for example `https://git.example.com/owner/repo`.
+> Bare `owner/repo` shorthand resolves against **GitHub** only. For another forge, pass the full Git URL instead, for example `https://git.example.com/owner/repo`.
 
-For local development:
+For local development, clone the repository and add the plugin directory:
 
 ```sh
 git clone https://github.com/xpufx/paseo.git

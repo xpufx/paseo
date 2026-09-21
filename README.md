@@ -13,23 +13,31 @@ Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared ru
 - [`plugins/top/`](plugins/top/) — Live host system resource monitor, timeline telemetry, and customizable metric pills (v0.4.0).
 - [`packages/paseo-plugin-helper/`](packages/paseo-plugin-helper/) — Shared runtime library for Paseo plugins (UI components, server utilities, RPC contracts, settings schema, and testing harness). Published to npm as `paseo-plugin-helper`.
 - [`plugins/mcp-tools/`](plugins/mcp-tools/) — MCP server fleet management and diagnostic plugin.
-- [`plugins/x-comms/`](plugins/x-comms/) — Cross-daemon agent conversation mesh plugin (coming soon).
+- [`plugins/x-comms/`](plugins/x-comms/) — Cross-daemon agent conversation mesh plugin.
 - [`plugins/forges/`](plugins/forges/) — Forge/Gitea-family issue tracker and workflow integration plugin.
 - [`plugins/slash/`](plugins/slash/) — Slash-command console: manage and run custom composer slash commands.
-- [`plugins/twofado/`](plugins/twofado/) — Approval-gate surface for the 2fado privileged-command daemon (coming soon).
+- [`plugins/twofado/`](plugins/twofado/) — Approval-gate surface for the 2fado privileged-command daemon.
 - [`plugins/plugin-updates/`](plugins/plugin-updates/) — Git-source update monitor for installed plugins.
 - [`plugins/demo/`](plugins/demo/) — Conformance testbed and canonical showcase for `paseo-plugin-helper` primitives.
 
 ## Installation
 
-Plugins install individually via native Paseo 0.8 monorepo subpath syntax:
+Install each plugin from npm:
+
+```sh
+# Host system resource monitor
+paseo plugin add npm:@xpufx/paseo-top
+```
+
+Or install directly from this Git repository:
 
 ```sh
 # Host system resource monitor
 paseo plugin add xpufx/paseo --path plugins/top
 ```
 
-*(Additional plugins will be enabled for public install as their releases are finalized.)*
+Replace `top` with any published plugin ID listed above. Each plugin README has
+copy-paste commands for that plugin.
 
 ## Development
 
@@ -42,13 +50,13 @@ make reload     # Auto-rebuild helper, stamp git versions, and reload daemons
 
 ## Branch & Backport Policy
 
-- **`main`** — SDK 0.9 mainline. Feature work targets here.
-- **`release/0.8`** — SDK 0.8 maintenance. Preserved baseline; only necessary
-  bug/security fixes.
+- **`main`** — Current SDK mainline. Feature work targets here.
+- **Maintenance branch** — Preserved baseline; only necessary bug and security
+  fixes belong here.
 
-Normal PRs target `main`; only bug/security fixes are backported to
-`release/0.8`, generally landing on `main` first. Milestones: 0.8.x fixes →
-`0.8.x Maintenance`; 0.9 work → `0.9.0 Features` / `0.9.0 Migration`.
+Normal PRs target `main`; only bug and security fixes are backported to the
+maintenance branch, generally landing on `main` first. Milestones distinguish
+maintenance fixes from current feature and migration work.
 
 See [`docs/branch-policy.md`](docs/branch-policy.md) for details.
 
@@ -88,9 +96,7 @@ npm staging; the human runs `npm stage approve <stage-id>` (2FA).
 Published plugins are tested with Node.js **18 or later** by
 `npm run test:npm-acquisition`: each package is packed, installed into a new
 consumer with production dependencies only and lifecycle scripts disabled, and
-then only its `paseo-plugin.json` build commands run. `top` and
-`plugin-updates` support Paseo **>= 0.8.0**. `x-comms` uses the 0.9 multi-host
-client/protocol APIs and requires Paseo **>= 0.9.0-beta.2**.
+then only its `paseo-plugin.json` build commands run.
 
 ## Storage Namespace
 

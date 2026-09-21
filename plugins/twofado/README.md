@@ -3,7 +3,7 @@
 > **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
 Approval-gate UI for the **2fado** privileged-command daemon, for
-[Paseo](https://github.com/getpaseo/paseo) (v0.8+).
+[Paseo](https://github.com/getpaseo/paseo).
 
 Surfaces pending risky command requests from `2fadod` and lets a human
 approve, deny, or acknowledge them without leaving Paseo. The plugin also
@@ -50,6 +50,14 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 - `twofado.settings`: socket path, notification target, and Telegram config.
 
 ## Install
+
+Install from npm:
+
+```sh
+paseo plugin add npm:@xpufx/paseo-twofado
+```
+
+Or install directly from the Git repository:
 
 ```sh
 paseo plugin add xpufx/paseo --path plugins/twofado

@@ -1,6 +1,6 @@
 # s/ash
 
-Slash-command console for [Paseo](https://github.com/getpaseo/paseo) (v0.8+).
+Slash-command console for [Paseo](https://github.com/getpaseo/paseo).
 
 <p align="center">
   <img src="docs/screenshots/slash-console.jpg" alt="S/ash console — command repository, prefix, and shipped catalog" width="380">
@@ -46,6 +46,14 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
   versioned bundle.
 
 ## Install
+
+Install from npm:
+
+```sh
+paseo plugin add npm:@xpufx/paseo-slash
+```
+
+Or install directly from the Git repository:
 
 ```sh
 paseo plugin add xpufx/paseo --path plugins/slash

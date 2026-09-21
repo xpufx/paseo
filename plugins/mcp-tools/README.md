@@ -67,17 +67,25 @@ See the complete step-by-step guide in the [write-mcp-provider skill](.agents/sk
 
 ## Install & Updates
 
-```bash
-# from git (recommended)
-paseo plugin add xpufx/paseo-mcp-tools
+Install from npm:
 
-# update to latest release
+```sh
+paseo plugin add npm:@xpufx/paseo-mcp-tools
+```
+
+Or install directly from the Git repository:
+
+```sh
+paseo plugin add xpufx/paseo --path plugins/mcp-tools
+```
+
+To update or reload the installed plugin:
+
+```sh
+# update to the latest release
 paseo plugin update mcp-tools
 
-# or from a local checkout (path-linked for development)
-paseo plugin install "$PWD"
-
-# reload daemon process after local edits
+# reload the daemon process after local edits
 paseo plugin reload mcp-tools
 ```
 

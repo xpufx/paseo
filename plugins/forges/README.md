@@ -56,18 +56,16 @@ See [`docs/workflow.md`](./docs/workflow.md) for the end-to-end architecture and
 
 ## Install
 
-The plugin uses the Paseo 0.8 layout (`index.client.tsx` / `index.server.ts`
-entries, `client/` / `server/` / `shared/` split, manifest
-`requirements.paseo >= 0.8.0`).
+Install from npm:
+
+```sh
+paseo plugin add npm:@xpufx/paseo-forges
+```
+
+Or install directly from the Git repository:
 
 ```sh
 paseo plugin add xpufx/paseo --path plugins/forges
-```
-
-Or from a local monorepo checkout:
-
-```sh
-paseo plugin add ./plugins/forges
 ```
 
 ## Configuration

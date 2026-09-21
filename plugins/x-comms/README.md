@@ -2,7 +2,7 @@
 
 > **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
-> Tracks Paseo 0.9 (`@getpaseo/* 0.9.0-beta.2`, manifest requires `paseo >= 0.9.0-beta.2`) for multi-host APIs. Expect breaking changes between versions.
+> Uses current Paseo multi-host APIs. Expect breaking changes as the platform evolves.
 
 [paseo](https://paseo.sh) is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions. **paseo-x-comms** lets agents on one daemon talk to agents on another — even across hosts — via the daemon relay (WebSocket + E2EE) or direct TCP.
 
@@ -30,13 +30,19 @@ The plugin embeds the MCP server and adds the X-comms UI. Agents get `x_comms_*`
 
 ### Install
 
-The plugin lives at the repo root (`paseo-plugin.json` id `x-comms`):
+Install the Paseo plugin from npm:
 
 ```sh
-paseo plugin add xpufx/paseo-x-comms
+paseo plugin add npm:@xpufx/paseo-x-comms
 ```
 
-The plugin requires **npm** and **Node.js** (v18+) in `$PATH`, plus Paseo **0.9.0-beta.2 or later**: the server bundle uses `@getpaseo/client` and `@getpaseo/protocol`, so `paseo-plugin.json` declares its production-only, lifecycle-disabled `npm install` build command. `paseo-plugin-helper` is vendored under `client/`, `server/`, `shared/` and bundled from source. The MCP server is spawned from `./mcp` and resolves its deps (`@modelcontextprotocol/sdk`, `zod`, etc.) from the installed tree.
+Or install the plugin directly from the Git repository:
+
+```sh
+paseo plugin add xpufx/paseo --path plugins/x-comms
+```
+
+The plugin requires **npm** and **Node.js** (v18+) in `$PATH`. It embeds and starts its MCP server automatically; do not install the standalone CLI for a plugin installation.
 
 To update:
 
@@ -89,8 +95,8 @@ A held message expires after **10 minutes** by default (configurable in the sett
 
 ```
 .
-├── index.client.tsx          # Paseo 0.9 client entry (surfaces, pill, panel, timeline renderers)
-├── index.server.ts           # Paseo 0.9 server entry (RPC + presence + injection handlers)
+├── index.client.tsx          # Paseo client entry (surfaces, pill, panel, timeline renderers)
+├── index.server.ts           # Paseo server entry (RPC + presence + injection handlers)
 ├── client/
 │   ├── main.tsx              # Main surface (daemon registry + health + prompt)
 │   ├── x-comms-pill.tsx      # Composer pill → conversation panel
@@ -120,13 +126,13 @@ A held message expires after **10 minutes** by default (configurable in the sett
 │   ├── paseo-x-comms.mjs      # MCP server (also bin `paseo-x-comms`)
 │   ├── README.md              # standalone server docs
 │   └── test/protocol.test.mjs
-├── paseo-plugin.json         # id x-comms, requires paseo >= 0.9.0-beta.2
+├── paseo-plugin.json         # plugin manifest (id x-comms)
 └── package.json               # single install at root for plugin + server
 ```
 
-## Standalone MCP
+## Standalone MCP server CLI (not the plugin)
 
-If you don't use the plugin, run the server directly:
+Use this only when you want the MCP server without the Paseo plugin or its UI:
 
 ```sh
 npm install -g @xpufx/paseo-x-comms
