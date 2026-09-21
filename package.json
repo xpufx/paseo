@@ -14,7 +14,8 @@
     "plugins/slash",
     "plugins/plugin-updates",
     "plugins/twofado",
-    "plugins/uppidi-forge"
+    "plugins/uppidi-forge",
+    "plugins/wellbeing"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",

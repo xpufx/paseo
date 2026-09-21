@@ -1,0 +1,35 @@
+{
+  "name": "@xpufx/paseo-wellbeing",
+  "version": "0.1.0",
+  "description": "Operator presence tracking, circadian schedule management, and fatigue/wind-down alerting for Paseo",
+  "private": false,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npx tsx --test server/presence.test.ts client/entry.test.ts"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "0.9.0-beta.2",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/react": "^19.0.10",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  },
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE",
+    "index.client.tsx",
+    "index.server.ts",
+    "client",
+    "server",
+    "shared"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xpufx/paseo.git"
+  }
+}
