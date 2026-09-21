@@ -53,7 +53,7 @@ check("--publish + --clean-stage rejected", throws(() => parseArgs(["--publish",
 
 // --- discovery + readiness ---
 const ids = pluginIds();
-check("discovers the 8 plugins", ids.length === 8 && ids.includes("top") && ids.includes("mcp-tools"));
+check("discovers the 9 plugins", ids.length === 9 && ids.includes("top") && ids.includes("mcp-tools") && ids.includes("uppidi-forge"));
 const top = manifestFor("top");
 check("top is READY", readiness(top).length === 0);
 check("top publish name is scoped", top.publishAs === "@xpufx/paseo-top");
