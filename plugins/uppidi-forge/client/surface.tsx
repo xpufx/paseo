@@ -1,43 +1,167 @@
 import React, { useMemo, useState } from "react";
+import { Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { Icon } from "@getpaseo/plugin/client/react-native";
+import {
+  ActionBar,
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  DataTable,
+  EmptyState,
+  Grid,
+  KeyValue,
+  KeyValueGroup,
+  ModalBody,
+  Row,
+  SearchInput,
+  Stack,
+  StatusDot,
+  Tabs,
+  usePluginTheme,
+} from "paseo-plugin-helper/client";
 import type { AttentionLabel, ForgeIssue } from "../shared/types";
+import { UppidiForgeStaticMockup } from "./static-mockup";
 
 type Filter = "all" | "needs-you" | "in-flight" | "review";
-type DashboardIssue = Pick<ForgeIssue, "number" | "title" | "labels" | "comments"> & { attention: AttentionLabel; status: "Backlog" | "In progress" | "Review"; repo: string; branch?: string };
+type SurfaceTab = "dashboard" | "mockup";
+type DashboardIssue = Pick<ForgeIssue, "number" | "title" | "labels" | "comments"> & {
+  attention: AttentionLabel;
+  status: "Backlog" | "In progress" | "Review";
+  repo: string;
+  branch?: string;
+};
+
 const issues: DashboardIssue[] = [
   { number: 42, title: "Add workspace dispatch controls", repo: "uppidi-forge", attention: "attention/1-agent", status: "In progress", branch: "feat/42-dispatch", comments: 3, labels: [] },
   { number: 38, title: "Confirm release verification checklist", repo: "paseo", attention: "attention/2-user", status: "Review", comments: 7, labels: [] },
   { number: 31, title: "Triage incoming repository hooks", repo: "uppidi-forge", attention: "attention/0-orchestrator", status: "Backlog", comments: 1, labels: [] },
   { number: 27, title: "Keep worktree activity in sync", repo: "paseo", attention: "attention/1-agent", status: "In progress", branch: "fix/27-worktree-sync", comments: 2, labels: [] },
 ];
-const filterLabels: Record<Filter, string> = { all: "All work", "needs-you": "Needs you", "in-flight": "In flight", review: "Review" };
-const attention: Record<AttentionLabel, string> = { "attention/0-orchestrator": "Orchestrator", "attention/1-agent": "Agent", "attention/2-user": "You" };
 
-export const UppidiForgeSurface: React.FC<PluginSurfaceProps> = () => {
-  const [filter, setFilter] = useState<Filter>("all");
-  const [selectedNumber, setSelectedNumber] = useState(42);
-  const [notice, setNotice] = useState("Everything is ready to orchestrate.");
-  const visible = useMemo(() => issues.filter((issue) => filter === "all" || (filter === "needs-you" && issue.attention === "attention/2-user") || (filter === "in-flight" && issue.status === "In progress") || (filter === "review" && issue.status === "Review")), [filter]);
-  const selected = issues.find((issue) => issue.number === selectedNumber) ?? visible[0] ?? issues[0];
-  return <View style={styles.container}>
-    <View style={styles.header}><View><View style={styles.titleRow}><Icon name="GitPullRequest" size={22} color="#58d6ff" /><Text style={styles.title}>Uppidi Forge</Text><View style={styles.connected}><View style={styles.dot} /><Text style={styles.connectedText}>CONNECTED</Text></View></View><Text style={styles.subtitle}>One place for triage, active work, and review decisions.</Text></View><Pressable accessibilityRole="button" onPress={() => setNotice("Dashboard refreshed. Forgejo RPC data can replace this local snapshot without changing the surface.")} style={styles.refresh}><Icon name="RefreshCw" size={15} color="#c9d1d9" /><Text style={styles.refreshText}>Refresh</Text></Pressable></View>
-    <View style={styles.filters}>{(Object.keys(filterLabels) as Filter[]).map((value) => <Pressable key={value} accessibilityRole="button" onPress={() => setFilter(value)} style={[styles.filter, filter === value && styles.filterActive]}><Text style={[styles.filterText, filter === value && styles.filterTextActive]}>{filterLabels[value]}</Text></Pressable>)}<Text style={styles.updated}>Updated just now</Text></View>
-    <ScrollView contentContainerStyle={styles.content}>
-      <View style={styles.metrics}><Metric icon="CircleDot" label="Open issues" value="12" detail="across 2 repos" color="#58d6ff" /><Metric icon="Bot" label="Active agents" value="3" detail="2 worktrees running" color="#a78bfa" /><Metric icon="GitPullRequest" label="Awaiting review" value="2" detail="1 needs your signoff" color="#fbbf24" /><Metric icon="CheckCircle2" label="Verified today" value="8" detail="last run 4 min ago" color="#34d399" /></View>
-      <View style={styles.grid}><View style={styles.primary}><Panel title="Work queue" action="Dispatch work" onAction={() => setNotice("Dispatch queued for the selected issue. Connect the RPC handler to start a real worktree.")}>{visible.map((issue) => <IssueRow key={issue.number} issue={issue} selected={selected.number === issue.number} onPress={() => setSelectedNumber(issue.number)} />)}{visible.length === 0 && <Text style={styles.empty}>No work matches this filter.</Text>}</Panel><Panel title="Active worktrees"><Worktree branch="feat/42-dispatch" meta="uppidi-forge · forge-orchestrator" status="Running verification" /><Worktree branch="fix/27-worktree-sync" meta="paseo · worker-27" status="Awaiting agent turn" /></Panel></View><View style={styles.sidebar}><Panel title="Selected work"><Text style={styles.issueNumber}>{selected.repo} #{selected.number}</Text><Text style={styles.selectedTitle}>{selected.title}</Text><View style={styles.badgeRow}><Badge text={selected.status} tone={selected.status === "Review" ? "review" : "running"} /><Badge text={attention[selected.attention]} tone="neutral" /></View><Text style={styles.detail}>{selected.branch ? `Branch ${selected.branch}` : "No worktree dispatched yet"}</Text><Pressable accessibilityRole="button" style={styles.primaryAction} onPress={() => setNotice(`Opened inline inspection for ${selected.repo} #${selected.number}.`)}><Icon name="PanelRightOpen" size={15} color="#06131b" /><Text style={styles.primaryActionText}>Inspect in place</Text></Pressable></Panel><Panel title="Review radar"><Review title="feat: dispatch worktree jobs" meta="uppidi-forge · Checks passing" /><Review title="fix: synchronize worktree events" meta="paseo · 1 approval needed" /></Panel><View style={styles.notice}><Icon name="Info" size={15} color="#58d6ff" /><Text style={styles.noticeText}>{notice}</Text></View></View></View>
-    </ScrollView>
-  </View>;
+const filters: Array<{ id: Filter; label: string }> = [
+  { id: "all", label: "All work" },
+  { id: "needs-you", label: "Needs you" },
+  { id: "in-flight", label: "In flight" },
+  { id: "review", label: "Review" },
+];
+const tabs = [
+  { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: "LayoutDashboard" },
+  { id: "mockup", label: "Static mockup", shortLabel: "Mockup", icon: "PanelTop" },
+];
+const attention: Record<AttentionLabel, string> = {
+  "attention/0-orchestrator": "Orchestrator",
+  "attention/1-agent": "Agent",
+  "attention/2-user": "You",
 };
 
-function Metric({ icon, label, value, detail, color }: { icon: string; label: string; value: string; detail: string; color: string }) { return <View style={styles.metric}><Icon name={icon} size={17} color={color} /><View><Text style={styles.metricLabel}>{label}</Text><Text style={styles.metricValue}>{value}</Text><Text style={styles.metricDetail}>{detail}</Text></View></View>; }
-function Panel({ title, action, onAction, children }: { title: string; action?: string; onAction?: () => void; children: React.ReactNode }) { return <View style={styles.panel}><View style={styles.panelHeader}><Text style={styles.panelTitle}>{title}</Text>{action && <Pressable accessibilityRole="button" onPress={onAction} style={styles.textAction}><Text style={styles.textActionText}>{action}</Text><Icon name="ArrowRight" size={14} color="#58d6ff" /></Pressable>}</View>{children}</View>; }
-function IssueRow({ issue, selected, onPress }: { issue: DashboardIssue; selected: boolean; onPress: () => void }) { return <Pressable accessibilityRole="button" onPress={onPress} style={[styles.issueRow, selected && styles.issueRowSelected]}><View style={styles.issueMain}><Text style={styles.issueTitle}>{issue.title}</Text><Text style={styles.meta}>{issue.repo} · #{issue.number} · {issue.comments} comments</Text></View><View style={styles.issueRight}><Badge text={issue.status} tone={issue.status === "Review" ? "review" : issue.status === "In progress" ? "running" : "neutral"} /><Text style={styles.meta}>{attention[issue.attention]}</Text></View></Pressable>; }
-function Worktree({ branch, meta, status }: { branch: string; meta: string; status: string }) { return <View style={styles.worktree}><View style={styles.worktreeIcon}><Icon name="FolderGit2" size={16} color="#a78bfa" /></View><View style={styles.flex}><Text style={styles.worktreeBranch}>{branch}</Text><Text style={styles.meta}>{meta}</Text></View><Text style={styles.worktreeStatus}>{status}</Text></View>; }
-function Review({ title, meta }: { title: string; meta: string }) { return <View style={styles.review}><Icon name="GitPullRequest" size={16} color="#fbbf24" /><View style={styles.flex}><Text style={styles.reviewTitle}>{title}</Text><Text style={styles.meta}>{meta}</Text></View><Icon name="ChevronRight" size={16} color="#8b949e" /></View>; }
-function Badge({ text, tone }: { text: string; tone: "running" | "review" | "neutral" }) { return <View style={[styles.badge, tone === "running" && styles.badgeRunning, tone === "review" && styles.badgeReview]}><Text style={[styles.badgeText, tone === "running" && styles.badgeRunningText, tone === "review" && styles.badgeReviewText]}>{text}</Text></View>; }
+function statusVariant(status: DashboardIssue["status"]): "neutral" | "warning" | "info" {
+  return status === "Review" ? "warning" : status === "In progress" ? "info" : "neutral";
+}
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0d1117" }, header: { paddingHorizontal: 24, paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: "#30363d", backgroundColor: "#161b22", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16 }, titleRow: { flexDirection: "row", alignItems: "center", gap: 9 }, title: { color: "#f0f6fc", fontSize: 19, fontWeight: "700" }, subtitle: { color: "#8b949e", fontSize: 13, marginTop: 5 }, connected: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#12261c", paddingHorizontal: 7, paddingVertical: 3, borderRadius: 12 }, dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#34d399" }, connectedText: { color: "#6ee7b7", fontSize: 10, fontWeight: "700" }, refresh: { flexDirection: "row", gap: 7, alignItems: "center", borderWidth: 1, borderColor: "#3d444d", borderRadius: 6, paddingHorizontal: 11, paddingVertical: 8 }, refreshText: { color: "#c9d1d9", fontSize: 12, fontWeight: "600" }, filters: { minHeight: 50, paddingHorizontal: 24, flexDirection: "row", alignItems: "center", gap: 8, borderBottomWidth: 1, borderBottomColor: "#21262d" }, filter: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 5 }, filterActive: { backgroundColor: "#173346" }, filterText: { fontSize: 12, color: "#8b949e", fontWeight: "600" }, filterTextActive: { color: "#58d6ff" }, updated: { marginLeft: "auto", color: "#6e7681", fontSize: 11 }, content: { padding: 20, gap: 18 }, metrics: { flexDirection: "row", flexWrap: "wrap", gap: 12 }, metric: { minWidth: 180, flexGrow: 1, flexDirection: "row", gap: 10, padding: 14, borderWidth: 1, borderColor: "#30363d", borderRadius: 8, backgroundColor: "#161b22" }, metricLabel: { color: "#8b949e", fontSize: 12 }, metricValue: { color: "#f0f6fc", fontSize: 22, fontWeight: "700", marginTop: 2 }, metricDetail: { color: "#6e7681", fontSize: 11, marginTop: 2 }, grid: { flexDirection: "row", flexWrap: "wrap", alignItems: "flex-start", gap: 18 }, primary: { flexGrow: 2, flexBasis: 480, gap: 18 }, sidebar: { flexGrow: 1, flexBasis: 280, gap: 18 }, panel: { borderWidth: 1, borderColor: "#30363d", borderRadius: 8, backgroundColor: "#161b22", overflow: "hidden" }, panelHeader: { minHeight: 48, paddingHorizontal: 15, flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderBottomWidth: 1, borderBottomColor: "#21262d" }, panelTitle: { color: "#f0f6fc", fontSize: 13, fontWeight: "700" }, textAction: { flexDirection: "row", alignItems: "center", gap: 4 }, textActionText: { color: "#58d6ff", fontSize: 12, fontWeight: "600" }, issueRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, paddingHorizontal: 15, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: "#21262d", borderLeftWidth: 2, borderLeftColor: "transparent" }, issueRowSelected: { backgroundColor: "#132631", borderLeftColor: "#58d6ff" }, issueMain: { flex: 1, gap: 4 }, issueTitle: { color: "#d0d7de", fontSize: 13, fontWeight: "600" }, meta: { color: "#8b949e", fontSize: 11, marginTop: 3 }, issueRight: { alignItems: "flex-end", gap: 3 }, badge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 10, backgroundColor: "#30363d" }, badgeRunning: { backgroundColor: "#3b2f13" }, badgeReview: { backgroundColor: "#2d224b" }, badgeText: { color: "#c9d1d9", fontSize: 10, fontWeight: "600" }, badgeRunningText: { color: "#fbbf24" }, badgeReviewText: { color: "#c4b5fd" }, empty: { padding: 18, color: "#8b949e", fontSize: 13 }, worktree: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderBottomWidth: 1, borderBottomColor: "#21262d" }, worktreeIcon: { width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: 5, backgroundColor: "#251d3b" }, flex: { flex: 1 }, worktreeBranch: { color: "#d0d7de", fontSize: 12, fontWeight: "600" }, worktreeStatus: { color: "#a78bfa", fontSize: 11, textAlign: "right" }, issueNumber: { color: "#58d6ff", fontSize: 12, marginHorizontal: 15, marginTop: 15, fontWeight: "600" }, selectedTitle: { color: "#f0f6fc", fontSize: 16, lineHeight: 22, fontWeight: "700", marginHorizontal: 15, marginTop: 5 }, badgeRow: { flexDirection: "row", gap: 6, marginHorizontal: 15, marginTop: 12 }, detail: { color: "#8b949e", fontSize: 12, marginHorizontal: 15, marginTop: 12 }, primaryAction: { margin: 15, paddingVertical: 9, borderRadius: 6, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7, backgroundColor: "#58d6ff" }, primaryActionText: { color: "#06131b", fontSize: 12, fontWeight: "700" }, review: { flexDirection: "row", alignItems: "center", gap: 9, padding: 14, borderBottomWidth: 1, borderBottomColor: "#21262d" }, reviewTitle: { color: "#d0d7de", fontSize: 12, fontWeight: "600" }, notice: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, borderRadius: 7, borderWidth: 1, borderColor: "#1d4d63", backgroundColor: "#102b3a" }, noticeText: { color: "#a5d8ef", flex: 1, fontSize: 11, lineHeight: 16 },
-});
+export function UppidiForgeSurface(props: PluginSurfaceProps) {
+  const { colors, typography } = usePluginTheme();
+  const [activeTab, setActiveTab] = useState<SurfaceTab>("dashboard");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
+  const [selectedNumber, setSelectedNumber] = useState(42);
+  const [notice, setNotice] = useState("Everything is ready to orchestrate.");
+
+  const visible = useMemo(() => issues.filter((issue) => {
+    const matchesFilter = filter === "all"
+      || (filter === "needs-you" && issue.attention === "attention/2-user")
+      || (filter === "in-flight" && issue.status === "In progress")
+      || (filter === "review" && issue.status === "Review");
+    const search = query.trim().toLowerCase();
+    return matchesFilter && (!search || `${issue.repo} ${issue.number} ${issue.title}`.toLowerCase().includes(search));
+  }), [filter, query]);
+  const selected = issues.find((issue) => issue.number === selectedNumber) ?? visible[0] ?? issues[0];
+
+  return (
+    <ModalBody
+      headerMode="pinned"
+      header={<Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />}
+      headerStyle={{ backgroundColor: colors.surface0, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 }}
+      contentContainerStyle={{ gap: 12, paddingHorizontal: 12, paddingTop: 6 }}
+    >
+      {activeTab === "mockup" ? <UppidiForgeStaticMockup {...props} /> : <Stack gap={12}>
+        <Row justify="space-between" align="center" wrap gap="sm">
+          <Stack gap="xxs" style={{ flex: 1 }}>
+            <Row align="center" gap="sm">
+              <StatusDot variant="success" pulse />
+              <Text style={{ color: colors.foreground, ...typography.title }}>Uppidi Forge</Text>
+              <Badge label="Connected" variant="success" size="sm" dot />
+            </Row>
+            <Text style={{ color: colors.foregroundMuted, ...typography.body }}>One place for triage, active work, and review decisions.</Text>
+          </Stack>
+          <Button label="Refresh" icon="RefreshCw" variant="secondary" onPress={() => setNotice("Dashboard refreshed. Forgejo RPC data can replace this local snapshot without changing the surface.")} />
+        </Row>
+
+        <ActionBar align="space-between">
+          <Row wrap gap="xs">
+            {filters.map(({ id, label }) => <Button key={id} label={label} size="sm" variant={filter === id ? "primary" : "ghost"} onPress={() => setFilter(id)} />)}
+          </Row>
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Updated just now</Text>
+        </ActionBar>
+
+        <Grid columns={4} minColumnWidth={160} gap="sm">
+          <Metric label="Open issues" value="12" detail="across 2 repos" icon="CircleDot" />
+          <Metric label="Active agents" value="3" detail="2 worktrees running" icon="Bot" />
+          <Metric label="Awaiting review" value="2" detail="1 needs your signoff" icon="GitPullRequest" />
+          <Metric label="Verified today" value="8" detail="last run 4 min ago" icon="CheckCircle2" />
+        </Grid>
+
+        <Grid columns={3} minColumnWidth={280} gap="md">
+          <Stack gap={12} style={{ flex: 2 }}>
+            <Card variant="elevated">
+              <CardHeader title="Work queue" subtitle={`${visible.length} matching items`} icon="ListTodo" action={<Button label="Dispatch work" size="sm" icon="ArrowRight" iconPosition="right" variant="ghost" onPress={() => setNotice("Dispatch queued for the selected issue. Connect the RPC handler to start a real worktree.")} />} />
+              <SearchInput value={query} onChangeText={setQuery} onClear={() => setQuery("")} placeholder="Filter issue title, repository, or number" />
+              <DataTable
+                data={visible}
+                keyExtractor={(issue) => String(issue.number)}
+                emptyState={<EmptyState title="No work matches this filter" description="Try another queue filter or clear the search." actionLabel="Clear filters" onAction={() => { setFilter("all"); setQuery(""); }} />}
+                columns={[
+                  { key: "issue", header: "Issue", flex: 3, render: (issue) => <Button label={`${issue.repo} #${issue.number} · ${issue.title}`} variant="ghost" size="sm" onPress={() => setSelectedNumber(issue.number)} /> },
+                  { key: "status", header: "Status", flex: 1, render: (issue) => <Badge label={issue.status} variant={statusVariant(issue.status)} size="sm" /> },
+                  { key: "attention", header: "Owner", flex: 1, render: (issue) => <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>{attention[issue.attention]}</Text> },
+                ]}
+              />
+            </Card>
+            <Card variant="elevated">
+              <CardHeader title="Active worktrees" icon="FolderGit2" />
+              <KeyValueGroup>
+                <KeyValue label="feat/42-dispatch" value="uppidi-forge · forge-orchestrator · Running verification" />
+                <KeyValue label="fix/27-worktree-sync" value="paseo · worker-27 · Awaiting agent turn" />
+              </KeyValueGroup>
+            </Card>
+          </Stack>
+          <Stack gap={12} style={{ flex: 1 }}>
+            <Card variant="elevated">
+              <CardHeader title="Selected work" icon="PanelRightOpen" />
+              <Stack gap="sm">
+                <Text style={{ color: colors.accent, ...typography.caption }}>{selected.repo} #{selected.number}</Text>
+                <Text style={{ color: colors.foreground, ...typography.heading }}>{selected.title}</Text>
+                <Row wrap gap="xs"><Badge label={selected.status} variant={statusVariant(selected.status)} /><Badge label={attention[selected.attention]} variant="neutral" /></Row>
+                <KeyValue label="Worktree" value={selected.branch ?? "No worktree dispatched yet"} copyable={!!selected.branch} />
+                <Button label="Inspect in place" icon="PanelRightOpen" variant="primary" onPress={() => setNotice(`Opened inline inspection for ${selected.repo} #${selected.number}.`)} />
+              </Stack>
+            </Card>
+            <Card variant="elevated">
+              <CardHeader title="Review radar" icon="GitPullRequest" />
+              <KeyValueGroup>
+                <KeyValue label="feat: dispatch worktree jobs" value="uppidi-forge · Checks passing" />
+                <KeyValue label="fix: synchronize worktree events" value="paseo · 1 approval needed" />
+              </KeyValueGroup>
+            </Card>
+            <Card><Text style={{ color: colors.foregroundMuted, ...typography.caption }}>{notice}</Text></Card>
+          </Stack>
+        </Grid>
+      </Stack>}
+    </ModalBody>
+  );
+}
+
+function Metric({ label, value, detail, icon }: { label: string; value: string; detail: string; icon: string }) {
+  const { colors, typography } = usePluginTheme();
+  return <Card variant="elevated"><CardHeader title={label} value={value} icon={icon} /><Text style={{ color: colors.foregroundMuted, ...typography.caption }}>{detail}</Text></Card>;
+}

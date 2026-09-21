@@ -16,7 +16,8 @@ Instead of managing issues through small modals or composer pills, `uppidi-forge
   - **Orchestration & Dispatch**: View orchestrator status, dispatch worktree jobs, and steer coding agents.
   - **In-Flight Queue**: Monitor active worktree runs, agent turns, and pending permissions across repos.
   - **Verification & Signoff**: Inspect diffs, review checklist items (`spec/1-checklist`), run signoff verifications, and drive PR merges.
-- **First-Class Theme & Native UI**: Powered by Paseo host theme tokens and client components.
+- **First-Class Theme & Native UI**: The primary dashboard uses `paseo-plugin-helper` theme, layout, table, filter, status, and action components.
+- **Static Mockup Tab**: The original visual dashboard mockup remains available from the dedicated **Static mockup** view tab for comparison and demos.
 - **Daemon & RPC Native**: Seamlessly interfaces with Paseo workspaces and the local Forgejo hook service.
 
 ---
