@@ -1,5 +1,5 @@
 import { StyleProp, ViewStyle, TextStyle } from 'react-native';
-import { P as PlatformType, R as ResponsiveLayout, T as ThemeColors, g as PluginTheme, S as StatusVariant } from './custom-pills-C98QP7Cg.cjs';
+import { g as PluginTheme, P as PlatformType, R as ResponsiveLayout, T as ThemeColors, S as StatusVariant } from './custom-pills-C98QP7Cg.cjs';
 import React__default, { ReactNode } from 'react';
 import { d as HostLayout } from './host-DatQ2QJE.cjs';
 
@@ -116,6 +116,9 @@ declare function resolveElevation(level: ElevationLevel): ElevationStyle;
  * Kept as a helper so call sites read consistently.
  */
 declare function elevationForPlatform(level: ElevationLevel, platform: PlatformType): ElevationStyle;
+declare const defaultDarkTheme: PluginTheme;
+declare const defaultLightTheme: PluginTheme;
+declare function getDefaultTheme(scheme?: string): PluginTheme;
 
 /**
  * Paseo 0.8 host theme variables. On web hosts the live theme is exposed as
@@ -178,9 +181,6 @@ interface PluginThemeContextValue {
     };
     typography: TypographyScale;
 }
-declare const defaultDarkTheme: PluginTheme;
-declare const defaultLightTheme: PluginTheme;
-declare function getDefaultTheme(scheme?: string): PluginTheme;
 declare function useAppearanceScheme(): [string | undefined, (s: string | undefined) => void];
 interface PluginThemeProviderProps {
     theme: PluginTheme;

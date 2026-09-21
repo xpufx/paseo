@@ -217,4 +217,41 @@ describe("Style Recipes", () => {
       expect(md.paddingVertical).toBe(2);
     });
   });
+
+  describe("Hardening & Ergonomics (#349 Review)", () => {
+    it("serializes without circular references (JSON.stringify safe)", () => {
+      const input = inputRecipe(defaultDarkTheme);
+      const card = cardRecipe(defaultDarkTheme);
+      const button = buttonRecipe(defaultDarkTheme);
+      const tabStrip = tabStripRecipe(defaultDarkTheme);
+      const tabItem = tabItemRecipe(defaultDarkTheme, true);
+      const badge = badgeRecipe(defaultDarkTheme);
+
+      expect(() => JSON.stringify(input)).not.toThrow();
+      expect(() => JSON.stringify(card)).not.toThrow();
+      expect(() => JSON.stringify(button)).not.toThrow();
+      expect(() => JSON.stringify(tabStrip)).not.toThrow();
+      expect(() => JSON.stringify(tabItem)).not.toThrow();
+      expect(() => JSON.stringify(badge)).not.toThrow();
+    });
+
+    it("ensures readable contrast for solid warning badges", () => {
+      const badge = badgeRecipe(defaultDarkTheme, { styleVariant: "solid", variant: "warning" });
+      // Bright statusWarning (#eab308) solid background must get dark foreground text for WCAG AA compliance
+      expect(badge.text.color).toBe(defaultDarkTheme.colors.foreground);
+    });
+
+    it("supports compact option on cardRecipe", () => {
+      const standard = cardRecipe(defaultDarkTheme);
+      const compact = cardRecipe(defaultDarkTheme, { compact: true });
+      expect(compact.paddingHorizontal).toBeLessThan(Number(standard.paddingHorizontal));
+      expect(compact.paddingVertical).toBeLessThan(Number(standard.paddingVertical));
+      expect(compact.borderRadius).toBe(6);
+    });
+
+    it("exposes placeholderColor on inputRecipe", () => {
+      const input = inputRecipe(defaultDarkTheme);
+      expect((input as any).placeholderColor).toBe(defaultDarkTheme.colors.foregroundMuted);
+    });
+  });
 });

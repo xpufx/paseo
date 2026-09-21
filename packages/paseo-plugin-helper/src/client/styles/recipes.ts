@@ -1,8 +1,8 @@
 import type { TextStyle, ViewStyle } from "react-native";
 import type { PluginTheme, StatusVariant, ThemeColors } from "../../shared/types.js";
-import { alpha, getStatusColor, getVariantPalette } from "../theme/color-utils.js";
-import { defaultDarkTheme, type PluginThemeContextValue } from "../theme/provider.js";
-import { FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens.js";
+import { alpha, getStatusColor, getVariantPalette, getContrastColor } from "../theme/color-utils.js";
+import { defaultDarkTheme, FALLBACK_ACCENT_FOREGROUND } from "../theme/tokens.js";
+import type { PluginThemeContextValue } from "../theme/provider.js";
 import type { SurfaceStyle } from "../theme/flair.js";
 import type { ButtonSize, ButtonVariant } from "../components/Button.js";
 import type { BadgeSize, BadgeStyle } from "../components/Badge.js";
@@ -18,10 +18,12 @@ export type ThemeInput =
  * Resolves ThemeColors from a PluginTheme, PluginThemeContextValue, ThemeColors, or undefined.
  */
 export function resolveThemeColors(themeInput?: ThemeInput): ThemeColors {
-  if (!themeInput) return defaultDarkTheme.colors;
-  if ("colors" in themeInput && themeInput.colors) return themeInput.colors;
+  if (!themeInput || typeof themeInput !== "object") return defaultDarkTheme.colors;
+  if ("colors" in themeInput && themeInput.colors && typeof themeInput.colors === "object") {
+    return { ...defaultDarkTheme.colors, ...themeInput.colors };
+  }
   if ("surface0" in themeInput && typeof (themeInput as ThemeColors).surface0 === "string") {
-    return themeInput as ThemeColors;
+    return { ...defaultDarkTheme.colors, ...(themeInput as ThemeColors) };
   }
   return defaultDarkTheme.colors;
 }
@@ -121,11 +123,13 @@ export function inputRecipe(
     marginTop: 2,
   };
 
+  const input = { ...baseInput };
   return Object.assign(baseInput, {
-    input: baseInput,
+    input,
     container,
     label,
     hint,
+    placeholderColor: colors.foregroundMuted,
   });
 }
 
@@ -161,7 +165,8 @@ export function cardRecipe(
 
   const variant = options.variant ?? "flat";
   const noPadding = Boolean(options.noPadding);
-  const radius = options.radius ?? 8;
+  const compact = Boolean(options.compact);
+  const radius = options.radius ?? (compact ? 6 : 8);
   const borderWidth = options.borderWidth ?? 1;
 
   let bg = colors.surface0;
@@ -180,8 +185,8 @@ export function cardRecipe(
     borderColor: border,
     borderWidth,
     borderRadius: radius,
-    paddingHorizontal: noPadding ? 0 : 12,
-    paddingVertical: noPadding ? 0 : 10,
+    paddingHorizontal: noPadding ? 0 : compact ? 8 : 12,
+    paddingVertical: noPadding ? 0 : compact ? 6 : 10,
     width: "100%",
     overflow: "hidden",
   };
@@ -191,27 +196,28 @@ export function cardRecipe(
     alignItems: "center",
     justifyContent: "space-between",
     flexWrap: "wrap",
-    gap: 8,
+    gap: compact ? 4 : 8,
     width: "100%",
-    marginBottom: 8,
+    marginBottom: compact ? 4 : 8,
   };
 
   const headerTitle: TextStyle = {
     color: colors.foreground,
-    fontSize: 14,
+    fontSize: compact ? 13 : 14,
     fontWeight: "600",
-    lineHeight: 20,
+    lineHeight: compact ? 18 : 20,
   };
 
   const headerSubtitle: TextStyle = {
     color: colors.foregroundMuted,
-    fontSize: 11,
-    lineHeight: 15,
+    fontSize: compact ? 10 : 11,
+    lineHeight: compact ? 14 : 15,
     fontWeight: "400",
   };
 
+  const card = { ...baseCard };
   return Object.assign(baseCard, {
-    card: baseCard,
+    card,
     header,
     headerTitle,
     headerSubtitle,
@@ -308,8 +314,9 @@ export function buttonRecipe(
     textAlign: "center",
   };
 
+  const subContainer = { ...container };
   return Object.assign(container, {
-    container,
+    container: subContainer,
     text,
   });
 }
@@ -355,8 +362,9 @@ export function tabStripRecipe(
     gap: 2,
   };
 
+  const subFrame = { ...frame };
   return Object.assign(frame, {
-    frame,
+    frame: subFrame,
     track,
   });
 }
@@ -437,8 +445,9 @@ export function tabItemRecipe(
     color: isActive ? colors.accentForeground || FALLBACK_ACCENT_FOREGROUND : colors.foregroundMuted,
   };
 
+  const subContainer = { ...container };
   return Object.assign(container, {
-    container,
+    container: subContainer,
     text,
     badge,
     badgeText,
@@ -493,7 +502,11 @@ export function badgeRecipe(
   } else if (styleVariant === "solid") {
     bg = solidColor;
     border = "transparent";
-    textColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
+    textColor = getContrastColor(
+      solidColor,
+      colors.accentForeground || FALLBACK_ACCENT_FOREGROUND,
+      colors.foreground,
+    );
   }
 
   const fontSize = size === "sm" ? 10 : 11;
@@ -528,8 +541,9 @@ export function badgeRecipe(
     backgroundColor: textColor,
   };
 
+  const subContainer = { ...container };
   return Object.assign(container, {
-    container,
+    container: subContainer,
     text,
     dot,
   });
