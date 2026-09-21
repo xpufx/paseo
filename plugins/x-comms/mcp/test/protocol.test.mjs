@@ -221,15 +221,16 @@ test("send stamps a structured sender-meta envelope and reaches the remote agent
   try {
     const res = await client.callTool({
       name: `${PREFIX}send`,
-      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello there" },
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello there", messageId: "msg-headless-1" },
     });
     const sent = JSON.parse(textOf(res));
     assert.equal(sent.to, "agent-9");
     assert.equal(sent.sawHost, RELAY_URL);
     assert.equal(sent.sawNoWait, true, "send must dispatch fire-and-forget (--no-wait)");
+    assert.equal(sent.sawMessageId, "msg-headless-1");
     assert.equal(sent.promptHead.split("\n\n")[1], "hello there", "prompt must stay prose");
     const meta = metaOf(sent.promptHead);
-    assert.equal(meta.xComms.version, 4);
+    assert.equal(meta.xComms.version, 5);
     assert.equal(meta.xComms.type, "x-comms.message");
     assert.equal(meta.xComms.direction, "outgoing");
     assert.equal(meta.xComms.sender.agentId, "agent-test-1");
@@ -239,6 +240,7 @@ test("send stamps a structured sender-meta envelope and reaches the remote agent
     assert.equal(meta.xComms.sender.cwd, "/tmp/test-cwd");
     assert.equal(meta.xComms.target.agentId, "agent-9");
     assert.equal(meta.xComms.target.daemon, "hsi");
+    assert.equal(meta.xComms.messageId, "msg-headless-1");
     assert.ok(!Number.isNaN(Date.parse(meta.xComms.sentAt)), "sentAt must be ISO");
   } finally {
     await client.close();

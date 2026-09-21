@@ -23,7 +23,7 @@ describe("native local send envelope", () => {
     assert.equal(ENVELOPE_PREFIX, META_PREFIX);
   });
 
-  it("produces a version-4 envelope parseable by shared/envelope", () => {
+  it("produces a version-5 envelope with its delivery messageId", () => {
     const stamped = buildSenderEnvelope({
       sender: {
         agentId: "agent-a",
@@ -33,10 +33,11 @@ describe("native local send envelope", () => {
         cwd: "/work/a",
       },
       target: { daemon: "peer", agentId: "agent-b" },
+      messageId: "msg-native-1",
       sentAt: SENT_AT,
     });
     const env = envelopeObject(stamped) as { xComms: Record<string, unknown> };
-    assert.equal(env.xComms.version, 4);
+    assert.equal(env.xComms.version, 5);
     assert.equal(env.xComms.type, "x-comms.message");
     assert.equal(env.xComms.direction, "outgoing");
     assert.deepEqual(env.xComms.sender, {
@@ -47,6 +48,7 @@ describe("native local send envelope", () => {
       cwd: "/work/a",
     });
     assert.deepEqual(env.xComms.target, { daemon: "peer", agentId: "agent-b" });
+    assert.equal(env.xComms.messageId, "msg-native-1");
     assert.equal(env.xComms.sentAt, SENT_AT);
   });
 

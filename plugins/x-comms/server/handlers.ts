@@ -267,6 +267,8 @@ export interface ConversationSendInput {
   prompt: string;
   fromAgentId?: string | null;
   fromAgentName?: string | null;
+  /** Stable across the initial attempt and every outbox retry. */
+  messageId?: string;
 }
 
 /**
@@ -296,6 +298,7 @@ async function tryDeliverLocalNative(
     fromAgentId: input.fromAgentId ?? null,
     fromAgentName: input.fromAgentName ?? null,
     targetDaemon: input.daemon,
+    messageId: input.messageId!,
   });
   return true;
 }
@@ -326,6 +329,7 @@ async function deliverConversationMessage(
       prompt: input.prompt,
       fromAgentId: input.fromAgentId ?? null,
       fromAgentName: input.fromAgentName ?? null,
+      messageId: input.messageId,
     });
   } finally {
     client.close();
@@ -334,13 +338,20 @@ async function deliverConversationMessage(
 
 export async function handleConversationSend(input: ConversationSendInput, context?: PluginHandlerContext) {
   rememberPaseo(context?.paseo);
+  // Generate once at the edge. The normalized input is also what gets held in
+  // the outbox, so an ambiguous failure cannot turn a retry into a new daemon
+  // message.
+  const message: ConversationSendInput & { messageId: string } = {
+    ...input,
+    messageId: input.messageId ?? randomUUID(),
+  };
   try {
-    await deliverConversationMessage(input, context?.paseo ?? paseoRef);
+    await deliverConversationMessage(message, context?.paseo ?? paseoRef);
   } catch (cause) {
     const error = cause instanceof Error ? cause.message : String(cause);
     const entry = await withOutboxLock(() => {
       const state = readOutbox();
-      const held = holdMessage(state, input, {
+      const held = holdMessage(state, message, {
         nowMs: Date.now(),
         expiryMs: resolveOutboxExpiryMs(readUiPrefs()),
         error,
@@ -348,20 +359,20 @@ export async function handleConversationSend(input: ConversationSendInput, conte
       writeOutbox(state);
       return held;
     });
-    log.warn(`outbox: held ${entry.id} for '${input.daemon}/${input.agentId}' until ${entry.expiresAt}: ${error}`);
+    log.warn(`outbox: held ${entry.id} for '${message.daemon}/${message.agentId}' until ${entry.expiresAt}: ${error}`);
     return {
-      daemon: input.daemon,
-      agentId: input.agentId,
+      daemon: message.daemon,
+      agentId: message.agentId,
       ok: false,
       error: `undelivered; held in the outbox for retry until ${entry.expiresAt}: ${error}`,
     };
   }
   recordOutboundSend({
-    daemon: input.daemon,
-    agentId: input.agentId,
-    localAgentId: input.fromAgentId ?? null,
+    daemon: message.daemon,
+    agentId: message.agentId,
+    localAgentId: message.fromAgentId ?? null,
   });
-  return { daemon: input.daemon, agentId: input.agentId, ok: true, error: null };
+  return { daemon: message.daemon, agentId: message.agentId, ok: true, error: null };
 }
 
 

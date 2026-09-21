@@ -48,6 +48,7 @@ export interface LocalSendInput {
   fromAgentId?: string | null;
   fromAgentName?: string | null;
   targetDaemon: string;
+  messageId: string;
 }
 
 /**
@@ -57,11 +58,12 @@ export interface LocalSendInput {
 export function buildSenderEnvelope(args: {
   sender: SenderIdentity;
   target: { daemon: string | null; agentId: string | null };
+  messageId?: string;
   sentAt: string;
 }): string {
   const envelope = {
     xComms: {
-      version: 4,
+      version: 5,
       type: "x-comms.message",
       direction: "outgoing",
       sender: {
@@ -75,6 +77,7 @@ export function buildSenderEnvelope(args: {
         daemon: args.target.daemon ?? null,
         agentId: args.target.agentId ?? null,
       },
+      ...(args.messageId ? { messageId: args.messageId } : {}),
       sentAt: args.sentAt,
     },
   };
@@ -147,7 +150,8 @@ export async function sendLocalNative(paseo: PaseoApi, input: LocalSendInput): P
   const stamped = `${buildSenderEnvelope({
     sender,
     target: { daemon: input.targetDaemon, agentId: input.agentId },
+    messageId: input.messageId,
     sentAt: new Date().toISOString(),
   })}\n\n${input.prompt}`;
-  await paseo.agents.ref(input.agentId).send(stamped);
+  await paseo.agents.ref(input.agentId).send(stamped, { messageId: input.messageId });
 }

@@ -58,7 +58,10 @@ export async function sendConfiguredHostAgent(args: {
   serverId: string;
   agentId: string;
   message: string;
+  messageId: string;
   getClient: (serverId: string) => PaseoApi;
 }): Promise<void> {
-  await args.getClient(args.serverId).agents.ref(args.agentId).send(args.message);
+  await args.getClient(args.serverId).agents.ref(args.agentId).send(args.message, {
+    messageId: args.messageId,
+  });
 }

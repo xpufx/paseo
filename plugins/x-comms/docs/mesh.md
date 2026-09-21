@@ -103,10 +103,10 @@ Implemented (`server/outbox.ts` + the plugin server, #12):
   has only `messageId`/`images`/`attachments`), so there is no host-targeted SDK
   call to replace the remote shell-out with. Both producers stamp the identical
   version-4 envelope, so the wire contract is unchanged.
-- Not implemented: UUID-keyed idempotency. The conversation envelope has no
-  message-id slot and receivers keep no seen-id set for messages, so a retry
-  after an ambiguous failure can re-deliver. Adding it needs a wire-format
-  change (separate decision).
+- Every initial send assigns a UUID messageId, carries it in the version-5
+  envelope, and passes it through to Paseo. Held outbox entries retain that
+  same id for retries, so native daemon deduplication prevents duplicate agent
+  delivery after an ambiguous failure.
 
 ## Trust corollary
 

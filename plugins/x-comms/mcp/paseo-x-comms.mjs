@@ -29,6 +29,7 @@ import { homedir, hostname } from "node:os";
 import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 const VERSION = "0.3.0";
 import { z } from "zod";
@@ -176,11 +177,11 @@ async function gatherSenderMeta(signal) {
   return meta;
 }
 
-async function senderMetaBlock(signal, target = {}, sender = {}) {
+async function senderMetaBlock(signal, target = {}, sender = {}, messageId = null) {
   const m = await gatherSenderMeta(signal);
   const envelope = {
     xComms: {
-      version: 4,
+      version: 5,
       // Neutral type: at stamp time the message is leaving, not arriving.
       // Direction of travel lives in `direction`; viewers derive
       // incoming vs outgoing by comparing sender.agentId to self.
@@ -200,6 +201,7 @@ async function senderMetaBlock(signal, target = {}, sender = {}) {
         daemon: target.daemon ?? null,
         agentId: target.agentId ?? null,
       },
+      ...(messageId ? { messageId } : {}),
       sentAt: new Date().toISOString(),
     },
   };
@@ -221,7 +223,7 @@ const TOOL_SCHEMAS = {
   removeDaemon: { name: z.string() },
   listAgents: { daemon: z.string() },
   inspect: { daemon: z.string(), agentId: z.string() },
-  send: { daemon: z.string(), agentId: z.string(), prompt: z.string(), fromAgentId: z.string().nullable().optional(), fromAgentName: z.string().nullable().optional() },
+  send: { daemon: z.string(), agentId: z.string(), prompt: z.string(), fromAgentId: z.string().nullable().optional(), fromAgentName: z.string().nullable().optional(), messageId: z.string().min(1).max(128).optional() },
   logs: { daemon: z.string(), agentId: z.string() },
   wait: {
     daemon: z.string(),
@@ -417,6 +419,7 @@ async function handleSend(input, signal) {
       prompt: input.prompt,
       fromAgentId: input.fromAgentId ?? null,
       fromAgentName: input.fromAgentName ?? null,
+      messageId: input.messageId ?? randomUUID(),
     },
     { tool: `${PREFIX}send` },
   );
@@ -428,10 +431,10 @@ async function handleSend(input, signal) {
   }, {
     agentId: message.fromAgentId ?? null,
     agentName: message.fromAgentName ?? null,
-  })}\n\n${message.prompt}`;
+  }, message.messageId)}\n\n${message.prompt}`;
   return await callPaseo(
     `${PREFIX}send`,
-    ["send", message.agentId, "--host", target, "--json", "--no-wait", stamped],
+    ["send", message.agentId, "--host", target, "--message-id", message.messageId, "--json", "--no-wait", stamped],
     { signal, daemon: message.daemon, agentId: message.agentId },
   );
 }

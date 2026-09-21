@@ -8,10 +8,8 @@ import { PluginStorage } from "./vendor/paseo-plugin-helper/index";
  * explicit immediate retry when a peer is observed reconnecting. Entries expire
  * after a configurable window; expiry notifies the local sender with the reason.
  *
- * Idempotency is deliberately absent: the conversation protocol has no
- * message-UUID slot and receivers keep no seen-id set for messages (see #12),
- * so a retry after an ambiguous failure can re-deliver. Retry, expiry, and
- * notify only.
+ * Every entry retains the first attempt's messageId. Paseo's daemon receives
+ * that same key on a retry and deduplicates before the target agent sees it.
  */
 
 export const OUTBOX_FILE = "outbox.json";
@@ -26,6 +24,7 @@ export interface OutboxMessageInput {
   prompt: string;
   fromAgentId?: string | null;
   fromAgentName?: string | null;
+  messageId: string;
 }
 
 export interface OutboxEntry {
@@ -35,6 +34,7 @@ export interface OutboxEntry {
   prompt: string;
   fromAgentId: string | null;
   fromAgentName: string | null;
+  messageId: string;
   createdAt: string;
   expiresAt: string;
   attempts: number;
@@ -89,6 +89,7 @@ export function holdMessage(
     prompt: input.prompt,
     fromAgentId: input.fromAgentId ?? null,
     fromAgentName: input.fromAgentName ?? null,
+    messageId: input.messageId,
     createdAt: new Date(nowMs).toISOString(),
     expiresAt: new Date(nowMs + expiryMs).toISOString(),
     attempts,

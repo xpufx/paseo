@@ -18,6 +18,7 @@ function argAfter(name) {
 
 const sub = args[0];
 const host = argAfter("--host");
+const messageId = argAfter("--message-id");
 const prompt = args[args.length - 1];
 
 function respond(data) {
@@ -49,7 +50,7 @@ switch (sub) {
     respond([{ id: "agent-1", shortId: "agent-1", name: "fake-agent", status: "idle", sawHost: host }]);
     break;
   case "send":
-    respond({ ok: true, to: args[1], sawHost: host, sawNoWait: args.includes("--no-wait"), promptHead: prompt });
+    respond({ ok: true, to: args[1], sawHost: host, sawMessageId: messageId, sawNoWait: args.includes("--no-wait"), promptHead: prompt });
     break;
   case "logs":
     respond({ events: [], sawHost: host });

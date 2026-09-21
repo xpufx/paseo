@@ -118,7 +118,7 @@ required.
 `send` prepends a structured sender-meta envelope, one line, JSON:
 
 ```
-[x-comms] {"xComms":{"version":3,"type":"x-comms.incoming_message","sender":{…},"target":{…},"sentAt":"…"}}
+[x-comms] {"xComms":{"version":5,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…"}}
 ```
 
 - `sender`: agentId, agentName, host, daemonServerId, cwd: who is talking and
@@ -126,6 +126,8 @@ required.
   (`PASEO_AGENT_ID` / `PASEO_AGENT_CWD`), `host`/`daemonServerId` from
   `paseo daemon status --json`, `agentName` from `paseo inspect <agentId> --json`.
 - `target`: daemon name + recipient agentId.
+- `messageId`: stable delivery key passed to Paseo's native send path. Reuse it
+  only for a retry of the same logical message; the target daemon deduplicates it.
 - `sentAt`: ISO timestamp.
 - The prompt text itself stays prose: the meta is for machines, the prompt is
   for humans.

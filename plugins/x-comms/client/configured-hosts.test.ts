@@ -7,11 +7,11 @@ import {
   sendConfiguredHostAgent,
 } from "./configured-hosts.ts";
 
-function client(entries: Array<{ id: string; title: string; status?: string }>, sent: string[] = []) {
+function client(entries: Array<{ id: string; title: string; status?: string }>, sent: Array<{ value: string; messageId?: string }> = []) {
   return {
     agents: {
       list: async () => ({ entries: entries.map((agent) => ({ agent })) }),
-      ref: (agentId: string) => ({ send: async (message: string) => { sent.push(`${agentId}:${message}`); } }),
+      ref: (agentId: string) => ({ send: async (message: string, options?: { messageId?: string }) => { sent.push({ value: `${agentId}:${message}`, messageId: options?.messageId }); } }),
     },
   };
 }
@@ -49,7 +49,7 @@ describe("configured-host picker", () => {
   });
 
   it("sends the preserved envelope to only the selected configured-host agent", async () => {
-    const sent: string[] = [];
+    const sent: Array<{ value: string; messageId?: string }> = [];
     const stamped = `${buildXCommsEnvelope({
       sender: { agentId: "source", agentName: "User", host: "paseo-client", daemonServerId: null, cwd: null },
       target: { daemon: "srv_two", agentId: "target" },
@@ -59,10 +59,12 @@ describe("configured-host picker", () => {
       serverId: "srv_two",
       agentId: "target",
       message: stamped,
+      messageId: "msg-configured-1",
       getClient: () => client([], sent) as never,
     });
     assert.equal(sent.length, 1);
-    assert.match(sent[0], /^target:\[x-comms\]/);
+    assert.match(sent[0].value, /^target:\[x-comms\]/);
+    assert.equal(sent[0].messageId, "msg-configured-1");
     assert.equal(parseEnvelope(stamped)?.envelope.xComms.target.daemon, "srv_two");
   });
 
@@ -71,7 +73,7 @@ describe("configured-host picker", () => {
     await assert.rejects(
       sendConfiguredHostAgent({
         serverId: "srv_one",
-        agentId: "agent", message: "message",
+        agentId: "agent", message: "message", messageId: "msg-released",
         getClient: () => {
           acquired += 1;
           return { agents: { ref: () => ({ send: async () => { throw new Error("handle released"); } }) } } as never;
@@ -80,5 +82,19 @@ describe("configured-host picker", () => {
       /handle released/,
     );
     assert.equal(acquired, 1);
+  });
+
+  it("reuses a caller-provided messageId on a duplicate native send", async () => {
+    const sent: Array<{ value: string; messageId?: string }> = [];
+    const args = {
+      serverId: "srv_two",
+      agentId: "target",
+      message: "[x-comms] duplicate-safe",
+      messageId: "msg-stable-retry",
+      getClient: () => client([], sent) as never,
+    };
+    await sendConfiguredHostAgent(args);
+    await sendConfiguredHostAgent(args);
+    assert.deepEqual(sent.map((entry) => entry.messageId), ["msg-stable-retry", "msg-stable-retry"]);
   });
 });

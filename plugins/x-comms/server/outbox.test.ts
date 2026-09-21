@@ -19,6 +19,7 @@ const MESSAGE: OutboxMessageInput = {
   prompt: "hello",
   fromAgentId: "agent-local",
   fromAgentName: "Local",
+  messageId: "msg-outbox-stable",
 };
 
 function deliveryStub() {
@@ -54,6 +55,7 @@ describe("outbox delivery", () => {
     assert.equal(state.entries.length, 1);
     assert.equal(entry.attempts, 1);
     assert.equal(entry.lastError, "connect ECONNREFUSED");
+    assert.equal(entry.messageId, MESSAGE.messageId);
 
     const early = await runOutboxPass(state, stub, { nowMs: T0 + 1 });
     assert.deepEqual(early.delivered, []);
@@ -63,6 +65,18 @@ describe("outbox delivery", () => {
     assert.deepEqual(later.delivered, [entry.id]);
     assert.deepEqual(stub.delivered, [entry.id]);
     assert.equal(state.entries.length, 0);
+  });
+
+  it("keeps the original daemon messageId when a failed delivery is retried", async () => {
+    const state = emptyOutboxState();
+    const entry = holdMessage(state, MESSAGE, { nowMs: T0, error: "ambiguous disconnect" });
+    const delivered: string[] = [];
+    await runOutboxPass(state, {
+      deliver: async (retry) => { delivered.push(retry.messageId); },
+      notify: async () => {},
+    }, { nowMs: T0 + OUTBOX_BACKOFF_BASE_MS });
+    assert.deepEqual(delivered, [MESSAGE.messageId]);
+    assert.equal(entry.messageId, MESSAGE.messageId);
   });
 
   it("backs off further and records the new error when delivery keeps failing", async () => {

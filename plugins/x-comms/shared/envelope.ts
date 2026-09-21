@@ -24,6 +24,10 @@ export const EnvelopeSchema = z.object({
       daemon: z.string().nullable(),
       agentId: z.string().nullable(),
     }),
+    // This is the daemon's delivery key, not a conversation id.  It must be
+    // retained when an outbox item is retried so Paseo can discard a duplicate
+    // before it reaches the target agent.
+    messageId: z.string().min(1).max(128).optional(),
     sentAt: z.string(),
   }),
 });
@@ -46,15 +50,17 @@ export function buildXCommsEnvelope(args: {
     cwd: string | null;
   };
   target: { daemon: string | null; agentId: string | null };
+  messageId?: string;
   sentAt: string;
 }): string {
   return `${META_PREFIX}${JSON.stringify({
     xComms: {
-      version: 4,
+      version: 5,
       type: "x-comms.message",
       direction: "outgoing",
       sender: args.sender,
       target: args.target,
+      ...(args.messageId ? { messageId: args.messageId } : {}),
       sentAt: args.sentAt,
     },
   })}`;

@@ -19,6 +19,13 @@ type SelectedTarget = ConversationPartner & { configuredHostServerId?: string };
 const targetCache = new Map<string, SelectedTarget | null>();
 const sentCache = new Map<string, Map<string, ConversationMessage[]>>();
 
+function newMessageId(): string {
+  // `crypto.randomUUID` is available in the Desktop runtime. Keep a small
+  // fallback for older embedded runtimes; this value is generated once per
+  // user action and then remains stable for the complete send attempt.
+  return globalThis.crypto?.randomUUID?.() ?? `xcomms-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function PeerText({ counterparty }: { counterparty: CounterpartyRef }) {
   return <>{useCounterpartyLabel(counterparty)}</>;
 }
@@ -170,18 +177,21 @@ export function CrossDaemonConversation({
   const send = useMutation({
     mutationFn: async () => {
       if (!target) throw new Error("Choose a target before sending.");
+      const messageId = newMessageId();
       if (target.configuredHostServerId) {
         // Acquire immediately before send. A configured host can disconnect or
         // release an earlier borrowed API while this surface remains mounted.
         const stamped = `${buildXCommsEnvelope({
           sender: { agentId, agentName: "User", host: "paseo-client", daemonServerId: null, cwd: null },
           target: { daemon: target.configuredHostServerId, agentId: target.counterparty.agentId },
+          messageId,
           sentAt: new Date().toISOString(),
         })}\n\n${draft}`;
         await sendConfiguredHostAgent({
           serverId: target.configuredHostServerId,
           agentId: target.counterparty.agentId ?? "",
           message: stamped,
+          messageId,
           getClient: getPaseoClient,
         });
         return { ok: true, error: null };
@@ -193,6 +203,7 @@ export function CrossDaemonConversation({
         prompt: draft,
         fromAgentId: agentId,
         fromAgentName: "User",
+        messageId,
       });
     },
     onSuccess: (data) => {

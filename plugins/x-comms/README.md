@@ -75,10 +75,10 @@ Quick pairing:
 Every `x_comms_send` prepends one line:
 
 ```
-[x-comms] {"xComms":{"version":4,"type":"x-comms.incoming_message","sender":{…},"target":{…},"sentAt":"…","direction":"outgoing"}}
+[x-comms] {"xComms":{"version":5,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…","direction":"outgoing"}}
 ```
 
-`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `sentAt`. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
+`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt`. Desktop discovers configured hosts only from Paseo's mounted host runtime and sends to the selected `(serverId, agentId)` with a fresh client; it never pairs hosts or creates agents. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
 
 Tools (via the embedded server) are `x_comms_list_daemons`, `x_comms_add_daemon`, `x_comms_remove_daemon`, `x_comms_list_agents`, `x_comms_inspect`, `x_comms_send`, `x_comms_logs`, `x_comms_wait`, `x_comms_list_permissions`, `x_comms_allow_permission`, `x_comms_deny_permission` — see [mcp/README.md#tools](mcp/README.md#tools) for the reference. The plugin's conversation/panel UI wraps `send`/`logs`/`wait`/permissions for interactive use.
 
@@ -88,7 +88,7 @@ The plugin server keeps an **outbox** (the plugin state dir's `outbox.json`) for
 
 A held message expires after **10 minutes** by default (configurable in the settings surface, `outboxExpirySeconds`, clamped to 10s–24h). On expiry the sender is notified by appending an `x-comms-outbox-notice` timeline item with the reason; the message is then dropped.
 
-**Idempotency is not implemented.** The conversation protocol has no message-UUID slot and the receiver keeps no seen-id set for messages, so a retry after an ambiguous failure (send succeeded, acknowledgement lost) can re-deliver. Adding it would need a wire-format change; tracked separately.
+**Idempotency:** every send receives one stable `messageId`, passed to Paseo's native daemon/client send API and retained in a held outbox entry. A retry therefore presents the same key to the target daemon, which suppresses a duplicate before it reaches the agent.
 
 
 ## Repository layout
