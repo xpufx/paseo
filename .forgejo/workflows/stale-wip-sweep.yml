@@ -1,0 +1,30 @@
+# Hourly stale-WIP sweep: one marked reminder, then `attention/0-orchestrator`
+# + `state/0-triage` (whose exclusivity evicts `state/1-wip`) for tickets with
+# no update past the timeout. The base job lives in xpufx-org/platform and is
+# invoked cross-repo; platform must stay public for the reference to resolve.
+# Pin to a tag/SHA once the base is released; `main` tracks it until then.
+
+name: Stale-WIP sweep caller
+
+on:
+  schedule:
+    - cron: '11 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report recovery candidates without commenting or changing labels
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  sweep:
+    uses: xpufx-org/platform/.forgejo/workflows/reusable/stale-wip.yml@main
+    with:
+      forgejo_hostname: forge.mrs.uppidi.com
+      repo: xpufx-org/paseo
+      dry_run: ${{ inputs.dry_run || false }}
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    permissions:
+      issues: write
