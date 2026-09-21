@@ -3,9 +3,9 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Modal, ScrollView } from "@getpaseo/plugin/client/react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Clipboard, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Clipboard, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
-import { ModalContent, TextInput } from "./vendor/paseo-plugin-helper/index";
+import { Button, InlineButton, ModalContent, TextInput } from "./vendor/paseo-plugin-helper/index";
 import { buildXCommsEnvelope } from "../shared/envelope";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
@@ -275,28 +275,30 @@ export function CrossDaemonConversation({
     <View style={{ padding: 12, flex: 1 }}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>X-comms conversations</Text>
-        <Pressable onPress={() => setPickerOpen(true)} style={({ pressed }) => [{ padding: 6, borderRadius: 6, borderWidth: 1, borderColor: theme.colors.accent }, pressed && { opacity: 0.7 }]}>
-          <Text style={{ color: theme.colors.accent, fontSize: 12, fontWeight: "600" as const }}>New</Text>
-        </Pressable>
+        <Button
+          label="New"
+          variant="secondary"
+          size="sm"
+          onPress={() => setPickerOpen(true)}
+        />
       </View>
       {conversations.isLoading ? (
         <ActivityIndicator />
       ) : conversations.data && conversations.data.length > 0 ? (
         <StickBottomScrollView style={{ marginBottom: 12, maxHeight: 160 }} resetKey="threads">
           {conversations.data.map((c) => (
-            <Pressable
+            <Button
               key={c.conversationId}
+              variant="secondary"
               onPress={() => pickTarget(c)}
-              style={({ pressed }) => [
-                {
-                  padding: 10,
-                  borderRadius: 6,
-                  borderWidth: 1,
-                  borderColor: target?.conversationId === c.conversationId ? theme.colors.accent : theme.colors.border,
-                  marginBottom: 6,
-                },
-                pressed && { opacity: 0.7 },
-              ]}
+              style={{
+                padding: 10,
+                borderRadius: 6,
+                borderWidth: 1,
+                borderColor: target?.conversationId === c.conversationId ? theme.colors.accent : theme.colors.border,
+                marginBottom: 6,
+                alignItems: "flex-start",
+              }}
             >
               <Text style={{ color: theme.colors.foreground, fontSize: 13, fontWeight: "600" as const }}>
                 {c.counterparty.agentName ?? c.counterparty.agentId ?? "unknown"}
@@ -304,7 +306,7 @@ export function CrossDaemonConversation({
               <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>
                 <PeerText counterparty={c.counterparty} /> · {c.messageCount} msgs
               </Text>
-            </Pressable>
+            </Button>
           ))}
         </StickBottomScrollView>
       ) : (
@@ -432,48 +434,47 @@ export function CrossDaemonConversation({
         inputStyle={{ fontSize: 13 }}
         multiline
       />
-      <Pressable
+      <Button
+        label={send.isPending ? "Sending…" : "Send"}
+        variant="primary"
         disabled={!target || !draft.trim() || send.isPending}
         onPress={() => send.mutate()}
-        style={({ pressed }) => [
-          { padding: 10, borderRadius: 6, borderWidth: 1.5, borderColor: theme.colors.accent, alignSelf: "flex-start" as const, minHeight: 44, justifyContent: "center" as const },
-          pressed && { opacity: 0.7 },
-        ]}
-      >
-        <Text style={{ color: theme.colors.accent, fontWeight: "600" as const }}>
-          {send.isPending ? "Sending…" : "Send"}
-        </Text>
-      </Pressable>
+        style={{ alignSelf: "flex-start", minHeight: 44 }}
+      />
       {send.isSuccess && send.data?.ok ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
           <Text style={{ color: theme.colors.statusSuccess, fontSize: 12, flexShrink: 1 }}>
             ✓ Sent to {lastSent?.to ?? target?.counterparty.agentName ?? target?.counterparty.agentId} at {lastSent?.at ?? ""}
           </Text>
-          <Pressable
+          <InlineButton
+            label="Dismiss"
             onPress={() => {
               setLastSent(null);
               send.reset();
             }}
-            hitSlop={10}
-          >
-            <Text style={{ color: theme.colors.accent, fontSize: 12, paddingHorizontal: 6 }}>Dismiss</Text>
-          </Pressable>
+          />
         </View>
       ) : null}
       {send.error ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
           <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>{String(send.error)}</Text>
-          <Pressable onPress={() => void Clipboard.setString(String(send.error))} hitSlop={10}>
-            <Text style={{ color: theme.colors.accent, fontSize: 16, paddingHorizontal: 6 }}>⧉</Text>
-          </Pressable>
+          <InlineButton
+            label="⧉"
+            accessibilityLabel="Copy error"
+            onPress={() => void Clipboard.setString(String(send.error))}
+            textStyle={{ fontSize: 16 }}
+          />
         </View>
       ) : null}
       {send.data && !send.data.ok ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
           <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>{send.data.error}</Text>
-          <Pressable onPress={() => void Clipboard.setString(String(send.data?.error ?? ""))} hitSlop={10}>
-            <Text style={{ color: theme.colors.accent, fontSize: 16, paddingHorizontal: 6 }}>⧉</Text>
-          </Pressable>
+          <InlineButton
+            label="⧉"
+            accessibilityLabel="Copy error"
+            onPress={() => void Clipboard.setString(String(send.data?.error ?? ""))}
+            textStyle={{ fontSize: 16 }}
+          />
         </View>
       ) : null}
       <Modal title="New conversation" open={pickerOpen} onOpenChange={setPickerOpen}>
@@ -497,17 +498,15 @@ export function CrossDaemonConversation({
                     <Text style={{ color: theme.colors.statusDanger, fontSize: 12, paddingLeft: 10 }}>Unavailable: {hostAgents.error}</Text>
                   ) : null}
                   {hostAgents?.agents.map((configuredAgent) => (
-                    <Pressable
+                    <InlineButton
                       key={`${configuredAgent.serverId}/${configuredAgent.agentId}`}
                       accessibilityRole="button"
+                      label={`${configuredAgent.name} (${configuredAgent.agentId})${configuredAgent.status ? ` · ${configuredAgent.status}` : ""}`}
                       accessibilityLabel={`Start a conversation with ${configuredAgent.name} on ${host.label}`}
                       onPress={() => pickConfiguredHostAgent(host, configuredAgent)}
-                      style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingLeft: 10 }, pressed && { opacity: 0.7 }]}
-                    >
-                      <Text style={{ color: theme.colors.foreground, fontSize: 13, flexShrink: 1 }}>
-                        {configuredAgent.name} ({configuredAgent.agentId}){configuredAgent.status ? ` · ${configuredAgent.status}` : ""}
-                      </Text>
-                    </Pressable>
+                      style={{ paddingVertical: 6, paddingLeft: 10 }}
+                      textStyle={{ color: theme.colors.foreground, fontSize: 13 }}
+                    />
                   ))}
                 </View>
               );
@@ -528,15 +527,15 @@ export function CrossDaemonConversation({
                       <View key={`${daemon.name}-${project.project}-${ws.name}`}>
                         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4, paddingLeft: 20 }}>⌂ {ws.name}</Text>
                         {ws.agents.map((a) => (
-                          <Pressable
+                          <InlineButton
                             key={a.agentId}
                             accessibilityRole="button"
+                            label={`${a.name} (${a.shortId}) · ${a.status}`}
                             accessibilityLabel={`Start a conversation with ${a.name} on ${peerLabelForName(daemon.name)}`}
                             onPress={() => pickPeer(daemon.name, a)}
-                            style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingLeft: 30 }, pressed && { opacity: 0.7 }]}
-                          >
-                            <Text style={{ color: theme.colors.foreground, fontSize: 13, flexShrink: 1 }}>{a.name} ({a.shortId}) · {a.status}</Text>
-                          </Pressable>
+                            style={{ paddingVertical: 6, paddingLeft: 30 }}
+                            textStyle={{ color: theme.colors.foreground, fontSize: 13 }}
+                          />
                         ))}
                       </View>
                     ))}

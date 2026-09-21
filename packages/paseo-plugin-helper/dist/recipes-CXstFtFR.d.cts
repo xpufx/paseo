@@ -219,6 +219,7 @@ declare function resolveButtonAttentionMode(attention?: ButtonAttention): Attent
 declare function resolveButtonAttentionTone(variant: ButtonVariant): AttentionBeaconTone;
 interface ButtonProps {
     label?: string;
+    children?: ReactNode;
     variant?: ButtonVariant;
     size?: ButtonSize;
     icon?: string | ReactNode;
@@ -229,9 +230,10 @@ interface ButtonProps {
     style?: StyleProp<ViewStyle>;
     textStyle?: StyleProp<TextStyle>;
     accessibilityLabel?: string;
+    accessibilityRole?: "button" | "link";
     attention?: ButtonAttention;
 }
-declare function Button({ label, variant, size, icon, iconPosition, onPress, disabled, loading, style, textStyle, accessibilityLabel, attention, }: ButtonProps): React__default.JSX.Element;
+declare function Button({ label, children, variant, size, icon, iconPosition, onPress, disabled, loading, style, textStyle, accessibilityLabel, accessibilityRole, attention, }: ButtonProps): React__default.JSX.Element;
 
 type BadgeStyle = "tinted" | "outline" | "solid";
 type BadgeSize = "sm" | "md";

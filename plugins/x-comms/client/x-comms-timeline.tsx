@@ -3,7 +3,8 @@ import { type PluginTimelineItemProps, type PluginTimelineTransformerContributio
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import { useCallback, useMemo, useState } from "react";
-import { Pressable, Text, View } from "react-native";
+import { Text, View } from "react-native";
+import { cardRecipe, InlineButton } from "./vendor/paseo-plugin-helper/index";
 import { EnvelopeSchema, cardSignal, isOverflowing, parseEnvelope, type CrossDaemonEnvelope } from "../shared/envelope";
 import {
   OUTBOX_NOTICE_KIND,
@@ -56,9 +57,11 @@ function MessageBody({ theme, body }: { theme: PluginTheme; body: string }) {
           {body}
         </Text>
         {overflows ? (
-          <Pressable accessibilityRole="button" onPress={() => setExpanded(true)} hitSlop={8}>
-            <Text style={{ color: theme.colors.accent, fontSize: 12, marginTop: 2 }}>Show more</Text>
-          </Pressable>
+          <InlineButton
+            label="Show more"
+            onPress={() => setExpanded(true)}
+            style={{ marginTop: 2 }}
+          />
         ) : null}
       </View>
     );
@@ -66,10 +69,7 @@ function MessageBody({ theme, body }: { theme: PluginTheme; body: string }) {
   return (
     <View
       style={{
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        borderRadius: 6,
-        padding: 8,
+        ...cardRecipe(theme, { variant: "flat", compact: true }),
         marginTop: 2,
         flexDirection: "row",
       }}
@@ -78,12 +78,16 @@ function MessageBody({ theme, body }: { theme: PluginTheme; body: string }) {
         {body}
       </Text>
       <View style={{ flexDirection: "column", gap: 8, marginLeft: 8 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Copy message" onPress={copy} hitSlop={10}>
-          <Text style={{ color: theme.colors.accent, fontSize: 14 }}>⧉</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => setExpanded(false)} hitSlop={8}>
-          <Text style={{ color: theme.colors.accent, fontSize: 12 }}>Less</Text>
-        </Pressable>
+        <InlineButton
+          label="⧉"
+          accessibilityLabel="Copy message"
+          onPress={copy}
+          textStyle={{ fontSize: 14 }}
+        />
+        <InlineButton
+          label="Less"
+          onPress={() => setExpanded(false)}
+        />
       </View>
     </View>
   );

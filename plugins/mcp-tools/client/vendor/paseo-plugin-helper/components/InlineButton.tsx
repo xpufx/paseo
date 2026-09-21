@@ -16,6 +16,7 @@ export interface InlineButtonProps {
   icon?: string | ReactNode;
   disabled?: boolean;
   accessibilityLabel?: string;
+  accessibilityRole?: "button" | "link";
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
 }
@@ -27,6 +28,7 @@ export function InlineButton({
   icon,
   disabled = false,
   accessibilityLabel,
+  accessibilityRole = "button",
   style,
   textStyle,
 }: InlineButtonProps) {
@@ -37,7 +39,7 @@ export function InlineButton({
     <Pressable
       onPress={onPress}
       disabled={disabled}
-      accessibilityRole="button"
+      accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel || label}
       hitSlop={Math.max(0, (touchTargetMin - 24) / 2)}
       style={({ pressed }) => [
