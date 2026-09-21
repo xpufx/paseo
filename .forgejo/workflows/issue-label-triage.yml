@@ -58,6 +58,7 @@ jobs:
     runs-on: runner-local-shell # host runner label; no container
     steps:
       - name: Report runner diagnostics
+        if: always()
         env:
           RUNNER_OS: ${{ runner.os }}
           RUNNER_ARCH: ${{ runner.arch }}

@@ -101,6 +101,7 @@ jobs:
       GIT_COMMITTER_EMAIL: install-smoke@paseo.invalid
     steps:
       - name: Report runner diagnostics
+        if: always()
         env:
           RUNNER_OS: ${{ runner.os }}
           RUNNER_ARCH: ${{ runner.arch }}

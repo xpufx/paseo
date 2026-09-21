@@ -37,6 +37,18 @@ class RunnerHostDiagnosticsTests(unittest.TestCase):
                 self.assertIn("Runner OS: %s\\nRunner architecture: %s\\nRunner host: %s\\n", contents)
                 self.assertIn("GITHUB_STEP_SUMMARY", contents)
 
+    def test_always_first_step_and_runs_always(self):
+        import yaml
+        for workflow in WORKFLOWS:
+            data = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+            for job_name, job in data.get("jobs", {}).items():
+                steps = job.get("steps", [])
+                with self.subTest(workflow=workflow.name, job=job_name):
+                    self.assertTrue(len(steps) > 0, f"job {job_name} has no steps")
+                    first_step = steps[0]
+                    self.assertEqual(first_step.get("name"), "Report runner diagnostics")
+                    self.assertEqual(first_step.get("if"), "always()")
+
 
 if __name__ == "__main__":
     unittest.main()
