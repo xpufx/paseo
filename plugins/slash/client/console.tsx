@@ -63,10 +63,6 @@ const VERB_VARIANT = {
   rpc: "warning",
 } as const;
 
-// Keep the console a readable centered column instead of stretching edge-to-edge
-// on large viewports. The cap lives in the helper (`ModalBody maxContentWidth`);
-// this is the only place the console picks the value.
-const CONSOLE_CONTENT_MAX_WIDTH = 600;
 
 // Header-only rows: the helper reserves an 8px bottom margin for content that
 // follows. Command rows have none, so reclaim it and use the token scale for
@@ -296,7 +292,7 @@ export function SlashConsole() {
 
   return (
     <View style={{ flex: 1, minHeight: 0, width: "100%" }}>
-      <ModalBody scrollMode="always" maxContentWidth={CONSOLE_CONTENT_MAX_WIDTH}>
+      <ModalBody scrollMode="always">
         <Card variant="tinted">
           <FormRow label="Command prefix">
             <TextInput
