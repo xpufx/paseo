@@ -181,6 +181,7 @@ export function contributeClient(client: ComposerPillRegistrar) {
     title: "X-comms",
     icon: "PhoneOutgoing",
     modalTitle: "X-comms",
+    presentation: "centered",
     renderPill: (props) => <CrossDaemonPill {...props} />,
     renderModal: (props) => <XCommsModalContent theme={props.theme} agentId={props.agentId} />,
   });

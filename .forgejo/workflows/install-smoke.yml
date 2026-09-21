@@ -276,12 +276,25 @@ jobs:
       # the manifest, and asserts that id reaches running. On the staged path the
       # source is a local `file://` clone of the prepared tree, so this red result
       # precedes any real mirror push.
+      #
+      # For Paseo 0.8.0 legacy lane: plugins that require Paseo 0.9 (like x-comms)
+      # are skipped from the install test, but announced in the log as a reminder.
+      - name: Resolve effective plugins for matrix lane
+        id: effective-plugins
+        run: |
+          set -euo pipefail
+          PLUGINS="${{ steps.source.outputs.plugins }}"
+          if [ "${{ matrix.paseo-version }}" = "0.8.0" ]; then
+            echo "::notice::Paseo 0.8.0 legacy lane: skipping x-comms (requires Paseo >=0.9.0-beta.2 per issue #296)"
+            PLUGINS="$(echo "$PLUGINS" | tr ' ' '\n' | grep -v '^x-comms$' | tr '\n' ' ' | xargs)"
+          fi
+          echo "plugins=${PLUGINS}" >> "$GITHUB_OUTPUT"
       - name: Install each plugin from the staged tree and assert it is running
         uses: ./.forgejo/actions/install-plugin-smoke
         with:
           mirror-url: ${{ steps.source.outputs.url }}
           mirror-ref: ${{ steps.source.outputs.ref }}
-          plugins: ${{ steps.source.outputs.plugins }}
+          plugins: ${{ steps.effective-plugins.outputs.plugins }}
 
       # Legacy compatibility is informational: make a failed 0.8 observation
       # conspicuous in the run while `continue-on-error` keeps the beta gate
