@@ -45,12 +45,6 @@ import {
 const HOST_FORM_HINT =
   "Full pairing link (https://app.paseo.sh/#offer=…) or a direct daemon host (host:port, tcp://…, unix://…).";
 
-// Keep the main surface a readable centered column instead of stretching
-// edge-to-edge on large viewports. The cap lives in the helper
-// (`ModalBody maxContentWidth`); this is the only place the surface picks
-// the value.
-const X_COMMS_CONTENT_MAX_WIDTH = 600;
-
 // Raw View/Text are kept only for plain content and layout composition
 // (headings, error notices, debug dump lines, modal footers). Every
 // interactive control, card, form row, status indicator, key/value display
@@ -475,7 +469,6 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
     <View style={{ flex: 1, minHeight: 0, width: "100%", backgroundColor: colors.surface0 }}>
       <ModalBody
         headerMode="pinned"
-        maxContentWidth={X_COMMS_CONTENT_MAX_WIDTH}
         header={
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <Text style={{ color: colors.foreground, fontSize: 20, fontWeight: "700" }}>X-comms</Text>

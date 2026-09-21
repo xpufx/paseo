@@ -21,11 +21,6 @@ import { Text } from "react-native";
 import { CrossDaemonConversation } from "./x-comms-conversation";
 import { uiPrefsGetRpc, uiPrefsSetRpc } from "../shared/registry";
 
-// Keep the modal a readable centered column instead of stretching edge-to-edge
-// on large viewports. The cap lives in the helper (`ModalBody
-// maxContentWidth`); this is the only place the pill picks the value.
-const X_COMMS_CONTENT_MAX_WIDTH = 600;
-
 // Raw Text is retained only for the composer pill label and the muted
 // reload-needed caption. Every tab, layout, settings row, toggle, status and
 // empty state goes through a paseo-plugin-helper primitive.
@@ -155,7 +150,6 @@ function XCommsModalContent({ theme, agentId }: { theme: RenderModalProps["theme
     <ModalBody
       header={<Tabs tabs={X_COMMS_TABS} activeTab={tab} onTabChange={setTab} />}
       headerMode="pinned"
-      maxContentWidth={X_COMMS_CONTENT_MAX_WIDTH}
       headerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 }}
     >
       {tab === "about" ? (

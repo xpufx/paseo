@@ -1,5 +1,5 @@
 import React from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import { z } from "zod";
 import type {
   PluginTimelineItemProps,
@@ -8,6 +8,7 @@ import type {
 import {
   Badge,
   ForgeIcon,
+  InlineButton,
 } from "paseo-plugin-helper/client";
 import {
   boardAlertTimelineSchema,
@@ -80,22 +81,14 @@ function BoardAlertIssueRow({
       <Badge variant="info" label={`#${issue.number}`} />
       <View style={styles.issueBody}>
         {open ? (
-          <Pressable onPress={open} hitSlop={8}>
-            <Text style={[styles.issueTitle, styles.issueTitleLink, { color: theme.colors.accent }]}>
-              {issue.title}
-            </Text>
-          </Pressable>
+          <InlineButton label={issue.title} onPress={open} />
         ) : (
           <Text style={[styles.issueTitle, { color: theme.colors.foreground }]}>
             {issue.title}
           </Text>
         )}
         {issue.url ? (
-          <Pressable onPress={open} hitSlop={8}>
-            <Text style={[styles.issueUrl, { color: theme.colors.accent }]}>
-              {issue.url}
-            </Text>
-          </Pressable>
+          <InlineButton label={issue.url} onPress={open} />
         ) : null}
         <LabelChipList
           labels={issue.labels.map((name) => ({ name }))}
@@ -173,7 +166,7 @@ export const forgeBoardAlertRenderer = {
   Component: ForgeBoardAlertCard,
 };
 
-const styles = StyleSheet.create({
+const styles = {
   card: {
     borderRadius: 8,
     borderWidth: 1,
@@ -213,13 +206,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "600",
   },
-  issueTitleLink: {
-    textDecorationLine: "underline",
-  },
-  issueUrl: {
-    fontSize: 11,
-    textDecorationLine: "underline",
-  },
   issueLabels: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -233,4 +219,4 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontStyle: "italic",
   },
-});
+} as const;

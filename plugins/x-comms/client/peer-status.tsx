@@ -18,7 +18,6 @@ import { formatPeerDisplay } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 import { peerStatusRpc } from "../shared/registry";
 
-const X_COMMS_CONTENT_MAX_WIDTH = 600;
 const PEER_STATUS_POLL_MS = 30_000;
 
 type PeerStatusEntry = {
@@ -125,7 +124,6 @@ export function PeerStatusSurface({ theme }: PluginSurfaceProps) {
   return (
     <ModalBody
       headerMode="pinned"
-      maxContentWidth={X_COMMS_CONTENT_MAX_WIDTH}
       header={
         <Card variant="elevated">
           <Card.Header

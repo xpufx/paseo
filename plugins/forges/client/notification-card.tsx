@@ -1,5 +1,5 @@
 import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import type {
   PluginTimelineItemProps,
   PluginTimelineRendererContribution,
@@ -62,10 +62,10 @@ export const forgejoNotificationRenderer: PluginTimelineRendererContribution<
   Component: ForgejoNotificationCard,
 };
 
-const styles = StyleSheet.create({
+const styles = {
   card: { borderRadius: 8, borderWidth: 1, padding: 8, marginVertical: 2, gap: 6 },
   header: { flexDirection: "row", alignItems: "center", gap: 6 },
   title: { fontSize: 12, fontWeight: "600", flex: 1 },
   message: { fontSize: 13 },
   footer: { fontSize: 10, fontStyle: "italic" },
-});
+} as const;

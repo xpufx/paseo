@@ -1,12 +1,12 @@
 import React from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import type {
   PluginTimelineItemProps,
   PluginTimelineRendererContribution,
   PluginTimelineTransformerContribution,
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { Badge, ForgeIcon, Icon } from "paseo-plugin-helper/client";
+import { Badge, ForgeIcon, Icon, InlineButton } from "paseo-plugin-helper/client";
 import {
   forgejoWebhookCardSchema,
   forgejoWebhookItem,
@@ -53,11 +53,7 @@ function SubjectRow({ theme, subject }: { theme: PluginTheme; subject: ForgejoSu
       <View style={styles.subjectBody}>
         {subject.title ? (
           onPress ? (
-            <Pressable onPress={onPress} hitSlop={8} accessibilityRole="link">
-              <Text style={[styles.subjectTitle, styles.link, { color: theme.colors.accent }]}>
-                {subject.title}
-              </Text>
-            </Pressable>
+            <InlineButton label={subject.title} onPress={onPress} />
           ) : (
             <Text style={[styles.subjectTitle, { color: theme.colors.foreground }]}>
               {subject.title}
@@ -80,11 +76,7 @@ function SubjectRow({ theme, subject }: { theme: PluginTheme; subject: ForgejoSu
           </Text>
         ) : null}
         {link ? (
-          <Pressable onPress={onPress} hitSlop={8} accessibilityRole="link">
-            <Text style={[styles.subjectUrl, styles.link, { color: theme.colors.accent }]}>
-              {link}
-            </Text>
-          </Pressable>
+          <InlineButton label={link} onPress={onPress} />
         ) : null}
       </View>
     </View>
@@ -111,11 +103,7 @@ export function ForgejoWebhookCard({ item, theme }: PluginTimelineItemProps<Forg
       </View>
       <View style={styles.metaRow}>
         {repoLink ? (
-          <Pressable onPress={repoLink} hitSlop={8} accessibilityRole="link">
-            <Text style={[styles.meta, styles.link, { color: theme.colors.accent }]}>
-              {data.repo}
-            </Text>
-          </Pressable>
+          <InlineButton label={data.repo} onPress={repoLink} />
         ) : (
           <Text style={[styles.meta, { color: theme.colors.foregroundMuted }]}>{data.repo}</Text>
         )}
@@ -142,7 +130,7 @@ export const forgejoWebhookRenderer: PluginTimelineRendererContribution<
   Component: ForgejoWebhookCard,
 };
 
-const styles = StyleSheet.create({
+const styles = {
   card: {
     borderRadius: 8,
     borderWidth: 1,
@@ -185,14 +173,8 @@ const styles = StyleSheet.create({
   subjectMeta: {
     fontSize: 11,
   },
-  subjectUrl: {
-    fontSize: 11,
-  },
-  link: {
-    textDecorationLine: "underline",
-  },
   footer: {
     fontSize: 10,
     fontStyle: "italic",
   },
-});
+} as const;

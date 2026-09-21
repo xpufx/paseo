@@ -1,5 +1,5 @@
 import React from "react";
-import { Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import { z } from "zod";
 import type {
   PluginTimelineItemProps,
@@ -8,7 +8,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { ForgeIcon, copyToClipboard } from "paseo-plugin-helper/client";
+import { Button, CopyButton, ForgeIcon } from "paseo-plugin-helper/client";
 import {
   classifyForgeLink,
   classifyForgeUrl,
@@ -94,34 +94,24 @@ function IssueLinkRow({
   const open = () => {
     Linking.openURL(link.url).catch(() => {});
   };
-  const copy = () => {
-    copyToClipboard(link.url).catch(() => {});
-  };
   return (
     <View style={styles.row}>
       <ForgeIcon host={link.host} size={13} color={theme.colors.accent} />
-      <Pressable
+      <Button
+        label={`${link.owner}/${link.repo}#${link.number}`}
+        size="sm"
+        variant="ghost"
         style={styles.linkBody}
         onPress={open}
-        hitSlop={8}
-        accessibilityRole="link"
         accessibilityLabel={
           foreign
             ? `${link.owner}/${link.repo}#${link.number} on ${link.host} — ${FOREIGN_LINK_HINT}`
             : undefined
         }
-      >
-        <Text style={[styles.linkText, { color: theme.colors.accent }]}>
-          {link.owner}/{link.repo}#{link.number}
-        </Text>
-        <Text style={[styles.hostText, { color: theme.colors.foregroundMuted }]}>
-          {link.host}
-        </Text>
-      </Pressable>
+      />
+      <Text style={[styles.hostText, { color: theme.colors.foregroundMuted }]}>{link.host}</Text>
       {foreign ? <ForeignLinkBadge /> : null}
-      <Pressable accessibilityRole="button" accessibilityLabel="Copy issue link" onPress={copy} hitSlop={10}>
-        <Text style={[styles.copyText, { color: theme.colors.foregroundMuted }]}>⧉</Text>
-      </Pressable>
+      <CopyButton text={link.url} label="Copy" accessibilityLabel="Copy issue link" />
     </View>
   );
 }
@@ -241,7 +231,7 @@ export const forgeLinkRenderer: PluginTimelineRendererContribution<typeof ForgeI
   Component: ForgeIssueLinks,
 };
 
-const styles = StyleSheet.create({
+const styles = {
   card: {
     paddingVertical: 4,
     gap: 4,
@@ -267,14 +257,7 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 1,
   },
-  linkText: {
-    fontSize: 13,
-    fontWeight: "600",
-  },
   hostText: {
     fontSize: 11,
   },
-  copyText: {
-    fontSize: 14,
-  },
-});
+} as const;

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import {
   ModalBody,
@@ -405,8 +405,10 @@ export function ForgeHookQueueSurface() {
   return <HookQueueView />;
 }
 
-const styles = StyleSheet.create({
+// A single card accent has no helper equivalent; keep it local rather than
+// creating a second style system.
+const styles = {
   messageItem: {
     borderLeftWidth: 3,
   },
-});
+} as const;

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Linking, Pressable, StyleSheet, Text, View, type ScrollView as ScrollViewInstance } from "react-native";
+import { Linking, Text, View, type ScrollView as ScrollViewInstance } from "react-native";
 import { useWorkspace } from "@getpaseo/plugin/client";
 import { useToast } from "@getpaseo/plugin/client/react-native";
 import { SettingsSelect } from "@getpaseo/plugin/client/ui";
@@ -8,6 +8,7 @@ import {
   ModalBody,
   Card,
   Button,
+  CopyButton,
   Badge,
   EmptyState,
   FormRow,
@@ -470,7 +471,7 @@ function IssueRow({
         variant={state === "open" ? "success" : "neutral"}
         label={state === "closed" ? "Closed" : "Open"}
       />
-      <Pressable style={styles.rowBody} onPress={() => onSelect(number)} hitSlop={4}>
+      <View style={styles.rowBody}>
         {/*
          * The row title must not opt into the whole-field fallback: it is one of
          * several fields, and a query that matches only a label must not light
@@ -483,7 +484,14 @@ function IssueRow({
           style={[styles.rowTitle, { color: colors.foreground }]}
         />
         <LabelChipList labels={labels} style={styles.rowLabels} query={query} />
-      </Pressable>
+        <Button
+          size="sm"
+          variant="ghost"
+          icon="ExternalLink"
+          label="Open issue"
+          onPress={() => onSelect(number)}
+        />
+      </View>
       <Button
         size="sm"
         variant={copied ? "primary" : "ghost"}
@@ -570,23 +578,18 @@ function CommentCard({
       />
       <View style={styles.commentRow}>
         <Icon name="ExternalLink" size={13} color={colors.accent} />
-        <Pressable
-          accessibilityRole="link"
-          accessibilityLabel={`Open comment by ${comment.author}`}
-          style={styles.commentBody}
-          onPress={open}
-          hitSlop={8}
-        >
+        <View style={styles.commentBody}>
           <MarkdownLite body={body} activeForge={activeForge} query={query} />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Copy comment link"
-          onPress={copy}
-          hitSlop={10}
-        >
-          <Text style={[styles.copyText, { color: colors.foregroundMuted }]}>⧉</Text>
-        </Pressable>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon="ExternalLink"
+            label="Open comment"
+            accessibilityLabel={`Open comment by ${comment.author}`}
+            onPress={open}
+          />
+        </View>
+        <CopyButton text={target} label="Copy" accessibilityLabel="Copy comment link" />
       </View>
       {comment.envelope ? <AgentEnvelopeCard envelope={comment.envelope} /> : null}
     </Card>
@@ -633,24 +636,22 @@ function ScopedLabelGroup({
   pending: boolean;
   onSelect: (label: string) => void;
 }) {
-  const { colors, touchTargetMin } = usePluginTheme();
-  const hitSlop = Math.max(0, (touchTargetMin - 32) / 2);
+  const { colors } = usePluginTheme();
   return (
     <View style={styles.labelGroup}>
       <Text style={[styles.sectionTitle, { color: colors.foregroundMuted }]}>{title}</Text>
       <View style={styles.labelRow}>
         {labels.map((label) => (
-          <Pressable
+          <Button
             key={label.name}
             onPress={() => onSelect(label.name)}
             disabled={pending}
-            accessibilityRole="button"
             accessibilityLabel={shortLabelName(label.name)}
-            hitSlop={hitSlop}
+            size="sm"
+            variant={active === label.name ? "primary" : "ghost"}
+            label={shortLabelName(label.name)}
             style={pending && active === label.name ? styles.labelChipPending : undefined}
-          >
-            <LabelChip label={label} selected={active === label.name} />
-          </Pressable>
+          />
         ))}
       </View>
     </View>
@@ -1794,7 +1795,7 @@ export function ForgeIssuesPanel({ workspaceId }: { workspaceId: string }) {
   return <ForgeIssuesView workspaceId={workspaceId} />;
 }
 
-const styles = StyleSheet.create({
+const styles = {
   pillContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1973,4 +1974,4 @@ const styles = StyleSheet.create({
   newIssueForm: {
     gap: 8,
   },
-});
+} as const;

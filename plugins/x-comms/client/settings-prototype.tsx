@@ -35,12 +35,6 @@ import {
 const HOST_FORM_HINT =
   "Full pairing link (https://app.paseo.sh/#offer=…) or a direct daemon host (host:port, tcp://…, unix://…).";
 
-// Keep the settings surface a readable centered column instead of stretching
-// edge-to-edge on large viewports. The cap lives in the helper
-// (`ModalBody maxContentWidth`); this is the only place the surface picks
-// the value.
-const X_COMMS_CONTENT_MAX_WIDTH = 600;
-
 // Prototype settings surface for #97. Built only from paseo-plugin-helper/client
 // primitives; the current page in main.tsx is untouched and stays the default tab.
 // Wired to the live registry/health/server/prefs RPCs — no local mock state.
@@ -186,7 +180,6 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
   return (
     <ModalBody
       headerMode="pinned"
-      maxContentWidth={X_COMMS_CONTENT_MAX_WIDTH}
       header={
         <Card variant="elevated">
           <Card.Header
