@@ -1,4 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
+import { getOptionalClientHost } from "./vendor/paseo-plugin-helper/host";
 import {
   interpolateTemplate,
   listCommandsRpc,
@@ -7,6 +8,22 @@ import {
   withPrefix,
   type SlashCommand,
 } from "../shared/resources";
+
+function showFeedback(message: string, isError = false): void {
+  try {
+    const toast = getOptionalClientHost()?.useToast?.();
+    if (toast) {
+      if (isError && typeof toast.error === "function") {
+        toast.error(message);
+        return;
+      }
+      if (typeof toast.show === "function") {
+        toast.show(message, isError ? { variant: "error" } : undefined);
+        return;
+      }
+    }
+  } catch {}
+}
 
 async function fetchCommands(rpc: PluginClientContext["rpc"]): Promise<SlashCommand[]> {
   const res = await (rpc as unknown as (contract: unknown, input: unknown) => Promise<{ commands: SlashCommand[] }>)(
@@ -98,34 +115,44 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
                   runCommandRpc as unknown,
                   { name: command.name, args: ctx.args, agentId: ctx.agent.id },
                 );
+                showFeedback(`/${command.name} executed`);
                 if (agentRef.timeline && typeof agentRef.timeline.append === "function") {
-                  await agentRef.timeline.append({
-                    type: "plugin",
-                    id: `slash-${command.name}-${Date.now()}`,
-                    kind: "slash-command-result",
-                    version: 1,
-                    data: {
-                      command: command.name,
-                      status: "ok",
-                      body: out.result !== undefined ? JSON.stringify(out.result, null, 2) : "Success",
-                    },
-                  });
+                  try {
+                    await agentRef.timeline.append({
+                      type: "plugin",
+                      id: `slash-${command.name}-${Date.now()}`,
+                      kind: "slash-command-result",
+                      version: 1,
+                      data: {
+                        command: command.name,
+                        status: "ok",
+                        body: out.result !== undefined ? JSON.stringify(out.result, null, 2) : "Success",
+                      },
+                    });
+                  } catch (tlErr) {
+                    report(`timeline.append:${command.name}`, tlErr);
+                  }
                 }
               } catch (e) {
                 const errMessage = e instanceof Error ? e.message : String(e);
                 report(`run-command:${command.name}`, errMessage);
+                showFeedback(`/${command.name} failed: ${errMessage}`, true);
                 if (agentRef.timeline && typeof agentRef.timeline.append === "function") {
-                  await agentRef.timeline.append({
-                    type: "plugin",
-                    id: `slash-${command.name}-${Date.now()}`,
-                    kind: "slash-command-result",
-                    version: 1,
-                    data: {
-                      command: command.name,
-                      status: "error",
-                      body: errMessage,
-                    },
-                  });
+                  try {
+                    await agentRef.timeline.append({
+                      type: "plugin",
+                      id: `slash-${command.name}-${Date.now()}`,
+                      kind: "slash-command-result",
+                      version: 1,
+                      data: {
+                        command: command.name,
+                        status: "error",
+                        body: errMessage,
+                      },
+                    });
+                  } catch (tlErr) {
+                    report(`timeline.append:${command.name}`, tlErr);
+                  }
                 }
               }
             },

@@ -147,4 +147,43 @@ describe("registerSlashCommands rpc wiring", () => {
 
     dispose();
   });
+
+  it("triggers toast notification and tolerates timeline.append rejection", async () => {
+    const { client, contributions, agentRef } = harness();
+    const showMock = vi.fn();
+    const errorMock = vi.fn();
+
+    // Mock client host helper deps with a toast API
+    const { initClientHelpers } = await import("../client/vendor/paseo-plugin-helper/host");
+    initClientHelpers({
+      Icon: (() => null) as any,
+      Modal: (() => null) as any,
+      useRpc: (() => () => Promise.resolve()) as any,
+      useToast: () => ({ show: showMock, error: errorMock }),
+    });
+
+    // Simulate timeline.append throwing handler_error (as experienced by operator)
+    agentRef.timeline.append = vi.fn(async () => {
+      throw new Error("Only plugin sessions can append plugin timeline items requestType=agent.timeline.append.request code=handler_error");
+    });
+
+    const dispose = registerSlashCommands(client);
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
+    const ping = contributions.find((c) => c.name === "slash-ping");
+    expect(ping).toBeDefined();
+
+    // Must not throw when timeline.append rejects
+    await expect(
+      ping?.onSubmit({
+        args: "",
+        agent: { id: "agent-77" },
+        paseo: client.paseo,
+      }),
+    ).resolves.not.toThrow();
+
+    // Verify toast notification was triggered
+    expect(showMock).toHaveBeenCalledWith("/ping executed", undefined);
+
+    dispose();
+  });
 });
