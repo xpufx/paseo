@@ -39,11 +39,14 @@ import {
   uppidiRoleModelsContract,
   uppidiSetRoleModelContract,
   uppidiRunnersContract,
+  uppidiFleetMetricsContract,
   type UppidiIssue,
   type AttentionLabel,
   type UppidiAgent,
   type RoleModelConfig,
   type UppidiRunner,
+  type CandidateModelMetrics,
+  type TaskProfileMetrics,
 } from "../shared/contracts.js";
 import { UppidiForgeStaticMockup } from "./static-mockup";
 
@@ -97,6 +100,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
   const [workersExpanded, setWorkersExpanded] = useState(false);
   const [roleModelsExpanded, setRoleModelsExpanded] = useState(false);
   const [runnersExpanded, setRunnersExpanded] = useState(false);
+  const [metricsExpanded, setMetricsExpanded] = useState(false);
 
   // Live RPC queries with polling
   const {
@@ -140,6 +144,11 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
     refetch: refetchRunners,
   } = useRpcQuery(uppidiRunnersContract, {}, { refetchInterval: 15000 });
 
+  const {
+    data: metricsData,
+    refetch: refetchMetrics,
+  } = useRpcQuery(uppidiFleetMetricsContract, {}, { refetchInterval: 15000 });
+
   // Mutations
   const pauseMutation = useRpcMutation(uppidiHookPauseContract);
   const resumeMutation = useRpcMutation(uppidiHookResumeContract);
@@ -156,6 +165,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
     void refetchAgents();
     void refetchRoleModels();
     void refetchRunners();
+    void refetchMetrics();
     toast.show("Dashboard refreshed");
   };
 
@@ -706,6 +716,86 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     </Card>
                   ))
                 )}
+              </Stack>
+            </Card>
+          </Collapsible>
+
+          {/* Collapsible Section: Fleet Capability & Benchmark Matrix (#373 / platform#18) */}
+          <Collapsible
+            title={`Fleet Capability & Benchmark Matrix (${metricsData?.candidates?.length ?? 0} candidates, ${metricsData?.totalEvaluatedTrials ?? 0} trials)`}
+            icon="Activity"
+            isExpanded={metricsExpanded}
+            onToggle={(exp) => setMetricsExpanded(exp)}
+          >
+            <Card variant="flat">
+              <Stack gap="sm">
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                    Empirical task benchmark evaluation matrix comparing candidate models against repeatable task profiles (platform#18).
+                  </Text>
+                  <Button label="Refresh metrics" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchMetrics()} />
+                </Row>
+
+                {metricsData?.privacyNotice && (
+                  <Card variant="tinted">
+                    <Row align="center" gap="xs">
+                      <Badge label="Privacy Boundary" variant="info" size="sm" />
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption, flex: 1 }}>
+                        {metricsData.privacyNotice}
+                      </Text>
+                    </Row>
+                  </Card>
+                )}
+
+                {(metricsData?.candidates ?? []).map((candidate) => (
+                  <Card key={candidate.model} variant="elevated">
+                    <Stack gap="xs">
+                      <Row justify="space-between" align="center" wrap gap="xs">
+                        <Row align="center" gap="xs">
+                          <StatusDot variant={candidate.overallPassRate >= 90 ? "success" : candidate.overallPassRate >= 80 ? "info" : "warning"} />
+                          <Text style={{ color: colors.foreground, ...typography.heading }}>{candidate.model}</Text>
+                          <Badge label={`${candidate.overallPassRate}% pass`} variant={candidate.overallPassRate >= 90 ? "success" : "neutral"} size="sm" />
+                          <Badge label={`${Math.round(candidate.medianWallMs / 1000)}s median`} variant="neutral" size="sm" />
+                          <Badge label={`${candidate.totalTrials} trials`} variant="neutral" size="sm" />
+                        </Row>
+                        <Row align="center" gap="xs" wrap>
+                          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Recommended roles:</Text>
+                          {candidate.recommendedRoles.map((role) => (
+                            <Badge key={role} label={role} variant="info" size="sm" />
+                          ))}
+                        </Row>
+                      </Row>
+
+                      {/* Task Profile breakdown */}
+                      <Stack gap="xs" style={{ marginTop: 4 }}>
+                        {candidate.profiles.map((p) => (
+                          <Card key={p.taskProfile} variant="flat">
+                            <Row justify="space-between" align="center" wrap gap="xs">
+                              <Stack gap="xxs" style={{ flex: 1, minWidth: 200 }}>
+                                <Row align="center" gap="xs">
+                                  <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
+                                    {p.taskProfileLabel}
+                                  </Text>
+                                  <Badge label={`${p.passRate}% pass`} variant={p.passRate >= 90 ? "success" : p.passRate >= 80 ? "info" : "warning"} size="sm" />
+                                  <Badge label={`${p.reworkRate}% rework`} variant="neutral" size="sm" />
+                                  <Badge label={p.confidence} variant={p.confidence === "high" ? "success" : "neutral"} size="sm" />
+                                </Row>
+                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                  {p.advisory}
+                                </Text>
+                              </Stack>
+                              <Row align="center" gap="xs">
+                                <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                                  Failures: Q:{p.failureBreakdown.quota} | T:{p.failureBreakdown.timeout} | Tool:{p.failureBreakdown.toolFailure} | Check:{p.failureBreakdown.checkFailure}
+                                </Text>
+                              </Row>
+                            </Row>
+                          </Card>
+                        ))}
+                      </Stack>
+                    </Stack>
+                  </Card>
+                ))}
               </Stack>
             </Card>
           </Collapsible>

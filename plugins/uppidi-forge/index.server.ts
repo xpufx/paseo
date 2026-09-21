@@ -13,6 +13,7 @@ import {
   uppidiRoleModelsContract,
   uppidiSetRoleModelContract,
   uppidiRunnersContract,
+  uppidiFleetMetricsContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues } from "./server/issues.js";
 import {
@@ -28,6 +29,7 @@ import {
 import { handleUppidiAgents } from "./server/agents.js";
 import { handleUppidiRoleModels, handleUppidiSetRoleModel } from "./server/role-models.js";
 import { handleUppidiRunners } from "./server/runners.js";
+import { handleUppidiFleetMetrics } from "./server/metrics.js";
 
 export default function contribute(server: PluginServerContext) {
   server.handle(uppidiIssuesContract, handleUppidiIssues);
@@ -43,6 +45,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiRoleModelsContract, handleUppidiRoleModels);
   server.handle(uppidiSetRoleModelContract, handleUppidiSetRoleModel);
   server.handle(uppidiRunnersContract, handleUppidiRunners);
+  server.handle(uppidiFleetMetricsContract, handleUppidiFleetMetrics);
 
   return () => {};
 }

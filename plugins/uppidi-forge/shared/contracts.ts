@@ -328,3 +328,59 @@ export const uppidiRunnersContract = defineContract({
   input: z.object({}),
   output: UppidiRunnersOutputSchema,
 });
+
+// Autonomous Fleet Capability & Benchmark Metrics (Issue #373 / Platform #18)
+export const TaskProfileMetricsSchema = z.object({
+  taskProfile: z.string(),
+  taskProfileLabel: z.string(),
+  description: z.string(),
+  trialsCount: z.number().default(0),
+  passRate: z.number().default(0),
+  reworkRate: z.number().default(0),
+  medianWallMs: z.number().default(0),
+  confidence: z.enum(["high", "moderate", "low", "inconclusive"]).default("high"),
+  failureBreakdown: z.object({
+    quota: z.number().default(0),
+    timeout: z.number().default(0),
+    toolFailure: z.number().default(0),
+    checkFailure: z.number().default(0),
+  }),
+  advisory: z.string(),
+});
+export type TaskProfileMetrics = z.infer<typeof TaskProfileMetricsSchema>;
+
+export const CandidateModelMetricsSchema = z.object({
+  model: z.string(),
+  provider: z.string(),
+  configProfile: z.string().default("default"),
+  overallPassRate: z.number().default(0),
+  totalTrials: z.number().default(0),
+  medianWallMs: z.number().default(0),
+  recommendedRoles: z.array(z.string()).default([]),
+  profiles: z.array(TaskProfileMetricsSchema).default([]),
+});
+export type CandidateModelMetrics = z.infer<typeof CandidateModelMetricsSchema>;
+
+export const UppidiFleetMetricsInputSchema = z.object({
+  taskProfile: z.string().optional(),
+  model: z.string().optional(),
+});
+export type UppidiFleetMetricsInput = z.infer<typeof UppidiFleetMetricsInputSchema>;
+
+export const UppidiFleetMetricsOutputSchema = z.object({
+  ok: z.boolean(),
+  candidates: z.array(CandidateModelMetricsSchema).default([]),
+  taskProfiles: z.array(z.string()).default([]),
+  totalEvaluatedTrials: z.number().default(0),
+  privacyNotice: z.string().default(""),
+  updatedAt: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiFleetMetricsOutput = z.infer<typeof UppidiFleetMetricsOutputSchema>;
+
+export const uppidiFleetMetricsContract = defineContract({
+  name: "uppidi-forge.metrics",
+  description: "Get autonomous fleet capability and task benchmark metrics matrix (platform#18)",
+  input: UppidiFleetMetricsInputSchema,
+  output: UppidiFleetMetricsOutputSchema,
+});
