@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Clipboard, Pressable, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
-import { ModalContent, TextInput } from "./vendor/paseo-plugin-helper/index";
+import { TextInput } from "./vendor/paseo-plugin-helper/index";
 import { buildXCommsEnvelope } from "../shared/envelope";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
@@ -471,7 +471,7 @@ export function CrossDaemonConversation({
          * single picker scroller. This keeps long host/agent lists reachable
          * without a nested sheet scroller on either desktop or mobile.
          */}
-        <ModalContent size="large">
+        <Modal.Content>
           <View>
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 4, textTransform: "uppercase" as const }}>
               Configured hosts
@@ -540,7 +540,7 @@ export function CrossDaemonConversation({
             ))}
           </View>
           <ViaXComms theme={theme} />
-        </ModalContent>
+        </Modal.Content>
       </Modal>
       <ViaXComms theme={theme} />
     </View>
