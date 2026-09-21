@@ -359,7 +359,10 @@ function QueueCard({
                     styles.messageItem,
                     {
                       borderLeftColor: colors.accent,
-                      backgroundColor: colors.surface0,
+                      // This is a nested, informational row, not a page
+                      // surface. Use the host's raised surface token so it
+                      // remains distinct from its Card in both themes.
+                      backgroundColor: colors.surface2,
                       borderRadius: resolveRadius("sm"),
                       paddingHorizontal: padding.horizontal / 2,
                       paddingVertical: padding.vertical / 2,

@@ -20,6 +20,8 @@ export interface RegisterWorkspacePanelOptions {
   icon: string;
   Component: ComponentType<PluginWorkspacePanelProps>;
   flair?: VisualFlair;
+  /** Host locations in which the panel should be available. */
+  locations?: string[];
 }
 
 export interface RegisterAgentPanelOptions {
@@ -37,8 +39,8 @@ export interface RegisterAgentPanelOptions {
 export function registerWorkspacePanel(
   plugin: WorkspacePanelRegistrar,
   options: RegisterWorkspacePanelOptions,
-): void {
-  const { id, title, icon, Component, flair } = options;
+): () => void {
+  const { id, title, icon, Component, flair, locations } = options;
 
   const WrappedComponent: ComponentType<PluginWorkspacePanelProps> = (props) => (
     <PluginThemeProvider theme={props.theme} layout={props.layout} flair={flair}>
@@ -46,13 +48,19 @@ export function registerWorkspacePanel(
     </PluginThemeProvider>
   );
 
-  plugin.addWorkspacePanel({
+  const registration = plugin.addWorkspacePanel({
     id,
     title,
     icon,
     context: "workspace",
+    locations,
     Component: WrappedComponent,
   });
+
+  return () => {
+    if (typeof registration === "function") registration();
+    else registration?.remove?.();
+  };
 }
 
 /**

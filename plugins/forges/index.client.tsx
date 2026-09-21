@@ -5,6 +5,7 @@ import {
   initClientHelpers,
   registerComposerPill,
   registerSidebarSurface,
+  registerWorkspacePanel,
 } from "paseo-plugin-helper/client";
 import {
   ISSUES_PILL_ID,
@@ -90,11 +91,13 @@ export default function contribute(client: PluginClientContext) {
     Component: ForgeIssuesPanel,
   });
 
-  const removeQueuePanel = client.addWorkspacePanel({
+  // Workspace panels receive the host theme as props. Register through the
+  // helper so cards and inputs consume those tokens instead of its dark
+  // fallback context; retain both host locations for this panel.
+  const removeQueuePanel = registerWorkspacePanel(client, {
     id: "forges-queues",
     title: "Forge Queues",
     icon: "Layers",
-    context: "workspace",
     locations: ["workspace", "explorer"],
     Component: ForgeHookQueuePanel,
   });
