@@ -508,12 +508,13 @@ function DemoModal({ close, workspaceId }: RenderModalProps) {
               <View style={tabStripRecipe(theme).track}>
                 {(["all", "active", "archived"] as const).map((subTab) => {
                   const isActive = recipeSubTab === subTab;
+                  const item = tabItemRecipe(theme, isActive);
                   return (
                     <Button
                       key={subTab}
                       label={subTab.charAt(0).toUpperCase() + subTab.slice(1)}
-                      size="sm"
-                      variant={isActive ? "primary" : "ghost"}
+                      style={item.container}
+                      textStyle={item.text}
                       onPress={() => {
                         triggerHaptic("light");
                         setRecipeSubTab(subTab);

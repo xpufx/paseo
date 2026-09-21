@@ -1,4 +1,4 @@
-import type { PlatformType } from "../../shared/types.js";
+import type { PlatformType, PluginTheme } from "../../shared/types.js";
 import type { DensityStyle } from "./flair.js";
 import type { ResponsiveLayout } from "../../shared/types.js";
 import { resolveEffectiveCompact } from "./responsive.js";
@@ -158,4 +158,43 @@ export function elevationForPlatform(
     return { ...style, elevation: 0 };
   }
   return style;
+}
+
+export const defaultDarkTheme: PluginTheme = {
+  colors: {
+    surface0: "#18181b",
+    surface1: "#27272a",
+    surface2: "#3f3f46",
+    border: "#3f3f46",
+    foreground: "#fafafa",
+    foregroundMuted: "#a1a1aa",
+    accent: "#3b82f6",
+    accentForeground: "#ffffff",
+    statusSuccess: "#22c55e",
+    statusWarning: "#eab308",
+    statusDanger: "#ef4444",
+  },
+};
+
+export const defaultLightTheme: PluginTheme = {
+  colors: {
+    surface0: "#ffffff",
+    surface1: "#f4f4f5",
+    surface2: "#e4e4e7",
+    border: "#e4e4e7",
+    foreground: "#09090b",
+    foregroundMuted: "#71717a",
+    accent: "#2563eb",
+    accentForeground: "#ffffff",
+    statusSuccess: "#16a34a",
+    statusWarning: "#ca8a04",
+    statusDanger: "#dc2626",
+  },
+};
+
+export function getDefaultTheme(scheme?: string): PluginTheme {
+  if (scheme === "light") {
+    return defaultLightTheme;
+  }
+  return defaultDarkTheme;
 }

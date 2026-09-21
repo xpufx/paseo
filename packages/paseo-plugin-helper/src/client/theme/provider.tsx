@@ -24,7 +24,8 @@ import {
   readHostThemeVariables,
   type HostFontVariables,
 } from "./host-variables.js";
-import { resolveTypography, type TypographyScale } from "./tokens.js";
+import { defaultDarkTheme, defaultLightTheme, getDefaultTheme, resolveTypography, type TypographyScale } from "./tokens.js";
+export { defaultDarkTheme, defaultLightTheme, getDefaultTheme };
 import type { ResponsiveLayout, StatusVariant, ThemeColors } from "../../shared/types.js";
 
 export interface PluginThemeContextValue {
@@ -50,44 +51,7 @@ const defaultLayout: ResponsiveLayout = {
   platform: "web",
 };
 
-export const defaultDarkTheme: PluginTheme = {
-  colors: {
-    surface0: "#18181b",
-    surface1: "#27272a",
-    surface2: "#3f3f46",
-    border: "#3f3f46",
-    foreground: "#fafafa",
-    foregroundMuted: "#a1a1aa",
-    accent: "#3b82f6",
-    accentForeground: "#ffffff",
-    statusSuccess: "#22c55e",
-    statusWarning: "#eab308",
-    statusDanger: "#ef4444",
-  },
-};
-
-export const defaultLightTheme: PluginTheme = {
-  colors: {
-    surface0: "#ffffff",
-    surface1: "#f4f4f5",
-    surface2: "#e4e4e7",
-    border: "#e4e4e7",
-    foreground: "#09090b",
-    foregroundMuted: "#71717a",
-    accent: "#2563eb",
-    accentForeground: "#ffffff",
-    statusSuccess: "#16a34a",
-    statusWarning: "#ca8a04",
-    statusDanger: "#dc2626",
-  },
-};
-
-export function getDefaultTheme(scheme?: string): PluginTheme {
-  if (scheme === "light") {
-    return defaultLightTheme;
-  }
-  return defaultDarkTheme;
-}
+// default themes re-exported from tokens.js
 
 export function useAppearanceScheme(): [string | undefined, (s: string | undefined) => void] {
   const [scheme, setScheme] = useState<string | undefined>(Appearance.getColorScheme?.() ?? undefined);
