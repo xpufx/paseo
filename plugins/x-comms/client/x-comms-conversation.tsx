@@ -466,7 +466,12 @@ export function CrossDaemonConversation({
         </View>
       ) : null}
       <Modal title="New conversation" open={pickerOpen} onOpenChange={setPickerOpen}>
-        <ModalContent>
+        {/*
+         * ModalContent makes the host allocate a bounded frame and owns the
+         * single picker scroller. This keeps long host/agent lists reachable
+         * without a nested sheet scroller on either desktop or mobile.
+         */}
+        <ModalContent size="large">
           <View>
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 4, textTransform: "uppercase" as const }}>
               Configured hosts
@@ -488,6 +493,8 @@ export function CrossDaemonConversation({
                   {hostAgents?.agents.map((configuredAgent) => (
                     <Pressable
                       key={`${configuredAgent.serverId}/${configuredAgent.agentId}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Start a conversation with ${configuredAgent.name} on ${host.label}`}
                       onPress={() => pickConfiguredHostAgent(host, configuredAgent)}
                       style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingLeft: 10 }, pressed && { opacity: 0.7 }]}
                     >
@@ -515,7 +522,13 @@ export function CrossDaemonConversation({
                       <View key={`${daemon.name}-${project.project}-${ws.name}`}>
                         <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, marginTop: 4, paddingLeft: 20 }}>⌂ {ws.name}</Text>
                         {ws.agents.map((a) => (
-                          <Pressable key={a.agentId} onPress={() => pickPeer(daemon.name, a)} style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingLeft: 30 }, pressed && { opacity: 0.7 }]}>
+                          <Pressable
+                            key={a.agentId}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Start a conversation with ${a.name} on ${peerLabelForName(daemon.name)}`}
+                            onPress={() => pickPeer(daemon.name, a)}
+                            style={({ pressed }) => [{ flexDirection: "row", alignItems: "center", paddingVertical: 6, paddingLeft: 30 }, pressed && { opacity: 0.7 }]}
+                          >
                             <Text style={{ color: theme.colors.foreground, fontSize: 13, flexShrink: 1 }}>{a.name} ({a.shortId}) · {a.status}</Text>
                           </Pressable>
                         ))}
