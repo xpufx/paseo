@@ -3,11 +3,11 @@
 Slash-command console for [Paseo](https://github.com/getpaseo/paseo).
 
 <p align="center">
-  <img src="docs/screenshots/slash-console.jpg" alt="S/ash console — command repository, prefix, and shipped catalog" width="380">
+  <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/slash/docs/screenshots/slash-console.jpg" alt="S/ash console — command repository, prefix, and shipped catalog" width="380">
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/slash-autocomplete.jpg" alt="S/ash command autocomplete in the composer" width="480">
+  <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/slash/docs/screenshots/slash-autocomplete.jpg" alt="S/ash command autocomplete in the composer" width="480">
 </p>
 
 Adds a **S/ash console** sidebar surface for managing the slash commands offered

@@ -12,11 +12,11 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 | MCP Servers | Diagnostics | Settings |
 | :---: | :---: | :---: |
-| <img src="screenshots/mcp-servers.png" width="100%" alt="MCP Servers" /> | <img src="screenshots/mcp-diagnostic.png" width="100%" alt="Diagnostics" /> | <img src="screenshots/mcp-settings.png" width="100%" alt="Settings" /> |
+| <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/mcp-tools/screenshots/mcp-servers.png" width="100%" alt="MCP Servers" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/mcp-tools/screenshots/mcp-diagnostic.png" width="100%" alt="Diagnostics" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/mcp-tools/screenshots/mcp-settings.png" width="100%" alt="Settings" /> |
 
 | Server Details | Tool Execution |
 | :---: | :---: |
-| <img src="screenshots/mcp-server-details.png" width="100%" alt="Server Details" /> | <img src="screenshots/mcp-execute.png" width="100%" alt="Tool Execution" /> |
+| <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/mcp-tools/screenshots/mcp-server-details.png" width="100%" alt="Server Details" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/mcp-tools/screenshots/mcp-execute.png" width="100%" alt="Tool Execution" /> |
 
 ## What it does
 

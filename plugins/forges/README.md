@@ -14,7 +14,7 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 | Main | Issue List | Issue Detail |
 | :---: | :---: | :---: |
-| <img src="screenshots/forge-main.png" width="100%" alt="Forges Main" /> | <img src="screenshots/forge-list.png" width="100%" alt="Forge Issue List" /> | <img src="screenshots/forge-issue-detail.png" width="100%" alt="Forge Issue Detail" /> |
+| <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/forges/screenshots/forge-main.png" width="100%" alt="Forges Main" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/forges/screenshots/forge-list.png" width="100%" alt="Forge Issue List" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/forges/screenshots/forge-issue-detail.png" width="100%" alt="Forge Issue Detail" /> |
 
 ## Highlights
 

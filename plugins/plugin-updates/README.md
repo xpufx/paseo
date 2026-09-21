@@ -4,8 +4,8 @@ Read-only Git-source update monitor for [Paseo](https://github.com/getpaseo/pase
 
 <table align="center">
   <tr>
-    <td align="center"><strong>main</strong><br><img src="screenshots/plugin-updates-main.jpg" alt="Plugin updates — main view" width="300"></td>
-    <td align="center"><strong>updating</strong><br><img src="screenshots/plugin-updates-action.jpg" alt="Plugin updates — updating" width="300"></td>
+    <td align="center"><strong>main</strong><br><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/plugin-updates/screenshots/plugin-updates-main.jpg" alt="Plugin updates — main view" width="300"></td>
+    <td align="center"><strong>updating</strong><br><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/plugin-updates/screenshots/plugin-updates-action.jpg" alt="Plugin updates — updating" width="300"></td>
   </tr>
 </table>
 

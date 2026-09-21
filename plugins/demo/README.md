@@ -14,14 +14,14 @@ the plugin ecosystem can benefit from a common library, not necessarily this
 common library, rather than solving the same issues again and again.
 
 <p align="center">
-  <a href="screenshots/helper-visual-flair.png">
-    <img src="screenshots/helper-visual-flair.png" alt="Visual Flair Studio" />
+  <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/demo/screenshots/helper-visual-flair.png">
+    <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/demo/screenshots/helper-visual-flair.png" alt="Visual Flair Studio" />
   </a>
 </p>
 
 | System Metrics | About Plugin |
 | :---: | :---: |
-| <a href="screenshots/helper-metric-gauges.png"><img src="screenshots/helper-metric-gauges.png" alt="System Metrics" /></a> | <a href="screenshots/helper-about.png"><img src="screenshots/helper-about.png" alt="About Plugin" /></a> |
+| <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/demo/screenshots/helper-metric-gauges.png"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/demo/screenshots/helper-metric-gauges.png" alt="System Metrics" /></a> | <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/demo/screenshots/helper-about.png"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/demo/screenshots/helper-about.png" alt="About Plugin" /></a> |
 
 > [!NOTE]
 > **Prerequisites & Platform Support**:

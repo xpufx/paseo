@@ -12,11 +12,11 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 | General Composer View | Dashboard View |
 | :---: | :---: |
-| [![General Composer View](screenshots/paseo-top-general-view.jpg)](screenshots/paseo-top-general-view.jpg) | [![Dashboard View](screenshots/paseo-top-dashboard.jpg)](screenshots/paseo-top-dashboard.jpg) |
+| [![General Composer View](https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/paseo-top-general-view.jpg)](https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/paseo-top-general-view.jpg) | [![Dashboard View](https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/paseo-top-dashboard.jpg)](https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/paseo-top-dashboard.jpg) |
 
 | System Resources Modal | Workspace Context Modal | Settings Modal | About Modal |
 | :---: | :---: | :---: | :---: |
-| <img src="screenshots/1-paseo-top-modal-system.jpg" alt="System Resources Modal" width="100%" /> | <img src="screenshots/2-paseo-top-modal-workspace.jpg" alt="Workspace Context Modal" width="100%" /> | <img src="screenshots/3-paseo-top-modal-settings.jpg" alt="Settings Modal" width="100%" /> | <img src="screenshots/4-paseo-top-modal-about.jpg" alt="About Modal" width="100%" /> |
+| <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/1-paseo-top-modal-system.jpg" alt="System Resources Modal" width="100%" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/2-paseo-top-modal-workspace.jpg" alt="Workspace Context Modal" width="100%" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/3-paseo-top-modal-settings.jpg" alt="Settings Modal" width="100%" /> | <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/top/screenshots/4-paseo-top-modal-about.jpg" alt="About Modal" width="100%" /> |
 
 
 ## Core Capabilities
