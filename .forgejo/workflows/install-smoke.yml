@@ -246,7 +246,19 @@ jobs:
       - name: Start headless daemon and wait for health
         run: |
           set -euo pipefail
-          paseo start --listen 127.0.0.1:6767 --no-relay --no-web-ui
+          # Paseo 0.8 accepts launch-time daemon options and returns as soon as
+          # it has handed the daemon off. In 0.9 those options are persistent
+          # daemon configuration; `daemon start` then waits for readiness.
+          # Keep the legacy invocation isolated so its compatibility result
+          # remains informational, while the current lane uses the 0.9 API.
+          if [ "${{ matrix.paseo-version }}" = "0.8.0" ]; then
+            paseo daemon start --listen 127.0.0.1:6767 --no-relay --no-web-ui
+          else
+            paseo daemon config set daemon.listen 127.0.0.1:6767 --home "$PASEO_HOME"
+            paseo daemon config set daemon.relay.enabled false --home "$PASEO_HOME"
+            paseo daemon config set features.webUi.enabled false --home "$PASEO_HOME"
+            paseo daemon start --home "$PASEO_HOME"
+          fi
           for _ in $(seq 1 60); do
             if paseo status --json 2>/dev/null | jq -e '.localDaemon == "running" and .connectedDaemon == "reachable"' >/dev/null; then
               echo "daemon healthy"
