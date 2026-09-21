@@ -35,8 +35,15 @@ import {
   uppidiHookServiceStatusContract,
   uppidiHookServiceActionContract,
   uppidiHookLogTailContract,
+  uppidiAgentsContract,
+  uppidiRoleModelsContract,
+  uppidiSetRoleModelContract,
+  uppidiRunnersContract,
   type UppidiIssue,
   type AttentionLabel,
+  type UppidiAgent,
+  type RoleModelConfig,
+  type UppidiRunner,
 } from "../shared/contracts.js";
 import { UppidiForgeStaticMockup } from "./static-mockup";
 
@@ -84,6 +91,12 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
   const [hookServiceExpanded, setHookServiceExpanded] = useState(false);
   const [hookQueuesExpanded, setHookQueuesExpanded] = useState(false);
   const [hookLogExpanded, setHookLogExpanded] = useState(false);
+  const [fleetExpanded, setFleetExpanded] = useState(true);
+  const [frontDeskExpanded, setFrontDeskExpanded] = useState(true);
+  const [orchestratorsExpanded, setOrchestratorsExpanded] = useState(true);
+  const [workersExpanded, setWorkersExpanded] = useState(false);
+  const [roleModelsExpanded, setRoleModelsExpanded] = useState(false);
+  const [runnersExpanded, setRunnersExpanded] = useState(false);
 
   // Live RPC queries with polling
   const {
@@ -112,11 +125,27 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
     refetch: refetchLogTail,
   } = useRpcQuery(uppidiHookLogTailContract, { lines: 40 }, { refetchInterval: 5000 });
 
+  const {
+    data: agentsData,
+    refetch: refetchAgents,
+  } = useRpcQuery(uppidiAgentsContract, {}, { refetchInterval: 5000 });
+
+  const {
+    data: roleModelsData,
+    refetch: refetchRoleModels,
+  } = useRpcQuery(uppidiRoleModelsContract, {}, { refetchInterval: 10000 });
+
+  const {
+    data: runnersData,
+    refetch: refetchRunners,
+  } = useRpcQuery(uppidiRunnersContract, {}, { refetchInterval: 15000 });
+
   // Mutations
   const pauseMutation = useRpcMutation(uppidiHookPauseContract);
   const resumeMutation = useRpcMutation(uppidiHookResumeContract);
   const drainMutation = useRpcMutation(uppidiHookDrainContract);
   const serviceActionMutation = useRpcMutation(uppidiHookServiceActionContract);
+  const setRoleModelMutation = useRpcMutation(uppidiSetRoleModelContract);
 
   const refetchAll = () => {
     void refetchIssues();
@@ -124,7 +153,24 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
     void refetchHookQueues();
     void refetchServiceStatus();
     void refetchLogTail();
+    void refetchAgents();
+    void refetchRoleModels();
+    void refetchRunners();
     toast.show("Dashboard refreshed");
+  };
+
+  const handleRoleModelChange = async (role: string, primaryModel: string) => {
+    try {
+      const res = await setRoleModelMutation.mutateAsync({ role, primaryModel });
+      if (res.ok) {
+        toast.show(res.message || `Updated model for ${role}`);
+        void refetchRoleModels();
+      } else {
+        toast.error(res.error || "Failed to update role model");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const handleServiceAction = async (action: "start" | "stop" | "restart") => {
@@ -443,6 +489,223 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   maxHeight={220}
                   copyable={true}
                 />
+              </Stack>
+            </Card>
+          </Collapsible>
+
+          {/* Collapsible Section: Agents & Fleet Hierarchy (#367) */}
+          <Collapsible
+            title={`Agents & Fleet (${agentsData?.totalCount ?? 0} total · ${agentsData?.runningCount ?? 0} running · ${agentsData?.idleCount ?? 0} idle)`}
+            icon="Bot"
+            isExpanded={fleetExpanded}
+            onToggle={(exp) => setFleetExpanded(exp)}
+          >
+            <Card variant="flat">
+              <Stack gap="sm">
+                {/* Front Desk Subtree */}
+                <Collapsible
+                  title={`Front Desk (${agentsData?.frontDesk?.length ?? 0})`}
+                  icon="Inbox"
+                  isExpanded={frontDeskExpanded}
+                  onToggle={(exp) => setFrontDeskExpanded(exp)}
+                >
+                  <Stack gap="xs">
+                    {(agentsData?.frontDesk ?? []).length === 0 ? (
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No Front Desk agent active.</Text>
+                    ) : (
+                      (agentsData?.frontDesk ?? []).map((a) => (
+                        <Card key={a.id} variant="elevated">
+                          <Row justify="space-between" align="center" wrap gap="xs">
+                            <Row align="center" gap="xs">
+                              <StatusDot variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} />
+                              <Text style={{ color: colors.foreground, ...typography.heading }}>{a.name}</Text>
+                              <Badge label={a.status} variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} size="sm" />
+                              <Badge label={a.shortId} variant="neutral" size="sm" />
+                            </Row>
+                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                              {a.provider || "default provider"}
+                            </Text>
+                          </Row>
+                          {a.cwd && (
+                            <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                              cwd: {a.cwd}
+                            </Text>
+                          )}
+                        </Card>
+                      ))
+                    )}
+                  </Stack>
+                </Collapsible>
+
+                {/* Orchestrators Subtree */}
+                <Collapsible
+                  title={`Orchestrators (${agentsData?.orchestrators?.length ?? 0})`}
+                  icon="Network"
+                  isExpanded={orchestratorsExpanded}
+                  onToggle={(exp) => setOrchestratorsExpanded(exp)}
+                >
+                  <Stack gap="xs">
+                    {(agentsData?.orchestrators ?? []).length === 0 ? (
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No orchestrators running.</Text>
+                    ) : (
+                      (agentsData?.orchestrators ?? []).map((a) => (
+                        <Card key={a.id} variant="elevated">
+                          <Row justify="space-between" align="center" wrap gap="xs">
+                            <Row align="center" gap="xs">
+                              <StatusDot variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} />
+                              <Text style={{ color: colors.foreground, ...typography.heading }}>{a.name}</Text>
+                              <Badge label={a.status} variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} size="sm" />
+                              <Badge label={a.shortId} variant="neutral" size="sm" />
+                            </Row>
+                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                              {a.provider || "default provider"}
+                            </Text>
+                          </Row>
+                          {a.cwd && (
+                            <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                              cwd: {a.cwd}
+                            </Text>
+                          )}
+                        </Card>
+                      ))
+                    )}
+                  </Stack>
+                </Collapsible>
+
+                {/* Task & Coding Agents Subtree */}
+                <Collapsible
+                  title={`Coding & Task Agents (${agentsData?.workers?.length ?? 0})`}
+                  icon="Terminal"
+                  isExpanded={workersExpanded}
+                  onToggle={(exp) => setWorkersExpanded(exp)}
+                >
+                  <Stack gap="xs">
+                    {(agentsData?.workers ?? []).length === 0 ? (
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No task agents active.</Text>
+                    ) : (
+                      (agentsData?.workers ?? []).map((a) => (
+                        <Card key={a.id} variant="elevated">
+                          <Row justify="space-between" align="center" wrap gap="xs">
+                            <Row align="center" gap="xs">
+                              <StatusDot variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} />
+                              <Text style={{ color: colors.foreground, ...typography.heading }}>{a.name}</Text>
+                              <Badge label={a.status} variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} size="sm" />
+                              <Badge label={a.shortId} variant="neutral" size="sm" />
+                            </Row>
+                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                              {a.provider || "default provider"}
+                            </Text>
+                          </Row>
+                          {a.cwd && (
+                            <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                              cwd: {a.cwd}
+                            </Text>
+                          )}
+                        </Card>
+                      ))
+                    )}
+                  </Stack>
+                </Collapsible>
+              </Stack>
+            </Card>
+          </Collapsible>
+
+          {/* Collapsible Section: Agent Role Models (#371) */}
+          <Collapsible
+            title="Agent Role Models & Fallback Groups"
+            icon="Cpu"
+            isExpanded={roleModelsExpanded}
+            onToggle={(exp) => setRoleModelsExpanded(exp)}
+          >
+            <Card variant="flat">
+              <Stack gap="sm">
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                  Configure primary model and fallback tiers for each agent role type:
+                </Text>
+                {Object.entries(roleModelsData?.roles ?? {}).map(([roleKey, cfg]) => (
+                  <Card key={roleKey} variant="elevated">
+                    <Row justify="space-between" align="center" wrap gap="xs">
+                      <Stack gap="xxs" style={{ flex: 1 }}>
+                        <Row align="center" gap="xs">
+                          <Text style={{ color: colors.foreground, ...typography.heading }}>
+                            {roleKey}
+                          </Text>
+                          <Badge label="Active tier" variant="info" size="sm" />
+                        </Row>
+                        <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                          Primary: <Text style={{ color: colors.foreground, fontFamily: "monospace" }}>{cfg.primaryModel}</Text>
+                        </Text>
+                        {cfg.fallbackGroup.length > 1 && (
+                          <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                            Fallbacks: {cfg.fallbackGroup.join(" → ")}
+                          </Text>
+                        )}
+                      </Stack>
+                      <Button
+                        label="Switch model"
+                        size="sm"
+                        variant="ghost"
+                        onPress={() => {
+                          const available = roleModelsData?.availableModels ?? [];
+                          if (available.length > 0) {
+                            const nextIdx = (available.indexOf(cfg.primaryModel) + 1) % available.length;
+                            const nextModel = available[nextIdx];
+                            void handleRoleModelChange(roleKey, nextModel);
+                          }
+                        }}
+                      />
+                    </Row>
+                  </Card>
+                ))}
+              </Stack>
+            </Card>
+          </Collapsible>
+
+          {/* Collapsible Section: CI Runners (#366) */}
+          <Collapsible
+            title={`CI Runner Fleet (${runnersData?.onlineCount ?? 0}/${runnersData?.totalCount ?? 0} online)`}
+            icon="Server"
+            isExpanded={runnersExpanded}
+            onToggle={(exp) => setRunnersExpanded(exp)}
+          >
+            <Card variant="flat">
+              <Stack gap="sm">
+                <Row justify="space-between" align="center">
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                    Forgejo Actions runner instances registered for automated CI jobs:
+                  </Text>
+                  <Button label="Refresh runners" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchRunners()} />
+                </Row>
+                {(runnersData?.runners ?? []).length === 0 ? (
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No registered runners found.</Text>
+                ) : (
+                  (runnersData?.runners ?? []).map((r) => (
+                    <Card key={r.id} variant="elevated">
+                      <Row justify="space-between" align="center" wrap gap="xs">
+                        <Stack gap="xxs">
+                          <Row align="center" gap="xs">
+                            <StatusDot variant={r.status === "online" ? "success" : "neutral"} />
+                            <Text style={{ color: colors.foreground, ...typography.heading }}>{r.name}</Text>
+                            <Badge label={r.status} variant={r.status === "online" ? "success" : "neutral"} size="sm" />
+                          </Row>
+                          <Row gap="xs" wrap style={{ marginTop: 4 }}>
+                            {r.labels.map((lbl) => (
+                              <Badge key={lbl} label={lbl} variant="neutral" size="sm" />
+                            ))}
+                          </Row>
+                          {r.lastJob && (
+                            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                              Last job: {r.lastJob}
+                            </Text>
+                          )}
+                        </Stack>
+                        <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                          {r.lastSeen || "active"}
+                        </Text>
+                      </Row>
+                    </Card>
+                  ))
+                )}
               </Stack>
             </Card>
           </Collapsible>

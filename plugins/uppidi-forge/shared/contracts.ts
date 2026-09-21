@@ -220,3 +220,111 @@ export const uppidiHookLogTailContract = defineContract({
   input: HookLogTailInputSchema,
   output: HookLogTailOutputSchema,
 });
+
+// Agents & Fleet Tree View (Issue #367)
+export const UppidiAgentCategorySchema = z.enum(["front-desk", "orchestrator", "worker"]);
+export type UppidiAgentCategory = z.infer<typeof UppidiAgentCategorySchema>;
+
+export const UppidiAgentSchema = z.object({
+  id: z.string(),
+  shortId: z.string(),
+  name: z.string(),
+  category: UppidiAgentCategorySchema,
+  provider: z.string().optional(),
+  status: z.string(),
+  cwd: z.string().optional(),
+  created: z.string().optional(),
+  workspaceId: z.string().optional(),
+});
+export type UppidiAgent = z.infer<typeof UppidiAgentSchema>;
+
+export const UppidiAgentsOutputSchema = z.object({
+  ok: z.boolean(),
+  frontDesk: z.array(UppidiAgentSchema).default([]),
+  orchestrators: z.array(UppidiAgentSchema).default([]),
+  workers: z.array(UppidiAgentSchema).default([]),
+  totalCount: z.number().default(0),
+  runningCount: z.number().default(0),
+  idleCount: z.number().default(0),
+  errorCount: z.number().default(0),
+  error: z.string().optional(),
+});
+export type UppidiAgentsOutput = z.infer<typeof UppidiAgentsOutputSchema>;
+
+export const uppidiAgentsContract = defineContract({
+  name: "uppidi-forge.agents",
+  description: "Get active Paseo agents grouped into tree hierarchy: Frontdesk, Orchestrators, and Workers",
+  input: z.object({}),
+  output: UppidiAgentsOutputSchema,
+});
+
+// Role Model Configuration (Issue #371)
+export const RoleModelConfigSchema = z.object({
+  role: z.string(),
+  primaryModel: z.string(),
+  fallbackGroup: z.array(z.string()).default([]),
+});
+export type RoleModelConfig = z.infer<typeof RoleModelConfigSchema>;
+
+export const UppidiRoleModelsOutputSchema = z.object({
+  ok: z.boolean(),
+  roles: z.record(z.string(), RoleModelConfigSchema).default({}),
+  availableModels: z.array(z.string()).default([]),
+  error: z.string().optional(),
+});
+export type UppidiRoleModelsOutput = z.infer<typeof UppidiRoleModelsOutputSchema>;
+
+export const uppidiRoleModelsContract = defineContract({
+  name: "uppidi-forge.role-models",
+  description: "Get model and fallback group configuration for each agent role",
+  input: z.object({}),
+  output: UppidiRoleModelsOutputSchema,
+});
+
+export const UppidiSetRoleModelInputSchema = z.object({
+  role: z.string(),
+  primaryModel: z.string(),
+  fallbackGroup: z.array(z.string()).optional(),
+});
+export type UppidiSetRoleModelInput = z.infer<typeof UppidiSetRoleModelInputSchema>;
+
+export const UppidiSetRoleModelOutputSchema = z.object({
+  ok: z.boolean(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiSetRoleModelOutput = z.infer<typeof UppidiSetRoleModelOutputSchema>;
+
+export const uppidiSetRoleModelContract = defineContract({
+  name: "uppidi-forge.set-role-model",
+  description: "Set primary model and optional fallback group for an agent role",
+  input: UppidiSetRoleModelInputSchema,
+  output: UppidiSetRoleModelOutputSchema,
+});
+
+// CI Runner List and Status (Issue #366)
+export const UppidiRunnerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  status: z.string(),
+  labels: z.array(z.string()).default([]),
+  lastSeen: z.string().optional(),
+  lastJob: z.string().optional(),
+});
+export type UppidiRunner = z.infer<typeof UppidiRunnerSchema>;
+
+export const UppidiRunnersOutputSchema = z.object({
+  ok: z.boolean(),
+  runners: z.array(UppidiRunnerSchema).default([]),
+  totalCount: z.number().default(0),
+  onlineCount: z.number().default(0),
+  error: z.string().optional(),
+});
+export type UppidiRunnersOutput = z.infer<typeof UppidiRunnersOutputSchema>;
+
+export const uppidiRunnersContract = defineContract({
+  name: "uppidi-forge.runners",
+  description: "Get CI runner fleet status and labels for repository actions",
+  input: z.object({}),
+  output: UppidiRunnersOutputSchema,
+});

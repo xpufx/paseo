@@ -9,6 +9,10 @@ import {
   uppidiHookServiceStatusContract,
   uppidiHookServiceActionContract,
   uppidiHookLogTailContract,
+  uppidiAgentsContract,
+  uppidiRoleModelsContract,
+  uppidiSetRoleModelContract,
+  uppidiRunnersContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues } from "./server/issues.js";
 import {
@@ -21,6 +25,9 @@ import {
   handleHookServiceAction,
   handleHookLogTail,
 } from "./server/hook.js";
+import { handleUppidiAgents } from "./server/agents.js";
+import { handleUppidiRoleModels, handleUppidiSetRoleModel } from "./server/role-models.js";
+import { handleUppidiRunners } from "./server/runners.js";
 
 export default function contribute(server: PluginServerContext) {
   server.handle(uppidiIssuesContract, handleUppidiIssues);
@@ -32,6 +39,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiHookServiceStatusContract, handleHookServiceStatus);
   server.handle(uppidiHookServiceActionContract, handleHookServiceAction);
   server.handle(uppidiHookLogTailContract, handleHookLogTail);
+  server.handle(uppidiAgentsContract, handleUppidiAgents);
+  server.handle(uppidiRoleModelsContract, handleUppidiRoleModels);
+  server.handle(uppidiSetRoleModelContract, handleUppidiSetRoleModel);
+  server.handle(uppidiRunnersContract, handleUppidiRunners);
 
   return () => {};
 }
