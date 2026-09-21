@@ -92,14 +92,41 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
             argumentHint: "[args]",
             context: "agent",
             async onSubmit(ctx) {
+              const agentRef = ctx.paseo.agents.ref(ctx.agent.id);
               try {
                 const out = await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<{ result?: unknown }>)(
                   runCommandRpc as unknown,
                   { name: command.name, args: ctx.args, agentId: ctx.agent.id },
                 );
-                await ctx.paseo.agents.ref(ctx.agent.id).send(`/${command.name}: ${JSON.stringify(out.result ?? null)}`);
+                if (agentRef.timeline && typeof agentRef.timeline.append === "function") {
+                  await agentRef.timeline.append({
+                    type: "plugin",
+                    id: `slash-${command.name}-${Date.now()}`,
+                    kind: "slash-command-result",
+                    version: 1,
+                    data: {
+                      command: command.name,
+                      status: "ok",
+                      body: out.result !== undefined ? JSON.stringify(out.result, null, 2) : "Success",
+                    },
+                  });
+                }
               } catch (e) {
-                await ctx.paseo.agents.ref(ctx.agent.id).send(`/${command.name} failed: ${e instanceof Error ? e.message : String(e)}`);
+                const errMessage = e instanceof Error ? e.message : String(e);
+                report(`run-command:${command.name}`, errMessage);
+                if (agentRef.timeline && typeof agentRef.timeline.append === "function") {
+                  await agentRef.timeline.append({
+                    type: "plugin",
+                    id: `slash-${command.name}-${Date.now()}`,
+                    kind: "slash-command-result",
+                    version: 1,
+                    data: {
+                      command: command.name,
+                      status: "error",
+                      body: errMessage,
+                    },
+                  });
+                }
               }
             },
           }),

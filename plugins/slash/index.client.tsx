@@ -3,6 +3,7 @@ import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers, registerCommandCenterItem, registerSidebarSurface } from "paseo-plugin-helper/client";
 import { registerSlashCommands } from "./client/commands";
+import { registerSlashTimeline } from "./client/timeline";
 import { SlashConsole } from "./client/console";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
@@ -27,8 +28,10 @@ export default function contribute(client: PluginClientContext) {
     },
   });
   const removeCommands = registerSlashCommands(client);
+  const removeTimeline = registerSlashTimeline(client);
   return () => {
     removeCommandCenter();
     removeCommands();
+    removeTimeline();
   };
 }
