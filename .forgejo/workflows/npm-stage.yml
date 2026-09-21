@@ -50,7 +50,9 @@ jobs:
           git --version
 
       - name: Unit-test the stage/publish logic
-        run: node scripts/publish-npm.test.mjs
+        run: |
+          node scripts/publish-npm.test.mjs
+          node scripts/npm-stage-native.test.mjs
 
       - name: Stage plugin tarballs (no registry, no credentials)
         run: make npm-stage
@@ -95,31 +97,16 @@ jobs:
           npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
           # Authenticate for `npm stage publish` (any token type works, no 2FA).
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
-          # A version cannot be staged twice. Query each package first so a
-          # repeated manual dispatch is idempotent, while making it clear that
-          # an existing stage is not a fresh publish.
-          jq -e -r '.packages[] | [.publishAs, .version, .tarball] | @tsv' publish-stage/manifest.json | while IFS="$(printf '\t')" read -r package_name version tarball; do
-            stage_list="$(mktemp)"
-            trap 'rm -f "$stage_list"' EXIT
-            npm stage list "$package_name" --json > "$stage_list"
-            if node - "$stage_list" "$package_name" "$version" <<'NODE_EOF'
-              const fs = require("fs");
-              const [stageListPath, packageName, version] = process.argv.slice(2);
-              const stages = JSON.parse(fs.readFileSync(stageListPath, "utf8"));
-              const existing = stages.filter((stage) => stage.packageName === packageName && stage.version === version);
-              if (existing.length === 0) process.exit(1);
-              console.log(`Skipping ${packageName}@${version}: already staged (${existing.map((stage) => stage.id).join(", ")}); not a fresh stage.`);
-          NODE_EOF
-            then
-              rm -f "$stage_list"
-              trap - EXIT
-              continue
-            fi
-            rm -f "$stage_list"
-            trap - EXIT
-            echo "staging $package_name@$version from publish-stage/$tarball"
-            npm stage publish "publish-stage/$tarball" --access public
-          done
+          # Fail before registry mutation when the configured notify-only
+          # 2fado path is unavailable; the helper uses the supported `list`
+          # request against the configured socket before staging anything.
+          export TWOFADO_NOTIFY_BIN="${TWOFADO_NOTIFY_BIN:-2fado}"
+          command -v "$TWOFADO_NOTIFY_BIN" >/dev/null || { echo "::error::2fado notify CLI is unavailable"; exit 1; }
+          # This helper retains duplicate-version skips and sends 2fado's
+          # notify-only petition only after npm accepts a fresh staged package.
+          # It never publishes or approves a version, and a failed npm command
+          # exits before a notification can be sent.
+          node scripts/npm-stage-native.mjs --manifest=publish-stage/manifest.json
 
       - name: Upload publish-stage/ artifact
         # The Forgejo-maintained fork has the GHES check removed; the upstream
