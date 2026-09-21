@@ -33,6 +33,7 @@ export function resolveButtonAttentionTone(variant: ButtonVariant): AttentionBea
 
 export interface ButtonProps {
   label?: string;
+  children?: ReactNode;
   variant?: ButtonVariant;
   size?: ButtonSize;
   icon?: string | ReactNode;
@@ -43,11 +44,13 @@ export interface ButtonProps {
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
   accessibilityLabel?: string;
+  accessibilityRole?: "button" | "link";
   attention?: ButtonAttention;
 }
 
 export function Button({
   label,
+  children,
   variant = "secondary",
   size = "md",
   icon,
@@ -58,6 +61,7 @@ export function Button({
   style,
   textStyle,
   accessibilityLabel,
+  accessibilityRole = "button",
   attention,
 }: ButtonProps) {
   const { Icon } = getClientHost();
@@ -112,7 +116,7 @@ export function Button({
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
-      accessibilityRole="button"
+      accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel || label}
       hitSlop={Math.max(0, (touchTargetMin - 32) / 2)}
       style={({ pressed }) => [
@@ -132,6 +136,8 @@ export function Button({
     >
       {loading ? (
         <ActivityIndicator size="small" color={textColor} />
+      ) : children ? (
+        children
       ) : (
         <>
           {iconPosition === "left" && renderIcon()}
