@@ -33,7 +33,7 @@ jobs:
     runs-on: alpine-docker
     # Dedicated paseo-ci image with Node 22, git/make/jq, and pinned @getpaseo/cli, same as install-smoke.
     container:
-      image: forge.mrs.uppidi.com/oktay/runner-containers/paseo-ci:latest
+      image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
     env:
       # Deterministic cache inside the throwaway container. `npm pack` reads the
       # local plugin dirs only — no registry contact.
