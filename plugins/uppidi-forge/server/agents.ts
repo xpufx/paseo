@@ -40,6 +40,7 @@ export interface RawAgentRecord {
     cachedInputTokens?: number;
     totalCostUsd?: number;
   } | null;
+  url?: string;
 }
 
 export function categorizeAgent(name: string): "front-desk" | "orchestrator" | "worker" {
@@ -226,6 +227,7 @@ export function normalizeRawAgent(
     stateDetail,
     attributedWork,
     usage: raw.lastUsage || null,
+    url: raw.url || (id ? `paseo://agent/${id}` : undefined),
   };
 }
 

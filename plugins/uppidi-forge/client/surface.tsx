@@ -13,6 +13,7 @@ import {
   DataTable,
   EmptyState,
   Grid,
+  Icon,
   KeyValue,
   KeyValueGroup,
   ModalBody,
@@ -72,7 +73,12 @@ import {
   type SortDirection,
 } from "../shared/sort-filter.js";
 import { UppidiForgeStaticMockup } from "./static-mockup";
-import { UppidiForgeTreeView } from "./tree-view";
+import {
+  UppidiForgeTreeView,
+  AgentStateDot,
+  AgentTitleLink,
+  getDeterministicStateConfig,
+} from "./tree-view";
 
 type SurfaceTab = "dashboard" | "tree" | "mockup";
 
@@ -735,26 +741,30 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     {filteredFrontDesk.length === 0 ? (
                       <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching Front Desk agents.</Text>
                     ) : (
-                      filteredFrontDesk.map((a) => (
-                        <Card key={a.id} variant="elevated">
-                          <Row justify="space-between" align="center" wrap gap="xs">
-                            <Row align="center" gap="xs">
-                              <StatusDot variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} />
-                              <Text style={{ color: colors.foreground, ...typography.heading }}>{a.name}</Text>
-                              <Badge label={a.status} variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} size="sm" />
-                              <Badge label={a.shortId} variant="neutral" size="sm" />
+                      filteredFrontDesk.map((a) => {
+                        const config = getDeterministicStateConfig(a.deterministicState, a.category);
+                        return (
+                          <Card key={a.id} variant="elevated">
+                            <Row justify="space-between" align="center" wrap gap="xs">
+                              <Row align="center" gap="xs">
+                                <AgentStateDot color={config.color} pulse={config.pulse} />
+                                <Icon name={config.categoryIcon} size={14} color={config.color} />
+                                <AgentTitleLink agent={a} colors={colors} typography={typography} />
+                                <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
+                                <Badge label={a.shortId} variant="neutral" size="sm" />
+                              </Row>
+                              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                {a.provider || "default provider"}
+                              </Text>
                             </Row>
-                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                              {a.provider || "default provider"}
-                            </Text>
-                          </Row>
-                          {a.cwd && (
-                            <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
-                              cwd: {a.cwd}
-                            </Text>
-                          )}
-                        </Card>
-                      ))
+                            {a.cwd && (
+                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                                cwd: {a.cwd}
+                              </Text>
+                            )}
+                          </Card>
+                        );
+                      })
                     )}
                   </Stack>
                 </Collapsible>
@@ -770,26 +780,30 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     {filteredOrchestrators.length === 0 ? (
                       <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching orchestrators.</Text>
                     ) : (
-                      filteredOrchestrators.map((a) => (
-                        <Card key={a.id} variant="elevated">
-                          <Row justify="space-between" align="center" wrap gap="xs">
-                            <Row align="center" gap="xs">
-                              <StatusDot variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} />
-                              <Text style={{ color: colors.foreground, ...typography.heading }}>{a.name}</Text>
-                              <Badge label={a.status} variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} size="sm" />
-                              <Badge label={a.shortId} variant="neutral" size="sm" />
+                      filteredOrchestrators.map((a) => {
+                        const config = getDeterministicStateConfig(a.deterministicState, a.category);
+                        return (
+                          <Card key={a.id} variant="elevated">
+                            <Row justify="space-between" align="center" wrap gap="xs">
+                              <Row align="center" gap="xs">
+                                <AgentStateDot color={config.color} pulse={config.pulse} />
+                                <Icon name={config.categoryIcon} size={14} color={config.color} />
+                                <AgentTitleLink agent={a} colors={colors} typography={typography} />
+                                <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
+                                <Badge label={a.shortId} variant="neutral" size="sm" />
+                              </Row>
+                              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                {a.provider || "default provider"}
+                              </Text>
                             </Row>
-                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                              {a.provider || "default provider"}
-                            </Text>
-                          </Row>
-                          {a.cwd && (
-                            <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
-                              cwd: {a.cwd}
-                            </Text>
-                          )}
-                        </Card>
-                      ))
+                            {a.cwd && (
+                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                                cwd: {a.cwd}
+                              </Text>
+                            )}
+                          </Card>
+                        );
+                      })
                     )}
                   </Stack>
                 </Collapsible>
@@ -805,26 +819,30 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     {filteredWorkers.length === 0 ? (
                       <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching task agents.</Text>
                     ) : (
-                      filteredWorkers.map((a) => (
-                        <Card key={a.id} variant="elevated">
-                          <Row justify="space-between" align="center" wrap gap="xs">
-                            <Row align="center" gap="xs">
-                              <StatusDot variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} />
-                              <Text style={{ color: colors.foreground, ...typography.heading }}>{a.name}</Text>
-                              <Badge label={a.status} variant={a.status === "running" ? "success" : a.status === "idle" ? "neutral" : "danger"} size="sm" />
-                              <Badge label={a.shortId} variant="neutral" size="sm" />
+                      filteredWorkers.map((a) => {
+                        const config = getDeterministicStateConfig(a.deterministicState, a.category);
+                        return (
+                          <Card key={a.id} variant="elevated">
+                            <Row justify="space-between" align="center" wrap gap="xs">
+                              <Row align="center" gap="xs">
+                                <AgentStateDot color={config.color} pulse={config.pulse} />
+                                <Icon name={config.categoryIcon} size={14} color={config.color} />
+                                <AgentTitleLink agent={a} colors={colors} typography={typography} />
+                                <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
+                                <Badge label={a.shortId} variant="neutral" size="sm" />
+                              </Row>
+                              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                {a.provider || "default provider"}
+                              </Text>
                             </Row>
-                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                              {a.provider || "default provider"}
-                            </Text>
-                          </Row>
-                          {a.cwd && (
-                            <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
-                              cwd: {a.cwd}
-                            </Text>
-                          )}
-                        </Card>
-                      ))
+                            {a.cwd && (
+                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                                cwd: {a.cwd}
+                              </Text>
+                            )}
+                          </Card>
+                        );
+                      })
                     )}
                   </Stack>
                 </Collapsible>

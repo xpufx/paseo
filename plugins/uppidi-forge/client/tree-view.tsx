@@ -1,22 +1,33 @@
-import React, { useMemo, useState } from "react";
-import { Text, View } from "react-native";
+import React, { useMemo, useRef, useState } from "react";
+import { Animated, Linking, Pressable, Text, View } from "react-native";
 import {
   Badge,
   Button,
   Card,
   EmptyState,
+  Icon,
   Row,
   SearchInput,
   Stack,
   StatusDot,
+  copyToClipboard,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
-import type {
-  UppidiAgent,
-  UppidiAgentTreeNode,
-  DeterministicAgentState,
-  UppidiAgentsOutput,
+import {
+  type UppidiAgent,
+  type UppidiAgentTreeNode,
+  type DeterministicAgentState,
+  type UppidiAgentsOutput,
+  type DeterministicStateConfig,
+  getAgentCategoryIcon,
+  getDeterministicStateConfig,
 } from "../shared/contracts.js";
+
+export {
+  type DeterministicStateConfig,
+  getAgentCategoryIcon,
+  getDeterministicStateConfig,
+};
 
 export interface UppidiForgeTreeViewProps {
   agentsData?: UppidiAgentsOutput;
@@ -40,49 +51,107 @@ function flattenTree(nodes: UppidiAgentTreeNode[], currentDepth = 0): FlattenedN
   return result;
 }
 
-function getDeterministicBadgeVariant(
-  state: DeterministicAgentState
-): "success" | "danger" | "warning" | "info" | "neutral" {
-  switch (state) {
-    case "working":
-      return "success";
-    case "running":
-      return "info";
-    case "idle:waiting":
-      return "neutral";
-    case "sleeping":
-      return "neutral";
-    case "idle:quota-exhausted":
-      return "warning";
-    case "failed:quota-exhausted":
-    case "failed:spawn":
-    case "failed:timeout":
-    case "failed:error":
-      return "danger";
-    default:
-      return "neutral";
-  }
+export function AgentStateDot({
+  color,
+  pulse = false,
+  size = 8,
+}: {
+  color: string;
+  pulse?: boolean;
+  size?: number;
+}) {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  React.useEffect(() => {
+    if (!pulse) {
+      pulseAnim.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 0.35,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 900,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse, pulseAnim]);
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Animated.View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: color,
+          opacity: pulseAnim,
+        }}
+      />
+    </View>
+  );
 }
 
-function getStatusDotVariant(
-  state: DeterministicAgentState
-): "success" | "danger" | "warning" | "neutral" {
-  switch (state) {
-    case "working":
-    case "running":
-      return "success";
-    case "idle:quota-exhausted":
-      return "warning";
-    case "failed:quota-exhausted":
-    case "failed:spawn":
-    case "failed:timeout":
-    case "failed:error":
-      return "danger";
-    case "sleeping":
-    case "idle:waiting":
-    default:
-      return "neutral";
-  }
+export function AgentTitleLink({
+  agent,
+  colors,
+  typography,
+}: {
+  agent: UppidiAgent;
+  colors: any;
+  typography: any;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const handlePress = () => {
+    const url = agent.url || `paseo://agent/${agent.id}`;
+    Linking.openURL(url).catch(() => {
+      copyToClipboard(url).catch(() => {});
+    });
+  };
+
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={`Open Paseo agent ${agent.name}`}
+      onPress={handlePress}
+      // @ts-ignore RN web hover
+      onMouseEnter={() => setHovered(true)}
+      // @ts-ignore RN web hover
+      onMouseLeave={() => setHovered(false)}
+      style={({ pressed }: any) => ({
+        opacity: pressed ? 0.75 : 1,
+        cursor: "pointer",
+        flexShrink: 1,
+      })}
+    >
+      <Text
+        style={{
+          color: hovered ? colors.accent : colors.foreground,
+          ...typography.heading,
+          fontWeight: "600",
+          textDecorationLine: hovered ? "underline" : "none",
+        }}
+        numberOfLines={1}
+      >
+        {agent.name}
+      </Text>
+    </Pressable>
+  );
 }
 
 function formatRelativeTime(dateStr?: string | null): string {
@@ -220,9 +289,10 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
       ) : (
         <Stack gap={6}>
           {filteredNodes.map(({ agent, depth }) => {
-            const badgeVariant = getDeterministicBadgeVariant(agent.deterministicState);
-            const dotVariant = getStatusDotVariant(agent.deterministicState);
-            const isWorking = agent.deterministicState === "working";
+            const stateConfig = getDeterministicStateConfig(
+              agent.deterministicState,
+              agent.category
+            );
             const indentPadding = Math.min(depth * 22, 110);
 
             return (
@@ -247,7 +317,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
                   }}
                 >
                   <Row justify="space-between" align="center" wrap gap="xs">
-                    {/* Left: Indicator, Lineage Branch Symbol, Name, Category */}
+                    {/* Left: Indicator, Lineage Branch Symbol, Icon, Title Link, Badges */}
                     <Row align="center" gap="xs" style={{ flexShrink: 1 }}>
                       {depth > 0 && (
                         <Text
@@ -261,16 +331,20 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
                           {"└─"}
                         </Text>
                       )}
-                      <StatusDot variant={dotVariant} pulse={isWorking} />
-                      <Text
-                        style={{
-                          color: colors.foreground,
-                          ...typography.heading,
-                          fontWeight: "600",
-                        }}
-                      >
-                        {agent.name}
-                      </Text>
+                      <AgentStateDot
+                        color={stateConfig.color}
+                        pulse={stateConfig.pulse}
+                      />
+                      <Icon
+                        name={stateConfig.categoryIcon}
+                        size={14}
+                        color={stateConfig.color}
+                      />
+                      <AgentTitleLink
+                        agent={agent}
+                        colors={colors}
+                        typography={typography}
+                      />
                       <Badge label={agent.shortId} variant="neutral" size="sm" />
                       <Badge label={agent.category} variant="neutral" size="sm" />
                     </Row>
@@ -282,9 +356,10 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
                         label={`${agent.deterministicState}${
                           agent.stateDetail ? `: ${agent.stateDetail}` : ""
                         }`}
-                        variant={badgeVariant}
+                        variant={stateConfig.badgeVariant}
                         size="sm"
                         dot
+                        style={{ borderColor: stateConfig.color }}
                       />
 
                       {/* Model Pill */}

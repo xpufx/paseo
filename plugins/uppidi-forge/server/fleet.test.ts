@@ -165,6 +165,13 @@ describe("fleet and agents classification", () => {
     assert.equal(agent.category, "front-desk");
     assert.equal(agent.status, "idle");
     assert.equal(agent.deterministicState, "idle:waiting");
+    assert.equal(agent.url, "paseo://agent/64d89202-acaa-4071-b658-90db710875bd");
+
+    const custom = normalizeRawAgent({
+      id: "agent-custom",
+      url: "https://paseo.uppidi.com/agent/agent-custom",
+    });
+    assert.equal(custom.url, "https://paseo.uppidi.com/agent/agent-custom");
   });
 
   it("groups agents by hierarchy, calculates health totals, and attaches tree", async () => {

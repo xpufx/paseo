@@ -10,6 +10,8 @@ import {
   UppidiAgentSchema,
   UppidiAgentTreeNodeSchema,
   UppidiAgentsOutputSchema,
+  getDeterministicStateConfig,
+  getAgentCategoryIcon,
 } from "./contracts.js";
 
 describe("uppidi-forge shared contracts", () => {
@@ -128,5 +130,89 @@ describe("uppidi-forge shared contracts", () => {
     assert.equal(tree.children.length, 1);
     assert.equal(tree.children[0].agent.id, "child-1");
     assert.equal(tree.children[0].depth, 1);
+  });
+
+  it("maps deterministic states strictly to fixed color taxonomy and icons", () => {
+    // working: success/emerald (#10b981) + pulsing
+    const working = getDeterministicStateConfig("working", "front-desk");
+    assert.equal(working.color, "#10b981");
+    assert.equal(working.badgeVariant, "success");
+    assert.equal(working.pulse, true);
+    assert.equal(working.categoryIcon, "Inbox");
+
+    // running: info/blue (#3b82f6)
+    const running = getDeterministicStateConfig("running", "orchestrator");
+    assert.equal(running.color, "#3b82f6");
+    assert.equal(running.badgeVariant, "info");
+    assert.equal(running.pulse, false);
+    assert.equal(running.categoryIcon, "Network");
+
+    // sleeping: neutral/muted/purple (#a855f7)
+    const sleeping = getDeterministicStateConfig("sleeping", "worker");
+    assert.equal(sleeping.color, "#a855f7");
+    assert.equal(sleeping.badgeVariant, "neutral");
+    assert.equal(sleeping.pulse, false);
+    assert.equal(sleeping.categoryIcon, "Terminal");
+
+    // idle:waiting: neutral/gray (#9ca3af)
+    const idleWaiting = getDeterministicStateConfig("idle:waiting");
+    assert.equal(idleWaiting.color, "#9ca3af");
+    assert.equal(idleWaiting.badgeVariant, "neutral");
+
+    // idle:quota-exhausted: warning/amber (#f59e0b)
+    const idleQuota = getDeterministicStateConfig("idle:quota-exhausted");
+    assert.equal(idleQuota.color, "#f59e0b");
+    assert.equal(idleQuota.badgeVariant, "warning");
+
+    // failed:quota-exhausted: warning/orange (#f97316)
+    const failedQuota = getDeterministicStateConfig("failed:quota-exhausted");
+    assert.equal(failedQuota.color, "#f97316");
+    assert.equal(failedQuota.badgeVariant, "warning");
+
+    // failed:spawn, failed:timeout, failed:error: danger/error/red (#ef4444)
+    const failedSpawn = getDeterministicStateConfig("failed:spawn");
+    assert.equal(failedSpawn.color, "#ef4444");
+    assert.equal(failedSpawn.badgeVariant, "danger");
+
+    const failedTimeout = getDeterministicStateConfig("failed:timeout");
+    assert.equal(failedTimeout.color, "#ef4444");
+    assert.equal(failedTimeout.badgeVariant, "danger");
+
+    const failedError = getDeterministicStateConfig("failed:error");
+    assert.equal(failedError.color, "#ef4444");
+    assert.equal(failedError.badgeVariant, "danger");
+
+    // unknown: neutral/gray (#6b7280)
+    const unknown = getDeterministicStateConfig("unknown");
+    assert.equal(unknown.color, "#6b7280");
+    assert.equal(unknown.badgeVariant, "neutral");
+  });
+
+  it("resolves agent category icons accurately", () => {
+    assert.equal(getAgentCategoryIcon("front-desk"), "Inbox");
+    assert.equal(getAgentCategoryIcon("orchestrator"), "Network");
+    assert.equal(getAgentCategoryIcon("worker"), "Terminal");
+    assert.equal(getAgentCategoryIcon(undefined), "Bot");
+  });
+
+  it("validates UppidiAgentSchema with optional url", () => {
+    const agentWithUrl = UppidiAgentSchema.parse({
+      id: "agent-123",
+      shortId: "agent12",
+      name: "Worker 1",
+      category: "worker",
+      status: "running",
+      url: "paseo://agent/agent-123",
+    });
+    assert.equal(agentWithUrl.url, "paseo://agent/agent-123");
+
+    const agentWithoutUrl = UppidiAgentSchema.parse({
+      id: "agent-456",
+      shortId: "agent45",
+      name: "Worker 2",
+      category: "worker",
+      status: "idle",
+    });
+    assert.equal(agentWithoutUrl.url, undefined);
   });
 });

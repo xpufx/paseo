@@ -239,6 +239,123 @@ export const DeterministicAgentStateSchema = z.enum([
 ]);
 export type DeterministicAgentState = z.infer<typeof DeterministicAgentStateSchema>;
 
+export interface DeterministicStateConfig {
+  state: DeterministicAgentState;
+  color: string;
+  badgeVariant: "success" | "info" | "warning" | "danger" | "neutral";
+  dotVariant: "success" | "info" | "warning" | "danger" | "neutral";
+  stateIcon: string;
+  categoryIcon: string;
+  pulse: boolean;
+  label: string;
+}
+
+export function getAgentCategoryIcon(category?: UppidiAgentCategory | string): string {
+  switch (category) {
+    case "front-desk":
+      return "Inbox";
+    case "orchestrator":
+      return "Network";
+    case "worker":
+      return "Terminal";
+    default:
+      return "Bot";
+  }
+}
+
+export function getDeterministicStateConfig(
+  state: DeterministicAgentState,
+  category?: UppidiAgentCategory | string
+): DeterministicStateConfig {
+  let color = "#6b7280"; // neutral/gray
+  let badgeVariant: "success" | "info" | "warning" | "danger" | "neutral" = "neutral";
+  let dotVariant: "success" | "info" | "warning" | "danger" | "neutral" = "neutral";
+  let stateIcon = "HelpCircle";
+  let pulse = false;
+  let label = "Unknown";
+
+  switch (state) {
+    case "working":
+      color = "#10b981"; // success/emerald
+      badgeVariant = "success";
+      dotVariant = "success";
+      stateIcon = "Bot";
+      pulse = true;
+      label = "Working";
+      break;
+    case "running":
+      color = "#3b82f6"; // info/blue
+      badgeVariant = "info";
+      dotVariant = "info";
+      stateIcon = "Play";
+      pulse = false;
+      label = "Running";
+      break;
+    case "sleeping":
+      color = "#a855f7"; // neutral/muted/purple
+      badgeVariant = "neutral";
+      dotVariant = "neutral";
+      stateIcon = "Moon";
+      pulse = false;
+      label = "Sleeping";
+      break;
+    case "idle:waiting":
+      color = "#9ca3af"; // neutral/gray
+      badgeVariant = "neutral";
+      dotVariant = "neutral";
+      stateIcon = "Clock";
+      pulse = false;
+      label = "Waiting";
+      break;
+    case "idle:quota-exhausted":
+      color = "#f59e0b"; // warning/amber
+      badgeVariant = "warning";
+      dotVariant = "warning";
+      stateIcon = "Hourglass";
+      pulse = false;
+      label = "Quota Cooldown";
+      break;
+    case "failed:quota-exhausted":
+      color = "#f97316"; // warning/orange
+      badgeVariant = "warning";
+      dotVariant = "warning";
+      stateIcon = "AlertTriangle";
+      pulse = false;
+      label = "Quota Exhausted";
+      break;
+    case "failed:spawn":
+    case "failed:timeout":
+    case "failed:error":
+      color = "#ef4444"; // danger/error/red
+      badgeVariant = "danger";
+      dotVariant = "danger";
+      stateIcon = "AlertOctagon";
+      pulse = false;
+      label = "Failed";
+      break;
+    case "unknown":
+    default:
+      color = "#6b7280"; // neutral/gray
+      badgeVariant = "neutral";
+      dotVariant = "neutral";
+      stateIcon = "HelpCircle";
+      pulse = false;
+      label = "Unknown";
+      break;
+  }
+
+  return {
+    state,
+    color,
+    badgeVariant,
+    dotVariant,
+    stateIcon,
+    categoryIcon: getAgentCategoryIcon(category),
+    pulse,
+    label,
+  };
+}
+
 export const UppidiAgentWorkSchema = z.object({
   repo: z.string().optional(),
   issue: z.number().optional(),
@@ -273,6 +390,7 @@ export const UppidiAgentSchema = z.object({
   stateDetail: z.string().optional(),
   attributedWork: UppidiAgentWorkSchema.nullable().optional(),
   usage: UppidiAgentUsageSchema.nullable().optional(),
+  url: z.string().optional(),
 });
 export type UppidiAgent = z.infer<typeof UppidiAgentSchema>;
 
