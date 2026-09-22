@@ -75,7 +75,7 @@ jobs:
         include:
           - paseo-version: 0.8.0
             allow-failure: true
-          - paseo-version: 0.9.0-beta.2
+          - paseo-version: 0.9.0
             allow-failure: false
     # Dedicated paseo-ci image with Node 22, git/make/jq, and pinned @getpaseo/cli.
     # A fresh container per run is the point: no reused node_modules and no pre-existing daemon state.
@@ -296,7 +296,7 @@ jobs:
           set -euo pipefail
           PLUGINS="${{ steps.source.outputs.plugins }}"
           if [ "${{ matrix.paseo-version }}" = "0.8.0" ]; then
-            echo "::notice::Paseo 0.8.0 legacy lane: skipping x-comms (requires Paseo >=0.9.0-beta.2 per issue #296)"
+            echo "::notice::Paseo 0.8.0 legacy lane: skipping x-comms (requires Paseo >=0.9.0 per issue #296)"
             PLUGINS="$(echo "$PLUGINS" | tr ' ' '\n' | grep -v '^x-comms$' | tr '\n' ' ' | xargs)"
           fi
           echo "plugins=${PLUGINS}" >> "$GITHUB_OUTPUT"

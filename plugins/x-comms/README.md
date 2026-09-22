@@ -2,7 +2,7 @@
 
 > **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
-> Requires **Paseo >=0.9.0-beta.2**. Cross-daemon agent conversation relies on Paseo 0.9 native multi-host APIs (`daemon.get_status`, `paseo send --host`). Legacy Paseo 0.8 is not supported.
+> Requires **Paseo >=0.9.0**. Cross-daemon agent conversation relies on Paseo 0.9 native multi-host APIs (`daemon.get_status`, `paseo send --host`). Legacy Paseo 0.8 is not supported.
 
 [paseo](https://paseo.sh) is an agent orchestrator: AI coding agents run on paseo daemons, each managing workspaces, tools, and permissions. **paseo-x-comms** lets agents on one daemon talk to agents on another — even across hosts — via the daemon relay (WebSocket + E2EE) or direct TCP.
 
@@ -30,7 +30,7 @@ The plugin embeds the MCP server and adds the X-comms UI. Agents get `x_comms_*`
 
 ### Install
 
-> **Prerequisite**: Paseo >=0.9.0-beta.2.
+> **Prerequisite**: Paseo >=0.9.0.
 
 Install the Paseo plugin from npm:
 

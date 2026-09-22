@@ -9,7 +9,7 @@
     "test": "npm run typecheck && npx tsx --test server/telemetry.test.ts client/pill-labels.test.ts client/turn-counter.test.ts client/telemetry-copy.test.ts"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.9.0-beta.2",
+    "@getpaseo/plugin": "^0.9.0",
     "@tanstack/react-query": "^5.90.11",
     "@types/react": "^19.0.10",
     "react": "19.1.0",

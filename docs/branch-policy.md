@@ -8,7 +8,7 @@ only for necessary fixes.
 
 - **`main` — SDK 0.9 mainline.** Feature work, refactors, and dependency
   updates target `main`. It tracks the current Paseo SDK 0.9 baseline
-  (`@getpaseo/*` `0.9.0-beta.2`).
+  (`@getpaseo/*` `0.9.0`).
 - **`release/0.8` — SDK 0.8 maintenance.** The 0.8-compatible baseline
   (preserved at `10945ec`), carrying only necessary bug and security fixes for
   consumers still on SDK 0.8.

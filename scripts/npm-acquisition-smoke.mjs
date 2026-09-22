@@ -25,7 +25,7 @@ const PACKAGES = [
   {
     id: "x-comms",
     name: "@xpufx/paseo-x-comms",
-    paseo: ">=0.9.0-beta.2",
+    paseo: ">=0.9.0",
     runtime: [
       "@getpaseo/client/internal/daemon-client",
       "@getpaseo/plugin/server",

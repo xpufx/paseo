@@ -11,7 +11,7 @@
     "test": "esbuild shared/issues.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-issues.test.mjs --log-level=error && esbuild shared/webhook.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-webhook.test.mjs --log-level=error && esbuild shared/notification.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-notification.test.mjs --log-level=error && esbuild server/git-origin.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-git-origin.test.mjs --log-level=error && esbuild server/registry.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-registry.test.mjs --log-level=error && esbuild server/forge-guard.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-forge-guard.test.mjs --log-level=error && esbuild server/forge-client.test.ts --bundle --platform=node --format=esm --outfile=${TMPDIR:-/tmp}/paseo-forges-forge-client.test.mjs --log-level=error && node --test ${TMPDIR:-/tmp}/paseo-forges-issues.test.mjs ${TMPDIR:-/tmp}/paseo-forges-webhook.test.mjs ${TMPDIR:-/tmp}/paseo-forges-notification.test.mjs ${TMPDIR:-/tmp}/paseo-forges-git-origin.test.mjs ${TMPDIR:-/tmp}/paseo-forges-registry.test.mjs ${TMPDIR:-/tmp}/paseo-forges-forge-guard.test.mjs ${TMPDIR:-/tmp}/paseo-forges-forge-client.test.mjs"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "0.9.0-beta.2",
+    "@getpaseo/plugin": "^0.9.0",
     "@types/react": "^19.0.10",
     "react": "19.1.0",
     "react-native": "0.81.5",
