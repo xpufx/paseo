@@ -34,7 +34,6 @@ import {
   type RenderPillProps,
 } from "paseo-plugin-helper/client";
 import { hasFuzzyHighlight, normalizeSearchQuery } from "paseo-plugin-helper/shared";
-import { HookQueueView } from "./hook-queue-panel.js";
 import {
   ATTENTION_LABELS,
   PRIORITY_ORDER,
@@ -1391,7 +1390,6 @@ export function ForgeIssuesView({
         <Tabs
           tabs={[
             { id: "issues", label: "Open Issues", shortLabel: "Issues" },
-            { id: "queues", label: "Hook Queues", shortLabel: "Queues" },
             { id: "settings", label: "Settings", shortLabel: "Settings" },
           ]}
           activeTab={activeTab}
@@ -1409,9 +1407,7 @@ export function ForgeIssuesView({
       onRefresh={() => { refetch(); }}
       scrollRef={scrollRef}
     >
-      {activeTab === "queues" ? (
-        <HookQueueView onClose={onClose} embedded />
-      ) : selected != null ? (
+      {selected != null ? (
         <>
           <IssueDetailView
             workspaceId={workspaceId}

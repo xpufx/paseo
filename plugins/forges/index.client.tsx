@@ -31,10 +31,6 @@ import {
 import {
   forgejoNotificationRenderer,
 } from "./client/notification-card.js";
-import {
-  ForgeHookQueuePanel,
-  ForgeHookQueueSurface,
-} from "./client/hook-queue-panel.js";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
@@ -91,27 +87,7 @@ export default function contribute(client: PluginClientContext) {
     Component: ForgeIssuesPanel,
   });
 
-  // Workspace panels receive the host theme as props. Register through the
-  // helper so cards and inputs consume those tokens instead of its dark
-  // fallback context; retain both host locations for this panel.
-  const removeQueuePanel = registerWorkspacePanel(client, {
-    id: "forges-queues",
-    title: "Forge Queues",
-    icon: "Layers",
-    locations: ["workspace", "explorer"],
-    Component: ForgeHookQueuePanel,
-  });
-
-  const removeQueueSurface = registerSidebarSurface(client, {
-    id: "queues",
-    title: "Forge Queues",
-    icon: "Layers",
-    Component: ForgeHookQueueSurface,
-  });
-
   return () => {
-    removeQueueSurface?.();
-    removeQueuePanel?.();
     removePanel();
     removePill();
     removeWebhookUser();
