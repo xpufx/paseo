@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 
-export const WELLBEING_VERSION = "0.1.0";
+export const WELLBEING_VERSION = "0.2.0";
 
 export const CircadianWindowSchema = z.object({
   start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM format required"),
@@ -30,16 +30,30 @@ export const OperatorPhaseSchema = z.enum([
 ]);
 export type OperatorPhase = z.infer<typeof OperatorPhaseSchema>;
 
+export const FleetPostureSchema = z.enum([
+  "active-focus",
+  "extended-stretch",
+  "wind-down",
+  "bed-mode-custodial",
+  "idle-standby",
+]);
+export type FleetPosture = z.infer<typeof FleetPostureSchema>;
+
 export const WellbeingStatusSchema = z.object({
   phase: OperatorPhaseSchema,
+  fleetPosture: FleetPostureSchema,
+  fleetDirective: z.string(),
   isBedMode: z.boolean(),
   activeStretchMinutes: z.number(),
+  longestStretchMinutes: z.number(),
+  breaksTaken: z.number(),
   idleMinutes: z.number(),
   dailyUsageMinutes: z.number(),
   lastActivityAt: z.string().nullable(),
   streakStartedAt: z.string().nullable(),
   fatigueAlertTriggered: z.boolean(),
   fatigueAlertCount: z.number(),
+  snoozedUntil: z.string().nullable(),
   settings: WellbeingSettingsSchema,
 });
 export type WellbeingStatus = z.infer<typeof WellbeingStatusSchema>;
@@ -66,6 +80,8 @@ export const toggleBedModeRpc = defineContract({
   output: z.object({
     isBedMode: z.boolean(),
     phase: OperatorPhaseSchema,
+    fleetPosture: FleetPostureSchema,
+    fleetDirective: z.string(),
   }),
 });
 
@@ -78,5 +94,17 @@ export const recordActivityRpc = defineContract({
   output: z.object({
     ok: z.boolean(),
     activeStretchMinutes: z.number(),
+  }),
+});
+
+export const snoozeAlertRpc = defineContract({
+  name: "wellbeing.snooze_alert",
+  description: "Snooze fatigue alerts for N minutes",
+  input: z.object({
+    minutes: z.number().int().min(1).max(180).default(15),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    snoozedUntil: z.string(),
   }),
 });

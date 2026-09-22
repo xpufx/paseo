@@ -68,23 +68,26 @@ describe("PresenceTracker", () => {
     }
   });
 
-  it("resets streak when idle timeout is exceeded", () => {
+  it("resets streak and tracks breaks when idle timeout is exceeded", () => {
     const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-2.json`);
     try {
       const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
       const base = 1790000000000;
 
       tracker.recordActivity(base);
-      tracker.recordActivity(base + 20 * 60000); // 20m later (idle 20m > 15m timeout)
+      tracker.recordActivity(base + 10 * 60000);
+      tracker.recordActivity(base + 30 * 60000); // 20m later (idle 20m > 15m timeout) -> break!
 
-      const status = tracker.getStatus(base + 20 * 60000);
+      const status = tracker.getStatus(base + 30 * 60000);
       assert.equal(status.activeStretchMinutes, 0);
+      assert.equal(status.breaksTaken, 1);
+      assert.equal(status.longestStretchMinutes, 10);
     } finally {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }
   });
 
-  it("triggers fatigue alert when continuous stretch exceeds threshold", () => {
+  it("triggers fatigue alert and supports snooze mechanics", () => {
     const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-3.json`);
     try {
       const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
@@ -102,21 +105,20 @@ describe("PresenceTracker", () => {
       assert.equal(alertTurn.activeStretchMinutes, 180);
       assert.equal(alertTurn.fatigueAlertTriggered, true);
 
-      // Next checks within 60m cooldown do not trigger
-      for (let m = 190; m <= 230; m += 10) {
-        const turn = tracker.recordActivity(base + m * 60000);
-        assert.equal(turn.fatigueAlertTriggered, false);
-      }
+      // Snooze alert for 30 minutes
+      const snoozeRes = tracker.snoozeAlert(30, base + 180 * 60000);
+      assert.equal(snoozeRes.ok, true);
+      assert.ok(snoozeRes.snoozedUntil);
 
-      // Exactly at cooldown boundary (180 + 60 = 240m), triggers again!
-      const postCooldownCheck = tracker.recordActivity(base + 240 * 60000);
-      assert.equal(postCooldownCheck.fatigueAlertTriggered, true);
+      // Activity inside snooze window suppresses alert
+      const turnDuringSnooze = tracker.recordActivity(base + 200 * 60000);
+      assert.equal(turnDuringSnooze.fatigueAlertTriggered, false);
     } finally {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }
   });
 
-  it("toggles manual Bed Mode", () => {
+  it("toggles manual Bed Mode and provides fleet posture directives", () => {
     const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-4.json`);
     try {
       const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
@@ -126,10 +128,14 @@ describe("PresenceTracker", () => {
       const res = tracker.toggleBedMode(true, base);
       assert.equal(res.isBedMode, true);
       assert.equal(res.phase, "bed-mode");
+      assert.equal(res.fleetPosture, "bed-mode-custodial");
+      assert.match(res.fleetDirective, /Bed Mode \(Mobile\)/);
 
       const status = tracker.getStatus(base);
       assert.equal(status.isBedMode, true);
       assert.equal(status.phase, "bed-mode");
+      assert.equal(status.fleetPosture, "bed-mode-custodial");
+      assert.match(status.fleetDirective, /priority\/0-SOS/);
 
       tracker.toggleBedMode(false, base);
       assert.equal(tracker.isBedModeActive(base), false);

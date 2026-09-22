@@ -5,6 +5,7 @@ import {
   statusRpc,
   toggleBedModeRpc,
   recordActivityRpc,
+  snoozeAlertRpc,
   type WellbeingSettings,
 } from "./shared/contracts.js";
 import { PresenceTracker } from "./server/presence.js";
@@ -61,11 +62,17 @@ export default function contribute(server: PluginServerContext) {
     if (fatigueAlertTriggered && tracker.getSettings().notifyVia2fado) {
       log.warn("fatigue alert triggered", { activeStretchMinutes });
       void tracker.send2fadoNotice(
-        `⚠️ Operator Wellbeing: Continuous high-intensity session reached ${activeStretchMinutes}m. Consider handing off to Front Desk or taking a break.`,
+        `⚠️ Operator Wellbeing: Continuous high-intensity session reached ${activeStretchMinutes}m. Consider taking a break or enabling Bed Mode.`,
         "http://localhost:3000"
       );
     }
     return { ok: true, activeStretchMinutes };
+  });
+
+  server.handle(snoozeAlertRpc, async (input: { minutes: number }) => {
+    const result = tracker.snoozeAlert(input.minutes);
+    log.info("fatigue alert snoozed", result);
+    return result;
   });
 
   // Automatically track presence on server events

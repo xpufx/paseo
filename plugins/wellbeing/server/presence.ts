@@ -7,6 +7,7 @@ import type {
   WellbeingSettings,
   WellbeingStatus,
   OperatorPhase,
+  FleetPosture,
 } from "../shared/contracts.js";
 
 const execFileAsync = promisify(execFile);
@@ -19,6 +20,9 @@ export interface PresenceStateData {
   lastFatigueAlertTs: number | null;
   fatigueAlertCount: number;
   manualBedMode: boolean | null;
+  longestStretchMinutes: number;
+  breaksTaken: number;
+  snoozedUntilTs: number | null;
 }
 
 export function parseMinutes(hhmm: string): number {
@@ -67,6 +71,9 @@ export class PresenceTracker {
       lastFatigueAlertTs: null,
       fatigueAlertCount: 0,
       manualBedMode: null,
+      longestStretchMinutes: 0,
+      breaksTaken: 0,
+      snoozedUntilTs: null,
       ...options?.initialState,
     };
     this.loadState();
@@ -119,6 +126,9 @@ export class PresenceTracker {
       this.state.lastDayStamp = today;
       this.state.fatigueAlertCount = 0;
       this.state.lastFatigueAlertTs = null;
+      this.state.longestStretchMinutes = 0;
+      this.state.breaksTaken = 0;
+      this.state.snoozedUntilTs = null;
     }
 
     if (this.state.lastActivityTs === null) {
@@ -129,7 +139,8 @@ export class PresenceTracker {
       const idleMinutes = idleMs / 60000;
 
       if (idleMinutes > this.settings.idleTimeoutMinutes) {
-        // Idle timeout exceeded: streak resets
+        // Idle timeout exceeded: break recorded and streak resets
+        this.state.breaksTaken += 1;
         this.state.streakStartTs = now;
       } else if (idleMs > 0) {
         this.state.dailyUsageSeconds += Math.min(idleMs, this.settings.idleTimeoutMinutes * 60000) / 1000;
@@ -137,9 +148,15 @@ export class PresenceTracker {
       this.state.lastActivityTs = now;
     }
 
-    let fatigueAlertTriggered = false;
     const activeMinutes = this.getActiveStretchMinutes(now);
-    if (activeMinutes >= this.settings.maxSessionContinuousMinutes) {
+    if (activeMinutes > this.state.longestStretchMinutes) {
+      this.state.longestStretchMinutes = Math.round(activeMinutes);
+    }
+
+    let fatigueAlertTriggered = false;
+    const isSnoozed = this.state.snoozedUntilTs !== null && now < this.state.snoozedUntilTs;
+
+    if (!isSnoozed && activeMinutes >= this.settings.maxSessionContinuousMinutes) {
       const cooldownMs = this.settings.fatigueAlertCooldownMinutes * 60000;
       const canAlert =
         this.state.lastFatigueAlertTs === null ||
@@ -159,9 +176,25 @@ export class PresenceTracker {
     };
   }
 
+  public snooze(minutes: number, now = Date.now()): { ok: boolean; snoozedUntil: string } {
+    return this.snoozeAlert(minutes, now);
+  }
+
+  public snoozeAlert(minutes: number, now = Date.now()): { ok: boolean; snoozedUntil: string } {
+    const snoozedUntilTs = now + minutes * 60000;
+    this.state.snoozedUntilTs = snoozedUntilTs;
+    this.saveState();
+    return {
+      ok: true,
+      snoozedUntil: new Date(snoozedUntilTs).toISOString(),
+    };
+  }
+
   public toggleBedMode(enabled?: boolean, now = Date.now()): {
     isBedMode: boolean;
     phase: OperatorPhase;
+    fleetPosture: FleetPosture;
+    fleetDirective: string;
   } {
     if (enabled !== undefined) {
       this.state.manualBedMode = enabled;
@@ -170,9 +203,14 @@ export class PresenceTracker {
       this.state.manualBedMode = !current;
     }
     this.saveState();
+    const isBed = this.isBedModeActive(now);
+    const phase = this.calculatePhase(now);
+    const fleetPosture = this.calculateFleetPosture(now);
     return {
-      isBedMode: this.isBedModeActive(now),
-      phase: this.calculatePhase(now),
+      isBedMode: isBed,
+      phase,
+      fleetPosture,
+      fleetDirective: this.getFleetDirective(fleetPosture),
     };
   }
 
@@ -232,17 +270,55 @@ export class PresenceTracker {
     return "working";
   }
 
+  public calculateFleetPosture(now = Date.now()): FleetPosture {
+    const phase = this.calculatePhase(now);
+    switch (phase) {
+      case "bed-mode":
+        return "bed-mode-custodial";
+      case "wind-down":
+        return "wind-down";
+      case "extended-stretch":
+        return "extended-stretch";
+      case "idle":
+        return "idle-standby";
+      case "working":
+      default:
+        return "active-focus";
+    }
+  }
+
+  public getFleetDirective(posture: FleetPosture): string {
+    switch (posture) {
+      case "bed-mode-custodial":
+        return "Operator Status: Bed Mode (Mobile). Front Desk holds custody. Escalate ONLY priority/0-SOS.";
+      case "wind-down":
+        return "Operator Status: Wind-Down. Prefer async digests; avoid non-blocking questions.";
+      case "extended-stretch":
+        return "Operator Status: Extended Stretch (Fatigue Warning). Recommend break before complex refactors.";
+      case "idle-standby":
+        return "Operator Status: Away / Idle. Batch non-urgent notifications.";
+      case "active-focus":
+      default:
+        return "Operator Status: Active / Desk Mode.";
+    }
+  }
+
   public getStatus(now = Date.now()): WellbeingStatus {
     const isBed = this.isBedModeActive(now);
     const phase = this.calculatePhase(now);
+    const fleetPosture = this.calculateFleetPosture(now);
     const activeStretch = Math.round(this.getActiveStretchMinutes(now));
     const idle = Math.round(this.getIdleMinutes(now));
     const daily = Math.round(this.state.dailyUsageSeconds / 60);
 
     return {
       phase,
+      fleetPosture,
+      fleetDirective: this.getFleetDirective(fleetPosture),
       isBedMode: isBed,
       activeStretchMinutes: activeStretch,
+      longestStretchMinutes: this.state.longestStretchMinutes,
+      breaksTaken: this.state.breaksTaken,
       idleMinutes: idle,
       dailyUsageMinutes: daily,
       lastActivityAt: this.state.lastActivityTs
@@ -253,6 +329,9 @@ export class PresenceTracker {
         : null,
       fatigueAlertTriggered: phase === "extended-stretch",
       fatigueAlertCount: this.state.fatigueAlertCount,
+      snoozedUntil: this.state.snoozedUntilTs
+        ? new Date(this.state.snoozedUntilTs).toISOString()
+        : null,
       settings: this.settings,
     };
   }
