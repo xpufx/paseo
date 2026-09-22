@@ -268,7 +268,7 @@ describe("archive agent actions (#402)", () => {
     assert.ok(res.error?.includes("agentId is required"));
   });
 
-  it("bulk archives inactive and failed agents while protecting running agents and orchestrators", async () => {
+  it("bulk archives inactive and failed agents while protecting running agents, orchestrators, and idle waiting agents (#409)", async () => {
     const archivedIds: string[] = [];
     const mockContext: any = {
       paseo: {
@@ -280,6 +280,7 @@ describe("archive agent actions (#402)", () => {
               { agent: { id: "worker-running", name: "Worker running", status: "running" } },
               { agent: { id: "worker-failed", name: "Worker failed", status: "error" } },
               { agent: { id: "worker-idle", name: "Worker idle", status: "idle" } },
+              { agent: { id: "worker-closed", name: "Worker closed", status: "closed" } },
             ],
           }),
           ref: (id: string) => ({
@@ -292,26 +293,33 @@ describe("archive agent actions (#402)", () => {
       },
     };
 
-    // Case 1: Pass explicit IDs including protected ones (fd-1, orch-1, worker-running)
+    // Case 1: Pass explicit IDs including protected ones (fd-1, orch-1, worker-running, worker-idle)
     const resWithTargetIds = await handleUppidiArchiveInactiveAgents(
       {
-        agentIds: ["fd-1", "orch-1", "worker-running", "worker-failed", "worker-idle"],
+        agentIds: [
+          "fd-1",
+          "orch-1",
+          "worker-running",
+          "worker-failed",
+          "worker-idle",
+          "worker-closed",
+        ],
       },
       mockContext
     );
 
     assert.equal(resWithTargetIds.ok, true);
     assert.equal(resWithTargetIds.archivedCount, 2);
-    assert.deepEqual(resWithTargetIds.archivedIds, ["worker-failed", "worker-idle"]);
-    assert.deepEqual(archivedIds, ["worker-failed", "worker-idle"]);
+    assert.deepEqual(resWithTargetIds.archivedIds, ["worker-failed", "worker-closed"]);
+    assert.deepEqual(archivedIds, ["worker-failed", "worker-closed"]);
 
-    // Case 2: No IDs passed, archives all eligible agents
+    // Case 2: No IDs passed, archives all eligible agents (worker-idle MUST NOT be archived)
     archivedIds.length = 0;
     const resBulkAll = await handleUppidiArchiveInactiveAgents({}, mockContext);
     assert.equal(resBulkAll.ok, true);
     assert.equal(resBulkAll.archivedCount, 2);
-    assert.deepEqual(resBulkAll.archivedIds, ["worker-failed", "worker-idle"]);
-    assert.deepEqual(archivedIds, ["worker-failed", "worker-idle"]);
+    assert.deepEqual(resBulkAll.archivedIds, ["worker-failed", "worker-closed"]);
+    assert.deepEqual(archivedIds, ["worker-failed", "worker-closed"]);
   });
 
   it("handles empty candidate list gracefully", async () => {

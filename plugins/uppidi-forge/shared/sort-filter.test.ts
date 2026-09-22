@@ -313,7 +313,7 @@ describe("Uppidi Forge sort & filter predicates", () => {
       assert.equal(isAgentEligibleForBulkArchive(failedError), true);
     });
 
-    it("allows closed, completed, terminated, and idle worker agents", () => {
+    it("allows closed, completed, and terminated worker agents while protecting idle waiting workers (#409)", () => {
       const closedWorker: UppidiAgent = {
         id: "w-closed",
         shortId: "wc1",
@@ -358,8 +358,8 @@ describe("Uppidi Forge sort & filter predicates", () => {
       assert.equal(isAgentEligibleForBulkArchive(closedWorker), true);
       assert.equal(isAgentEligibleForBulkArchive(completedWorker), true);
       assert.equal(isAgentEligibleForBulkArchive(terminatedWorker), true);
-      assert.equal(isAgentEligibleForBulkArchive(idleWaitingWorker), true);
-      assert.equal(isAgentEligibleForBulkArchive(idleQuotaWorker), true);
+      assert.equal(isAgentEligibleForBulkArchive(idleWaitingWorker), false);
+      assert.equal(isAgentEligibleForBulkArchive(idleQuotaWorker), false);
     });
 
     it("filterBulkArchiveCandidates filters out protected agents accurately", () => {
@@ -415,10 +415,10 @@ describe("Uppidi Forge sort & filter predicates", () => {
       ];
 
       const candidates = filterBulkArchiveCandidates(fleet);
-      assert.equal(candidates.length, 3);
+      assert.equal(candidates.length, 2);
       assert.deepEqual(
         candidates.map((c) => c.id),
-        ["w-failed", "w-idle", "w-completed"]
+        ["w-failed", "w-completed"]
       );
     });
   });

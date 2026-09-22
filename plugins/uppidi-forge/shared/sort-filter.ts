@@ -267,10 +267,14 @@ export function sortAgents(
 /**
  * Determines if an agent is safe and eligible for bulk archival.
  *
- * Requirements (Issue #402):
- * - Never archive running, working, or orchestrator/front-desk agents in bulk.
- * - Identifies agents with deterministic state `failed:*`, completed/closed/terminated/done,
- *   or inactive non-running worker states.
+ * Requirements (Issue #402, #409):
+ * - Never bulk-archive orchestrator or front-desk agents.
+ * - Never bulk-archive active/running/working agents.
+ * - Never bulk-archive idle agents (status == 'idle' or deterministicState == 'idle:waiting').
+ *   Idle agents are live, healthy agents waiting for turns and MUST NOT be bulk archived.
+ * - Bulk archive should ONLY target genuinely terminal states:
+ *   - failed deterministic states: failed:quota-exhausted, failed:spawn, failed:timeout, failed:error
+ *   - terminal statuses: closed, completed, terminated, done, failed, error
  */
 export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
   // 1. Safety rule: Never bulk-archive orchestrator or front-desk agents
@@ -278,8 +282,9 @@ export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
     return false;
   }
 
-  // 2. Safety rule: Never bulk-archive active/running/working agents
   const normalizedStatus = (agent.status || "").toLowerCase();
+
+  // 2. Safety rule: Never bulk-archive active/running/working agents
   if (
     normalizedStatus === "running" ||
     agent.deterministicState === "running" ||
@@ -288,12 +293,26 @@ export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
     return false;
   }
 
-  // 3. Deterministic failed states (failed:quota-exhausted, failed:spawn, failed:timeout, failed:error)
-  if (agent.deterministicState.startsWith("failed:")) {
+  // 3. Safety rule (#409): Idle agents are live, healthy agents waiting for turns and MUST NOT be bulk archived
+  if (
+    normalizedStatus === "idle" ||
+    agent.deterministicState === "idle:waiting" ||
+    agent.deterministicState === "idle:quota-exhausted"
+  ) {
+    return false;
+  }
+
+  // 4. Failed deterministic states: failed:quota-exhausted, failed:spawn, failed:timeout, failed:error
+  if (
+    agent.deterministicState === "failed:quota-exhausted" ||
+    agent.deterministicState === "failed:spawn" ||
+    agent.deterministicState === "failed:timeout" ||
+    agent.deterministicState === "failed:error"
+  ) {
     return true;
   }
 
-  // 4. Closed, completed, terminated, done, or failed raw statuses
+  // 5. Terminal statuses: closed, completed, terminated, done, failed, error
   if (
     normalizedStatus === "closed" ||
     normalizedStatus === "completed" ||
@@ -301,15 +320,6 @@ export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
     normalizedStatus === "done" ||
     normalizedStatus === "failed" ||
     normalizedStatus === "error"
-  ) {
-    return true;
-  }
-
-  // 5. Inactive non-running states (idle:waiting, idle:quota-exhausted, or idle status)
-  if (
-    agent.deterministicState === "idle:waiting" ||
-    agent.deterministicState === "idle:quota-exhausted" ||
-    normalizedStatus === "idle"
   ) {
     return true;
   }

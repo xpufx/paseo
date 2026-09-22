@@ -617,6 +617,7 @@ export function DenseAgentRow({
 
 /**
  * Orchestrator anchored row with interactive expand/collapse toggle for children.
+ * Renders as a clean tree row (no card wrapper) with guide connector (#409).
  */
 export function OrchestratorRow({
   node,
@@ -629,6 +630,7 @@ export function OrchestratorRow({
   onToggleExpand,
   hasChildren = false,
   childCount = 0,
+  isLast = false,
 }: {
   node: UppidiAgentTreeNode;
   colors: any;
@@ -640,6 +642,7 @@ export function OrchestratorRow({
   onToggleExpand?: () => void;
   hasChildren?: boolean;
   childCount?: number;
+  isLast?: boolean;
 }) {
   const { alpha } = usePluginTheme();
   const [isHovered, setIsHovered] = useState(false);
@@ -654,21 +657,37 @@ export function OrchestratorRow({
       // @ts-ignore RN web hover
       onMouseLeave={() => setIsHovered(false)}
       style={{
-        paddingHorizontal: 12,
-        paddingVertical: 8,
-        borderRadius: 6,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
         backgroundColor: isHovered
-          ? (alpha?.(colors.accent, 0.04) || colors.surface1 || colors.surface0)
-          : (colors.surface0 ?? "transparent"),
-        borderWidth: 1,
-        borderColor: isHovered
-          ? (alpha?.(colors.accent, 0.35) || colors.border)
-          : colors.border,
+          ? (alpha?.(colors.accent, 0.05) || colors.surface1 || "rgba(255,255,255,0.04)")
+          : "transparent",
       }}
     >
       <Row justify="space-between" align="center" wrap gap="xs">
-        {/* Left: Expand toggle, Indicator, Icon, Title Link, Badges */}
+        {/* Left: Guide connector, Expand toggle, Indicator, Icon, Title Link, Badges */}
         <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200 }}>
+          <View
+            style={{
+              width: 18,
+              alignItems: "center",
+              justifyContent: "center",
+              marginRight: 2,
+            }}
+          >
+            <Text
+              style={{
+                color: colors.foregroundMuted,
+                fontFamily: "monospace",
+                fontSize: 11,
+                opacity: 0.65,
+              }}
+            >
+              {isLast ? "└─" : "├─"}
+            </Text>
+          </View>
+
           {hasChildren && onToggleExpand ? (
             <Pressable
               onPress={onToggleExpand}
@@ -688,7 +707,7 @@ export function OrchestratorRow({
               />
             </Pressable>
           ) : (
-            <View style={{ width: 18 }} />
+            <View style={{ width: 14 }} />
           )}
 
           <AgentStateDot color={stateConfig.color} pulse={stateConfig.pulse} size={8} />
@@ -778,9 +797,9 @@ export function OrchestratorRow({
 }
 
 /**
- * Project Group Container (#403)
+ * Project Group Container (#403, #409)
  * Displays top-level project, its Orchestrator(s), and dense child rows under each orchestrator.
- * Supports smooth collapsible folding of large project trees.
+ * Clean tree hierarchy without boxy card borders, supporting interactive expand/collapse.
  */
 export function ProjectGroupCard({
   group,
@@ -810,17 +829,12 @@ export function ProjectGroupCard({
   const workerCount = group.totalCount - group.orchestrators.length;
 
   return (
-    <Card
-      variant="flat"
+    <View
       style={{
-        paddingHorizontal: 12,
-        paddingVertical: 12,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: 8,
+        paddingVertical: 2,
       }}
     >
-      <Stack gap={8}>
+      <Stack gap={4}>
         {/* Project Group Header - interactive expand/collapse */}
         <Pressable
           onPress={onToggleExpand}
@@ -900,98 +914,95 @@ export function ProjectGroupCard({
 
         {/* Orchestrators & their subagents (rendered when project is expanded) */}
         {isExpanded && (
-          <Stack
-            gap={8}
+          <View
             style={{
-              borderTopWidth: 1,
-              borderTopColor: colors.border,
-              paddingTop: 8,
+              borderLeftWidth: 1.5,
+              borderLeftColor: colors.border,
+              marginLeft: 14,
+              paddingLeft: 6,
+              marginTop: 2,
             }}
           >
-            {group.orchestrators.map((orchNode) => {
-              const orchId = orchNode.agent.id;
-              const isOrchExpanded = collapsedOrchestrators ? !collapsedOrchestrators[orchId] : true;
-              const childCount = orchNode.children?.length ?? 0;
+            <Stack gap={2}>
+              {group.orchestrators.map((orchNode, orchIdx) => {
+                const orchId = orchNode.agent.id;
+                const isOrchExpanded = collapsedOrchestrators ? !collapsedOrchestrators[orchId] : true;
+                const childCount = orchNode.children?.length ?? 0;
+                const isLastOrch =
+                  orchIdx === group.orchestrators.length - 1 && group.unparentedWorkers.length === 0;
 
-              return (
-                <Stack key={orchId} gap={4}>
-                  <OrchestratorRow
-                    node={orchNode}
-                    colors={colors}
-                    typography={typography}
-                    navigation={navigation}
-                    archivingAgentId={archivingAgentId}
-                    onArchiveAgent={onArchiveAgent}
-                    hasChildren={childCount > 0}
-                    isExpanded={isOrchExpanded}
-                    childCount={childCount}
-                    onToggleExpand={
-                      onToggleOrchestrator ? () => onToggleOrchestrator(orchId) : undefined
-                    }
-                  />
+                return (
+                  <Stack key={orchId} gap={1}>
+                    <OrchestratorRow
+                      node={orchNode}
+                      colors={colors}
+                      typography={typography}
+                      navigation={navigation}
+                      archivingAgentId={archivingAgentId}
+                      onArchiveAgent={onArchiveAgent}
+                      hasChildren={childCount > 0}
+                      isExpanded={isOrchExpanded}
+                      childCount={childCount}
+                      isLast={isLastOrch}
+                      onToggleExpand={
+                        onToggleOrchestrator ? () => onToggleOrchestrator(orchId) : undefined
+                      }
+                    />
 
-                  {/* Subagents under Orchestrator - NO CARDS! */}
-                  {isOrchExpanded && orchNode.children && orchNode.children.length > 0 && (
-                    <View
-                      style={{
-                        paddingLeft: 10,
-                        borderLeftWidth: 1.5,
-                        borderLeftColor: colors.border,
-                        marginLeft: 18,
-                        marginTop: 2,
-                        marginBottom: 4,
-                      }}
-                    >
-                      {orchNode.children.map((child, idx) => (
-                        <DenseAgentRow
-                          key={child.agent.id}
-                          node={child}
-                          depth={1}
-                          isLast={idx === orchNode.children.length - 1}
-                          colors={colors}
-                          typography={typography}
-                          navigation={navigation}
-                          archivingAgentId={archivingAgentId}
-                          onArchiveAgent={onArchiveAgent}
-                        />
-                      ))}
-                    </View>
-                  )}
-                </Stack>
-              );
-            })}
+                    {/* Subagents under Orchestrator - NO CARDS! */}
+                    {isOrchExpanded && orchNode.children && orchNode.children.length > 0 && (
+                      <View
+                        style={{
+                          borderLeftWidth: 1.5,
+                          borderLeftColor: colors.border,
+                          marginLeft: 16,
+                          paddingLeft: 6,
+                          marginTop: 1,
+                          marginBottom: 2,
+                        }}
+                      >
+                        {orchNode.children.map((child, idx) => (
+                          <DenseAgentRow
+                            key={child.agent.id}
+                            node={child}
+                            depth={1}
+                            isLast={idx === orchNode.children.length - 1}
+                            colors={colors}
+                            typography={typography}
+                            navigation={navigation}
+                            archivingAgentId={archivingAgentId}
+                            onArchiveAgent={onArchiveAgent}
+                          />
+                        ))}
+                      </View>
+                    )}
+                  </Stack>
+                );
+              })}
 
-            {/* Unparented Workers in this Project (if any) */}
-            {group.unparentedWorkers.length > 0 && (
-              <View
-                style={{
-                  paddingLeft: 10,
-                  borderLeftWidth: 1.5,
-                  borderLeftColor: colors.border,
-                  marginLeft: 18,
-                  marginTop: 2,
-                  marginBottom: 4,
-                }}
-              >
-                {group.unparentedWorkers.map((workerNode, idx) => (
-                  <DenseAgentRow
-                    key={workerNode.agent.id}
-                    node={workerNode}
-                    depth={1}
-                    isLast={idx === group.unparentedWorkers.length - 1}
-                    colors={colors}
-                    typography={typography}
-                    navigation={navigation}
-                    archivingAgentId={archivingAgentId}
-                    onArchiveAgent={onArchiveAgent}
-                  />
-                ))}
-              </View>
-            )}
-          </Stack>
+              {/* Unparented Workers in this Project (if any) */}
+              {group.unparentedWorkers.length > 0 && (
+                <View style={{ marginTop: 2 }}>
+                  {group.unparentedWorkers.map((workerNode, idx) => (
+                    <DenseAgentRow
+                      key={workerNode.agent.id}
+                      node={workerNode}
+                      depth={1}
+                      isLast={idx === group.unparentedWorkers.length - 1}
+                      colors={colors}
+                      typography={typography}
+                      navigation={navigation}
+                      archivingAgentId={archivingAgentId}
+                      onArchiveAgent={onArchiveAgent}
+                    />
+                  ))}
+                </View>
+              )}
+            </Stack>
+          </View>
         )}
       </Stack>
-    </Card>
+    </View>
   );
 }
 
