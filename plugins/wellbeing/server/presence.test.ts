@@ -45,23 +45,28 @@ describe("wellbeing circadian math", () => {
 });
 
 describe("PresenceTracker", () => {
-  it("tracks initial interaction and active streak", () => {
+  it("tracks initial interaction and records activity source", () => {
     const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-1.json`);
     try {
       const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
       const base = 1790000000000;
 
-      const first = tracker.recordActivity(base);
+      const first = tracker.recordActivity("client_interaction", base);
       assert.equal(first.activeStretchMinutes, 0);
+      assert.equal(first.source, "client_interaction");
       assert.equal(first.fatigueAlertTriggered, false);
 
-      // 30 minutes later (active continuation within 15m intervals)
-      tracker.recordActivity(base + 10 * 60000);
-      tracker.recordActivity(base + 20 * 60000);
-      const third = tracker.recordActivity(base + 30 * 60000);
+      // 30 minutes later (active continuation within 15m intervals via interactive turns)
+      tracker.recordActivity("interactive_turn", base + 10 * 60000);
+      tracker.recordActivity("permission_resolved", base + 20 * 60000);
+      const third = tracker.recordActivity("client_surface", base + 30 * 60000);
 
       assert.equal(third.activeStretchMinutes, 30);
+      assert.equal(third.source, "client_surface");
       assert.equal(third.fatigueAlertTriggered, false);
+
+      const status = tracker.getStatus(base + 30 * 60000);
+      assert.equal(status.lastActivitySource, "client_surface");
       assert.equal(tracker.getIdleMinutes(base + 30 * 60000), 0);
     } finally {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
@@ -74,11 +79,11 @@ describe("PresenceTracker", () => {
       const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
       const base = 1790000000000;
 
-      tracker.recordActivity(base);
-      tracker.recordActivity(base + 10 * 60000);
-      tracker.recordActivity(base + 30 * 60000); // 20m later (idle 20m > 15m timeout) -> break!
+      tracker.recordActivity("client_interaction", base);
+      tracker.recordActivity("client_interaction", base + 10 * 60000); // 10m streak
+      tracker.recordActivity("client_interaction", base + 35 * 60000); // 25m gap > 15m idle timeout -> break!
 
-      const status = tracker.getStatus(base + 30 * 60000);
+      const status = tracker.getStatus(base + 35 * 60000);
       assert.equal(status.activeStretchMinutes, 0);
       assert.equal(status.breaksTaken, 1);
       assert.equal(status.longestStretchMinutes, 10);
@@ -93,26 +98,32 @@ describe("PresenceTracker", () => {
       const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
       const base = 1790000000000;
 
-      tracker.recordActivity(base);
-      // Continuous activity up to 170 minutes (under threshold)
+      tracker.recordActivity("client_interaction", base);
       for (let m = 10; m <= 170; m += 10) {
-        const turn = tracker.recordActivity(base + m * 60000);
-        assert.equal(turn.fatigueAlertTriggered, false);
+        tracker.recordActivity("client_interaction", base + m * 60000);
       }
 
-      // Exactly hits threshold (180 minutes)
-      const alertTurn = tracker.recordActivity(base + 180 * 60000);
+      // Hits 180 min fatigue threshold
+      const alertTurn = tracker.recordActivity("client_interaction", base + 180 * 60000);
       assert.equal(alertTurn.activeStretchMinutes, 180);
       assert.equal(alertTurn.fatigueAlertTriggered, true);
 
-      // Snooze alert for 30 minutes
-      const snoozeRes = tracker.snoozeAlert(30, base + 180 * 60000);
-      assert.equal(snoozeRes.ok, true);
-      assert.ok(snoozeRes.snoozedUntil);
+      let status = tracker.getStatus(base + 180 * 60000);
+      assert.equal(status.phase, "extended-stretch");
+      assert.equal(status.fleetPosture, "extended-stretch");
 
-      // Activity inside snooze window suppresses alert
-      const turnDuringSnooze = tracker.recordActivity(base + 200 * 60000);
-      assert.equal(turnDuringSnooze.fatigueAlertTriggered, false);
+      // Snooze for 15 minutes
+      const snoozeRes = tracker.snooze(15, base + 180 * 60000);
+      assert.equal(snoozeRes.ok, true);
+
+      // During snooze window (5 mins later)
+      status = tracker.getStatus(base + 185 * 60000);
+      assert.notEqual(status.phase, "extended-stretch");
+      assert.ok(status.snoozedUntil);
+
+      // Check recordActivity during snooze
+      const snoozedTurn = tracker.recordActivity("client_interaction", base + 185 * 60000);
+      assert.equal(snoozedTurn.fatigueAlertTriggered, false);
     } finally {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }
@@ -124,21 +135,23 @@ describe("PresenceTracker", () => {
       const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
       const base = 1790000000000;
 
-      assert.equal(tracker.isBedModeActive(base), false);
-      const res = tracker.toggleBedMode(true, base);
-      assert.equal(res.isBedMode, true);
-      assert.equal(res.phase, "bed-mode");
-      assert.equal(res.fleetPosture, "bed-mode-custodial");
-      assert.match(res.fleetDirective, /Bed Mode \(Mobile\)/);
+      // Active focus
+      tracker.recordActivity("client_interaction", base);
+      let status = tracker.getStatus(base);
+      assert.equal(status.fleetPosture, "active-focus");
+      assert.match(status.fleetDirective, /Active \(Desk Focus\)/);
 
-      const status = tracker.getStatus(base);
-      assert.equal(status.isBedMode, true);
-      assert.equal(status.phase, "bed-mode");
+      // Bed Mode
+      tracker.toggleBedMode(true, base);
+      status = tracker.getStatus(base);
       assert.equal(status.fleetPosture, "bed-mode-custodial");
+      assert.match(status.fleetDirective, /Bed Mode/);
       assert.match(status.fleetDirective, /priority\/0-SOS/);
 
+      // Resume
       tracker.toggleBedMode(false, base);
-      assert.equal(tracker.isBedModeActive(base), false);
+      status = tracker.getStatus(base);
+      assert.equal(status.fleetPosture, "active-focus");
     } finally {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }

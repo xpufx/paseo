@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 
-export const WELLBEING_VERSION = "0.2.0";
+export const WELLBEING_VERSION = "0.2.1";
 
 export const CircadianWindowSchema = z.object({
   start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM format required"),
@@ -39,6 +39,15 @@ export const FleetPostureSchema = z.enum([
 ]);
 export type FleetPosture = z.infer<typeof FleetPostureSchema>;
 
+export const ActivitySourceSchema = z.enum([
+  "client_surface",
+  "client_interaction",
+  "interactive_turn",
+  "permission_resolved",
+  "manual_override",
+]);
+export type ActivitySource = z.infer<typeof ActivitySourceSchema>;
+
 export const WellbeingStatusSchema = z.object({
   phase: OperatorPhaseSchema,
   fleetPosture: FleetPostureSchema,
@@ -50,6 +59,7 @@ export const WellbeingStatusSchema = z.object({
   idleMinutes: z.number(),
   dailyUsageMinutes: z.number(),
   lastActivityAt: z.string().nullable(),
+  lastActivitySource: ActivitySourceSchema.nullable(),
   streakStartedAt: z.string().nullable(),
   fatigueAlertTriggered: z.boolean(),
   fatigueAlertCount: z.number(),
@@ -87,13 +97,14 @@ export const toggleBedModeRpc = defineContract({
 
 export const recordActivityRpc = defineContract({
   name: "wellbeing.record_activity",
-  description: "Record operator or agent activity timestamp",
+  description: "Record human operator or interactive client activity timestamp",
   input: z.object({
-    source: z.string().optional(),
+    source: ActivitySourceSchema.optional(),
   }),
   output: z.object({
     ok: z.boolean(),
     activeStretchMinutes: z.number(),
+    source: ActivitySourceSchema,
   }),
 });
 

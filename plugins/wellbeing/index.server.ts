@@ -4,9 +4,10 @@ import {
   wellbeingSettingsContract,
   statusRpc,
   toggleBedModeRpc,
-  recordActivityRpc,
   snoozeAlertRpc,
+  recordActivityRpc,
   type WellbeingSettings,
+  type ActivitySource,
 } from "./shared/contracts.js";
 import { PresenceTracker } from "./server/presence.js";
 
@@ -57,35 +58,44 @@ export default function contribute(server: PluginServerContext) {
     return result;
   });
 
-  server.handle(recordActivityRpc, async (_input: { source?: string }) => {
-    const { activeStretchMinutes, fatigueAlertTriggered } = tracker.recordActivity();
+  server.handle(snoozeAlertRpc, async (input: { minutes: number }) => {
+    const result = tracker.snooze(input.minutes);
+    log.info("fatigue alert snoozed", result);
+    return result;
+  });
+
+  server.handle(recordActivityRpc, async (input: { source?: ActivitySource }) => {
+    const source = input.source ?? "client_interaction";
+    const { activeStretchMinutes, fatigueAlertTriggered } = tracker.recordActivity(source);
     if (fatigueAlertTriggered && tracker.getSettings().notifyVia2fado) {
-      log.warn("fatigue alert triggered", { activeStretchMinutes });
+      log.warn("fatigue alert triggered", { activeStretchMinutes, source });
       void tracker.send2fadoNotice(
         `⚠️ Operator Wellbeing: Continuous high-intensity session reached ${activeStretchMinutes}m. Consider taking a break or enabling Bed Mode.`,
         "http://localhost:3000"
       );
     }
-    return { ok: true, activeStretchMinutes };
+    return { ok: true, activeStretchMinutes, source };
   });
 
-  server.handle(snoozeAlertRpc, async (input: { minutes: number }) => {
-    const result = tracker.snoozeAlert(input.minutes);
-    log.info("fatigue alert snoozed", result);
-    return result;
+  // Automatically track presence ONLY on interactive human actions
+  server.on("agent.turn_ended", (event) => {
+    const hasInteractiveUserMessage = event.timeline?.some(
+      (item) => item.type === "user_message" && (!item.clientMessageId || !item.clientMessageId.startsWith("cron_"))
+    );
+    if (hasInteractiveUserMessage) {
+      tracker.recordActivity("interactive_turn");
+    }
   });
 
-  // Automatically track presence on server events
-  const onTurnEnded = () => {
-    tracker.recordActivity();
-  };
-  server.on("agent.turn_ended", onTurnEnded);
+  server.on("agent.permission_resolved", () => {
+    tracker.recordActivity("permission_resolved");
+  });
 
   // Periodic heartbeat / fatigue check every 60s
   const timer = setInterval(() => {
     const status = tracker.getStatus();
     if (status.phase === "extended-stretch" && tracker.getSettings().notifyVia2fado) {
-      const { fatigueAlertTriggered } = tracker.recordActivity();
+      const { fatigueAlertTriggered } = tracker.recordActivity("client_surface");
       if (fatigueAlertTriggered) {
         void tracker.send2fadoNotice(
           `⚠️ Operator Wellbeing: Continuous high-intensity session reached ${status.activeStretchMinutes}m. Consider taking a break or enabling Bed Mode.`,

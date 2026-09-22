@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
 import {
   usePluginTheme,
@@ -10,8 +10,10 @@ import {
   statusRpc,
   toggleBedModeRpc,
   snoozeAlertRpc,
+  recordActivityRpc,
   type WellbeingStatus,
   type OperatorPhase,
+  type ActivitySource,
 } from "../shared/contracts.js";
 
 export function WellbeingSurface() {
@@ -19,6 +21,49 @@ export function WellbeingSurface() {
   const { data: status, isLoading, refetch } = useRpcQuery(statusRpc, {}, { refetchInterval: 5000 });
   const toggleMutation = useRpcMutation(toggleBedModeRpc);
   const snoozeMutation = useRpcMutation(snoozeAlertRpc);
+  const recordActivityMutation = useRpcMutation(recordActivityRpc);
+
+  const lastHeartbeatRef = useRef<number>(0);
+
+  // Client-side operator presence detection: window events + document visibility heartbeat
+  useEffect(() => {
+    const reportActivity = (source: ActivitySource = "client_interaction") => {
+      const now = Date.now();
+      if (now - lastHeartbeatRef.current >= 15000) {
+        lastHeartbeatRef.current = now;
+        void recordActivityMutation.mutateAsync({ source }).then(() => {
+          void refetch();
+        });
+      }
+    };
+
+    // Immediate initial heartbeat when surface opens
+    reportActivity("client_surface");
+
+    if (typeof window !== "undefined") {
+      const handlePointer = () => reportActivity("client_interaction");
+      const handleKey = () => reportActivity("client_interaction");
+      const handleFocus = () => reportActivity("client_interaction");
+
+      window.addEventListener("pointerdown", handlePointer, { passive: true });
+      window.addEventListener("keydown", handleKey, { passive: true });
+      window.addEventListener("focus", handleFocus);
+
+      // Heartbeat while surface is active and visible
+      const interval = setInterval(() => {
+        if (typeof document !== "undefined" && document.visibilityState === "visible") {
+          reportActivity("client_surface");
+        }
+      }, 30000);
+
+      return () => {
+        window.removeEventListener("pointerdown", handlePointer);
+        window.removeEventListener("keydown", handleKey);
+        window.removeEventListener("focus", handleFocus);
+        clearInterval(interval);
+      };
+    }
+  }, []);
 
   const radiusRounded = resolveRadius("md");
   const radiusPill = resolveRadius("pill");
@@ -37,7 +82,7 @@ export function WellbeingSurface() {
   const s: WellbeingStatus = (status as WellbeingStatus) || {
     phase: "working",
     fleetPosture: "active-focus",
-    fleetDirective: "Operator Status: Active / Desk Mode.",
+    fleetDirective: "Operator Status: Active (Desk Focus).",
     isBedMode: false,
     activeStretchMinutes: 0,
     longestStretchMinutes: 0,
@@ -45,6 +90,7 @@ export function WellbeingSurface() {
     idleMinutes: 0,
     dailyUsageMinutes: 0,
     lastActivityAt: null,
+    lastActivitySource: null,
     streakStartedAt: null,
     fatigueAlertTriggered: false,
     fatigueAlertCount: 0,
@@ -62,11 +108,19 @@ export function WellbeingSurface() {
   };
 
   const phaseThemeMap: Record<OperatorPhase, { bg: string; text: string; label: string }> = {
-    working: { bg: colors.statusSuccess, text: "#ffffff", label: "DESK MODE" },
+    working: { bg: colors.statusSuccess, text: "#ffffff", label: "DESK FOCUS" },
     "extended-stretch": { bg: colors.statusWarning, text: "#ffffff", label: "FATIGUE ALERT" },
     "wind-down": { bg: colors.accent, text: colors.accentForeground, label: "WIND-DOWN" },
     "bed-mode": { bg: colors.surface2, text: colors.foreground, label: "BED MODE" },
     idle: { bg: colors.surface2, text: colors.foregroundMuted, label: "AWAY" },
+  };
+
+  const sourceLabels: Record<ActivitySource, string> = {
+    client_surface: "Surface Active",
+    client_interaction: "UI Touch/Keyboard",
+    interactive_turn: "Prompt Interaction",
+    permission_resolved: "Permission Decision",
+    manual_override: "Manual Pulse",
   };
 
   const currentPhase = phaseThemeMap[s.phase] || phaseThemeMap.working;
@@ -81,6 +135,11 @@ export function WellbeingSurface() {
     void refetch();
   };
 
+  const handleManualPulse = async () => {
+    await recordActivityMutation.mutateAsync({ source: "manual_override" });
+    void refetch();
+  };
+
   const stretchThreshold = s.settings.maxSessionContinuousMinutes || 180;
   const stretchProgress = Math.min(100, Math.round((s.activeStretchMinutes / stretchThreshold) * 100));
 
@@ -88,9 +147,16 @@ export function WellbeingSurface() {
     <View style={[styles.container, { backgroundColor: colors.surface0 }]}>
       {/* Header Row */}
       <View style={styles.headerRow}>
-        <Text style={[styles.title, { color: colors.foreground, ...typography.heading }]}>
-          Operator Wellbeing
-        </Text>
+        <View>
+          <Text style={[styles.title, { color: colors.foreground, ...typography.heading }]}>
+            Operator Wellbeing
+          </Text>
+          <Text style={[styles.subtext, { color: colors.foregroundMuted, ...typography.caption }]}>
+            {s.lastActivitySource
+              ? `Telemetry: ${sourceLabels[s.lastActivitySource] || s.lastActivitySource}`
+              : "Telemetry: Standby"}
+          </Text>
+        </View>
         <View style={[styles.badge, { backgroundColor: currentPhase.bg, borderRadius: radiusPill }]}>
           <Text style={[styles.badgeText, { color: currentPhase.text }]}>{currentPhase.label}</Text>
         </View>
@@ -175,7 +241,7 @@ export function WellbeingSurface() {
             {Math.floor(s.dailyUsageMinutes / 60)}h {s.dailyUsageMinutes % 60}m
           </Text>
           <Text style={[styles.microText, { color: colors.foregroundMuted, ...typography.caption }]}>
-            Hours: {s.settings.workingHours.start}-{s.settings.workingHours.end}
+            Window: {s.settings.workingHours.start}–{s.settings.workingHours.end}
           </Text>
         </View>
 
@@ -194,7 +260,7 @@ export function WellbeingSurface() {
           </Text>
           <Text style={[styles.metricText, { color: colors.foreground }]}>{s.breaksTaken}</Text>
           <Text style={[styles.microText, { color: colors.foregroundMuted, ...typography.caption }]}>
-            Peak: {s.longestStretchMinutes}m
+            Longest: {s.longestStretchMinutes}m
           </Text>
         </View>
       </View>
@@ -226,28 +292,48 @@ export function WellbeingSurface() {
         </View>
       </View>
 
-      {/* Action Button */}
-      <TouchableOpacity
-        style={[
-          styles.actionButton,
-          {
-            backgroundColor: s.isBedMode ? colors.accent : colors.surface2,
-            borderRadius: radiusRounded,
-            borderColor: colors.border,
-          },
-        ]}
-        onPress={handleToggle}
-        disabled={toggleMutation.isPending}
-      >
-        <Text
+      {/* Action Controls */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
           style={[
-            styles.actionButtonText,
-            { color: s.isBedMode ? colors.accentForeground : colors.foreground },
+            styles.actionButton,
+            {
+              backgroundColor: s.isBedMode ? colors.accent : colors.surface2,
+              borderRadius: radiusRounded,
+              borderColor: colors.border,
+              flex: 1,
+            },
           ]}
+          onPress={handleToggle}
+          disabled={toggleMutation.isPending}
         >
-          {s.isBedMode ? "🌙 Bed Mode Active (Tap to Resume)" : "🛌 Activate Bed Mode"}
-        </Text>
-      </TouchableOpacity>
+          <Text
+            style={[
+              styles.actionButtonText,
+              { color: s.isBedMode ? colors.accentForeground : colors.foreground },
+            ]}
+          >
+            {s.isBedMode ? "🌙 Bed Mode Active (Resume)" : "🛌 Shift to Bed Mode"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.pulseButton,
+            {
+              backgroundColor: colors.surface1,
+              borderRadius: radiusRounded,
+              borderColor: colors.border,
+            },
+          ]}
+          onPress={handleManualPulse}
+          disabled={recordActivityMutation.isPending}
+        >
+          <Text style={[styles.pulseButtonText, { color: colors.foregroundMuted, ...typography.caption }]}>
+            ⚡ Log Focus
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -274,7 +360,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   subtext: {
-    marginTop: 8,
+    marginTop: 2,
   },
   badge: {
     paddingHorizontal: 10,
@@ -376,6 +462,11 @@ const styles = StyleSheet.create({
     paddingTop: 6,
     borderColor: "rgba(128,128,128,0.2)",
   },
+  actionRow: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
   actionButton: {
     paddingVertical: 12,
     alignItems: "center",
@@ -384,5 +475,14 @@ const styles = StyleSheet.create({
   actionButtonText: {
     fontSize: 13,
     fontWeight: "700",
+  },
+  pulseButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    borderWidth: 1,
+  },
+  pulseButtonText: {
+    fontWeight: "600",
   },
 });
