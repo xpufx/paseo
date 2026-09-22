@@ -15,6 +15,11 @@ import {
   filterBulkArchiveCandidates,
   buildProjectGroups,
   filterAgentTree,
+  getStatusLightColor,
+  STATUS_LIGHT_GREEN,
+  STATUS_LIGHT_ORANGE,
+  STATUS_LIGHT_RED,
+  STATUS_LIGHT_COLORS,
 } from "./sort-filter.js";
 
 import type {
@@ -552,6 +557,151 @@ describe("Uppidi Forge sort & filter predicates", () => {
 
       const byProject = filterAgents(agents, "all", "xpufx-org/paseo");
       assert.equal(byProject.length, 2);
+    });
+  });
+
+  describe("agent status lights (#410)", () => {
+    it("exports standard light colors matching taxonomy", () => {
+      assert.equal(STATUS_LIGHT_GREEN, "#10b981");
+      assert.equal(STATUS_LIGHT_ORANGE, "#f59e0b");
+      assert.equal(STATUS_LIGHT_RED, "#ef4444");
+      assert.equal(STATUS_LIGHT_COLORS.GREEN, "#10b981");
+      assert.equal(STATUS_LIGHT_COLORS.ORANGE, "#f59e0b");
+      assert.equal(STATUS_LIGHT_COLORS.RED, "#ef4444");
+    });
+
+    it("returns Green (#10b981) for working, running, executing, and busy states", () => {
+      assert.equal(
+        getStatusLightColor({ deterministicState: "working", status: "running" }),
+        STATUS_LIGHT_GREEN
+      );
+      assert.equal(
+        getStatusLightColor({ deterministicState: "running", status: "running" }),
+        STATUS_LIGHT_GREEN
+      );
+      assert.equal(
+        getStatusLightColor({ status: "working" }),
+        STATUS_LIGHT_GREEN
+      );
+      assert.equal(
+        getStatusLightColor({ status: "executing" }),
+        STATUS_LIGHT_GREEN
+      );
+      assert.equal(
+        getStatusLightColor({ status: "busy" }),
+        STATUS_LIGHT_GREEN
+      );
+    });
+
+    it("returns Orange / Amber (#f59e0b) for idle, waiting, paused, ready, sleeping, and non-failure modes", () => {
+      assert.equal(
+        getStatusLightColor({ deterministicState: "idle:waiting", status: "idle" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ deterministicState: "sleeping", status: "idle" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ deterministicState: "idle:quota-exhausted", status: "idle" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ status: "idle" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ status: "waiting" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ status: "paused" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ status: "ready" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ status: "standby" }),
+        STATUS_LIGHT_ORANGE
+      );
+      // Non-failure generic/closed/completed/unknown states default to Orange
+      assert.equal(
+        getStatusLightColor({ status: "completed" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ status: "closed" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ deterministicState: "unknown" }),
+        STATUS_LIGHT_ORANGE
+      );
+    });
+
+    it("returns Red (#ef4444) for failed, error, and timeout failure modes", () => {
+      assert.equal(
+        getStatusLightColor({ deterministicState: "failed:error", status: "error" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ deterministicState: "failed:timeout", status: "running" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ deterministicState: "failed:spawn", status: "error" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ deterministicState: "failed:quota-exhausted", status: "error" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ status: "error" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ status: "failed" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ status: "failure" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ status: "timeout" }),
+        STATUS_LIGHT_RED
+      );
+    });
+
+    it("handles null and undefined safely by falling back to Orange", () => {
+      assert.equal(getStatusLightColor(null), STATUS_LIGHT_ORANGE);
+      assert.equal(getStatusLightColor(undefined), STATUS_LIGHT_ORANGE);
+      assert.equal(getStatusLightColor({}), STATUS_LIGHT_ORANGE);
+    });
+
+    it("prioritizes failure mode over running status", () => {
+      assert.equal(
+        getStatusLightColor({ status: "running", deterministicState: "failed:timeout" }),
+        STATUS_LIGHT_RED
+      );
+      assert.equal(
+        getStatusLightColor({ status: "executing", deterministicState: "failed:error" }),
+        STATUS_LIGHT_RED
+      );
+    });
+
+    it("prioritizes idle / sleeping over generic running status", () => {
+      assert.equal(
+        getStatusLightColor({ status: "running", deterministicState: "sleeping" }),
+        STATUS_LIGHT_ORANGE
+      );
+      assert.equal(
+        getStatusLightColor({ status: "running", deterministicState: "idle:waiting" }),
+        STATUS_LIGHT_ORANGE
+      );
     });
   });
 });

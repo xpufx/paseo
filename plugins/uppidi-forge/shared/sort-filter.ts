@@ -6,8 +6,78 @@ import type {
   UppidiRunner,
   CandidateModelMetrics,
   TaskProfileMetrics,
+  DeterministicAgentState,
 } from "./contracts.js";
 import { extractAgentProject, extractAgentWorktree } from "./contracts.js";
+
+// --- Agent Status Lights (#410) ---
+
+export const STATUS_LIGHT_GREEN = "#10b981";
+export const STATUS_LIGHT_ORANGE = "#f59e0b";
+export const STATUS_LIGHT_RED = "#ef4444";
+
+export const STATUS_LIGHT_COLORS = {
+  GREEN: STATUS_LIGHT_GREEN,
+  ORANGE: STATUS_LIGHT_ORANGE,
+  RED: STATUS_LIGHT_RED,
+} as const;
+
+/**
+ * Resolves status light color for an agent according to taxonomy:
+ * - Green (#10b981): working / running / executing
+ * - Orange / Amber (#f59e0b): idle / waiting / paused / ready / non-failure mode
+ * - Red (#ef4444): error / failed / timeout / failure mode
+ */
+export function getStatusLightColor(agent?: {
+  status?: string | null;
+  deterministicState?: DeterministicAgentState | string | null;
+} | null): string {
+  if (!agent) return STATUS_LIGHT_ORANGE;
+
+  const detState = (agent.deterministicState || "").toLowerCase().trim();
+  const status = (agent.status || "").toLowerCase().trim();
+
+  // 1. Red: error / failed / timeout / failure mode
+  if (
+    detState.startsWith("failed") ||
+    status === "error" ||
+    status === "failed" ||
+    status === "failure" ||
+    status === "timeout" ||
+    status.includes("error") ||
+    status.includes("fail")
+  ) {
+    return STATUS_LIGHT_RED;
+  }
+
+  // 2. Orange / Amber: idle / waiting / paused / ready / sleeping / non-failure mode
+  if (
+    detState.startsWith("idle") ||
+    detState === "sleeping" ||
+    status === "idle" ||
+    status === "waiting" ||
+    status === "paused" ||
+    status === "ready" ||
+    status === "standby"
+  ) {
+    return STATUS_LIGHT_ORANGE;
+  }
+
+  // 3. Green: working / running / executing
+  if (
+    detState === "working" ||
+    detState === "running" ||
+    status === "running" ||
+    status === "busy" ||
+    status === "working" ||
+    status === "executing"
+  ) {
+    return STATUS_LIGHT_GREEN;
+  }
+
+  // Fallback: non-failure mode defaults to Orange
+  return STATUS_LIGHT_ORANGE;
+}
 
 // --- Issues & PRs ---
 

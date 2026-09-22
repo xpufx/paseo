@@ -32,6 +32,11 @@ import {
   filterBulkArchiveCandidates,
   buildProjectGroups,
   filterAgentTree,
+  getStatusLightColor,
+  STATUS_LIGHT_GREEN,
+  STATUS_LIGHT_ORANGE,
+  STATUS_LIGHT_RED,
+  STATUS_LIGHT_COLORS,
   type ProjectAgentGroup,
 } from "../shared/sort-filter.js";
 
@@ -39,6 +44,11 @@ export {
   type DeterministicStateConfig,
   getAgentCategoryIcon,
   getDeterministicStateConfig,
+  getStatusLightColor,
+  STATUS_LIGHT_GREEN,
+  STATUS_LIGHT_ORANGE,
+  STATUS_LIGHT_RED,
+  STATUS_LIGHT_COLORS,
 };
 
 export interface UppidiForgeTreeViewProps {
@@ -49,6 +59,112 @@ export interface UppidiForgeTreeViewProps {
   onArchiveAgent?: (agentId: string) => Promise<void> | void;
   onArchiveBulk?: () => Promise<void> | void;
   isArchiving?: boolean;
+}
+
+export interface AgentStatusLightProps {
+  agent: UppidiAgent;
+  navigation?: PluginSurfaceProps["navigation"];
+  size?: number;
+}
+
+/**
+ * Interactive agent status light dot (#410)
+ * Color coded:
+ * - Green (#10b981): working / running / executing
+ * - Orange / Amber (#f59e0b): idle / waiting / paused / ready / non-failure mode
+ * - Red (#ef4444): error / failed / timeout / failure mode
+ * Features hover highlight, tooltip with agent name & status, and opens composer surface on click.
+ */
+export function AgentStatusLight({
+  agent,
+  navigation,
+  size = 8,
+}: AgentStatusLightProps) {
+  const [hovered, setHovered] = useState(false);
+  const color = getStatusLightColor(agent);
+  const isWorking = color === STATUS_LIGHT_GREEN;
+
+  const statusText =
+    agent.stateDetail
+      ? `${agent.deterministicState || agent.status}: ${agent.stateDetail}`
+      : agent.deterministicState && agent.deterministicState !== "unknown"
+      ? agent.deterministicState
+      : agent.status || "idle";
+  const tooltip = `${agent.name} (${statusText})`;
+
+  const handlePress = (e?: any) => {
+    e?.stopPropagation?.();
+    if (navigation?.openAgent) {
+      navigation.openAgent({ agentId: agent.id });
+      return;
+    }
+    if (typeof window !== "undefined" && agent.url) {
+      try {
+        window.open(agent.url, "_blank");
+        return;
+      } catch {}
+    }
+    const url = agent.url || `paseo://agent/${agent.id}`;
+    Linking.openURL(url).catch(() => {
+      copyToClipboard(url).catch(() => {});
+    });
+  };
+
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityLabel={tooltip}
+      // @ts-ignore RN web tooltip attribute
+      title={tooltip}
+      onPress={handlePress}
+      // @ts-ignore RN web hover
+      onMouseEnter={() => setHovered(true)}
+      // @ts-ignore RN web hover
+      onMouseLeave={() => setHovered(false)}
+      style={({ pressed }: any) => ({
+        padding: 2,
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        opacity: pressed ? 0.7 : 1,
+        transform: [{ scale: hovered ? 1.3 : 1 }],
+      })}
+    >
+      <AgentStateDot color={color} pulse={isWorking} size={size} />
+    </Pressable>
+  );
+}
+
+export interface AgentStatusLightsRowProps {
+  agents: UppidiAgent[];
+  navigation?: PluginSurfaceProps["navigation"];
+  size?: number;
+  gap?: number;
+}
+
+/**
+ * Row of side-by-side interactive agent status lights (#410).
+ */
+export function AgentStatusLightsRow({
+  agents,
+  navigation,
+  size = 8,
+  gap = 4,
+}: AgentStatusLightsRowProps) {
+  if (!agents || agents.length === 0) return null;
+
+  return (
+    <Row align="center" gap={gap} style={{ flexWrap: "wrap", alignItems: "center" }}>
+      {agents.map((agent) => (
+        <AgentStatusLight
+          key={agent.id}
+          agent={agent}
+          navigation={navigation}
+          size={size}
+        />
+      ))}
+    </Row>
+  );
 }
 
 /**
@@ -195,9 +311,11 @@ export function formatRelativeTime(dateStr?: string | null): string {
 /**
  * Dedicated Fleet Front Desk Header & Hero Card (#403)
  * Elevated at the top of the tree view as the fleet-wide liaison.
+ * Displays interactive status lights for fleet orchestrators (#410).
  */
 export function FrontDeskHero({
   nodes,
+  orchestrators = [],
   colors,
   typography,
   navigation,
@@ -205,6 +323,7 @@ export function FrontDeskHero({
   onArchiveAgent,
 }: {
   nodes: UppidiAgentTreeNode[];
+  orchestrators?: UppidiAgent[];
   colors: any;
   typography: any;
   navigation?: PluginSurfaceProps["navigation"];
@@ -226,23 +345,53 @@ export function FrontDeskHero({
           borderRadius: 8,
         }}
       >
-        <Row justify="space-between" align="center" wrap gap="sm">
-          <Row align="center" gap="sm">
-            <Icon name="Inbox" size={18} color={colors.foregroundMuted} />
-            <Stack gap={2}>
-              <Row align="center" gap="xs">
-                <Text style={{ color: colors.foreground, ...typography.heading, fontWeight: "700" }}>
-                  Fleet Front Desk
+        <Stack gap={8}>
+          <Row justify="space-between" align="center" wrap gap="sm">
+            <Row align="center" gap="sm">
+              <Icon name="Inbox" size={18} color={colors.foregroundMuted} />
+              <Stack gap={2}>
+                <Row align="center" gap="xs">
+                  <Text style={{ color: colors.foreground, ...typography.heading, fontWeight: "700" }}>
+                    Fleet Front Desk
+                  </Text>
+                  <Badge label="Liaison" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+                </Row>
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                  No active front desk liaison session running. Webhook events route to standbys.
                 </Text>
-                <Badge label="Liaison" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-              </Row>
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                No active front desk liaison session running. Webhook events route to standbys.
-              </Text>
-            </Stack>
+              </Stack>
+            </Row>
+            <Badge label="Standby" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
           </Row>
-          <Badge label="Standby" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-        </Row>
+
+          {/* Fleet Orchestrator Status Lights (#410) */}
+          {orchestrators && orchestrators.length > 0 && (
+            <Row
+              align="center"
+              justify="space-between"
+              wrap
+              gap="xs"
+              style={{
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+                paddingTop: 8,
+                marginTop: 2,
+              }}
+            >
+              <Row align="center" gap="xs">
+                <Icon name="Network" size={13} color={colors.foregroundMuted} />
+                <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
+                  Orchestrators ({orchestrators.length}):
+                </Text>
+              </Row>
+              <AgentStatusLightsRow
+                agents={orchestrators}
+                navigation={navigation}
+                size={9}
+              />
+            </Row>
+          )}
+        </Stack>
       </Card>
     );
   }
@@ -269,11 +418,11 @@ export function FrontDeskHero({
     >
       <Stack gap={10}>
         <Row justify="space-between" align="center" wrap gap="sm">
-          {/* Left: Status Dot, Icon, Titles & Worktree */}
+          {/* Left: Status Light, Icon, Titles & Worktree */}
           <Row align="center" gap="sm" style={{ flexShrink: 1 }}>
-            <AgentStateDot
-              color={primaryStateConfig.color}
-              pulse={primaryStateConfig.pulse}
+            <AgentStatusLight
+              agent={primaryAgent}
+              navigation={navigation}
               size={10}
             />
             <Icon name="Inbox" size={18} color={primaryStateConfig.color} />
@@ -366,6 +515,34 @@ export function FrontDeskHero({
             />
           </Row>
         </Row>
+
+        {/* Fleet Orchestrator Status Lights (#410) */}
+        {orchestrators && orchestrators.length > 0 && (
+          <Row
+            align="center"
+            justify="space-between"
+            wrap
+            gap="xs"
+            style={{
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+              paddingTop: 8,
+              marginTop: 2,
+            }}
+          >
+            <Row align="center" gap="xs">
+              <Icon name="Network" size={13} color={colors.foregroundMuted} />
+              <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
+                Fleet Orchestrators ({orchestrators.length}):
+              </Text>
+            </Row>
+            <AgentStatusLightsRow
+              agents={orchestrators}
+              navigation={navigation}
+              size={9}
+            />
+          </Row>
+        )}
 
         {/* If secondary front desk agents exist, render as dense rows */}
         {nodes.length > 1 && (
@@ -490,7 +667,7 @@ export function DenseAgentRow({
                 {isLast ? "└─" : "├─"}
               </Text>
             </View>
-            <AgentStateDot color={stateConfig.color} pulse={stateConfig.pulse} size={7} />
+            <AgentStatusLight agent={agent} navigation={navigation} size={7} />
             <Icon name={stateConfig.categoryIcon} size={13} color={stateConfig.color} />
             <AgentTitleLink
               agent={agent}
@@ -650,6 +827,20 @@ export function OrchestratorRow({
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
 
+  // Collect all child agents under this orchestrator (#410)
+  const childAgents = useMemo(() => {
+    const list: UppidiAgent[] = [];
+    function collect(children?: UppidiAgentTreeNode[]) {
+      if (!children) return;
+      for (const c of children) {
+        list.push(c.agent);
+        if (c.children?.length) collect(c.children);
+      }
+    }
+    collect(node.children);
+    return list;
+  }, [node.children]);
+
   return (
     <View
       // @ts-ignore RN web hover
@@ -684,7 +875,7 @@ export function OrchestratorRow({
                 opacity: 0.65,
               }}
             >
-              {isLast ? "└─" : "├─"}
+              {isLast ? "└──" : "├──"}
             </Text>
           </View>
 
@@ -710,7 +901,7 @@ export function OrchestratorRow({
             <View style={{ width: 14 }} />
           )}
 
-          <AgentStateDot color={stateConfig.color} pulse={stateConfig.pulse} size={8} />
+          <AgentStatusLight agent={agent} navigation={navigation} size={8} />
           <Icon name="Network" size={15} color={stateConfig.color} />
           <AgentTitleLink
             agent={agent}
@@ -732,6 +923,17 @@ export function OrchestratorRow({
               size="sm"
               textStyle={{ fontSize: 10 }}
             />
+          )}
+
+          {/* Child agent status lights side by side (#410) */}
+          {childAgents.length > 0 && (
+            <Row align="center" gap="xs" style={{ marginLeft: 4, alignItems: "center" }}>
+              <AgentStatusLightsRow
+                agents={childAgents}
+                navigation={navigation}
+                size={7}
+              />
+            </Row>
           )}
         </Row>
 
@@ -1164,6 +1366,39 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
 
   const displayFrontDesk = query.trim() || stateFilter !== "all" ? frontDeskNodes : allFrontDeskNodes;
 
+  // 5. Fleet Orchestrators for Front Desk Hero (#410)
+  const allOrchestrators = useMemo(() => {
+    if (agentsData?.orchestrators && agentsData.orchestrators.length > 0) {
+      return agentsData.orchestrators;
+    }
+    const list: UppidiAgent[] = [];
+    for (const a of allAgents) {
+      if (a.category === "orchestrator") {
+        list.push(a);
+      }
+    }
+    return list;
+  }, [agentsData?.orchestrators, allAgents]);
+
+  const displayOrchestrators = useMemo(() => {
+    if (!query.trim() && stateFilter === "all") {
+      return allOrchestrators;
+    }
+    const list: UppidiAgent[] = [];
+    function collect(nodes: UppidiAgentTreeNode[]) {
+      for (const n of nodes) {
+        if (n.agent.category === "orchestrator") {
+          list.push(n.agent);
+        }
+        if (n.children && n.children.length > 0) {
+          collect(n.children);
+        }
+      }
+    }
+    collect(filteredTree);
+    return list;
+  }, [query, stateFilter, filteredTree, allOrchestrators]);
+
   // Toggle handlers for collapse
   const handleToggleProject = (projectName: string) => {
     setCollapsedProjects((prev) => ({
@@ -1275,6 +1510,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
       {/* 1. Fleet Front Desk Hero (Elevated at Top of All) */}
       <FrontDeskHero
         nodes={displayFrontDesk}
+        orchestrators={displayOrchestrators}
         colors={colors}
         typography={typography}
         navigation={navigation}
