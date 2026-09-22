@@ -48,17 +48,40 @@ import {
   type CandidateModelMetrics,
   type TaskProfileMetrics,
 } from "../shared/contracts.js";
+import {
+  filterIssues,
+  sortIssues,
+  filterQueues,
+  sortQueues,
+  filterAgents,
+  sortAgents,
+  filterRunners,
+  sortRunners,
+  filterMetricCandidates,
+  sortMetricCandidates,
+  type IssuePreset,
+  type IssueSortField,
+  type QueuePreset,
+  type QueueSortField,
+  type AgentPreset,
+  type AgentSortField,
+  type RunnerPreset,
+  type RunnerSortField,
+  type MetricPreset,
+  type MetricSortField,
+  type SortDirection,
+} from "../shared/sort-filter.js";
 import { UppidiForgeStaticMockup } from "./static-mockup";
 import { UppidiForgeTreeView } from "./tree-view";
 
-type Filter = "all" | "needs-you" | "in-flight" | "review";
 type SurfaceTab = "dashboard" | "tree" | "mockup";
 
-const filters: Array<{ id: Filter; label: string }> = [
+const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
   { id: "all", label: "All work" },
-  { id: "needs-you", label: "Needs you" },
-  { id: "in-flight", label: "In flight" },
-  { id: "review", label: "Review" },
+  { id: "needs-attention", label: "Needs Attention" },
+  { id: "triage-review", label: "Triage / Review" },
+  { id: "in-progress", label: "In Progress" },
+  { id: "verify", label: "Verify" },
 ];
 
 const tabs = [
@@ -90,19 +113,47 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<SurfaceTab>("dashboard");
-  const [filter, setFilter] = useState<Filter>("all");
+
+  // Section 1: Issues sort & filter state
+  const [filter, setFilter] = useState<IssuePreset>("all");
   const [query, setQuery] = useState("");
+  const [issueSortField, setIssueSortField] = useState<IssueSortField>("number");
+  const [issueSortDir, setIssueSortDir] = useState<SortDirection>("desc");
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
+
+  // Section 2: Hook Queues sort & filter state
   const [hookServiceExpanded, setHookServiceExpanded] = useState(false);
   const [hookQueuesExpanded, setHookQueuesExpanded] = useState(false);
+  const [queuePreset, setQueuePreset] = useState<QueuePreset>("all");
+  const [queueQuery, setQueueQuery] = useState("");
+  const [queueSortField, setQueueSortField] = useState<QueueSortField>("repo");
+  const [queueSortDir, setQueueSortDir] = useState<SortDirection>("asc");
   const [hookLogExpanded, setHookLogExpanded] = useState(false);
+
+  // Section 3: Fleet & Agents sort & filter state
   const [fleetExpanded, setFleetExpanded] = useState(true);
+  const [agentPreset, setAgentPreset] = useState<AgentPreset>("all");
+  const [agentQuery, setAgentQuery] = useState("");
+  const [agentSortField, setAgentSortField] = useState<AgentSortField>("name");
+  const [agentSortDir, setAgentSortDir] = useState<SortDirection>("asc");
   const [frontDeskExpanded, setFrontDeskExpanded] = useState(true);
   const [orchestratorsExpanded, setOrchestratorsExpanded] = useState(true);
   const [workersExpanded, setWorkersExpanded] = useState(false);
   const [roleModelsExpanded, setRoleModelsExpanded] = useState(false);
+
+  // Section 4: CI Runners sort & filter state
   const [runnersExpanded, setRunnersExpanded] = useState(false);
+  const [runnerPreset, setRunnerPreset] = useState<RunnerPreset>("all");
+  const [runnerQuery, setRunnerQuery] = useState("");
+  const [runnerSortField, setRunnerSortField] = useState<RunnerSortField>("name");
+  const [runnerSortDir, setRunnerSortDir] = useState<SortDirection>("asc");
+
+  // Section 5: Fleet Capability & Benchmark Matrix sort & filter state
   const [metricsExpanded, setMetricsExpanded] = useState(false);
+  const [metricPreset, setMetricPreset] = useState<MetricPreset>("all");
+  const [metricQuery, setMetricQuery] = useState("");
+  const [metricSortField, setMetricSortField] = useState<MetricSortField>("passRate");
+  const [metricSortDir, setMetricSortDir] = useState<SortDirection>("desc");
 
   // Live RPC queries with polling
   const {
@@ -248,19 +299,9 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
 
   const rawIssues = issuesData?.issues ?? [];
   const visible = useMemo(() => {
-    return rawIssues.filter((issue) => {
-      const matchesFilter =
-        filter === "all" ||
-        (filter === "needs-you" && issue.attention === "attention/2-user") ||
-        (filter === "in-flight" && issue.status === "In progress") ||
-        (filter === "review" && issue.status === "Review");
-      const search = query.trim().toLowerCase();
-      return (
-        matchesFilter &&
-        (!search || `${issue.repo} ${issue.number} ${issue.title} ${issue.labels.join(" ")}`.toLowerCase().includes(search))
-      );
-    });
-  }, [rawIssues, filter, query]);
+    const filtered = filterIssues(rawIssues, filter, query);
+    return sortIssues(filtered, issueSortField, issueSortDir);
+  }, [rawIssues, filter, query, issueSortField, issueSortDir]);
 
   const selected = useMemo(() => {
     if (selectedNumber !== null) {
@@ -274,6 +315,51 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
   const isServiceRunning = serviceStatus?.active ?? false;
   const totalQueued = hookStatus?.totalQueued ?? 0;
   const queuesList = hookQueues?.queues ?? [];
+
+  const visibleQueues = useMemo(() => {
+    const filtered = filterQueues(queuesList, queuePreset, queueQuery);
+    return sortQueues(filtered, queueSortField, queueSortDir);
+  }, [queuesList, queuePreset, queueQuery, queueSortField, queueSortDir]);
+
+  const allAgents = useMemo(() => {
+    return [
+      ...(agentsData?.frontDesk ?? []),
+      ...(agentsData?.orchestrators ?? []),
+      ...(agentsData?.workers ?? []),
+    ];
+  }, [agentsData]);
+
+  const visibleAgents = useMemo(() => {
+    const filtered = filterAgents(allAgents, agentPreset, agentQuery);
+    return sortAgents(filtered, agentSortField, agentSortDir);
+  }, [allAgents, agentPreset, agentQuery, agentSortField, agentSortDir]);
+
+  const filteredFrontDesk = useMemo(() => {
+    const filtered = filterAgents(agentsData?.frontDesk ?? [], agentPreset, agentQuery);
+    return sortAgents(filtered, agentSortField, agentSortDir);
+  }, [agentsData?.frontDesk, agentPreset, agentQuery, agentSortField, agentSortDir]);
+
+  const filteredOrchestrators = useMemo(() => {
+    const filtered = filterAgents(agentsData?.orchestrators ?? [], agentPreset, agentQuery);
+    return sortAgents(filtered, agentSortField, agentSortDir);
+  }, [agentsData?.orchestrators, agentPreset, agentQuery, agentSortField, agentSortDir]);
+
+  const filteredWorkers = useMemo(() => {
+    const filtered = filterAgents(agentsData?.workers ?? [], agentPreset, agentQuery);
+    return sortAgents(filtered, agentSortField, agentSortDir);
+  }, [agentsData?.workers, agentPreset, agentQuery, agentSortField, agentSortDir]);
+
+  const rawRunners = runnersData?.runners ?? [];
+  const visibleRunners = useMemo(() => {
+    const filtered = filterRunners(rawRunners, runnerPreset, runnerQuery);
+    return sortRunners(filtered, runnerSortField, runnerSortDir);
+  }, [rawRunners, runnerPreset, runnerQuery, runnerSortField, runnerSortDir]);
+
+  const rawCandidates = metricsData?.candidates ?? [];
+  const visibleCandidates = useMemo(() => {
+    const filtered = filterMetricCandidates(rawCandidates, metricPreset, metricQuery);
+    return sortMetricCandidates(filtered, metricSortField, metricSortDir);
+  }, [rawCandidates, metricPreset, metricQuery, metricSortField, metricSortDir]);
 
   return (
     <ModalBody
@@ -316,12 +402,31 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
           {/* Action Bar & Filter Buttons */}
           <ActionBar align="space-between">
             <Row wrap gap="xs">
-              {filters.map(({ id, label }) => {
+              {issuePresetFilters.map(({ id, label }) => {
                 let count = 0;
-                if (id === "all") count = issuesData?.openCount ?? rawIssues.length;
-                else if (id === "needs-you") count = issuesData?.needsYouCount ?? 0;
-                else if (id === "in-flight") count = issuesData?.inFlightCount ?? 0;
-                else if (id === "review") count = issuesData?.reviewCount ?? 0;
+                if (id === "all") count = rawIssues.length;
+                else if (id === "needs-attention") {
+                  count = rawIssues.filter(
+                    (i) =>
+                      i.attention.startsWith("attention/0-") ||
+                      i.attention.startsWith("attention/1-") ||
+                      i.attention.startsWith("attention/2-")
+                  ).length;
+                } else if (id === "triage-review") {
+                  count = rawIssues.filter(
+                    (i) =>
+                      i.status === "Review" ||
+                      i.labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"))
+                  ).length;
+                } else if (id === "in-progress") {
+                  count = rawIssues.filter(
+                    (i) =>
+                      i.status === "In progress" ||
+                      i.labels.some((l) => l.includes("state/1-wip"))
+                  ).length;
+                } else if (id === "verify") {
+                  count = rawIssues.filter((i) => i.labels.some((l) => l.includes("state/3-verify"))).length;
+                }
                 return (
                   <Button
                     key={id}
@@ -419,28 +524,71 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          {/* Collapsible Section: Hook Queues (#364, #368) */}
+          {/* Collapsible Section: Hook Queues (#364, #368, #376) */}
           <Collapsible
-            title={`Hook Queues (${queuesList.length} repos, ${totalQueued} messages)`}
+            title={`Hook Queues (${visibleQueues.length}/${queuesList.length} repos, ${totalQueued} messages)`}
             icon="ListOrdered"
             isExpanded={hookQueuesExpanded}
             onToggle={(exp) => setHookQueuesExpanded(exp)}
           >
             <Card variant="flat">
               <Stack gap="sm">
-                <Row justify="space-between" align="center">
-                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    Repository webhook ingest queues managed by forgejo-hook.
-                  </Text>
-                  <Row gap="xs">
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Preset:</Text>
+                    <Button
+                      label="All"
+                      size="sm"
+                      variant={queuePreset === "all" ? "primary" : "ghost"}
+                      onPress={() => setQueuePreset("all")}
+                    />
+                    <Button
+                      label="Pending / Busy"
+                      size="sm"
+                      variant={queuePreset === "pending-processing" ? "primary" : "ghost"}
+                      onPress={() => setQueuePreset("pending-processing")}
+                    />
+                    <Button
+                      label="Paused / Dead"
+                      size="sm"
+                      variant={queuePreset === "dead-failed" ? "primary" : "ghost"}
+                      onPress={() => setQueuePreset("dead-failed")}
+                    />
+                  </Row>
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
+                    {(["repo", "depth", "status"] as const).map((field) => (
+                      <Button
+                        key={field}
+                        label={`${field === "repo" ? "Repo" : field === "depth" ? "Depth" : "Status"}${queueSortField === field ? (queueSortDir === "asc" ? " ↑" : " ↓") : ""}`}
+                        size="sm"
+                        variant={queueSortField === field ? "secondary" : "ghost"}
+                        onPress={() => {
+                          if (queueSortField === field) {
+                            setQueueSortDir(queueSortDir === "asc" ? "desc" : "asc");
+                          } else {
+                            setQueueSortField(field);
+                            setQueueSortDir(field === "depth" ? "desc" : "asc");
+                          }
+                        }}
+                      />
+                    ))}
                     <Button label="Pause all" size="sm" variant="ghost" onPress={() => handleQueuePause()} />
                     <Button label="Resume all" size="sm" variant="ghost" onPress={() => handleQueueResume()} />
                   </Row>
                 </Row>
-                {queuesList.length === 0 ? (
-                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No active queues.</Text>
+                <SearchInput
+                  value={queueQuery}
+                  onChangeText={setQueueQuery}
+                  onClear={() => setQueueQuery("")}
+                  placeholder="Filter queues by repo or orchestrator..."
+                />
+                {visibleQueues.length === 0 ? (
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                    {queuesList.length === 0 ? "No active queues." : "No queues match the selected filter."}
+                  </Text>
                 ) : (
-                  queuesList.map((q) => (
+                  visibleQueues.map((q) => (
                     <Card key={q.key} variant="elevated">
                       <Row justify="space-between" align="center" wrap gap="xs">
                         <Stack gap="xxs" style={{ flex: 1 }}>
@@ -512,27 +660,82 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          {/* Collapsible Section: Agents & Fleet Hierarchy (#367) */}
+          {/* Collapsible Section: Agents & Fleet Hierarchy (#367, #376) */}
           <Collapsible
-            title={`Agents & Fleet (${agentsData?.totalCount ?? 0} total · ${agentsData?.runningCount ?? 0} running · ${agentsData?.idleCount ?? 0} idle)`}
+            title={`Agents & Fleet (${visibleAgents.length}/${allAgents.length} total · ${agentsData?.runningCount ?? 0} running · ${agentsData?.idleCount ?? 0} idle)`}
             icon="Bot"
             isExpanded={fleetExpanded}
             onToggle={(exp) => setFleetExpanded(exp)}
           >
             <Card variant="flat">
               <Stack gap="sm">
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Preset:</Text>
+                    <Button
+                      label="All"
+                      size="sm"
+                      variant={agentPreset === "all" ? "primary" : "ghost"}
+                      onPress={() => setAgentPreset("all")}
+                    />
+                    <Button
+                      label="Active"
+                      size="sm"
+                      variant={agentPreset === "active" ? "primary" : "ghost"}
+                      onPress={() => setAgentPreset("active")}
+                    />
+                    <Button
+                      label="Idle"
+                      size="sm"
+                      variant={agentPreset === "idle" ? "primary" : "ghost"}
+                      onPress={() => setAgentPreset("idle")}
+                    />
+                    <Button
+                      label="Blocked / Errors"
+                      size="sm"
+                      variant={agentPreset === "blocked" ? "primary" : "ghost"}
+                      onPress={() => setAgentPreset("blocked")}
+                    />
+                  </Row>
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
+                    {(["name", "status", "provider"] as const).map((field) => (
+                      <Button
+                        key={field}
+                        label={`${field === "name" ? "Name" : field === "status" ? "Status" : "Provider"}${agentSortField === field ? (agentSortDir === "asc" ? " ↑" : " ↓") : ""}`}
+                        size="sm"
+                        variant={agentSortField === field ? "secondary" : "ghost"}
+                        onPress={() => {
+                          if (agentSortField === field) {
+                            setAgentSortDir(agentSortDir === "asc" ? "desc" : "asc");
+                          } else {
+                            setAgentSortField(field);
+                            setAgentSortDir("asc");
+                          }
+                        }}
+                      />
+                    ))}
+                    <Button label="Refresh agents" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchAgents()} />
+                  </Row>
+                </Row>
+                <SearchInput
+                  value={agentQuery}
+                  onChangeText={setAgentQuery}
+                  onClear={() => setAgentQuery("")}
+                  placeholder="Filter agents by name, shortId, provider, cwd..."
+                />
                 {/* Front Desk Subtree */}
                 <Collapsible
-                  title={`Front Desk (${agentsData?.frontDesk?.length ?? 0})`}
+                  title={`Front Desk (${filteredFrontDesk.length})`}
                   icon="Inbox"
                   isExpanded={frontDeskExpanded}
                   onToggle={(exp) => setFrontDeskExpanded(exp)}
                 >
                   <Stack gap="xs">
-                    {(agentsData?.frontDesk ?? []).length === 0 ? (
-                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No Front Desk agent active.</Text>
+                    {filteredFrontDesk.length === 0 ? (
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching Front Desk agents.</Text>
                     ) : (
-                      (agentsData?.frontDesk ?? []).map((a) => (
+                      filteredFrontDesk.map((a) => (
                         <Card key={a.id} variant="elevated">
                           <Row justify="space-between" align="center" wrap gap="xs">
                             <Row align="center" gap="xs">
@@ -558,16 +761,16 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
 
                 {/* Orchestrators Subtree */}
                 <Collapsible
-                  title={`Orchestrators (${agentsData?.orchestrators?.length ?? 0})`}
+                  title={`Orchestrators (${filteredOrchestrators.length})`}
                   icon="Network"
                   isExpanded={orchestratorsExpanded}
                   onToggle={(exp) => setOrchestratorsExpanded(exp)}
                 >
                   <Stack gap="xs">
-                    {(agentsData?.orchestrators ?? []).length === 0 ? (
-                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No orchestrators running.</Text>
+                    {filteredOrchestrators.length === 0 ? (
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching orchestrators.</Text>
                     ) : (
-                      (agentsData?.orchestrators ?? []).map((a) => (
+                      filteredOrchestrators.map((a) => (
                         <Card key={a.id} variant="elevated">
                           <Row justify="space-between" align="center" wrap gap="xs">
                             <Row align="center" gap="xs">
@@ -593,16 +796,16 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
 
                 {/* Task & Coding Agents Subtree */}
                 <Collapsible
-                  title={`Coding & Task Agents (${agentsData?.workers?.length ?? 0})`}
+                  title={`Coding & Task Agents (${filteredWorkers.length})`}
                   icon="Terminal"
                   isExpanded={workersExpanded}
                   onToggle={(exp) => setWorkersExpanded(exp)}
                 >
                   <Stack gap="xs">
-                    {(agentsData?.workers ?? []).length === 0 ? (
-                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No task agents active.</Text>
+                    {filteredWorkers.length === 0 ? (
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching task agents.</Text>
                     ) : (
-                      (agentsData?.workers ?? []).map((a) => (
+                      filteredWorkers.map((a) => (
                         <Card key={a.id} variant="elevated">
                           <Row justify="space-between" align="center" wrap gap="xs">
                             <Row align="center" gap="xs">
@@ -680,25 +883,70 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          {/* Collapsible Section: CI Runners (#366) */}
+          {/* Collapsible Section: CI Runners (#366, #376) */}
           <Collapsible
-            title={`CI Runner Fleet (${runnersData?.onlineCount ?? 0}/${runnersData?.totalCount ?? 0} online)`}
+            title={`CI Runner Fleet (${visibleRunners.length}/${runnersData?.totalCount ?? 0} runners \u00b7 ${runnersData?.onlineCount ?? 0} online)`}
             icon="Server"
             isExpanded={runnersExpanded}
             onToggle={(exp) => setRunnersExpanded(exp)}
           >
             <Card variant="flat">
               <Stack gap="sm">
-                <Row justify="space-between" align="center">
-                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    Forgejo Actions runner instances registered for automated CI jobs:
-                  </Text>
-                  <Button label="Refresh runners" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchRunners()} />
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Preset:</Text>
+                    <Button
+                      label="All"
+                      size="sm"
+                      variant={runnerPreset === "all" ? "primary" : "ghost"}
+                      onPress={() => setRunnerPreset("all")}
+                    />
+                    <Button
+                      label="Online"
+                      size="sm"
+                      variant={runnerPreset === "online" ? "primary" : "ghost"}
+                      onPress={() => setRunnerPreset("online")}
+                    />
+                    <Button
+                      label="Offline"
+                      size="sm"
+                      variant={runnerPreset === "offline" ? "primary" : "ghost"}
+                      onPress={() => setRunnerPreset("offline")}
+                    />
+                  </Row>
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
+                    {(["name", "status", "lastSeen"] as const).map((field) => (
+                      <Button
+                        key={field}
+                        label={`${field === "name" ? "Name" : field === "status" ? "Status" : "Last seen"}${runnerSortField === field ? (runnerSortDir === "asc" ? " ↑" : " ↓") : ""}`}
+                        size="sm"
+                        variant={runnerSortField === field ? "secondary" : "ghost"}
+                        onPress={() => {
+                          if (runnerSortField === field) {
+                            setRunnerSortDir(runnerSortDir === "asc" ? "desc" : "asc");
+                          } else {
+                            setRunnerSortField(field);
+                            setRunnerSortDir("asc");
+                          }
+                        }}
+                      />
+                    ))}
+                    <Button label="Refresh runners" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchRunners()} />
+                  </Row>
                 </Row>
-                {(runnersData?.runners ?? []).length === 0 ? (
-                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No registered runners found.</Text>
+                <SearchInput
+                  value={runnerQuery}
+                  onChangeText={setRunnerQuery}
+                  onClear={() => setRunnerQuery("")}
+                  placeholder="Filter runners by name, labels, or job..."
+                />
+                {visibleRunners.length === 0 ? (
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                    {(runnersData?.runners ?? []).length === 0 ? "No registered runners found." : "No runners match the selected filter."}
+                  </Text>
                 ) : (
-                  (runnersData?.runners ?? []).map((r) => (
+                  visibleRunners.map((r) => (
                     <Card key={r.id} variant="elevated">
                       <Row justify="space-between" align="center" wrap gap="xs">
                         <Stack gap="xxs">
@@ -729,9 +977,9 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          {/* Collapsible Section: Fleet Capability & Benchmark Matrix (#373 / platform#18) */}
+          {/* Collapsible Section: Fleet Capability & Benchmark Matrix (#373 / platform#18, #376) */}
           <Collapsible
-            title={`Fleet Capability & Benchmark Matrix (${metricsData?.candidates?.length ?? 0} candidates, ${metricsData?.totalEvaluatedTrials ?? 0} trials)`}
+            title={`Fleet Capability & Benchmark Matrix (${visibleCandidates.length}/${rawCandidates.length} candidates, ${metricsData?.totalEvaluatedTrials ?? 0} trials)`}
             icon="Activity"
             isExpanded={metricsExpanded}
             onToggle={(exp) => setMetricsExpanded(exp)}
@@ -745,6 +993,62 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   <Button label="Refresh metrics" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchMetrics()} />
                 </Row>
 
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Preset:</Text>
+                    <Button
+                      label="All"
+                      size="sm"
+                      variant={metricPreset === "all" ? "primary" : "ghost"}
+                      onPress={() => setMetricPreset("all")}
+                    />
+                    <Button
+                      label="High Pass (≥85%)"
+                      size="sm"
+                      variant={metricPreset === "high-pass" ? "primary" : "ghost"}
+                      onPress={() => setMetricPreset("high-pass")}
+                    />
+                    <Button
+                      label="Worker Suitable"
+                      size="sm"
+                      variant={metricPreset === "bugfix-suitable" ? "primary" : "ghost"}
+                      onPress={() => setMetricPreset("bugfix-suitable")}
+                    />
+                    <Button
+                      label="Liaison Suitable"
+                      size="sm"
+                      variant={metricPreset === "liaison-suitable" ? "primary" : "ghost"}
+                      onPress={() => setMetricPreset("liaison-suitable")}
+                    />
+                  </Row>
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
+                    {(["passRate", "latency", "trials", "model"] as const).map((field) => (
+                      <Button
+                        key={field}
+                        label={`${field === "passRate" ? "Pass rate" : field === "latency" ? "Latency" : field === "trials" ? "Trials" : "Model"}${metricSortField === field ? (metricSortDir === "asc" ? " ↑" : " ↓") : ""}`}
+                        size="sm"
+                        variant={metricSortField === field ? "secondary" : "ghost"}
+                        onPress={() => {
+                          if (metricSortField === field) {
+                            setMetricSortDir(metricSortDir === "asc" ? "desc" : "asc");
+                          } else {
+                            setMetricSortField(field);
+                            setMetricSortDir(field === "latency" || field === "model" ? "asc" : "desc");
+                          }
+                        }}
+                      />
+                    ))}
+                  </Row>
+                </Row>
+
+                <SearchInput
+                  value={metricQuery}
+                  onChangeText={setMetricQuery}
+                  onClear={() => setMetricQuery("")}
+                  placeholder="Filter models by name, role, or profile advisory..."
+                />
+
                 {metricsData?.privacyNotice && (
                   <Card variant="tinted">
                     <Row align="center" gap="xs">
@@ -756,55 +1060,61 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   </Card>
                 )}
 
-                {(metricsData?.candidates ?? []).map((candidate) => (
-                  <Card key={candidate.model} variant="elevated">
-                    <Stack gap="xs">
-                      <Row justify="space-between" align="center" wrap gap="xs">
-                        <Row align="center" gap="xs">
-                          <StatusDot variant={candidate.overallPassRate >= 90 ? "success" : candidate.overallPassRate >= 80 ? "info" : "warning"} />
-                          <Text style={{ color: colors.foreground, ...typography.heading }}>{candidate.model}</Text>
-                          <Badge label={`${candidate.overallPassRate}% pass`} variant={candidate.overallPassRate >= 90 ? "success" : "neutral"} size="sm" />
-                          <Badge label={`${Math.round(candidate.medianWallMs / 1000)}s median`} variant="neutral" size="sm" />
-                          <Badge label={`${candidate.totalTrials} trials`} variant="neutral" size="sm" />
+                {visibleCandidates.length === 0 ? (
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                    {rawCandidates.length === 0 ? "No benchmark candidate data available." : "No model candidates match the selected filter."}
+                  </Text>
+                ) : (
+                  visibleCandidates.map((candidate) => (
+                    <Card key={candidate.model} variant="elevated">
+                      <Stack gap="xs">
+                        <Row justify="space-between" align="center" wrap gap="xs">
+                          <Row align="center" gap="xs">
+                            <StatusDot variant={candidate.overallPassRate >= 90 ? "success" : candidate.overallPassRate >= 80 ? "info" : "warning"} />
+                            <Text style={{ color: colors.foreground, ...typography.heading }}>{candidate.model}</Text>
+                            <Badge label={`${candidate.overallPassRate}% pass`} variant={candidate.overallPassRate >= 90 ? "success" : "neutral"} size="sm" />
+                            <Badge label={`${Math.round(candidate.medianWallMs / 1000)}s median`} variant="neutral" size="sm" />
+                            <Badge label={`${candidate.totalTrials} trials`} variant="neutral" size="sm" />
+                          </Row>
+                          <Row align="center" gap="xs" wrap>
+                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Recommended roles:</Text>
+                            {candidate.recommendedRoles.map((role) => (
+                              <Badge key={role} label={role} variant="info" size="sm" />
+                            ))}
+                          </Row>
                         </Row>
-                        <Row align="center" gap="xs" wrap>
-                          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Recommended roles:</Text>
-                          {candidate.recommendedRoles.map((role) => (
-                            <Badge key={role} label={role} variant="info" size="sm" />
-                          ))}
-                        </Row>
-                      </Row>
 
-                      {/* Task Profile breakdown */}
-                      <Stack gap="xs" style={{ marginTop: 4 }}>
-                        {candidate.profiles.map((p) => (
-                          <Card key={p.taskProfile} variant="flat">
-                            <Row justify="space-between" align="center" wrap gap="xs">
-                              <Stack gap="xxs" style={{ flex: 1, minWidth: 200 }}>
-                                <Row align="center" gap="xs">
-                                  <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
-                                    {p.taskProfileLabel}
+                        {/* Task Profile breakdown */}
+                        <Stack gap="xs" style={{ marginTop: 4 }}>
+                          {candidate.profiles.map((p) => (
+                            <Card key={p.taskProfile} variant="flat">
+                              <Row justify="space-between" align="center" wrap gap="xs">
+                                <Stack gap="xxs" style={{ flex: 1, minWidth: 200 }}>
+                                  <Row align="center" gap="xs">
+                                    <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
+                                      {p.taskProfileLabel}
+                                    </Text>
+                                    <Badge label={`${p.passRate}% pass`} variant={p.passRate >= 90 ? "success" : p.passRate >= 80 ? "info" : "warning"} size="sm" />
+                                    <Badge label={`${p.reworkRate}% rework`} variant="neutral" size="sm" />
+                                    <Badge label={p.confidence} variant={p.confidence === "high" ? "success" : "neutral"} size="sm" />
+                                  </Row>
+                                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                    {p.advisory}
                                   </Text>
-                                  <Badge label={`${p.passRate}% pass`} variant={p.passRate >= 90 ? "success" : p.passRate >= 80 ? "info" : "warning"} size="sm" />
-                                  <Badge label={`${p.reworkRate}% rework`} variant="neutral" size="sm" />
-                                  <Badge label={p.confidence} variant={p.confidence === "high" ? "success" : "neutral"} size="sm" />
+                                </Stack>
+                                <Row align="center" gap="xs">
+                                  <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                                    Failures: Q:{p.failureBreakdown.quota} | T:{p.failureBreakdown.timeout} | Tool:{p.failureBreakdown.toolFailure} | Check:{p.failureBreakdown.checkFailure}
+                                  </Text>
                                 </Row>
-                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                                  {p.advisory}
-                                </Text>
-                              </Stack>
-                              <Row align="center" gap="xs">
-                                <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
-                                  Failures: Q:{p.failureBreakdown.quota} | T:{p.failureBreakdown.timeout} | Tool:{p.failureBreakdown.toolFailure} | Check:{p.failureBreakdown.checkFailure}
-                                </Text>
                               </Row>
-                            </Row>
-                          </Card>
-                        ))}
+                            </Card>
+                          ))}
+                        </Stack>
                       </Stack>
-                    </Stack>
-                  </Card>
-                ))}
+                    </Card>
+                  ))
+                )}
               </Stack>
             </Card>
           </Collapsible>
@@ -832,12 +1142,35 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     />
                   }
                 />
-                <SearchInput
-                  value={query}
-                  onChangeText={setQuery}
-                  onClear={() => setQuery("")}
-                  placeholder="Filter by title, number, or label..."
-                />
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <View style={{ flex: 1, minWidth: 200 }}>
+                    <SearchInput
+                      value={query}
+                      onChangeText={setQuery}
+                      onClear={() => setQuery("")}
+                      placeholder="Filter by title, number, or label..."
+                    />
+                  </View>
+                  <Row gap="xs" align="center" wrap>
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
+                    {(["number", "title", "status", "comments", "repo"] as const).map((field) => (
+                      <Button
+                        key={field}
+                        label={`${field === "number" ? "#" : field === "title" ? "Title" : field === "status" ? "Status" : field === "comments" ? "Comments" : "Repo"}${issueSortField === field ? (issueSortDir === "asc" ? " ↑" : " ↓") : ""}`}
+                        size="sm"
+                        variant={issueSortField === field ? "secondary" : "ghost"}
+                        onPress={() => {
+                          if (issueSortField === field) {
+                            setIssueSortDir(issueSortDir === "asc" ? "desc" : "asc");
+                          } else {
+                            setIssueSortField(field);
+                            setIssueSortDir(field === "number" || field === "comments" ? "desc" : "asc");
+                          }
+                        }}
+                      />
+                    ))}
+                  </Row>
+                </Row>
                 <DataTable
                   data={visible}
                   keyExtractor={(issue) => String(issue.number)}
