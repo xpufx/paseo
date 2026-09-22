@@ -18,6 +18,8 @@ import {
   UppidiArchiveInactiveAgentsInputSchema,
   UppidiArchiveInactiveAgentsOutputSchema,
   uppidiArchiveInactiveAgentsContract,
+  extractAgentWorktree,
+  extractAgentProject,
 } from "./contracts.js";
 
 
@@ -255,5 +257,88 @@ describe("uppidi-forge shared contracts", () => {
     assert.equal(outputBulk.archivedCount, 2);
     assert.deepEqual(outputBulk.archivedIds, ["agent-1", "agent-2"]);
   });
+
+  it("extracts agent worktree accurately (#403)", () => {
+    // 1. From worktree property
+    assert.equal(
+      extractAgentWorktree({ worktree: "feat-403-dense-fleet-tree" }),
+      "feat-403-dense-fleet-tree"
+    );
+
+    // 2. From cwd worktree path
+    assert.equal(
+      extractAgentWorktree({ cwd: "/home/xpufx/.paseo/worktrees/2h0dw6vb/feat-403-dense-fleet-tree" }),
+      "feat-403-dense-fleet-tree"
+    );
+
+    // 3. From cwd code repo path
+    assert.equal(
+      extractAgentWorktree({ cwd: "/home/xpufx/code/paseo" }),
+      "paseo"
+    );
+
+    // 4. From attributed work slug/branch
+    assert.equal(
+      extractAgentWorktree({ attributedWork: { slug: "feat/403-dense-tree" } }),
+      "feat/403-dense-tree"
+    );
+
+    // 5. From workspaceId
+    assert.equal(
+      extractAgentWorktree({ workspaceId: "wks_e29c301bc004300c" }),
+      "wks_e29c301b"
+    );
+
+    // 6. From labels
+    assert.equal(
+      extractAgentWorktree({ labels: { worktree: "custom-worktree" } }),
+      "custom-worktree"
+    );
+  });
+
+  it("extracts agent project accurately (#403)", () => {
+    // 1. From project property
+    assert.equal(
+      extractAgentProject({ project: "xpufx-org/paseo" }),
+      "xpufx-org/paseo"
+    );
+
+    // 2. From labels
+    assert.equal(
+      extractAgentProject({ labels: { repo: "xpufx-org/platform" } }),
+      "xpufx-org/platform"
+    );
+
+    // 3. From name pattern
+    assert.equal(
+      extractAgentProject({ name: "Orchestrator · xpufx-org/paseo" }),
+      "xpufx-org/paseo"
+    );
+
+    // 4. From attributed work
+    assert.equal(
+      extractAgentProject({ attributedWork: { repo: "xpufx-org/aur-automation" } }),
+      "xpufx-org/aur-automation"
+    );
+
+    // 5. From cwd
+    assert.equal(
+      extractAgentProject({ cwd: "/home/xpufx/code/paseo" }),
+      "xpufx-org/paseo"
+    );
+
+    // 6. Inherited from parent
+    assert.equal(
+      extractAgentProject({ name: "Worker" }, "xpufx-org/paseo"),
+      "xpufx-org/paseo"
+    );
+
+    // 7. Fallback
+    assert.equal(
+      extractAgentProject({ name: "Unassigned Worker" }),
+      "Default Project"
+    );
+  });
 });
+
 

@@ -15,6 +15,7 @@ import type {
   UppidiArchiveInactiveAgentsInput,
   UppidiArchiveInactiveAgentsOutput,
 } from "../shared/contracts.js";
+import { extractAgentWorktree, extractAgentProject } from "../shared/contracts.js";
 import { isAgentEligibleForBulkArchive } from "../shared/sort-filter.js";
 
 
@@ -234,6 +235,8 @@ export function normalizeRawAgent(
     attributedWork,
     usage: raw.lastUsage || null,
     url: raw.url || (id ? `paseo://agent/${id}` : undefined),
+    worktree: extractAgentWorktree(raw),
+    project: extractAgentProject(raw),
   };
 }
 
@@ -469,6 +472,17 @@ export async function handleUppidiAgents(
         orchestrators.push(agent);
       } else {
         workers.push(agent);
+      }
+    }
+
+    // Propagate project from parent orchestrator to child agents if needed
+    const agentMap = new Map(agents.map((a) => [a.id, a]));
+    for (const a of agents) {
+      if ((!a.project || a.project === "Default Project") && a.parentId) {
+        const parent = agentMap.get(a.parentId);
+        if (parent?.project && parent.project !== "Default Project") {
+          a.project = parent.project;
+        }
       }
     }
 

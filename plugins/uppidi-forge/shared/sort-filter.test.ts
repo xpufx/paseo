@@ -13,12 +13,15 @@ import {
   sortMetricCandidates,
   isAgentEligibleForBulkArchive,
   filterBulkArchiveCandidates,
+  buildProjectGroups,
+  filterAgentTree,
 } from "./sort-filter.js";
 
 import type {
   UppidiIssue,
   HookQueueItem,
   UppidiAgent,
+  UppidiAgentTreeNode,
   UppidiRunner,
   CandidateModelMetrics,
 } from "./contracts.js";
@@ -419,5 +422,138 @@ describe("Uppidi Forge sort & filter predicates", () => {
       );
     });
   });
+
+  describe("project grouping and tree hierarchy (#403)", () => {
+    const frontDeskAgent: UppidiAgent = {
+      id: "fd-1",
+      shortId: "fd1",
+      name: "Front Desk Liaison",
+      category: "front-desk",
+      status: "running",
+      deterministicState: "running",
+      worktree: "main",
+    };
+
+    const paseoOrch: UppidiAgent = {
+      id: "orch-paseo",
+      shortId: "orch1",
+      name: "Orchestrator · xpufx-org/paseo",
+      category: "orchestrator",
+      status: "running",
+      deterministicState: "working",
+      project: "xpufx-org/paseo",
+      worktree: "paseo",
+    };
+
+    const paseoWorker1: UppidiAgent = {
+      id: "worker-403",
+      shortId: "w403",
+      name: "feat-403-dense-fleet-tree",
+      category: "worker",
+      status: "busy",
+      parentId: "orch-paseo",
+      deterministicState: "working",
+      project: "xpufx-org/paseo",
+      worktree: "feat-403-dense-fleet-tree",
+      attributedWork: { repo: "xpufx-org/paseo", issue: 403, slug: "feat-403-dense-fleet-tree" },
+    };
+
+    const platformOrch: UppidiAgent = {
+      id: "orch-plat",
+      shortId: "orch2",
+      name: "Orchestrator · xpufx-org/platform",
+      category: "orchestrator",
+      status: "idle",
+      deterministicState: "sleeping",
+      project: "xpufx-org/platform",
+      worktree: "platform",
+    };
+
+    const unparentedWorker: UppidiAgent = {
+      id: "worker-misc",
+      shortId: "wmisc",
+      name: "scratch-worker",
+      category: "worker",
+      status: "idle",
+      deterministicState: "idle:waiting",
+      project: "Default Project",
+    };
+
+    const tree: UppidiAgentTreeNode[] = [
+      {
+        agent: frontDeskAgent,
+        depth: 0,
+        children: [],
+      },
+      {
+        agent: paseoOrch,
+        depth: 0,
+        children: [
+          {
+            agent: paseoWorker1,
+            depth: 1,
+            children: [],
+          },
+        ],
+      },
+      {
+        agent: platformOrch,
+        depth: 0,
+        children: [],
+      },
+      {
+        agent: unparentedWorker,
+        depth: 0,
+        children: [],
+      },
+    ];
+
+    it("elevates Front Desk to top and groups rest by project", () => {
+      const { frontDeskNodes, projectGroups } = buildProjectGroups(tree);
+
+      assert.equal(frontDeskNodes.length, 1);
+      assert.equal(frontDeskNodes[0].agent.id, "fd-1");
+
+      assert.equal(projectGroups.length, 3);
+      // paseo is active (runningCount: 2), so it is sorted first
+      assert.equal(projectGroups[0].projectName, "xpufx-org/paseo");
+      assert.equal(projectGroups[0].runningCount, 2);
+      assert.equal(projectGroups[0].totalCount, 2);
+      assert.equal(projectGroups[0].orchestrators.length, 1);
+      assert.equal(projectGroups[0].orchestrators[0].children.length, 1);
+
+      // platform is idle (runningCount: 0)
+      assert.equal(projectGroups[1].projectName, "xpufx-org/platform");
+      assert.equal(projectGroups[1].runningCount, 0);
+      assert.equal(projectGroups[1].totalCount, 1);
+
+      // Default Project is sorted last
+      assert.equal(projectGroups[2].projectName, "Default Project");
+      assert.equal(projectGroups[2].unparentedWorkers.length, 1);
+    });
+
+    it("filters agent tree preserving lineage to matching descendants", () => {
+      // Search for "#403" should retain orchestrator -> worker-403
+      const filtered = filterAgentTree(tree, (agent) =>
+        agent.name.includes("403") || (agent.attributedWork?.issue === 403)
+      );
+
+      assert.equal(filtered.length, 1);
+      assert.equal(filtered[0].agent.id, "orch-paseo"); // Parent kept because child matches!
+      assert.equal(filtered[0].children.length, 1);
+      assert.equal(filtered[0].children[0].agent.id, "worker-403");
+    });
+
+    it("filterAgents matches query against worktree and project", () => {
+      const agents = [frontDeskAgent, paseoOrch, paseoWorker1];
+      const byWorktree = filterAgents(agents, "all", "dense-fleet-tree");
+      assert.equal(byWorktree.length, 1);
+      assert.equal(byWorktree[0].id, "worker-403");
+
+      const byProject = filterAgents(agents, "all", "xpufx-org/paseo");
+      assert.equal(byProject.length, 2);
+    });
+  });
 });
+
 

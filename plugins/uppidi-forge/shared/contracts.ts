@@ -391,6 +391,8 @@ export const UppidiAgentSchema = z.object({
   attributedWork: UppidiAgentWorkSchema.nullable().optional(),
   usage: UppidiAgentUsageSchema.nullable().optional(),
   url: z.string().optional(),
+  worktree: z.string().optional(),
+  project: z.string().optional(),
 });
 export type UppidiAgent = z.infer<typeof UppidiAgentSchema>;
 
@@ -597,4 +599,94 @@ export const uppidiArchiveInactiveAgentsContract = defineContract({
   input: UppidiArchiveInactiveAgentsInputSchema,
   output: UppidiArchiveInactiveAgentsOutputSchema,
 });
+
+/**
+ * Extracts a concise workspace or worktree slug from an agent record.
+ * Supports worktree paths (~/.paseo/worktrees/<id>/<slug>), cwd repo paths,
+ * attributed work slugs/branches, labels, or workspace IDs.
+ */
+export function extractAgentWorktree(agent: {
+  worktree?: string;
+  cwd?: string;
+  workspaceId?: string;
+  labels?: Record<string, string>;
+  attributedWork?: { slug?: string; branch?: string } | null;
+  name?: string;
+  title?: string;
+}): string | undefined {
+  if (agent.worktree && agent.worktree.trim()) return agent.worktree.trim();
+  if (agent.labels?.["worktree"] && agent.labels["worktree"].trim()) return agent.labels["worktree"].trim();
+  if (agent.labels?.["branch"] && agent.labels["branch"].trim()) return agent.labels["branch"].trim();
+
+  if (agent.cwd) {
+    const cwd = agent.cwd.trim();
+    const wtMatch = cwd.match(/worktrees\/[^/]+\/([^/]+)/);
+    if (wtMatch && wtMatch[1]) {
+      return wtMatch[1];
+    }
+    const codeMatch = cwd.match(/\/code\/([^/]+)/);
+    if (codeMatch && codeMatch[1]) {
+      return codeMatch[1];
+    }
+    const parts = cwd.split("/").filter(Boolean);
+    if (parts.length > 0) {
+      return parts[parts.length - 1];
+    }
+  }
+
+  if (agent.attributedWork?.slug) return agent.attributedWork.slug;
+  if (agent.attributedWork?.branch) return agent.attributedWork.branch;
+
+  if (agent.workspaceId) {
+    return agent.workspaceId.length > 12 ? agent.workspaceId.slice(0, 12) : agent.workspaceId;
+  }
+
+  return undefined;
+}
+
+/**
+ * Extracts or infers a project identifier (e.g. "xpufx-org/paseo") from an agent record.
+ * Falls back to parentProject if provided, or "Default Project".
+ */
+export function extractAgentProject(
+  agent: {
+    project?: string;
+    labels?: Record<string, string>;
+    attributedWork?: { repo?: string } | null;
+    name?: string;
+    title?: string;
+    cwd?: string;
+  },
+  parentProject?: string
+): string {
+  if (agent.project && agent.project.trim()) return agent.project.trim();
+  if (agent.labels?.["repo"] && agent.labels["repo"].trim()) return agent.labels["repo"].trim();
+  if (agent.labels?.["project"] && agent.labels["project"].trim()) return agent.labels["project"].trim();
+  if (agent.attributedWork?.repo && agent.attributedWork.repo.trim()) return agent.attributedWork.repo.trim();
+
+  const text = `${agent.name || ""} ${agent.title || ""}`;
+  const match = text.match(/Orchestrator\s+[·-]\s*([a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)?)/i);
+  if (match && match[1]) {
+    return match[1];
+  }
+
+  const issueMatch = text.match(/([a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)#\d+/);
+  if (issueMatch && issueMatch[1]) {
+    return issueMatch[1];
+  }
+
+  if (agent.cwd) {
+    const cwdMatch = agent.cwd.match(/\/code\/([a-zA-Z0-9_-]+)/);
+    if (cwdMatch && cwdMatch[1]) {
+      return `xpufx-org/${cwdMatch[1]}`;
+    }
+  }
+
+  if (parentProject) {
+    return parentProject;
+  }
+
+  return "Default Project";
+}
+
 

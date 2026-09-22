@@ -2,10 +2,12 @@ import type {
   UppidiIssue,
   HookQueueItem,
   UppidiAgent,
+  UppidiAgentTreeNode,
   UppidiRunner,
   CandidateModelMetrics,
   TaskProfileMetrics,
 } from "./contracts.js";
+import { extractAgentProject, extractAgentWorktree } from "./contracts.js";
 
 // --- Issues & PRs ---
 
@@ -226,6 +228,8 @@ export function filterAgents(
       a.provider ?? "",
       a.model ?? "",
       a.cwd ?? "",
+      a.worktree ?? "",
+      a.project ?? "",
     ]
       .join(" ")
       .toLowerCase();
@@ -468,3 +472,133 @@ export function sortMetricCandidates(
 
   return sorted;
 }
+
+// --- Project Groups & High-Density Fleet Hierarchy (#403) ---
+
+export interface ProjectAgentGroup {
+  projectName: string;
+  orchestrators: UppidiAgentTreeNode[];
+  unparentedWorkers: UppidiAgentTreeNode[];
+  allAgents: UppidiAgent[];
+  runningCount: number;
+  totalCount: number;
+}
+
+/**
+ * Filters a tree of UppidiAgentTreeNodes recursively.
+ * A node is included if itself matches the predicate OR any of its descendants match.
+ * If a descendant matches, only the matching descendant branches are kept.
+ */
+export function filterAgentTree(
+  nodes: UppidiAgentTreeNode[],
+  predicate: (agent: UppidiAgent) => boolean
+): UppidiAgentTreeNode[] {
+  const result: UppidiAgentTreeNode[] = [];
+
+  for (const node of nodes) {
+    const matchingChildren = filterAgentTree(node.children, predicate);
+    const selfMatches = predicate(node.agent);
+
+    if (selfMatches || matchingChildren.length > 0) {
+      result.push({
+        agent: node.agent,
+        depth: node.depth,
+        children: matchingChildren,
+      });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Builds project groups from the fleet tree.
+ * - Elevates Front Desk nodes into frontDeskNodes.
+ * - Groups all other nodes by project (derived from agent.project or labels/cwd/attribution).
+ * - Under each project, separates Orchestrators (with their children) and unparented workers.
+ */
+export function buildProjectGroups(tree: UppidiAgentTreeNode[]): {
+  frontDeskNodes: UppidiAgentTreeNode[];
+  projectGroups: ProjectAgentGroup[];
+} {
+  const frontDeskNodes: UppidiAgentTreeNode[] = [];
+  const projectMap = new Map<
+    string,
+    {
+      orchestrators: UppidiAgentTreeNode[];
+      unparentedWorkers: UppidiAgentTreeNode[];
+      allAgents: UppidiAgent[];
+    }
+  >();
+
+  function collectAllAgents(node: UppidiAgentTreeNode, list: UppidiAgent[]) {
+    list.push(node.agent);
+    for (const child of node.children) {
+      collectAllAgents(child, list);
+    }
+  }
+
+  for (const node of tree) {
+    if (node.agent.category === "front-desk") {
+      frontDeskNodes.push(node);
+      continue;
+    }
+
+    const project =
+      node.agent.project || extractAgentProject(node.agent) || "Default Project";
+
+    if (!projectMap.has(project)) {
+      projectMap.set(project, {
+        orchestrators: [],
+        unparentedWorkers: [],
+        allAgents: [],
+      });
+    }
+
+    const group = projectMap.get(project)!;
+    collectAllAgents(node, group.allAgents);
+
+    if (node.agent.category === "orchestrator") {
+      group.orchestrators.push(node);
+    } else {
+      group.unparentedWorkers.push(node);
+    }
+  }
+
+  const projectGroups: ProjectAgentGroup[] = Array.from(
+    projectMap.entries()
+  ).map(([projectName, data]) => {
+    const runningCount = data.allAgents.filter(
+      (a) =>
+        a.deterministicState === "working" ||
+        a.deterministicState === "running" ||
+        (a.status === "running" &&
+          a.deterministicState !== "sleeping" &&
+          a.deterministicState !== "idle:waiting")
+    ).length;
+
+    return {
+      projectName,
+      orchestrators: data.orchestrators,
+      unparentedWorkers: data.unparentedWorkers,
+      allAgents: data.allAgents,
+      runningCount,
+      totalCount: data.allAgents.length,
+    };
+  });
+
+  // Sort projects: active projects first, then alphabetically, with "Default Project" last
+  projectGroups.sort((a, b) => {
+    if (a.runningCount > 0 && b.runningCount === 0) return -1;
+    if (b.runningCount > 0 && a.runningCount === 0) return 1;
+    if (a.projectName === "Default Project" && b.projectName !== "Default Project") return 1;
+    if (b.projectName === "Default Project" && a.projectName !== "Default Project") return -1;
+    return a.projectName.localeCompare(b.projectName);
+  });
+
+  return {
+    frontDeskNodes,
+    projectGroups,
+  };
+}
+

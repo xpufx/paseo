@@ -50,6 +50,7 @@ import {
   type UppidiRunner,
   type CandidateModelMetrics,
   type TaskProfileMetrics,
+  extractAgentWorktree,
 } from "../shared/contracts.js";
 import {
   filterIssues,
@@ -808,6 +809,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     ) : (
                       filteredFrontDesk.map((a) => {
                         const config = getDeterministicStateConfig(a.deterministicState, a.category);
+                        const worktree = a.worktree || extractAgentWorktree(a);
                         return (
                           <Card key={a.id} variant="elevated">
                             <Row justify="space-between" align="center" wrap gap="xs">
@@ -817,6 +819,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                                 <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
+                                {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
                               </Row>
                               <Row align="center" gap="xs">
                                 <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
@@ -858,6 +861,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     ) : (
                       filteredOrchestrators.map((a) => {
                         const config = getDeterministicStateConfig(a.deterministicState, a.category);
+                        const worktree = a.worktree || extractAgentWorktree(a);
                         return (
                           <Card key={a.id} variant="elevated">
                             <Row justify="space-between" align="center" wrap gap="xs">
@@ -867,6 +871,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                                 <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
+                                {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
                               </Row>
                               <Row align="center" gap="xs">
                                 <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
@@ -895,7 +900,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   </Stack>
                 </Collapsible>
 
-                {/* Task & Coding Agents Subtree */}
+                {/* Task & Coding Agents Subtree (Dense rows without child cards #403) */}
                 <Collapsible
                   title={`Coding & Task Agents (${filteredWorkers.length})`}
                   icon="Terminal"
@@ -908,18 +913,30 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                     ) : (
                       filteredWorkers.map((a) => {
                         const config = getDeterministicStateConfig(a.deterministicState, a.category);
+                        const worktree = a.worktree || extractAgentWorktree(a);
                         return (
-                          <Card key={a.id} variant="elevated">
+                          <View
+                            key={a.id}
+                            style={{
+                              paddingHorizontal: 8,
+                              paddingVertical: 5,
+                              borderRadius: 4,
+                              borderLeftWidth: 2,
+                              borderLeftColor: config.color,
+                              backgroundColor: colors.surface0 ?? "transparent",
+                            }}
+                          >
                             <Row justify="space-between" align="center" wrap gap="xs">
                               <Row align="center" gap="xs">
-                                <AgentStateDot color={config.color} pulse={config.pulse} />
-                                <Icon name={config.categoryIcon} size={14} color={config.color} />
+                                <AgentStateDot color={config.color} pulse={config.pulse} size={7} />
+                                <Icon name={config.categoryIcon} size={13} color={config.color} />
                                 <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
+                                {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
                               </Row>
                               <Row align="center" gap="xs">
-                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
                                   {a.provider || "default provider"}
                                 </Text>
                                 <Button
@@ -934,11 +951,11 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                               </Row>
                             </Row>
                             {a.cwd && (
-                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 10, marginTop: 2 }}>
                                 cwd: {a.cwd}
                               </Text>
                             )}
-                          </Card>
+                          </View>
                         );
                       })
                     )}
