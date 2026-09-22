@@ -13,6 +13,7 @@ import {
   copyToClipboard,
   usePluginTheme,
 } from "paseo-plugin-helper/client";
+import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import {
   type UppidiAgent,
   type UppidiAgentTreeNode,
@@ -33,6 +34,7 @@ export interface UppidiForgeTreeViewProps {
   agentsData?: UppidiAgentsOutput;
   isLoading?: boolean;
   onRefresh?: () => void;
+  navigation?: PluginSurfaceProps["navigation"];
 }
 
 interface FlattenedNode {
@@ -107,17 +109,25 @@ export function AgentStateDot({
   );
 }
 
+export interface AgentTitleLinkProps {
+  agent: UppidiAgent;
+  colors: any;
+  typography: any;
+  navigation?: PluginSurfaceProps["navigation"];
+}
+
 export function AgentTitleLink({
   agent,
   colors,
   typography,
-}: {
-  agent: UppidiAgent;
-  colors: any;
-  typography: any;
-}) {
+  navigation,
+}: AgentTitleLinkProps) {
   const [hovered, setHovered] = useState(false);
   const handlePress = () => {
+    if (navigation?.openAgent) {
+      navigation.openAgent({ agentId: agent.id });
+      return;
+    }
     const url = agent.url || `paseo://agent/${agent.id}`;
     Linking.openURL(url).catch(() => {
       copyToClipboard(url).catch(() => {});
@@ -175,6 +185,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
   agentsData,
   isLoading,
   onRefresh,
+  navigation,
 }) => {
   const { colors, typography } = usePluginTheme();
   const [query, setQuery] = useState("");
@@ -344,6 +355,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
                         agent={agent}
                         colors={colors}
                         typography={typography}
+                        navigation={navigation}
                       />
                       <Badge label={agent.shortId} variant="neutral" size="sm" />
                       <Badge label={agent.category} variant="neutral" size="sm" />

@@ -381,6 +381,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
           agentsData={agentsData}
           isLoading={agentsLoading}
           onRefresh={refetchAgents}
+          navigation={props.navigation}
         />
       ) : (
         <Stack gap={12}>
@@ -749,7 +750,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                               <Row align="center" gap="xs">
                                 <AgentStateDot color={config.color} pulse={config.pulse} />
                                 <Icon name={config.categoryIcon} size={14} color={config.color} />
-                                <AgentTitleLink agent={a} colors={colors} typography={typography} />
+                                <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
                               </Row>
@@ -788,7 +789,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                               <Row align="center" gap="xs">
                                 <AgentStateDot color={config.color} pulse={config.pulse} />
                                 <Icon name={config.categoryIcon} size={14} color={config.color} />
-                                <AgentTitleLink agent={a} colors={colors} typography={typography} />
+                                <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
                               </Row>
@@ -827,7 +828,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                               <Row align="center" gap="xs">
                                 <AgentStateDot color={config.color} pulse={config.pulse} />
                                 <Icon name={config.categoryIcon} size={14} color={config.color} />
-                                <AgentTitleLink agent={a} colors={colors} typography={typography} />
+                                <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
                               </Row>
