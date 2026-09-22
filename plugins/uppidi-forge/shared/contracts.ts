@@ -221,9 +221,39 @@ export const uppidiHookLogTailContract = defineContract({
   output: HookLogTailOutputSchema,
 });
 
-// Agents & Fleet Tree View (Issue #367)
+// Agents & Fleet Tree View (Issue #367, Issue #385)
 export const UppidiAgentCategorySchema = z.enum(["front-desk", "orchestrator", "worker"]);
 export type UppidiAgentCategory = z.infer<typeof UppidiAgentCategorySchema>;
+
+export const DeterministicAgentStateSchema = z.enum([
+  "working",                // Running with attributed work: e.g. #385
+  "running",                // Running general task without specific issue attribution
+  "sleeping",               // Idle orchestrator/frontdesk inactive > 15 minutes
+  "idle:waiting",           // Idle agent waiting for turn/prompt
+  "idle:quota-exhausted",   // Idle due to model quota exhaustion cooldown
+  "failed:quota-exhausted", // Failed/aborted due to usage/quota limit
+  "failed:spawn",           // Failed during process or session spawn
+  "failed:timeout",         // Execution or connection timeout
+  "failed:error",           // General agent crash or unhandled error
+  "unknown",                // Fallback when signals cannot resolve
+]);
+export type DeterministicAgentState = z.infer<typeof DeterministicAgentStateSchema>;
+
+export const UppidiAgentWorkSchema = z.object({
+  repo: z.string().optional(),
+  issue: z.number().optional(),
+  slug: z.string().optional(),
+  branch: z.string().optional(),
+});
+export type UppidiAgentWork = z.infer<typeof UppidiAgentWorkSchema>;
+
+export const UppidiAgentUsageSchema = z.object({
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  cachedInputTokens: z.number().optional(),
+  totalCostUsd: z.number().optional(),
+});
+export type UppidiAgentUsage = z.infer<typeof UppidiAgentUsageSchema>;
 
 export const UppidiAgentSchema = z.object({
   id: z.string(),
@@ -231,18 +261,41 @@ export const UppidiAgentSchema = z.object({
   name: z.string(),
   category: UppidiAgentCategorySchema,
   provider: z.string().optional(),
+  model: z.string().nullable().optional(),
   status: z.string(),
   cwd: z.string().optional(),
   created: z.string().optional(),
+  updatedAt: z.string().optional(),
+  lastActivityAt: z.string().nullable().optional(),
   workspaceId: z.string().optional(),
+  parentId: z.string().nullable().optional(),
+  deterministicState: DeterministicAgentStateSchema.default("unknown"),
+  stateDetail: z.string().optional(),
+  attributedWork: UppidiAgentWorkSchema.nullable().optional(),
+  usage: UppidiAgentUsageSchema.nullable().optional(),
 });
 export type UppidiAgent = z.infer<typeof UppidiAgentSchema>;
+
+export interface UppidiAgentTreeNode {
+  agent: UppidiAgent;
+  depth: number;
+  children: UppidiAgentTreeNode[];
+}
+
+export const UppidiAgentTreeNodeSchema: z.ZodType<UppidiAgentTreeNode> = z.lazy(() =>
+  z.object({
+    agent: UppidiAgentSchema,
+    depth: z.number(),
+    children: z.array(UppidiAgentTreeNodeSchema).default([]),
+  })
+);
 
 export const UppidiAgentsOutputSchema = z.object({
   ok: z.boolean(),
   frontDesk: z.array(UppidiAgentSchema).default([]),
   orchestrators: z.array(UppidiAgentSchema).default([]),
   workers: z.array(UppidiAgentSchema).default([]),
+  tree: z.array(UppidiAgentTreeNodeSchema).default([]),
   totalCount: z.number().default(0),
   runningCount: z.number().default(0),
   idleCount: z.number().default(0),

@@ -49,9 +49,10 @@ import {
   type TaskProfileMetrics,
 } from "../shared/contracts.js";
 import { UppidiForgeStaticMockup } from "./static-mockup";
+import { UppidiForgeTreeView } from "./tree-view";
 
 type Filter = "all" | "needs-you" | "in-flight" | "review";
-type SurfaceTab = "dashboard" | "mockup";
+type SurfaceTab = "dashboard" | "tree" | "mockup";
 
 const filters: Array<{ id: Filter; label: string }> = [
   { id: "all", label: "All work" },
@@ -62,6 +63,7 @@ const filters: Array<{ id: Filter; label: string }> = [
 
 const tabs = [
   { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: "LayoutDashboard" },
+  { id: "tree", label: "Fleet Tree", shortLabel: "Tree", icon: "FolderTree" },
   { id: "mockup", label: "Static mockup", shortLabel: "Mockup", icon: "PanelTop" },
 ];
 
@@ -131,6 +133,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
 
   const {
     data: agentsData,
+    isLoading: agentsLoading,
     refetch: refetchAgents,
   } = useRpcQuery(uppidiAgentsContract, {}, { refetchInterval: 5000 });
 
@@ -281,6 +284,12 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
     >
       {activeTab === "mockup" ? (
         <UppidiForgeStaticMockup {...props} />
+      ) : activeTab === "tree" ? (
+        <UppidiForgeTreeView
+          agentsData={agentsData}
+          isLoading={agentsLoading}
+          onRefresh={refetchAgents}
+        />
       ) : (
         <Stack gap={12}>
           {/* Header */}

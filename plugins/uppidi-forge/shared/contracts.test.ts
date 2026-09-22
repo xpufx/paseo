@@ -6,6 +6,10 @@ import {
   HookStatusOutputSchema,
   uppidiIssuesContract,
   uppidiHookStatusContract,
+  DeterministicAgentStateSchema,
+  UppidiAgentSchema,
+  UppidiAgentTreeNodeSchema,
+  UppidiAgentsOutputSchema,
 } from "./contracts.js";
 
 describe("uppidi-forge shared contracts", () => {
@@ -43,5 +47,86 @@ describe("uppidi-forge shared contracts", () => {
   it("has valid contract definitions", () => {
     assert.equal(uppidiIssuesContract.name, "uppidi-forge.issues");
     assert.equal(uppidiHookStatusContract.name, "uppidi-forge.hook-status");
+  });
+
+  it("validates deterministic agent state taxonomy strictly", () => {
+    const validStates = [
+      "working",
+      "running",
+      "sleeping",
+      "idle:waiting",
+      "idle:quota-exhausted",
+      "failed:quota-exhausted",
+      "failed:spawn",
+      "failed:timeout",
+      "failed:error",
+      "unknown",
+    ];
+
+    for (const s of validStates) {
+      assert.equal(DeterministicAgentStateSchema.parse(s), s);
+    }
+
+    assert.throws(() => DeterministicAgentStateSchema.parse("invalid-state"));
+  });
+
+  it("validates UppidiAgentSchema with lineage, work attribution, and deterministic state", () => {
+    const agent = UppidiAgentSchema.parse({
+      id: "agent-123",
+      shortId: "ag123",
+      name: "Worker feat-385",
+      category: "worker",
+      status: "running",
+      parentId: "orch-456",
+      model: "gemini-3.8-flash-low",
+      deterministicState: "working",
+      stateDetail: "#385 (feat/385-tree-fleet-view)",
+      attributedWork: {
+        repo: "xpufx-org/paseo",
+        issue: 385,
+        slug: "feat/385-tree-fleet-view",
+      },
+    });
+
+    assert.equal(agent.id, "agent-123");
+    assert.equal(agent.parentId, "orch-456");
+    assert.equal(agent.deterministicState, "working");
+    assert.equal(agent.attributedWork?.issue, 385);
+  });
+
+  it("validates UppidiAgentTreeNodeSchema recursively", () => {
+    const tree = UppidiAgentTreeNodeSchema.parse({
+      agent: {
+        id: "root-1",
+        shortId: "root1",
+        name: "Front Desk",
+        category: "front-desk",
+        status: "running",
+        parentId: null,
+        deterministicState: "running",
+      },
+      depth: 0,
+      children: [
+        {
+          agent: {
+            id: "child-1",
+            shortId: "chld1",
+            name: "Orchestrator",
+            category: "orchestrator",
+            status: "running",
+            parentId: "root-1",
+            deterministicState: "working",
+          },
+          depth: 1,
+          children: [],
+        },
+      ],
+    });
+
+    assert.equal(tree.agent.id, "root-1");
+    assert.equal(tree.depth, 0);
+    assert.equal(tree.children.length, 1);
+    assert.equal(tree.children[0].agent.id, "child-1");
+    assert.equal(tree.children[0].depth, 1);
   });
 });

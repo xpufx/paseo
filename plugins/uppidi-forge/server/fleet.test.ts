@@ -1,6 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { categorizeAgent, normalizeRawAgent, handleUppidiAgents } from "./agents.js";
+import {
+  categorizeAgent,
+  normalizeRawAgent,
+  handleUppidiAgents,
+  extractAttributedWork,
+  deriveDeterministicState,
+  buildAgentTree,
+} from "./agents.js";
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel } from "./role-models.js";
 import { handleUppidiRunners } from "./runners.js";
 
@@ -14,7 +21,137 @@ describe("fleet and agents classification", () => {
     assert.equal(categorizeAgent("platform #99 caller"), "worker");
   });
 
-  it("normalizes raw agent records with defaults", () => {
+  it("extracts attributed work from titles, names, branches, and labels", () => {
+    const work1 = extractAttributedWork({
+      id: "agent-1",
+      name: "feat-385-tree-fleet-view",
+      cwd: "/home/xpufx/code/paseo",
+    });
+    assert.equal(work1?.issue, 385);
+    assert.equal(work1?.repo, "xpufx-org/paseo");
+
+    const work2 = extractAttributedWork({
+      id: "agent-2",
+      title: "Worker for xpufx-org/platform#109",
+    });
+    assert.equal(work2?.issue, 109);
+    assert.equal(work2?.repo, "xpufx-org/platform");
+
+    const work3 = extractAttributedWork({
+      id: "agent-3",
+      name: "worker",
+      labels: { "forgejo.issue": "404", repo: "xpufx-org/aur-automation" },
+    });
+    assert.equal(work3?.issue, 404);
+    assert.equal(work3?.repo, "xpufx-org/aur-automation");
+  });
+
+  it("derives deterministic states strictly according to taxonomy", () => {
+    // 1. Working with issue
+    const s1 = deriveDeterministicState(
+      { id: "a1", status: "running" },
+      { issue: 385, repo: "xpufx-org/paseo" }
+    );
+    assert.equal(s1.state, "working");
+    assert.ok(s1.detail?.includes("#385"));
+
+    // 2. Running without issue
+    const s2 = deriveDeterministicState({ id: "a2", status: "running" }, null);
+    assert.equal(s2.state, "running");
+
+    // 3. Sleeping orchestrator (idle > 15m)
+    const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    const s3 = deriveDeterministicState(
+      { id: "a3", name: "Orchestrator · test", status: "idle", lastActivityAt: oldTime },
+      null
+    );
+    assert.equal(s3.state, "sleeping");
+
+    // 4. Idle waiting
+    const recentTime = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+    const s4 = deriveDeterministicState(
+      { id: "a4", name: "Orchestrator · test", status: "idle", lastActivityAt: recentTime },
+      null
+    );
+    assert.equal(s4.state, "idle:waiting");
+
+    // 5. Idle quota-exhausted
+    const s5 = deriveDeterministicState(
+      { id: "a5", status: "idle" },
+      null,
+      new Set(["a5"])
+    );
+    assert.equal(s5.state, "idle:quota-exhausted");
+
+    // 6. Failed quota-exhausted
+    const s6 = deriveDeterministicState(
+      { id: "a6", status: "error", lastError: "Rate limit exceeded (429): Quota exhausted" },
+      null
+    );
+    assert.equal(s6.state, "failed:quota-exhausted");
+
+    // 7. Failed spawn
+    const s7 = deriveDeterministicState(
+      { id: "a7", status: "error", lastError: "spawn ENOENT /usr/bin/missing" },
+      null
+    );
+    assert.equal(s7.state, "failed:spawn");
+
+    // 8. Failed timeout
+    const s8 = deriveDeterministicState(
+      { id: "a8", status: "error", lastError: "Command timed out after 30000ms" },
+      null
+    );
+    assert.equal(s8.state, "failed:timeout");
+
+    // 9. Failed general error
+    const s9 = deriveDeterministicState(
+      { id: "a9", status: "error", lastError: "Unknown fatal exception in agent loop" },
+      null
+    );
+    assert.equal(s9.state, "failed:error");
+  });
+
+  it("builds hierarchy tree correctly with depths and children", () => {
+    const agents = [
+      normalizeRawAgent({ id: "root-1", name: "Front Desk", status: "running" }),
+      normalizeRawAgent({
+        id: "orch-1",
+        name: "Orchestrator · paseo",
+        status: "running",
+        parentId: "root-1",
+        labels: { "forgejo.issue": "385" },
+      }),
+      normalizeRawAgent({
+        id: "worker-1",
+        name: "Worker 1",
+        status: "running",
+        parentId: "orch-1",
+      }),
+      normalizeRawAgent({ id: "solo-orch", name: "Orchestrator · other", status: "idle" }),
+    ];
+
+    const tree = buildAgentTree(agents);
+    assert.equal(tree.length, 2); // root-1 and solo-orch
+
+    const rootNode = tree.find((n) => n.agent.id === "root-1");
+    assert.ok(rootNode);
+    assert.equal(rootNode.depth, 0);
+    assert.equal(rootNode.children.length, 1);
+
+    const orchNode = rootNode.children[0];
+    assert.equal(orchNode.agent.id, "orch-1");
+    assert.equal(orchNode.depth, 1);
+    assert.equal(orchNode.agent.deterministicState, "working");
+    assert.equal(orchNode.children.length, 1);
+
+    const workerNode = orchNode.children[0];
+    assert.equal(workerNode.agent.id, "worker-1");
+    assert.equal(workerNode.depth, 2);
+    assert.equal(workerNode.children.length, 0);
+  });
+
+  it("normalizes raw agent records with defaults and deterministic states", () => {
     const agent = normalizeRawAgent({
       id: "64d89202-acaa-4071-b658-90db710875bd",
       name: "Front Desk",
@@ -27,9 +164,10 @@ describe("fleet and agents classification", () => {
     assert.equal(agent.shortId, "64d8920");
     assert.equal(agent.category, "front-desk");
     assert.equal(agent.status, "idle");
+    assert.equal(agent.deterministicState, "idle:waiting");
   });
 
-  it("groups agents by hierarchy and calculates health totals", async () => {
+  it("groups agents by hierarchy, calculates health totals, and attaches tree", async () => {
     const mockContext: any = {
       paseo: {
         agents: {
@@ -50,6 +188,7 @@ describe("fleet and agents classification", () => {
     assert.equal(res.frontDesk.length, 1);
     assert.equal(res.orchestrators.length, 2);
     assert.equal(res.workers.length, 1);
+    assert.equal(res.tree.length, 4); // without explicit parentIds, all are roots
     assert.equal(res.totalCount, 4);
     assert.equal(res.runningCount, 1);
     assert.equal(res.idleCount, 2);
