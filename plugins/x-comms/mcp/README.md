@@ -115,10 +115,10 @@ required.
 
 ## Message envelope
 
-`send` prepends a structured sender-meta envelope, one line, JSON:
+`send` prepends a structured sender-meta envelope:
 
 ```
-[x-comms] {"xComms":{"version":5,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…"}}
+<x-comms-message>{"xComms":{"version":6,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…"}}</x-comms-message>
 ```
 
 - `sender`: agentId, agentName, host, daemonServerId, cwd: who is talking and
@@ -133,8 +133,8 @@ required.
   for humans.
 
 Recipients may parse the envelope and reply to `sender.agentId` on the
-sender's daemon. The envelope is versioned (`version: 1`), so the format can
-evolve without breaking older readers.
+sender's daemon. The envelope is versioned (`version: 6`), with backward-compatible
+support for v5 `[x-comms]`, so the format can evolve without breaking older readers.
 
 For best results, run the same version on each daemon: the envelope format,
 tool names, and parameters evolve between releases, so a mismatched pair still

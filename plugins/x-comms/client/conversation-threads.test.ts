@@ -10,7 +10,27 @@ import {
 function envelope(senderAgentId: string, sentAt: string): string {
   const payload = {
     xComms: {
-      version: 4,
+      version: 6,
+      type: "x-comms.message",
+      direction: "outgoing",
+      sender: {
+        agentId: senderAgentId,
+        agentName: "Remote",
+        host: "remote-host",
+        daemonServerId: "srv_remote",
+        cwd: null,
+      },
+      target: { daemon: "local", agentId: "me" },
+      sentAt,
+    },
+  };
+  return `<x-comms-message>${JSON.stringify(payload)}</x-comms-message>\n\nhello at ${sentAt}`;
+}
+
+function legacyV5Envelope(senderAgentId: string, sentAt: string): string {
+  const payload = {
+    xComms: {
+      version: 5,
       type: "x-comms.message",
       direction: "outgoing",
       sender: {
@@ -49,6 +69,18 @@ describe("conversation threads", () => {
   it("groups envelope messages into one incoming thread", async () => {
     const paseo = mockPaseo([
       envelope("peer-1", "2026-09-09T10:00:00.000Z"),
+      envelope("peer-1", "2026-09-09T10:05:00.000Z"),
+    ]);
+    const threads = await deriveConversationThreads(paseo as never, "me");
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0].partner.conversationId, "srv_remote/peer-1");
+    assert.equal(threads[0].messages.length, 2);
+    assert.ok(threads[0].messages.every((m) => m.isIncoming));
+  });
+
+  it("groups both v5 and v6 envelope messages into one incoming thread", async () => {
+    const paseo = mockPaseo([
+      legacyV5Envelope("peer-1", "2026-09-09T10:00:00.000Z"),
       envelope("peer-1", "2026-09-09T10:05:00.000Z"),
     ]);
     const threads = await deriveConversationThreads(paseo as never, "me");

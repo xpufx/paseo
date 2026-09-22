@@ -21,7 +21,21 @@ import {
 function envelope(senderAgentId: string, sentAt: string, serverId = "srv_remote"): string {
   const payload = {
     xComms: {
-      version: 4,
+      version: 6,
+      type: "x-comms.message",
+      direction: "outgoing",
+      sender: { agentId: senderAgentId, agentName: "Remote", host: "h", daemonServerId: serverId, cwd: null },
+      target: { daemon: "local", agentId: "me" },
+      sentAt,
+    },
+  };
+  return `<x-comms-message>${JSON.stringify(payload)}</x-comms-message>\n\nhello`;
+}
+
+function legacyV5Envelope(senderAgentId: string, sentAt: string, serverId = "srv_remote"): string {
+  const payload = {
+    xComms: {
+      version: 5,
       type: "x-comms.message",
       direction: "outgoing",
       sender: { agentId: senderAgentId, agentName: "Remote", host: "h", daemonServerId: serverId, cwd: null },
@@ -130,6 +144,20 @@ describe("conversations snapshot", () => {
     const twice = reconcileTimelines(once, second, () => "hsi");
     assert.equal(twice.threads[0].unreadCount, 2);
     assert.equal(twice.threads[0].lastTimestamp, "2026-09-09T10:05:00.000Z");
+  });
+
+  it("reconciles timelines with both v5 and v6 envelopes seamlessly", () => {
+    const timelines: TimelineOwnerLike[] = [{
+      ownerAgentId: "me",
+      entries: [
+        { item: { type: "user_message", text: legacyV5Envelope("peer-1", "2026-09-09T10:00:00.000Z") } },
+        { item: { type: "user_message", text: envelope("peer-1", "2026-09-09T10:05:00.000Z") } },
+      ],
+    }];
+    const snapshot = reconcileTimelines(emptyConversationsSnapshot(), timelines, () => "hsi");
+    assert.equal(snapshot.threads.length, 1);
+    assert.equal(snapshot.threads[0].unreadCount, 2);
+    assert.equal(snapshot.threads[0].lastTimestamp, "2026-09-09T10:05:00.000Z");
   });
 
   it("a send after receives resets unread", () => {

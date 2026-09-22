@@ -83,9 +83,11 @@ function textOf(callResult) {
 
 // Extract and parse the structured sender-meta envelope from a stamped prompt.
 function metaOf(stampedPrompt) {
-  const m = stampedPrompt.match(/^\[x-comms\] (\{.*\})/);
-  assert.ok(m, `no meta envelope in: ${stampedPrompt.slice(0, 120)}…`);
-  return JSON.parse(m[1]);
+  const v6 = stampedPrompt.match(/^<x-comms-message>([\s\S]*?)<\/x-comms-message>/);
+  if (v6) return JSON.parse(v6[1]);
+  const v5 = stampedPrompt.match(/^\[x-comms\] (\{.*\})/);
+  assert.ok(v5, `no meta envelope in: ${stampedPrompt.slice(0, 120)}…`);
+  return JSON.parse(v5[1]);
 }
 
 test("lists 11 tools under paseo_cross_daemon_*", async () => {
@@ -277,8 +279,10 @@ test("send stamps a structured sender-meta envelope and reaches the remote agent
     assert.equal(sent.sawNoWait, true, "send must dispatch fire-and-forget (--no-wait)");
     assert.equal(sent.sawMessageId, "msg-headless-1");
     assert.equal(sent.promptHead.split("\n\n")[1], "hello there", "prompt must stay prose");
+    assert.ok(sent.promptHead.startsWith("<x-comms-message>"));
+    assert.ok(sent.promptHead.includes("</x-comms-message>"));
     const meta = metaOf(sent.promptHead);
-    assert.equal(meta.xComms.version, 5);
+    assert.equal(meta.xComms.version, 6);
     assert.equal(meta.xComms.type, "x-comms.message");
     assert.equal(meta.xComms.direction, "outgoing");
     assert.equal(meta.xComms.sender.agentId, "agent-test-1");
@@ -471,7 +475,7 @@ async function rawHandshake(s) {
   assert.equal(res.result.protocolVersion, "2025-03-26");
   assert.equal(res.result.serverInfo.name, "paseo-x-comms");
   assert.equal(res.result.capabilities.tools.listChanged, true); // SDK forces true when tools are registered
-  assert.match(res.result.instructions, /\[x-comms\]/);
+  assert.match(res.result.instructions, /<x-comms-message>/);
   s.send({ jsonrpc: "2.0", method: "notifications/initialized" });
 }
 

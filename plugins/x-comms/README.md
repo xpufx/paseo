@@ -24,7 +24,7 @@ The plugin embeds the MCP server and adds the X-comms UI. Agents get `x_comms_*`
 * **Main surface — X-comms** (`client/main.tsx`, surfaced via `index.client.tsx` sidebar item): registered daemons list with health (reachable/unreachable + agent count), add/edit/remove with host-form validation and reachability probe, refresh (identity + snapshot), server version check, introduce-agents picker, debug dump per daemon.
 * **Peers surface** (`client/peer-status.tsx`, the "Peers" tab): the known daemon registry rendered with a live per-peer `daemon.get_status` probe — up/down plus identity (`serverId`, `version`, `listen`, relay, provider count, hub relationship). Each host is probed independently (relay or direct), so an unreachable peer shows as down without failing the surface. Polls every 30 s via `peer.status`.
 * **Composer pill** (`client/x-comms-pill.tsx`): one `X-comms` pill per agent in the composer; opens the conversation panel for that agent.
-* **Agent panel** (`client/x-comms-panel.tsx` / `x-comms-timeline.tsx` / `x-comms-conversation.tsx`, plus `x-comms-tool-call.tsx` and `via-x-comms.tsx`): per-agent conversation view with timeline rendering of the `[x-comms]` envelope, send/reply, wait, and permission handling. Timeline transformers/renderers registered in `index.client.tsx` render envelopes and tool calls inline in agent timelines.
+* **Agent panel** (`client/x-comms-panel.tsx` / `x-comms-timeline.tsx` / `x-comms-conversation.tsx`, plus `x-comms-tool-call.tsx` and `via-x-comms.tsx`): per-agent conversation view with timeline rendering of the `<x-comms-message>` envelope (with backward-compatible support for v5 `[x-comms]`), send/reply, wait, and permission handling. Timeline transformers/renderers registered in `index.client.tsx` render envelopes and tool calls inline in agent timelines.
 * **Server side** (`index.server.ts` + `server/`): registry, health, settings, presence announce/retract/list, and MCP injection handlers.
 * **Embedded MCP server** (`mcp/paseo-x-comms.mjs`): spawned via `serverPath()` from `server/server-status.ts` (resolved from `import.meta.url` with plugin-dir fallbacks); shares the repo-root `node_modules` — no separate install or `paseo` on PATH required beyond the daemon itself.
 
@@ -72,12 +72,12 @@ Quick pairing:
 1. On the **target** daemon: `paseo daemon pair --json` → copy the `url` (`https://app.paseo.sh/#offer=…`). For a directly-reachable daemon, use its address instead.
 2. On **this** daemon: open the X-comms Main surface → *Add daemon* → paste the offer or address. The UI probes reachability before saving (with "Add anyway" for offline hosts).
 
-### How messaging works
+#### How messaging works
 
-Every `x_comms_send` prepends one line:
+Every `x_comms_send` prepends an envelope block:
 
 ```
-[x-comms] {"xComms":{"version":5,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…","direction":"outgoing"}}
+<x-comms-message>{"xComms":{"version":6,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…","direction":"outgoing"}}</x-comms-message>
 ```
 
 `sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt`. Desktop discovers configured hosts only from Paseo's mounted host runtime and sends to the selected `(serverId, agentId)` with a fresh client; it never pairs hosts or creates agents. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
@@ -91,7 +91,6 @@ The plugin server keeps an **outbox** (the plugin state dir's `outbox.json`) for
 A held message expires after **10 minutes** by default (configurable in the settings surface, `outboxExpirySeconds`, clamped to 10s–24h). On expiry the sender is notified by appending an `x-comms-outbox-notice` timeline item with the reason; the message is then dropped.
 
 **Idempotency:** every send receives one stable `messageId`, passed to Paseo's native daemon/client send API and retained in a held outbox entry. A retry therefore presents the same key to the target daemon, which suppresses a duplicate before it reaches the agent.
-
 
 ## Repository layout
 
@@ -121,7 +120,7 @@ A held message expires after **10 minutes** by default (configurable in the sett
 │   ├── mcp-client.ts / peer-channel.ts
 │   └── *.test.ts             # Server unit tests
 ├── shared/
-│   ├── envelope.ts           # Wire envelope schema ([x-comms] parsing)
+│   ├── envelope.ts           # Wire envelope schema (<x-comms-message> parsing, v5 fallback)
 │   ├── registry.ts           # RPC definitions (zod)
 │   └── conversations-snapshot.ts
 ├── mcp/

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { META_PREFIX, parseEnvelope } from "../shared/envelope.ts";
+import { ENVELOPE_OPEN, ENVELOPE_CLOSE, META_PREFIX, parseEnvelope } from "../shared/envelope.ts";
 import {
   assertNotSelfMessage,
   buildSenderEnvelope,
@@ -19,11 +19,13 @@ function envelopeObject(stamped: string): Record<string, unknown> {
 }
 
 describe("native local send envelope", () => {
-  it("uses the [x-comms] prefix shared with the MCP server", () => {
+  it("uses the <x-comms-message> tags shared with the MCP server", () => {
+    assert.equal(ENVELOPE_OPEN, "<x-comms-message>");
+    assert.equal(ENVELOPE_CLOSE, "</x-comms-message>");
     assert.equal(ENVELOPE_PREFIX, META_PREFIX);
   });
 
-  it("produces a version-5 envelope with its delivery messageId", () => {
+  it("produces a version-6 envelope with its delivery messageId", () => {
     const stamped = buildSenderEnvelope({
       sender: {
         agentId: "agent-a",
@@ -36,8 +38,10 @@ describe("native local send envelope", () => {
       messageId: "msg-native-1",
       sentAt: SENT_AT,
     });
+    assert.ok(stamped.startsWith("<x-comms-message>"));
+    assert.ok(stamped.endsWith("</x-comms-message>"));
     const env = envelopeObject(stamped) as { xComms: Record<string, unknown> };
-    assert.equal(env.xComms.version, 5);
+    assert.equal(env.xComms.version, 6);
     assert.equal(env.xComms.type, "x-comms.message");
     assert.equal(env.xComms.direction, "outgoing");
     assert.deepEqual(env.xComms.sender, {
@@ -73,6 +77,54 @@ describe("native local send envelope", () => {
     const env = envelopeObject(stamped) as { xComms: { sender: Record<string, unknown> } };
     assert.equal(env.xComms.sender.agentId, null);
     assert.equal(env.xComms.sender.daemonServerId, null);
+  });
+});
+
+describe("dual-parsing v5 and v6 envelopes", () => {
+  it("parses both v5 and v6 into identical CrossDaemonEnvelope structures", () => {
+    const common = {
+      type: "x-comms.message",
+      direction: "outgoing" as const,
+      sender: {
+        agentId: "agent-a",
+        agentName: "Agent A",
+        host: "host-a",
+        daemonServerId: "srv_self",
+        cwd: "/work/a",
+      },
+      target: { daemon: "peer", agentId: "agent-b" },
+      messageId: "msg-dual-1",
+      sentAt: SENT_AT,
+    };
+
+    const v5Wire = `[x-comms] ${JSON.stringify({ xComms: { version: 5, ...common } })}\n\nhello dual parse`;
+    const v6Wire = `<x-comms-message>${JSON.stringify({ xComms: { version: 6, ...common } })}</x-comms-message>\n\nhello dual parse`;
+
+    const parsedV5 = parseEnvelope(v5Wire);
+    const parsedV6 = parseEnvelope(v6Wire);
+
+    assert.ok(parsedV5);
+    assert.ok(parsedV6);
+    assert.equal(parsedV5.body, "hello dual parse");
+    assert.equal(parsedV6.body, "hello dual parse");
+
+    // Identical CrossDaemonEnvelope structure fields
+    assert.equal(parsedV5.envelope.xComms.type, parsedV6.envelope.xComms.type);
+    assert.equal(parsedV5.envelope.xComms.direction, parsedV6.envelope.xComms.direction);
+    assert.deepEqual(parsedV5.envelope.xComms.sender, parsedV6.envelope.xComms.sender);
+    assert.deepEqual(parsedV5.envelope.xComms.target, parsedV6.envelope.xComms.target);
+    assert.equal(parsedV5.envelope.xComms.messageId, parsedV6.envelope.xComms.messageId);
+    assert.equal(parsedV5.envelope.xComms.sentAt, parsedV6.envelope.xComms.sentAt);
+
+    // Exact structure equality when payload is identical
+    const v5Same = `[x-comms] ${JSON.stringify({ xComms: { version: 6, ...common } })}\n\nhello`;
+    const v6Same = `<x-comms-message>${JSON.stringify({ xComms: { version: 6, ...common } })}</x-comms-message>\n\nhello`;
+    assert.deepEqual(parseEnvelope(v5Same)?.envelope, parseEnvelope(v6Same)?.envelope);
+  });
+
+  it("rejects unclosed or malformed v6 envelopes", () => {
+    assert.equal(parseEnvelope("<x-comms-message>{\"xComms\":{}}"), null);
+    assert.equal(parseEnvelope("<x-comms-message>not json</x-comms-message>"), null);
   });
 });
 

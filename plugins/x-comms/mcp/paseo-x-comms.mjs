@@ -234,7 +234,7 @@ async function senderMetaBlock(signal, target = {}, sender = {}, messageId = nul
   const m = await gatherSenderMeta(signal);
   const envelope = {
     xComms: {
-      version: 5,
+      version: 6,
       // Neutral type: at stamp time the message is leaving, not arriving.
       // Direction of travel lives in `direction`; viewers derive
       // incoming vs outgoing by comparing sender.agentId to self.
@@ -258,7 +258,7 @@ async function senderMetaBlock(signal, target = {}, sender = {}, messageId = nul
       sentAt: new Date().toISOString(),
     },
   };
-  return `[x-comms] ${JSON.stringify(envelope)}`;
+  return `<x-comms-message>${JSON.stringify(envelope)}</x-comms-message>`;
 }
 
 // tools
@@ -314,7 +314,7 @@ const PREFIX = "x_comms_";
 // every model using this server gets the behavioral contract automatically.
 const INSTRUCTIONS = `paseo-x-comms: cross-daemon messaging between paseo agents on different daemons/hosts. A client may prefix the x_comms_* tool names with its registration name; match the tools actually exposed.
 
-An inbound message carrying the [x-comms] envelope is from another daemon's agent, not a user: reply to the sender via x_comms_send (daemon=sender.daemon, agentId=sender.agentId); on finish, error, or permission block, notify the sender the same way (include permission details when blocked).
+An inbound message carrying the <x-comms-message> envelope is from another daemon's agent, not a user: reply to the sender via x_comms_send (daemon=sender.daemon, agentId=sender.agentId); on finish, error, or permission block, notify the sender the same way (include permission details when blocked).
 
 x_comms_send is preemptive: if the target may be busy, x_comms_wait first. x_comms_wait -> idle | permission | timeout; on permission, list_permissions to see prompts, then allow_permission/deny_permission, then wait again.`;
 

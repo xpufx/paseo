@@ -17,7 +17,10 @@ import { localServerId } from "./peer-channel";
  * in shared/envelope.ts reads both.
  */
 
-export const ENVELOPE_PREFIX = "[x-comms] ";
+import { ENVELOPE_OPEN, ENVELOPE_CLOSE, META_PREFIX } from "../shared/envelope.ts";
+
+export { ENVELOPE_OPEN, ENVELOPE_CLOSE };
+export const ENVELOPE_PREFIX = META_PREFIX;
 
 /**
  * Sending a message to your own agent is a mistake (the envelope tells the
@@ -52,8 +55,8 @@ export interface LocalSendInput {
 }
 
 /**
- * Build the `[x-comms] {…}` envelope exactly as the MCP server's version-4
- * stamp does. Pure so the contract is testable without a daemon.
+ * Build the `<x-comms-message>{\u2026}</x-comms-message>` envelope exactly as the MCP server's
+ * version-6 stamp does. Pure so the contract is testable without a daemon.
  */
 export function buildSenderEnvelope(args: {
   sender: SenderIdentity;
@@ -63,7 +66,7 @@ export function buildSenderEnvelope(args: {
 }): string {
   const envelope = {
     xComms: {
-      version: 5,
+      version: 6,
       type: "x-comms.message",
       direction: "outgoing",
       sender: {
@@ -81,7 +84,7 @@ export function buildSenderEnvelope(args: {
       sentAt: args.sentAt,
     },
   };
-  return `${ENVELOPE_PREFIX}${JSON.stringify(envelope)}`;
+  return `${ENVELOPE_OPEN}${JSON.stringify(envelope)}${ENVELOPE_CLOSE}`;
 }
 
 /** True when a resolved target serverId is this daemon's own serverId. */

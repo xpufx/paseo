@@ -63,7 +63,7 @@ describe("configured-host picker", () => {
       getClient: () => client([], sent) as never,
     });
     assert.equal(sent.length, 1);
-    assert.match(sent[0].value, /^target:\[x-comms\]/);
+    assert.match(sent[0].value, /^target:<x-comms-message>/);
     assert.equal(sent[0].messageId, "msg-configured-1");
     assert.equal(parseEnvelope(stamped)?.envelope.xComms.target.daemon, "srv_two");
   });
