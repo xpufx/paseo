@@ -1,5 +1,5 @@
-import React, { useMemo, useRef, useState } from "react";
-import { Animated, Linking, Pressable, Text, View } from "react-native";
+import React, { useMemo, useRef, useState, useEffect } from "react";
+import { Animated, Linking, Platform, Pressable, Text, View } from "react-native";
 import {
   Badge,
   Button,
@@ -51,6 +51,9 @@ export interface UppidiForgeTreeViewProps {
   isArchiving?: boolean;
 }
 
+/**
+ * Centered state jewel dot with smooth, subtle breathing pulse animation for active states.
+ */
 export function AgentStateDot({
   color,
   pulse = false,
@@ -62,7 +65,7 @@ export function AgentStateDot({
 }) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!pulse) {
       pulseAnim.setValue(1);
       return;
@@ -101,6 +104,10 @@ export function AgentStateDot({
           borderRadius: size / 2,
           backgroundColor: color,
           opacity: pulseAnim,
+          shadowColor: color,
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: pulse ? 0.6 : 0.2,
+          shadowRadius: pulse ? 3 : 1,
         }}
       />
     </View>
@@ -112,13 +119,18 @@ export interface AgentTitleLinkProps {
   colors: any;
   typography: any;
   navigation?: PluginSurfaceProps["navigation"];
+  size?: "sm" | "md";
 }
 
+/**
+ * Interactive agent name link with clean hover/press cues and no layout jitter.
+ */
 export function AgentTitleLink({
   agent,
   colors,
   typography,
   navigation,
+  size = "md",
 }: AgentTitleLinkProps) {
   const [hovered, setHovered] = useState(false);
   const handlePress = () => {
@@ -150,7 +162,8 @@ export function AgentTitleLink({
       <Text
         style={{
           color: hovered ? colors.accent : colors.foreground,
-          ...typography.heading,
+          ...(size === "sm" ? typography.body : typography.heading),
+          fontSize: size === "sm" ? 12 : 13,
           fontWeight: "600",
           textDecorationLine: hovered ? "underline" : "none",
         }}
@@ -198,6 +211,8 @@ export function FrontDeskHero({
   archivingAgentId?: string | null;
   onArchiveAgent: (id: string) => Promise<void> | void;
 }) {
+  const [secondaryExpanded, setSecondaryExpanded] = useState(false);
+
   if (nodes.length === 0) {
     return (
       <Card
@@ -208,6 +223,7 @@ export function FrontDeskHero({
           borderColor: colors.border,
           borderLeftWidth: 4,
           borderLeftColor: colors.foregroundMuted,
+          borderRadius: 8,
         }}
       >
         <Row justify="space-between" align="center" wrap gap="sm">
@@ -218,14 +234,14 @@ export function FrontDeskHero({
                 <Text style={{ color: colors.foreground, ...typography.heading, fontWeight: "700" }}>
                   Fleet Front Desk
                 </Text>
-                <Badge label="Liaison" variant="neutral" size="sm" />
+                <Badge label="Liaison" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
               </Row>
               <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                 No active front desk liaison session running. Webhook events route to standbys.
               </Text>
             </Stack>
           </Row>
-          <Badge label="Standby" variant="neutral" size="sm" />
+          <Badge label="Standby" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
         </Row>
       </Card>
     );
@@ -248,6 +264,7 @@ export function FrontDeskHero({
         borderColor: colors.border,
         borderLeftWidth: 4,
         borderLeftColor: primaryStateConfig.color,
+        borderRadius: 8,
       }}
     >
       <Stack gap={10}>
@@ -267,13 +284,13 @@ export function FrontDeskHero({
                     color: colors.foregroundMuted,
                     fontSize: 10,
                     fontWeight: "700",
-                    letterSpacing: 0.5,
+                    letterSpacing: 0.8,
                     textTransform: "uppercase",
                   }}
                 >
                   Fleet Front Desk
                 </Text>
-                <Badge label="Liaison" variant="neutral" size="sm" />
+                <Badge label="Liaison" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
               </Row>
               <Row align="center" gap="xs" wrap style={{ flexShrink: 1 }}>
                 <AgentTitleLink
@@ -282,9 +299,19 @@ export function FrontDeskHero({
                   typography={typography}
                   navigation={navigation}
                 />
-                <Badge label={primaryAgent.shortId} variant="neutral" size="sm" />
+                <Badge
+                  label={primaryAgent.shortId}
+                  variant="neutral"
+                  size="sm"
+                  textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
+                />
                 {primaryWorktree && (
-                  <Badge label={primaryWorktree} variant="neutral" size="sm" />
+                  <Badge
+                    label={primaryWorktree}
+                    variant="neutral"
+                    size="sm"
+                    textStyle={{ fontFamily: "monospace", fontSize: 10 }}
+                  />
                 )}
               </Row>
             </Stack>
@@ -300,10 +327,11 @@ export function FrontDeskHero({
               size="sm"
               dot
               style={{ borderColor: primaryStateConfig.color }}
+              textStyle={{ fontSize: 10 }}
             />
 
             {primaryAgent.model && (
-              <Badge label={primaryAgent.model} variant="neutral" size="sm" />
+              <Badge label={primaryAgent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
             )}
 
             {primaryAgent.lastActivityAt && (
@@ -322,6 +350,15 @@ export function FrontDeskHero({
               icon="Archive"
               variant="ghost"
               size="sm"
+              style={{
+                width: 26,
+                height: 26,
+                paddingHorizontal: 0,
+                paddingVertical: 0,
+                justifyContent: "center",
+                alignItems: "center",
+                borderRadius: 4,
+              }}
               accessibilityLabel={`Archive front desk agent ${primaryAgent.name}`}
               disabled={archivingAgentId === primaryAgent.id}
               loading={archivingAgentId === primaryAgent.id}
@@ -333,22 +370,42 @@ export function FrontDeskHero({
         {/* If secondary front desk agents exist, render as dense rows */}
         {nodes.length > 1 && (
           <Stack gap={4} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8 }}>
-            <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
-              Secondary Front Desk Sessions ({nodes.length - 1})
-            </Text>
-            {nodes.slice(1).map((secNode, idx) => (
-              <DenseAgentRow
-                key={secNode.agent.id}
-                node={secNode}
-                depth={1}
-                isLast={idx === nodes.length - 2}
-                colors={colors}
-                typography={typography}
-                navigation={navigation}
-                archivingAgentId={archivingAgentId}
-                onArchiveAgent={onArchiveAgent}
+            <Pressable
+              onPress={() => setSecondaryExpanded(!secondaryExpanded)}
+              style={({ pressed }: any) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+                paddingVertical: 2,
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle secondary front desk sessions"
+            >
+              <Icon
+                name={secondaryExpanded ? "ChevronDown" : "ChevronRight"}
+                size={13}
+                color={colors.foregroundMuted}
               />
-            ))}
+              <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
+                Secondary Front Desk Sessions ({nodes.length - 1})
+              </Text>
+            </Pressable>
+            {secondaryExpanded &&
+              nodes.slice(1).map((secNode, idx) => (
+                <DenseAgentRow
+                  key={secNode.agent.id}
+                  node={secNode}
+                  depth={1}
+                  isLast={idx === nodes.length - 2}
+                  colors={colors}
+                  typography={typography}
+                  navigation={navigation}
+                  archivingAgentId={archivingAgentId}
+                  onArchiveAgent={onArchiveAgent}
+                />
+              ))}
           </Stack>
         )}
       </Stack>
@@ -370,6 +427,7 @@ export interface DenseAgentRowProps {
 /**
  * High-density agent list row.
  * CRITICAL (#403): Descendants/children MUST NOT use Card containers to avoid wasted space.
+ * Features 4px/8px rhythm, visual tree guide connector, and subtle row hover highlighting.
  */
 export function DenseAgentRow({
   node,
@@ -381,41 +439,57 @@ export function DenseAgentRow({
   archivingAgentId,
   onArchiveAgent,
 }: DenseAgentRowProps) {
+  const { alpha } = usePluginTheme();
+  const [isHovered, setIsHovered] = useState(false);
   const agent = node.agent;
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
-  const indentPadding = Math.min((depth - 1) * 18, 72);
+  const indentPadding = Math.min((depth - 1) * 16, 64);
 
   return (
     <View
       key={agent.id}
       style={{
         paddingLeft: indentPadding,
-        paddingVertical: 2,
+        paddingVertical: 1,
       }}
     >
       <View
+        // @ts-ignore RN web hover
+        onMouseEnter={() => setIsHovered(true)}
+        // @ts-ignore RN web hover
+        onMouseLeave={() => setIsHovered(false)}
         style={{
           paddingHorizontal: 8,
           paddingVertical: 4,
           borderRadius: 4,
-          backgroundColor: "transparent",
+          backgroundColor: isHovered
+            ? (alpha?.(colors.accent, 0.05) || colors.surface1 || "rgba(255,255,255,0.04)")
+            : "transparent",
         }}
       >
         <Row justify="space-between" align="center" wrap gap="xs">
           {/* Left side: Guide connector, status dot, icon, title, shortId */}
           <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200 }}>
-            <Text
+            <View
               style={{
-                color: colors.foregroundMuted,
-                fontFamily: "monospace",
-                fontSize: 12,
-                opacity: 0.7,
+                width: 18,
+                alignItems: "center",
+                justifyContent: "center",
                 marginRight: 2,
               }}
             >
-              {isLast ? "└─" : "├─"}
-            </Text>
+              <Text
+                style={{
+                  color: colors.foregroundMuted,
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  opacity: 0.65,
+                }}
+              >
+                {isLast ? "└─" : "├─"}
+              </Text>
+            </View>
             <AgentStateDot color={stateConfig.color} pulse={stateConfig.pulse} size={7} />
             <Icon name={stateConfig.categoryIcon} size={13} color={stateConfig.color} />
             <AgentTitleLink
@@ -423,10 +497,21 @@ export function DenseAgentRow({
               colors={colors}
               typography={typography}
               navigation={navigation}
+              size="sm"
             />
-            <Badge label={agent.shortId} variant="neutral" size="sm" />
+            <Badge
+              label={agent.shortId}
+              variant="neutral"
+              size="sm"
+              textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
+            />
             {agent.category !== "worker" && (
-              <Badge label={agent.category} variant="neutral" size="sm" />
+              <Badge
+                label={agent.category}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontSize: 10 }}
+              />
             )}
           </Row>
 
@@ -438,15 +523,30 @@ export function DenseAgentRow({
               size="sm"
               dot
               style={{ borderColor: stateConfig.color }}
+              textStyle={{ fontSize: 10 }}
             />
 
-            {agent.model && <Badge label={agent.model} variant="neutral" size="sm" />}
-
-            {agent.attributedWork?.issue && (
-              <Badge label={`#${agent.attributedWork.issue}`} variant="info" size="sm" />
+            {agent.model && (
+              <Badge label={agent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
             )}
 
-            {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
+            {agent.attributedWork?.issue && (
+              <Badge
+                label={`#${agent.attributedWork.issue}`}
+                variant="info"
+                size="sm"
+                textStyle={{ fontFamily: "monospace", fontSize: 10, fontWeight: "600" }}
+              />
+            )}
+
+            {worktree && (
+              <Badge
+                label={worktree}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontFamily: "monospace", fontSize: 10 }}
+              />
+            )}
 
             {agent.lastActivityAt && (
               <Text
@@ -454,6 +554,7 @@ export function DenseAgentRow({
                   color: colors.foregroundMuted,
                   ...typography.caption,
                   fontSize: 11,
+                  lineHeight: 14,
                 }}
               >
                 {formatRelativeTime(agent.lastActivityAt)}
@@ -464,6 +565,16 @@ export function DenseAgentRow({
               icon="Archive"
               variant="ghost"
               size="sm"
+              style={{
+                width: 24,
+                height: 24,
+                paddingHorizontal: 0,
+                paddingVertical: 0,
+                justifyContent: "center",
+                alignItems: "center",
+                borderRadius: 4,
+                opacity: isHovered ? 1 : 0.6,
+              }}
               accessibilityLabel={`Archive agent ${agent.name}`}
               disabled={archivingAgentId === agent.id}
               loading={archivingAgentId === agent.id}
@@ -475,7 +586,16 @@ export function DenseAgentRow({
 
       {/* Descendant subagents (recursive) - Still NO cards! */}
       {node.children && node.children.length > 0 && (
-        <Stack gap={1} style={{ marginTop: 1 }}>
+        <View
+          style={{
+            borderLeftWidth: 1.5,
+            borderLeftColor: colors.border,
+            marginLeft: 16,
+            paddingLeft: 8,
+            marginTop: 2,
+            marginBottom: 2,
+          }}
+        >
           {node.children.map((child, idx) => (
             <DenseAgentRow
               key={child.agent.id}
@@ -489,14 +609,14 @@ export function DenseAgentRow({
               onArchiveAgent={onArchiveAgent}
             />
           ))}
-        </Stack>
+        </View>
       )}
     </View>
   );
 }
 
 /**
- * Orchestrator anchored row.
+ * Orchestrator anchored row with interactive expand/collapse toggle for children.
  */
 export function OrchestratorRow({
   node,
@@ -505,6 +625,10 @@ export function OrchestratorRow({
   navigation,
   archivingAgentId,
   onArchiveAgent,
+  isExpanded = true,
+  onToggleExpand,
+  hasChildren = false,
+  childCount = 0,
 }: {
   node: UppidiAgentTreeNode;
   colors: any;
@@ -512,25 +636,61 @@ export function OrchestratorRow({
   navigation?: PluginSurfaceProps["navigation"];
   archivingAgentId?: string | null;
   onArchiveAgent: (id: string) => Promise<void> | void;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  hasChildren?: boolean;
+  childCount?: number;
 }) {
+  const { alpha } = usePluginTheme();
+  const [isHovered, setIsHovered] = useState(false);
   const agent = node.agent;
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
 
   return (
     <View
+      // @ts-ignore RN web hover
+      onMouseEnter={() => setIsHovered(true)}
+      // @ts-ignore RN web hover
+      onMouseLeave={() => setIsHovered(false)}
       style={{
-        paddingHorizontal: 10,
-        paddingVertical: 7,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
         borderRadius: 6,
-        backgroundColor: colors.surface0 ?? "transparent",
+        backgroundColor: isHovered
+          ? (alpha?.(colors.accent, 0.04) || colors.surface1 || colors.surface0)
+          : (colors.surface0 ?? "transparent"),
         borderWidth: 1,
-        borderColor: colors.border,
+        borderColor: isHovered
+          ? (alpha?.(colors.accent, 0.35) || colors.border)
+          : colors.border,
       }}
     >
       <Row justify="space-between" align="center" wrap gap="xs">
-        {/* Left: Indicator, Icon, Title Link, Badges */}
+        {/* Left: Expand toggle, Indicator, Icon, Title Link, Badges */}
         <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200 }}>
+          {hasChildren && onToggleExpand ? (
+            <Pressable
+              onPress={onToggleExpand}
+              style={({ pressed }: any) => ({
+                opacity: pressed ? 0.6 : 1,
+                cursor: "pointer",
+                padding: 2,
+                marginRight: 2,
+              })}
+              accessibilityRole="button"
+              accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} subagents of ${agent.name}`}
+            >
+              <Icon
+                name={isExpanded ? "ChevronDown" : "ChevronRight"}
+                size={14}
+                color={colors.foregroundMuted}
+              />
+            </Pressable>
+          ) : (
+            <View style={{ width: 18 }} />
+          )}
+
           <AgentStateDot color={stateConfig.color} pulse={stateConfig.pulse} size={8} />
           <Icon name="Network" size={15} color={stateConfig.color} />
           <AgentTitleLink
@@ -539,8 +699,21 @@ export function OrchestratorRow({
             typography={typography}
             navigation={navigation}
           />
-          <Badge label={agent.shortId} variant="neutral" size="sm" />
-          <Badge label="Orchestrator" variant="neutral" size="sm" />
+          <Badge
+            label={agent.shortId}
+            variant="neutral"
+            size="sm"
+            textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
+          />
+          <Badge label="Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+          {!isExpanded && hasChildren && childCount > 0 && (
+            <Badge
+              label={`${childCount} subagent${childCount === 1 ? "" : "s"}`}
+              variant="neutral"
+              size="sm"
+              textStyle={{ fontSize: 10 }}
+            />
+          )}
         </Row>
 
         {/* Right: State, Model, Worktree, Activity, Archive */}
@@ -551,11 +724,21 @@ export function OrchestratorRow({
             size="sm"
             dot
             style={{ borderColor: stateConfig.color }}
+            textStyle={{ fontSize: 10 }}
           />
 
-          {agent.model && <Badge label={agent.model} variant="neutral" size="sm" />}
+          {agent.model && (
+            <Badge label={agent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+          )}
 
-          {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
+          {worktree && (
+            <Badge
+              label={worktree}
+              variant="neutral"
+              size="sm"
+              textStyle={{ fontFamily: "monospace", fontSize: 10 }}
+            />
+          )}
 
           {agent.lastActivityAt && (
             <Text
@@ -573,6 +756,16 @@ export function OrchestratorRow({
             icon="Archive"
             variant="ghost"
             size="sm"
+            style={{
+              width: 24,
+              height: 24,
+              paddingHorizontal: 0,
+              paddingVertical: 0,
+              justifyContent: "center",
+              alignItems: "center",
+              borderRadius: 4,
+              opacity: isHovered ? 1 : 0.7,
+            }}
             accessibilityLabel={`Archive agent ${agent.name}`}
             disabled={archivingAgentId === agent.id}
             loading={archivingAgentId === agent.id}
@@ -587,6 +780,7 @@ export function OrchestratorRow({
 /**
  * Project Group Container (#403)
  * Displays top-level project, its Orchestrator(s), and dense child rows under each orchestrator.
+ * Supports smooth collapsible folding of large project trees.
  */
 export function ProjectGroupCard({
   group,
@@ -595,6 +789,10 @@ export function ProjectGroupCard({
   navigation,
   archivingAgentId,
   onArchiveAgent,
+  isExpanded = true,
+  onToggleExpand,
+  collapsedOrchestrators,
+  onToggleOrchestrator,
 }: {
   group: ProjectAgentGroup;
   colors: any;
@@ -602,7 +800,13 @@ export function ProjectGroupCard({
   navigation?: PluginSurfaceProps["navigation"];
   archivingAgentId?: string | null;
   onArchiveAgent: (id: string) => Promise<void> | void;
+  isExpanded?: boolean;
+  onToggleExpand?: () => void;
+  collapsedOrchestrators?: Record<string, boolean>;
+  onToggleOrchestrator?: (orchId: string) => void;
 }) {
+  const { alpha } = usePluginTheme();
+  const [isHeaderHovered, setIsHeaderHovered] = useState(false);
   const workerCount = group.totalCount - group.orchestrators.length;
 
   return (
@@ -610,119 +814,182 @@ export function ProjectGroupCard({
       variant="flat"
       style={{
         paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingVertical: 12,
         borderWidth: 1,
         borderColor: colors.border,
         borderRadius: 8,
       }}
     >
       <Stack gap={8}>
-        {/* Project Group Header */}
-        <Row justify="space-between" align="center" wrap gap="xs">
-          <Row align="center" gap="xs">
-            <Icon name="FolderGit2" size={16} color={colors.accent} />
-            <Text
-              style={{
-                color: colors.foreground,
-                ...typography.heading,
-                fontWeight: "700",
-                fontSize: 14,
-              }}
-            >
-              {group.projectName}
-            </Text>
-            <Badge
-              label={`${group.orchestrators.length} Orchestrator${
-                group.orchestrators.length === 1 ? "" : "s"
-              }`}
-              variant="neutral"
-              size="sm"
-            />
-            <Badge
-              label={`${workerCount} Worker${workerCount === 1 ? "" : "s"}`}
-              variant="neutral"
-              size="sm"
-            />
-          </Row>
-          {group.runningCount > 0 && (
-            <Badge
-              label={`${group.runningCount} Active`}
-              variant="success"
-              size="sm"
-              dot
-            />
-          )}
-        </Row>
-
-        {/* Orchestrators & their subagents */}
-        <Stack gap={6}>
-          {group.orchestrators.map((orchNode) => (
-            <Stack key={orchNode.agent.id} gap={3}>
-              <OrchestratorRow
-                node={orchNode}
-                colors={colors}
-                typography={typography}
-                navigation={navigation}
-                archivingAgentId={archivingAgentId}
-                onArchiveAgent={onArchiveAgent}
-              />
-
-              {/* Subagents under Orchestrator - NO CARDS! */}
-              {orchNode.children && orchNode.children.length > 0 && (
-                <View
-                  style={{
-                    paddingLeft: 8,
-                    borderLeftWidth: 2,
-                    borderLeftColor: colors.border,
-                    marginLeft: 10,
-                    marginTop: 2,
-                  }}
-                >
-                  {orchNode.children.map((child, idx) => (
-                    <DenseAgentRow
-                      key={child.agent.id}
-                      node={child}
-                      depth={1}
-                      isLast={idx === orchNode.children.length - 1}
-                      colors={colors}
-                      typography={typography}
-                      navigation={navigation}
-                      archivingAgentId={archivingAgentId}
-                      onArchiveAgent={onArchiveAgent}
-                    />
-                  ))}
-                </View>
-              )}
-            </Stack>
-          ))}
-
-          {/* Unparented Workers in this Project (if any) */}
-          {group.unparentedWorkers.length > 0 && (
-            <View
-              style={{
-                paddingLeft: 8,
-                borderLeftWidth: 2,
-                borderLeftColor: colors.border,
-                marginLeft: 10,
-                marginTop: 2,
-              }}
-            >
-              {group.unparentedWorkers.map((workerNode, idx) => (
-                <DenseAgentRow
-                  key={workerNode.agent.id}
-                  node={workerNode}
-                  depth={1}
-                  isLast={idx === group.unparentedWorkers.length - 1}
-                  colors={colors}
-                  typography={typography}
-                  navigation={navigation}
-                  archivingAgentId={archivingAgentId}
-                  onArchiveAgent={onArchiveAgent}
+        {/* Project Group Header - interactive expand/collapse */}
+        <Pressable
+          onPress={onToggleExpand}
+          // @ts-ignore RN web hover
+          onMouseEnter={() => setIsHeaderHovered(true)}
+          // @ts-ignore RN web hover
+          onMouseLeave={() => setIsHeaderHovered(false)}
+          style={({ pressed }: any) => ({
+            paddingHorizontal: 6,
+            paddingVertical: 4,
+            borderRadius: 6,
+            backgroundColor: isHeaderHovered
+              ? (alpha?.(colors.accent, 0.04) || colors.surface1 || "transparent")
+              : "transparent",
+            opacity: pressed ? 0.75 : 1,
+            cursor: (onToggleExpand ? "pointer" : "auto") as any,
+          })}
+          accessibilityRole="button"
+          accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} project group ${group.projectName}`}
+        >
+          <Row justify="space-between" align="center" wrap gap="xs">
+            <Row align="center" gap="xs">
+              {onToggleExpand && (
+                <Icon
+                  name={isExpanded ? "ChevronDown" : "ChevronRight"}
+                  size={15}
+                  color={colors.foregroundMuted}
                 />
-              ))}
-            </View>
-          )}
-        </Stack>
+              )}
+              <Icon name="FolderGit2" size={16} color={colors.accent} />
+              <Text
+                style={{
+                  color: colors.foreground,
+                  ...typography.heading,
+                  fontWeight: "700",
+                  fontSize: 14,
+                }}
+              >
+                {group.projectName}
+              </Text>
+              <Badge
+                label={`${group.orchestrators.length} Orchestrator${
+                  group.orchestrators.length === 1 ? "" : "s"
+                }`}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontSize: 10 }}
+              />
+              <Badge
+                label={`${workerCount} Worker${workerCount === 1 ? "" : "s"}`}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontSize: 10 }}
+              />
+            </Row>
+            <Row align="center" gap="xs">
+              {group.runningCount > 0 && (
+                <Badge
+                  label={`${group.runningCount} Active`}
+                  variant="success"
+                  size="sm"
+                  dot
+                  textStyle={{ fontSize: 10 }}
+                />
+              )}
+              {!isExpanded && (
+                <Badge
+                  label={`${group.totalCount} Total`}
+                  variant="neutral"
+                  size="sm"
+                  textStyle={{ fontSize: 10 }}
+                />
+              )}
+            </Row>
+          </Row>
+        </Pressable>
+
+        {/* Orchestrators & their subagents (rendered when project is expanded) */}
+        {isExpanded && (
+          <Stack
+            gap={8}
+            style={{
+              borderTopWidth: 1,
+              borderTopColor: colors.border,
+              paddingTop: 8,
+            }}
+          >
+            {group.orchestrators.map((orchNode) => {
+              const orchId = orchNode.agent.id;
+              const isOrchExpanded = collapsedOrchestrators ? !collapsedOrchestrators[orchId] : true;
+              const childCount = orchNode.children?.length ?? 0;
+
+              return (
+                <Stack key={orchId} gap={4}>
+                  <OrchestratorRow
+                    node={orchNode}
+                    colors={colors}
+                    typography={typography}
+                    navigation={navigation}
+                    archivingAgentId={archivingAgentId}
+                    onArchiveAgent={onArchiveAgent}
+                    hasChildren={childCount > 0}
+                    isExpanded={isOrchExpanded}
+                    childCount={childCount}
+                    onToggleExpand={
+                      onToggleOrchestrator ? () => onToggleOrchestrator(orchId) : undefined
+                    }
+                  />
+
+                  {/* Subagents under Orchestrator - NO CARDS! */}
+                  {isOrchExpanded && orchNode.children && orchNode.children.length > 0 && (
+                    <View
+                      style={{
+                        paddingLeft: 10,
+                        borderLeftWidth: 1.5,
+                        borderLeftColor: colors.border,
+                        marginLeft: 18,
+                        marginTop: 2,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {orchNode.children.map((child, idx) => (
+                        <DenseAgentRow
+                          key={child.agent.id}
+                          node={child}
+                          depth={1}
+                          isLast={idx === orchNode.children.length - 1}
+                          colors={colors}
+                          typography={typography}
+                          navigation={navigation}
+                          archivingAgentId={archivingAgentId}
+                          onArchiveAgent={onArchiveAgent}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </Stack>
+              );
+            })}
+
+            {/* Unparented Workers in this Project (if any) */}
+            {group.unparentedWorkers.length > 0 && (
+              <View
+                style={{
+                  paddingLeft: 10,
+                  borderLeftWidth: 1.5,
+                  borderLeftColor: colors.border,
+                  marginLeft: 18,
+                  marginTop: 2,
+                  marginBottom: 4,
+                }}
+              >
+                {group.unparentedWorkers.map((workerNode, idx) => (
+                  <DenseAgentRow
+                    key={workerNode.agent.id}
+                    node={workerNode}
+                    depth={1}
+                    isLast={idx === group.unparentedWorkers.length - 1}
+                    colors={colors}
+                    typography={typography}
+                    navigation={navigation}
+                    archivingAgentId={archivingAgentId}
+                    onArchiveAgent={onArchiveAgent}
+                  />
+                ))}
+              </View>
+            )}
+          </Stack>
+        )}
       </Stack>
     </Card>
   );
@@ -742,6 +1009,10 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [localArchivingId, setLocalArchivingId] = useState<string | null>(null);
   const [localBulkArchiving, setLocalBulkArchiving] = useState(false);
+
+  // Collapsible tracking states
+  const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
+  const [collapsedOrchestrators, setCollapsedOrchestrators] = useState<Record<string, boolean>>({});
 
   const archiveAgentMutation = useRpcMutation(uppidiArchiveAgentContract);
   const archiveBulkMutation = useRpcMutation(uppidiArchiveInactiveAgentsContract);
@@ -882,6 +1153,44 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
 
   const displayFrontDesk = query.trim() || stateFilter !== "all" ? frontDeskNodes : allFrontDeskNodes;
 
+  // Toggle handlers for collapse
+  const handleToggleProject = (projectName: string) => {
+    setCollapsedProjects((prev) => ({
+      ...prev,
+      [projectName]: !prev[projectName],
+    }));
+  };
+
+  const handleToggleOrchestrator = (orchId: string) => {
+    setCollapsedOrchestrators((prev) => ({
+      ...prev,
+      [orchId]: !prev[orchId],
+    }));
+  };
+
+  const allProjectsCollapsed = useMemo(() => {
+    if (projectGroups.length === 0) return false;
+    return projectGroups.every((g) => collapsedProjects[g.projectName]);
+  }, [projectGroups, collapsedProjects]);
+
+  const toggleAllProjects = () => {
+    if (allProjectsCollapsed) {
+      setCollapsedProjects({});
+      setCollapsedOrchestrators({});
+    } else {
+      const nextCollapsedProj: Record<string, boolean> = {};
+      const nextCollapsedOrch: Record<string, boolean> = {};
+      for (const g of projectGroups) {
+        nextCollapsedProj[g.projectName] = true;
+        for (const o of g.orchestrators) {
+          nextCollapsedOrch[o.agent.id] = true;
+        }
+      }
+      setCollapsedProjects(nextCollapsedProj);
+      setCollapsedOrchestrators(nextCollapsedOrch);
+    }
+  };
+
   return (
     <Stack gap={12}>
       {/* Header & Metric Badges */}
@@ -890,10 +1199,12 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
           <Row align="center" gap="sm">
             <StatusDot variant={runningCount > 0 ? "success" : "neutral"} pulse={runningCount > 0} />
             <Text style={{ color: colors.foreground, ...typography.title }}>Fleet Lineage Tree</Text>
-            <Badge label={`${totalCount} Total`} variant="neutral" size="sm" />
-            <Badge label={`${runningCount} Running`} variant="success" size="sm" dot />
-            <Badge label={`${idleCount} Idle`} variant="neutral" size="sm" />
-            {errorCount > 0 && <Badge label={`${errorCount} Failed`} variant="danger" size="sm" dot />}
+            <Badge label={`${totalCount} Total`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+            <Badge label={`${runningCount} Running`} variant="success" size="sm" dot textStyle={{ fontSize: 10 }} />
+            <Badge label={`${idleCount} Idle`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+            {errorCount > 0 && (
+              <Badge label={`${errorCount} Failed`} variant="danger" size="sm" dot textStyle={{ fontSize: 10 }} />
+            )}
           </Row>
           <Text style={{ color: colors.foregroundMuted, ...typography.body }}>
             High-density project hierarchy: Fleet Front Desk, projects, orchestrators, and subagents.
@@ -916,7 +1227,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
 
       {/* Filter and Search Bar */}
       <Row justify="space-between" align="center" wrap gap="xs">
-        <Row wrap gap="xs">
+        <Row wrap gap="xs" align="center">
           {[
             { id: "all", label: "All States" },
             { id: "working", label: "Working" },
@@ -931,6 +1242,15 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
               onPress={() => setStateFilter(f.id)}
             />
           ))}
+          {projectGroups.length > 0 && (
+            <Button
+              label={allProjectsCollapsed ? "Expand All" : "Collapse All"}
+              icon={allProjectsCollapsed ? "ChevronDown" : "ChevronRight"}
+              size="sm"
+              variant="ghost"
+              onPress={toggleAllProjects}
+            />
+          )}
         </Row>
         <View style={{ minWidth: 200, flex: 1, maxWidth: 360 }}>
           <SearchInput
@@ -953,30 +1273,51 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
 
       {/* 2. Top-Level Project Groups with Dense Non-Card Children */}
       {projectGroups.length === 0 ? (
-        displayFrontDesk.length === 0 && (
+        displayFrontDesk.length === 0 ? (
           <EmptyState
-            title={isLoading ? "Loading fleet tree..." : "No matching agents"}
+            title={isLoading ? "Scanning fleet..." : "No matching agents"}
             description={
               isLoading
                 ? "Scanning Paseo agent sessions..."
-                : "No active agents match the selected search or state filters."
+                : query.trim() || stateFilter !== "all"
+                ? `No agents match filter '${stateFilter}'${
+                    query.trim() ? ` or search query '${query.trim()}'` : ""
+                  }.`
+                : "No active agents found in the fleet."
             }
             icon="Network"
+            actionLabel={query.trim() || stateFilter !== "all" ? "Clear Filters" : undefined}
+            onAction={
+              query.trim() || stateFilter !== "all"
+                ? () => {
+                    setQuery("");
+                    setStateFilter("all");
+                  }
+                : undefined
+            }
           />
-        )
+        ) : null
       ) : (
         <Stack gap={8}>
-          {projectGroups.map((group) => (
-            <ProjectGroupCard
-              key={group.projectName}
-              group={group}
-              colors={colors}
-              typography={typography}
-              navigation={navigation}
-              archivingAgentId={archivingAgentId}
-              onArchiveAgent={handleArchiveAgent}
-            />
-          ))}
+          {projectGroups.map((group) => {
+            const isProjectCollapsed =
+              !query.trim() && Boolean(collapsedProjects[group.projectName]);
+            return (
+              <ProjectGroupCard
+                key={group.projectName}
+                group={group}
+                colors={colors}
+                typography={typography}
+                navigation={navigation}
+                archivingAgentId={archivingAgentId}
+                onArchiveAgent={handleArchiveAgent}
+                isExpanded={!isProjectCollapsed}
+                onToggleExpand={() => handleToggleProject(group.projectName)}
+                collapsedOrchestrators={collapsedOrchestrators}
+                onToggleOrchestrator={handleToggleOrchestrator}
+              />
+            );
+          })}
         </Stack>
       )}
     </Stack>
