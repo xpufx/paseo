@@ -10,7 +10,7 @@ Instead of managing issues through small modals or composer pills, `uppidi-forge
 
 ## Highlights
 
-- **Dedicated Primary Surface**: Registered as a full sidebar tab (`addSidebarItem` + `addSurface`), giving you full width and height for complete workflow management.
+- **Dedicated Primary Surface & Workspace Tab Launcher**: Registered as a full sidebar tab (`addSidebarItem` + `addSurface`) and workspace panel (`addWorkspacePanel`), allowing Uppidi Forge to appear in the workspace New Tab (`+`) launcher menu and open as a tab.
 - **Full Lifecycle Flow**:
   - **Triage & Backlog**: Filter by status, priority, and attention labels (`attention/0-orchestrator`, `attention/1-agent`, `attention/2-user`).
   - **Orchestration & Dispatch**: View orchestrator status, dispatch worktree jobs, and steer coding agents.
@@ -27,7 +27,7 @@ Instead of managing issues through small modals or composer pills, `uppidi-forge
 ```
 plugins/uppidi-forge/
 ├── paseo-plugin.json      # Plugin manifest (requirements: paseo >= 0.8.0)
-├── index.client.tsx       # Client entrypoint: registers top-level sidebar surface
+├── index.client.tsx       # Client entrypoint: registers sidebar surface & workspace panel launcher
 ├── index.server.ts       # Server RPC handlers & Forgejo API bridge
 ├── client/
 │   ├── surface.tsx        # Top-level full-screen surface component
