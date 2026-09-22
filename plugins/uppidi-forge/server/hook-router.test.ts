@@ -15,6 +15,11 @@ import {
   stableId,
   HookRouter,
   startHookRouter,
+  appendHookLog,
+  getHookLogs,
+  clearHookLogs,
+  getActiveHookRouter,
+  setActiveHookRouter,
 } from "./hook-router.js";
 
 describe("hook-router payload and key utilities", () => {
@@ -462,6 +467,86 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
 
     const stop = startHookRouter(mockServer, { queueDir, stateDir, port: 0 });
     assert.equal(typeof stop, "function");
+    assert.ok(getActiveHookRouter() !== null);
     await stop();
+    assert.equal(getActiveHookRouter(), null);
+  });
+});
+
+describe("hook-router bundled service lifecycle and log buffer", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-lifecycle-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    clearHookLogs();
+  });
+
+  afterEach(async () => {
+    const router = getActiveHookRouter();
+    if (router) {
+      await router.stop();
+      setActiveHookRouter(null);
+    }
+    clearHookLogs();
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("inspects lifecycle status and responds to restart and reload", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    assert.equal(router.isListening(), false);
+    assert.equal(router.getUptime(), 0);
+
+    await router.start();
+    assert.equal(router.isListening(), true);
+    assert.ok(router.port > 0);
+    assert.equal(typeof router.getUptime(), "number");
+
+    const status = router.getLifecycleStatus();
+    assert.equal(status.listening, true);
+    assert.equal(status.port, router.port);
+    assert.equal(typeof status.uptime, "number");
+    assert.equal(status.totalQueued, 0);
+    assert.equal(status.repoCount, 0);
+
+    // Test reload
+    await router.reload();
+
+    // Test restart
+    const oldPort = router.port;
+    await router.restart();
+    assert.equal(router.isListening(), true);
+    assert.ok(router.port > 0);
+
+    // Stop
+    await router.stop();
+    assert.equal(router.isListening(), false);
+    assert.equal(router.getUptime(), 0);
+  });
+
+  it("maintains in-memory log buffer with max line limits", () => {
+    clearHookLogs();
+    assert.deepEqual(getHookLogs(), []);
+
+    appendHookLog("test message 1");
+    appendHookLog("test message 2");
+
+    const logs = getHookLogs(10);
+    assert.equal(logs.length, 2);
+    assert.ok(logs[0].includes("test message 1"));
+    assert.ok(logs[1].includes("test message 2"));
+
+    // Check custom line limit
+    const singleLog = getHookLogs(1);
+    assert.equal(singleLog.length, 1);
+    assert.ok(singleLog[0].includes("test message 2"));
+
+    clearHookLogs();
+    assert.deepEqual(getHookLogs(), []);
   });
 });

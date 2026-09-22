@@ -453,7 +453,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   size="sm"
                   dot
                 />
-                {isServiceRunning && <Badge label="systemd active" variant="info" size="sm" />}
+                {isServiceRunning && <Badge label="bundled router active" variant="info" size="sm" />}
               </Row>
               <Text style={{ color: colors.foregroundMuted, ...typography.body }}>
                 One place for triage, active work, queues, and review decisions.
@@ -547,7 +547,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   <Row align="center" gap="xs">
                     <StatusDot variant={isServiceRunning ? "success" : "danger"} />
                     <Text style={{ color: colors.foreground, ...typography.heading }}>
-                      forgejo-hook.service: {serviceStatus?.state ?? "unknown"}
+                      Bundled router: {serviceStatus?.state ?? "unknown"}
                     </Text>
                   </Row>
                   <Row gap="xs">
@@ -574,7 +574,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   </Row>
                 </Row>
                 <KeyValueGroup>
-                  <KeyValue label="Unit name" value="forgejo-hook.service (user slice)" />
+                  <KeyValue label="Unit name" value="Bundled router (port 8099)" />
                   <KeyValue label="Router endpoint" value="http://127.0.0.1:8099" />
                   <KeyValue
                     label="Front desk agent"
@@ -710,7 +710,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
               <Stack gap="xs">
                 <Row justify="space-between" align="center">
                   <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    Live systemd journal tail from `forgejo-hook.service`:
+                    Live log tail from bundled hook router:
                   </Text>
                   <Button label="Refresh logs" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchLogTail()} />
                 </Row>

@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import {
   type HookStatusOutput,
@@ -9,8 +7,12 @@ import {
   type HookServiceActionOutput,
   type HookLogTailOutput,
 } from "../shared/contracts.js";
+import {
+  getHookServiceStatus,
+  executeHookServiceAction,
+  getHookLogTail,
+} from "./hook-router.js";
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_HOOK_URL = process.env.FORGE_HOOK_URL || "http://127.0.0.1:8099";
 
 export function resolveHookUrl(provided?: string): string {
@@ -117,45 +119,15 @@ export async function handleHookDrain(
 }
 
 export async function handleHookServiceStatus(): Promise<HookServiceStatusOutput> {
-  try {
-    const { stdout } = await execFileAsync("systemctl", ["--user", "is-active", "forgejo-hook.service"]);
-    const state = stdout.trim();
-    const isActive = state === "active";
-    return { ok: true, active: isActive, state };
-  } catch (err: unknown) {
-    // is-active exits with non-zero when inactive/failed
-    const state = (err as { stdout?: string }).stdout?.trim() || "inactive";
-    return { ok: true, active: false, state };
-  }
+  return getHookServiceStatus();
 }
 
 export async function handleHookServiceAction(input: {
   action: "start" | "stop" | "restart" | "reload";
 }): Promise<HookServiceActionOutput> {
-  try {
-    await execFileAsync("systemctl", ["--user", input.action, "forgejo-hook.service"]);
-    return { ok: true, action: input.action, message: `forgejo-hook.service ${input.action}ed successfully` };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, action: input.action, error: msg };
-  }
+  return executeHookServiceAction(input.action);
 }
 
-export async function handleHookLogTail(input: { lines?: number }): Promise<HookLogTailOutput> {
-  const count = Math.min(Math.max(input.lines ?? 50, 5), 200);
-  try {
-    const { stdout } = await execFileAsync("journalctl", [
-      "--user",
-      "-u",
-      "forgejo-hook.service",
-      "-n",
-      String(count),
-      "--no-pager",
-    ]);
-    const lines = stdout.split("\n").filter((l) => l.trim().length > 0);
-    return { ok: true, lines };
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, lines: [], error: msg };
-  }
+export async function handleHookLogTail(input?: { lines?: number }): Promise<HookLogTailOutput> {
+  return getHookLogTail(input?.lines);
 }

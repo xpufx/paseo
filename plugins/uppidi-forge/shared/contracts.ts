@@ -176,7 +176,7 @@ export type HookServiceStatusOutput = z.infer<typeof HookServiceStatusOutputSche
 
 export const uppidiHookServiceStatusContract = defineContract({
   name: "uppidi-forge.hook-service-status",
-  description: "Inspect systemd user service status for forgejo-hook.service",
+  description: "Inspect bundled hook router service status",
   input: z.object({}),
   output: HookServiceStatusOutputSchema,
 });
@@ -196,7 +196,7 @@ export type HookServiceActionOutput = z.infer<typeof HookServiceActionOutputSche
 
 export const uppidiHookServiceActionContract = defineContract({
   name: "uppidi-forge.hook-service-action",
-  description: "Start/Stop/Restart the forgejo-hook systemd service",
+  description: "Start/Stop/Restart the bundled hook router service",
   input: HookServiceActionInputSchema,
   output: HookServiceActionOutputSchema,
 });
@@ -216,7 +216,7 @@ export type HookLogTailOutput = z.infer<typeof HookLogTailOutputSchema>;
 
 export const uppidiHookLogTailContract = defineContract({
   name: "uppidi-forge.hook-log-tail",
-  description: "Tail journal log lines for forgejo-hook.service",
+  description: "Tail log lines for bundled hook router",
   input: HookLogTailInputSchema,
   output: HookLogTailOutputSchema,
 });

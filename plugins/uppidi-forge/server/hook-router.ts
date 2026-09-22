@@ -4,6 +4,11 @@ import { readFileSync, writeFileSync, renameSync, readdirSync, unlinkSync, mkdir
 import { join, dirname } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { PaseoApi } from "@getpaseo/client";
+import type {
+  HookServiceStatusOutput,
+  HookServiceActionOutput,
+  HookLogTailOutput,
+} from "../shared/contracts.js";
 
 export interface HookRouterOptions {
   port?: number;
@@ -130,6 +135,26 @@ export function stableId(key: string, msg: string): string {
   return h.digest("hex").slice(0, 16);
 }
 
+const MAX_LOG_LINES = 1000;
+const logBuffer: string[] = [];
+
+export function appendHookLog(message: string): void {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  logBuffer.push(line);
+  if (logBuffer.length > MAX_LOG_LINES) {
+    logBuffer.splice(0, logBuffer.length - MAX_LOG_LINES);
+  }
+}
+
+export function getHookLogs(lines = 50): string[] {
+  const count = Math.max(1, Math.min(lines, MAX_LOG_LINES));
+  return logBuffer.slice(-count);
+}
+
+export function clearHookLogs(): void {
+  logBuffer.length = 0;
+}
+
 export class HookRouter {
   public configuredPort: number;
   public boundPort = 0;
@@ -138,7 +163,7 @@ export class HookRouter {
   public readonly stateDir: string;
   public readonly secret?: string;
 
-  private server: PluginServerContext;
+  private server: PluginServerContext | null;
   private httpServer: HttpServer | null = null;
   private activePaseo: PaseoApi | null = null;
   private queues = new Map<string, QueueEntry[]>();
@@ -150,13 +175,17 @@ export class HookRouter {
   private backoffTimers = new Map<string, NodeJS.Timeout>();
   private unsubscribeLifecycle?: () => void;
   private isClosed = false;
+  private startedAt: number | null = null;
 
-  constructor(server: PluginServerContext, options?: HookRouterOptions) {
-    this.server = server;
-    this.configuredPort = options?.port ?? Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
+  constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
+    this.server = server ?? null;
+    this.configuredPort =
+      options?.port !== undefined
+        ? options.port
+        : Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
     this.host = options?.host ?? process.env.FORGE_HOOK_HOST ?? "127.0.0.1";
     this.secret = options?.secret ?? process.env.FORGE_HOOK_SECRET;
-    this.activePaseo = options?.paseo ?? (server as any).paseo ?? null;
+    this.activePaseo = options?.paseo ?? (server as any)?.paseo ?? null;
 
     const home = process.env.HOME ?? "/home/xpufx";
     this.queueDir = options?.queueDir ?? process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-forge", "queues");
@@ -176,6 +205,46 @@ export class HookRouter {
 
   public getHttpServer(): HttpServer | null {
     return this.httpServer;
+  }
+
+  public isListening(): boolean {
+    return this.httpServer !== null && Boolean(this.httpServer.listening);
+  }
+
+  public getUptime(): number {
+    return this.isListening() && this.startedAt ? Math.floor((Date.now() - this.startedAt) / 1000) : 0;
+  }
+
+  public getTotalQueued(): number {
+    let total = 0;
+    for (const entries of this.queues.values()) {
+      total += entries.length;
+    }
+    return total;
+  }
+
+  public getQueueCount(): number {
+    return this.queues.size;
+  }
+
+  public getLifecycleStatus(): {
+    listening: boolean;
+    port: number;
+    uptime: number;
+    totalQueued: number;
+    repoCount: number;
+  } {
+    return {
+      listening: this.isListening(),
+      port: this.port,
+      uptime: this.getUptime(),
+      totalQueued: this.getTotalQueued(),
+      repoCount: this.queues.size,
+    };
+  }
+
+  private log(message: string): void {
+    appendHookLog(message);
   }
 
   private getPaseo(): PaseoApi | null {
@@ -356,10 +425,12 @@ export class HookRouter {
     if (list.length > 50) {
       const dropped = list.splice(0, list.length - 50);
       this.droppedCount.set(key, (this.droppedCount.get(key) ?? 0) + dropped.length);
+      this.log(`[warn] Queue ${key} exceeded depth limit; dropped ${dropped.length} messages`);
     }
 
     this.queues.set(key, list);
     this.persistQueue(key);
+    this.log(`[info] Enqueued message ${entry.id} for ${key} (total depth: ${list.length}, sos: ${Boolean(isSos)})`);
     void this.drain(key);
     return entry;
   }
@@ -371,10 +442,12 @@ export class HookRouter {
   public pause(key?: string): string[] {
     if (key) {
       this.pausedQueues.add(key);
+      this.log(`[info] Queue ${key} paused`);
     } else {
       for (const k of this.queues.keys()) {
         this.pausedQueues.add(k);
       }
+      this.log("[info] All queues paused");
     }
     return Array.from(this.pausedQueues);
   }
@@ -382,9 +455,11 @@ export class HookRouter {
   public resume(key?: string): string[] {
     if (key) {
       this.pausedQueues.delete(key);
+      this.log(`[info] Queue ${key} resumed`);
       void this.drain(key);
     } else {
       this.pausedQueues.clear();
+      this.log("[info] All queues resumed");
       for (const k of this.queues.keys()) {
         void this.drain(k);
       }
@@ -397,13 +472,16 @@ export class HookRouter {
   }
 
   private bindLifecycleEvents(): void {
-    if (typeof this.server.on === "function") {
+    if (this.unsubscribeLifecycle) return;
+    if (this.server && typeof this.server.on === "function") {
       this.unsubscribeLifecycle = this.server.on("agent.turn_ended", async (event, context) => {
         if (context?.paseo) {
           this.activePaseo = context.paseo;
         }
         const endedAgentId = event?.agent?.id;
         if (!endedAgentId) return;
+
+        this.log(`[info] Agent turn ended for agent ${endedAgentId}, triggering queue drain`);
 
         // Immediate event-driven draining for any queue targeting this agent
         const frontDesk = this.readFrontDesk();
@@ -484,6 +562,7 @@ export class HookRouter {
           this.busyQueues.add(key);
           const attempts = (this.busyAttempts.get(key) ?? 0) + 1;
           this.busyAttempts.set(key, attempts);
+          this.log(`[info] Agent ${targetAgentId} busy for ${key}, retry scheduled (attempt ${attempts})`);
 
           // Schedule a backoff retry in case turn_ended was missed
           if (!this.backoffTimers.has(key)) {
@@ -511,8 +590,11 @@ export class HookRouter {
           await agentRef.send(entry.msg, { steer: !entry.isSos } as any);
           list.shift();
           this.persistQueue(key);
+          this.log(`[info] Delivered message ${entry.id} to agent ${targetAgentId} for ${key}`);
         } catch (error) {
-          console.error(`[uppidi-forge:hook-router] Failed to deliver message to ${targetAgentId} for ${key}:`, error);
+          this.log(
+            `[error] Failed to deliver message to ${targetAgentId} for ${key}: ${error instanceof Error ? error.message : String(error)}`,
+          );
           // Keep message in queue, back off
           break;
         }
@@ -524,16 +606,13 @@ export class HookRouter {
 
   public getStatusOverview(): Record<string, unknown> {
     const frontDesk = this.readFrontDesk();
-    let totalQueued = 0;
-    for (const entries of this.queues.values()) {
-      totalQueued += entries.length;
-    }
+    const totalQueued = this.getTotalQueued();
 
     return {
       ok: true,
       service: "uppidi-forge-hook-router",
       version: 1,
-      uptime: Math.round(process.uptime()),
+      uptime: this.getUptime(),
       frontDesk: frontDesk
         ? {
             version: frontDesk.version ?? 1,
@@ -582,7 +661,7 @@ export class HookRouter {
     return {
       ok: true,
       service: "uppidi-forge-hook-router",
-      uptime: Math.round(process.uptime()),
+      uptime: this.getUptime(),
       paused: Array.from(this.pausedQueues),
       queues: queueItems,
     };
@@ -590,7 +669,10 @@ export class HookRouter {
 
   public start(): Promise<void> {
     return new Promise((resolve, reject) => {
-      if (this.httpServer) {
+      this.isClosed = false;
+      this.bindLifecycleEvents();
+
+      if (this.httpServer && this.httpServer.listening) {
         resolve();
         return;
       }
@@ -601,12 +683,15 @@ export class HookRouter {
 
       this.httpServer.on("error", (err: NodeJS.ErrnoException) => {
         if (err.code === "EADDRINUSE") {
-          console.warn(
-            `[uppidi-forge:hook-router] Port ${this.port} is already in use. Embedded hook router HTTP listener paused (external service active).`,
+          this.log(
+            `[warn] Port ${this.port} is already in use. Bundled hook router HTTP listener paused (external service active).`,
           );
+          this.httpServer = null;
+          this.boundPort = 0;
+          this.startedAt = null;
           resolve();
         } else {
-          console.error(`[uppidi-forge:hook-router] HTTP server error:`, err);
+          this.log(`[error] HTTP server error: ${err.message}`);
           reject(err);
         }
       });
@@ -616,6 +701,8 @@ export class HookRouter {
         if (addr && typeof addr === "object") {
           this.boundPort = addr.port;
         }
+        this.startedAt = Date.now();
+        this.log(`[info] Bundled hook router listening on http://${this.host}:${this.port}`);
         resolve();
       });
     });
@@ -638,12 +725,27 @@ export class HookRouter {
       if (this.httpServer) {
         this.httpServer.close(() => {
           this.httpServer = null;
+          this.boundPort = 0;
+          this.startedAt = null;
+          this.log("[info] Bundled hook router stopped");
           resolve();
         });
       } else {
+        this.boundPort = 0;
+        this.startedAt = null;
         resolve();
       }
     });
+  }
+
+  public async restart(): Promise<void> {
+    await this.stop();
+    await this.start();
+  }
+
+  public async reload(): Promise<void> {
+    this.loadPersistedQueues();
+    this.log("[info] Bundled hook router reloaded persisted queues and configuration");
   }
 
   private async handleHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -665,7 +767,7 @@ export class HookRouter {
         this.sendJson(res, 200, {
           ok: true,
           status: "healthy",
-          uptime: Math.round(process.uptime()),
+          uptime: this.getUptime(),
           service: "uppidi-forge-hook-router",
           port: this.port,
         });
@@ -718,12 +820,14 @@ export class HookRouter {
         const body = await this.readJsonBody(req);
 
         if (event === "ping") {
+          this.log("[info] Webhook ping received on POST /forgejo");
           this.sendJson(res, 200, { ok: true, ping: true });
           return;
         }
 
         const repoKey = keyFromPayload(body);
         if (!repoKey) {
+          this.log("[warn] Webhook rejected: could not derive repository key from payload");
           this.sendJson(res, 400, { ok: false, error: "Could not derive repository key from payload" });
           return;
         }
@@ -733,6 +837,7 @@ export class HookRouter {
         const targetKey = isFd ? "frontdesk" : repoKey;
         const msg = formatWebhookMessage(event, body);
 
+        this.log(`[info] Webhook received: event=${event} repo=${targetKey} bypass=${isBypass} frontDesk=${isFd}`);
         const entry = this.enqueue(targetKey, msg, isBypass);
         this.sendJson(res, 200, {
           ok: true,
@@ -747,7 +852,7 @@ export class HookRouter {
 
       this.sendJson(res, 404, { ok: false, error: "Not Found" });
     } catch (err) {
-      console.error("[uppidi-forge:hook-router] Request handling error:", err);
+      this.log(`[error] Request handling error: ${err instanceof Error ? err.message : String(err)}`);
       this.sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : String(err) });
     }
   }
@@ -787,11 +892,141 @@ export class HookRouter {
   }
 }
 
+let activeRouter: HookRouter | null = null;
+
+export function getActiveHookRouter(): HookRouter | null {
+  return activeRouter;
+}
+
+export function setActiveHookRouter(router: HookRouter | null): void {
+  activeRouter = router;
+}
+
+export function getOrCreateHookRouter(
+  server?: PluginServerContext,
+  options?: HookRouterOptions,
+): HookRouter {
+  if (!activeRouter) {
+    activeRouter = new HookRouter(server, options);
+  }
+  return activeRouter;
+}
+
+export function getHookServiceStatus(): HookServiceStatusOutput {
+  const router = getActiveHookRouter();
+  const listening = router ? router.isListening() : false;
+  const port = router ? router.port : Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
+  const uptime = router ? router.getUptime() : 0;
+  const queued = router ? router.getTotalQueued() : 0;
+
+  return {
+    ok: true,
+    active: listening,
+    state: listening ? "active" : "inactive",
+    description: listening
+      ? `Bundled hook router listening on port ${port} (uptime: ${uptime}s, queued: ${queued})`
+      : "Bundled hook router is inactive",
+    pid: process.pid,
+  };
+}
+
+export async function executeHookServiceAction(
+  action: "start" | "stop" | "restart" | "reload",
+): Promise<HookServiceActionOutput> {
+  try {
+    let router = getActiveHookRouter();
+    switch (action) {
+      case "start": {
+        if (!router) {
+          router = new HookRouter();
+          setActiveHookRouter(router);
+        }
+        await router.start();
+        appendHookLog(`[info] Service action executed: start (port ${router.port})`);
+        return {
+          ok: true,
+          action,
+          message: `Bundled hook router started on port ${router.port}`,
+        };
+      }
+      case "stop": {
+        if (router) {
+          await router.stop();
+        }
+        appendHookLog("[info] Service action executed: stop");
+        return {
+          ok: true,
+          action,
+          message: "Bundled hook router stopped successfully",
+        };
+      }
+      case "restart": {
+        if (!router) {
+          router = new HookRouter();
+          setActiveHookRouter(router);
+        }
+        await router.restart();
+        appendHookLog(`[info] Service action executed: restart (port ${router.port})`);
+        return {
+          ok: true,
+          action,
+          message: `Bundled hook router restarted on port ${router.port}`,
+        };
+      }
+      case "reload": {
+        if (!router) {
+          return {
+            ok: true,
+            action,
+            message: "Bundled hook router is not running; nothing to reload",
+          };
+        }
+        await router.reload();
+        appendHookLog("[info] Service action executed: reload");
+        return {
+          ok: true,
+          action,
+          message: "Bundled hook router reloaded successfully",
+        };
+      }
+      default: {
+        return {
+          ok: false,
+          action,
+          error: `Unknown action: ${String(action)}`,
+        };
+      }
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    appendHookLog(`[error] Service action ${action} failed: ${msg}`);
+    return {
+      ok: false,
+      action,
+      error: msg,
+    };
+  }
+}
+
+export function getHookLogTail(lines?: number): HookLogTailOutput {
+  const count = Math.min(Math.max(lines ?? 50, 1), 200);
+  return {
+    ok: true,
+    lines: getHookLogs(count),
+  };
+}
+
 export function startHookRouter(
-  server: PluginServerContext,
+  server?: PluginServerContext,
   options?: HookRouterOptions,
 ): () => Promise<void> {
   const router = new HookRouter(server, options);
+  setActiveHookRouter(router);
   void router.start();
-  return () => router.stop();
+  return async () => {
+    await router.stop();
+    if (getActiveHookRouter() === router) {
+      setActiveHookRouter(null);
+    }
+  };
 }
