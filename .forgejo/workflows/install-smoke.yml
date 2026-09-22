@@ -77,10 +77,10 @@ jobs:
             allow-failure: true
           - paseo-version: 0.9.0-beta.2
             allow-failure: false
-    # Clean Ubuntu 24.04 + Node 22 + git/make/jq image. A fresh container per
-    # run is the point: no reused node_modules and no pre-existing daemon state.
+    # Dedicated paseo-ci image with Node 22, git/make/jq, and pinned @getpaseo/cli.
+    # A fresh container per run is the point: no reused node_modules and no pre-existing daemon state.
     container:
-      image: forge.mrs.uppidi.com/oktay/runner-containers/ubuntu-podman-builder:latest
+      image: forge.mrs.uppidi.com/oktay/runner-containers/paseo-ci:latest
     env:
       # Dedicated daemon home, wiped below, so the job never reuses state.
       PASEO_HOME: /tmp/paseo-install-smoke/home
@@ -234,10 +234,12 @@ jobs:
       - name: Install Paseo CLI ${{ matrix.paseo-version }}
         run: |
           set -euo pipefail
-          if [ "$(id -u)" -eq 0 ]; then
-            npm i -g @getpaseo/cli@${{ matrix.paseo-version }}
-          else
-            sudo npm i -g @getpaseo/cli@${{ matrix.paseo-version }}
+          if ! command -v paseo >/dev/null 2>&1 || [ "$(paseo --version 2>/dev/null)" != "${{ matrix.paseo-version }}" ]; then
+            if [ "$(id -u)" -eq 0 ]; then
+              npm i -g @getpaseo/cli@${{ matrix.paseo-version }}
+            else
+              sudo npm i -g @getpaseo/cli@${{ matrix.paseo-version }}
+            fi
           fi
           paseo --version
 
