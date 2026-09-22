@@ -14,6 +14,8 @@ import {
   uppidiSetRoleModelContract,
   uppidiRunnersContract,
   uppidiFleetMetricsContract,
+  uppidiArchiveAgentContract,
+  uppidiArchiveInactiveAgentsContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues } from "./server/issues.js";
 import {
@@ -26,7 +28,12 @@ import {
   handleHookServiceAction,
   handleHookLogTail,
 } from "./server/hook.js";
-import { handleUppidiAgents } from "./server/agents.js";
+import {
+  handleUppidiAgents,
+  handleUppidiArchiveAgent,
+  handleUppidiArchiveInactiveAgents,
+} from "./server/agents.js";
+
 import { handleUppidiRoleModels, handleUppidiSetRoleModel } from "./server/role-models.js";
 import { handleUppidiRunners } from "./server/runners.js";
 import { handleUppidiFleetMetrics } from "./server/metrics.js";
@@ -47,6 +54,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiSetRoleModelContract, handleUppidiSetRoleModel);
   server.handle(uppidiRunnersContract, handleUppidiRunners);
   server.handle(uppidiFleetMetricsContract, handleUppidiFleetMetrics);
+  server.handle(uppidiArchiveAgentContract, handleUppidiArchiveAgent);
+  server.handle(uppidiArchiveInactiveAgentsContract, handleUppidiArchiveInactiveAgents);
 
   const stopHookRouter = startHookRouter(server);
 

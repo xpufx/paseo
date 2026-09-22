@@ -260,6 +260,63 @@ export function sortAgents(
   return sorted;
 }
 
+/**
+ * Determines if an agent is safe and eligible for bulk archival.
+ *
+ * Requirements (Issue #402):
+ * - Never archive running, working, or orchestrator/front-desk agents in bulk.
+ * - Identifies agents with deterministic state `failed:*`, completed/closed/terminated/done,
+ *   or inactive non-running worker states.
+ */
+export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
+  // 1. Safety rule: Never bulk-archive orchestrator or front-desk agents
+  if (agent.category === "front-desk" || agent.category === "orchestrator") {
+    return false;
+  }
+
+  // 2. Safety rule: Never bulk-archive active/running/working agents
+  const normalizedStatus = (agent.status || "").toLowerCase();
+  if (
+    normalizedStatus === "running" ||
+    agent.deterministicState === "running" ||
+    agent.deterministicState === "working"
+  ) {
+    return false;
+  }
+
+  // 3. Deterministic failed states (failed:quota-exhausted, failed:spawn, failed:timeout, failed:error)
+  if (agent.deterministicState.startsWith("failed:")) {
+    return true;
+  }
+
+  // 4. Closed, completed, terminated, done, or failed raw statuses
+  if (
+    normalizedStatus === "closed" ||
+    normalizedStatus === "completed" ||
+    normalizedStatus === "terminated" ||
+    normalizedStatus === "done" ||
+    normalizedStatus === "failed" ||
+    normalizedStatus === "error"
+  ) {
+    return true;
+  }
+
+  // 5. Inactive non-running states (idle:waiting, idle:quota-exhausted, or idle status)
+  if (
+    agent.deterministicState === "idle:waiting" ||
+    agent.deterministicState === "idle:quota-exhausted" ||
+    normalizedStatus === "idle"
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function filterBulkArchiveCandidates(agents: UppidiAgent[]): UppidiAgent[] {
+  return agents.filter(isAgentEligibleForBulkArchive);
+}
+
 // --- CI Runners ---
 
 export type RunnerPreset = "all" | "online" | "offline";

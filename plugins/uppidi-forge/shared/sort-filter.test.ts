@@ -11,7 +11,10 @@ import {
   sortRunners,
   filterMetricCandidates,
   sortMetricCandidates,
+  isAgentEligibleForBulkArchive,
+  filterBulkArchiveCandidates,
 } from "./sort-filter.js";
+
 import type {
   UppidiIssue,
   HookQueueItem,
@@ -194,4 +197,227 @@ describe("Uppidi Forge sort & filter predicates", () => {
     const byLatencyAsc = sortMetricCandidates(candidates, "latency", "asc");
     assert.equal(byLatencyAsc[0].model, "model-cheap");
   });
+
+  describe("bulk archive eligibility predicates (#402)", () => {
+    it("protects front-desk and orchestrator agents from bulk archive", () => {
+      const frontDesk: UppidiAgent = {
+        id: "fd-1",
+        shortId: "fd1",
+        name: "Front Desk",
+        category: "front-desk",
+        status: "idle",
+        deterministicState: "idle:waiting",
+      };
+      const frontDeskFailed: UppidiAgent = {
+        id: "fd-2",
+        shortId: "fd2",
+        name: "Front Desk Failed",
+        category: "front-desk",
+        status: "error",
+        deterministicState: "failed:error",
+      };
+      const orchestrator: UppidiAgent = {
+        id: "orch-1",
+        shortId: "orch1",
+        name: "Orchestrator",
+        category: "orchestrator",
+        status: "idle",
+        deterministicState: "idle:waiting",
+      };
+      const orchestratorFailed: UppidiAgent = {
+        id: "orch-2",
+        shortId: "orch2",
+        name: "Orchestrator Failed",
+        category: "orchestrator",
+        status: "error",
+        deterministicState: "failed:quota-exhausted",
+      };
+
+      assert.equal(isAgentEligibleForBulkArchive(frontDesk), false);
+      assert.equal(isAgentEligibleForBulkArchive(frontDeskFailed), false);
+      assert.equal(isAgentEligibleForBulkArchive(orchestrator), false);
+      assert.equal(isAgentEligibleForBulkArchive(orchestratorFailed), false);
+    });
+
+    it("protects running and working agents from bulk archive", () => {
+      const workingWorker: UppidiAgent = {
+        id: "w-work",
+        shortId: "ww1",
+        name: "Worker 1",
+        category: "worker",
+        status: "busy",
+        deterministicState: "working",
+      };
+      const runningWorker: UppidiAgent = {
+        id: "w-run",
+        shortId: "wr1",
+        name: "Worker 2",
+        category: "worker",
+        status: "running",
+        deterministicState: "running",
+      };
+      const activeWorkerStatus: UppidiAgent = {
+        id: "w-run-stat",
+        shortId: "wrs1",
+        name: "Worker 3",
+        category: "worker",
+        status: "Running",
+        deterministicState: "sleeping",
+      };
+
+      assert.equal(isAgentEligibleForBulkArchive(workingWorker), false);
+      assert.equal(isAgentEligibleForBulkArchive(runningWorker), false);
+      assert.equal(isAgentEligibleForBulkArchive(activeWorkerStatus), false);
+    });
+
+    it("allows deterministic failed states for bulk archive", () => {
+      const failedQuota: UppidiAgent = {
+        id: "w-fail-q",
+        shortId: "wfq1",
+        name: "Worker Quota",
+        category: "worker",
+        status: "error",
+        deterministicState: "failed:quota-exhausted",
+      };
+      const failedSpawn: UppidiAgent = {
+        id: "w-fail-s",
+        shortId: "wfs1",
+        name: "Worker Spawn",
+        category: "worker",
+        status: "error",
+        deterministicState: "failed:spawn",
+      };
+      const failedTimeout: UppidiAgent = {
+        id: "w-fail-t",
+        shortId: "wft1",
+        name: "Worker Timeout",
+        category: "worker",
+        status: "error",
+        deterministicState: "failed:timeout",
+      };
+      const failedError: UppidiAgent = {
+        id: "w-fail-e",
+        shortId: "wfe1",
+        name: "Worker Error",
+        category: "worker",
+        status: "error",
+        deterministicState: "failed:error",
+      };
+
+      assert.equal(isAgentEligibleForBulkArchive(failedQuota), true);
+      assert.equal(isAgentEligibleForBulkArchive(failedSpawn), true);
+      assert.equal(isAgentEligibleForBulkArchive(failedTimeout), true);
+      assert.equal(isAgentEligibleForBulkArchive(failedError), true);
+    });
+
+    it("allows closed, completed, terminated, and idle worker agents", () => {
+      const closedWorker: UppidiAgent = {
+        id: "w-closed",
+        shortId: "wc1",
+        name: "Closed Worker",
+        category: "worker",
+        status: "closed",
+        deterministicState: "sleeping",
+      };
+      const completedWorker: UppidiAgent = {
+        id: "w-completed",
+        shortId: "wcmp1",
+        name: "Completed Worker",
+        category: "worker",
+        status: "completed",
+        deterministicState: "sleeping",
+      };
+      const terminatedWorker: UppidiAgent = {
+        id: "w-term",
+        shortId: "wt1",
+        name: "Terminated Worker",
+        category: "worker",
+        status: "terminated",
+        deterministicState: "unknown",
+      };
+      const idleWaitingWorker: UppidiAgent = {
+        id: "w-idle",
+        shortId: "wi1",
+        name: "Idle Worker",
+        category: "worker",
+        status: "idle",
+        deterministicState: "idle:waiting",
+      };
+      const idleQuotaWorker: UppidiAgent = {
+        id: "w-idle-q",
+        shortId: "wiq1",
+        name: "Idle Quota Worker",
+        category: "worker",
+        status: "idle",
+        deterministicState: "idle:quota-exhausted",
+      };
+
+      assert.equal(isAgentEligibleForBulkArchive(closedWorker), true);
+      assert.equal(isAgentEligibleForBulkArchive(completedWorker), true);
+      assert.equal(isAgentEligibleForBulkArchive(terminatedWorker), true);
+      assert.equal(isAgentEligibleForBulkArchive(idleWaitingWorker), true);
+      assert.equal(isAgentEligibleForBulkArchive(idleQuotaWorker), true);
+    });
+
+    it("filterBulkArchiveCandidates filters out protected agents accurately", () => {
+      const fleet: UppidiAgent[] = [
+        {
+          id: "fd",
+          shortId: "fd",
+          name: "Front Desk",
+          category: "front-desk",
+          status: "idle",
+          deterministicState: "idle:waiting",
+        },
+        {
+          id: "orch",
+          shortId: "orch",
+          name: "Orchestrator",
+          category: "orchestrator",
+          status: "running",
+          deterministicState: "running",
+        },
+        {
+          id: "w-running",
+          shortId: "wr",
+          name: "Running Worker",
+          category: "worker",
+          status: "running",
+          deterministicState: "working",
+        },
+        {
+          id: "w-failed",
+          shortId: "wf",
+          name: "Failed Worker",
+          category: "worker",
+          status: "error",
+          deterministicState: "failed:spawn",
+        },
+        {
+          id: "w-idle",
+          shortId: "wi",
+          name: "Idle Worker",
+          category: "worker",
+          status: "idle",
+          deterministicState: "idle:waiting",
+        },
+        {
+          id: "w-completed",
+          shortId: "wc",
+          name: "Completed Worker",
+          category: "worker",
+          status: "completed",
+          deterministicState: "sleeping",
+        },
+      ];
+
+      const candidates = filterBulkArchiveCandidates(fleet);
+      assert.equal(candidates.length, 3);
+      assert.deepEqual(
+        candidates.map((c) => c.id),
+        ["w-failed", "w-idle", "w-completed"]
+      );
+    });
+  });
 });
+

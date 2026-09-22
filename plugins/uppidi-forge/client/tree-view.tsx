@@ -12,6 +12,7 @@ import {
   StatusDot,
   copyToClipboard,
   usePluginTheme,
+  useRpcMutation,
 } from "paseo-plugin-helper/client";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import {
@@ -22,7 +23,10 @@ import {
   type DeterministicStateConfig,
   getAgentCategoryIcon,
   getDeterministicStateConfig,
+  uppidiArchiveAgentContract,
+  uppidiArchiveInactiveAgentsContract,
 } from "../shared/contracts.js";
+import { filterBulkArchiveCandidates } from "../shared/sort-filter.js";
 
 export {
   type DeterministicStateConfig,
@@ -35,6 +39,9 @@ export interface UppidiForgeTreeViewProps {
   isLoading?: boolean;
   onRefresh?: () => void;
   navigation?: PluginSurfaceProps["navigation"];
+  onArchiveAgent?: (agentId: string) => Promise<void> | void;
+  onArchiveBulk?: () => Promise<void> | void;
+  isArchiving?: boolean;
 }
 
 interface FlattenedNode {
@@ -186,10 +193,21 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
   isLoading,
   onRefresh,
   navigation,
+  onArchiveAgent,
+  onArchiveBulk,
+  isArchiving = false,
 }) => {
   const { colors, typography } = usePluginTheme();
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState<string>("all");
+  const [localArchivingId, setLocalArchivingId] = useState<string | null>(null);
+  const [localBulkArchiving, setLocalBulkArchiving] = useState(false);
+
+  const archiveAgentMutation = useRpcMutation(uppidiArchiveAgentContract);
+  const archiveBulkMutation = useRpcMutation(uppidiArchiveInactiveAgentsContract);
+
+  const isBulkArchiving = isArchiving || localBulkArchiving;
+  const archivingAgentId = localArchivingId;
 
   const flattenedNodes = useMemo(() => {
     if (agentsData?.tree && agentsData.tree.length > 0) {
@@ -208,6 +226,50 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
     }
     return fallback;
   }, [agentsData]);
+
+  const allAgents = useMemo(() => {
+    return flattenedNodes.map((n) => n.agent);
+  }, [flattenedNodes]);
+
+  const eligibleBulkAgents = useMemo(() => {
+    return filterBulkArchiveCandidates(allAgents);
+  }, [allAgents]);
+
+  const eligibleBulkCount = eligibleBulkAgents.length;
+
+  const handleArchiveAgent = async (agentId: string) => {
+    try {
+      setLocalArchivingId(agentId);
+      if (onArchiveAgent) {
+        await onArchiveAgent(agentId);
+      } else {
+        await archiveAgentMutation.mutate({ agentId });
+        onRefresh?.();
+      }
+    } catch {
+      // Silently handled or toast-surfaced by caller
+    } finally {
+      setLocalArchivingId(null);
+    }
+  };
+
+  const handleBulkArchive = async () => {
+    if (eligibleBulkCount === 0 || isBulkArchiving) return;
+    try {
+      setLocalBulkArchiving(true);
+      if (onArchiveBulk) {
+        await onArchiveBulk();
+      } else {
+        const agentIds = eligibleBulkAgents.map((a) => a.id);
+        await archiveBulkMutation.mutate({ agentIds });
+        onRefresh?.();
+      }
+    } catch {
+      // Silently handled or toast-surfaced by caller
+    } finally {
+      setLocalBulkArchiving(false);
+    }
+  };
 
   const filteredNodes = useMemo(() => {
     return flattenedNodes.filter(({ agent }) => {
@@ -254,9 +316,19 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
             Hierarchical parent-child lineage with deterministic computable states.
           </Text>
         </Stack>
-        {onRefresh && (
-          <Button label="Refresh Fleet" icon="RefreshCw" variant="secondary" onPress={onRefresh} />
-        )}
+        <Row gap="xs" align="center">
+          <Button
+            label={`Archive Closed/Failed${eligibleBulkCount > 0 ? ` (${eligibleBulkCount})` : ""}`}
+            icon="Archive"
+            variant="secondary"
+            disabled={eligibleBulkCount === 0 || isBulkArchiving}
+            loading={isBulkArchiving}
+            onPress={handleBulkArchive}
+          />
+          {onRefresh && (
+            <Button label="Refresh Fleet" icon="RefreshCw" variant="secondary" onPress={onRefresh} />
+          )}
+        </Row>
       </Row>
 
       {/* Filter and Search Bar */}
@@ -400,7 +472,19 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
                           {formatRelativeTime(agent.lastActivityAt)}
                         </Text>
                       )}
+
+                      {/* Individual Archive Action Button (#402) */}
+                      <Button
+                        icon="Archive"
+                        variant="ghost"
+                        size="sm"
+                        accessibilityLabel={`Archive agent ${agent.name}`}
+                        disabled={archivingAgentId === agent.id}
+                        loading={archivingAgentId === agent.id}
+                        onPress={() => handleArchiveAgent(agent.id)}
+                      />
                     </Row>
+
                   </Row>
                 </Card>
               </View>

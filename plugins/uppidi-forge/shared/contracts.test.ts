@@ -12,7 +12,14 @@ import {
   UppidiAgentsOutputSchema,
   getDeterministicStateConfig,
   getAgentCategoryIcon,
+  UppidiArchiveAgentInputSchema,
+  UppidiArchiveAgentOutputSchema,
+  uppidiArchiveAgentContract,
+  UppidiArchiveInactiveAgentsInputSchema,
+  UppidiArchiveInactiveAgentsOutputSchema,
+  uppidiArchiveInactiveAgentsContract,
 } from "./contracts.js";
+
 
 describe("uppidi-forge shared contracts", () => {
   it("validates UppidiIssueSchema with defaults", () => {
@@ -215,4 +222,38 @@ describe("uppidi-forge shared contracts", () => {
     });
     assert.equal(agentWithoutUrl.url, undefined);
   });
+
+  it("validates archive contracts and schemas (#402)", () => {
+    assert.equal(uppidiArchiveAgentContract.name, "uppidi-forge.archive-agent");
+    assert.equal(uppidiArchiveInactiveAgentsContract.name, "uppidi-forge.archive-inactive-agents");
+
+    const inputOne = UppidiArchiveAgentInputSchema.parse({ agentId: "agent-123" });
+    assert.equal(inputOne.agentId, "agent-123");
+
+    const outputOne = UppidiArchiveAgentOutputSchema.parse({
+      ok: true,
+      agentId: "agent-123",
+      message: "Archived agent agent-123",
+    });
+    assert.equal(outputOne.ok, true);
+    assert.equal(outputOne.agentId, "agent-123");
+
+    const inputBulk = UppidiArchiveInactiveAgentsInputSchema.parse({
+      agentIds: ["agent-1", "agent-2"],
+    });
+    assert.deepEqual(inputBulk.agentIds, ["agent-1", "agent-2"]);
+
+    const inputBulkEmpty = UppidiArchiveInactiveAgentsInputSchema.parse({});
+    assert.equal(inputBulkEmpty.agentIds, undefined);
+
+    const outputBulk = UppidiArchiveInactiveAgentsOutputSchema.parse({
+      ok: true,
+      archivedCount: 2,
+      archivedIds: ["agent-1", "agent-2"],
+    });
+    assert.equal(outputBulk.ok, true);
+    assert.equal(outputBulk.archivedCount, 2);
+    assert.deepEqual(outputBulk.archivedIds, ["agent-1", "agent-2"]);
+  });
 });
+

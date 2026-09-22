@@ -7,7 +7,10 @@ import {
   extractAttributedWork,
   deriveDeterministicState,
   buildAgentTree,
+  handleUppidiArchiveAgent,
+  handleUppidiArchiveInactiveAgents,
 } from "./agents.js";
+
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel } from "./role-models.js";
 import { handleUppidiRunners } from "./runners.js";
 
@@ -234,3 +237,100 @@ describe("runner fleet status", () => {
     assert.ok(res.onlineCount >= 0);
   });
 });
+
+describe("archive agent actions (#402)", () => {
+  it("archives an individual agent via Paseo SDK", async () => {
+    let archivedId = "";
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          ref: (id: string) => ({
+            archive: async () => {
+              archivedId = id;
+              return { archivedAt: new Date().toISOString() };
+            },
+          }),
+        },
+      },
+    };
+
+    const res = await handleUppidiArchiveAgent({ agentId: "worker-1" }, mockContext);
+    assert.equal(res.ok, true);
+    assert.equal(res.agentId, "worker-1");
+    assert.equal(archivedId, "worker-1");
+  });
+
+  it("handles missing agentId gracefully", async () => {
+    const res = await handleUppidiArchiveAgent({ agentId: "" }, {} as any);
+    assert.equal(res.ok, false);
+    assert.ok(res.error?.includes("agentId is required"));
+  });
+
+  it("bulk archives inactive and failed agents while protecting running agents and orchestrators", async () => {
+    const archivedIds: string[] = [];
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              { agent: { id: "fd-1", name: "Front Desk", status: "idle" } },
+              { agent: { id: "orch-1", name: "Orchestrator · test", status: "idle" } },
+              { agent: { id: "worker-running", name: "Worker running", status: "running" } },
+              { agent: { id: "worker-failed", name: "Worker failed", status: "error" } },
+              { agent: { id: "worker-idle", name: "Worker idle", status: "idle" } },
+            ],
+          }),
+          ref: (id: string) => ({
+            archive: async () => {
+              archivedIds.push(id);
+              return { archivedAt: new Date().toISOString() };
+            },
+          }),
+        },
+      },
+    };
+
+    // Case 1: Pass explicit IDs including protected ones (fd-1, orch-1, worker-running)
+    const resWithTargetIds = await handleUppidiArchiveInactiveAgents(
+      {
+        agentIds: ["fd-1", "orch-1", "worker-running", "worker-failed", "worker-idle"],
+      },
+      mockContext
+    );
+
+    assert.equal(resWithTargetIds.ok, true);
+    assert.equal(resWithTargetIds.archivedCount, 2);
+    assert.deepEqual(resWithTargetIds.archivedIds, ["worker-failed", "worker-idle"]);
+    assert.deepEqual(archivedIds, ["worker-failed", "worker-idle"]);
+
+    // Case 2: No IDs passed, archives all eligible agents
+    archivedIds.length = 0;
+    const resBulkAll = await handleUppidiArchiveInactiveAgents({}, mockContext);
+    assert.equal(resBulkAll.ok, true);
+    assert.equal(resBulkAll.archivedCount, 2);
+    assert.deepEqual(resBulkAll.archivedIds, ["worker-failed", "worker-idle"]);
+    assert.deepEqual(archivedIds, ["worker-failed", "worker-idle"]);
+  });
+
+  it("handles empty candidate list gracefully", async () => {
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              { agent: { id: "fd-1", name: "Front Desk", status: "running" } },
+              { agent: { id: "worker-1", name: "Worker 1", status: "running" } },
+            ],
+          }),
+        },
+      },
+    };
+
+    const res = await handleUppidiArchiveInactiveAgents({}, mockContext);
+    assert.equal(res.ok, true);
+    assert.equal(res.archivedCount, 0);
+    assert.deepEqual(res.archivedIds, []);
+    assert.ok(res.message?.includes("No eligible"));
+  });
+});
+

@@ -41,6 +41,8 @@ import {
   uppidiSetRoleModelContract,
   uppidiRunnersContract,
   uppidiFleetMetricsContract,
+  uppidiArchiveAgentContract,
+  uppidiArchiveInactiveAgentsContract,
   type UppidiIssue,
   type AttentionLabel,
   type UppidiAgent,
@@ -58,6 +60,8 @@ import {
   sortAgents,
   filterRunners,
   sortRunners,
+  filterBulkArchiveCandidates,
+
   filterMetricCandidates,
   sortMetricCandidates,
   type IssuePreset,
@@ -215,6 +219,11 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
   const drainMutation = useRpcMutation(uppidiHookDrainContract);
   const serviceActionMutation = useRpcMutation(uppidiHookServiceActionContract);
   const setRoleModelMutation = useRpcMutation(uppidiSetRoleModelContract);
+  const archiveAgentMutation = useRpcMutation(uppidiArchiveAgentContract);
+  const archiveBulkMutation = useRpcMutation(uppidiArchiveInactiveAgentsContract);
+
+  const [archivingAgentId, setArchivingAgentId] = useState<string | null>(null);
+  const [isBulkArchiving, setIsBulkArchiving] = useState(false);
 
   const refetchAll = () => {
     void refetchIssues();
@@ -228,6 +237,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
     void refetchMetrics();
     toast.show("Dashboard refreshed");
   };
+
 
   const handleRoleModelChange = async (role: string, primaryModel: string) => {
     try {
@@ -335,6 +345,47 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
     ];
   }, [agentsData]);
 
+  const eligibleBulkAgents = useMemo(() => {
+    return filterBulkArchiveCandidates(allAgents);
+  }, [allAgents]);
+
+  const handleArchiveAgent = async (agentId: string) => {
+    try {
+      setArchivingAgentId(agentId);
+      const res = await archiveAgentMutation.mutateAsync({ agentId });
+      if (res.ok) {
+        toast.show(res.message || "Agent archived");
+      } else {
+        toast.error(res.error || "Failed to archive agent");
+      }
+      void refetchAgents();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setArchivingAgentId(null);
+    }
+  };
+
+  const handleArchiveBulk = async () => {
+    if (eligibleBulkAgents.length === 0 || isBulkArchiving) return;
+    try {
+      setIsBulkArchiving(true);
+      const agentIds = eligibleBulkAgents.map((a) => a.id);
+      const res = await archiveBulkMutation.mutateAsync({ agentIds });
+      if (res.ok) {
+        toast.show(res.message || `Archived ${res.archivedCount ?? agentIds.length} inactive agent(s)`);
+      } else {
+        toast.error(res.error || "Failed to archive inactive agents");
+      }
+      void refetchAgents();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsBulkArchiving(false);
+    }
+  };
+
+
   const visibleAgents = useMemo(() => {
     const filtered = filterAgents(allAgents, agentPreset, agentQuery);
     return sortAgents(filtered, agentSortField, agentSortDir);
@@ -382,7 +433,11 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
           isLoading={agentsLoading}
           onRefresh={refetchAgents}
           navigation={props.navigation}
+          onArchiveAgent={handleArchiveAgent}
+          onArchiveBulk={handleArchiveBulk}
+          isArchiving={isBulkArchiving}
         />
+
       ) : (
         <Stack gap={12}>
           {/* Header */}
@@ -722,6 +777,15 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                         }}
                       />
                     ))}
+                    <Button
+                      label={`Archive Closed/Failed${eligibleBulkAgents.length > 0 ? ` (${eligibleBulkAgents.length})` : ""}`}
+                      size="sm"
+                      variant="ghost"
+                      icon="Archive"
+                      disabled={eligibleBulkAgents.length === 0 || isBulkArchiving}
+                      loading={isBulkArchiving}
+                      onPress={handleArchiveBulk}
+                    />
                     <Button label="Refresh agents" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchAgents()} />
                   </Row>
                 </Row>
@@ -754,9 +818,20 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
                               </Row>
-                              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                                {a.provider || "default provider"}
-                              </Text>
+                              <Row align="center" gap="xs">
+                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                  {a.provider || "default provider"}
+                                </Text>
+                                <Button
+                                  icon="Archive"
+                                  size="sm"
+                                  variant="ghost"
+                                  accessibilityLabel={`Archive agent ${a.name}`}
+                                  disabled={archivingAgentId === a.id}
+                                  loading={archivingAgentId === a.id}
+                                  onPress={() => handleArchiveAgent(a.id)}
+                                />
+                              </Row>
                             </Row>
                             {a.cwd && (
                               <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
@@ -793,9 +868,20 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
                               </Row>
-                              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                                {a.provider || "default provider"}
-                              </Text>
+                              <Row align="center" gap="xs">
+                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                  {a.provider || "default provider"}
+                                </Text>
+                                <Button
+                                  icon="Archive"
+                                  size="sm"
+                                  variant="ghost"
+                                  accessibilityLabel={`Archive agent ${a.name}`}
+                                  disabled={archivingAgentId === a.id}
+                                  loading={archivingAgentId === a.id}
+                                  onPress={() => handleArchiveAgent(a.id)}
+                                />
+                              </Row>
                             </Row>
                             {a.cwd && (
                               <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
@@ -832,9 +918,20 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                                 <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
                                 <Badge label={a.shortId} variant="neutral" size="sm" />
                               </Row>
-                              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                                {a.provider || "default provider"}
-                              </Text>
+                              <Row align="center" gap="xs">
+                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                                  {a.provider || "default provider"}
+                                </Text>
+                                <Button
+                                  icon="Archive"
+                                  size="sm"
+                                  variant="ghost"
+                                  accessibilityLabel={`Archive agent ${a.name}`}
+                                  disabled={archivingAgentId === a.id}
+                                  loading={archivingAgentId === a.id}
+                                  onPress={() => handleArchiveAgent(a.id)}
+                                />
+                              </Row>
                             </Row>
                             {a.cwd && (
                               <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>

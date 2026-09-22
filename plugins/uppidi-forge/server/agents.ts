@@ -10,7 +10,13 @@ import type {
   UppidiAgentTreeNode,
   UppidiAgentWork,
   DeterministicAgentState,
+  UppidiArchiveAgentInput,
+  UppidiArchiveAgentOutput,
+  UppidiArchiveInactiveAgentsInput,
+  UppidiArchiveInactiveAgentsOutput,
 } from "../shared/contracts.js";
+import { isAgentEligibleForBulkArchive } from "../shared/sort-filter.js";
+
 
 const execFileAsync = promisify(execFile);
 
@@ -494,3 +500,123 @@ export async function handleUppidiAgents(
     };
   }
 }
+
+export async function handleUppidiArchiveAgent(
+  input: UppidiArchiveAgentInput,
+  context: PluginHandlerContext
+): Promise<UppidiArchiveAgentOutput> {
+  const agentId = input.agentId?.trim();
+  if (!agentId) {
+    return { ok: false, error: "agentId is required" };
+  }
+
+  // 1. Try SDK context.paseo.agents.ref(agentId).archive()
+  if (context?.paseo?.agents?.ref) {
+    try {
+      const ref = context.paseo.agents.ref(agentId);
+      if (typeof ref?.archive === "function") {
+        await ref.archive();
+        return { ok: true, agentId, message: `Archived agent ${agentId}` };
+      }
+    } catch (err: any) {
+      // Fall through to CLI fallback
+    }
+  }
+
+  // 2. Fallback to CLI: paseo archive <agentId>
+  try {
+    await execFileAsync("paseo", ["archive", agentId], {
+      timeout: 5000,
+      encoding: "utf-8",
+    });
+    return { ok: true, agentId, message: `Archived agent ${agentId}` };
+  } catch (err: any) {
+    return {
+      ok: false,
+      agentId,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+export async function handleUppidiArchiveInactiveAgents(
+  input: UppidiArchiveInactiveAgentsInput,
+  context: PluginHandlerContext
+): Promise<UppidiArchiveInactiveAgentsOutput> {
+  try {
+    const agents = await fetchPaseoAgents(context);
+    const agentMap = new Map(agents.map((a) => [a.id, a]));
+
+    let targetIds: string[] = [];
+    if (input.agentIds && input.agentIds.length > 0) {
+      for (const id of input.agentIds) {
+        const agent = agentMap.get(id);
+        // Safety guard: ensure agent exists and is eligible for bulk archive
+        if (agent && isAgentEligibleForBulkArchive(agent)) {
+          targetIds.push(id);
+        }
+      }
+    } else {
+      targetIds = agents.filter(isAgentEligibleForBulkArchive).map((a) => a.id);
+    }
+
+    if (targetIds.length === 0) {
+      return {
+        ok: true,
+        archivedCount: 0,
+        archivedIds: [],
+        message: "No eligible inactive agents found to archive",
+      };
+    }
+
+    const archivedIds: string[] = [];
+    const errors: string[] = [];
+
+    for (const id of targetIds) {
+      let success = false;
+      if (context?.paseo?.agents?.ref) {
+        try {
+          const ref = context.paseo.agents.ref(id);
+          if (typeof ref?.archive === "function") {
+            await ref.archive();
+            success = true;
+          }
+        } catch {
+          // Fall through to CLI
+        }
+      }
+
+      if (!success) {
+        try {
+          await execFileAsync("paseo", ["archive", id], {
+            timeout: 5000,
+            encoding: "utf-8",
+          });
+          success = true;
+        } catch (err: any) {
+          errors.push(`Failed to archive agent ${id}: ${err?.message || String(err)}`);
+        }
+      }
+
+      if (success) {
+        archivedIds.push(id);
+      }
+    }
+
+    return {
+      ok: errors.length === 0 || archivedIds.length > 0,
+      archivedCount: archivedIds.length,
+      archivedIds,
+      message: `Archived ${archivedIds.length} inactive agent(s)`,
+      error: errors.length > 0 ? errors.join("; ") : undefined,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      archivedCount: 0,
+      archivedIds: [],
+      error: err?.message || String(err),
+    };
+  }
+}
+

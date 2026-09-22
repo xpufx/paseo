@@ -555,3 +555,46 @@ export const uppidiFleetMetricsContract = defineContract({
   input: UppidiFleetMetricsInputSchema,
   output: UppidiFleetMetricsOutputSchema,
 });
+
+// Agent Archive Contracts (Issue #402)
+export const UppidiArchiveAgentInputSchema = z.object({
+  agentId: z.string(),
+});
+export type UppidiArchiveAgentInput = z.infer<typeof UppidiArchiveAgentInputSchema>;
+
+export const UppidiArchiveAgentOutputSchema = z.object({
+  ok: z.boolean(),
+  agentId: z.string().optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiArchiveAgentOutput = z.infer<typeof UppidiArchiveAgentOutputSchema>;
+
+export const uppidiArchiveAgentContract = defineContract({
+  name: "uppidi-forge.archive-agent",
+  description: "Archive an individual Paseo agent",
+  input: UppidiArchiveAgentInputSchema,
+  output: UppidiArchiveAgentOutputSchema,
+});
+
+export const UppidiArchiveInactiveAgentsInputSchema = z.object({
+  agentIds: z.array(z.string()).optional(),
+});
+export type UppidiArchiveInactiveAgentsInput = z.infer<typeof UppidiArchiveInactiveAgentsInputSchema>;
+
+export const UppidiArchiveInactiveAgentsOutputSchema = z.object({
+  ok: z.boolean(),
+  archivedCount: z.number().default(0),
+  archivedIds: z.array(z.string()).default([]),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiArchiveInactiveAgentsOutput = z.infer<typeof UppidiArchiveInactiveAgentsOutputSchema>;
+
+export const uppidiArchiveInactiveAgentsContract = defineContract({
+  name: "uppidi-forge.archive-inactive-agents",
+  description: "Bulk archive inactive, closed, or failed agents (never running, working, or orchestrator/frontdesk)",
+  input: UppidiArchiveInactiveAgentsInputSchema,
+  output: UppidiArchiveInactiveAgentsOutputSchema,
+});
+
