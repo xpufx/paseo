@@ -2,7 +2,7 @@
 # opens an issue or posts an issue comment, make sure the exclusive
 # `attention/0-orchestrator` label is the effective attention signal.
 #
-# Why a host-mode runner: this is a handful of curl/jq calls, so there is no
+# Why a host-mode runner: this is a handful of HTTP API calls, so there is no
 # reason to pay for a container image to be pulled/started. A runner registered
 # with a `host`-backend label executes the steps directly on the host, which is
 # faster and cheaper for small operations.
@@ -12,8 +12,16 @@
 # label name. No `container:` block is present on purpose: that is what selects
 # the host backend.
 #
-# RUNTIME DEPENDENCIES: host mode runs on the host, so the host itself must
-# provide `curl` and `jq`. The workflow fails loudly if either is missing.
+# RUNTIME DEPENDENCIES: host mode runs on the host, so tooling varies across
+# runner instances. Some host runners provide full tooling (`curl` and `jq`),
+# while others (such as minimal BusyBox hosts) only provide `wget` without
+# `curl` or `jq`. This workflow adopts a dual capability / graceful fallback
+# design:
+#   - HTTP client: prefers `curl` when present, falling back to BusyBox `wget`
+#     (using BusyBox-supported options `--header`, `--post-data`, `-q`, `-O -`).
+#     The workflow fails with an error if neither `curl` nor `wget` is found.
+#   - JSON processing: prefers `jq` when present, falling back to regular
+#     expression matching (`grep -Eq`) when `jq` is absent.
 #
 # Trigger conditions
 #   - issues        : opened   (a new issue)
@@ -71,8 +79,21 @@ jobs:
         run: |
           set -eu
 
-          command -v curl >/dev/null 2>&1 || { echo "::error::curl is required on the host runner"; exit 1; }
-          command -v jq   >/dev/null 2>&1 || { echo "::error::jq is required on the host runner";   exit 1; }
+          have_curl=0
+          have_wget=0
+          if command -v curl >/dev/null 2>&1; then
+            have_curl=1
+          elif command -v wget >/dev/null 2>&1; then
+            have_wget=1
+          else
+            echo "::error::neither curl nor wget is available on the host runner"
+            exit 1
+          fi
+
+          have_jq=0
+          if command -v jq >/dev/null 2>&1; then
+            have_jq=1
+          fi
 
           # All agents share the `xpufx` account: that actor is automated, not a
           # human, so there is nothing to do.
@@ -83,17 +104,60 @@ jobs:
 
           auth_header="Authorization: token ${FORGEJO_TOKEN}"
 
+          # GET a URL's body to stdout. Prefers curl; falls back to BusyBox wget.
+          api_get() {
+            if [ "$have_curl" = 1 ]; then
+              curl -fsS -H "$auth_header" "$1"
+            else
+              wget -q -O - --header "$auth_header" "$1"
+            fi
+          }
+
+          # POST a JSON payload to a URL. Prefers curl; falls back to BusyBox wget.
+          api_post() {
+            if [ "$have_curl" = 1 ]; then
+              curl -fsS -X POST -H "$auth_header" -H "Content-Type: application/json" -d "$2" "$1" >/dev/null
+            else
+              wget -q -O - --post-data "$2" --header "$auth_header" --header "Content-Type: application/json" "$1" >/dev/null
+            fi
+          }
+
+          # True when the issue object carries a non-null `pull_request` (i.e.
+          # the event is for a PR). Forgejo omits the field entirely for real
+          # issues, so its presence as an object is authoritative.
+          is_pull_request() {
+            if [ "$have_jq" = 1 ]; then
+              printf '%s' "$1" | jq -r '.pull_request != null' | grep -q '^true$'
+            else
+              printf '%s' "$1" | grep -Eq '"pull_request"[[:space:]]*:[[:space:]]*\{'
+            fi
+          }
+
+          # True when the issue or labels array contains the label name.
+          has_orchestrator_label() {
+            case "$1" in \[* | [[:space:]]*\[*) set -- "{\"labels\":$1}" ;; esac
+            if [ "$have_jq" = 1 ]; then
+              printf '%s' "$1" | jq -r 'any(.labels[]? // .[]; .name == "attention/0-orchestrator")' | grep -q '^true$'
+            else
+              printf '%s' "$1" | grep -Eq '"name"[[:space:]]*:[[:space:]]*"attention/0-orchestrator"'
+            fi
+          }
+
           # Skip pull requests. The workflow targets issues; a PR comment shares
           # the same event shape, and the issues API reports `pull_request` for
           # a PR, so this is the authoritative check.
-          issue_json="$(curl -fsS -H "$auth_header" "${API_URL}/repos/${REPO}/issues/${ISSUE}")"
-          if [ "$(printf '%s' "$issue_json" | jq -r '.pull_request != null')" = "true" ]; then
+          issue_json="$(api_get "${API_URL}/repos/${REPO}/issues/${ISSUE}")"
+          if [ -z "$issue_json" ]; then
+            echo "::error::empty response fetching issue #${ISSUE} (HTTP error or auth failure?)"
+            exit 1
+          fi
+          if is_pull_request "$issue_json"; then
             echo "issue #${ISSUE} is a pull request; skipping"
             exit 0
           fi
 
           # Already triaged: `attention/0-orchestrator` is present, no-op.
-          if [ "$(printf '%s' "$issue_json" | jq -r 'any(.labels[]?; .name == "attention/0-orchestrator")')" = "true" ]; then
+          if has_orchestrator_label "$issue_json"; then
             echo "issue #${ISSUE} already has attention/0-orchestrator; nothing to do"
             exit 0
           fi
@@ -101,14 +165,12 @@ jobs:
           # Add it. Because `attention/*` is an exclusive scope, this single add
           # evicts whatever attention label is currently set.
           echo "human actor '${ACTOR}' on issue #${ISSUE}: setting attention/0-orchestrator"
-          curl -fsS -X POST -H "$auth_header" -H "Content-Type: application/json" \
-            -d '{"labels":["attention/0-orchestrator"]}' \
-            "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels" >/dev/null
+          api_post "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels" '{"labels":["attention/0-orchestrator"]}'
 
           # Confirm the write landed (and that the label is defined on the repo);
           # a silent drop would otherwise leave the board's signal wrong.
-          labels_json="$(curl -fsS -H "$auth_header" "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels")"
-          if [ "$(printf '%s' "$labels_json" | jq -r 'any(.[]; .name == "attention/0-orchestrator")')" != "true" ]; then
+          labels_json="$(api_get "${API_URL}/repos/${REPO}/issues/${ISSUE}/labels")"
+          if ! has_orchestrator_label "$labels_json"; then
             echo "::error::attention/0-orchestrator was not applied to issue #${ISSUE} (is the label defined on the repo?)"
             exit 1
           fi
