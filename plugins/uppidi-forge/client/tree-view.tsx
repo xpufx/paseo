@@ -92,16 +92,17 @@ export function AgentStatusLight({
   size = 8,
 }: AgentStatusLightProps) {
   const [hovered, setHovered] = useState(false);
+  const { colors } = usePluginTheme();
   const color = getStatusLightColor(agent);
   const isWorking = color === STATUS_LIGHT_GREEN;
 
-  const statusText =
+  const statusDetail =
     agent.stateDetail
       ? `${agent.deterministicState || agent.status}: ${agent.stateDetail}`
       : agent.deterministicState && agent.deterministicState !== "unknown"
       ? agent.deterministicState
       : agent.status || "idle";
-  const tooltip = `${agent.name} (${statusText})`;
+  const tooltip = `${agent.name} (${statusDetail})`;
 
   const handlePress = (e?: any) => {
     e?.stopPropagation?.();
@@ -138,10 +139,71 @@ export function AgentStatusLight({
         justifyContent: "center",
         cursor: "pointer",
         opacity: pressed ? 0.7 : 1,
-        transform: [{ scale: hovered ? 1.3 : 1 }],
+        position: "relative",
+        overflow: "visible",
       })}
     >
-      <AgentStateDot color={color} pulse={isWorking} size={size} />
+      <View style={{ transform: [{ scale: hovered ? 1.3 : 1 }] }}>
+        <AgentStateDot color={color} pulse={isWorking} size={size} />
+      </View>
+      {hovered && (
+        <View
+          // @ts-ignore RN web accessibilityRole
+          accessibilityRole={"tooltip" as any}
+          testID="agent-status-light-tooltip"
+          style={{
+            position: "absolute",
+            bottom: size + 6,
+            left: "50%",
+            transform: [{ translateX: "-50%" as any }],
+            zIndex: 100,
+            pointerEvents: "none" as any,
+            backgroundColor: (colors as any).surfaceRaised || colors.surface2 || colors.surface1 || "#1e293b",
+            borderColor: colors.border || "#334155",
+            borderWidth: 1,
+            borderRadius: 9999,
+            paddingHorizontal: 8,
+            paddingVertical: 3,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.35,
+            shadowRadius: 4,
+            elevation: 5,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            whiteSpace: "nowrap" as any,
+          } as any}
+        >
+          <View
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: color,
+            }}
+          />
+          <Text
+            style={{
+              color: colors.foreground || "#f8fafc",
+              fontSize: 11,
+              fontWeight: "600",
+              whiteSpace: "nowrap" as any,
+            } as any}
+          >
+            {agent.name}
+          </Text>
+          <Text
+            style={{
+              color: colors.foregroundMuted || "#94a3b8",
+              fontSize: 10,
+              whiteSpace: "nowrap" as any,
+            } as any}
+          >
+            ({statusDetail})
+          </Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -165,7 +227,7 @@ export function AgentStatusLightsRow({
   if (!agents || agents.length === 0) return null;
 
   return (
-    <Row align="center" gap={gap} style={{ flexWrap: "wrap", alignItems: "center" }}>
+    <Row align="center" gap={gap} style={{ flexWrap: "wrap", alignItems: "center", overflow: "visible" }}>
       {agents.map((agent) => (
         <AgentStatusLight
           key={agent.id}
@@ -360,10 +422,11 @@ export function FrontDeskHero({
           borderLeftWidth: 4,
           borderLeftColor: colors.foregroundMuted,
           borderRadius: 8,
+          overflow: "visible",
         }}
       >
-        <Stack gap={8}>
-          <Row justify="space-between" align="center" wrap gap="sm">
+        <Stack gap={8} style={{ overflow: "visible" }}>
+          <Row justify="space-between" align="center" wrap gap="sm" style={{ overflow: "visible" }}>
             <Row align="center" gap="sm">
               <Icon name="Inbox" size={18} color={colors.foregroundMuted} />
               <Stack gap={2}>
@@ -406,9 +469,10 @@ export function FrontDeskHero({
                 borderTopColor: colors.border,
                 paddingTop: 8,
                 marginTop: 2,
+                overflow: "visible",
               }}
             >
-              <Row align="center" gap="xs">
+              <Row align="center" gap="xs" style={{ overflow: "visible" }}>
                 <Icon name="Network" size={13} color={colors.foregroundMuted} />
                 <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
                   Orchestrators ({orchestrators.length}):
@@ -444,12 +508,13 @@ export function FrontDeskHero({
         borderLeftWidth: 4,
         borderLeftColor: primaryStateConfig.color,
         borderRadius: 8,
+        overflow: "visible",
       }}
     >
-      <Stack gap={10}>
-        <Row justify="space-between" align="center" wrap gap="sm">
+      <Stack gap={10} style={{ overflow: "visible" }}>
+        <Row justify="space-between" align="center" wrap gap="sm" style={{ overflow: "visible" }}>
           {/* Left: Status Light, Icon, Titles & Worktree */}
-          <Row align="center" gap="sm" style={{ flexShrink: 1 }}>
+          <Row align="center" gap="sm" style={{ flexShrink: 1, overflow: "visible" }}>
             <AgentStatusLight
               agent={primaryAgent}
               navigation={navigation}
@@ -570,9 +635,10 @@ export function FrontDeskHero({
               borderTopColor: colors.border,
               paddingTop: 8,
               marginTop: 2,
+              overflow: "visible",
             }}
           >
-            <Row align="center" gap="xs">
+            <Row align="center" gap="xs" style={{ overflow: "visible" }}>
               <Icon name="Network" size={13} color={colors.foregroundMuted} />
               <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
                 Fleet Orchestrators ({orchestrators.length}):
@@ -736,6 +802,7 @@ export function DenseAgentRow({
       style={{
         paddingLeft: indentPadding,
         paddingVertical: 1,
+        overflow: "visible",
       }}
     >
       <View
@@ -750,11 +817,12 @@ export function DenseAgentRow({
           backgroundColor: isHovered
             ? (alpha?.(colors.accent, 0.05) || colors.surface1 || "rgba(255,255,255,0.04)")
             : "transparent",
+          overflow: "visible",
         }}
       >
-        <Row justify="space-between" align="center" wrap gap="xs">
+        <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
           {/* Left side: Guide connector, status dot, icon, title, shortId */}
-          <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200 }}>
+          <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200, overflow: "visible" }}>
             <View
               style={{
                 width: 18,
@@ -879,6 +947,7 @@ export function DenseAgentRow({
             paddingLeft: 8,
             marginTop: 2,
             marginBottom: 2,
+            overflow: "visible",
           }}
         >
           {node.children.map((child, idx) => (
@@ -962,11 +1031,12 @@ export function OrchestratorRow({
         backgroundColor: isHovered
           ? (alpha?.(colors.accent, 0.05) || colors.surface1 || "rgba(255,255,255,0.04)")
           : "transparent",
+        overflow: "visible",
       }}
     >
-      <Row justify="space-between" align="center" wrap gap="xs">
+      <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
         {/* Left: Guide connector, Expand toggle, Indicator, Icon, Title Link, Badges */}
-        <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200 }}>
+        <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200, overflow: "visible" }}>
           <View
             style={{
               width: 18,
@@ -1036,7 +1106,7 @@ export function OrchestratorRow({
 
           {/* Child agent status lights side by side (#410) */}
           {childAgents.length > 0 && (
-            <Row align="center" gap="xs" style={{ marginLeft: 4, alignItems: "center" }}>
+            <Row align="center" gap="xs" style={{ marginLeft: 4, alignItems: "center", overflow: "visible" }}>
               <AgentStatusLightsRow
                 agents={childAgents}
                 navigation={navigation}
@@ -1152,6 +1222,7 @@ export function ProjectGroupCard({
       style={{
         paddingVertical: 2,
         opacity: group.isMuted ? 0.65 : 1,
+        overflow: "visible",
       }}
     >
       <Stack gap={4}>
@@ -1309,6 +1380,7 @@ export function ProjectGroupCard({
               marginLeft: 14,
               paddingLeft: 6,
               marginTop: 2,
+              overflow: "visible",
             }}
           >
             {group.totalCount === 0 ? (
