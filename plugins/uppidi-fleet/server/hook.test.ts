@@ -12,6 +12,14 @@ import {
   getActiveHookRouter,
   clearHookLogs,
 } from "./hook-router.js";
+import {
+  getUppidiFleetSettingsStorage,
+  migrateLegacyConfigIfNeeded,
+  getLegacyRouterConfig,
+} from "./settings.js";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("uppidi-fleet hook server handlers", () => {
   let prevHookPort: string | undefined;
@@ -140,5 +148,44 @@ describe("uppidi-fleet hook server handlers", () => {
     assert.equal(reconfiguredStatus.configuredHost, "127.0.0.1");
 
     await handleHookServiceAction({ action: "stop" });
+  });
+  it("persists hook configuration into plugin settings and migrates legacy config (#444)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "uppidi-settings-test-"));
+    try {
+      const legacyPath = join(tmpDir, "legacy-router-config.json");
+      writeFileSync(
+        legacyPath,
+        JSON.stringify({
+          host: "192.168.1.50",
+          port: 8123,
+          enrolledRepos: ["xpufx-org/paseo"],
+          mutedRepos: ["xpufx-org/muted"],
+        }),
+        "utf8",
+      );
+
+      const storage = getUppidiFleetSettingsStorage({ baseDir: tmpDir });
+      const migrated = migrateLegacyConfigIfNeeded(storage, legacyPath);
+      assert.equal(migrated, true);
+
+      const loaded = storage.read();
+      assert.equal(loaded.hookHost, "192.168.1.50");
+      assert.equal(loaded.hookPort, 8123);
+      assert.deepEqual(loaded.enrolledRepos, ["xpufx-org/paseo"]);
+      assert.deepEqual(loaded.mutedRepos, ["xpufx-org/muted"]);
+
+      // Verify handleHookConfigure updates settings
+      await handleHookServiceAction({ action: "start" });
+      const configureResult = await handleHookConfigure({
+        host: "127.0.0.1",
+        port: 0,
+        restart: true,
+      });
+      assert.equal(configureResult.ok, true);
+
+      await handleHookServiceAction({ action: "stop" });
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

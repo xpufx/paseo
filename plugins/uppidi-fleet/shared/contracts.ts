@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineContract } from "paseo-plugin-helper/shared";
+import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 
 export const AttentionLabelSchema = z.enum([
   "attention/0-orchestrator",
@@ -771,6 +771,22 @@ export const uppidiToggleRepoMuteContract = defineContract({
   description: "Toggle per-repository webhook muting / circuit breaker",
   input: UppidiToggleRepoMuteInputSchema,
   output: UppidiToggleRepoMuteOutputSchema,
+});
+
+// Uppidi Fleet Plugin Settings Contract (Issue #444)
+export const uppidiFleetSettingsSchema = z.object({
+  hookHost: z.string().default("127.0.0.1"),
+  hookPort: z.number().int().min(1).max(65535).default(8099),
+  density: z.enum(["dense", "standard"]).default("dense"),
+  enrolledRepos: z.array(z.string()).default([]),
+  mutedRepos: z.array(z.string()).default([]),
+});
+export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
+
+export const uppidiFleetSettingsContract = defineSettingsContract({
+  name: "uppidi-fleet.settings",
+  description: "Uppidi Fleet plugin settings",
+  schema: uppidiFleetSettingsSchema,
 });
 
 /**
