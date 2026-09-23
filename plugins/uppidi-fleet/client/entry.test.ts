@@ -209,4 +209,179 @@ describe("uppidi-fleet client entry contract", () => {
       "AgentStatusLightsRow must ensure overflow: visible to prevent clipping floating tooltips",
     );
   });
+
+  describe("Cockpit density, unified header, and modal selection (#425, #424)", () => {
+    const surfacePath = path.resolve(__dirname, "surface.tsx");
+    const surfaceSource = fs.readFileSync(surfacePath, "utf8");
+
+    it("verifies default navigation tab is tree and tab ordering (#425)", () => {
+      // 1. Default activeTab is 'tree'
+      assert.match(
+        surfaceSource,
+        /useState<SurfaceTab>\(\s*["']tree["']\s*\)/,
+        "default activeTab must be 'tree'",
+      );
+
+      // 2. Tab order: tree first, then dashboard, then mockup
+      assert.match(
+        surfaceSource,
+        /id:\s*["']tree["'][\s\S]*id:\s*["']dashboard["'][\s\S]*id:\s*["']mockup["']/,
+        "tabs order must be tree, dashboard, mockup",
+      );
+
+      // 3. Tab labels
+      assert.match(
+        surfaceSource,
+        /label:\s*["']Agents & Fleet["']/,
+        "tree tab must have label 'Agents & Fleet'",
+      );
+      assert.match(
+        surfaceSource,
+        /label:\s*["']Work Queue["']/,
+        "dashboard tab must have label 'Work Queue'",
+      );
+    });
+
+    it("verifies density state and localStorage persistence (#425)", () => {
+      assert.match(
+        surfaceSource,
+        /export\s+const\s+DENSITY_STORAGE_KEY\s*=\s*["']uppidi-fleet-density["']/,
+        "must define DENSITY_STORAGE_KEY as 'uppidi-fleet-density'",
+      );
+      assert.match(
+        surfaceSource,
+        /export\s+function\s+getStoredDensity\(\)/,
+        "must export getStoredDensity helper",
+      );
+      assert.match(
+        surfaceSource,
+        /export\s+function\s+setStoredDensity\(/,
+        "must export setStoredDensity helper",
+      );
+      assert.match(
+        surfaceSource,
+        /useState<SurfaceDensity>\(getStoredDensity\)/,
+        "must initialize density state using getStoredDensity()",
+      );
+    });
+
+    it("verifies compact unified top header bar (#424)", () => {
+      assert.match(
+        surfaceSource,
+        /export\s+function\s+UppidiTopHeaderBar/,
+        "must export UppidiTopHeaderBar component",
+      );
+      assert.match(
+        surfaceSource,
+        /<UppidiBrandMark\s+size=\{density\s*===\s*["']dense["']\s*\?\s*18\s*:\s*20\}/,
+        "UppidiTopHeaderBar must render compact brand mark",
+      );
+      assert.match(
+        surfaceSource,
+        /label=["']Dense["'][\s\S]*label=["']Standard["']/,
+        "UppidiTopHeaderBar must render Dense and Standard density selector buttons",
+      );
+      assert.match(
+        surfaceSource,
+        /<Select[\s\S]*value=\{selectedRepo\}[\s\S]*options=\{repoOptions\}/,
+        "UppidiTopHeaderBar must render global repository Select dropdown",
+      );
+    });
+
+    it("verifies dense metrics bar strip (#424)", () => {
+      // Must contain all 4 key metrics in horizontal strip
+      assert.match(
+        surfaceSource,
+        /Open issues:/,
+        "dense metrics bar must include 'Open issues:'",
+      );
+      assert.match(
+        surfaceSource,
+        /Needs your attention:/,
+        "dense metrics bar must include 'Needs your attention:'",
+      );
+      assert.match(
+        surfaceSource,
+        /Awaiting review:/,
+        "dense metrics bar must include 'Awaiting review:'",
+      );
+      assert.match(
+        surfaceSource,
+        /Hook queued:/,
+        "dense metrics bar must include 'Hook queued:'",
+      );
+
+      // Must support click-to-filter
+      assert.match(
+        surfaceSource,
+        /setFilter\(\s*["']needs-attention["']\s*\)/,
+        "dense metrics bar must support click-to-filter for needs-attention",
+      );
+      assert.match(
+        surfaceSource,
+        /setFilter\(\s*["']triage-review["']\s*\)/,
+        "dense metrics bar must support click-to-filter for triage-review",
+      );
+    });
+
+    it("verifies center modal for selected work and full-width work queue (#425)", () => {
+      // 1. Full-width work queue card (no Grid columns={3} side-split)
+      assert.doesNotMatch(
+        surfaceSource,
+        /<Grid\s+columns=\{3\}[^>]*>\s*<Stack[^>]*>\s*<Card[^>]*>\s*<CardHeader[^>]*title=["']Work queue["']/,
+        "must not use 3-column side-split pane for work queue and selected work",
+      );
+
+      assert.match(
+        surfaceSource,
+        /<Card\s+variant=["']elevated["']\s+style=\{\{\s*width:\s*["']100%["']\s*\}\}>/,
+        "Work queue Card must take 100% full width",
+      );
+
+      // 2. Selected work opens in centered Modal with ModalContent size='large'
+      assert.match(
+        surfaceSource,
+        /<Modal[\s\S]*open=\{selectedNumber\s*!==\s*null\}[\s\S]*<ModalContent\s+size=["']large["']>/,
+        "selected work must open in centered Modal with ModalContent size='large'",
+      );
+
+      // 3. Modal contains key actions and branch info
+      assert.match(
+        surfaceSource,
+        /label=["']Dispatch Worktree["']/,
+        "modal must render Dispatch Worktree action button",
+      );
+      assert.match(
+        surfaceSource,
+        /label=["']Close["'][\s\S]*setSelectedNumber\(null\)/,
+        "modal must render Close button that sets selectedNumber to null",
+      );
+      assert.match(
+        surfaceSource,
+        /label=["']Worktree branch["']/,
+        "modal must display worktree branch with copyable afforance",
+      );
+    });
+
+    it("verifies tree-view supports density and selectedRepo filtering (#425)", () => {
+      const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+      const treeViewSource = fs.readFileSync(treeViewPath, "utf8");
+
+      assert.match(
+        treeViewSource,
+        /density\?:?\s*["']dense["']\s*\|\s*["']standard["']/,
+        "UppidiFleetTreeViewProps must declare density prop",
+      );
+      assert.match(
+        treeViewSource,
+        /selectedRepo\?:?\s*string/,
+        "UppidiFleetTreeViewProps must declare selectedRepo prop",
+      );
+      assert.match(
+        treeViewSource,
+        /isRepoMatching\(\s*g\.projectName,\s*selectedRepo\s*\)/,
+        "tree-view must filter enrolled and detached groups with isRepoMatching",
+      );
+    });
+  });
 });

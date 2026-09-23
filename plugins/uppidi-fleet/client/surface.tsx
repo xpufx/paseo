@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { Linking, Text, View } from "react-native";
+import { Linking, Pressable, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { useToast } from "@getpaseo/plugin/client/react-native";
+import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   ActionBar,
   Badge,
@@ -18,8 +18,11 @@ import {
   KeyValue,
   KeyValueGroup,
   ModalBody,
+  ModalContent,
   Row,
   SearchInput,
+  Select,
+  type SelectOption,
   Stack,
   StatusDot,
   Tabs,
@@ -65,9 +68,9 @@ import {
   filterRunners,
   sortRunners,
   filterBulkArchiveCandidates,
-
   filterMetricCandidates,
   sortMetricCandidates,
+  isRepoMatching,
   type IssuePreset,
   type IssueSortField,
   type QueuePreset,
@@ -89,7 +92,30 @@ import {
   getDeterministicStateConfig,
 } from "./tree-view.js";
 
-type SurfaceTab = "dashboard" | "tree" | "mockup";
+export type SurfaceTab = "tree" | "dashboard" | "mockup";
+
+export const DENSITY_STORAGE_KEY = "uppidi-fleet-density";
+export type SurfaceDensity = "dense" | "standard";
+
+export function getStoredDensity(): SurfaceDensity {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const val = localStorage.getItem(DENSITY_STORAGE_KEY);
+      if (val === "standard" || val === "dense") {
+        return val;
+      }
+    }
+  } catch {}
+  return "dense";
+}
+
+export function setStoredDensity(density: SurfaceDensity): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(DENSITY_STORAGE_KEY, density);
+    }
+  } catch {}
+}
 
 const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
   { id: "all", label: "All work" },
@@ -100,8 +126,8 @@ const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
 ];
 
 const tabs = [
-  { id: "dashboard", label: "Dashboard", shortLabel: "Dashboard", icon: "LayoutDashboard" },
-  { id: "tree", label: "Fleet Tree", shortLabel: "Tree", icon: "FolderTree" },
+  { id: "tree", label: "Agents & Fleet", shortLabel: "Fleet", icon: "FolderTree" },
+  { id: "dashboard", label: "Work Queue", shortLabel: "Queue", icon: "LayoutDashboard" },
   { id: "mockup", label: "Static mockup", shortLabel: "Mockup", icon: "PanelTop" },
 ];
 
@@ -137,10 +163,141 @@ export function UppidiBrandMark({ size = 20, color }: { size?: number; color?: s
   );
 }
 
+export interface UppidiTopHeaderBarProps {
+  isConnected: boolean;
+  isServiceRunning: boolean;
+  selectedRepo: string;
+  repoOptions: SelectOption[];
+  onRepoChange: (repo: string) => void;
+  density: SurfaceDensity;
+  onDensityChange: (density: SurfaceDensity) => void;
+  onRefresh: () => void;
+}
+
+/**
+ * Compact Unified Header Bar (#424, #425)
+ * Merges brand mark, Cockpit title, Uppidi Fleet badge, router status,
+ * global repo selector, stateful sizing selector, and refresh button into a single tight row.
+ * Multi-line subtitle descriptions are eliminated to reduce vertical footprint by >50%.
+ */
+export function UppidiTopHeaderBar({
+  isConnected,
+  isServiceRunning,
+  selectedRepo,
+  repoOptions,
+  onRepoChange,
+  density,
+  onDensityChange,
+  onRefresh,
+}: UppidiTopHeaderBarProps) {
+  const { colors, typography } = usePluginTheme();
+
+  return (
+    <Row justify="space-between" align="center" wrap gap="xs" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
+      {/* Left: Brand mark, title, status dots & badges */}
+      <Row align="center" gap="xs" wrap>
+        <UppidiBrandMark size={density === "dense" ? 18 : 20} />
+        <StatusDot variant={isConnected ? "success" : "danger"} pulse={isConnected} />
+        <Text
+          style={{
+            color: colors.foreground,
+            ...typography.title,
+            fontSize: density === "dense" ? 15 : 17,
+            fontWeight: "700",
+          }}
+        >
+          Cockpit
+        </Text>
+        <Badge label="Uppidi Fleet" variant="accent" size="sm" textStyle={{ fontSize: 10 }} />
+        <Badge
+          label={isConnected ? "Router Connected" : "Router Disconnected"}
+          variant={isConnected ? "success" : "danger"}
+          size="sm"
+          dot
+          textStyle={{ fontSize: 10 }}
+        />
+        {isServiceRunning && (
+          <Badge label="Router active" variant="info" size="sm" textStyle={{ fontSize: 10 }} />
+        )}
+      </Row>
+
+      {/* Right: Global Repo Selector, Sizing Selector, Refresh button */}
+      <Row align="center" gap="xs" wrap>
+        {/* Global Repo Selector */}
+        <View style={{ minWidth: 150, maxWidth: 220 }}>
+          <Select
+            value={selectedRepo}
+            options={repoOptions}
+            onValueChange={onRepoChange}
+            size="sm"
+          />
+        </View>
+
+        {/* Stateful Sizing / Density Selector (#425) */}
+        <Row
+          align="center"
+          gap="xxs"
+          style={{
+            backgroundColor: colors.surface1,
+            padding: 2,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: colors.border ?? "transparent",
+          }}
+        >
+          <Button
+            label="Dense"
+            size="sm"
+            variant={density === "dense" ? "primary" : "ghost"}
+            style={{
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              minHeight: 22,
+            }}
+            onPress={() => onDensityChange("dense")}
+          />
+          <Button
+            label="Standard"
+            size="sm"
+            variant={density === "standard" ? "primary" : "ghost"}
+            style={{
+              paddingHorizontal: 6,
+              paddingVertical: 1,
+              minHeight: 22,
+            }}
+            onPress={() => onDensityChange("standard")}
+          />
+        </Row>
+
+        <Button
+          label="Refresh"
+          icon="RefreshCw"
+          size="sm"
+          variant="secondary"
+          style={{
+            paddingHorizontal: 8,
+            paddingVertical: density === "dense" ? 2 : 4,
+            minHeight: density === "dense" ? 22 : 26,
+          }}
+          onPress={onRefresh}
+        />
+      </Row>
+    </Row>
+  );
+}
+
 export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<SurfaceTab>("dashboard");
+  const [activeTab, setActiveTab] = useState<SurfaceTab>("tree");
+  const [density, setDensity] = useState<SurfaceDensity>(getStoredDensity);
+
+  const handleDensityChange = (newDensity: SurfaceDensity) => {
+    setDensity(newDensity);
+    setStoredDensity(newDensity);
+  };
+
+  const [selectedRepo, setSelectedRepo] = useState<string>("xpufx-org/paseo");
 
   // Section 1: Issues sort & filter state
   const [filter, setFilter] = useState<IssuePreset>("all");
@@ -397,7 +554,27 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     }
   };
 
-  const rawIssues = issuesData?.issues ?? [];
+  const availableRepos = useMemo(() => {
+    const set = new Set<string>();
+    const defaultRepo = issuesData?.repo ?? "xpufx-org/paseo";
+    set.add(defaultRepo);
+    for (const r of agentsData?.enrolledRepos ?? []) set.add(r);
+    for (const q of hookQueues?.queues ?? []) if (q.key) set.add(q.key);
+    for (const i of issuesData?.issues ?? []) if (i.repo) set.add(i.repo);
+    return Array.from(set);
+  }, [issuesData?.repo, issuesData?.issues, agentsData?.enrolledRepos, hookQueues?.queues]);
+
+  const repoOptions = useMemo<SelectOption[]>(() => [
+    { label: "All Repositories", value: "all" },
+    ...availableRepos.map((r) => ({ label: r, value: r })),
+  ], [availableRepos]);
+
+  const rawIssues = useMemo(() => {
+    const all = issuesData?.issues ?? [];
+    if (selectedRepo === "all") return all;
+    return all.filter((i) => isRepoMatching(i.repo, selectedRepo) || i.repo.toLowerCase() === selectedRepo.toLowerCase());
+  }, [issuesData?.issues, selectedRepo]);
+
   const visible = useMemo(() => {
     const filtered = filterIssues(rawIssues, filter, query);
     return sortIssues(filtered, issueSortField, issueSortDir);
@@ -405,11 +582,10 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
 
   const selected = useMemo(() => {
     if (selectedNumber !== null) {
-      const found = rawIssues.find((i) => i.number === selectedNumber);
-      if (found) return found;
+      return rawIssues.find((i) => i.number === selectedNumber) ?? null;
     }
-    return visible[0] ?? rawIssues[0] ?? null;
-  }, [selectedNumber, rawIssues, visible]);
+    return null;
+  }, [selectedNumber, rawIssues]);
 
   const isConnected = hookStatus?.ok ?? false;
   const isServiceRunning = serviceStatus?.active ?? false;
@@ -505,9 +681,32 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   return (
     <ModalBody
       headerMode="pinned"
-      header={<Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />}
-      headerStyle={{ backgroundColor: colors.surface0, paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 }}
-      contentContainerStyle={{ gap: 12, paddingHorizontal: 12, paddingTop: 6 }}
+      header={
+        <Stack gap={density === "dense" ? 4 : 8}>
+          <UppidiTopHeaderBar
+            isConnected={isConnected}
+            isServiceRunning={isServiceRunning}
+            selectedRepo={selectedRepo}
+            repoOptions={repoOptions}
+            onRepoChange={setSelectedRepo}
+            density={density}
+            onDensityChange={handleDensityChange}
+            onRefresh={refetchAll}
+          />
+          <Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />
+        </Stack>
+      }
+      headerStyle={{
+        backgroundColor: colors.surface0,
+        paddingHorizontal: density === "dense" ? 8 : 12,
+        paddingTop: density === "dense" ? 6 : 10,
+        paddingBottom: density === "dense" ? 4 : 6,
+      }}
+      contentContainerStyle={{
+        gap: density === "dense" ? 6 : 12,
+        paddingHorizontal: density === "dense" ? 8 : 12,
+        paddingTop: density === "dense" ? 4 : 6,
+      }}
     >
       {activeTab === "mockup" ? (
         <UppidiFleetStaticMockup {...props} />
@@ -520,36 +719,167 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
           onArchiveAgent={handleArchiveAgent}
           onArchiveBulk={handleArchiveBulk}
           isArchiving={isBulkArchiving}
+          density={density}
+          selectedRepo={selectedRepo}
         />
-
       ) : (
-        <Stack gap={12}>
-          {/* Header */}
-          <Row justify="space-between" align="center" wrap gap="sm">
-            <Stack gap="xxs" style={{ flex: 1 }}>
-              <Row align="center" gap="sm">
-                <UppidiBrandMark size={20} />
-                <StatusDot variant={isConnected ? "success" : "danger"} pulse={isConnected} />
-                <Text style={{ color: colors.foreground, ...typography.title }}>Cockpit</Text>
-                <Badge label="Uppidi Fleet" variant="accent" size="sm" />
-                <Badge
-                  label={isConnected ? "Router Connected" : "Router Disconnected"}
-                  variant={isConnected ? "success" : "danger"}
-                  size="sm"
-                  dot
-                />
-                {isServiceRunning && <Badge label="bundled router active" variant="info" size="sm" />}
-              </Row>
-              <Text style={{ color: colors.foregroundMuted, ...typography.body }}>
-                One place for autonomous engineering fleet triage, active work, queues, and review decisions.
+        <Stack gap={density === "dense" ? 6 : 12}>
+          {/* Dense Metrics Bar (#424) */}
+          <Row
+            wrap
+            gap="xs"
+            align="center"
+            style={{
+              backgroundColor: colors.surface1 ?? "rgba(255,255,255,0.03)",
+              paddingHorizontal: density === "dense" ? 6 : 10,
+              paddingVertical: density === "dense" ? 4 : 6,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: colors.border ?? "transparent",
+            }}
+          >
+            <Pressable
+              onPress={() => setFilter("all")}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: filter === "all" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Filter all open issues"
+            >
+              <Icon name="CircleDot" size={13} color={colors.accent} />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Open issues:
               </Text>
-            </Stack>
-            <Button label="Refresh" icon="RefreshCw" variant="secondary" onPress={refetchAll} />
+              <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: density === "dense" ? 12 : 13 }}>
+                {issuesData?.openCount ?? rawIssues.length}
+              </Text>
+            </Pressable>
+
+            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+
+            <Pressable
+              onPress={() => setFilter("needs-attention")}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: filter === "needs-attention" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Filter needs your attention"
+            >
+              <Icon
+                name="Bot"
+                size={13}
+                color={(issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foregroundMuted}
+              />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Needs your attention:
+              </Text>
+              <Text
+                style={{
+                  color: (issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foreground,
+                  fontWeight: "700",
+                  fontSize: density === "dense" ? 12 : 13,
+                }}
+              >
+                {issuesData?.needsYouCount ?? 0}
+              </Text>
+            </Pressable>
+
+            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+
+            <Pressable
+              onPress={() => setFilter("triage-review")}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: filter === "triage-review" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Filter awaiting review"
+            >
+              <Icon
+                name="GitPullRequest"
+                size={13}
+                color={(issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foregroundMuted}
+              />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Awaiting review:
+              </Text>
+              <Text
+                style={{
+                  color: (issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foreground,
+                  fontWeight: "700",
+                  fontSize: density === "dense" ? 12 : 13,
+                }}
+              >
+                {issuesData?.reviewCount ?? 0}
+              </Text>
+            </Pressable>
+
+            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+
+            <Pressable
+              onPress={() => setHookQueuesExpanded((prev) => !prev)}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: hookQueuesExpanded ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle hook queues"
+            >
+              <Icon name="Layers" size={13} color={totalQueued > 0 ? colors.accent : colors.foregroundMuted} />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Hook queued:
+              </Text>
+              <Text
+                style={{
+                  color: totalQueued > 0 ? colors.accent : colors.foreground,
+                  fontWeight: "700",
+                  fontSize: density === "dense" ? 12 : 13,
+                }}
+              >
+                {totalQueued}
+              </Text>
+              <Badge
+                label={hookStatus?.frontDesk?.agentId ? "Front Desk" : "Bridge"}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontSize: 9 }}
+              />
+            </Pressable>
           </Row>
 
           {/* Action Bar & Filter Buttons */}
-          <ActionBar align="space-between">
-            <Row wrap gap="xs">
+          <ActionBar align="space-between" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
+            <Row wrap gap="xs" align="center">
               {issuePresetFilters.map(({ id, label }) => {
                 let count = 0;
                 if (id === "all") count = rawIssues.length;
@@ -581,43 +911,20 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     label={`${label} (${count})`}
                     size="sm"
                     variant={filter === id ? "primary" : "ghost"}
+                    style={{
+                      paddingHorizontal: density === "dense" ? 6 : 10,
+                      paddingVertical: density === "dense" ? 2 : 4,
+                      minHeight: density === "dense" ? 22 : 28,
+                    }}
                     onPress={() => setFilter(id)}
                   />
                 );
               })}
             </Row>
-            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-              Repo: {issuesData?.repo ?? "xpufx-org/paseo"}
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 10 : 11 }}>
+              {selectedRepo === "all" ? "All Repositories" : `Repo: ${selectedRepo}`}
             </Text>
           </ActionBar>
-
-          {/* Live Metrics */}
-          <Grid columns={4} minColumnWidth={160} gap="sm">
-            <Metric
-              label="Open issues"
-              value={String(issuesData?.openCount ?? rawIssues.length)}
-              detail="active repository backlog"
-              icon="CircleDot"
-            />
-            <Metric
-              label="Needs your attention"
-              value={String(issuesData?.needsYouCount ?? 0)}
-              detail="awaiting human signoff"
-              icon="Bot"
-            />
-            <Metric
-              label="Awaiting review"
-              value={String(issuesData?.reviewCount ?? 0)}
-              detail="PRs & verification states"
-              icon="GitPullRequest"
-            />
-            <Metric
-              label="Hook queued"
-              value={String(totalQueued)}
-              detail={hookStatus?.frontDesk?.agentId ? "Front Desk active" : "Standalone bridge"}
-              icon="Layers"
-            />
-          </Grid>
 
           {/* Collapsible Section: Hook Service Management (#368) */}
           <Collapsible
@@ -1433,153 +1740,177 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          {/* Primary Main Split View: Work Queue & Selected Issue Details */}
-          <Grid columns={3} minColumnWidth={280} gap="md">
-            <Stack gap={12} style={{ flex: 2 }}>
-              <Card variant="elevated">
-                <CardHeader
-                  title="Work queue"
-                  subtitle={`${visible.length} issues in view`}
-                  icon="ListTodo"
-                  action={
+          {/* Work Queue (Full Width) (#425) */}
+          <Card variant="elevated" style={{ width: "100%" }}>
+            <CardHeader
+              title="Work queue"
+              subtitle={`${visible.length} issues in view`}
+              icon="ListTodo"
+              action={
+                <Button
+                  label="Dispatch work"
+                  size="sm"
+                  icon="ArrowRight"
+                  iconPosition="right"
+                  variant="ghost"
+                  onPress={() => {
+                    if (visible[0]) {
+                      toast.show(`Worktree dispatch requested for #${visible[0].number}`);
+                    }
+                  }}
+                />
+              }
+            />
+            <Row justify="space-between" align="center" wrap gap="xs">
+              <View style={{ flex: 1, minWidth: 200 }}>
+                <SearchInput
+                  value={query}
+                  onChangeText={setQuery}
+                  onClear={() => setQuery("")}
+                  placeholder="Filter by title, number, or label..."
+                />
+              </View>
+              <Row gap="xs" align="center" wrap>
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
+                {(["number", "title", "status", "comments", "repo"] as const).map((field) => (
+                  <Button
+                    key={field}
+                    label={`${field === "number" ? "#" : field === "title" ? "Title" : field === "status" ? "Status" : field === "comments" ? "Comments" : "Repo"}${issueSortField === field ? (issueSortDir === "asc" ? " ↑" : " ↓") : ""}`}
+                    size="sm"
+                    variant={issueSortField === field ? "secondary" : "ghost"}
+                    onPress={() => {
+                      if (issueSortField === field) {
+                        setIssueSortDir(issueSortDir === "asc" ? "desc" : "asc");
+                      } else {
+                        setIssueSortField(field);
+                        setIssueSortDir(field === "number" || field === "comments" ? "desc" : "asc");
+                      }
+                    }}
+                  />
+                ))}
+              </Row>
+            </Row>
+            <DataTable
+              data={visible}
+              keyExtractor={(issue) => String(issue.number)}
+              emptyState={
+                <EmptyState
+                  title="No issues match this filter"
+                  description="Try changing the filter or search query."
+                  actionLabel="Clear filters"
+                  onAction={() => {
+                    setFilter("all");
+                    setQuery("");
+                  }}
+                />
+              }
+              columns={[
+                {
+                  key: "issue",
+                  header: "Issue",
+                  flex: 3,
+                  render: (issue) => (
                     <Button
-                      label="Dispatch work"
-                      size="sm"
-                      icon="ArrowRight"
-                      iconPosition="right"
+                      label={`#${issue.number} · ${issue.title}`}
                       variant="ghost"
-                      onPress={() => {
-                        if (selected) {
-                          toast.show(`Worktree dispatch requested for #${selected.number}`);
-                        }
-                      }}
+                      size="sm"
+                      onPress={() => setSelectedNumber(issue.number)}
                     />
-                  }
-                />
-                <Row justify="space-between" align="center" wrap gap="xs">
-                  <View style={{ flex: 1, minWidth: 200 }}>
-                    <SearchInput
-                      value={query}
-                      onChangeText={setQuery}
-                      onClear={() => setQuery("")}
-                      placeholder="Filter by title, number, or label..."
-                    />
-                  </View>
-                  <Row gap="xs" align="center" wrap>
-                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
-                    {(["number", "title", "status", "comments", "repo"] as const).map((field) => (
-                      <Button
-                        key={field}
-                        label={`${field === "number" ? "#" : field === "title" ? "Title" : field === "status" ? "Status" : field === "comments" ? "Comments" : "Repo"}${issueSortField === field ? (issueSortDir === "asc" ? " ↑" : " ↓") : ""}`}
-                        size="sm"
-                        variant={issueSortField === field ? "secondary" : "ghost"}
-                        onPress={() => {
-                          if (issueSortField === field) {
-                            setIssueSortDir(issueSortDir === "asc" ? "desc" : "asc");
-                          } else {
-                            setIssueSortField(field);
-                            setIssueSortDir(field === "number" || field === "comments" ? "desc" : "asc");
-                          }
-                        }}
-                      />
-                    ))}
-                  </Row>
-                </Row>
-                <DataTable
-                  data={visible}
-                  keyExtractor={(issue) => String(issue.number)}
-                  emptyState={
-                    <EmptyState
-                      title="No issues match this filter"
-                      description="Try changing the filter or search query."
-                      actionLabel="Clear filters"
-                      onAction={() => {
-                        setFilter("all");
-                        setQuery("");
-                      }}
-                    />
-                  }
-                  columns={[
-                    {
-                      key: "issue",
-                      header: "Issue",
-                      flex: 3,
-                      render: (issue) => (
-                        <Button
-                          label={`#${issue.number} · ${issue.title}`}
-                          variant={selected?.number === issue.number ? "primary" : "ghost"}
-                          size="sm"
-                          onPress={() => setSelectedNumber(issue.number)}
-                        />
-                      ),
-                    },
-                    {
-                      key: "status",
-                      header: "Status",
-                      flex: 1,
-                      render: (issue) => <Badge label={issue.status} variant={statusVariant(issue.status)} size="sm" />,
-                    },
-                    {
-                      key: "attention",
-                      header: "Owner",
-                      flex: 1,
-                      render: (issue) => (
-                        <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                          {attentionMap[issue.attention]}
-                        </Text>
-                      ),
-                    },
-                  ]}
-                />
-              </Card>
-            </Stack>
+                  ),
+                },
+                {
+                  key: "status",
+                  header: "Status",
+                  flex: 1,
+                  render: (issue) => <Badge label={issue.status} variant={statusVariant(issue.status)} size="sm" />,
+                },
+                {
+                  key: "attention",
+                  header: "Owner",
+                  flex: 1,
+                  render: (issue) => (
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                      {attentionMap[issue.attention]}
+                    </Text>
+                  ),
+                },
+              ]}
+            />
+          </Card>
 
-            <Stack gap={12} style={{ flex: 1 }}>
-              {selected ? (
-                <Card variant="elevated">
-                  <CardHeader title="Selected work" icon="PanelRightOpen" />
-                  <Stack gap="sm">
-                    <Text style={{ color: colors.accent, ...typography.caption }}>
+          {/* Center Modal for Selected Work (#425) */}
+          {selected && (
+            <Modal
+              title={`#${selected.number} · ${selected.title}`}
+              open={selectedNumber !== null}
+              onOpenChange={(open) => {
+                if (!open) setSelectedNumber(null);
+              }}
+            >
+              <ModalContent size="large">
+                <Stack gap={density === "dense" ? "xs" : "sm"}>
+                  <Row justify="space-between" align="center" wrap gap="xs">
+                    <Text style={{ color: colors.accent, ...typography.caption, fontWeight: "600" }}>
                       {selected.repo} #{selected.number}
                     </Text>
-                    <Text style={{ color: colors.foreground, ...typography.heading }}>{selected.title}</Text>
                     <Row wrap gap="xs">
-                      <Badge label={selected.status} variant={statusVariant(selected.status)} />
-                      <Badge label={attentionMap[selected.attention]} variant="neutral" />
-                      {selected.comments > 0 && <Badge label={`${selected.comments} comments`} variant="neutral" />}
+                      <Badge label={selected.status} variant={statusVariant(selected.status)} size="sm" />
+                      <Badge label={attentionMap[selected.attention]} variant="neutral" size="sm" />
+                      {selected.comments > 0 && (
+                        <Badge label={`${selected.comments} comments`} variant="neutral" size="sm" />
+                      )}
                     </Row>
-                    {selected.labels.length > 0 && (
-                      <Row wrap gap="xxs">
-                        {selected.labels.map((l) => (
-                          <Badge key={l} label={l} variant="neutral" size="sm" />
-                        ))}
-                      </Row>
-                    )}
-                    <KeyValue
-                      label="Worktree branch"
-                      value={selected.branch ?? "No worktree dispatched yet"}
-                      copyable={!!selected.branch}
+                  </Row>
+
+                  <Text style={{ color: colors.foreground, ...typography.heading, fontSize: 16, fontWeight: "700" }}>
+                    {selected.title}
+                  </Text>
+
+                  {selected.labels.length > 0 && (
+                    <Row wrap gap="xxs">
+                      {selected.labels.map((l) => (
+                        <Badge key={l} label={l} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+                      ))}
+                    </Row>
+                  )}
+
+                  <KeyValue
+                    label="Worktree branch"
+                    value={selected.branch ?? "No worktree dispatched yet"}
+                    copyable={!!selected.branch}
+                  />
+
+                  {/* Actions: Dispatch Worktree, Open in Forgejo, Close */}
+                  <Row justify="flex-end" align="center" wrap gap="xs" style={{ marginTop: 8 }}>
+                    <Button
+                      label="Close"
+                      variant="ghost"
+                      size="sm"
+                      onPress={() => setSelectedNumber(null)}
                     />
                     {selected.url && (
                       <Button
                         label="Open in Forgejo"
                         icon="ExternalLink"
-                        variant="primary"
+                        variant="secondary"
+                        size="sm"
                         onPress={() => Linking.openURL(selected.url!)}
                       />
                     )}
-                  </Stack>
-                </Card>
-              ) : (
-                <Card variant="elevated">
-                  <CardHeader title="Selected work" icon="PanelRightOpen" />
-                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    Select an issue from the queue to view details.
-                  </Text>
-                </Card>
-              )}
-            </Stack>
-          </Grid>
+                    <Button
+                      label="Dispatch Worktree"
+                      icon="ArrowRight"
+                      variant="primary"
+                      size="sm"
+                      onPress={() => {
+                        toast.show(`Worktree dispatch requested for #${selected.number}`);
+                      }}
+                    />
+                  </Row>
+                </Stack>
+              </ModalContent>
+            </Modal>
+          )}
         </Stack>
       )}
     </ModalBody>

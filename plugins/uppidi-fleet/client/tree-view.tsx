@@ -43,6 +43,7 @@ import {
   STATUS_LIGHT_ORANGE,
   STATUS_LIGHT_RED,
   STATUS_LIGHT_COLORS,
+  isRepoMatching,
   type ProjectAgentGroup,
 } from "../shared/sort-filter.js";
 
@@ -70,6 +71,8 @@ export interface UppidiFleetTreeViewProps {
   onAddOrchestrator?: (repo: string) => Promise<void> | void;
   onReplaceOrchestrator?: (repo: string, existingAgentId?: string) => Promise<void> | void;
   onToggleRepoMute?: (repo: string, muted?: boolean) => Promise<void> | void;
+  density?: "dense" | "standard";
+  selectedRepo?: string;
 }
 
 export interface AgentStatusLightProps {
@@ -1506,6 +1509,8 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   onAddOrchestrator,
   onReplaceOrchestrator,
   onToggleRepoMute,
+  density = "dense",
+  selectedRepo,
 }) => {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
@@ -1581,7 +1586,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
       } else {
         const res = await addOrchestratorMutation.mutateAsync({ repo });
         if (res.ok) {
-          toast.show(res.message || `Orchestrator spawned for ${repo}`);
+          toast.show(res.message || `Orchestrator added for ${repo}`);
           onRefresh?.();
         } else {
           toast.error(res.error || `Failed to add orchestrator for ${repo}`);
@@ -1615,15 +1620,15 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     }
   };
 
-  const handleToggleRepoMute = async (repo: string, currentlyMuted?: boolean) => {
+  const handleToggleRepoMute = async (repo: string, muted?: boolean) => {
     setActionLoadingRepo(repo);
     try {
       if (onToggleRepoMute) {
-        await onToggleRepoMute(repo, !currentlyMuted);
+        await onToggleRepoMute(repo, muted);
       } else {
-        const res = await toggleRepoMuteMutation.mutateAsync({ repo, muted: !currentlyMuted });
+        const res = await toggleRepoMuteMutation.mutateAsync({ repo, muted });
         if (res.ok) {
-          toast.show(res.message || (res.isMuted ? `Muted repository ${repo}` : `Unmuted repository ${repo}`));
+          toast.show(res.message || `Repo ${repo} ${muted ? "muted" : "unmuted"}`);
           onRefresh?.();
         } else {
           toast.error(res.error || `Failed to toggle mute for ${repo}`);
@@ -1636,43 +1641,64 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     }
   };
 
-  // 1. Base Tree Lineage
-  const baseTree = useMemo(() => {
-    if (agentsData?.tree && agentsData.tree.length > 0) {
-      return agentsData.tree;
-    }
-    // Fallback: construct from flat arrays if tree is not populated
-    const fallback: UppidiAgentTreeNode[] = [];
-    for (const a of agentsData?.frontDesk ?? []) {
-      fallback.push({ agent: a, depth: 0, children: [] });
-    }
-    for (const a of agentsData?.orchestrators ?? []) {
-      fallback.push({ agent: a, depth: 0, children: [] });
-    }
-    for (const a of agentsData?.workers ?? []) {
-      fallback.push({ agent: a, depth: 0, children: [] });
-    }
-    return fallback;
+  // 1. Flatten all agents to extract counts and filters
+  const allAgents = useMemo(() => {
+    return [
+      ...(agentsData?.frontDesk ?? []),
+      ...(agentsData?.orchestrators ?? []),
+      ...(agentsData?.workers ?? []),
+    ];
   }, [agentsData]);
 
-  // 2. All agents for bulk archive evaluation
-  const allAgents = useMemo(() => {
-    const list: UppidiAgent[] = [];
-    function collect(nodes: UppidiAgentTreeNode[]) {
-      for (const n of nodes) {
-        list.push(n.agent);
-        if (n.children && n.children.length > 0) collect(n.children);
-      }
-    }
-    collect(baseTree);
-    return list;
-  }, [baseTree]);
-
+  // Bulk archive candidates: closed/done/failed/cancelled
   const eligibleBulkAgents = useMemo(() => {
     return filterBulkArchiveCandidates(allAgents);
   }, [allAgents]);
 
   const eligibleBulkCount = eligibleBulkAgents.length;
+
+  // 2. Build full tree with proper orchestrator-to-worker nesting
+  const baseTree = useMemo(() => {
+    if (agentsData?.tree && agentsData.tree.length > 0) {
+      return agentsData.tree;
+    }
+    const nodes: UppidiAgentTreeNode[] = [];
+    const workers = agentsData?.workers ?? [];
+    const orchestrators = agentsData?.orchestrators ?? [];
+    const frontDesk = agentsData?.frontDesk ?? [];
+
+    for (const fd of frontDesk) {
+      nodes.push({ agent: fd, depth: 0, children: [] });
+    }
+
+    const claimedWorkerIds = new Set<string>();
+    for (const orch of orchestrators) {
+      const orchWorktree = orch.worktree || extractAgentWorktree(orch);
+      const orchProject = orch.project || extractAgentProject(orch);
+      const children: UppidiAgentTreeNode[] = [];
+
+      for (const w of workers) {
+        const workerWorktree = w.worktree || extractAgentWorktree(w);
+        const workerProject = w.project || extractAgentProject(w);
+        if (
+          (orchWorktree && workerWorktree && orchWorktree === workerWorktree) ||
+          (orchProject && workerProject && orchProject === workerProject)
+        ) {
+          children.push({ agent: w, depth: 1, children: [] });
+          claimedWorkerIds.add(w.id);
+        }
+      }
+      nodes.push({ agent: orch, depth: 0, children });
+    }
+
+    for (const w of workers) {
+      if (!claimedWorkerIds.has(w.id)) {
+        nodes.push({ agent: w, depth: 0, children: [] });
+      }
+    }
+
+    return nodes;
+  }, [agentsData]);
 
   const handleArchiveAgent = async (agentId: string) => {
     try {
@@ -1771,20 +1797,28 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   }, [baseTree, agentsData]);
 
   const displayEnrolled = useMemo(() => {
-    if (!query.trim() && stateFilter === "all") {
-      return enrolledGroups;
+    let list = enrolledGroups;
+    if (selectedRepo && selectedRepo !== "all") {
+      list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
-    return enrolledGroups.filter(
+    if (!query.trim() && stateFilter === "all") {
+      return list;
+    }
+    return list.filter(
       (g) => g.allAgents.length > 0 || g.projectName.toLowerCase().includes(query.toLowerCase())
     );
-  }, [query, stateFilter, enrolledGroups]);
+  }, [query, stateFilter, enrolledGroups, selectedRepo]);
 
   const displayDetached = useMemo(() => {
-    if (!query.trim() && stateFilter === "all") {
-      return detachedGroups;
+    let list = detachedGroups;
+    if (selectedRepo && selectedRepo !== "all") {
+      list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
-    return detachedGroups.filter((g) => g.allAgents.length > 0);
-  }, [query, stateFilter, detachedGroups]);
+    if (!query.trim() && stateFilter === "all") {
+      return list;
+    }
+    return list.filter((g) => g.allAgents.length > 0);
+  }, [query, stateFilter, detachedGroups, selectedRepo]);
 
   const totalCount = agentsData?.totalCount ?? allAgents.length;
   const runningCount = agentsData?.runningCount ?? 0;
@@ -1808,14 +1842,24 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   }, [agentsData?.orchestrators, allAgents]);
 
   const displayOrchestrators = useMemo(() => {
+    let base = allOrchestrators;
+    if (selectedRepo && selectedRepo !== "all") {
+      base = base.filter((a) => {
+        const proj = a.project || extractAgentProject(a) || "";
+        return isRepoMatching(proj, selectedRepo) || proj.toLowerCase() === selectedRepo.toLowerCase();
+      });
+    }
     if (!query.trim() && stateFilter === "all") {
-      return allOrchestrators;
+      return base;
     }
     const list: UppidiAgent[] = [];
     function collect(nodes: UppidiAgentTreeNode[]) {
       for (const n of nodes) {
         if (n.agent.category === "orchestrator") {
-          list.push(n.agent);
+          const proj = n.agent.project || extractAgentProject(n.agent) || "";
+          if (!selectedRepo || selectedRepo === "all" || isRepoMatching(proj, selectedRepo) || proj.toLowerCase() === selectedRepo.toLowerCase()) {
+            list.push(n.agent);
+          }
         }
         if (n.children && n.children.length > 0) {
           collect(n.children);
@@ -1824,7 +1868,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     }
     collect(filteredTree);
     return list;
-  }, [query, stateFilter, filteredTree, allOrchestrators]);
+  }, [query, stateFilter, filteredTree, allOrchestrators, selectedRepo]);
 
   // Toggle handlers for collapse
   const handleToggleProject = (projectName: string) => {
@@ -1841,6 +1885,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     }));
   };
 
+  // Bulk expand/collapse for projects and orchestrators
   const allProjects = useMemo(() => {
     return [...displayEnrolled, ...displayDetached];
   }, [displayEnrolled, displayDetached]);
@@ -1850,32 +1895,58 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     return allProjects.every((g) => collapsedProjects[g.projectName]);
   }, [allProjects, collapsedProjects]);
 
-  const toggleAllProjects = () => {
-    if (allProjectsCollapsed) {
-      setCollapsedProjects({});
-      setCollapsedOrchestrators({});
-    } else {
-      const nextCollapsedProj: Record<string, boolean> = {};
-      const nextCollapsedOrch: Record<string, boolean> = {};
-      for (const g of allProjects) {
-        nextCollapsedProj[g.projectName] = true;
-        for (const o of g.orchestrators) {
-          nextCollapsedOrch[o.agent.id] = true;
-        }
-      }
-      setCollapsedProjects(nextCollapsedProj);
-      setCollapsedOrchestrators(nextCollapsedOrch);
+  const handleToggleAllProjects = () => {
+    const shouldCollapse = !allProjectsCollapsed;
+    const nextCollapsed: Record<string, boolean> = {};
+    for (const g of allProjects) {
+      nextCollapsed[g.projectName] = shouldCollapse;
     }
+    setCollapsedProjects(nextCollapsed);
+  };
+
+  const toggleAllProjects = handleToggleAllProjects;
+
+  const allOrchestratorsCollapsed = useMemo(() => {
+    if (displayOrchestrators.length === 0) return false;
+    return displayOrchestrators.every((o) => collapsedOrchestrators[o.id]);
+  }, [displayOrchestrators, collapsedOrchestrators]);
+
+  const handleToggleAllOrchestrators = () => {
+    const shouldCollapse = !allOrchestratorsCollapsed;
+    const nextCollapsedOrch: Record<string, boolean> = {};
+    for (const o of displayOrchestrators) {
+      nextCollapsedOrch[o.id] = shouldCollapse;
+    }
+    setCollapsedOrchestrators(nextCollapsedOrch);
+  };
+
+  const isAnyCollapsed = allProjectsCollapsed || allOrchestratorsCollapsed;
+  const handleToggleAllHierarchy = () => {
+    const shouldCollapse = !isAnyCollapsed;
+    const allGroups = [...displayEnrolled, ...displayDetached];
+    const nextCollapsedProjects: Record<string, boolean> = {};
+    for (const g of allGroups) {
+      nextCollapsedProjects[g.projectName] = shouldCollapse;
+    }
+    setCollapsedProjects(nextCollapsedProjects);
+
+    const nextCollapsedOrch: Record<string, boolean> = {};
+    for (const o of displayOrchestrators) {
+      nextCollapsedOrch[o.id] = shouldCollapse;
+    }
+    setCollapsedOrchestrators(nextCollapsedOrch);
   };
 
   return (
-    <Stack gap={12}>
+    <Stack gap={density === "dense" ? 6 : 12}>
       {/* Header & Metric Badges */}
-      <Row justify="space-between" align="center" wrap gap="sm">
+      <Row justify="space-between" align="center" wrap gap="sm" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
         <Stack gap="xxs" style={{ flex: 1 }}>
           <Row align="center" gap="sm">
             <StatusDot variant={runningCount > 0 ? "success" : "neutral"} pulse={runningCount > 0} />
-            <Text style={{ color: colors.foreground, ...typography.title }}>Fleet Lineage Tree</Text>
+            <Text style={{ color: colors.foreground, ...typography.title, fontSize: density === "dense" ? 15 : 17 }}>
+              Fleet Lineage Tree
+            </Text>
             <Badge label={`${totalCount} Total`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
             <Badge label={`${runningCount} Running`} variant="success" size="sm" dot textStyle={{ fontSize: 10 }} />
             <Badge label={`${idleCount} Idle`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
@@ -1883,21 +1954,27 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
               <Badge label={`${errorCount} Failed`} variant="danger" size="sm" dot textStyle={{ fontSize: 10 }} />
             )}
           </Row>
-          <Text style={{ color: colors.foregroundMuted, ...typography.body }}>
-            High-density project hierarchy: Fleet Front Desk, projects, orchestrators, and subagents.
-          </Text>
         </Stack>
         <Row gap="xs" align="center">
           <Button
             label={`Archive Closed/Failed${eligibleBulkCount > 0 ? ` (${eligibleBulkCount})` : ""}`}
             icon="Archive"
             variant="secondary"
+            size="sm"
             disabled={eligibleBulkCount === 0 || isBulkArchiving}
             loading={isBulkArchiving}
             onPress={handleBulkArchive}
+            style={{ paddingVertical: density === "dense" ? 2 : 4, minHeight: density === "dense" ? 24 : 28 }}
           />
           {onRefresh && (
-            <Button label="Refresh Fleet" icon="RefreshCw" variant="secondary" onPress={onRefresh} />
+            <Button
+              label="Refresh Fleet"
+              icon="RefreshCw"
+              variant="secondary"
+              size="sm"
+              onPress={onRefresh}
+              style={{ paddingVertical: density === "dense" ? 2 : 4, minHeight: density === "dense" ? 24 : 28 }}
+            />
           )}
         </Row>
       </Row>
