@@ -426,6 +426,11 @@ export const UppidiAgentSchema = z.object({
   url: z.string().optional(),
   worktree: z.string().optional(),
   project: z.string().optional(),
+  isEnrolled: z.boolean().optional(),
+  isMuted: z.boolean().optional(),
+  hasOrchestrator: z.boolean().optional(),
+  queuedHooksCount: z.number().optional(),
+  isDetached: z.boolean().optional(),
 });
 export type UppidiAgent = z.infer<typeof UppidiAgentSchema>;
 
@@ -433,6 +438,11 @@ export interface UppidiAgentTreeNode {
   agent: UppidiAgent;
   depth: number;
   children: UppidiAgentTreeNode[];
+  isEnrolled?: boolean;
+  isMuted?: boolean;
+  hasOrchestrator?: boolean;
+  queuedHooksCount?: number;
+  isDetached?: boolean;
 }
 
 export const UppidiAgentTreeNodeSchema: z.ZodType<UppidiAgentTreeNode> = z.lazy(() =>
@@ -440,6 +450,11 @@ export const UppidiAgentTreeNodeSchema: z.ZodType<UppidiAgentTreeNode> = z.lazy(
     agent: UppidiAgentSchema,
     depth: z.number(),
     children: z.array(UppidiAgentTreeNodeSchema).default([]),
+    isEnrolled: z.boolean().optional(),
+    isMuted: z.boolean().optional(),
+    hasOrchestrator: z.boolean().optional(),
+    queuedHooksCount: z.number().optional(),
+    isDetached: z.boolean().optional(),
   })
 );
 
@@ -449,6 +464,9 @@ export const UppidiAgentsOutputSchema = z.object({
   orchestrators: z.array(UppidiAgentSchema).default([]),
   workers: z.array(UppidiAgentSchema).default([]),
   tree: z.array(UppidiAgentTreeNodeSchema).default([]),
+  enrolledRepos: z.array(z.string()).default([]),
+  mutedRepos: z.array(z.string()).default([]),
+  repoQueuedHooks: z.record(z.string(), z.number()).default({}),
   totalCount: z.number().default(0),
   runningCount: z.number().default(0),
   idleCount: z.number().default(0),
@@ -631,6 +649,128 @@ export const uppidiArchiveInactiveAgentsContract = defineContract({
   description: "Bulk archive inactive, closed, or failed agents (never running, working, or orchestrator/frontdesk)",
   input: UppidiArchiveInactiveAgentsInputSchema,
   output: UppidiArchiveInactiveAgentsOutputSchema,
+});
+
+// Front Desk & Orchestrator Lifecycle + Muting Contracts (Issue #426)
+export const UppidiCreateFrontDeskInputSchema = z.object({
+  model: z.string().optional(),
+  prompt: z.string().optional(),
+  title: z.string().optional(),
+});
+export type UppidiCreateFrontDeskInput = z.infer<typeof UppidiCreateFrontDeskInputSchema>;
+
+export const UppidiCreateFrontDeskOutputSchema = z.object({
+  ok: z.boolean(),
+  agentId: z.string().optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiCreateFrontDeskOutput = z.infer<typeof UppidiCreateFrontDeskOutputSchema>;
+
+export const uppidiCreateFrontDeskContract = defineContract({
+  name: "uppidi-forge.create-front-desk",
+  description: "Create a fresh Front Desk liaison session",
+  input: UppidiCreateFrontDeskInputSchema,
+  output: UppidiCreateFrontDeskOutputSchema,
+});
+
+export const UppidiReplaceFrontDeskInputSchema = z.object({
+  existingAgentId: z.string().optional(),
+  model: z.string().optional(),
+  prompt: z.string().optional(),
+  title: z.string().optional(),
+});
+export type UppidiReplaceFrontDeskInput = z.infer<typeof UppidiReplaceFrontDeskInputSchema>;
+
+export const UppidiReplaceFrontDeskOutputSchema = z.object({
+  ok: z.boolean(),
+  oldAgentId: z.string().optional(),
+  agentId: z.string().optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiReplaceFrontDeskOutput = z.infer<typeof UppidiReplaceFrontDeskOutputSchema>;
+
+export const uppidiReplaceFrontDeskContract = defineContract({
+  name: "uppidi-forge.replace-front-desk",
+  description: "Retire/archive existing Front Desk session and spawn a fresh one",
+  input: UppidiReplaceFrontDeskInputSchema,
+  output: UppidiReplaceFrontDeskOutputSchema,
+});
+
+export const UppidiAddOrchestratorInputSchema = z.object({
+  repo: z.string(),
+  workspacePath: z.string().optional(),
+  model: z.string().optional(),
+  prompt: z.string().optional(),
+  title: z.string().optional(),
+});
+export type UppidiAddOrchestratorInput = z.infer<typeof UppidiAddOrchestratorInputSchema>;
+
+export const UppidiAddOrchestratorOutputSchema = z.object({
+  ok: z.boolean(),
+  repo: z.string(),
+  agentId: z.string().optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiAddOrchestratorOutput = z.infer<typeof UppidiAddOrchestratorOutputSchema>;
+
+export const uppidiAddOrchestratorContract = defineContract({
+  name: "uppidi-forge.add-orchestrator",
+  description: "Provision an orchestrator in a repository workspace",
+  input: UppidiAddOrchestratorInputSchema,
+  output: UppidiAddOrchestratorOutputSchema,
+});
+
+export const UppidiReplaceOrchestratorInputSchema = z.object({
+  repo: z.string(),
+  existingAgentId: z.string().optional(),
+  workspacePath: z.string().optional(),
+  model: z.string().optional(),
+  prompt: z.string().optional(),
+  title: z.string().optional(),
+});
+export type UppidiReplaceOrchestratorInput = z.infer<typeof UppidiReplaceOrchestratorInputSchema>;
+
+export const UppidiReplaceOrchestratorOutputSchema = z.object({
+  ok: z.boolean(),
+  repo: z.string(),
+  oldAgentId: z.string().optional(),
+  agentId: z.string().optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiReplaceOrchestratorOutput = z.infer<typeof UppidiReplaceOrchestratorOutputSchema>;
+
+export const uppidiReplaceOrchestratorContract = defineContract({
+  name: "uppidi-forge.replace-orchestrator",
+  description: "Retire/archive existing orchestrator session and spawn a new one",
+  input: UppidiReplaceOrchestratorInputSchema,
+  output: UppidiReplaceOrchestratorOutputSchema,
+});
+
+export const UppidiToggleRepoMuteInputSchema = z.object({
+  repo: z.string(),
+  muted: z.boolean().optional(),
+});
+export type UppidiToggleRepoMuteInput = z.infer<typeof UppidiToggleRepoMuteInputSchema>;
+
+export const UppidiToggleRepoMuteOutputSchema = z.object({
+  ok: z.boolean(),
+  repo: z.string(),
+  isMuted: z.boolean(),
+  mutedRepos: z.array(z.string()).default([]),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiToggleRepoMuteOutput = z.infer<typeof UppidiToggleRepoMuteOutputSchema>;
+
+export const uppidiToggleRepoMuteContract = defineContract({
+  name: "uppidi-forge.toggle-repo-mute",
+  description: "Toggle per-repository webhook muting / circuit breaker",
+  input: UppidiToggleRepoMuteInputSchema,
+  output: UppidiToggleRepoMuteOutputSchema,
 });
 
 /**

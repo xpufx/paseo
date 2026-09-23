@@ -15,6 +15,7 @@ import {
   filterBulkArchiveCandidates,
   buildProjectGroups,
   filterAgentTree,
+  isRepoMatching,
   getStatusLightColor,
   STATUS_LIGHT_GREEN,
   STATUS_LIGHT_ORANGE,
@@ -793,6 +794,127 @@ describe("Uppidi Forge sort & filter predicates", () => {
         getStatusLightColor({ status: "running", deterministicState: "idle:waiting" }),
         STATUS_LIGHT_ORANGE
       );
+    });
+  });
+
+  describe("enrolled fleet roster, unstaffed state, per-repo mute, and detached workspaces (#426)", () => {
+    it("matches repository identifiers robustly with isRepoMatching", () => {
+      assert.equal(isRepoMatching("xpufx-org/paseo", "xpufx-org/paseo"), true);
+      assert.equal(isRepoMatching("https://forgejo.example/xpufx-org/paseo.git", "xpufx-org/paseo"), true);
+      assert.equal(isRepoMatching("git@forgejo.example:xpufx-org/paseo.git", "xpufx-org/paseo"), true);
+      assert.equal(isRepoMatching("XPUFX-ORG/PASEO", "xpufx-org/paseo"), true);
+      assert.equal(isRepoMatching("paseo", "xpufx-org/paseo"), true);
+      assert.equal(isRepoMatching("xpufx-org/paseo", "xpufx-org/platform"), false);
+    });
+
+    it("synthesizes enrolled unstaffed repos, tracks muted states, and handles queued hooks", () => {
+      // Tree with only one agent in xpufx-org/paseo
+      const activeTree: UppidiAgentTreeNode[] = [
+        {
+          agent: {
+            id: "orch-paseo",
+            shortId: "orch1",
+            name: "Orchestrator · xpufx-org/paseo",
+            category: "orchestrator",
+            status: "running",
+            deterministicState: "working",
+            project: "xpufx-org/paseo",
+          },
+          depth: 0,
+          children: [],
+        },
+      ];
+
+      const options = {
+        enrolledRepos: ["xpufx-org/paseo", "xpufx-org/unstaffed-repo"],
+        mutedRepos: ["xpufx-org/paseo"],
+        repoQueuedHooks: {
+          "xpufx-org/paseo": 4,
+          "xpufx-org/unstaffed-repo": 7,
+        },
+      };
+
+      const result = buildProjectGroups(activeTree, options);
+
+      // 1. Enrolled groups should contain both repos
+      assert.equal(result.enrolledGroups.length, 2);
+
+      // Paseo: enrolled, muted, has orchestrator, 4 queued hooks
+      const paseoGroup = result.enrolledGroups.find((g) => g.projectName === "xpufx-org/paseo");
+      assert.ok(paseoGroup);
+      assert.equal(paseoGroup.isEnrolled, true);
+      assert.equal(paseoGroup.isMuted, true);
+      assert.equal(paseoGroup.hasOrchestrator, true);
+      assert.equal(paseoGroup.queuedHooksCount, 4);
+      assert.equal(paseoGroup.totalCount, 1);
+
+      // Unstaffed: enrolled, not muted, no orchestrator, 7 queued hooks
+      const unstaffedGroup = result.enrolledGroups.find(
+        (g) => g.projectName === "xpufx-org/unstaffed-repo"
+      );
+      assert.ok(unstaffedGroup);
+      assert.equal(unstaffedGroup.isEnrolled, true);
+      assert.equal(unstaffedGroup.isMuted, false);
+      assert.equal(unstaffedGroup.hasOrchestrator, false);
+      assert.equal(unstaffedGroup.queuedHooksCount, 7);
+      assert.equal(unstaffedGroup.totalCount, 0);
+      assert.equal(unstaffedGroup.orchestrators.length, 0);
+    });
+
+    it("groups detached and local workspaces separately from enrolled fleet roster", () => {
+      const mixedTree: UppidiAgentTreeNode[] = [
+        {
+          agent: {
+            id: "orch-enrolled",
+            shortId: "oe",
+            name: "Orchestrator · xpufx-org/paseo",
+            category: "orchestrator",
+            status: "running",
+            deterministicState: "working",
+            project: "xpufx-org/paseo",
+          },
+          depth: 0,
+          children: [],
+        },
+        {
+          agent: {
+            id: "worker-detached",
+            shortId: "wd",
+            name: "local-scratchpad",
+            category: "worker",
+            status: "idle",
+            deterministicState: "idle:waiting",
+            project: "scratch-local-wks",
+          },
+          depth: 0,
+          children: [],
+        },
+      ];
+
+      const options = {
+        enrolledRepos: ["xpufx-org/paseo"],
+      };
+
+      const result = buildProjectGroups(mixedTree, options);
+
+      // Enrolled groups only have xpufx-org/paseo
+      assert.equal(result.enrolledGroups.length, 1);
+      assert.equal(result.enrolledGroups[0].projectName, "xpufx-org/paseo");
+      assert.equal(result.enrolledGroups[0].isEnrolled, true);
+      assert.equal(result.enrolledGroups[0].isDetached, false);
+
+      // Detached groups have scratch-local-wks
+      assert.equal(result.detachedGroups.length, 1);
+      assert.equal(result.detachedGroups[0].projectName, "scratch-local-wks");
+      assert.equal(result.detachedGroups[0].isEnrolled, false);
+      assert.equal(result.detachedGroups[0].isDetached, true);
+      // Detached groups never display missing orchestrator warnings
+      assert.equal(result.detachedGroups[0].hasOrchestrator, false);
+
+      // Combined projectGroups places detached groups at the end
+      assert.equal(result.projectGroups.length, 2);
+      assert.equal(result.projectGroups[0].projectName, "xpufx-org/paseo");
+      assert.equal(result.projectGroups[1].projectName, "scratch-local-wks");
     });
   });
 });

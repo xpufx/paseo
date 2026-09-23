@@ -562,6 +562,37 @@ export interface ProjectAgentGroup {
   allAgents: UppidiAgent[];
   runningCount: number;
   totalCount: number;
+  isEnrolled?: boolean;
+  isMuted?: boolean;
+  hasOrchestrator?: boolean;
+  queuedHooksCount?: number;
+  isDetached?: boolean;
+}
+
+export interface BuildProjectGroupsOptions {
+  enrolledRepos?: string[];
+  mutedRepos?: string[];
+  repoQueuedHooks?: Record<string, number>;
+}
+
+export interface BuildProjectGroupsResult {
+  frontDeskNodes: UppidiAgentTreeNode[];
+  projectGroups: ProjectAgentGroup[];
+  enrolledGroups: ProjectAgentGroup[];
+  detachedGroups: ProjectAgentGroup[];
+}
+
+/**
+ * Checks if two repository names or keys match (normalizing protocol/host/git suffixes).
+ */
+export function isRepoMatching(repoA?: string, repoB?: string): boolean {
+  if (!repoA || !repoB) return false;
+  if (repoA.toLowerCase() === repoB.toLowerCase()) return true;
+  const cleanA = repoA.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
+  const cleanB = repoB.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "").replace(/^git@[^:]+:/, "");
+  if (cleanA === cleanB) return true;
+  if (cleanA.endsWith(`/${cleanB}`) || cleanB.endsWith(`/${cleanA}`)) return true;
+  return false;
 }
 
 /**
@@ -594,13 +625,15 @@ export function filterAgentTree(
 /**
  * Builds project groups from the fleet tree.
  * - Elevates Front Desk nodes into frontDeskNodes.
- * - Groups all other nodes by project (derived from agent.project or labels/cwd/attribution).
+ * - Permanently includes enrolled repositories (even when unstaffed with 0 agents).
  * - Under each project, separates Orchestrators (with their children) and unparented workers.
+ * - Labels enrolled repos vs detached / local workspaces.
+ * - Resolves muting state and queued hook counts per project.
  */
-export function buildProjectGroups(tree: UppidiAgentTreeNode[]): {
-  frontDeskNodes: UppidiAgentTreeNode[];
-  projectGroups: ProjectAgentGroup[];
-} {
+export function buildProjectGroups(
+  tree: UppidiAgentTreeNode[],
+  options?: BuildProjectGroupsOptions
+): BuildProjectGroupsResult {
   const frontDeskNodes: UppidiAgentTreeNode[] = [];
   const projectMap = new Map<
     string,
@@ -639,6 +672,7 @@ export function buildProjectGroups(tree: UppidiAgentTreeNode[]): {
     return group;
   }
 
+  // First, populate from active tree nodes
   for (const node of tree) {
     if (node.agent.category === "front-desk") {
       const remainingChildren: UppidiAgentTreeNode[] = [];
@@ -674,6 +708,16 @@ export function buildProjectGroups(tree: UppidiAgentTreeNode[]): {
     }
   }
 
+  // If enrolled repos provided, ensure all enrolled repos exist in projectMap (Fleet Roster)
+  if (options?.enrolledRepos && options.enrolledRepos.length > 0) {
+    for (const repo of options.enrolledRepos) {
+      const existingKey = Array.from(projectMap.keys()).find((k) => isRepoMatching(k, repo));
+      if (!existingKey) {
+        getOrCreateGroup(repo);
+      }
+    }
+  }
+
   const projectGroups: ProjectAgentGroup[] = Array.from(
     projectMap.entries()
   ).map(([projectName, data]) => {
@@ -686,6 +730,31 @@ export function buildProjectGroups(tree: UppidiAgentTreeNode[]): {
           a.deterministicState !== "idle:waiting")
     ).length;
 
+    const hasExplicitEnrolled = Boolean(
+      options?.enrolledRepos && options.enrolledRepos.length > 0
+    );
+
+    const isEnrolled = hasExplicitEnrolled
+      ? options!.enrolledRepos!.some((r) => isRepoMatching(r, projectName))
+      : projectName !== "Default Project";
+
+    const isDetached = !isEnrolled;
+    const hasOrchestrator = data.orchestrators.length > 0;
+
+    const isMuted = Boolean(
+      options?.mutedRepos &&
+        options.mutedRepos.some((r) => isRepoMatching(r, projectName))
+    );
+
+    let queuedHooksCount = 0;
+    if (options?.repoQueuedHooks) {
+      for (const [k, count] of Object.entries(options.repoQueuedHooks)) {
+        if (isRepoMatching(k, projectName)) {
+          queuedHooksCount += count;
+        }
+      }
+    }
+
     return {
       projectName,
       orchestrators: data.orchestrators,
@@ -693,21 +762,45 @@ export function buildProjectGroups(tree: UppidiAgentTreeNode[]): {
       allAgents: data.allAgents,
       runningCount,
       totalCount: data.allAgents.length,
+      isEnrolled,
+      isMuted,
+      hasOrchestrator,
+      queuedHooksCount,
+      isDetached,
     };
   });
 
-  // Sort projects: active projects first, then alphabetically, with "Default Project" last
+  // Sort projects:
+  // 1. Enrolled before detached
+  // 2. Running active projects first
+  // 3. Projects with queued hooks
+  // 4. Default Project always last
+  // 5. Alphabetical tie-breaker
   projectGroups.sort((a, b) => {
+    // Detached always placed after enrolled
+    if (a.isDetached !== b.isDetached) {
+      return a.isDetached ? 1 : -1;
+    }
     if (a.runningCount > 0 && b.runningCount === 0) return -1;
     if (b.runningCount > 0 && a.runningCount === 0) return 1;
+
+    const aQueued = a.queuedHooksCount ?? 0;
+    const bQueued = b.queuedHooksCount ?? 0;
+    if (aQueued > 0 && bQueued === 0) return -1;
+    if (bQueued > 0 && aQueued === 0) return 1;
+
     if (a.projectName === "Default Project" && b.projectName !== "Default Project") return 1;
     if (b.projectName === "Default Project" && a.projectName !== "Default Project") return -1;
     return a.projectName.localeCompare(b.projectName);
   });
 
+  const enrolledGroups = projectGroups.filter((g) => !g.isDetached);
+  const detachedGroups = projectGroups.filter((g) => g.isDetached);
+
   return {
     frontDeskNodes,
     projectGroups,
+    enrolledGroups,
+    detachedGroups,
   };
 }
-

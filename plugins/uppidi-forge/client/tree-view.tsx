@@ -14,6 +14,7 @@ import {
   usePluginTheme,
   useRpcMutation,
 } from "paseo-plugin-helper/client";
+import { useToast } from "@getpaseo/plugin/client/react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import {
   type UppidiAgent,
@@ -25,6 +26,11 @@ import {
   getDeterministicStateConfig,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
+  uppidiCreateFrontDeskContract,
+  uppidiReplaceFrontDeskContract,
+  uppidiAddOrchestratorContract,
+  uppidiReplaceOrchestratorContract,
+  uppidiToggleRepoMuteContract,
   extractAgentWorktree,
   extractAgentProject,
 } from "../shared/contracts.js";
@@ -59,6 +65,11 @@ export interface UppidiForgeTreeViewProps {
   onArchiveAgent?: (agentId: string) => Promise<void> | void;
   onArchiveBulk?: () => Promise<void> | void;
   isArchiving?: boolean;
+  onCreateFrontDesk?: () => Promise<void> | void;
+  onReplaceFrontDesk?: (existingAgentId?: string) => Promise<void> | void;
+  onAddOrchestrator?: (repo: string) => Promise<void> | void;
+  onReplaceOrchestrator?: (repo: string, existingAgentId?: string) => Promise<void> | void;
+  onToggleRepoMute?: (repo: string, muted?: boolean) => Promise<void> | void;
 }
 
 export interface AgentStatusLightProps {
@@ -321,6 +332,9 @@ export function FrontDeskHero({
   navigation,
   archivingAgentId,
   onArchiveAgent,
+  onCreateFrontDesk,
+  onReplaceFrontDesk,
+  isActionLoading = false,
 }: {
   nodes: UppidiAgentTreeNode[];
   orchestrators?: UppidiAgent[];
@@ -329,6 +343,9 @@ export function FrontDeskHero({
   navigation?: PluginSurfaceProps["navigation"];
   archivingAgentId?: string | null;
   onArchiveAgent: (id: string) => Promise<void> | void;
+  onCreateFrontDesk?: () => Promise<void> | void;
+  onReplaceFrontDesk?: (existingAgentId?: string) => Promise<void> | void;
+  isActionLoading?: boolean;
 }) {
   const [secondaryExpanded, setSecondaryExpanded] = useState(false);
 
@@ -361,7 +378,20 @@ export function FrontDeskHero({
                 </Text>
               </Stack>
             </Row>
-            <Badge label="Standby" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+            <Row align="center" gap="xs">
+              <Badge label="Standby" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+              {onCreateFrontDesk && (
+                <Button
+                  label="+ Create Front Desk"
+                  icon="Plus"
+                  size="sm"
+                  variant="primary"
+                  disabled={isActionLoading}
+                  loading={isActionLoading}
+                  onPress={onCreateFrontDesk}
+                />
+              )}
+            </Row>
           </Row>
 
           {/* Fleet Orchestrator Status Lights (#410) */}
@@ -493,6 +523,18 @@ export function FrontDeskHero({
               >
                 {formatRelativeTime(primaryAgent.lastActivityAt)}
               </Text>
+            )}
+
+            {onReplaceFrontDesk && (
+              <Button
+                label="Replace Front Desk"
+                icon="RefreshCw"
+                variant="ghost"
+                size="sm"
+                disabled={isActionLoading}
+                loading={isActionLoading}
+                onPress={() => onReplaceFrontDesk(primaryAgent.id)}
+              />
             )}
 
             <Button
@@ -1081,6 +1123,10 @@ export function ProjectGroupCard({
   onToggleExpand,
   collapsedOrchestrators,
   onToggleOrchestrator,
+  onAddOrchestrator,
+  onReplaceOrchestrator,
+  onToggleMute,
+  isActionLoading = false,
 }: {
   group: ProjectAgentGroup;
   colors: any;
@@ -1092,6 +1138,10 @@ export function ProjectGroupCard({
   onToggleExpand?: () => void;
   collapsedOrchestrators?: Record<string, boolean>;
   onToggleOrchestrator?: (orchId: string) => void;
+  onAddOrchestrator?: (repo: string) => Promise<void> | void;
+  onReplaceOrchestrator?: (repo: string, existingAgentId?: string) => Promise<void> | void;
+  onToggleMute?: (repo: string, currentlyMuted?: boolean) => Promise<void> | void;
+  isActionLoading?: boolean;
 }) {
   const { alpha } = usePluginTheme();
   const [isHeaderHovered, setIsHeaderHovered] = useState(false);
@@ -1101,6 +1151,7 @@ export function ProjectGroupCard({
     <View
       style={{
         paddingVertical: 2,
+        opacity: group.isMuted ? 0.65 : 1,
       }}
     >
       <Stack gap={4}>
@@ -1158,8 +1209,76 @@ export function ProjectGroupCard({
                 size="sm"
                 textStyle={{ fontSize: 10 }}
               />
+
+              {/* Fleet Roster Enrolled & Detached Badges (#426) */}
+              {group.isEnrolled && (
+                <>
+                  {group.isMuted && (
+                    <Badge label="Muted" variant="warning" size="sm" dot textStyle={{ fontSize: 10 }} />
+                  )}
+                  {!group.hasOrchestrator && (
+                    <Badge label="⚪ No Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+                  )}
+                  {(group.queuedHooksCount ?? 0) > 0 && (
+                    <Badge
+                      label={`${group.queuedHooksCount} hooks queued`}
+                      variant="info"
+                      size="sm"
+                      dot
+                      textStyle={{ fontSize: 10 }}
+                    />
+                  )}
+                </>
+              )}
+
+              {group.isDetached && (
+                <Badge label="Detached / Local" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+              )}
             </Row>
+
             <Row align="center" gap="xs">
+              {/* Lifecycle & Muting Action Buttons (#426) */}
+              {group.isEnrolled && onToggleMute && (
+                <Button
+                  label={group.isMuted ? "Unmute" : "Mute"}
+                  icon={group.isMuted ? "Volume2" : "VolumeX"}
+                  size="sm"
+                  variant="ghost"
+                  disabled={isActionLoading}
+                  loading={isActionLoading}
+                  onPress={() => onToggleMute(group.projectName, group.isMuted)}
+                />
+              )}
+
+              {group.isEnrolled && !group.hasOrchestrator && onAddOrchestrator && (
+                <Button
+                  label="+ Add Orchestrator"
+                  icon="Plus"
+                  size="sm"
+                  variant="primary"
+                  disabled={isActionLoading}
+                  loading={isActionLoading}
+                  onPress={() => onAddOrchestrator(group.projectName)}
+                />
+              )}
+
+              {group.isEnrolled && group.hasOrchestrator && onReplaceOrchestrator && (
+                <Button
+                  label="Replace Orchestrator"
+                  icon="RefreshCw"
+                  size="sm"
+                  variant="ghost"
+                  disabled={isActionLoading}
+                  loading={isActionLoading}
+                  onPress={() =>
+                    onReplaceOrchestrator(
+                      group.projectName,
+                      group.orchestrators[0]?.agent?.id
+                    )
+                  }
+                />
+              )}
+
               {group.runningCount > 0 && (
                 <Badge
                   label={`${group.runningCount} Active`}
@@ -1192,6 +1311,30 @@ export function ProjectGroupCard({
               marginTop: 2,
             }}
           >
+            {group.totalCount === 0 ? (
+              <Row
+                align="center"
+                justify="space-between"
+                wrap
+                gap="xs"
+                style={{ paddingVertical: 8, paddingHorizontal: 6 }}
+              >
+                <Text style={{ color: colors.foregroundMuted, fontSize: 12, fontStyle: "italic" }}>
+                  No agents active. Enrolled repository is unstaffed.
+                </Text>
+                {onAddOrchestrator && (
+                  <Button
+                    label="+ Add Orchestrator"
+                    icon="Plus"
+                    size="sm"
+                    variant="secondary"
+                    disabled={isActionLoading}
+                    loading={isActionLoading}
+                    onPress={() => onAddOrchestrator(group.projectName)}
+                  />
+                )}
+              </Row>
+            ) : (
             <Stack gap={2}>
               {group.orchestrators.map((orchNode, orchIdx) => {
                 const orchId = orchNode.agent.id;
@@ -1268,6 +1411,7 @@ export function ProjectGroupCard({
                 </View>
               )}
             </Stack>
+            )}
           </View>
         )}
       </Stack>
@@ -1283,12 +1427,20 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
   onArchiveAgent,
   onArchiveBulk,
   isArchiving = false,
+  onCreateFrontDesk,
+  onReplaceFrontDesk,
+  onAddOrchestrator,
+  onReplaceOrchestrator,
+  onToggleRepoMute,
 }) => {
   const { colors, typography } = usePluginTheme();
+  const toast = useToast();
   const [query, setQuery] = useState("");
   const [stateFilter, setStateFilter] = useState<string>("all");
   const [localArchivingId, setLocalArchivingId] = useState<string | null>(null);
   const [localBulkArchiving, setLocalBulkArchiving] = useState(false);
+  const [frontDeskLoading, setFrontDeskLoading] = useState(false);
+  const [actionLoadingRepo, setActionLoadingRepo] = useState<string | null>(null);
 
   // Collapsible tracking states
   const [collapsedProjects, setCollapsedProjects] = useState<Record<string, boolean>>({});
@@ -1296,9 +1448,119 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
 
   const archiveAgentMutation = useRpcMutation(uppidiArchiveAgentContract);
   const archiveBulkMutation = useRpcMutation(uppidiArchiveInactiveAgentsContract);
+  const createFrontDeskMutation = useRpcMutation(uppidiCreateFrontDeskContract);
+  const replaceFrontDeskMutation = useRpcMutation(uppidiReplaceFrontDeskContract);
+  const addOrchestratorMutation = useRpcMutation(uppidiAddOrchestratorContract);
+  const replaceOrchestratorMutation = useRpcMutation(uppidiReplaceOrchestratorContract);
+  const toggleRepoMuteMutation = useRpcMutation(uppidiToggleRepoMuteContract);
 
   const isBulkArchiving = isArchiving || localBulkArchiving;
   const archivingAgentId = localArchivingId;
+
+  const handleCreateFrontDesk = async () => {
+    setFrontDeskLoading(true);
+    try {
+      if (onCreateFrontDesk) {
+        await onCreateFrontDesk();
+      } else {
+        const res = await createFrontDeskMutation.mutateAsync({});
+        if (res.ok) {
+          toast.show(res.message || "Front Desk session created");
+          onRefresh?.();
+        } else {
+          toast.error(res.error || "Failed to create Front Desk session");
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || String(err));
+    } finally {
+      setFrontDeskLoading(false);
+    }
+  };
+
+  const handleReplaceFrontDesk = async (existingAgentId?: string) => {
+    setFrontDeskLoading(true);
+    try {
+      if (onReplaceFrontDesk) {
+        await onReplaceFrontDesk(existingAgentId);
+      } else {
+        const res = await replaceFrontDeskMutation.mutateAsync({ existingAgentId });
+        if (res.ok) {
+          toast.show(res.message || "Front Desk session replaced");
+          onRefresh?.();
+        } else {
+          toast.error(res.error || "Failed to replace Front Desk session");
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || String(err));
+    } finally {
+      setFrontDeskLoading(false);
+    }
+  };
+
+  const handleAddOrchestrator = async (repo: string) => {
+    setActionLoadingRepo(repo);
+    try {
+      if (onAddOrchestrator) {
+        await onAddOrchestrator(repo);
+      } else {
+        const res = await addOrchestratorMutation.mutateAsync({ repo });
+        if (res.ok) {
+          toast.show(res.message || `Orchestrator spawned for ${repo}`);
+          onRefresh?.();
+        } else {
+          toast.error(res.error || `Failed to add orchestrator for ${repo}`);
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || String(err));
+    } finally {
+      setActionLoadingRepo(null);
+    }
+  };
+
+  const handleReplaceOrchestrator = async (repo: string, existingAgentId?: string) => {
+    setActionLoadingRepo(repo);
+    try {
+      if (onReplaceOrchestrator) {
+        await onReplaceOrchestrator(repo, existingAgentId);
+      } else {
+        const res = await replaceOrchestratorMutation.mutateAsync({ repo, existingAgentId });
+        if (res.ok) {
+          toast.show(res.message || `Orchestrator replaced for ${repo}`);
+          onRefresh?.();
+        } else {
+          toast.error(res.error || `Failed to replace orchestrator for ${repo}`);
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || String(err));
+    } finally {
+      setActionLoadingRepo(null);
+    }
+  };
+
+  const handleToggleRepoMute = async (repo: string, currentlyMuted?: boolean) => {
+    setActionLoadingRepo(repo);
+    try {
+      if (onToggleRepoMute) {
+        await onToggleRepoMute(repo, !currentlyMuted);
+      } else {
+        const res = await toggleRepoMuteMutation.mutateAsync({ repo, muted: !currentlyMuted });
+        if (res.ok) {
+          toast.show(res.message || (res.isMuted ? `Muted repository ${repo}` : `Unmuted repository ${repo}`));
+          onRefresh?.();
+        } else {
+          toast.error(res.error || `Failed to toggle mute for ${repo}`);
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || String(err));
+    } finally {
+      setActionLoadingRepo(null);
+    }
+  };
 
   // 1. Base Tree Lineage
   const baseTree = useMemo(() => {
@@ -1416,15 +1678,39 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
     return filterAgentTree(baseTree, matches);
   }, [baseTree, query, stateFilter]);
 
-  // 4. Group by Front Desk and Projects (#403)
-  const { frontDeskNodes, projectGroups } = useMemo(() => {
-    return buildProjectGroups(filteredTree);
-  }, [filteredTree]);
+  // 4. Group by Front Desk and Projects (#403, #426)
+  const { frontDeskNodes, enrolledGroups, detachedGroups } = useMemo(() => {
+    return buildProjectGroups(filteredTree, {
+      enrolledRepos: agentsData?.enrolledRepos,
+      mutedRepos: agentsData?.mutedRepos,
+      repoQueuedHooks: agentsData?.repoQueuedHooks,
+    });
+  }, [filteredTree, agentsData]);
 
   // Unfiltered Front Desk nodes for top display when filter is active
   const allFrontDeskNodes = useMemo(() => {
-    return buildProjectGroups(baseTree).frontDeskNodes;
-  }, [baseTree]);
+    return buildProjectGroups(baseTree, {
+      enrolledRepos: agentsData?.enrolledRepos,
+      mutedRepos: agentsData?.mutedRepos,
+      repoQueuedHooks: agentsData?.repoQueuedHooks,
+    }).frontDeskNodes;
+  }, [baseTree, agentsData]);
+
+  const displayEnrolled = useMemo(() => {
+    if (!query.trim() && stateFilter === "all") {
+      return enrolledGroups;
+    }
+    return enrolledGroups.filter(
+      (g) => g.allAgents.length > 0 || g.projectName.toLowerCase().includes(query.toLowerCase())
+    );
+  }, [query, stateFilter, enrolledGroups]);
+
+  const displayDetached = useMemo(() => {
+    if (!query.trim() && stateFilter === "all") {
+      return detachedGroups;
+    }
+    return detachedGroups.filter((g) => g.allAgents.length > 0);
+  }, [query, stateFilter, detachedGroups]);
 
   const totalCount = agentsData?.totalCount ?? allAgents.length;
   const runningCount = agentsData?.runningCount ?? 0;
@@ -1481,10 +1767,14 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
     }));
   };
 
+  const allProjects = useMemo(() => {
+    return [...displayEnrolled, ...displayDetached];
+  }, [displayEnrolled, displayDetached]);
+
   const allProjectsCollapsed = useMemo(() => {
-    if (projectGroups.length === 0) return false;
-    return projectGroups.every((g) => collapsedProjects[g.projectName]);
-  }, [projectGroups, collapsedProjects]);
+    if (allProjects.length === 0) return false;
+    return allProjects.every((g) => collapsedProjects[g.projectName]);
+  }, [allProjects, collapsedProjects]);
 
   const toggleAllProjects = () => {
     if (allProjectsCollapsed) {
@@ -1493,7 +1783,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
     } else {
       const nextCollapsedProj: Record<string, boolean> = {};
       const nextCollapsedOrch: Record<string, boolean> = {};
-      for (const g of projectGroups) {
+      for (const g of allProjects) {
         nextCollapsedProj[g.projectName] = true;
         for (const o of g.orchestrators) {
           nextCollapsedOrch[o.agent.id] = true;
@@ -1555,7 +1845,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
               onPress={() => setStateFilter(f.id)}
             />
           ))}
-          {projectGroups.length > 0 && (
+          {allProjects.length > 0 && (
             <Button
               label={allProjectsCollapsed ? "Expand All" : "Collapse All"}
               icon={allProjectsCollapsed ? "ChevronDown" : "ChevronRight"}
@@ -1583,10 +1873,13 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
         navigation={navigation}
         archivingAgentId={archivingAgentId}
         onArchiveAgent={handleArchiveAgent}
+        onCreateFrontDesk={handleCreateFrontDesk}
+        onReplaceFrontDesk={handleReplaceFrontDesk}
+        isActionLoading={frontDeskLoading}
       />
 
-      {/* 2. Top-Level Project Groups with Dense Non-Card Children */}
-      {projectGroups.length === 0 ? (
+      {/* 2. Top-Level Project Groups (Enrolled Fleet Roster) */}
+      {displayEnrolled.length === 0 && displayDetached.length === 0 ? (
         displayFrontDesk.length === 0 ? (
           <EmptyState
             title={isLoading ? "Scanning fleet..." : "No matching agents"}
@@ -1613,7 +1906,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
         ) : null
       ) : (
         <Stack gap={8}>
-          {projectGroups.map((group) => {
+          {displayEnrolled.map((group) => {
             const isProjectCollapsed =
               !query.trim() && Boolean(collapsedProjects[group.projectName]);
             return (
@@ -1629,9 +1922,62 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
                 onToggleExpand={() => handleToggleProject(group.projectName)}
                 collapsedOrchestrators={collapsedOrchestrators}
                 onToggleOrchestrator={handleToggleOrchestrator}
+                onAddOrchestrator={handleAddOrchestrator}
+                onReplaceOrchestrator={handleReplaceOrchestrator}
+                onToggleMute={handleToggleRepoMute}
+                isActionLoading={actionLoadingRepo === group.projectName}
               />
             );
           })}
+
+          {/* 3. Detached / Local Workspaces Grouping (#426) */}
+          {displayDetached.length > 0 && (
+            <Stack
+              gap={6}
+              style={{
+                marginTop: 12,
+                paddingTop: 12,
+                borderTopWidth: 1,
+                borderTopColor: colors.border,
+              }}
+            >
+              <Row align="center" gap="xs">
+                <Icon name="FolderGit2" size={14} color={colors.foregroundMuted} />
+                <Text
+                  style={{
+                    color: colors.foregroundMuted,
+                    ...typography.caption,
+                    fontWeight: "700",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.8,
+                  }}
+                >
+                  Detached / Local Workspaces ({displayDetached.length})
+                </Text>
+              </Row>
+              <Stack gap={8}>
+                {displayDetached.map((group) => {
+                  const isProjectCollapsed =
+                    !query.trim() && Boolean(collapsedProjects[group.projectName]);
+                  return (
+                    <ProjectGroupCard
+                      key={group.projectName}
+                      group={group}
+                      colors={colors}
+                      typography={typography}
+                      navigation={navigation}
+                      archivingAgentId={archivingAgentId}
+                      onArchiveAgent={handleArchiveAgent}
+                      isExpanded={!isProjectCollapsed}
+                      onToggleExpand={() => handleToggleProject(group.projectName)}
+                      collapsedOrchestrators={collapsedOrchestrators}
+                      onToggleOrchestrator={handleToggleOrchestrator}
+                    />
+                  );
+                })}
+              </Stack>
+            </Stack>
+          )}
         </Stack>
       )}
     </Stack>

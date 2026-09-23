@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import fs from "node:fs";
+import fs, { mkdirSync, writeFileSync, renameSync } from "node:fs";
 import os from "node:os";
-import path from "node:path";
+import path, { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type {
   UppidiAgent,
@@ -14,9 +14,25 @@ import type {
   UppidiArchiveAgentOutput,
   UppidiArchiveInactiveAgentsInput,
   UppidiArchiveInactiveAgentsOutput,
+  UppidiCreateFrontDeskInput,
+  UppidiCreateFrontDeskOutput,
+  UppidiReplaceFrontDeskInput,
+  UppidiReplaceFrontDeskOutput,
+  UppidiAddOrchestratorInput,
+  UppidiAddOrchestratorOutput,
+  UppidiReplaceOrchestratorInput,
+  UppidiReplaceOrchestratorOutput,
+  UppidiToggleRepoMuteInput,
+  UppidiToggleRepoMuteOutput,
 } from "../shared/contracts.js";
 import { extractAgentWorktree, extractAgentProject } from "../shared/contracts.js";
-import { isAgentEligibleForBulkArchive } from "../shared/sort-filter.js";
+import { isAgentEligibleForBulkArchive, isRepoMatching } from "../shared/sort-filter.js";
+import {
+  getActiveHookRouter,
+  getFleetRosterInfo,
+  loadRouterConfig,
+  saveRouterConfig,
+} from "./hook-router.js";
 
 
 const execFileAsync = promisify(execFile);
@@ -105,7 +121,7 @@ export function extractAttributedWork(raw: RawAgentRecord): UppidiAgentWork | nu
     }
   }
 
-  // Check repo from cwd if available (e.g. /home/xpufx/code/paseo -> xpufx-org/paseo)
+  // Check repo from cwd if available (e.g. /home/user/code/paseo -> xpufx-org/paseo)
   if (!repoName && raw.cwd) {
     const match = raw.cwd.match(/\/code\/([a-zA-Z0-9_-]+)/);
     if (match && match[1]) {
@@ -494,6 +510,23 @@ export async function handleUppidiAgents(
       }
     }
 
+    const { enrolledRepos, mutedRepos, repoQueuedHooks } = getFleetRosterInfo();
+
+    for (const a of agents) {
+      const proj = a.project || extractAgentProject(a);
+      const isEnrolled = enrolledRepos.some((r) => isRepoMatching(r, proj));
+      a.isEnrolled = isEnrolled;
+      a.isDetached = !isEnrolled;
+      a.isMuted = mutedRepos.some((m) => isRepoMatching(m, proj));
+      let queued = 0;
+      for (const [k, count] of Object.entries(repoQueuedHooks)) {
+        if (isRepoMatching(k, proj)) {
+          queued += count;
+        }
+      }
+      a.queuedHooksCount = queued;
+    }
+
     const tree = buildAgentTree(agents);
 
     return {
@@ -502,6 +535,9 @@ export async function handleUppidiAgents(
       orchestrators,
       workers,
       tree,
+      enrolledRepos,
+      mutedRepos,
+      repoQueuedHooks,
       totalCount: agents.length,
       runningCount,
       idleCount,
@@ -514,6 +550,9 @@ export async function handleUppidiAgents(
       orchestrators: [],
       workers: [],
       tree: [],
+      enrolledRepos: [],
+      mutedRepos: [],
+      repoQueuedHooks: {},
       totalCount: 0,
       runningCount: 0,
       idleCount: 0,
@@ -637,6 +676,411 @@ export async function handleUppidiArchiveInactiveAgents(
       ok: false,
       archivedCount: 0,
       archivedIds: [],
+      error: err?.message || String(err),
+    };
+  }
+}
+
+// --- Front Desk & Orchestrator Lifecycle + Muting Handlers (#426) ---
+
+async function spawnPaseoAgent(
+  options: {
+    title: string;
+    prompt: string;
+    category?: "front-desk" | "orchestrator" | "worker";
+    model?: string;
+    cwd?: string;
+    labels?: Record<string, string>;
+  },
+  context: PluginHandlerContext
+): Promise<{ ok: boolean; agentId?: string; error?: string }> {
+  // 1. Try SDK context.paseo.agents.create if available
+  if (typeof (context?.paseo?.agents as any)?.create === "function") {
+    try {
+      const created = await (context.paseo.agents as any).create({
+        title: options.title,
+        prompt: options.prompt,
+        model: options.model,
+        cwd: options.cwd,
+        labels: options.labels,
+        role: options.category,
+      });
+      const id = created?.id || created?.agent?.id;
+      if (id) {
+        return { ok: true, agentId: id };
+      }
+    } catch (err: any) {
+      console.warn("[uppidi-forge:agents] context.paseo.agents.create failed, falling back to CLI:", err?.message || err);
+    }
+  }
+
+  // 2. Fall back to CLI `paseo run -d ...`
+  try {
+    const args = ["run", "-d", "--title", options.title];
+    if (options.model) {
+      args.push("--model", options.model);
+    }
+    if (options.cwd) {
+      args.push("--cwd", options.cwd);
+    }
+    if (options.labels) {
+      for (const [k, v] of Object.entries(options.labels)) {
+        args.push("--label", `${k}=${v}`);
+      }
+    }
+    args.push("--json", options.prompt);
+
+    const { stdout } = await execFileAsync("paseo", args, {
+      timeout: 15000,
+      encoding: "utf-8",
+    });
+
+    let agentId: string | undefined;
+    try {
+      const parsed = JSON.parse(stdout);
+      agentId = parsed?.id || parsed?.agentId;
+    } catch {
+      const uuidMatch = stdout.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+      if (uuidMatch) {
+        agentId = uuidMatch[0];
+      }
+    }
+
+    return { ok: true, agentId: agentId || `spawned-${Date.now()}` };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+function writePersistedFrontDesk(agentId: string): void {
+  const home = process.env.HOME ?? os.homedir();
+  const dir = join(home, ".paseo", "forgejo-hook");
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, "frontdesk.json");
+  const record = {
+    version: 1,
+    agentId,
+    updatedAt: new Date().toISOString(),
+    by: "frontdesk",
+  };
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(record, null, 2), "utf8");
+  renameSync(tmp, file);
+}
+
+function writePersistedOrchestrator(repo: string, agentId: string): void {
+  const home = process.env.HOME ?? os.homedir();
+  const dir = join(home, ".paseo", "forgejo-hook", "orchestrators");
+  mkdirSync(dir, { recursive: true });
+  const sanitized = repo.replace(/[^a-zA-Z0-9_.-]/g, "_");
+  const file = join(dir, `${sanitized}.json`);
+  const record = {
+    version: 1,
+    key: repo,
+    agentId,
+    updatedAt: new Date().toISOString(),
+    by: "orchestrator",
+  };
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(record, null, 2), "utf8");
+  renameSync(tmp, file);
+}
+
+function enrollPersistedRepo(repo: string): void {
+  const config = loadRouterConfig();
+  const enrolled = new Set(config.enrolledRepos ?? []);
+  enrolled.add(repo);
+  saveRouterConfig({ enrolledRepos: Array.from(enrolled) });
+}
+
+export async function handleUppidiCreateFrontDesk(
+  input: UppidiCreateFrontDeskInput,
+  context: PluginHandlerContext
+): Promise<UppidiCreateFrontDeskOutput> {
+  try {
+    const title = input.title?.trim() || "Front Desk";
+    const prompt =
+      input.prompt?.trim() ||
+      "You are the Fleet Front Desk liaison. Monitor incoming events, coordinate with project orchestrators, and triage requests across the workspace.";
+
+    const spawnRes = await spawnPaseoAgent(
+      {
+        title,
+        prompt,
+        category: "front-desk",
+        model: input.model,
+        labels: {
+          role: "front-desk",
+          category: "front-desk",
+        },
+      },
+      context
+    );
+
+    if (!spawnRes.ok || !spawnRes.agentId) {
+      return {
+        ok: false,
+        error: spawnRes.error || "Failed to spawn Front Desk session",
+      };
+    }
+
+    const router = getActiveHookRouter();
+    if (router) {
+      router.writeFrontDesk(spawnRes.agentId, "frontdesk");
+    } else {
+      writePersistedFrontDesk(spawnRes.agentId);
+    }
+
+    return {
+      ok: true,
+      agentId: spawnRes.agentId,
+      message: "Front Desk session created successfully",
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+export async function handleUppidiReplaceFrontDesk(
+  input: UppidiReplaceFrontDeskInput,
+  context: PluginHandlerContext
+): Promise<UppidiReplaceFrontDeskOutput> {
+  try {
+    let oldAgentId = input.existingAgentId?.trim();
+
+    if (!oldAgentId) {
+      const agents = await fetchPaseoAgents(context).catch(() => []);
+      const existingFd = agents.find((a) => a.category === "front-desk");
+      if (existingFd) {
+        oldAgentId = existingFd.id;
+      }
+    }
+
+    if (oldAgentId) {
+      await handleUppidiArchiveAgent({ agentId: oldAgentId }, context).catch(() => {});
+    }
+
+    const createRes = await handleUppidiCreateFrontDesk(
+      {
+        model: input.model,
+        prompt: input.prompt,
+        title: input.title,
+      },
+      context
+    );
+
+    if (!createRes.ok || !createRes.agentId) {
+      return {
+        ok: false,
+        oldAgentId,
+        error: createRes.error || "Failed to spawn replacement Front Desk session",
+      };
+    }
+
+    return {
+      ok: true,
+      oldAgentId,
+      agentId: createRes.agentId,
+      message: "Front Desk session replaced successfully",
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+export async function handleUppidiAddOrchestrator(
+  input: UppidiAddOrchestratorInput,
+  context: PluginHandlerContext
+): Promise<UppidiAddOrchestratorOutput> {
+  const repo = input.repo?.trim();
+  if (!repo) {
+    return { ok: false, repo: "", error: "repo is required" };
+  }
+
+  try {
+    const title = input.title?.trim() || `Orchestrator · ${repo}`;
+    const prompt =
+      input.prompt?.trim() ||
+      `You are the project orchestrator for ${repo}. Coordinate tasks, supervise worker agents, and manage pull requests and issues for this repository.`;
+
+    let cwd = input.workspacePath?.trim();
+    if (!cwd) {
+      const agents = await fetchPaseoAgents(context).catch(() => []);
+      const matching = agents.find(
+        (a) => a.cwd && isRepoMatching(a.project || extractAgentProject(a), repo)
+      );
+      if (matching?.cwd) {
+        cwd = matching.cwd;
+      }
+    }
+
+    const spawnRes = await spawnPaseoAgent(
+      {
+        title,
+        prompt,
+        category: "orchestrator",
+        model: input.model,
+        cwd,
+        labels: {
+          role: "orchestrator",
+          category: "orchestrator",
+          repo,
+        },
+      },
+      context
+    );
+
+    if (!spawnRes.ok || !spawnRes.agentId) {
+      return {
+        ok: false,
+        repo,
+        error: spawnRes.error || `Failed to spawn orchestrator for ${repo}`,
+      };
+    }
+
+    const router = getActiveHookRouter();
+    if (router) {
+      router.writeOrchestrator(repo, spawnRes.agentId, "orchestrator");
+      router.enrollRepo(repo);
+    } else {
+      writePersistedOrchestrator(repo, spawnRes.agentId);
+      enrollPersistedRepo(repo);
+    }
+
+    return {
+      ok: true,
+      repo,
+      agentId: spawnRes.agentId,
+      message: `Orchestrator spawned for ${repo}`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      repo,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+export async function handleUppidiReplaceOrchestrator(
+  input: UppidiReplaceOrchestratorInput,
+  context: PluginHandlerContext
+): Promise<UppidiReplaceOrchestratorOutput> {
+  const repo = input.repo?.trim();
+  if (!repo) {
+    return { ok: false, repo: "", error: "repo is required" };
+  }
+
+  try {
+    let oldAgentId = input.existingAgentId?.trim();
+
+    if (!oldAgentId) {
+      const agents = await fetchPaseoAgents(context).catch(() => []);
+      const existing = agents.find(
+        (a) =>
+          a.category === "orchestrator" &&
+          isRepoMatching(a.project || extractAgentProject(a), repo)
+      );
+      if (existing) {
+        oldAgentId = existing.id;
+      }
+    }
+
+    if (oldAgentId) {
+      await handleUppidiArchiveAgent({ agentId: oldAgentId }, context).catch(() => {});
+    }
+
+    const addRes = await handleUppidiAddOrchestrator(
+      {
+        repo,
+        workspacePath: input.workspacePath,
+        model: input.model,
+        prompt: input.prompt,
+        title: input.title,
+      },
+      context
+    );
+
+    if (!addRes.ok || !addRes.agentId) {
+      return {
+        ok: false,
+        repo,
+        oldAgentId,
+        error: addRes.error || `Failed to replace orchestrator for ${repo}`,
+      };
+    }
+
+    return {
+      ok: true,
+      repo,
+      oldAgentId,
+      agentId: addRes.agentId,
+      message: `Orchestrator replaced for ${repo}`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      repo,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+export async function handleUppidiToggleRepoMute(
+  input: UppidiToggleRepoMuteInput,
+  context: PluginHandlerContext
+): Promise<UppidiToggleRepoMuteOutput> {
+  const repo = input.repo?.trim();
+  if (!repo) {
+    return { ok: false, repo: "", isMuted: false, mutedRepos: [], error: "repo is required" };
+  }
+
+  try {
+    const router = getActiveHookRouter();
+    if (router) {
+      const res = router.toggleRepoMute(repo, input.muted);
+      return {
+        ok: true,
+        repo,
+        isMuted: res.isMuted,
+        mutedRepos: res.mutedRepos,
+        message: res.isMuted ? `Muted repository ${repo}` : `Unmuted repository ${repo}`,
+      };
+    }
+
+    const config = loadRouterConfig();
+    const currentMuted = config.mutedRepos ?? [];
+    const isCurrentlyMuted = currentMuted.some((m) => isRepoMatching(m, repo));
+    const shouldMute = input.muted !== undefined ? input.muted : !isCurrentlyMuted;
+
+    let updatedMuted: string[];
+    if (shouldMute) {
+      updatedMuted = Array.from(new Set([...currentMuted, repo]));
+    } else {
+      updatedMuted = currentMuted.filter((m) => !isRepoMatching(m, repo));
+    }
+
+    saveRouterConfig({ mutedRepos: updatedMuted });
+
+    return {
+      ok: true,
+      repo,
+      isMuted: shouldMute,
+      mutedRepos: updatedMuted,
+      message: shouldMute ? `Muted repository ${repo}` : `Unmuted repository ${repo}`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      repo,
+      isMuted: false,
+      mutedRepos: [],
       error: err?.message || String(err),
     };
   }

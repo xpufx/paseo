@@ -24,6 +24,21 @@ import {
   HookServiceConfigInputSchema,
   HookServiceConfigOutputSchema,
   uppidiHookConfigureContract,
+  uppidiCreateFrontDeskContract,
+  uppidiReplaceFrontDeskContract,
+  uppidiAddOrchestratorContract,
+  uppidiReplaceOrchestratorContract,
+  uppidiToggleRepoMuteContract,
+  UppidiCreateFrontDeskInputSchema,
+  UppidiCreateFrontDeskOutputSchema,
+  UppidiReplaceFrontDeskInputSchema,
+  UppidiReplaceFrontDeskOutputSchema,
+  UppidiAddOrchestratorInputSchema,
+  UppidiAddOrchestratorOutputSchema,
+  UppidiReplaceOrchestratorInputSchema,
+  UppidiReplaceOrchestratorOutputSchema,
+  UppidiToggleRepoMuteInputSchema,
+  UppidiToggleRepoMuteOutputSchema,
 } from "./contracts.js";
 
 
@@ -275,13 +290,13 @@ describe("uppidi-forge shared contracts", () => {
 
     // 2. From cwd worktree path
     assert.equal(
-      extractAgentWorktree({ cwd: "/home/xpufx/.paseo/worktrees/2h0dw6vb/feat-403-dense-fleet-tree" }),
+      extractAgentWorktree({ cwd: "/home/user/.paseo/worktrees/2h0dw6vb/feat-403-dense-fleet-tree" }),
       "feat-403-dense-fleet-tree"
     );
 
     // 3. From cwd code repo path
     assert.equal(
-      extractAgentWorktree({ cwd: "/home/xpufx/code/paseo" }),
+      extractAgentWorktree({ cwd: "/home/user/code/paseo" }),
       "paseo"
     );
 
@@ -331,7 +346,7 @@ describe("uppidi-forge shared contracts", () => {
 
     // 5. From cwd
     assert.equal(
-      extractAgentProject({ cwd: "/home/xpufx/code/paseo" }),
+      extractAgentProject({ cwd: "/home/user/code/paseo" }),
       "xpufx-org/paseo"
     );
 
@@ -398,6 +413,118 @@ describe("uppidi-forge shared contracts", () => {
     assert.equal(statusOutput.port, 8099);
     assert.equal(statusOutput.configuredPort, 8099);
     assert.deepEqual(statusOutput.availableInterfaces, ["127.0.0.1", "0.0.0.0", "192.168.1.50"]);
+  });
+
+  it("validates fleet roster contracts and schemas (#426)", () => {
+    // 1. Create Front Desk
+    assert.equal(uppidiCreateFrontDeskContract.name, "uppidi-forge.create-front-desk");
+    const createFdInput = UppidiCreateFrontDeskInputSchema.parse({});
+    assert.equal(createFdInput.model, undefined);
+    const createFdOutput = UppidiCreateFrontDeskOutputSchema.parse({
+      ok: true,
+      agentId: "agent-fd-1",
+      agentName: "Front Desk Liaison",
+      message: "Spawned Front Desk",
+    });
+    assert.equal(createFdOutput.ok, true);
+    assert.equal(createFdOutput.agentId, "agent-fd-1");
+
+    // 2. Replace Front Desk
+    assert.equal(uppidiReplaceFrontDeskContract.name, "uppidi-forge.replace-front-desk");
+    const replaceFdInput = UppidiReplaceFrontDeskInputSchema.parse({ existingAgentId: "agent-fd-old" });
+    assert.equal(replaceFdInput.existingAgentId, "agent-fd-old");
+    const replaceFdOutput = UppidiReplaceFrontDeskOutputSchema.parse({
+      ok: true,
+      oldAgentId: "agent-fd-old",
+      agentId: "agent-fd-new",
+      message: "Replaced Front Desk",
+    });
+    assert.equal(replaceFdOutput.ok, true);
+    assert.equal(replaceFdOutput.agentId, "agent-fd-new");
+
+    // 3. Add Orchestrator
+    assert.equal(uppidiAddOrchestratorContract.name, "uppidi-forge.add-orchestrator");
+    const addOrchInput = UppidiAddOrchestratorInputSchema.parse({ repo: "xpufx-org/paseo" });
+    assert.equal(addOrchInput.repo, "xpufx-org/paseo");
+    const addOrchOutput = UppidiAddOrchestratorOutputSchema.parse({
+      ok: true,
+      repo: "xpufx-org/paseo",
+      agentId: "agent-orch-1",
+    });
+    assert.equal(addOrchOutput.ok, true);
+    assert.equal(addOrchOutput.agentId, "agent-orch-1");
+
+    // 4. Replace Orchestrator
+    assert.equal(uppidiReplaceOrchestratorContract.name, "uppidi-forge.replace-orchestrator");
+    const replaceOrchInput = UppidiReplaceOrchestratorInputSchema.parse({
+      repo: "xpufx-org/paseo",
+      existingAgentId: "agent-orch-old",
+    });
+    assert.equal(replaceOrchInput.repo, "xpufx-org/paseo");
+    assert.equal(replaceOrchInput.existingAgentId, "agent-orch-old");
+    const replaceOrchOutput = UppidiReplaceOrchestratorOutputSchema.parse({
+      ok: true,
+      repo: "xpufx-org/paseo",
+      oldAgentId: "agent-orch-old",
+      agentId: "agent-orch-new",
+    });
+    assert.equal(replaceOrchOutput.ok, true);
+    assert.equal(replaceOrchOutput.agentId, "agent-orch-new");
+
+    // 5. Toggle Repo Mute
+    assert.equal(uppidiToggleRepoMuteContract.name, "uppidi-forge.toggle-repo-mute");
+    const muteInput = UppidiToggleRepoMuteInputSchema.parse({ repo: "xpufx-org/paseo", muted: true });
+    assert.equal(muteInput.repo, "xpufx-org/paseo");
+    assert.equal(muteInput.muted, true);
+    const muteOutput = UppidiToggleRepoMuteOutputSchema.parse({
+      ok: true,
+      repo: "xpufx-org/paseo",
+      isMuted: true,
+      mutedRepos: ["xpufx-org/paseo"],
+    });
+    assert.equal(muteOutput.ok, true);
+    assert.equal(muteOutput.isMuted, true);
+    assert.deepEqual(muteOutput.mutedRepos, ["xpufx-org/paseo"]);
+
+    // 6. Schema extensions on UppidiAgent, TreeNode, Output
+    const agent = UppidiAgentSchema.parse({
+      id: "agent-1",
+      shortId: "ag1",
+      name: "Worker 1",
+      category: "worker",
+      status: "running",
+      isEnrolled: true,
+      isMuted: false,
+      hasOrchestrator: true,
+      queuedHooksCount: 3,
+      isDetached: false,
+    });
+    assert.equal(agent.isEnrolled, true);
+    assert.equal(agent.queuedHooksCount, 3);
+    assert.equal(agent.isDetached, false);
+
+    const treeNode = UppidiAgentTreeNodeSchema.parse({
+      agent,
+      depth: 0,
+      children: [],
+      isEnrolled: true,
+      isDetached: false,
+    });
+    assert.equal(treeNode.isEnrolled, true);
+
+    const fleetOutput = UppidiAgentsOutputSchema.parse({
+      ok: true,
+      frontDesk: [],
+      orchestrators: [],
+      workers: [],
+      tree: [treeNode],
+      enrolledRepos: ["xpufx-org/paseo"],
+      mutedRepos: ["xpufx-org/other"],
+      repoQueuedHooks: { "xpufx-org/paseo": 3 },
+    });
+    assert.deepEqual(fleetOutput.enrolledRepos, ["xpufx-org/paseo"]);
+    assert.deepEqual(fleetOutput.mutedRepos, ["xpufx-org/other"]);
+    assert.equal(fleetOutput.repoQueuedHooks?.["xpufx-org/paseo"], 3);
   });
 });
 

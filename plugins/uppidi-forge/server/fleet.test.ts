@@ -9,6 +9,11 @@ import {
   buildAgentTree,
   handleUppidiArchiveAgent,
   handleUppidiArchiveInactiveAgents,
+  handleUppidiCreateFrontDesk,
+  handleUppidiReplaceFrontDesk,
+  handleUppidiAddOrchestrator,
+  handleUppidiReplaceOrchestrator,
+  handleUppidiToggleRepoMute,
 } from "./agents.js";
 
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel } from "./role-models.js";
@@ -29,7 +34,7 @@ describe("fleet and agents classification", () => {
     const work1 = extractAttributedWork({
       id: "agent-1",
       name: "feat-385-tree-fleet-view",
-      cwd: "/home/xpufx/code/paseo",
+      cwd: "/home/user/code/paseo",
     });
     assert.equal(work1?.issue, 385);
     assert.equal(work1?.repo, "xpufx-org/paseo");
@@ -432,6 +437,202 @@ describe("archive agent actions (#402)", () => {
     assert.equal(res.archivedCount, 0);
     assert.deepEqual(res.archivedIds, []);
     assert.ok(res.message?.includes("No eligible"));
+  });
+});
+
+describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
+  it("creates Front Desk session via handleUppidiCreateFrontDesk", async () => {
+    let createdPayload: any = null;
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async (opts: any) => {
+            createdPayload = opts;
+            return {
+              agent: {
+                id: "agent-fd-new",
+                name: opts.name,
+                role: opts.role,
+                status: "running",
+              },
+            };
+          },
+        },
+      },
+    };
+
+    const res = await handleUppidiCreateFrontDesk({}, mockContext);
+    assert.equal(res.ok, true);
+    assert.equal(res.agentId, "agent-fd-new");
+    assert.equal(createdPayload?.role, "front-desk");
+    assert.ok(createdPayload?.title?.includes("Front Desk"));
+  });
+
+  it("replaces Front Desk session via handleUppidiReplaceFrontDesk", async () => {
+    let archivedId = "";
+    let createdAgent: any = null;
+
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async (opts: any) => {
+            createdAgent = opts;
+            return {
+              agent: {
+                id: "agent-fd-replaced",
+                name: opts.name || opts.title,
+                role: opts.role,
+                status: "running",
+              },
+            };
+          },
+          ref: (id: string) => ({
+            archive: async () => {
+              archivedId = id;
+              return { archivedAt: new Date().toISOString() };
+            },
+          }),
+        },
+      },
+    };
+
+    const res = await handleUppidiReplaceFrontDesk(
+      { existingAgentId: "agent-fd-old" },
+      mockContext
+    );
+    assert.equal(res.ok, true);
+    assert.equal(res.oldAgentId, "agent-fd-old");
+    assert.equal(res.agentId, "agent-fd-replaced");
+    assert.equal(archivedId, "agent-fd-old");
+    assert.ok(createdAgent);
+  });
+
+  it("adds Orchestrator for repository via handleUppidiAddOrchestrator", async () => {
+    let createdPayload: any = null;
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async (opts: any) => {
+            createdPayload = opts;
+            return {
+              agent: {
+                id: "agent-orch-created",
+                name: opts.name || opts.title,
+                role: opts.role,
+                status: "running",
+              },
+            };
+          },
+        },
+      },
+    };
+
+    const res = await handleUppidiAddOrchestrator(
+      { repo: "xpufx-org/aur-automation" },
+      mockContext
+    );
+    assert.equal(res.ok, true);
+    assert.equal(res.repo, "xpufx-org/aur-automation");
+    assert.equal(res.agentId, "agent-orch-created");
+    assert.equal(createdPayload?.role, "orchestrator");
+    assert.ok(createdPayload?.title?.includes("xpufx-org/aur-automation"));
+  });
+
+  it("replaces Orchestrator for repository via handleUppidiReplaceOrchestrator", async () => {
+    let archivedId = "";
+    let createdAgent: any = null;
+
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async (opts: any) => {
+            createdAgent = opts;
+            return {
+              agent: {
+                id: "agent-orch-new",
+                name: opts.name,
+                role: opts.role,
+                status: "running",
+              },
+            };
+          },
+          ref: (id: string) => ({
+            archive: async () => {
+              archivedId = id;
+              return { archivedAt: new Date().toISOString() };
+            },
+          }),
+        },
+      },
+    };
+
+    const res = await handleUppidiReplaceOrchestrator(
+      {
+        repo: "xpufx-org/paseo",
+        existingAgentId: "agent-orch-old",
+      },
+      mockContext
+    );
+
+    assert.equal(res.ok, true);
+    assert.equal(res.repo, "xpufx-org/paseo");
+    assert.equal(res.oldAgentId, "agent-orch-old");
+    assert.equal(res.agentId, "agent-orch-new");
+    assert.equal(archivedId, "agent-orch-old");
+  });
+
+  it("toggles repository mute status via handleUppidiToggleRepoMute", async () => {
+    const resMute = await handleUppidiToggleRepoMute(
+      { repo: "xpufx-org/mute-test", muted: true },
+      {} as any
+    );
+    assert.equal(resMute.ok, true);
+    assert.equal(resMute.isMuted, true);
+    assert.ok(resMute.mutedRepos?.includes("xpufx-org/mute-test"));
+
+    const resUnmute = await handleUppidiToggleRepoMute(
+      { repo: "xpufx-org/mute-test", muted: false },
+      {} as any
+    );
+    assert.equal(resUnmute.ok, true);
+    assert.equal(resUnmute.isMuted, false);
+    assert.ok(!resUnmute.mutedRepos?.includes("xpufx-org/mute-test"));
+  });
+
+  it("handleUppidiAgents outputs enrolledRepos, mutedRepos, and repoQueuedHooks", async () => {
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              {
+                agent: {
+                  id: "fd-1",
+                  name: "Front Desk",
+                  role: "front-desk",
+                  status: "running",
+                },
+              },
+              {
+                agent: {
+                  id: "orch-1",
+                  name: "Orchestrator · xpufx-org/paseo",
+                  role: "orchestrator",
+                  status: "running",
+                  project: "xpufx-org/paseo",
+                },
+              },
+            ],
+          }),
+        },
+      },
+    };
+
+    const output = await handleUppidiAgents({}, mockContext);
+    assert.ok(Array.isArray(output.enrolledRepos));
+    assert.ok(Array.isArray(output.mutedRepos));
+    assert.equal(typeof output.repoQueuedHooks, "object");
+    assert.ok(output.tree.length > 0);
   });
 });
 

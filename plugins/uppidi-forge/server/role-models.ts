@@ -21,7 +21,7 @@ export const DEFAULT_ROLE_MODELS: Record<string, RoleModelConfig> = {
     primaryModel: "antigravity-acp/gemini-3.8-flash-low",
     fallbackGroup: [
       "antigravity-acp/gemini-3.8-flash-low",
-      "pufaysokt/opencode-go/deepseek-v4.1-flash",
+      "uppidi/opencode-go/deepseek-v4.1-flash",
       "opencode/ollama-cloud/deepseek-v4.1-flash",
     ],
   },
@@ -31,7 +31,7 @@ export const DEFAULT_ROLE_MODELS: Record<string, RoleModelConfig> = {
     fallbackGroup: [
       "antigravity-acp/gemini-3.8-flash-low",
       "codex/gpt-5.6-luna",
-      "pufaysokt/opencode-go/deepseek-v4.1-flash",
+      "uppidi/opencode-go/deepseek-v4.1-flash",
     ],
   },
   "coding-agent": {
@@ -40,14 +40,14 @@ export const DEFAULT_ROLE_MODELS: Record<string, RoleModelConfig> = {
     fallbackGroup: [
       "codex/gpt-5.6-terra",
       "codex/gpt-5.6-luna",
-      "pufaysokt/opencode-go/deepseek-v4.1-flash",
+      "uppidi/opencode-go/deepseek-v4.1-flash",
     ],
   },
   auditor: {
     role: "auditor",
-    primaryModel: "pufaysokt/opencode-go/muse-spark-1.3-contributor",
+    primaryModel: "uppidi/opencode-go/muse-spark-1.3-contributor",
     fallbackGroup: [
-      "pufaysokt/opencode-go/muse-spark-1.3-contributor",
+      "uppidi/opencode-go/muse-spark-1.3-contributor",
       "opencode/opencode/muse-spark-1.3-contributor-free",
     ],
   },
@@ -88,9 +88,9 @@ export async function discoverAvailableModels(
     "antigravity-acp/gemini-3.8-flash-medium",
     "codex/gpt-5.6-terra",
     "codex/gpt-5.6-luna",
-    "pufaysokt/opencode-go/deepseek-v4.1-flash",
+    "uppidi/opencode-go/deepseek-v4.1-flash",
     "opencode/ollama-cloud/deepseek-v4.1-flash",
-    "pufaysokt/opencode-go/muse-spark-1.3-contributor",
+    "uppidi/opencode-go/muse-spark-1.3-contributor",
     "opencode/opencode/muse-spark-1.3-contributor-free",
   ]);
 

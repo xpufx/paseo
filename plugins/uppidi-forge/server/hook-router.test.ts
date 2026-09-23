@@ -26,6 +26,7 @@ import {
   saveRouterConfig,
   configureHookService,
   getHookServiceStatus,
+  getFleetRosterInfo,
 } from "./hook-router.js";
 
 describe("hook-router payload and key utilities", () => {
@@ -689,5 +690,144 @@ describe("hook-router network interfaces and listen address configuration (#427)
     const statusAfter = getHookServiceStatus();
     assert.equal(statusAfter.configuredHost, "127.0.0.1");
     assert.equal(statusAfter.configuredPort, 8888);
+  });
+});
+
+describe("hook-router per-repository muting circuit breaker and fleet roster (#426)", () => {
+  let tmpDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let configPath: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "uppidi-forge-mute-test-"));
+    queueDir = join(tmpDir, "queues");
+    stateDir = join(tmpDir, "state");
+    configPath = join(tmpDir, "router-config.json");
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("manages and persists mutedRepos and enrolledRepos in router config", () => {
+    const router = new HookRouter(null, {
+      configPath,
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+
+    assert.equal(router.isRepoMuted("xpufx-org/paseo"), false);
+    assert.deepEqual(router.getMutedRepos(), []);
+
+    // Mute repo
+    router.muteRepo("xpufx-org/paseo");
+    assert.equal(router.isRepoMuted("xpufx-org/paseo"), true);
+    assert.deepEqual(router.getMutedRepos(), ["xpufx-org/paseo"]);
+
+    // Verify config persisted
+    const saved = loadRouterConfig(configPath);
+    assert.deepEqual(saved.mutedRepos, ["xpufx-org/paseo"]);
+
+    // Toggle mute off
+    const toggleRes = router.toggleRepoMute("xpufx-org/paseo");
+    assert.equal(toggleRes.isMuted, false);
+    assert.equal(router.isRepoMuted("xpufx-org/paseo"), false);
+    assert.deepEqual(router.getMutedRepos(), []);
+
+    // Enroll repo
+    router.enrollRepo("xpufx-org/new-repo");
+    assert.ok(router.getEnrolledRepos().includes("xpufx-org/new-repo"));
+  });
+
+  it("suppresses queue drain when repository is muted and resumes on unmute", async () => {
+    const key = "xpufx-org/paseo";
+    const targetAgentId = "agent-orch-mute-1";
+    const sentMessages: string[] = [];
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => {
+          assert.equal(id, targetAgentId);
+          return {
+            current: () => ({ id, status: "idle", activeTurn: null }),
+            send: async (text: string) => {
+              sentMessages.push(text);
+            },
+          };
+        },
+      },
+    } as any;
+
+    const mockServer = {
+      paseo: mockPaseo,
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    const router = new HookRouter(mockServer, {
+      configPath,
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+
+    // Write orchestrator mapping
+    router.writeOrchestrator(key, targetAgentId);
+
+    // Mute the repository
+    router.muteRepo(key);
+    assert.equal(router.isRepoMuted(key), true);
+
+    // Enqueue message while muted
+    router.enqueue(key, "Muted webhook task");
+
+    // Allow drain check to run
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Message should NOT be sent because repo is muted!
+    assert.equal(sentMessages.length, 0);
+    assert.equal(router.getQueue(key).length, 1);
+
+    // Now unmute the repository
+    router.unmuteRepo(key);
+    assert.equal(router.isRepoMuted(key), false);
+
+    // Trigger drain
+    await router.drain(key);
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Message should now be dispatched!
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0], "Muted webhook task");
+    assert.equal(router.getQueue(key).length, 0);
+  });
+
+  it("getFleetRosterInfo reports enrolled repos, muted repos, and queue depths", () => {
+    const router = new HookRouter(null, {
+      configPath,
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    router.enrollRepo("xpufx-org/paseo");
+    router.enrollRepo("xpufx-org/aur-automation");
+    router.muteRepo("xpufx-org/aur-automation");
+    router.enqueue("xpufx-org/paseo", "Queued 1");
+    router.enqueue("xpufx-org/paseo", "Queued 2");
+
+    const info = getFleetRosterInfo();
+    assert.ok(info.enrolledRepos.includes("xpufx-org/paseo"));
+    assert.ok(info.enrolledRepos.includes("xpufx-org/aur-automation"));
+    assert.deepEqual(info.mutedRepos, ["xpufx-org/aur-automation"]);
+    assert.equal(info.repoQueuedHooks["xpufx-org/paseo"], 2);
   });
 });

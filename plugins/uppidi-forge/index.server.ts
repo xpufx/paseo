@@ -17,6 +17,11 @@ import {
   uppidiFleetMetricsContract,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
+  uppidiCreateFrontDeskContract,
+  uppidiReplaceFrontDeskContract,
+  uppidiAddOrchestratorContract,
+  uppidiReplaceOrchestratorContract,
+  uppidiToggleRepoMuteContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues } from "./server/issues.js";
 import {
@@ -34,6 +39,11 @@ import {
   handleUppidiAgents,
   handleUppidiArchiveAgent,
   handleUppidiArchiveInactiveAgents,
+  handleUppidiCreateFrontDesk,
+  handleUppidiReplaceFrontDesk,
+  handleUppidiAddOrchestrator,
+  handleUppidiReplaceOrchestrator,
+  handleUppidiToggleRepoMute,
 } from "./server/agents.js";
 
 import { handleUppidiRoleModels, handleUppidiSetRoleModel } from "./server/role-models.js";
@@ -59,6 +69,11 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiFleetMetricsContract, handleUppidiFleetMetrics);
   server.handle(uppidiArchiveAgentContract, handleUppidiArchiveAgent);
   server.handle(uppidiArchiveInactiveAgentsContract, handleUppidiArchiveInactiveAgents);
+  server.handle(uppidiCreateFrontDeskContract, handleUppidiCreateFrontDesk);
+  server.handle(uppidiReplaceFrontDeskContract, handleUppidiReplaceFrontDesk);
+  server.handle(uppidiAddOrchestratorContract, handleUppidiAddOrchestrator);
+  server.handle(uppidiReplaceOrchestratorContract, handleUppidiReplaceOrchestrator);
+  server.handle(uppidiToggleRepoMuteContract, handleUppidiToggleRepoMute);
 
   const stopHookRouter = startHookRouter(server);
 

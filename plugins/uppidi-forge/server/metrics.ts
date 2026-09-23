@@ -197,7 +197,7 @@ export const BASELINE_CANDIDATES: CandidateModelMetrics[] = [
   },
   {
     model: "muse-spark-1.3",
-    provider: "pufaysokt/opencode",
+    provider: "uppidi/opencode",
     configProfile: "default",
     overallPassRate: 81,
     totalTrials: 28,

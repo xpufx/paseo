@@ -16,6 +16,8 @@ import type {
 export interface RouterConfig {
   host?: string;
   port?: number;
+  mutedRepos?: string[];
+  enrolledRepos?: string[];
 }
 
 export function getAvailableNetworkInterfaces(): string[] {
@@ -61,6 +63,8 @@ export function loadRouterConfig(customPath?: string): RouterConfig {
         return {
           host: typeof parsed.host === "string" && parsed.host.trim() ? parsed.host.trim() : undefined,
           port: typeof parsed.port === "number" && !isNaN(parsed.port) ? parsed.port : undefined,
+          mutedRepos: Array.isArray(parsed.mutedRepos) ? parsed.mutedRepos.filter((r: unknown) => typeof r === "string") : undefined,
+          enrolledRepos: Array.isArray(parsed.enrolledRepos) ? parsed.enrolledRepos.filter((r: unknown) => typeof r === "string") : undefined,
         };
       }
     } catch {
@@ -75,8 +79,15 @@ export function saveRouterConfig(config: RouterConfig, customPath?: string): voi
   if (!configPath) return;
   const dir = dirname(configPath);
   mkdirSync(dir, { recursive: true });
+  const existing = loadRouterConfig(configPath);
+  const merged: RouterConfig = {
+    ...existing,
+    ...config,
+    mutedRepos: config.mutedRepos !== undefined ? config.mutedRepos : existing.mutedRepos,
+    enrolledRepos: config.enrolledRepos !== undefined ? config.enrolledRepos : existing.enrolledRepos,
+  };
   const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, JSON.stringify(config, null, 2), "utf8");
+  writeFileSync(tmp, JSON.stringify(merged, null, 2), "utf8");
   renameSync(tmp, configPath);
 }
 
@@ -249,6 +260,8 @@ export class HookRouter {
   private unsubscribeLifecycle?: () => void;
   private isClosed = false;
   private startedAt: number | null = null;
+  private mutedRepos = new Set<string>();
+  private enrolledRepos = new Set<string>();
 
   constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
     this.server = server ?? null;
@@ -270,6 +283,17 @@ export class HookRouter {
     this.secret = options?.secret ?? process.env.FORGE_HOOK_SECRET;
     this.activePaseo = options?.paseo ?? (server as any)?.paseo ?? null;
 
+    if (persisted.mutedRepos) {
+      for (const r of persisted.mutedRepos) {
+        if (r) this.mutedRepos.add(r);
+      }
+    }
+    if (persisted.enrolledRepos) {
+      for (const r of persisted.enrolledRepos) {
+        if (r) this.enrolledRepos.add(r);
+      }
+    }
+
     const home = process.env.HOME ?? os.homedir();
     this.queueDir = options?.queueDir ?? process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-forge", "queues");
     this.stateDir =
@@ -280,6 +304,107 @@ export class HookRouter {
 
     this.loadPersistedQueues();
     this.bindLifecycleEvents();
+  }
+
+  public isRepoMuted(repoKey: string): boolean {
+    if (!repoKey) return false;
+    if (this.mutedRepos.has(repoKey)) return true;
+    for (const m of this.mutedRepos) {
+      if (m.toLowerCase() === repoKey.toLowerCase()) return true;
+      const cleanM = m.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
+      const cleanK = repoKey.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
+      if (cleanM === cleanK || cleanK.endsWith(`/${cleanM}`) || cleanM.endsWith(`/${cleanK}`)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public muteRepo(repoKey: string): string[] {
+    this.mutedRepos.add(repoKey);
+    this.saveConfigState();
+    this.log(`[info] Repository ${repoKey} muted (circuit breaker engaged)`);
+    return Array.from(this.mutedRepos);
+  }
+
+  public unmuteRepo(repoKey: string): string[] {
+    for (const m of Array.from(this.mutedRepos)) {
+      if (m === repoKey || this.isRepoMutedMatch(m, repoKey)) {
+        this.mutedRepos.delete(m);
+      }
+    }
+    this.saveConfigState();
+    this.log(`[info] Repository ${repoKey} unmuted; resuming processing`);
+    void this.drain(repoKey);
+    return Array.from(this.mutedRepos);
+  }
+
+  public toggleRepoMute(repoKey: string, forceMute?: boolean): { isMuted: boolean; mutedRepos: string[] } {
+    const current = this.isRepoMuted(repoKey);
+    const shouldMute = forceMute !== undefined ? forceMute : !current;
+    if (shouldMute) {
+      this.muteRepo(repoKey);
+    } else {
+      this.unmuteRepo(repoKey);
+    }
+    return {
+      isMuted: shouldMute,
+      mutedRepos: Array.from(this.mutedRepos),
+    };
+  }
+
+  public getMutedRepos(): string[] {
+    return Array.from(this.mutedRepos);
+  }
+
+  public enrollRepo(repoKey: string): string[] {
+    this.enrolledRepos.add(repoKey);
+    this.saveConfigState();
+    return Array.from(this.enrolledRepos);
+  }
+
+  public getEnrolledRepos(): string[] {
+    const set = new Set<string>(this.enrolledRepos);
+    try {
+      if (existsSync(this.stateDir)) {
+        const files = readdirSync(this.stateDir);
+        for (const file of files) {
+          if (!file.endsWith(".json") || file === "frontdesk.json") continue;
+          try {
+            const raw = readFileSync(join(this.stateDir, file), "utf8");
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.key === "string" && parsed.key.trim()) {
+              set.add(parsed.key.trim());
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+
+    for (const key of this.queues.keys()) {
+      if (key !== "frontdesk") {
+        set.add(key);
+      }
+    }
+
+    return Array.from(set);
+  }
+
+  private isRepoMutedMatch(a: string, b: string): boolean {
+    if (a.toLowerCase() === b.toLowerCase()) return true;
+    const cleanA = a.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
+    const cleanB = b.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
+    return cleanA === cleanB || cleanA.endsWith(`/${cleanB}`) || cleanB.endsWith(`/${cleanA}`);
+  }
+
+  private saveConfigState(): void {
+    saveRouterConfig(
+      {
+        mutedRepos: Array.from(this.mutedRepos),
+        enrolledRepos: Array.from(this.enrolledRepos),
+      },
+      this.configPath
+    );
   }
 
   public get port(): number {
@@ -524,7 +649,11 @@ export class HookRouter {
     this.queues.set(key, list);
     this.persistQueue(key);
     this.log(`[info] Enqueued message ${entry.id} for ${key} (total depth: ${list.length}, sos: ${Boolean(isSos)})`);
-    void this.drain(key);
+    if (!this.isRepoMuted(key)) {
+      void this.drain(key);
+    } else {
+      this.log(`[info] Drain suppressed for muted repository ${key}`);
+    }
     return entry;
   }
 
@@ -549,12 +678,16 @@ export class HookRouter {
     if (key) {
       this.pausedQueues.delete(key);
       this.log(`[info] Queue ${key} resumed`);
-      void this.drain(key);
+      if (!this.isRepoMuted(key)) {
+        void this.drain(key);
+      }
     } else {
       this.pausedQueues.clear();
       this.log("[info] All queues resumed");
       for (const k of this.queues.keys()) {
-        void this.drain(k);
+        if (!this.isRepoMuted(k)) {
+          void this.drain(k);
+        }
       }
     }
     return Array.from(this.pausedQueues);
@@ -586,11 +719,14 @@ export class HookRouter {
             clearTimeout(timer);
             this.backoffTimers.delete("frontdesk");
           }
-          void this.drain("frontdesk");
+          if (!this.isRepoMuted("frontdesk")) {
+            void this.drain("frontdesk");
+          }
         }
 
         for (const [key, items] of this.queues.entries()) {
           if (key === "frontdesk" || items.length === 0) continue;
+          if (this.isRepoMuted(key)) continue;
           const orch = this.readOrchestrator(key);
           if (orch?.agentId === endedAgentId) {
             this.busyQueues.delete(key);
@@ -611,8 +747,15 @@ export class HookRouter {
     if (this.isClosed) return;
     if (!key) {
       for (const k of this.queues.keys()) {
-        void this.drain(k);
+        if (!this.isRepoMuted(k)) {
+          void this.drain(k);
+        }
       }
+      return;
+    }
+
+    if (this.isRepoMuted(key)) {
+      this.log(`[info] Drain suppressed for muted repository ${key}`);
       return;
     }
 
@@ -1244,5 +1387,72 @@ export function startHookRouter(
     if (getActiveHookRouter() === router) {
       setActiveHookRouter(null);
     }
+  };
+}
+
+export function getFleetRosterInfo(): {
+  enrolledRepos: string[];
+  mutedRepos: string[];
+  repoQueuedHooks: Record<string, number>;
+} {
+  const router = getActiveHookRouter();
+  const home = process.env.HOME ?? os.homedir();
+  const config = loadRouterConfig();
+  const mutedRepos = router ? router.getMutedRepos() : (config.mutedRepos ?? []);
+
+  const enrolledSet = new Set<string>(router ? router.getEnrolledRepos() : (config.enrolledRepos ?? []));
+
+  const stateDir = process.env.HOOK_STATE_DIR ?? join(home, ".paseo", "forgejo-hook", "orchestrators");
+  if (existsSync(stateDir)) {
+    try {
+      const files = readdirSync(stateDir);
+      for (const f of files) {
+        if (!f.endsWith(".json") || f === "frontdesk.json") continue;
+        try {
+          const raw = readFileSync(join(stateDir, f), "utf8");
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.key === "string" && parsed.key.trim()) {
+            enrolledSet.add(parsed.key.trim());
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  const repoQueuedHooks: Record<string, number> = {};
+  if (router) {
+    const overview = router.getQueuesOverview() as any;
+    if (Array.isArray(overview?.queues)) {
+      for (const q of overview.queues) {
+        if (q.key && typeof q.depth === "number") {
+          repoQueuedHooks[q.key] = q.depth;
+        }
+      }
+    }
+  } else {
+    const queueDir = process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-forge", "queues");
+    if (existsSync(queueDir)) {
+      try {
+        const files = readdirSync(queueDir);
+        for (const f of files) {
+          if (!f.endsWith(".json")) continue;
+          try {
+            const raw = readFileSync(join(queueDir, f), "utf8");
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+              const key = parsed[0]?.key || f.replace(/\.json$/, "");
+              repoQueuedHooks[key] = parsed.length;
+              enrolledSet.add(key);
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+
+  return {
+    enrolledRepos: Array.from(enrolledSet),
+    mutedRepos,
+    repoQueuedHooks,
   };
 }
