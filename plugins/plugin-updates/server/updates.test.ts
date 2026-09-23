@@ -859,6 +859,229 @@ test("emits one unbundled row per plugin with independent subdir verdicts", asyn
   ]);
 });
 
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
+
+test("refuses to pull a dirty tree and surfaces the refusal", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    statusPorcelain: " M server/updates.ts",
+    calls,
+  });
+  const action = await testing.updatePlugin("demo", undefined, {
+    runner,
+    installedOverride: [plugin()],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(action.status, "error");
+  assert.equal(action.requiresForce, true);
+  assert.match(action.error ?? "", /dirty/i);
+  assert.equal(calls.some((call) => call.args[0] === "pull"), false);
+  assert.equal(calls.some((call) => call.command === "paseo"), false);
+});
+
+test("refuses a diverged branch before attempting a pull", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    statusPorcelain: "",
+    refs: { "origin/main": UPSTREAM },
+    isAncestor: () => 1,
+    calls,
+  });
+  const action = await testing.updatePlugin("demo", undefined, {
+    runner,
+    installedOverride: [plugin()],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(action.status, "error");
+  assert.match(action.error ?? "", /diverged/i);
+  assert.equal(calls.some((call) => call.args[0] === "pull"), false);
+});
+
+test("force pulls a dirty tree then reloads every plugin sharing the root", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: () => "/repo",
+    statusPorcelain: " M server/updates.ts",
+    refs: { "origin/main": UPSTREAM },
+    isAncestor: (a) => (a === UPSTREAM ? 0 : 1),
+    pullOutput: "Updating aaaaaaa..bbbbbbb",
+    calls,
+  });
+  const action = await testing.updatePlugin("demo", undefined, {
+    runner,
+    force: true,
+    installedOverride: [plugin("demo", "/repo/plugins/demo"), plugin("slash", "/repo/plugins/slash")],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(action.status, "updated");
+  const pull = calls.find((call) => call.args[0] === "pull");
+  assert.deepEqual(pull?.args, ["pull", "--ff-only"]);
+  assert.equal(pull?.timeoutMs, testing.UPDATE_TIMEOUT_MS);
+  const reloads = calls.filter((call) => call.command === "paseo" && call.args[1] === "reload");
+  assert.deepEqual(reloads.map((call) => call.args[2]).sort(), ["demo", "slash"]);
+});
+
+test("pulls a clean tree with the update timeout and reloads the plugin", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    statusPorcelain: "",
+    refs: { "origin/main": UPSTREAM },
+    isAncestor: (a) => (a === UPSTREAM ? 0 : 1),
+    calls,
+  });
+  const action = await testing.updatePlugin("demo", undefined, {
+    runner,
+    installedOverride: [plugin()],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(action.status, "updated");
+  const pull = calls.find((call) => call.args[0] === "pull");
+  assert.equal(pull?.timeoutMs, testing.UPDATE_TIMEOUT_MS);
+  const reload = calls.find((call) => call.command === "paseo");
+  assert.deepEqual(reload?.args, ["plugin", "reload", "demo"]);
+});
+
+test("routes git-managed installs through paseo plugin update", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/managed/gitty",
+    calls,
+  });
+  const action = await testing.updatePlugin("gitty", undefined, {
+    runner,
+    installedOverride: [
+      { id: "gitty", path: "/managed/gitty", enabled: true, status: "running", source: "git" },
+    ],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(action.status, "updated");
+  const update = calls.find((call) => call.command === "paseo");
+  assert.deepEqual(update?.args, ["plugin", "update", "gitty"]);
+  assert.equal(calls.some((call) => call.args[0] === "pull"), false);
+});
+
+test("update-all pulls each affected directory root once and reloads its plugins", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    head: LOCAL,
+    lsRemote: () => branchRemote(REMOTE),
+    trees: {
+      [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/demo`]: TREE_REMOTE,
+      [`${LOCAL}:plugins/slash`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/slash`]: TREE_REMOTE,
+    },
+    isAncestor: (a, b) => (a === LOCAL && b === REMOTE ? 0 : a === UPSTREAM ? 0 : 1),
+    refs: { "origin/main": UPSTREAM },
+    calls,
+  });
+  const result = await testing.updateAllPlugins(undefined, {
+    runner,
+    installedOverride: [plugin("demo", "/repo/plugins/demo"), plugin("slash", "/repo/plugins/slash")],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  assert.equal(calls.filter((call) => call.args[0] === "pull").length, 1);
+  assert.deepEqual(
+    result.results.map((item) => item.pluginId).sort(),
+    ["demo", "slash"],
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Self-update / reload-loop guard (#210)
+// ---------------------------------------------------------------------------
+
+test("planReloads skips the updater's own id and de-dupes", () => {
+  const plan = testing.planReloads(["demo", "plugin-updates", "slash", "demo"]);
+  assert.deepEqual(plan.reload, ["demo", "slash"]);
+  assert.deepEqual(plan.skippedSelf, ["plugin-updates"]);
+});
+
+test("update-all never reloads plugin-updates itself", async () => {
+  const calls: Call[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    head: LOCAL,
+    lsRemote: () => branchRemote(REMOTE),
+    trees: {
+      [`${LOCAL}:plugins/plugin-updates`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/plugin-updates`]: TREE_REMOTE,
+      [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/demo`]: TREE_REMOTE,
+    },
+    isAncestor: (a, b) => (a === LOCAL && b === REMOTE ? 0 : a === UPSTREAM ? 0 : 1),
+    refs: { "origin/main": UPSTREAM },
+    calls,
+  });
+  const result = await testing.updateAllPlugins(undefined, {
+    runner,
+    installedOverride: [
+      plugin("plugin-updates", "/repo/plugins/plugin-updates"),
+      plugin("demo", "/repo/plugins/demo"),
+    ],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  const reloads = calls
+    .filter((call) => call.command === "paseo" && call.args[1] === "reload")
+    .map((call) => call.args[2]);
+  assert.equal(reloads.includes("plugin-updates"), false);
+  assert.deepEqual(reloads, ["demo"]);
+
+  const self = result.results.find((item) => item.pluginId === "plugin-updates");
+  assert.equal(self?.status, "updated");
+  assert.match(self?.output ?? "", /cannot safely reload itself/);
+});
+
+test("update-all pulls every root before it reloads anything (#210)", async () => {
+  const events: string[] = [];
+  const calls: Call[] = [];
+  const base = makeRunner({
+    toplevel: "/repo",
+    head: LOCAL,
+    lsRemote: () => branchRemote(REMOTE),
+    trees: {
+      [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/demo`]: TREE_REMOTE,
+      [`${LOCAL}:plugins/slash`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/slash`]: TREE_REMOTE,
+    },
+    isAncestor: (a, b) => (a === LOCAL && b === REMOTE ? 0 : a === UPSTREAM ? 0 : 1),
+    refs: { "origin/main": UPSTREAM },
+    calls,
+  });
+  const runner: Runner = async (command, args, options) => {
+    if (command === "git" && args[0] === "pull") events.push("pull");
+    if (command === "paseo" && args[1] === "reload") events.push(`reload:${args[2]}`);
+    return base!(command, args, options);
+  };
+
+  await testing.updateAllPlugins(undefined, {
+    runner,
+    installedOverride: [plugin("demo", "/repo/plugins/demo"), plugin("slash", "/repo/plugins/slash")],
+    deps: { readFile: NO_FILES, cacheRoot: "/cache" },
+  });
+
+  const firstReload = events.findIndex((event) => event.startsWith("reload:"));
+  const lastPull = events.map((e, i) => (e === "pull" ? i : -1)).reduce((a, b) => Math.max(a, b), -1);
+  assert.notEqual(firstReload, -1);
+  assert.ok(lastPull < firstReload, `expected all pulls before reloads, got ${events.join(",")}`);
+  // Reloads are serialized, not interleaved with pulls.
+  assert.deepEqual(events.filter((e) => e.startsWith("reload:")), ["reload:demo", "reload:slash"]);
+});
+
 
 // ---------------------------------------------------------------------------
 // Orphans

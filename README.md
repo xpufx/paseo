@@ -17,7 +17,7 @@ Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared ru
 - [`plugins/forges/`](plugins/forges/) — Forge/Gitea-family issue tracker and workflow integration plugin.
 - [`plugins/slash/`](plugins/slash/) — Slash-command console: manage and run custom composer slash commands.
 - [`plugins/twofado/`](plugins/twofado/) — Approval-gate surface for the 2fado privileged-command daemon.
-- [`plugins/plugin-updates/`](plugins/plugin-updates/) — Git-source update monitor for installed plugins.
+- [`plugins/plugin-updates/`](plugins/plugin-updates/) — Git-source update monitor and updater for installed plugins.
 - [`plugins/demo/`](plugins/demo/) — Conformance testbed and canonical showcase for `paseo-plugin-helper` primitives.
 
 ## Installation

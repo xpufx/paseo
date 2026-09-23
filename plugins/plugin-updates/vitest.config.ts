@@ -6,7 +6,7 @@ import path from "node:path";
  *
  * The canonical test command is `npm test` (node:test + tsx). Some environments
  * cannot install `tsx` — the npm cache is read-only and the registry is
- * unreachable — which would leave the diagnostics guards unverified. This
+ * unreachable — which would leave the update/reload guards unverified. This
  * config aliases `node:test` to a small vitest shim so the exact same test files
  * execute without tsx:
  *
@@ -24,7 +24,6 @@ export default defineConfig({
   test: {
     include: [
       "plugins/plugin-updates/shared/updates.test.ts",
-      "plugins/plugin-updates/shared/native-lifecycle.test.ts",
       "plugins/plugin-updates/server/updates.test.ts",
       "plugins/plugin-updates/client/orphans.test.ts",
     ],
