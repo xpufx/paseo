@@ -216,8 +216,11 @@ describe("hook-router HTTP server endpoints", () => {
   let stateDir: string;
   let router: HookRouter;
   let stopRouter: () => Promise<void>;
+  let prevNodeEnv: string | undefined;
 
   beforeEach(async () => {
+    prevNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
     tempDir = mkdtempSync(join(tmpdir(), "paseo-http-test-"));
     queueDir = join(tempDir, "queues");
     stateDir = join(tempDir, "state");
@@ -238,6 +241,11 @@ describe("hook-router HTTP server endpoints", () => {
   afterEach(async () => {
     if (stopRouter) {
       await stopRouter();
+    }
+    if (prevNodeEnv !== undefined) {
+      process.env.NODE_ENV = prevNodeEnv;
+    } else {
+      delete process.env.NODE_ENV;
     }
     try {
       rmSync(tempDir, { recursive: true, force: true });

@@ -51,20 +51,16 @@ import {
   uppidiArchiveInactiveAgentsContract,
   type UppidiIssue,
   type AttentionLabel,
-  type UppidiAgent,
   type RoleModelConfig,
   type UppidiRunner,
   type CandidateModelMetrics,
   type TaskProfileMetrics,
-  extractAgentWorktree,
 } from "../shared/contracts.js";
 import {
   filterIssues,
   sortIssues,
   filterQueues,
   sortQueues,
-  filterAgents,
-  sortAgents,
   filterRunners,
   sortRunners,
   filterBulkArchiveCandidates,
@@ -75,8 +71,6 @@ import {
   type IssueSortField,
   type QueuePreset,
   type QueueSortField,
-  type AgentPreset,
-  type AgentSortField,
   type RunnerPreset,
   type RunnerSortField,
   type MetricPreset,
@@ -87,9 +81,6 @@ import { UppidiFleetStaticMockup, UppidiForgeStaticMockup } from "./static-mocku
 import {
   UppidiFleetTreeView,
   UppidiForgeTreeView,
-  AgentStateDot,
-  AgentTitleLink,
-  getDeterministicStateConfig,
 } from "./tree-view.js";
 
 export type SurfaceTab = "tree" | "dashboard" | "mockup";
@@ -314,16 +305,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const [queueSortField, setQueueSortField] = useState<QueueSortField>("repo");
   const [queueSortDir, setQueueSortDir] = useState<SortDirection>("asc");
   const [hookLogExpanded, setHookLogExpanded] = useState(false);
-
-  // Section 3: Fleet & Agents sort & filter state
-  const [fleetExpanded, setFleetExpanded] = useState(true);
-  const [agentPreset, setAgentPreset] = useState<AgentPreset>("all");
-  const [agentQuery, setAgentQuery] = useState("");
-  const [agentSortField, setAgentSortField] = useState<AgentSortField>("name");
-  const [agentSortDir, setAgentSortDir] = useState<SortDirection>("asc");
-  const [frontDeskExpanded, setFrontDeskExpanded] = useState(true);
-  const [orchestratorsExpanded, setOrchestratorsExpanded] = useState(true);
-  const [workersExpanded, setWorkersExpanded] = useState(false);
   const [roleModelsExpanded, setRoleModelsExpanded] = useState(false);
 
   // Section 4: CI Runners sort & filter state
@@ -645,26 +626,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     }
   };
 
-
-  const visibleAgents = useMemo(() => {
-    const filtered = filterAgents(allAgents, agentPreset, agentQuery);
-    return sortAgents(filtered, agentSortField, agentSortDir);
-  }, [allAgents, agentPreset, agentQuery, agentSortField, agentSortDir]);
-
-  const filteredFrontDesk = useMemo(() => {
-    const filtered = filterAgents(agentsData?.frontDesk ?? [], agentPreset, agentQuery);
-    return sortAgents(filtered, agentSortField, agentSortDir);
-  }, [agentsData?.frontDesk, agentPreset, agentQuery, agentSortField, agentSortDir]);
-
-  const filteredOrchestrators = useMemo(() => {
-    const filtered = filterAgents(agentsData?.orchestrators ?? [], agentPreset, agentQuery);
-    return sortAgents(filtered, agentSortField, agentSortDir);
-  }, [agentsData?.orchestrators, agentPreset, agentQuery, agentSortField, agentSortDir]);
-
-  const filteredWorkers = useMemo(() => {
-    const filtered = filterAgents(agentsData?.workers ?? [], agentPreset, agentQuery);
-    return sortAgents(filtered, agentSortField, agentSortDir);
-  }, [agentsData?.workers, agentPreset, agentQuery, agentSortField, agentSortDir]);
 
   const rawRunners = runnersData?.runners ?? [];
   const visibleRunners = useMemo(() => {
@@ -1211,247 +1172,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          {/* Collapsible Section: Agents & Fleet Hierarchy (#367, #376) */}
-          <Collapsible
-            title={`Agents & Fleet (${visibleAgents.length}/${allAgents.length} total · ${agentsData?.runningCount ?? 0} running · ${agentsData?.idleCount ?? 0} idle)`}
-            icon="Bot"
-            isExpanded={fleetExpanded}
-            onToggle={(exp) => setFleetExpanded(exp)}
-          >
-            <Card variant="flat">
-              <Stack gap="sm">
-                <Row justify="space-between" align="center" wrap gap="xs">
-                  <Row gap="xs" wrap align="center">
-                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Preset:</Text>
-                    <Button
-                      label="All"
-                      size="sm"
-                      variant={agentPreset === "all" ? "primary" : "ghost"}
-                      onPress={() => setAgentPreset("all")}
-                    />
-                    <Button
-                      label="Active"
-                      size="sm"
-                      variant={agentPreset === "active" ? "primary" : "ghost"}
-                      onPress={() => setAgentPreset("active")}
-                    />
-                    <Button
-                      label="Idle"
-                      size="sm"
-                      variant={agentPreset === "idle" ? "primary" : "ghost"}
-                      onPress={() => setAgentPreset("idle")}
-                    />
-                    <Button
-                      label="Blocked / Errors"
-                      size="sm"
-                      variant={agentPreset === "blocked" ? "primary" : "ghost"}
-                      onPress={() => setAgentPreset("blocked")}
-                    />
-                  </Row>
-                  <Row gap="xs" wrap align="center">
-                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
-                    {(["name", "status", "provider"] as const).map((field) => (
-                      <Button
-                        key={field}
-                        label={`${field === "name" ? "Name" : field === "status" ? "Status" : "Provider"}${agentSortField === field ? (agentSortDir === "asc" ? " ↑" : " ↓") : ""}`}
-                        size="sm"
-                        variant={agentSortField === field ? "secondary" : "ghost"}
-                        onPress={() => {
-                          if (agentSortField === field) {
-                            setAgentSortDir(agentSortDir === "asc" ? "desc" : "asc");
-                          } else {
-                            setAgentSortField(field);
-                            setAgentSortDir("asc");
-                          }
-                        }}
-                      />
-                    ))}
-                    <Button
-                      label={`Archive Closed/Failed${eligibleBulkAgents.length > 0 ? ` (${eligibleBulkAgents.length})` : ""}`}
-                      size="sm"
-                      variant="ghost"
-                      icon="Archive"
-                      disabled={eligibleBulkAgents.length === 0 || isBulkArchiving}
-                      loading={isBulkArchiving}
-                      onPress={handleArchiveBulk}
-                    />
-                    <Button label="Refresh agents" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchAgents()} />
-                  </Row>
-                </Row>
-                <SearchInput
-                  value={agentQuery}
-                  onChangeText={setAgentQuery}
-                  onClear={() => setAgentQuery("")}
-                  placeholder="Filter agents by name, shortId, provider, cwd..."
-                />
-                {/* Front Desk Subtree */}
-                <Collapsible
-                  title={`Front Desk (${filteredFrontDesk.length})`}
-                  icon="Inbox"
-                  isExpanded={frontDeskExpanded}
-                  onToggle={(exp) => setFrontDeskExpanded(exp)}
-                >
-                  <Stack gap="xs">
-                    {filteredFrontDesk.length === 0 ? (
-                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching Front Desk agents.</Text>
-                    ) : (
-                      filteredFrontDesk.map((a) => {
-                        const config = getDeterministicStateConfig(a.deterministicState, a.category);
-                        const worktree = a.worktree || extractAgentWorktree(a);
-                        return (
-                          <Card key={a.id} variant="elevated">
-                            <Row justify="space-between" align="center" wrap gap="xs">
-                              <Row align="center" gap="xs">
-                                <AgentStateDot color={config.color} pulse={config.pulse} />
-                                <Icon name={config.categoryIcon} size={14} color={config.color} />
-                                <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
-                                <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
-                                <Badge label={a.shortId} variant="neutral" size="sm" />
-                                {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
-                              </Row>
-                              <Row align="center" gap="xs">
-                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                                  {a.provider || "default provider"}
-                                </Text>
-                                <Button
-                                  icon="Archive"
-                                  size="sm"
-                                  variant="ghost"
-                                  accessibilityLabel={`Archive agent ${a.name}`}
-                                  disabled={archivingAgentId === a.id}
-                                  loading={archivingAgentId === a.id}
-                                  onPress={() => handleArchiveAgent(a.id)}
-                                />
-                              </Row>
-                            </Row>
-                            {a.cwd && (
-                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
-                                cwd: {a.cwd}
-                              </Text>
-                            )}
-                          </Card>
-                        );
-                      })
-                    )}
-                  </Stack>
-                </Collapsible>
-
-                {/* Orchestrators Subtree */}
-                <Collapsible
-                  title={`Orchestrators (${filteredOrchestrators.length})`}
-                  icon="Network"
-                  isExpanded={orchestratorsExpanded}
-                  onToggle={(exp) => setOrchestratorsExpanded(exp)}
-                >
-                  <Stack gap="xs">
-                    {filteredOrchestrators.length === 0 ? (
-                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching orchestrators.</Text>
-                    ) : (
-                      filteredOrchestrators.map((a) => {
-                        const config = getDeterministicStateConfig(a.deterministicState, a.category);
-                        const worktree = a.worktree || extractAgentWorktree(a);
-                        return (
-                          <Card key={a.id} variant="elevated">
-                            <Row justify="space-between" align="center" wrap gap="xs">
-                              <Row align="center" gap="xs">
-                                <AgentStateDot color={config.color} pulse={config.pulse} />
-                                <Icon name={config.categoryIcon} size={14} color={config.color} />
-                                <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
-                                <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
-                                <Badge label={a.shortId} variant="neutral" size="sm" />
-                                {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
-                              </Row>
-                              <Row align="center" gap="xs">
-                                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                                  {a.provider || "default provider"}
-                                </Text>
-                                <Button
-                                  icon="Archive"
-                                  size="sm"
-                                  variant="ghost"
-                                  accessibilityLabel={`Archive agent ${a.name}`}
-                                  disabled={archivingAgentId === a.id}
-                                  loading={archivingAgentId === a.id}
-                                  onPress={() => handleArchiveAgent(a.id)}
-                                />
-                              </Row>
-                            </Row>
-                            {a.cwd && (
-                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 11, marginTop: 4 }}>
-                                cwd: {a.cwd}
-                              </Text>
-                            )}
-                          </Card>
-                        );
-                      })
-                    )}
-                  </Stack>
-                </Collapsible>
-
-                {/* Task & Coding Agents Subtree (Dense rows without child cards #403) */}
-                <Collapsible
-                  title={`Coding & Task Agents (${filteredWorkers.length})`}
-                  icon="Terminal"
-                  isExpanded={workersExpanded}
-                  onToggle={(exp) => setWorkersExpanded(exp)}
-                >
-                  <Stack gap="xs">
-                    {filteredWorkers.length === 0 ? (
-                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>No matching task agents.</Text>
-                    ) : (
-                      filteredWorkers.map((a) => {
-                        const config = getDeterministicStateConfig(a.deterministicState, a.category);
-                        const worktree = a.worktree || extractAgentWorktree(a);
-                        return (
-                          <View
-                            key={a.id}
-                            style={{
-                              paddingHorizontal: 8,
-                              paddingVertical: 5,
-                              borderRadius: 4,
-                              borderLeftWidth: 2,
-                              borderLeftColor: config.color,
-                              backgroundColor: colors.surface0 ?? "transparent",
-                            }}
-                          >
-                            <Row justify="space-between" align="center" wrap gap="xs">
-                              <Row align="center" gap="xs">
-                                <AgentStateDot color={config.color} pulse={config.pulse} size={7} />
-                                <Icon name={config.categoryIcon} size={13} color={config.color} />
-                                <AgentTitleLink agent={a} colors={colors} typography={typography} navigation={props.navigation} />
-                                <Badge label={a.deterministicState} variant={config.badgeVariant} size="sm" dot style={{ borderColor: config.color }} />
-                                <Badge label={a.shortId} variant="neutral" size="sm" />
-                                {worktree && <Badge label={worktree} variant="neutral" size="sm" />}
-                              </Row>
-                              <Row align="center" gap="xs">
-                                <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
-                                  {a.provider || "default provider"}
-                                </Text>
-                                <Button
-                                  icon="Archive"
-                                  size="sm"
-                                  variant="ghost"
-                                  accessibilityLabel={`Archive agent ${a.name}`}
-                                  disabled={archivingAgentId === a.id}
-                                  loading={archivingAgentId === a.id}
-                                  onPress={() => handleArchiveAgent(a.id)}
-                                />
-                              </Row>
-                            </Row>
-                            {a.cwd && (
-                              <Text style={{ color: colors.foregroundMuted, fontFamily: "monospace", ...typography.caption, fontSize: 10, marginTop: 2 }}>
-                                cwd: {a.cwd}
-                              </Text>
-                            )}
-                          </View>
-                        );
-                      })
-                    )}
-                  </Stack>
-                </Collapsible>
-              </Stack>
-            </Card>
-          </Collapsible>
 
           {/* Collapsible Section: Agent Role Models (#371) */}
           <Collapsible

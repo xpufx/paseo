@@ -383,5 +383,53 @@ describe("uppidi-fleet client entry contract", () => {
         "tree-view must filter enrolled and detached groups with isRepoMatching",
       );
     });
+
+    it("verifies Dashboard tab does not contain old Agents & Fleet Hierarchy collapsible and lives in dedicated tab (#441)", () => {
+      // 1. Must not contain the old Agents & Fleet Hierarchy collapsible in dashboard
+      assert.doesNotMatch(
+        surfaceSource,
+        /<Collapsible[\s\S]*title=\{`Agents & Fleet \(\$\{visibleAgents\.length\}/,
+        "must not contain old collapsible Agents & Fleet section in dashboard",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /title=\{`Front Desk \(/,
+        "must not contain Front Desk collapsible in dashboard",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /title=\{`Orchestrators \(/,
+        "must not contain Orchestrators collapsible in dashboard",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /title=\{`Coding & Task Agents \(/,
+        "must not contain Coding & Task Agents collapsible in dashboard",
+      );
+
+      // 2. Unused agent filter states and memos removed
+      assert.doesNotMatch(
+        surfaceSource,
+        /const \[fleetExpanded, setFleetExpanded\]/,
+        "must not have fleetExpanded state",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /const \[agentPreset, setAgentPreset\]/,
+        "must not have agentPreset state",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /const visibleAgents = useMemo/,
+        "must not have visibleAgents memo",
+      );
+
+      // 3. Agents & Fleet lives in its dedicated tab (activeTab === "tree")
+      assert.match(
+        surfaceSource,
+        /activeTab === "tree"\s*\?\s*\(\s*<UppidiFleetTreeView/,
+        "Agents & Fleet must be rendered in its dedicated 'tree' tab via UppidiFleetTreeView",
+      );
+    });
   });
 });

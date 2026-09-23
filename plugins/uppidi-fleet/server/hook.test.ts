@@ -15,10 +15,13 @@ import {
 
 describe("uppidi-fleet hook server handlers", () => {
   let prevHookPort: string | undefined;
+  let prevNodeEnv: string | undefined;
 
   beforeEach(() => {
     prevHookPort = process.env.HOOK_PORT;
+    prevNodeEnv = process.env.NODE_ENV;
     process.env.HOOK_PORT = "0";
+    process.env.NODE_ENV = "test";
     clearHookLogs();
   });
 
@@ -32,6 +35,11 @@ describe("uppidi-fleet hook server handlers", () => {
       process.env.HOOK_PORT = prevHookPort;
     } else {
       delete process.env.HOOK_PORT;
+    }
+    if (prevNodeEnv !== undefined) {
+      process.env.NODE_ENV = prevNodeEnv;
+    } else {
+      delete process.env.NODE_ENV;
     }
     clearHookLogs();
   });
