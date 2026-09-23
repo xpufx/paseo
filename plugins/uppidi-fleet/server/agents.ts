@@ -264,6 +264,7 @@ export function normalizeRawAgent(
     url: raw.url || (id ? `paseo://agent/${id}` : undefined),
     worktree: extractAgentWorktree(raw),
     project: extractAgentProject(raw),
+    labels: raw.labels,
   };
 }
 

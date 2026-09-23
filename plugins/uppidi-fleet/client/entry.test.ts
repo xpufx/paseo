@@ -83,6 +83,28 @@ describe("uppidi-fleet client entry contract", () => {
     );
   });
 
+  it("verifies client/tree-view.tsx exports AgentLabelsRow and getDisplayableAgentLabels (#447)", () => {
+    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+    assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
+    const source = fs.readFileSync(treeViewPath, "utf8");
+
+    assert.match(
+      source,
+      /export\s+function\s+getDisplayableAgentLabels/,
+      "client/tree-view.tsx must export getDisplayableAgentLabels"
+    );
+    assert.match(
+      source,
+      /export\s+function\s+AgentLabelsRow/,
+      "client/tree-view.tsx must export AgentLabelsRow"
+    );
+    assert.match(
+      source,
+      /<AgentLabelsRow\s+agent=\{agent\}\s*\/>/,
+      "client/tree-view.tsx must render AgentLabelsRow for agents"
+    );
+  });
+
   it("verifies client/tree-view.tsx defines getParentBadgeLabel and ParentAgentPill (#430)", () => {
     const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
     assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
