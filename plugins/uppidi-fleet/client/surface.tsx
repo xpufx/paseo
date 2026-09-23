@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
@@ -49,6 +49,7 @@ import {
   uppidiFleetMetricsContract,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
+  extractAgentWorktree,
   type UppidiIssue,
   type AttentionLabel,
   type RoleModelConfig,
@@ -157,6 +158,9 @@ export function UppidiBrandMark({ size = 20, color }: { size?: number; color?: s
 export interface UppidiTopHeaderBarProps {
   isConnected: boolean;
   isServiceRunning: boolean;
+  selectedWorkspace?: string;
+  workspaceOptions?: SelectOption[];
+  onWorkspaceChange?: (workspace: string) => void;
   selectedRepo: string;
   repoOptions: SelectOption[];
   onRepoChange: (repo: string) => void;
@@ -166,14 +170,17 @@ export interface UppidiTopHeaderBarProps {
 }
 
 /**
- * Compact Unified Header Bar (#424, #425)
+ * Compact Unified Header Bar (#424, #425, #449)
  * Merges brand mark, Cockpit title, Uppidi Fleet badge, router status,
- * global repo selector, stateful sizing selector, and refresh button into a single tight row.
+ * workspace selector, global repo selector, stateful sizing selector, and refresh button into a single tight row.
  * Multi-line subtitle descriptions are eliminated to reduce vertical footprint by >50%.
  */
 export function UppidiTopHeaderBar({
   isConnected,
   isServiceRunning,
+  selectedWorkspace = "all",
+  workspaceOptions = [{ label: "All Workspaces", value: "all" }],
+  onWorkspaceChange = () => {},
   selectedRepo,
   repoOptions,
   onRepoChange,
@@ -212,8 +219,19 @@ export function UppidiTopHeaderBar({
         )}
       </Row>
 
-      {/* Right: Global Repo Selector, Sizing Selector, Refresh button */}
+      {/* Right: Workspace & Repo Selectors, Sizing Selector, Refresh button (#449) */}
       <Row align="center" gap="xs" wrap>
+        {/* Workspace Selector (#449) */}
+        <View style={{ minWidth: 140, maxWidth: 200 }}>
+          <Select
+            value={selectedWorkspace}
+            options={workspaceOptions}
+            onValueChange={onWorkspaceChange}
+            size="sm"
+            placeholder="Select workspace…"
+          />
+        </View>
+
         {/* Global Repo Selector */}
         <View style={{ minWidth: 150, maxWidth: 220 }}>
           <Select
@@ -289,6 +307,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   };
 
   const [selectedRepo, setSelectedRepo] = useState<string>("xpufx-org/paseo");
+  const [selectedWorkspace, setSelectedWorkspace] = useState<string>((props as any)?.workspaceId ?? "all");
 
   // Section 1: Issues sort & filter state
   const [filter, setFilter] = useState<IssuePreset>("all");
@@ -586,6 +605,38 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     ];
   }, [agentsData]);
 
+  const availableWorkspaces = useMemo(() => {
+    const map = new Map<string, string>();
+    const currentWks = (props as any)?.workspaceId;
+    if (currentWks) {
+      map.set(currentWks, currentWks);
+    }
+    for (const a of allAgents) {
+      if (a.workspaceId) {
+        const label = extractAgentWorktree(a) || a.worktree || a.workspaceId;
+        if (!map.has(a.workspaceId)) {
+          map.set(a.workspaceId, label);
+        }
+      }
+    }
+    return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
+  }, [allAgents, (props as any)?.workspaceId]);
+
+  const workspaceOptions = useMemo<SelectOption[]>(() => [
+    { label: "All Workspaces", value: "all" },
+    ...availableWorkspaces.map((w) => ({
+      label: w.label && w.label !== w.id ? `${w.label} (${w.id.length > 8 ? w.id.slice(0, 8) : w.id})` : w.id,
+      value: w.id,
+    })),
+  ], [availableWorkspaces]);
+
+  const handleWorkspaceChange = useCallback((workspaceId: string) => {
+    setSelectedWorkspace(workspaceId);
+    if (workspaceId !== "all" && props.navigation?.openWorkspace) {
+      props.navigation.openWorkspace({ workspaceId });
+    }
+  }, [props.navigation]);
+
   const eligibleBulkAgents = useMemo(() => {
     return filterBulkArchiveCandidates(allAgents);
   }, [allAgents]);
@@ -647,6 +698,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
           <UppidiTopHeaderBar
             isConnected={isConnected}
             isServiceRunning={isServiceRunning}
+            selectedWorkspace={selectedWorkspace}
+            workspaceOptions={workspaceOptions}
+            onWorkspaceChange={handleWorkspaceChange}
             selectedRepo={selectedRepo}
             repoOptions={repoOptions}
             onRepoChange={setSelectedRepo}
@@ -682,6 +736,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
           isArchiving={isBulkArchiving}
           density={density}
           selectedRepo={selectedRepo}
+          selectedWorkspace={selectedWorkspace}
         />
       ) : (
         <Stack gap={density === "dense" ? 6 : 12}>

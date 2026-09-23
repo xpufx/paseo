@@ -73,6 +73,7 @@ export interface UppidiFleetTreeViewProps {
   onToggleRepoMute?: (repo: string, muted?: boolean) => Promise<void> | void;
   density?: "dense" | "standard";
   selectedRepo?: string;
+  selectedWorkspace?: string;
 }
 
 export interface AgentStatusLightProps {
@@ -1511,6 +1512,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   onToggleRepoMute,
   density = "dense",
   selectedRepo,
+  selectedWorkspace,
 }) => {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
@@ -1737,6 +1739,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   // 3. Filter tree with matching predicate
   const filteredTree = useMemo(() => {
     const matches = (agent: UppidiAgent): boolean => {
+      if (selectedWorkspace && selectedWorkspace !== "all") {
+        if (agent.workspaceId !== selectedWorkspace) return false;
+      }
       if (stateFilter !== "all") {
         if (stateFilter === "working" && agent.deterministicState !== "working") return false;
         if (
@@ -1776,7 +1781,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     };
 
     return filterAgentTree(baseTree, matches);
-  }, [baseTree, query, stateFilter]);
+  }, [baseTree, query, stateFilter, selectedWorkspace]);
 
   // 4. Group by Front Desk and Projects (#403, #426)
   const { frontDeskNodes, enrolledGroups, detachedGroups } = useMemo(() => {
@@ -1801,24 +1806,30 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     if (selectedRepo && selectedRepo !== "all") {
       list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
+    if (selectedWorkspace && selectedWorkspace !== "all") {
+      list = list.filter((g) => g.allAgents.some((a) => a.workspaceId === selectedWorkspace));
+    }
     if (!query.trim() && stateFilter === "all") {
       return list;
     }
     return list.filter(
       (g) => g.allAgents.length > 0 || g.projectName.toLowerCase().includes(query.toLowerCase())
     );
-  }, [query, stateFilter, enrolledGroups, selectedRepo]);
+  }, [query, stateFilter, enrolledGroups, selectedRepo, selectedWorkspace]);
 
   const displayDetached = useMemo(() => {
     let list = detachedGroups;
     if (selectedRepo && selectedRepo !== "all") {
       list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
+    if (selectedWorkspace && selectedWorkspace !== "all") {
+      list = list.filter((g) => g.allAgents.some((a) => a.workspaceId === selectedWorkspace));
+    }
     if (!query.trim() && stateFilter === "all") {
       return list;
     }
     return list.filter((g) => g.allAgents.length > 0);
-  }, [query, stateFilter, detachedGroups, selectedRepo]);
+  }, [query, stateFilter, detachedGroups, selectedRepo, selectedWorkspace]);
 
   const totalCount = agentsData?.totalCount ?? allAgents.length;
   const runningCount = agentsData?.runningCount ?? 0;

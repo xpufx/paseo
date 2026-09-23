@@ -288,6 +288,39 @@ describe("uppidi-fleet client entry contract", () => {
       );
     });
 
+    it("verifies workspace dropdown selector renders on desktop viewports (#449)", () => {
+      assert.match(
+        surfaceSource,
+        /selectedWorkspace\?:\s*string/,
+        "UppidiTopHeaderBarProps must define selectedWorkspace",
+      );
+      assert.match(
+        surfaceSource,
+        /workspaceOptions\?:\s*SelectOption\[\]/,
+        "UppidiTopHeaderBarProps must define workspaceOptions",
+      );
+      assert.match(
+        surfaceSource,
+        /onWorkspaceChange\?:\s*\(workspace:\s*string\)\s*=>\s*void/,
+        "UppidiTopHeaderBarProps must define onWorkspaceChange",
+      );
+      assert.match(
+        surfaceSource,
+        /<Select[\s\S]*value=\{selectedWorkspace\}[\s\S]*options=\{workspaceOptions\}[\s\S]*onValueChange=\{onWorkspaceChange\}/,
+        "UppidiTopHeaderBar must render workspace Select dropdown selector alongside repo selector",
+      );
+      assert.match(
+        surfaceSource,
+        /<UppidiTopHeaderBar[\s\S]*selectedWorkspace=\{selectedWorkspace\}[\s\S]*workspaceOptions=\{workspaceOptions\}[\s\S]*onWorkspaceChange=\{handleWorkspaceChange\}/,
+        "UppidiFleetSurface must pass workspace options and selection handlers to UppidiTopHeaderBar",
+      );
+      assert.match(
+        surfaceSource,
+        /<UppidiFleetTreeView[\s\S]*selectedWorkspace=\{selectedWorkspace\}/,
+        "UppidiFleetSurface must wire selectedWorkspace to UppidiFleetTreeView",
+      );
+    });
+
     it("verifies dense metrics bar strip (#424)", () => {
       // Must contain all 4 key metrics in horizontal strip
       assert.match(
@@ -379,8 +412,18 @@ describe("uppidi-fleet client entry contract", () => {
       );
       assert.match(
         treeViewSource,
+        /selectedWorkspace\?:?\s*string/,
+        "UppidiFleetTreeViewProps must declare selectedWorkspace prop (#449)",
+      );
+      assert.match(
+        treeViewSource,
         /isRepoMatching\(\s*g\.projectName,\s*selectedRepo\s*\)/,
         "tree-view must filter enrolled and detached groups with isRepoMatching",
+      );
+      assert.match(
+        treeViewSource,
+        /agent\.workspaceId\s*!==\s*selectedWorkspace/,
+        "tree-view must filter agents by selectedWorkspace (#449)",
       );
     });
 
