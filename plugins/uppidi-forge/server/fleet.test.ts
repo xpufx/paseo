@@ -198,6 +198,53 @@ describe("fleet and agents classification", () => {
     assert.equal(projectGroups[0].runningCount, 2);
   });
 
+  it("assigns parentName and parentCategory to child agents in buildAgentTree (#430)", () => {
+    const agents = [
+      normalizeRawAgent({ id: "root-1", name: "Front Desk", status: "running" }),
+      normalizeRawAgent({
+        id: "orch-1",
+        name: "Orchestrator · xpufx-org/paseo",
+        status: "running",
+        parentId: "root-1",
+        labels: { "forgejo.issue": "430", repo: "xpufx-org/paseo" },
+      }),
+      normalizeRawAgent({
+        id: "worker-1",
+        name: "Worker 1",
+        status: "running",
+        parentId: "orch-1",
+        labels: { repo: "xpufx-org/paseo" },
+      }),
+    ];
+
+    const tree = buildAgentTree(agents);
+
+    const root = agents.find((a) => a.id === "root-1")!;
+    const orch = agents.find((a) => a.id === "orch-1")!;
+    const worker = agents.find((a) => a.id === "worker-1")!;
+
+    assert.equal(root.parentName, undefined);
+    assert.equal(root.parentCategory, undefined);
+
+    // Orchestrator spawned by Front Desk
+    assert.equal(orch.parentName, "Front Desk");
+    assert.equal(orch.parentCategory, "front-desk");
+
+    // Worker spawned by orchestrator
+    assert.equal(worker.parentName, "Orchestrator · xpufx-org/paseo");
+    assert.equal(worker.parentCategory, "orchestrator");
+
+    // Verify on tree nodes as well
+    const rootNode = tree.find((n) => n.agent.id === "root-1")!;
+    const orchNode = rootNode.children.find((n) => n.agent.id === "orch-1")!;
+    const workerNode = orchNode.children.find((n) => n.agent.id === "worker-1")!;
+
+    assert.equal(orchNode.agent.parentName, "Front Desk");
+    assert.equal(orchNode.agent.parentCategory, "front-desk");
+    assert.equal(workerNode.agent.parentName, "Orchestrator · xpufx-org/paseo");
+    assert.equal(workerNode.agent.parentCategory, "orchestrator");
+  });
+
   it("normalizes raw agent records with defaults and deterministic states", () => {
     const agent = normalizeRawAgent({
       id: "64d89202-acaa-4071-b658-90db710875bd",

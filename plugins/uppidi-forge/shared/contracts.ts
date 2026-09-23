@@ -417,6 +417,8 @@ export const UppidiAgentSchema = z.object({
   lastActivityAt: z.string().nullable().optional(),
   workspaceId: z.string().optional(),
   parentId: z.string().nullable().optional(),
+  parentName: z.string().optional(),
+  parentCategory: UppidiAgentCategorySchema.optional(),
   deterministicState: DeterministicAgentStateSchema.default("unknown"),
   stateDetail: z.string().optional(),
   attributedWork: UppidiAgentWorkSchema.nullable().optional(),

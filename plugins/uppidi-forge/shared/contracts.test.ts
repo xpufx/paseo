@@ -93,6 +93,8 @@ describe("uppidi-forge shared contracts", () => {
       category: "worker",
       status: "running",
       parentId: "orch-456",
+      parentName: "Orchestrator · repo",
+      parentCategory: "orchestrator",
       model: "gemini-3.8-flash-low",
       deterministicState: "working",
       stateDetail: "#385 (feat/385-tree-fleet-view)",
@@ -105,6 +107,8 @@ describe("uppidi-forge shared contracts", () => {
 
     assert.equal(agent.id, "agent-123");
     assert.equal(agent.parentId, "orch-456");
+    assert.equal(agent.parentName, "Orchestrator · repo");
+    assert.equal(agent.parentCategory, "orchestrator");
     assert.equal(agent.deterministicState, "working");
     assert.equal(agent.attributedWork?.issue, 385);
   });

@@ -590,6 +590,71 @@ export function FrontDeskHero({
   );
 }
 
+export function getParentBadgeLabel(agent: UppidiAgent): string | null {
+  if (!agent.parentId && !agent.parentName) return null;
+  if (
+    agent.parentCategory === "front-desk" ||
+    (agent.parentName && agent.parentName.toLowerCase().includes("front desk"))
+  ) {
+    return "via Front Desk";
+  }
+  if (agent.parentName) {
+    return `via ${agent.parentName}`;
+  }
+  if (agent.parentId) {
+    return `via ${agent.parentId.slice(0, 7)}`;
+  }
+  return null;
+}
+
+export interface ParentAgentPillProps {
+  agent: UppidiAgent;
+  navigation?: PluginSurfaceProps["navigation"];
+}
+
+/**
+ * Parentage pill badge (#430)
+ * Displays compact parent pill badge (e.g. via Front Desk or via <parentName> or via <shortId>).
+ * Clicking opens the parent agent session if navigation is available.
+ */
+export function ParentAgentPill({ agent, navigation }: ParentAgentPillProps) {
+  const label = getParentBadgeLabel(agent);
+  if (!label) return null;
+
+  const badge = (
+    <Badge
+      label={label}
+      variant="neutral"
+      size="sm"
+      textStyle={{ fontSize: 10 }}
+    />
+  );
+
+  if (navigation?.openAgent && agent.parentId) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Open parent agent (${label})`}
+        accessibilityHint="Click to open parent agent session"
+        // @ts-ignore RN web title tooltip
+        title={agent.parentName ? `Parent: ${agent.parentName}` : label}
+        onPress={(e: any) => {
+          e?.stopPropagation?.();
+          navigation.openAgent?.({ agentId: agent.parentId! });
+        }}
+        style={({ pressed }: any) => ({
+          opacity: pressed ? 0.7 : 1,
+          cursor: "pointer",
+        })}
+      >
+        {badge}
+      </Pressable>
+    );
+  }
+
+  return badge;
+}
+
 export interface DenseAgentRowProps {
   node: UppidiAgentTreeNode;
   depth?: number;
@@ -690,6 +755,7 @@ export function DenseAgentRow({
                 textStyle={{ fontSize: 10 }}
               />
             )}
+            <ParentAgentPill agent={agent} navigation={navigation} />
           </Row>
 
           {/* Right side: State badge, Model, Issue, Worktree, Time, Archive */}
@@ -916,6 +982,7 @@ export function OrchestratorRow({
             textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
           />
           <Badge label="Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+          <ParentAgentPill agent={agent} navigation={navigation} />
           {!isExpanded && hasChildren && childCount > 0 && (
             <Badge
               label={`${childCount} subagent${childCount === 1 ? "" : "s"}`}

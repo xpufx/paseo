@@ -70,4 +70,28 @@ describe("uppidi-forge client entry contract", () => {
       "registerWorkspacePanel must invoke client.addWorkspacePanel() with id 'uppidi-forge'",
     );
   });
+
+  it("verifies client/tree-view.tsx defines getParentBadgeLabel and ParentAgentPill (#430)", () => {
+    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+    assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
+    const source = fs.readFileSync(treeViewPath, "utf8");
+
+    assert.match(
+      source,
+      /export\s+function\s+getParentBadgeLabel\s*\(/,
+      "tree-view.tsx must export getParentBadgeLabel",
+    );
+
+    assert.match(
+      source,
+      /export\s+function\s+ParentAgentPill\s*\(/,
+      "tree-view.tsx must export ParentAgentPill",
+    );
+
+    assert.match(
+      source,
+      /<ParentAgentPill\s+agent=\{agent\}\s+navigation=\{navigation\}\s*\/>/,
+      "OrchestratorRow and DenseAgentRow must render ParentAgentPill",
+    );
+  });
 });

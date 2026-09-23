@@ -248,6 +248,14 @@ export function buildAgentTree(agents: UppidiAgent[]): UppidiAgentTreeNode[] {
     agentMap.set(agent.id, agent);
   }
 
+  for (const agent of agents) {
+    if (agent.parentId && agentMap.has(agent.parentId)) {
+      const parent = agentMap.get(agent.parentId)!;
+      agent.parentName = parent.name;
+      agent.parentCategory = parent.category;
+    }
+  }
+
   const rootAgents: UppidiAgent[] = [];
 
   for (const agent of agents) {
