@@ -618,24 +618,53 @@ export function buildProjectGroups(tree: UppidiAgentTreeNode[]): {
     }
   }
 
+  function adjustDepths(node: UppidiAgentTreeNode, depth: number = 0): UppidiAgentTreeNode {
+    return {
+      ...node,
+      depth,
+      children: (node.children || []).map((child) => adjustDepths(child, depth + 1)),
+    };
+  }
+
+  function getOrCreateGroup(projectName: string) {
+    let group = projectMap.get(projectName);
+    if (!group) {
+      group = {
+        orchestrators: [],
+        unparentedWorkers: [],
+        allAgents: [],
+      };
+      projectMap.set(projectName, group);
+    }
+    return group;
+  }
+
   for (const node of tree) {
     if (node.agent.category === "front-desk") {
-      frontDeskNodes.push(node);
+      const remainingChildren: UppidiAgentTreeNode[] = [];
+      for (const child of node.children) {
+        if (child.agent.category === "orchestrator") {
+          const orchNode = adjustDepths(child, 0);
+          const project =
+            orchNode.agent.project || extractAgentProject(orchNode.agent) || "Default Project";
+          const group = getOrCreateGroup(project);
+          group.orchestrators.push(orchNode);
+          collectAllAgents(orchNode, group.allAgents);
+        } else {
+          remainingChildren.push(child);
+        }
+      }
+      frontDeskNodes.push({
+        ...node,
+        children: remainingChildren,
+      });
       continue;
     }
 
     const project =
       node.agent.project || extractAgentProject(node.agent) || "Default Project";
 
-    if (!projectMap.has(project)) {
-      projectMap.set(project, {
-        orchestrators: [],
-        unparentedWorkers: [],
-        allAgents: [],
-      });
-    }
-
-    const group = projectMap.get(project)!;
+    const group = getOrCreateGroup(project);
     collectAllAgents(node, group.allAgents);
 
     if (node.agent.category === "orchestrator") {

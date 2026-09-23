@@ -1356,7 +1356,7 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
 
   // Unfiltered Front Desk nodes for top display when filter is active
   const allFrontDeskNodes = useMemo(() => {
-    return baseTree.filter((n) => n.agent.category === "front-desk");
+    return buildProjectGroups(baseTree).frontDeskNodes;
   }, [baseTree]);
 
   const totalCount = agentsData?.totalCount ?? allAgents.length;

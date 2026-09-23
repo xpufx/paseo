@@ -41,13 +41,19 @@ export function getAvailableNetworkInterfaces(): string[] {
 }
 
 export function getRouterConfigPath(): string {
+  if (process.env.NODE_ENV === "test" && !process.env.FORGE_HOOK_CONFIG) {
+    return "";
+  }
+  if (process.env.FORGE_HOOK_CONFIG) {
+    return process.env.FORGE_HOOK_CONFIG;
+  }
   const home = process.env.HOME ?? os.homedir();
   return join(home, ".config", "uppidi-forge", "router-config.json");
 }
 
 export function loadRouterConfig(customPath?: string): RouterConfig {
   const configPath = customPath ?? getRouterConfigPath();
-  if (existsSync(configPath)) {
+  if (configPath && existsSync(configPath)) {
     try {
       const raw = readFileSync(configPath, "utf8");
       const parsed = JSON.parse(raw);
@@ -66,6 +72,7 @@ export function loadRouterConfig(customPath?: string): RouterConfig {
 
 export function saveRouterConfig(config: RouterConfig, customPath?: string): void {
   const configPath = customPath ?? getRouterConfigPath();
+  if (!configPath) return;
   const dir = dirname(configPath);
   mkdirSync(dir, { recursive: true });
   const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`;

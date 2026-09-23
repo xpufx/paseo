@@ -558,6 +558,97 @@ describe("Uppidi Forge sort & filter predicates", () => {
       const byProject = filterAgents(agents, "all", "xpufx-org/paseo");
       assert.equal(byProject.length, 2);
     });
+
+    it("promotes orchestrator spawned by Front Desk to project group while retaining subtasks (#430)", () => {
+      const fdNode: UppidiAgentTreeNode = {
+        agent: {
+          id: "fd-1",
+          shortId: "fd1",
+          name: "Front Desk",
+          category: "front-desk",
+          status: "idle",
+          deterministicState: "idle:waiting",
+        },
+        depth: 0,
+        children: [
+          {
+            agent: {
+              id: "fd-subtask-1",
+              shortId: "fst1",
+              name: "Research Subtask",
+              category: "worker",
+              status: "running",
+              parentId: "fd-1",
+              deterministicState: "working",
+              project: "xpufx-org/aur-automation",
+            },
+            depth: 1,
+            children: [],
+          },
+          {
+            agent: {
+              id: "orch-aur",
+              shortId: "oaur",
+              name: "Orchestrator · xpufx-org/aur-automation",
+              category: "orchestrator",
+              status: "running",
+              parentId: "fd-1",
+              deterministicState: "working",
+              project: "xpufx-org/aur-automation",
+            },
+            depth: 1,
+            children: [
+              {
+                agent: {
+                  id: "worker-aur-1",
+                  shortId: "waur1",
+                  name: "feat-430-aur-task",
+                  category: "worker",
+                  status: "running",
+                  parentId: "orch-aur",
+                  deterministicState: "working",
+                  project: "xpufx-org/aur-automation",
+                },
+                depth: 2,
+                children: [],
+              },
+            ],
+          },
+        ],
+      };
+
+      const { frontDeskNodes, projectGroups } = buildProjectGroups([fdNode]);
+
+      // 1. Front Desk node retained with non-orchestrator subtask only
+      assert.equal(frontDeskNodes.length, 1);
+      assert.equal(frontDeskNodes[0].agent.id, "fd-1");
+      assert.equal(frontDeskNodes[0].children.length, 1);
+      assert.equal(frontDeskNodes[0].children[0].agent.id, "fd-subtask-1");
+
+      // 2. Promoted orchestrator placed in its project group
+      assert.equal(projectGroups.length, 1);
+      const aurGroup = projectGroups[0];
+      assert.equal(aurGroup.projectName, "xpufx-org/aur-automation");
+      assert.equal(aurGroup.orchestrators.length, 1);
+
+      // 3. Depth adjustment: orchestrator depth 0, worker depth 1
+      const promotedOrch = aurGroup.orchestrators[0];
+      assert.equal(promotedOrch.agent.id, "orch-aur");
+      assert.equal(promotedOrch.depth, 0);
+      assert.equal(promotedOrch.children.length, 1);
+
+      const promotedWorker = promotedOrch.children[0];
+      assert.equal(promotedWorker.agent.id, "worker-aur-1");
+      assert.equal(promotedWorker.depth, 1);
+
+      // 4. Counts reflect orchestrator + worker
+      assert.equal(aurGroup.totalCount, 2);
+      assert.equal(aurGroup.runningCount, 2);
+      assert.deepEqual(
+        aurGroup.allAgents.map((a) => a.id),
+        ["orch-aur", "worker-aur-1"]
+      );
+    });
   });
 
   describe("agent status lights (#410)", () => {

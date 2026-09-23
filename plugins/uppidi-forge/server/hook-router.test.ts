@@ -576,6 +576,26 @@ describe("hook-router network interfaces and listen address configuration (#427)
     assert.ok(ifaces.includes("0.0.0.0"), "Must include 0.0.0.0");
   });
 
+  it("isolates default config path in test environment unless FORGE_HOOK_CONFIG is set", () => {
+    const originalEnv = process.env.NODE_ENV;
+    const originalConfig = process.env.FORGE_HOOK_CONFIG;
+    try {
+      process.env.NODE_ENV = "test";
+      delete process.env.FORGE_HOOK_CONFIG;
+      assert.equal(getRouterConfigPath(), "");
+
+      process.env.FORGE_HOOK_CONFIG = "/custom/path/router-config.json";
+      assert.equal(getRouterConfigPath(), "/custom/path/router-config.json");
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      if (originalConfig !== undefined) {
+        process.env.FORGE_HOOK_CONFIG = originalConfig;
+      } else {
+        delete process.env.FORGE_HOOK_CONFIG;
+      }
+    }
+  });
+
   it("saves and loads router configuration safely", () => {
     const configPath = join(tmpDir, "router-config.json");
     assert.deepEqual(loadRouterConfig(configPath), {});

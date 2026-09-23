@@ -13,6 +13,7 @@ import {
 
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel } from "./role-models.js";
 import { handleUppidiRunners } from "./runners.js";
+import { buildProjectGroups } from "../shared/sort-filter.js";
 
 describe("fleet and agents classification", () => {
   it("categorizes agent names accurately", () => {
@@ -152,6 +153,49 @@ describe("fleet and agents classification", () => {
     assert.equal(workerNode.agent.id, "worker-1");
     assert.equal(workerNode.depth, 2);
     assert.equal(workerNode.children.length, 0);
+  });
+
+  it("buildProjectGroups extracts an orchestrator spawned by Front Desk into projectGroups (#430)", () => {
+    const agents = [
+      normalizeRawAgent({ id: "root-1", name: "Front Desk", status: "running" }),
+      normalizeRawAgent({
+        id: "orch-1",
+        name: "Orchestrator · xpufx-org/paseo",
+        status: "running",
+        parentId: "root-1",
+        labels: { "forgejo.issue": "430", repo: "xpufx-org/paseo" },
+      }),
+      normalizeRawAgent({
+        id: "worker-1",
+        name: "Worker 1",
+        status: "running",
+        parentId: "orch-1",
+        labels: { repo: "xpufx-org/paseo" },
+      }),
+    ];
+
+    const tree = buildAgentTree(agents);
+    const { frontDeskNodes, projectGroups } = buildProjectGroups(tree);
+
+    assert.equal(frontDeskNodes.length, 1);
+    assert.equal(frontDeskNodes[0].agent.id, "root-1");
+    assert.equal(frontDeskNodes[0].children.length, 0); // orch-1 promoted out of Front Desk
+
+    assert.equal(projectGroups.length, 1);
+    assert.equal(projectGroups[0].projectName, "xpufx-org/paseo");
+    assert.equal(projectGroups[0].orchestrators.length, 1);
+
+    const promotedOrch = projectGroups[0].orchestrators[0];
+    assert.equal(promotedOrch.agent.id, "orch-1");
+    assert.equal(promotedOrch.depth, 0);
+    assert.equal(promotedOrch.children.length, 1);
+
+    const promotedWorker = promotedOrch.children[0];
+    assert.equal(promotedWorker.agent.id, "worker-1");
+    assert.equal(promotedWorker.depth, 1);
+
+    assert.equal(projectGroups[0].totalCount, 2);
+    assert.equal(projectGroups[0].runningCount, 2);
   });
 
   it("normalizes raw agent records with defaults and deterministic states", () => {
