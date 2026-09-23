@@ -15,6 +15,7 @@ import {
   getHookLogTail,
   configureHookService,
 } from "./hook-router.js";
+import { getUppidiFleetSettingsStorage } from "./settings.js";
 
 const DEFAULT_HOOK_URL = process.env.FORGE_HOOK_URL || "http://127.0.0.1:8099";
 
@@ -135,7 +136,20 @@ export async function handleHookConfigure(
   input: HookServiceConfigInput,
   _context?: PluginHandlerContext,
 ): Promise<HookServiceConfigOutput> {
-  return configureHookService(input);
+  const result = await configureHookService(input);
+  if (result.ok) {
+    try {
+      const storage = getUppidiFleetSettingsStorage();
+      storage.update((prev) => ({
+        ...prev,
+        hookHost: result.configuredHost,
+        hookPort: result.configuredPort,
+      }));
+    } catch {
+      // ignore
+    }
+  }
+  return result;
 }
 
 export async function handleHookLogTail(input?: { lines?: number }): Promise<HookLogTailOutput> {

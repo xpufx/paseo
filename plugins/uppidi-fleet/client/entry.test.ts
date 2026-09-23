@@ -474,5 +474,28 @@ describe("uppidi-fleet client entry contract", () => {
         "Agents & Fleet must be rendered in its dedicated 'tree' tab via UppidiFleetTreeView",
       );
     });
+
+    it("verifies settings integration via registerHelperSettingsScreen and surface tab (#444)", () => {
+      const entryPath = path.resolve(__dirname, "../index.client.tsx");
+      const clientSource = fs.readFileSync(entryPath, "utf8");
+
+      assert.match(
+        clientSource,
+        /registerHelperSettingsScreen\s*\(\s*client,\s*uppidiFleetSettingsContract/,
+        "index.client.tsx must register settings screen with registerHelperSettingsScreen and uppidiFleetSettingsContract",
+      );
+
+      assert.match(
+        surfaceSource,
+        /usePluginSettings\s*\(\s*uppidiFleetSettingsContract\s*\)/,
+        "surface.tsx must bind to settings via usePluginSettings",
+      );
+
+      assert.match(
+        surfaceSource,
+        /id:\s*["'"]settings["'"],\s*label:\s*["'"]Settings["'"]/,
+        "surface.tsx must register dedicated Settings tab",
+      );
+    });
   });
 });

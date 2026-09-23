@@ -22,6 +22,7 @@ import {
   uppidiAddOrchestratorContract,
   uppidiReplaceOrchestratorContract,
   uppidiToggleRepoMuteContract,
+  uppidiFleetSettingsContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues } from "./server/issues.js";
 import {
@@ -49,7 +50,9 @@ import {
 import { handleUppidiRoleModels, handleUppidiSetRoleModel } from "./server/role-models.js";
 import { handleUppidiRunners } from "./server/runners.js";
 import { handleUppidiFleetMetrics } from "./server/metrics.js";
-import { startHookRouter } from "./server/hook-router.js";
+import { startHookRouter, getActiveHookRouter } from "./server/hook-router.js";
+import { registerSettingsRpc } from "paseo-plugin-helper/server";
+import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 
 export default function contribute(server: PluginServerContext) {
   server.handle(uppidiIssuesContract, handleUppidiIssues);
@@ -74,6 +77,34 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiAddOrchestratorContract, handleUppidiAddOrchestrator);
   server.handle(uppidiReplaceOrchestratorContract, handleUppidiReplaceOrchestrator);
   server.handle(uppidiToggleRepoMuteContract, handleUppidiToggleRepoMute);
+
+  const settingsStorage = getUppidiFleetSettingsStorage();
+  registerSettingsRpc(server, uppidiFleetSettingsContract, settingsStorage, {
+    onUpdate: async (next, prev) => {
+      if (next.hookHost !== prev?.hookHost || next.hookPort !== prev?.hookPort) {
+        const router = getActiveHookRouter();
+        if (router) {
+          await router.configure({
+            host: next.hookHost,
+            port: next.hookPort,
+            restart: true,
+          });
+        }
+      }
+    },
+    onReset: async (defaults, prev) => {
+      if (defaults.hookHost !== prev?.hookHost || defaults.hookPort !== prev?.hookPort) {
+        const router = getActiveHookRouter();
+        if (router) {
+          await router.configure({
+            host: defaults.hookHost,
+            port: defaults.hookPort,
+            restart: true,
+          });
+        }
+      }
+    },
+  });
 
   const stopHookRouter = startHookRouter(server);
 

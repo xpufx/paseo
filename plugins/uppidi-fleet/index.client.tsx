@@ -1,7 +1,19 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers, registerSidebarSurface } from "paseo-plugin-helper/client";
+import {
+  SettingsCard,
+  SettingsSection,
+  SettingsSwitch,
+  SettingsSelect,
+  SettingsInput,
+} from "@getpaseo/plugin/client/ui";
+import {
+  initClientHelpers,
+  registerSidebarSurface,
+  registerHelperSettingsScreen,
+} from "paseo-plugin-helper/client";
+import { uppidiFleetSettingsContract } from "./shared/contracts.js";
 import { UppidiFleetSurface, UppidiForgeSurface } from "./client/surface.js";
 import {
   UppidiFleetPanel,
@@ -31,7 +43,24 @@ export default function contribute(client: PluginClientContext) {
     Component: UppidiFleetPanel,
   });
 
+  const removeSettings = registerHelperSettingsScreen(client, uppidiFleetSettingsContract, {
+    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
+    id: "uppidi-fleet",
+    title: "Uppidi Fleet",
+    icon: "GitPullRequest",
+    labels: {
+      hookHost: "Hook service listen host",
+      hookPort: "Hook service listen port",
+      density: "Cockpit density",
+    },
+  });
+
   return () => {
+    if (typeof removeSettings === "function") {
+      removeSettings();
+    } else if (removeSettings && typeof (removeSettings as any).remove === "function") {
+      (removeSettings as any).remove();
+    }
     if (typeof removePanel === "function") {
       removePanel();
     } else if (removePanel && typeof (removePanel as any).remove === "function") {

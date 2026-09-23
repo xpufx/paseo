@@ -30,8 +30,10 @@ import {
   usePluginTheme,
   useRpcQuery,
   useRpcMutation,
+  usePluginSettings,
 } from "paseo-plugin-helper/client";
 import {
+  uppidiFleetSettingsContract,
   uppidiIssuesContract,
   uppidiHookStatusContract,
   uppidiHookQueuesContract,
@@ -84,7 +86,7 @@ import {
   UppidiForgeTreeView,
 } from "./tree-view.js";
 
-export type SurfaceTab = "tree" | "dashboard" | "mockup";
+export type SurfaceTab = "tree" | "dashboard" | "settings" | "mockup";
 
 export const DENSITY_STORAGE_KEY = "uppidi-fleet-density";
 export type SurfaceDensity = "dense" | "standard";
@@ -120,6 +122,7 @@ const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
 const tabs = [
   { id: "tree", label: "Agents & Fleet", shortLabel: "Fleet", icon: "FolderTree" },
   { id: "dashboard", label: "Work Queue", shortLabel: "Queue", icon: "LayoutDashboard" },
+  { id: "settings", label: "Settings", shortLabel: "Settings", icon: "Sliders" },
   { id: "mockup", label: "Static mockup", shortLabel: "Mockup", icon: "PanelTop" },
 ];
 
@@ -298,13 +301,22 @@ export function UppidiTopHeaderBar({
 export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
+  const { settings, updateSettings, isUpdating: isUpdatingSettings } = usePluginSettings(uppidiFleetSettingsContract);
   const [activeTab, setActiveTab] = useState<SurfaceTab>("tree");
   const [density, setDensity] = useState<SurfaceDensity>(getStoredDensity);
 
   const handleDensityChange = (newDensity: SurfaceDensity) => {
     setDensity(newDensity);
     setStoredDensity(newDensity);
+    void updateSettings({ density: newDensity });
   };
+
+  React.useEffect(() => {
+    if (settings?.density && settings.density !== density) {
+      setDensity(settings.density);
+      setStoredDensity(settings.density);
+    }
+  }, [settings?.density]);
 
   const [selectedRepo, setSelectedRepo] = useState<string>("xpufx-org/paseo");
   const [selectedWorkspace, setSelectedWorkspace] = useState<string>((props as any)?.workspaceId ?? "all");
@@ -410,13 +422,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const configInitializedRef = React.useRef(false);
 
   React.useEffect(() => {
-    if (serviceStatus && !configInitializedRef.current) {
+    if ((serviceStatus || settings) && !configInitializedRef.current) {
       configInitializedRef.current = true;
-      const cfgHost = serviceStatus.configuredHost || serviceStatus.host || "127.0.0.1";
-      const cfgPort = serviceStatus.configuredPort || serviceStatus.port || 8099;
+      const cfgHost = settings?.hookHost || serviceStatus?.configuredHost || serviceStatus?.host || "127.0.0.1";
+      const cfgPort = settings?.hookPort || serviceStatus?.configuredPort || serviceStatus?.port || 8099;
       setConfiguredPortInput(String(cfgPort));
 
-      const isDetected = (serviceStatus.availableInterfaces ?? []).includes(cfgHost);
+      const isDetected = (serviceStatus?.availableInterfaces ?? []).includes(cfgHost);
       if (cfgHost === "127.0.0.1" || cfgHost === "0.0.0.0" || isDetected) {
         setHostSelection(cfgHost);
         setIsCustomHost(false);
@@ -426,7 +438,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
         setIsCustomHost(true);
       }
     }
-  }, [serviceStatus]);
+  }, [serviceStatus, settings]);
 
   const detectedIps = useMemo(() => {
     const list = serviceStatus?.availableInterfaces ?? [];
@@ -452,6 +464,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
         port: parsedPort,
         restart: true,
       });
+      void updateSettings({ hookHost: targetHost, hookPort: parsedPort });
       if (res.ok) {
         toast.show(res.message || `Hook service listening on ${res.activeHost}:${res.activePort}`);
         void refetchServiceStatus();
@@ -725,6 +738,164 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     >
       {activeTab === "mockup" ? (
         <UppidiFleetStaticMockup {...props} />
+      ) : activeTab === "settings" ? (
+        <Stack gap={density === "dense" ? 6 : 12}>
+          <Card variant="flat">
+            <Stack gap="sm" style={{ padding: density === "dense" ? 8 : 12 }}>
+              <CardHeader
+                title="Hook Service Management"
+                subtitle="Persistent network address & port for the bundled webhook router"
+                icon="Server"
+              />
+              <Row justify="space-between" align="center" wrap gap="sm">
+                <Row align="center" gap="xs">
+                  <StatusDot variant={isServiceRunning ? "success" : "danger"} />
+                  <Text style={{ color: colors.foreground, ...typography.heading }}>
+                    Bundled router: {serviceStatus?.state ?? "unknown"}
+                  </Text>
+                </Row>
+                <Row gap="xs">
+                  <Button
+                    label="Start"
+                    size="sm"
+                    variant="primary"
+                    disabled={isServiceRunning}
+                    onPress={() => handleServiceAction("start")}
+                  />
+                  <Button
+                    label="Restart"
+                    size="sm"
+                    variant="secondary"
+                    onPress={() => handleServiceAction("restart")}
+                  />
+                  <Button
+                    label="Stop"
+                    size="sm"
+                    variant="danger"
+                    disabled={!isServiceRunning}
+                    onPress={() => handleServiceAction("stop")}
+                  />
+                </Row>
+              </Row>
+              <KeyValueGroup>
+                <KeyValue
+                  label="Configured host"
+                  value={settings?.hookHost ?? serviceStatus?.configuredHost ?? "127.0.0.1"}
+                />
+                <KeyValue
+                  label="Configured port"
+                  value={String(settings?.hookPort ?? serviceStatus?.configuredPort ?? 8099)}
+                />
+                <KeyValue
+                  label="Active endpoint"
+                  value={`http://${serviceStatus?.host ?? settings?.hookHost ?? "127.0.0.1"}:${serviceStatus?.port ?? settings?.hookPort ?? 8099}`}
+                />
+              </KeyValueGroup>
+
+              <Card variant="flat">
+                <Stack gap="xs">
+                  <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
+                    Configure Listen Address & Port
+                  </Text>
+                  <Row gap="xs" wrap align="center">
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Host:</Text>
+                    <Button
+                      label="127.0.0.1 (Loopback)"
+                      size="sm"
+                      variant={!isCustomHost && hostSelection === "127.0.0.1" ? "primary" : "ghost"}
+                      onPress={() => {
+                        setIsCustomHost(false);
+                        setHostSelection("127.0.0.1");
+                      }}
+                    />
+                    <Button
+                      label="0.0.0.0 (All interfaces)"
+                      size="sm"
+                      variant={!isCustomHost && hostSelection === "0.0.0.0" ? "primary" : "ghost"}
+                      onPress={() => {
+                        setIsCustomHost(false);
+                        setHostSelection("0.0.0.0");
+                      }}
+                    />
+                    {detectedIps.map((ip) => (
+                      <Button
+                        key={ip}
+                        label={ip}
+                        size="sm"
+                        variant={!isCustomHost && hostSelection === ip ? "primary" : "ghost"}
+                        onPress={() => {
+                          setIsCustomHost(false);
+                          setHostSelection(ip);
+                        }}
+                      />
+                    ))}
+                    <Button
+                      label="Custom"
+                      size="sm"
+                      variant={isCustomHost ? "primary" : "ghost"}
+                      onPress={() => {
+                        setIsCustomHost(true);
+                        setHostSelection("custom");
+                      }}
+                    />
+                  </Row>
+                  <Row gap="sm" wrap align="flex-end">
+                    {isCustomHost && (
+                      <View style={{ flex: 1, minWidth: 160 }}>
+                        <TextInput
+                          label="Custom Host"
+                          value={customHost}
+                          onChangeText={setCustomHost}
+                          placeholder="127.0.0.1 or IP"
+                        />
+                      </View>
+                    )}
+                    <View style={{ width: 120 }}>
+                      <TextInput
+                        label="Port"
+                        value={configuredPortInput}
+                        onChangeText={setConfiguredPortInput}
+                        keyboardType="number-pad"
+                        placeholder="8099"
+                      />
+                    </View>
+                    <Button
+                      label={isConfiguring ? "Applying..." : "Apply & Persist"}
+                      size="sm"
+                      variant="primary"
+                      disabled={isConfiguring}
+                      onPress={handleApplyConfig}
+                    />
+                  </Row>
+                </Stack>
+              </Card>
+            </Stack>
+          </Card>
+
+          <Card variant="flat">
+            <Stack gap="sm" style={{ padding: density === "dense" ? 8 : 12 }}>
+              <CardHeader
+                title="Cockpit Display Density"
+                subtitle="Adjust UI density across agent tree, queue, and tables"
+                icon="Sliders"
+              />
+              <Row gap="xs">
+                <Button
+                  label="Dense"
+                  size="sm"
+                  variant={density === "dense" ? "primary" : "ghost"}
+                  onPress={() => handleDensityChange("dense")}
+                />
+                <Button
+                  label="Standard"
+                  size="sm"
+                  variant={density === "standard" ? "primary" : "ghost"}
+                  onPress={() => handleDensityChange("standard")}
+                />
+              </Row>
+            </Stack>
+          </Card>
+        </Stack>
       ) : activeTab === "tree" ? (
         <UppidiFleetTreeView
           agentsData={agentsData}

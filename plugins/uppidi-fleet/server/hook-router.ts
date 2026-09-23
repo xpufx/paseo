@@ -16,6 +16,7 @@ import type {
   HookServiceConfigInput,
   HookServiceConfigOutput,
 } from "../shared/contracts.js";
+import { getUppidiFleetSettingsStorage } from "./settings.js";
 
 export interface RouterConfig {
   host?: string;
@@ -93,6 +94,20 @@ export function saveRouterConfig(config: RouterConfig, customPath?: string): voi
   const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, JSON.stringify(merged, null, 2), "utf8");
   renameSync(tmp, configPath);
+
+  try {
+    const storage = getUppidiFleetSettingsStorage();
+    const updateData: Record<string, any> = {};
+    if (merged.host !== undefined) updateData.hookHost = merged.host;
+    if (merged.port !== undefined) updateData.hookPort = merged.port;
+    if (merged.enrolledRepos !== undefined) updateData.enrolledRepos = merged.enrolledRepos;
+    if (merged.mutedRepos !== undefined) updateData.mutedRepos = merged.mutedRepos;
+    if (Object.keys(updateData).length > 0) {
+      storage.update((prev) => ({ ...prev, ...updateData }));
+    }
+  } catch {
+    // ignore when storage not accessible or in isolated testing
+  }
 }
 
 export interface HookRouterOptions {
@@ -271,19 +286,37 @@ export class HookRouter {
     this.server = server ?? null;
     this.configPath = options?.configPath;
     const persisted = loadRouterConfig(this.configPath);
+    const settings = (() => {
+      try {
+        return getUppidiFleetSettingsStorage().read();
+      } catch {
+        return null;
+      }
+    })();
+
+    const envPort = process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT;
+    const isTestMode = process.env.NODE_ENV === "test" && !process.env.FORGE_HOOK_CONFIG;
 
     this.configuredPort =
       options?.port !== undefined
         ? options.port
-        : persisted.port !== undefined
-          ? persisted.port
-          : Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
+        : isTestMode && envPort !== undefined
+          ? Number(envPort)
+          : settings?.hookPort !== undefined
+            ? settings.hookPort
+            : persisted.port !== undefined
+              ? persisted.port
+              : Number(envPort ?? 8099);
     this.configuredHost =
       options?.host !== undefined
         ? options.host
-        : persisted.host !== undefined
-          ? persisted.host
-          : process.env.FORGE_HOOK_HOST ?? "127.0.0.1";
+        : isTestMode
+          ? (process.env.FORGE_HOOK_HOST ?? "127.0.0.1")
+          : settings?.hookHost !== undefined
+            ? settings.hookHost
+            : persisted.host !== undefined
+              ? persisted.host
+              : process.env.FORGE_HOOK_HOST ?? "127.0.0.1";
     this.secret = options?.secret ?? process.env.FORGE_HOOK_SECRET;
     this.activePaseo = options?.paseo ?? (server as any)?.paseo ?? null;
 
