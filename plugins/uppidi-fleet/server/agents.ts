@@ -398,6 +398,27 @@ export function getAgentDiskMetadataMap(): Map<string, Partial<RawAgentRecord>> 
   return metaMap;
 }
 
+
+export async function checkRepoMainDirty(cwd?: string): Promise<{ isDirty: boolean; summary?: string }> {
+  if (!cwd) return { isDirty: false };
+  try {
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain"], {
+      cwd,
+      timeout: 3000,
+      encoding: "utf-8",
+    });
+    const trimmed = stdout.trim();
+    if (!trimmed) return { isDirty: false };
+    const lines = trimmed.split("\n").filter(Boolean);
+    return {
+      isDirty: true,
+      summary: String(lines.length) + " uncommitted file" + (lines.length === 1 ? "" : "s"),
+    };
+  } catch {
+    return { isDirty: false };
+  }
+}
+
 export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<UppidiAgent[]> {
   const quotaAlerts = getQuotaAlertAgentIds();
   const diskMeta = getAgentDiskMetadataMap();
@@ -537,6 +558,12 @@ export async function handleUppidiAgents(
         }
       }
       a.queuedHooksCount = queued;
+
+      if (a.category === "orchestrator" && a.cwd) {
+        const dirtyStatus = await checkRepoMainDirty(a.cwd);
+        a.isMainDirty = dirtyStatus.isDirty;
+        a.mainDirtySummary = dirtyStatus.summary;
+      }
     }
 
     const tree = buildAgentTree(agents);
