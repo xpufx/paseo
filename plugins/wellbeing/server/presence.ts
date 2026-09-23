@@ -63,8 +63,27 @@ export class PresenceTracker {
     options?: { stateFilePath?: string; initialState?: Partial<PresenceStateData> }
   ) {
     this.settings = settings;
-    const baseDir = path.join(os.homedir(), ".config", "paseo");
-    this.stateFilePath = options?.stateFilePath ?? path.join(baseDir, "wellbeing-state.json");
+    const legacyStatePath = path.join(os.homedir(), ".config", "paseo", "wellbeing-state.json");
+    const canonicalStatePath = path.join(os.homedir(), ".paseo", "plugin-data", "xpufx", "wellbeing", "wellbeing-state.json");
+
+    if (options?.stateFilePath) {
+      this.stateFilePath = options.stateFilePath;
+    } else if (fs.existsSync(canonicalStatePath)) {
+      this.stateFilePath = canonicalStatePath;
+    } else if (fs.existsSync(legacyStatePath)) {
+      try {
+        const destDir = path.dirname(canonicalStatePath);
+        if (!fs.existsSync(destDir)) {
+          fs.mkdirSync(destDir, { recursive: true });
+        }
+        fs.copyFileSync(legacyStatePath, canonicalStatePath);
+        this.stateFilePath = canonicalStatePath;
+      } catch {
+        this.stateFilePath = legacyStatePath;
+      }
+    } else {
+      this.stateFilePath = canonicalStatePath;
+    }
     this.state = {
       lastActivityTs: null,
       lastActivitySource: null,

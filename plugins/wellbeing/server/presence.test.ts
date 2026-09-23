@@ -156,4 +156,37 @@ describe("PresenceTracker", () => {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }
   });
+    it("migrates legacy state from ~/.config/paseo to canonical storage dir (#446)", () => {
+    const tmpDir = path.join(os.tmpdir(), "wellbeing-migrate-" + String(Date.now()));
+    const legacyDir = path.join(tmpDir, ".config", "paseo");
+    const canonicalDir = path.join(tmpDir, ".paseo", "plugin-data", "xpufx", "wellbeing");
+    fs.mkdirSync(legacyDir, { recursive: true });
+
+    const legacyFile = path.join(legacyDir, "wellbeing-state.json");
+    const canonicalFile = path.join(canonicalDir, "wellbeing-state.json");
+
+    fs.writeFileSync(
+      legacyFile,
+      JSON.stringify({
+        lastActivityTs: 1790134570558,
+        dailyUsageSeconds: 9435.386,
+        breaksTakenToday: 3,
+      })
+    );
+
+    // Patch os.homedir() temporarily
+    const origHomedir = os.homedir;
+    try {
+      (os as any).homedir = () => tmpDir;
+      const tracker = new PresenceTracker(TEST_SETTINGS);
+      assert.equal(fs.existsSync(canonicalFile), true);
+      const status = tracker.getStatus();
+      assert.equal(status.dailyUsageMinutes, Math.round(9435.386 / 60));
+      assert.equal(status.breaksTaken, 3);
+    } finally {
+      (os as any).homedir = origHomedir;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
 });
