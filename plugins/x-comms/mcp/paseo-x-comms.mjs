@@ -312,11 +312,16 @@ const PREFIX = "x_comms_";
 
 // Surfaced to clients via the MCP `instructions` field (initialize result) so
 // every model using this server gets the behavioral contract automatically.
-const INSTRUCTIONS = `paseo-x-comms: cross-daemon messaging between paseo agents on different daemons/hosts. A client may prefix the x_comms_* tool names with its registration name; match the tools actually exposed.
+const INSTRUCTIONS = `paseo-x-comms: Cross-daemon messaging between Paseo agents on DIFFERENT daemons or remote hosts. A client may prefix the x_comms_* tool names with its registration name; match the tools actually exposed.
 
-An inbound message carrying the <x-comms-message> envelope is from another daemon's agent, not a user: reply to the sender via x_comms_send (daemon=sender.daemon, agentId=sender.agentId); on finish, error, or permission block, notify the sender the same way (include permission details when blocked).
+SCOPE & LOCAL VS REMOTE BOUNDARIES:
+- LOCAL AGENTS: Do NOT use x_comms_* for agents running on the SAME local daemon or machine. Use native local 'paseo send' or MCP send_agent_prompt directly.
+- ISSUE TRACKERS & PRs: Never emit '<x-comms-message>' or JSON envelopes into Forgejo or GitHub issue/PR comments. Ticket comments are strictly for human readers in standard Markdown.
+- WIRE ENVELOPE: '<x-comms-message>' is an internal wire protocol generated automatically by this MCP server. Do not manually format, craft, or output raw '<x-comms-message>' tags in chat or ticket comments.
 
-x_comms_send is preemptive: if the target may be busy, x_comms_wait first. x_comms_wait -> idle | permission | timeout; on permission, list_permissions to see prompts, then allow_permission/deny_permission, then wait again.`;
+CROSS-DAEMON PROTOCOL:
+- An inbound message carrying the <x-comms-message> envelope is from a remote daemon's agent, not a user: reply to the sender via x_comms_send (daemon=sender.daemon, agentId=sender.agentId); on finish, error, or permission block, notify the sender the same way (include permission details when blocked).
+- x_comms_send is preemptive: if the target may be busy, x_comms_wait first. x_comms_wait -> idle | permission | timeout; on permission, list_permissions to see prompts, then allow_permission/deny_permission, then wait again.`;
 
 // One tool result shape, mirroring paseo's own PaseoToolResult: text content for
 // every client plus structuredContent (a record) for clients that consume it.

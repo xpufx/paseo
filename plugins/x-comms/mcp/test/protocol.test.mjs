@@ -476,6 +476,8 @@ async function rawHandshake(s) {
   assert.equal(res.result.serverInfo.name, "paseo-x-comms");
   assert.equal(res.result.capabilities.tools.listChanged, true); // SDK forces true when tools are registered
   assert.match(res.result.instructions, /<x-comms-message>/);
+  assert.match(res.result.instructions, /LOCAL AGENTS/);
+  assert.match(res.result.instructions, /Never emit '<x-comms-message>'/);
   s.send({ jsonrpc: "2.0", method: "notifications/initialized" });
 }
 
