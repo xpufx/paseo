@@ -57,7 +57,7 @@ export {
   STATUS_LIGHT_COLORS,
 };
 
-export interface UppidiForgeTreeViewProps {
+export interface UppidiFleetTreeViewProps {
   agentsData?: UppidiAgentsOutput;
   isLoading?: boolean;
   onRefresh?: () => void;
@@ -1491,7 +1491,9 @@ export function ProjectGroupCard({
   );
 }
 
-export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
+export type UppidiForgeTreeViewProps = UppidiFleetTreeViewProps;
+
+export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   agentsData,
   isLoading,
   onRefresh,
@@ -2055,3 +2057,5 @@ export const UppidiForgeTreeView: React.FC<UppidiForgeTreeViewProps> = ({
     </Stack>
   );
 };
+
+export const UppidiForgeTreeView = UppidiFleetTreeView;

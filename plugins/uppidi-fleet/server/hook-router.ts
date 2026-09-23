@@ -50,7 +50,7 @@ export function getRouterConfigPath(): string {
     return process.env.FORGE_HOOK_CONFIG;
   }
   const home = process.env.HOME ?? os.homedir();
-  return join(home, ".config", "uppidi-forge", "router-config.json");
+  return join(home, ".config", "uppidi-fleet", "router-config.json");
 }
 
 export function loadRouterConfig(customPath?: string): RouterConfig {
@@ -295,7 +295,7 @@ export class HookRouter {
     }
 
     const home = process.env.HOME ?? os.homedir();
-    this.queueDir = options?.queueDir ?? process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-forge", "queues");
+    this.queueDir = options?.queueDir ?? process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-fleet", "queues");
     this.stateDir =
       options?.stateDir ?? process.env.HOOK_STATE_DIR ?? join(home, ".paseo", "forgejo-hook", "orchestrators");
 
@@ -612,7 +612,7 @@ export class HookRouter {
       writeFileSync(tmp, JSON.stringify(entries, null, 2), "utf8");
       renameSync(tmp, target);
     } catch (err) {
-      console.error(`[uppidi-forge:hook-router] Failed to persist queue for ${key}:`, err);
+      console.error(`[uppidi-fleet:hook-router] Failed to persist queue for ${key}:`, err);
     }
   }
 
@@ -846,7 +846,7 @@ export class HookRouter {
 
     return {
       ok: true,
-      service: "uppidi-forge-hook-router",
+      service: "uppidi-fleet-hook-router",
       version: 1,
       uptime: this.getUptime(),
       frontDesk: frontDesk
@@ -896,7 +896,7 @@ export class HookRouter {
 
     return {
       ok: true,
-      service: "uppidi-forge-hook-router",
+      service: "uppidi-fleet-hook-router",
       uptime: this.getUptime(),
       paused: Array.from(this.pausedQueues),
       queues: queueItems,
@@ -1050,7 +1050,7 @@ export class HookRouter {
           ok: true,
           status: "healthy",
           uptime: this.getUptime(),
-          service: "uppidi-forge-hook-router",
+          service: "uppidi-fleet-hook-router",
           port: this.port,
         });
         return;
@@ -1430,7 +1430,7 @@ export function getFleetRosterInfo(): {
       }
     }
   } else {
-    const queueDir = process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-forge", "queues");
+    const queueDir = process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-fleet", "queues");
     if (existsSync(queueDir)) {
       try {
         const files = readdirSync(queueDir);

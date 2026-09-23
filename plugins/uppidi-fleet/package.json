@@ -1,7 +1,7 @@
 {
-  "name": "@xpufx/paseo-uppidi-forge",
+  "name": "@xpufx/paseo-uppidi-fleet",
   "version": "0.1.0",
-  "description": "Dedicated, opinionated full-lifecycle Forgejo workflow surface for Paseo",
+  "description": "Full-lifecycle autonomous engineering fleet for Paseo",
   "private": false,
   "license": "MIT",
   "type": "module",

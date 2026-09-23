@@ -7,7 +7,7 @@ import {
   DEFAULT_TASK_PROFILES,
 } from "./metrics.js";
 
-describe("Uppidi Forge Fleet Capability & Benchmark Metrics (#373 / platform#18)", () => {
+describe("Uppidi Fleet Capability & Benchmark Metrics (#373 / platform#18)", () => {
   it("loads baseline fleet benchmark metrics when no custom storage file exists", async () => {
     const data = await loadFleetMetrics();
     assert.ok(data.candidates.length >= 4, "Must have at least 4 candidate models");

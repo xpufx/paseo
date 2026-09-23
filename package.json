@@ -14,7 +14,7 @@
     "plugins/slash",
     "plugins/plugin-updates",
     "plugins/twofado",
-    "plugins/uppidi-forge",
+    "plugins/uppidi-fleet",
     "plugins/wellbeing"
   ],
   "scripts": {

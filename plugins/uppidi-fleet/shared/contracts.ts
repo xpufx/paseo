@@ -52,7 +52,7 @@ export const UppidiIssuesOutputSchema = z.object({
 export type UppidiIssuesOutput = z.infer<typeof UppidiIssuesOutputSchema>;
 
 export const uppidiIssuesContract = defineContract({
-  name: "uppidi-forge.issues",
+  name: "uppidi-fleet.issues",
   description: "Get repository issues parsed for the single-surface Uppidi dashboard",
   input: UppidiIssuesInputSchema,
   output: UppidiIssuesOutputSchema,
@@ -106,7 +106,7 @@ export const HookStatusOutputSchema = z.object({
 export type HookStatusOutput = z.infer<typeof HookStatusOutputSchema>;
 
 export const uppidiHookStatusContract = defineContract({
-  name: "uppidi-forge.hook-status",
+  name: "uppidi-fleet.hook-status",
   description: "Get running forgejo-hook status, active frontdesk, and queued totals",
   input: z.object({ hookUrl: z.string().optional() }),
   output: HookStatusOutputSchema,
@@ -123,7 +123,7 @@ export const HookQueuesOutputSchema = z.object({
 export type HookQueuesOutput = z.infer<typeof HookQueuesOutputSchema>;
 
 export const uppidiHookQueuesContract = defineContract({
-  name: "uppidi-forge.hook-queues",
+  name: "uppidi-fleet.hook-queues",
   description: "Get detailed queues per repository from forgejo-hook",
   input: z.object({ hookUrl: z.string().optional() }),
   output: HookQueuesOutputSchema,
@@ -143,21 +143,21 @@ export const HookQueueActionOutputSchema = z.object({
 export type HookQueueActionOutput = z.infer<typeof HookQueueActionOutputSchema>;
 
 export const uppidiHookPauseContract = defineContract({
-  name: "uppidi-forge.hook-pause",
+  name: "uppidi-fleet.hook-pause",
   description: "Pause one or all repository queues",
   input: HookQueueActionInputSchema,
   output: HookQueueActionOutputSchema,
 });
 
 export const uppidiHookResumeContract = defineContract({
-  name: "uppidi-forge.hook-resume",
+  name: "uppidi-fleet.hook-resume",
   description: "Resume one or all repository queues",
   input: HookQueueActionInputSchema,
   output: HookQueueActionOutputSchema,
 });
 
 export const uppidiHookDrainContract = defineContract({
-  name: "uppidi-forge.hook-drain",
+  name: "uppidi-fleet.hook-drain",
   description: "Drain/discard queued messages for a repository",
   input: HookQueueActionInputSchema,
   output: HookQueueActionOutputSchema,
@@ -180,7 +180,7 @@ export const HookServiceStatusOutputSchema = z.object({
 export type HookServiceStatusOutput = z.infer<typeof HookServiceStatusOutputSchema>;
 
 export const uppidiHookServiceStatusContract = defineContract({
-  name: "uppidi-forge.hook-service-status",
+  name: "uppidi-fleet.hook-service-status",
   description: "Inspect bundled hook router service status",
   input: z.object({}),
   output: HookServiceStatusOutputSchema,
@@ -206,7 +206,7 @@ export const HookServiceConfigOutputSchema = z.object({
 export type HookServiceConfigOutput = z.infer<typeof HookServiceConfigOutputSchema>;
 
 export const uppidiHookConfigureContract = defineContract({
-  name: "uppidi-forge.hook-configure",
+  name: "uppidi-fleet.hook-configure",
   description: "Configure host listen address and port for bundled hook service",
   input: HookServiceConfigInputSchema,
   output: HookServiceConfigOutputSchema,
@@ -226,7 +226,7 @@ export const HookServiceActionOutputSchema = z.object({
 export type HookServiceActionOutput = z.infer<typeof HookServiceActionOutputSchema>;
 
 export const uppidiHookServiceActionContract = defineContract({
-  name: "uppidi-forge.hook-service-action",
+  name: "uppidi-fleet.hook-service-action",
   description: "Start/Stop/Restart the bundled hook router service",
   input: HookServiceActionInputSchema,
   output: HookServiceActionOutputSchema,
@@ -246,7 +246,7 @@ export const HookLogTailOutputSchema = z.object({
 export type HookLogTailOutput = z.infer<typeof HookLogTailOutputSchema>;
 
 export const uppidiHookLogTailContract = defineContract({
-  name: "uppidi-forge.hook-log-tail",
+  name: "uppidi-fleet.hook-log-tail",
   description: "Tail log lines for bundled hook router",
   input: HookLogTailInputSchema,
   output: HookLogTailOutputSchema,
@@ -476,7 +476,7 @@ export const UppidiAgentsOutputSchema = z.object({
 export type UppidiAgentsOutput = z.infer<typeof UppidiAgentsOutputSchema>;
 
 export const uppidiAgentsContract = defineContract({
-  name: "uppidi-forge.agents",
+  name: "uppidi-fleet.agents",
   description: "Get active Paseo agents grouped into tree hierarchy: Frontdesk, Orchestrators, and Workers",
   input: z.object({}),
   output: UppidiAgentsOutputSchema,
@@ -499,7 +499,7 @@ export const UppidiRoleModelsOutputSchema = z.object({
 export type UppidiRoleModelsOutput = z.infer<typeof UppidiRoleModelsOutputSchema>;
 
 export const uppidiRoleModelsContract = defineContract({
-  name: "uppidi-forge.role-models",
+  name: "uppidi-fleet.role-models",
   description: "Get model and fallback group configuration for each agent role",
   input: z.object({}),
   output: UppidiRoleModelsOutputSchema,
@@ -520,7 +520,7 @@ export const UppidiSetRoleModelOutputSchema = z.object({
 export type UppidiSetRoleModelOutput = z.infer<typeof UppidiSetRoleModelOutputSchema>;
 
 export const uppidiSetRoleModelContract = defineContract({
-  name: "uppidi-forge.set-role-model",
+  name: "uppidi-fleet.set-role-model",
   description: "Set primary model and optional fallback group for an agent role",
   input: UppidiSetRoleModelInputSchema,
   output: UppidiSetRoleModelOutputSchema,
@@ -547,7 +547,7 @@ export const UppidiRunnersOutputSchema = z.object({
 export type UppidiRunnersOutput = z.infer<typeof UppidiRunnersOutputSchema>;
 
 export const uppidiRunnersContract = defineContract({
-  name: "uppidi-forge.runners",
+  name: "uppidi-fleet.runners",
   description: "Get CI runner fleet status and labels for repository actions",
   input: z.object({}),
   output: UppidiRunnersOutputSchema,
@@ -603,7 +603,7 @@ export const UppidiFleetMetricsOutputSchema = z.object({
 export type UppidiFleetMetricsOutput = z.infer<typeof UppidiFleetMetricsOutputSchema>;
 
 export const uppidiFleetMetricsContract = defineContract({
-  name: "uppidi-forge.metrics",
+  name: "uppidi-fleet.metrics",
   description: "Get autonomous fleet capability and task benchmark metrics matrix (platform#18)",
   input: UppidiFleetMetricsInputSchema,
   output: UppidiFleetMetricsOutputSchema,
@@ -624,7 +624,7 @@ export const UppidiArchiveAgentOutputSchema = z.object({
 export type UppidiArchiveAgentOutput = z.infer<typeof UppidiArchiveAgentOutputSchema>;
 
 export const uppidiArchiveAgentContract = defineContract({
-  name: "uppidi-forge.archive-agent",
+  name: "uppidi-fleet.archive-agent",
   description: "Archive an individual Paseo agent",
   input: UppidiArchiveAgentInputSchema,
   output: UppidiArchiveAgentOutputSchema,
@@ -645,7 +645,7 @@ export const UppidiArchiveInactiveAgentsOutputSchema = z.object({
 export type UppidiArchiveInactiveAgentsOutput = z.infer<typeof UppidiArchiveInactiveAgentsOutputSchema>;
 
 export const uppidiArchiveInactiveAgentsContract = defineContract({
-  name: "uppidi-forge.archive-inactive-agents",
+  name: "uppidi-fleet.archive-inactive-agents",
   description: "Bulk archive inactive, closed, or failed agents (never running, working, or orchestrator/frontdesk)",
   input: UppidiArchiveInactiveAgentsInputSchema,
   output: UppidiArchiveInactiveAgentsOutputSchema,
@@ -668,7 +668,7 @@ export const UppidiCreateFrontDeskOutputSchema = z.object({
 export type UppidiCreateFrontDeskOutput = z.infer<typeof UppidiCreateFrontDeskOutputSchema>;
 
 export const uppidiCreateFrontDeskContract = defineContract({
-  name: "uppidi-forge.create-front-desk",
+  name: "uppidi-fleet.create-front-desk",
   description: "Create a fresh Front Desk liaison session",
   input: UppidiCreateFrontDeskInputSchema,
   output: UppidiCreateFrontDeskOutputSchema,
@@ -692,7 +692,7 @@ export const UppidiReplaceFrontDeskOutputSchema = z.object({
 export type UppidiReplaceFrontDeskOutput = z.infer<typeof UppidiReplaceFrontDeskOutputSchema>;
 
 export const uppidiReplaceFrontDeskContract = defineContract({
-  name: "uppidi-forge.replace-front-desk",
+  name: "uppidi-fleet.replace-front-desk",
   description: "Retire/archive existing Front Desk session and spawn a fresh one",
   input: UppidiReplaceFrontDeskInputSchema,
   output: UppidiReplaceFrontDeskOutputSchema,
@@ -717,7 +717,7 @@ export const UppidiAddOrchestratorOutputSchema = z.object({
 export type UppidiAddOrchestratorOutput = z.infer<typeof UppidiAddOrchestratorOutputSchema>;
 
 export const uppidiAddOrchestratorContract = defineContract({
-  name: "uppidi-forge.add-orchestrator",
+  name: "uppidi-fleet.add-orchestrator",
   description: "Provision an orchestrator in a repository workspace",
   input: UppidiAddOrchestratorInputSchema,
   output: UppidiAddOrchestratorOutputSchema,
@@ -744,7 +744,7 @@ export const UppidiReplaceOrchestratorOutputSchema = z.object({
 export type UppidiReplaceOrchestratorOutput = z.infer<typeof UppidiReplaceOrchestratorOutputSchema>;
 
 export const uppidiReplaceOrchestratorContract = defineContract({
-  name: "uppidi-forge.replace-orchestrator",
+  name: "uppidi-fleet.replace-orchestrator",
   description: "Retire/archive existing orchestrator session and spawn a new one",
   input: UppidiReplaceOrchestratorInputSchema,
   output: UppidiReplaceOrchestratorOutputSchema,
@@ -767,7 +767,7 @@ export const UppidiToggleRepoMuteOutputSchema = z.object({
 export type UppidiToggleRepoMuteOutput = z.infer<typeof UppidiToggleRepoMuteOutputSchema>;
 
 export const uppidiToggleRepoMuteContract = defineContract({
-  name: "uppidi-forge.toggle-repo-mute",
+  name: "uppidi-fleet.toggle-repo-mute",
   description: "Toggle per-repository webhook muting / circuit breaker",
   input: UppidiToggleRepoMuteInputSchema,
   output: UppidiToggleRepoMuteOutputSchema,

@@ -5,9 +5,9 @@ import {
   PluginThemeProvider,
   type VisualFlair,
 } from "paseo-plugin-helper/client";
-import { UppidiForgeSurface } from "./surface.js";
+import { UppidiFleetSurface, UppidiForgeSurface } from "./surface.js";
 
-export const UPPIDI_FORGE_FLAIR: VisualFlair = {
+export const UPPIDI_FLEET_FLAIR: VisualFlair = {
   radius: "rounded",
   density: "comfortable",
   surfaceStyle: "elevated",
@@ -15,25 +15,32 @@ export const UPPIDI_FORGE_FLAIR: VisualFlair = {
   headingTransform: "none",
 };
 
-export function UppidiForgePanel(props: PluginWorkspacePanelProps) {
+export const UPPIDI_FORGE_FLAIR = UPPIDI_FLEET_FLAIR;
+
+export function UppidiFleetPanel(props: PluginWorkspacePanelProps) {
   return (
-    <PluginThemeProvider theme={props.theme} layout={props.layout} flair={UPPIDI_FORGE_FLAIR}>
+    <PluginThemeProvider theme={props.theme} layout={props.layout} flair={UPPIDI_FLEET_FLAIR}>
       <ModalBodyScrollOwnerContext.Provider value="required">
-        <UppidiForgeSurface {...props} />
+        <UppidiFleetSurface {...props} />
       </ModalBodyScrollOwnerContext.Provider>
     </PluginThemeProvider>
   );
 }
 
-export { UppidiForgePanel as UppidiForgeWorkspacePanel };
+export const UppidiForgePanel = UppidiFleetPanel;
+
+export {
+  UppidiFleetPanel as UppidiFleetWorkspacePanel,
+  UppidiForgePanel as UppidiForgeWorkspacePanel,
+};
 
 export function registerWorkspacePanel(client: PluginClientContext) {
   return client.addWorkspacePanel({
-    id: "uppidi-forge",
-    title: "Uppidi Forge",
+    id: "uppidi-fleet",
+    title: "Uppidi Fleet",
     icon: "GitPullRequest",
     context: "workspace",
     locations: ["workspace", "explorer"],
-    Component: UppidiForgePanel,
+    Component: UppidiFleetPanel,
   });
 }

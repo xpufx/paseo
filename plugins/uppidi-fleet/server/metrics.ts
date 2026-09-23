@@ -8,7 +8,7 @@ import type {
   UppidiFleetMetricsOutput,
 } from "../shared/contracts.js";
 
-const METRICS_FILE_PATH = path.join(os.homedir(), ".paseo", "uppidi-forge-fleet-metrics.json");
+const METRICS_FILE_PATH = path.join(os.homedir(), ".paseo", "uppidi-fleet-metrics.json");
 
 export const DEFAULT_TASK_PROFILES = [
   "surgical-bugfix",

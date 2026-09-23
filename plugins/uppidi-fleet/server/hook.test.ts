@@ -13,7 +13,7 @@ import {
   clearHookLogs,
 } from "./hook-router.js";
 
-describe("uppidi-forge hook server handlers", () => {
+describe("uppidi-fleet hook server handlers", () => {
   let prevHookPort: string | undefined;
 
   beforeEach(() => {

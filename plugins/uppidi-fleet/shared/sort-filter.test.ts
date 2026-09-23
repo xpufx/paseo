@@ -32,7 +32,7 @@ import type {
   CandidateModelMetrics,
 } from "./contracts.js";
 
-describe("Uppidi Forge sort & filter predicates", () => {
+describe("Uppidi Fleet sort & filter predicates", () => {
   const issues: UppidiIssue[] = [
     {
       number: 10,

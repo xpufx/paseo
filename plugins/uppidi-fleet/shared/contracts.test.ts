@@ -42,7 +42,7 @@ import {
 } from "./contracts.js";
 
 
-describe("uppidi-forge shared contracts", () => {
+describe("uppidi-fleet shared contracts", () => {
   it("validates UppidiIssueSchema with defaults", () => {
     const issue = UppidiIssueSchema.parse({
       number: 123,
@@ -75,8 +75,8 @@ describe("uppidi-forge shared contracts", () => {
   });
 
   it("has valid contract definitions", () => {
-    assert.equal(uppidiIssuesContract.name, "uppidi-forge.issues");
-    assert.equal(uppidiHookStatusContract.name, "uppidi-forge.hook-status");
+    assert.equal(uppidiIssuesContract.name, "uppidi-fleet.issues");
+    assert.equal(uppidiHookStatusContract.name, "uppidi-fleet.hook-status");
   });
 
   it("validates deterministic agent state taxonomy strictly", () => {
@@ -249,8 +249,8 @@ describe("uppidi-forge shared contracts", () => {
   });
 
   it("validates archive contracts and schemas (#402)", () => {
-    assert.equal(uppidiArchiveAgentContract.name, "uppidi-forge.archive-agent");
-    assert.equal(uppidiArchiveInactiveAgentsContract.name, "uppidi-forge.archive-inactive-agents");
+    assert.equal(uppidiArchiveAgentContract.name, "uppidi-fleet.archive-agent");
+    assert.equal(uppidiArchiveInactiveAgentsContract.name, "uppidi-fleet.archive-inactive-agents");
 
     const inputOne = UppidiArchiveAgentInputSchema.parse({ agentId: "agent-123" });
     assert.equal(inputOne.agentId, "agent-123");
@@ -364,7 +364,7 @@ describe("uppidi-forge shared contracts", () => {
   });
 
   it("validates hook service configuration contract and schemas (#427)", () => {
-    assert.equal(uppidiHookConfigureContract.name, "uppidi-forge.hook-configure");
+    assert.equal(uppidiHookConfigureContract.name, "uppidi-fleet.hook-configure");
 
     // Input schema with defaults
     const defaultInput = HookServiceConfigInputSchema.parse({});
@@ -417,7 +417,7 @@ describe("uppidi-forge shared contracts", () => {
 
   it("validates fleet roster contracts and schemas (#426)", () => {
     // 1. Create Front Desk
-    assert.equal(uppidiCreateFrontDeskContract.name, "uppidi-forge.create-front-desk");
+    assert.equal(uppidiCreateFrontDeskContract.name, "uppidi-fleet.create-front-desk");
     const createFdInput = UppidiCreateFrontDeskInputSchema.parse({});
     assert.equal(createFdInput.model, undefined);
     const createFdOutput = UppidiCreateFrontDeskOutputSchema.parse({
@@ -430,7 +430,7 @@ describe("uppidi-forge shared contracts", () => {
     assert.equal(createFdOutput.agentId, "agent-fd-1");
 
     // 2. Replace Front Desk
-    assert.equal(uppidiReplaceFrontDeskContract.name, "uppidi-forge.replace-front-desk");
+    assert.equal(uppidiReplaceFrontDeskContract.name, "uppidi-fleet.replace-front-desk");
     const replaceFdInput = UppidiReplaceFrontDeskInputSchema.parse({ existingAgentId: "agent-fd-old" });
     assert.equal(replaceFdInput.existingAgentId, "agent-fd-old");
     const replaceFdOutput = UppidiReplaceFrontDeskOutputSchema.parse({
@@ -443,7 +443,7 @@ describe("uppidi-forge shared contracts", () => {
     assert.equal(replaceFdOutput.agentId, "agent-fd-new");
 
     // 3. Add Orchestrator
-    assert.equal(uppidiAddOrchestratorContract.name, "uppidi-forge.add-orchestrator");
+    assert.equal(uppidiAddOrchestratorContract.name, "uppidi-fleet.add-orchestrator");
     const addOrchInput = UppidiAddOrchestratorInputSchema.parse({ repo: "xpufx-org/paseo" });
     assert.equal(addOrchInput.repo, "xpufx-org/paseo");
     const addOrchOutput = UppidiAddOrchestratorOutputSchema.parse({
@@ -455,7 +455,7 @@ describe("uppidi-forge shared contracts", () => {
     assert.equal(addOrchOutput.agentId, "agent-orch-1");
 
     // 4. Replace Orchestrator
-    assert.equal(uppidiReplaceOrchestratorContract.name, "uppidi-forge.replace-orchestrator");
+    assert.equal(uppidiReplaceOrchestratorContract.name, "uppidi-fleet.replace-orchestrator");
     const replaceOrchInput = UppidiReplaceOrchestratorInputSchema.parse({
       repo: "xpufx-org/paseo",
       existingAgentId: "agent-orch-old",
@@ -472,7 +472,7 @@ describe("uppidi-forge shared contracts", () => {
     assert.equal(replaceOrchOutput.agentId, "agent-orch-new");
 
     // 5. Toggle Repo Mute
-    assert.equal(uppidiToggleRepoMuteContract.name, "uppidi-forge.toggle-repo-mute");
+    assert.equal(uppidiToggleRepoMuteContract.name, "uppidi-fleet.toggle-repo-mute");
     const muteInput = UppidiToggleRepoMuteInputSchema.parse({ repo: "xpufx-org/paseo", muted: true });
     assert.equal(muteInput.repo, "xpufx-org/paseo");
     assert.equal(muteInput.muted, true);

@@ -14,6 +14,7 @@ import {
   EmptyState,
   Grid,
   Icon,
+  ForgeIcon,
   KeyValue,
   KeyValueGroup,
   ModalBody,
@@ -79,13 +80,14 @@ import {
   type MetricSortField,
   type SortDirection,
 } from "../shared/sort-filter.js";
-import { UppidiForgeStaticMockup } from "./static-mockup";
+import { UppidiFleetStaticMockup, UppidiForgeStaticMockup } from "./static-mockup.js";
 import {
+  UppidiFleetTreeView,
   UppidiForgeTreeView,
   AgentStateDot,
   AgentTitleLink,
   getDeterministicStateConfig,
-} from "./tree-view";
+} from "./tree-view.js";
 
 type SurfaceTab = "dashboard" | "tree" | "mockup";
 
@@ -122,7 +124,20 @@ function statusVariant(status: UppidiIssue["status"]): "neutral" | "warning" | "
   }
 }
 
-export function UppidiForgeSurface(props: PluginSurfaceProps) {
+export function UppidiBrandMark({ size = 20, color }: { size?: number; color?: string }) {
+  const { colors } = usePluginTheme();
+  return (
+    <ForgeIcon
+      host="forge.mrs.uppidi.com"
+      kind="forgejo"
+      size={size}
+      color={color ?? colors.accent}
+      accessibilityLabel="Uppidi Fleet"
+    />
+  );
+}
+
+export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState<SurfaceTab>("dashboard");
@@ -495,9 +510,9 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
       contentContainerStyle={{ gap: 12, paddingHorizontal: 12, paddingTop: 6 }}
     >
       {activeTab === "mockup" ? (
-        <UppidiForgeStaticMockup {...props} />
+        <UppidiFleetStaticMockup {...props} />
       ) : activeTab === "tree" ? (
-        <UppidiForgeTreeView
+        <UppidiFleetTreeView
           agentsData={agentsData}
           isLoading={agentsLoading}
           onRefresh={refetchAgents}
@@ -513,8 +528,10 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
           <Row justify="space-between" align="center" wrap gap="sm">
             <Stack gap="xxs" style={{ flex: 1 }}>
               <Row align="center" gap="sm">
+                <UppidiBrandMark size={20} />
                 <StatusDot variant={isConnected ? "success" : "danger"} pulse={isConnected} />
-                <Text style={{ color: colors.foreground, ...typography.title }}>Uppidi Forge</Text>
+                <Text style={{ color: colors.foreground, ...typography.title }}>Cockpit</Text>
+                <Badge label="Uppidi Fleet" variant="accent" size="sm" />
                 <Badge
                   label={isConnected ? "Router Connected" : "Router Disconnected"}
                   variant={isConnected ? "success" : "danger"}
@@ -524,7 +541,7 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                 {isServiceRunning && <Badge label="bundled router active" variant="info" size="sm" />}
               </Row>
               <Text style={{ color: colors.foregroundMuted, ...typography.body }}>
-                One place for triage, active work, queues, and review decisions.
+                One place for autonomous engineering fleet triage, active work, queues, and review decisions.
               </Text>
             </Stack>
             <Button label="Refresh" icon="RefreshCw" variant="secondary" onPress={refetchAll} />
@@ -1578,3 +1595,5 @@ function Metric({ label, value, detail, icon }: { label: string; value: string; 
     </Card>
   );
 }
+
+export const UppidiForgeSurface = UppidiFleetSurface;

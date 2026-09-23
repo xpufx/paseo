@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-describe("uppidi-forge client entry contract", () => {
-  it("verifies index.client.tsx registers workspace panel via client.addWorkspacePanel()", () => {
+describe("uppidi-fleet client entry contract", () => {
+  it("verifies index.client.tsx registers sidebar surface and workspace panel via helper and client", () => {
     const entryPath = path.resolve(__dirname, "../index.client.tsx");
     assert.ok(fs.existsSync(entryPath), "index.client.tsx must exist");
     const source = fs.readFileSync(entryPath, "utf8");
@@ -20,8 +20,14 @@ describe("uppidi-forge client entry contract", () => {
 
     assert.match(
       source,
-      /client\.addWorkspacePanel\s*\(\s*\{[\s\S]*id:\s*["']uppidi-forge["'][\s\S]*\}\s*\)/,
-      "index.client.tsx must register workspace panel using client.addWorkspacePanel() with id 'uppidi-forge'",
+      /registerSidebarSurface\s*\(\s*client,\s*\{[\s\S]*id:\s*["']uppidi-fleet["'][\s\S]*\}\s*\)/,
+      "index.client.tsx must register sidebar surface using registerSidebarSurface() with id 'uppidi-fleet'",
+    );
+
+    assert.match(
+      source,
+      /client\.addWorkspacePanel\s*\(\s*\{[\s\S]*id:\s*["']uppidi-fleet["'][\s\S]*\}\s*\)/,
+      "index.client.tsx must register workspace panel using client.addWorkspacePanel() with id 'uppidi-fleet'",
     );
 
     assert.match(
@@ -32,8 +38,8 @@ describe("uppidi-forge client entry contract", () => {
 
     assert.match(
       source,
-      /title:\s*["']Uppidi Forge["']/,
-      "workspace panel must specify title 'Uppidi Forge'",
+      /title:\s*["']Uppidi Fleet["']/,
+      "workspace panel must specify title 'Uppidi Fleet'",
     );
 
     assert.match(
@@ -60,14 +66,20 @@ describe("uppidi-forge client entry contract", () => {
 
     assert.match(
       panelSource,
-      /export\s+function\s+UppidiForgePanel/,
-      "client/panel.tsx must export UppidiForgePanel",
+      /export\s+function\s+UppidiFleetPanel/,
+      "client/panel.tsx must export UppidiFleetPanel",
     );
 
     assert.match(
       panelSource,
-      /client\.addWorkspacePanel\s*\(\s*\{[\s\S]*id:\s*["']uppidi-forge["'][\s\S]*\}\s*\)/,
-      "registerWorkspacePanel must invoke client.addWorkspacePanel() with id 'uppidi-forge'",
+      /export\s+const\s+UppidiForgePanel/,
+      "client/panel.tsx must export UppidiForgePanel alias",
+    );
+
+    assert.match(
+      panelSource,
+      /client\.addWorkspacePanel\s*\(\s*\{[\s\S]*id:\s*["']uppidi-fleet["'][\s\S]*\}\s*\)/,
+      "registerWorkspacePanel must invoke client.addWorkspacePanel() with id 'uppidi-fleet'",
     );
   });
 

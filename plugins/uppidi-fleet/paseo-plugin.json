@@ -1,5 +1,5 @@
 {
-  "id": "uppidi-forge",
+  "id": "uppidi-fleet",
   "requirements": {
     "paseo": ">=0.8.0"
   }

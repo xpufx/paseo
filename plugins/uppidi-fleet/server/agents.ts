@@ -710,7 +710,7 @@ async function spawnPaseoAgent(
         return { ok: true, agentId: id };
       }
     } catch (err: any) {
-      console.warn("[uppidi-forge:agents] context.paseo.agents.create failed, falling back to CLI:", err?.message || err);
+      console.warn("[uppidi-fleet:agents] context.paseo.agents.create failed, falling back to CLI:", err?.message || err);
     }
   }
 

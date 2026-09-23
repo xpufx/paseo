@@ -1,16 +1,16 @@
-# @xpufx/paseo-uppidi-forge
+# @xpufx/paseo-uppidi-fleet
 
-**Dedicated, opinionated full-lifecycle Forgejo workflow surface for Paseo.**
+**Dedicated, opinionated full-lifecycle autonomous engineering fleet surface (Cockpit) for Paseo.**
 
-`uppidi-forge` brings the complete Forgejo / Uppidi developer lifecycle into a first-class, dedicated top-level Paseo tab surface (parallel to **Agent**, **Terminal**, and **Explorer**).
+`uppidi-fleet` brings the complete Forgejo / Uppidi autonomous developer lifecycle into a first-class, dedicated top-level Paseo tab surface (parallel to **Agent**, **Terminal**, and **Explorer**).
 
-Instead of managing issues through small modals or composer pills, `uppidi-forge` provides an expansive, opinionated workspace designed for orchestrators and operators to drive issues, pull requests, dispatch pipelines, and review cycles without ever leaving Paseo.
+Instead of managing issues through small modals or composer pills, `uppidi-fleet` provides an expansive, opinionated workspace (Cockpit) designed for orchestrators and operators to drive issues, pull requests, dispatch pipelines, and review cycles without ever leaving Paseo.
 
 ---
 
 ## Highlights
 
-- **Dedicated Primary Surface & Workspace Tab Launcher**: Registered as a full sidebar tab (`addSidebarItem` + `addSurface`) and workspace panel (`addWorkspacePanel`), allowing Uppidi Forge to appear in the workspace New Tab (`+`) launcher menu and open as a tab.
+- **Dedicated Primary Surface & Workspace Tab Launcher**: Registered as a full sidebar tab (`addSidebarItem` + `addSurface`) and workspace panel (`addWorkspacePanel`), allowing Uppidi Fleet (Cockpit) to appear in the workspace New Tab (`+`) launcher menu and open as a tab.
 - **Full Lifecycle Flow**:
   - **Triage & Backlog**: Filter by status, priority, and attention labels (`attention/0-orchestrator`, `attention/1-agent`, `attention/2-user`).
   - **Orchestration & Dispatch**: View orchestrator status, dispatch worktree jobs, and steer coding agents.
@@ -25,12 +25,12 @@ Instead of managing issues through small modals or composer pills, `uppidi-forge
 ## Architecture
 
 ```
-plugins/uppidi-forge/
+plugins/uppidi-fleet/
 ├── paseo-plugin.json      # Plugin manifest (requirements: paseo >= 0.8.0)
 ├── index.client.tsx       # Client entrypoint: registers sidebar surface & workspace panel launcher
 ├── index.server.ts       # Server RPC handlers & Forgejo API bridge
 ├── client/
-│   ├── surface.tsx        # Top-level full-screen surface component
+│   ├── surface.tsx        # Top-level full-screen surface component (Cockpit)
 │   ├── components/        # Kanban, issue list, PR inspector, activity streams
 │   └── hooks/             # Reactive queries for issues, agents, and worktrees
 ├── server/
@@ -48,7 +48,7 @@ plugins/uppidi-forge/
 
 Install directly from this repository's plugin path:
 ```bash
-paseo plugin add xpufx/paseo --path plugins/uppidi-forge
+paseo plugin add xpufx/paseo --path plugins/uppidi-fleet
 ```
 
 ---
@@ -57,10 +57,10 @@ paseo plugin add xpufx/paseo --path plugins/uppidi-forge
 
 ```bash
 # Typecheck
-npm run typecheck --workspace=plugins/uppidi-forge
+npm run typecheck --workspace=plugins/uppidi-fleet
 
 # Test
-npm test --workspace=plugins/uppidi-forge
+npm test --workspace=plugins/uppidi-fleet
 ```
 
 ---

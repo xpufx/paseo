@@ -250,7 +250,7 @@ describe("hook-router HTTP server endpoints", () => {
     const body = await res.json();
     assert.equal(body.ok, true);
     assert.equal(body.status, "healthy");
-    assert.equal(body.service, "uppidi-forge-hook-router");
+    assert.equal(body.service, "uppidi-fleet-hook-router");
   });
 
   it("responds to GET /status", async () => {
@@ -258,7 +258,7 @@ describe("hook-router HTTP server endpoints", () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.ok, true);
-    assert.equal(body.service, "uppidi-forge-hook-router");
+    assert.equal(body.service, "uppidi-fleet-hook-router");
     assert.equal(typeof body.totalQueued, "number");
   });
 
@@ -700,7 +700,7 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
   let configPath: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "uppidi-forge-mute-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "uppidi-fleet-mute-test-"));
     queueDir = join(tmpDir, "queues");
     stateDir = join(tmpDir, "state");
     configPath = join(tmpDir, "router-config.json");
