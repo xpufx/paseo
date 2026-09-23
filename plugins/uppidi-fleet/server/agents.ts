@@ -701,6 +701,7 @@ export async function spawnPaseoAgent(
     category?: "front-desk" | "orchestrator" | "worker";
     model?: string;
     cwd?: string;
+    workspaceId?: string;
     labels?: Record<string, string>;
   },
   context: PluginHandlerContext
@@ -768,7 +769,9 @@ export async function spawnPaseoAgent(
     if (targetProvider === "antigravity-acp") {
       args.push("--mode", "yolo");
     }
-    if (options.cwd) {
+    if (options.workspaceId) {
+      args.push("--workspace", options.workspaceId);
+    } else if (options.cwd) {
       args.push("--cwd", options.cwd);
     }
     if (options.labels) {
@@ -942,6 +945,63 @@ export async function handleUppidiReplaceFrontDesk(
   }
 }
 
+export async function resolveRepoWorkspace(
+  repo: string,
+  context?: PluginHandlerContext
+): Promise<{ cwd?: string; workspaceId?: string }> {
+  const parts = repo.split("/");
+  const repoBasename = parts[parts.length - 1] || repo;
+
+  // 1. Try querying Paseo workspaces via CLI
+  try {
+    const { stdout } = await execFileAsync("paseo", ["workspace", "ls", "--json"], { timeout: 5000 });
+    const list = JSON.parse(stdout);
+    if (Array.isArray(list)) {
+      const match = list.find((w: any) => {
+        const proj = String(w.project || "").toLowerCase();
+        const name = String(w.name || "").toLowerCase();
+        const base = repoBasename.toLowerCase();
+        return isRepoMatching(proj, repo) || proj === base || name === base;
+      });
+      if (match?.id) {
+        return { cwd: match.cwd, workspaceId: match.id };
+      }
+    }
+  } catch {}
+
+  // 2. Try matching against existing agents
+  if (context) {
+    try {
+      const agents = await fetchPaseoAgents(context).catch(() => []);
+      const matching = agents.find(
+        (a) => a.cwd && isRepoMatching(a.project || extractAgentProject(a), repo)
+      );
+      if (matching?.cwd && fs.existsSync(matching.cwd)) {
+        return { cwd: matching.cwd };
+      }
+    } catch {}
+  }
+
+  // 3. Fall back to standard ~/code/<repoBasename> path if it exists
+  const home = process.env.HOME || "";
+  if (home) {
+    const candidate = join(home, "code", repoBasename);
+    if (fs.existsSync(candidate)) {
+      return { cwd: candidate };
+    }
+  }
+
+  return {};
+}
+
+export async function resolveRepoWorkspacePath(
+  repo: string,
+  context?: PluginHandlerContext
+): Promise<string | undefined> {
+  const resolved = await resolveRepoWorkspace(repo, context);
+  return resolved.cwd;
+}
+
 export async function handleUppidiAddOrchestrator(
   input: UppidiAddOrchestratorInput,
   context: PluginHandlerContext
@@ -958,14 +1018,11 @@ export async function handleUppidiAddOrchestrator(
       `You are the project orchestrator for ${repo}. Coordinate tasks, supervise worker agents, and manage pull requests and issues for this repository.`;
 
     let cwd = input.workspacePath?.trim();
+    let workspaceId: string | undefined;
     if (!cwd) {
-      const agents = await fetchPaseoAgents(context).catch(() => []);
-      const matching = agents.find(
-        (a) => a.cwd && isRepoMatching(a.project || extractAgentProject(a), repo)
-      );
-      if (matching?.cwd) {
-        cwd = matching.cwd;
-      }
+      const resolved = await resolveRepoWorkspace(repo, context);
+      cwd = resolved.cwd;
+      workspaceId = resolved.workspaceId;
     }
 
     const spawnRes = await spawnPaseoAgent(
@@ -975,6 +1032,7 @@ export async function handleUppidiAddOrchestrator(
         category: "orchestrator",
         model: input.model,
         cwd,
+        workspaceId,
         labels: {
           role: "orchestrator",
           category: "orchestrator",

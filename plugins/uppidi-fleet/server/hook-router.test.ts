@@ -346,6 +346,49 @@ describe("hook-router HTTP server endpoints", () => {
     const drainBody = await drainRes.json();
     assert.equal(drainBody.ok, true);
   });
+
+  it("handles GET and POST /frontdesk", async () => {
+    // Initially null or empty
+    const getRes1 = await fetch(`http://127.0.0.1:${router.port}/frontdesk`);
+    assert.equal(getRes1.status, 200);
+    const getBody1 = await getRes1.json();
+    assert.equal(getBody1.agentId, null);
+
+    // Register front desk
+    const postRes = await fetch(`http://127.0.0.1:${router.port}/frontdesk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: "test-fd-agent-1" }),
+    });
+    assert.equal(postRes.status, 200);
+    const postBody = await postRes.json();
+    assert.equal(postBody.ok, true);
+    assert.equal(postBody.agentId, "test-fd-agent-1");
+
+    // Verify GET reflects registered agent
+    const getRes2 = await fetch(`http://127.0.0.1:${router.port}/frontdesk`);
+    assert.equal(getRes2.status, 200);
+    const getBody2 = await getRes2.json();
+    assert.equal(getBody2.agentId, "test-fd-agent-1");
+  });
+
+  it("handles GET and POST /orchestrator", async () => {
+    const postRes = await fetch(`http://127.0.0.1:${router.port}/orchestrator`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: "xpufx-org/test-repo", agentId: "test-orch-agent-1" }),
+    });
+    assert.equal(postRes.status, 200);
+    const postBody = await postRes.json();
+    assert.equal(postBody.ok, true);
+    assert.equal(postBody.repo, "xpufx-org/test-repo");
+
+    const getRes = await fetch(`http://127.0.0.1:${router.port}/orchestrators?repo=xpufx-org/test-repo`);
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json();
+    assert.equal(getBody.ok, true);
+    assert.equal(getBody.orchestrator.agentId, "test-orch-agent-1");
+  });
 });
 
 describe("hook-router in-process dispatch and event-driven draining", () => {

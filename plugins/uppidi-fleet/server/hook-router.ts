@@ -3,6 +3,10 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, renameSync, readdirSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import os from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { PaseoApi } from "@getpaseo/client";
 import type {
@@ -550,6 +554,106 @@ export class HookRouter {
     renameSync(tmp, target);
   }
 
+  public async deliverMessage(
+    targetAgentId: string,
+    msg: string,
+    options?: { noWait?: boolean; steer?: boolean },
+  ): Promise<boolean> {
+    const paseo = this.getPaseo();
+    if (paseo?.agents?.ref) {
+      try {
+        const agentRef = paseo.agents.ref(targetAgentId);
+        await agentRef.send(msg, { steer: options?.steer ?? true } as any);
+        return true;
+      } catch (err) {
+        this.log(`[warn] SDK send failed for ${targetAgentId}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    try {
+      const args = ["send"];
+      if (options?.noWait !== false) {
+        args.push("--no-wait");
+      }
+      args.push(targetAgentId, msg);
+      await execFileAsync("paseo", args, { timeout: options?.noWait ? 5000 : 15000 });
+      return true;
+    } catch (err) {
+      this.log(`[error] CLI send failed for ${targetAgentId}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  public async updateAgentMetadata(
+    agentId: string,
+    name: string,
+    labels: Record<string, string>,
+  ): Promise<boolean> {
+    const paseo = this.getPaseo();
+    if (paseo?.agents) {
+      try {
+        const ref = typeof paseo.agents.ref === "function" ? paseo.agents.ref(agentId) : null;
+        if (typeof (ref as any)?.update === "function") {
+          await (ref as any).update({ name, labels });
+          return true;
+        } else if (typeof (paseo.agents as any)?.update === "function") {
+          await (paseo.agents as any).update(agentId, { name, labels });
+          return true;
+        }
+      } catch (err) {
+        this.log(`[warn] SDK updateAgent failed for ${agentId}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    try {
+      const args = ["agent", "update", agentId, "--name", name];
+      for (const [k, v] of Object.entries(labels)) {
+        args.push("--label", `${k}=${v}`);
+      }
+      await execFileAsync("paseo", args, { timeout: 10000 });
+      return true;
+    } catch (err) {
+      this.log(`[error] CLI updateAgent failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  public async getActiveAgentIds(): Promise<Set<string>> {
+    const active = new Set<string>();
+    try {
+      const { stdout } = await execFileAsync("paseo", ["ls", "--json"], { timeout: 5000 });
+      const list = JSON.parse(stdout);
+      if (Array.isArray(list)) {
+        for (const item of list) {
+          if (item?.id && item?.status !== "closed" && item?.status !== "archived") {
+            active.add(item.id);
+          }
+        }
+      }
+    } catch {}
+    return active;
+  }
+
+  public listOrchestratorAgentIds(): string[] {
+    const ids = new Set<string>();
+    try {
+      if (existsSync(this.stateDir)) {
+        const files = readdirSync(this.stateDir);
+        for (const file of files) {
+          if (!file.endsWith(".json") || file === "frontdesk.json") continue;
+          try {
+            const raw = readFileSync(join(this.stateDir, file), "utf8");
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.agentId === "string" && parsed.agentId.trim()) {
+              ids.add(parsed.agentId.trim());
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    return Array.from(ids);
+  }
+
   private queueFilePath(key: string): string {
     return join(this.queueDir, `${sanitizeKey(key)}.json`);
   }
@@ -781,39 +885,37 @@ export class HookRouter {
       }
 
       const paseo = this.getPaseo();
-      if (!paseo?.agents?.ref) {
-        // Paseo client not yet ready/connected
-        return;
-      }
 
-      const agentRef = paseo.agents.ref(targetAgentId);
+      const agentRef = paseo?.agents?.ref ? paseo.agents.ref(targetAgentId) : null;
 
-      // Check if agent is currently busy
-      try {
-        const currentSnapshot = agentRef.current ? agentRef.current() : null;
-        const refreshed = (!currentSnapshot && agentRef.refresh) ? await agentRef.refresh().catch(() => null) : null;
-        const agent = refreshed?.agent ?? currentSnapshot;
+      if (agentRef) {
+        // Check if agent is currently busy
+        try {
+          const currentSnapshot = agentRef.current ? agentRef.current() : null;
+          const refreshed = (!currentSnapshot && agentRef.refresh) ? await agentRef.refresh().catch(() => null) : null;
+          const agent = refreshed?.agent ?? currentSnapshot;
 
-        if (agent && (agent.status === "running" || Boolean(agent.activeTurn))) {
-          this.busyQueues.add(key);
-          const attempts = (this.busyAttempts.get(key) ?? 0) + 1;
-          this.busyAttempts.set(key, attempts);
-          this.log(`[info] Agent ${targetAgentId} busy for ${key}, retry scheduled (attempt ${attempts})`);
+          if (agent && (agent.status === "running" || Boolean(agent.activeTurn))) {
+            this.busyQueues.add(key);
+            const attempts = (this.busyAttempts.get(key) ?? 0) + 1;
+            this.busyAttempts.set(key, attempts);
+            this.log(`[info] Agent ${targetAgentId} busy for ${key}, retry scheduled (attempt ${attempts})`);
 
-          // Schedule a backoff retry in case turn_ended was missed
-          if (!this.backoffTimers.has(key)) {
-            const delay = Math.min(30000, 3000 * Math.pow(1.5, Math.min(attempts, 5)));
-            const timer = setTimeout(() => {
-              this.backoffTimers.delete(key);
-              void this.drain(key);
-            }, delay);
-            timer.unref?.();
-            this.backoffTimers.set(key, timer);
+            // Schedule a backoff retry in case turn_ended was missed
+            if (!this.backoffTimers.has(key)) {
+              const delay = Math.min(30000, 3000 * Math.pow(1.5, Math.min(attempts, 5)));
+              const timer = setTimeout(() => {
+                this.backoffTimers.delete(key);
+                void this.drain(key);
+              }, delay);
+              timer.unref?.();
+              this.backoffTimers.set(key, timer);
+            }
+            return;
           }
-          return;
+        } catch {
+          // Proceed if status inspection fails
         }
-      } catch {
-        // Proceed if status inspection fails
       }
 
       this.busyQueues.delete(key);
@@ -822,15 +924,16 @@ export class HookRouter {
       // Deliver queued messages in FIFO order
       while (list.length > 0) {
         const entry = list[0];
-        try {
-          await agentRef.send(entry.msg, { steer: !entry.isSos } as any);
+        const ok = await this.deliverMessage(targetAgentId, entry.msg, {
+          steer: !entry.isSos,
+          noWait: false,
+        });
+        if (ok) {
           list.shift();
           this.persistQueue(key);
           this.log(`[info] Delivered message ${entry.id} to agent ${targetAgentId} for ${key}`);
-        } catch (error) {
-          this.log(
-            `[error] Failed to deliver message to ${targetAgentId} for ${key}: ${error instanceof Error ? error.message : String(error)}`,
-          );
+        } else {
+          this.log(`[error] Failed to deliver message to ${targetAgentId} for ${key}`);
           // Keep message in queue, back off
           break;
         }
@@ -1063,6 +1166,116 @@ export class HookRouter {
 
       if (req.method === "GET" && pathname === "/queues") {
         this.sendJson(res, 200, this.getQueuesOverview());
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/frontdesk") {
+        const record = this.readFrontDesk();
+        this.sendJson(res, 200, record ?? { agentId: null });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/frontdesk") {
+        const body = await this.readJsonBody(req);
+        const agentId = typeof body?.agentId === "string" ? body.agentId.trim() : "";
+        if (!agentId) {
+          this.sendJson(res, 400, { ok: false, error: "agentId is required" });
+          return;
+        }
+
+        const instruction = typeof body?.instruction === "string" ? body.instruction.trim() : "";
+        const previous = this.readFrontDesk()?.agentId ?? null;
+        this.writeFrontDesk(agentId, "frontdesk");
+        void this.drain("frontdesk");
+
+        await this.updateAgentMetadata(agentId, "Front Desk", {
+          role: "front-desk",
+          category: "front-desk",
+        });
+
+        if (previous && previous !== agentId) {
+          await this.updateAgentMetadata(previous, "Front Desk (retired)", {
+            role: "retired-front-desk",
+          });
+        }
+
+        const orchestrators = this.listOrchestratorAgentIds();
+        const activeAgents = await this.getActiveAgentIds();
+        const targetOrchestrators = orchestrators.filter(
+          (id) => id !== agentId && (activeAgents.size === 0 || activeAgents.has(id)),
+        );
+
+        const notice =
+          instruction ||
+          `Front Desk registered: ${agentId}. Orchestrators must maintain composer silence and route all operator-escalation requests (attention/2-user) to Front Desk (${agentId}) via 'paseo send --steer --no-wait ${agentId} <msg>'.`;
+
+        let notified = 0;
+        for (const orchId of targetOrchestrators) {
+          const ok = await this.deliverMessage(orchId, notice, { noWait: true, steer: true });
+          if (ok) notified++;
+        }
+
+        this.log(`[info] Front Desk registered: ${agentId}, notified ${notified} orchestrator(s)`);
+        this.sendJson(res, 200, {
+          ok: true,
+          agentId,
+          orchestratorsNotified: notified,
+        });
+        return;
+      }
+
+      if (req.method === "GET" && (pathname === "/orchestrators" || pathname.startsWith("/orchestrators/"))) {
+        const pathRepo = pathname.startsWith("/orchestrators/")
+          ? decodeURIComponent(pathname.slice("/orchestrators/".length))
+          : null;
+        const requestedRepo = pathRepo ?? url.searchParams.get("repo");
+        if (requestedRepo) {
+          const orch = this.readOrchestrator(requestedRepo);
+          if (!orch) {
+            this.sendJson(res, 404, { ok: false, error: "orchestrator not registered", key: requestedRepo });
+            return;
+          }
+          this.sendJson(res, 200, { ok: true, orchestrator: orch });
+          return;
+        }
+
+        const list: OrchestratorRecord[] = [];
+        try {
+          if (existsSync(this.stateDir)) {
+            const files = readdirSync(this.stateDir);
+            for (const file of files) {
+              if (!file.endsWith(".json") || file === "frontdesk.json") continue;
+              try {
+                const raw = readFileSync(join(this.stateDir, file), "utf8");
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed.agentId === "string" && parsed.agentId.trim()) {
+                  list.push({
+                    key: parsed.key ?? file.replace(/\.json$/, ""),
+                    agentId: parsed.agentId.trim(),
+                    updatedAt: parsed.updatedAt ?? null,
+                    by: parsed.by ?? null,
+                  });
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+        list.sort((a, b) => a.key.localeCompare(b.key));
+        this.sendJson(res, 200, { ok: true, orchestrators: list });
+        return;
+      }
+
+      if (req.method === "POST" && (pathname === "/orchestrator" || pathname === "/orchestrate")) {
+        const body = await this.readJsonBody(req);
+        const repo = typeof body?.repo === "string" ? body.repo.trim() : "";
+        const agentId = typeof body?.agentId === "string" ? body.agentId.trim() : "";
+        if (!repo || !agentId) {
+          this.sendJson(res, 400, { ok: false, error: "repo and agentId are required" });
+          return;
+        }
+        this.writeOrchestrator(repo, agentId, "orchestrator");
+        void this.drain(repo);
+        this.sendJson(res, 200, { ok: true, repo, agentId });
         return;
       }
 
