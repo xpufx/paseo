@@ -561,6 +561,7 @@ export function FrontDeskHero({
                     textStyle={{ fontFamily: "monospace", fontSize: 10 }}
                   />
                 )}
+                <AgentLabelsRow agent={primaryAgent} />
               </Row>
             </Stack>
           </Row>
@@ -699,6 +700,52 @@ export function FrontDeskHero({
         )}
       </Stack>
     </Card>
+  );
+}
+
+
+export function getDisplayableAgentLabels(agent: UppidiAgent): Array<{ key: string; value: string; display: string }> {
+  if (!agent.labels || typeof agent.labels !== "object") return [];
+  const entries: Array<{ key: string; value: string; display: string }> = [];
+  for (const [k, v] of Object.entries(agent.labels)) {
+    if (!k || v === undefined || v === null || String(v).trim() === "") continue;
+    const strVal = String(v).trim();
+    // Exclude internal routing/tab labels
+    if (k.startsWith("paseo.open-agent-tab.") || k === "paseo.parent-agent-id") continue;
+    // Common labels can be displayed cleanly
+    if (k === "role" || k === "category") {
+      // already shown in specialized badge, but if distinct show it
+      continue;
+    }
+    entries.push({ key: k, value: strVal, display: `${k}=${strVal}` });
+  }
+  return entries;
+}
+
+export function AgentLabelsRow({ agent, max = 5 }: { agent: UppidiAgent; max?: number }) {
+  const labels = getDisplayableAgentLabels(agent);
+  if (labels.length === 0) return null;
+
+  return (
+    <Row align="center" gap="xxs" wrap style={{ overflow: "visible" }}>
+      {labels.slice(0, max).map((item) => (
+        <Badge
+          key={item.key}
+          label={item.display}
+          variant="neutral"
+          size="sm"
+          textStyle={{ fontFamily: "monospace", fontSize: 9 }}
+        />
+      ))}
+      {labels.length > max && (
+        <Badge
+          label={`+${labels.length - max}`}
+          variant="neutral"
+          size="sm"
+          textStyle={{ fontSize: 9 }}
+        />
+      )}
+    </Row>
   );
 }
 
@@ -870,6 +917,7 @@ export function DenseAgentRow({
               />
             )}
             <ParentAgentPill agent={agent} navigation={navigation} />
+            <AgentLabelsRow agent={agent} />
           </Row>
 
           {/* Right side: State badge, Model, Issue, Worktree, Time, Archive */}
@@ -1099,6 +1147,7 @@ export function OrchestratorRow({
           />
           <Badge label="Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
           <ParentAgentPill agent={agent} navigation={navigation} />
+          <AgentLabelsRow agent={agent} />
           {!isExpanded && hasChildren && childCount > 0 && (
             <Badge
               label={`${childCount} subagent${childCount === 1 ? "" : "s"}`}

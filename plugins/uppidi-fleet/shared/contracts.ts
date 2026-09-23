@@ -431,6 +431,7 @@ export const UppidiAgentSchema = z.object({
   hasOrchestrator: z.boolean().optional(),
   queuedHooksCount: z.number().optional(),
   isDetached: z.boolean().optional(),
+  labels: z.record(z.string(), z.string()).optional(),
 });
 export type UppidiAgent = z.infer<typeof UppidiAgentSchema>;
 
