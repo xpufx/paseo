@@ -860,6 +860,27 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     assert.equal(router.getQueue(key).length, 0);
   });
 
+  it("getQueuesOverview and getStatusOverview report enrolled repositories even when queue depth is 0 (#448)", () => {
+    const router = new HookRouter(null, {
+      configPath,
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+
+    router.enrollRepo("xpufx-org/enrolled-repo-empty");
+    const overview = router.getQueuesOverview() as any;
+    assert.ok(Array.isArray(overview.queues));
+    const emptyQueue = overview.queues.find((q: any) => q.key === "xpufx-org/enrolled-repo-empty");
+    assert.ok(emptyQueue, "Enrolled repository must be returned in getQueuesOverview");
+    assert.equal(emptyQueue.depth, 0);
+    assert.equal(emptyQueue.isBusy, false);
+    assert.deepEqual(emptyQueue.messages, []);
+
+    const status = router.getStatusOverview() as any;
+    assert.ok(status.repoCount >= 1, "Status repoCount must include enrolled repositories");
+  });
+
   it("getFleetRosterInfo reports enrolled repos, muted repos, and queue depths", () => {
     const router = new HookRouter(null, {
       configPath,

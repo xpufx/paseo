@@ -980,6 +980,10 @@ export class HookRouter {
     const frontDesk = this.readFrontDesk();
     const totalQueued = this.getTotalQueued();
 
+    const allKeys = new Set<string>();
+    for (const r of this.getEnrolledRepos()) allKeys.add(r);
+    for (const k of this.queues.keys()) allKeys.add(k);
+
     return {
       ok: true,
       service: "uppidi-fleet-hook-router",
@@ -995,14 +999,20 @@ export class HookRouter {
         : null,
       paused: Array.from(this.pausedQueues),
       totalQueued,
-      repoCount: this.queues.size,
+      repoCount: allKeys.size,
     };
   }
 
   public getQueuesOverview(): Record<string, unknown> {
     const queueItems: Record<string, unknown>[] = [];
 
-    for (const [key, entries] of this.queues.entries()) {
+    // Enumerate enrolled repositories as well as any active queues so idle/empty enrolled queues appear (#448)
+    const allKeys = new Set<string>();
+    for (const r of this.getEnrolledRepos()) allKeys.add(r);
+    for (const k of this.queues.keys()) allKeys.add(k);
+
+    for (const key of allKeys) {
+      const entries = this.queues.get(key) ?? [];
       const orch = key === "frontdesk" ? null : this.readOrchestrator(key);
       const isBusy = this.busyQueues.has(key);
       const busyAttempts = this.busyAttempts.get(key) ?? 0;
