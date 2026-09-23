@@ -33,9 +33,20 @@ import {
   loadRouterConfig,
   saveRouterConfig,
 } from "./hook-router.js";
+import { loadSavedRoleModels, DEFAULT_ROLE_MODELS } from "./role-models.js";
 
 
-const execFileAsync = promisify(execFile);
+export type ExecFileAsyncFn = (
+  file: string,
+  args: readonly string[],
+  options?: any
+) => Promise<{ stdout: string; stderr?: string }>;
+
+let execFileAsync: ExecFileAsyncFn = promisify(execFile);
+
+export function setExecFileAsyncForTest(fn: ExecFileAsyncFn | null): void {
+  execFileAsync = fn || promisify(execFile);
+}
 
 export interface RawAgentRecord {
   id: string;
@@ -683,7 +694,7 @@ export async function handleUppidiArchiveInactiveAgents(
 
 // --- Front Desk & Orchestrator Lifecycle + Muting Handlers (#426) ---
 
-async function spawnPaseoAgent(
+export async function spawnPaseoAgent(
   options: {
     title: string;
     prompt: string;
@@ -694,17 +705,48 @@ async function spawnPaseoAgent(
   },
   context: PluginHandlerContext
 ): Promise<{ ok: boolean; agentId?: string; error?: string }> {
+  const categoryKey = options.category === "front-desk" ? "front-desk" : "orchestrator";
+  let resolvedModel = options.model?.trim();
+  if (!resolvedModel) {
+    try {
+      const savedRoles = loadSavedRoleModels();
+      resolvedModel =
+        savedRoles[categoryKey]?.primaryModel ||
+        DEFAULT_ROLE_MODELS[categoryKey]?.primaryModel ||
+        "antigravity-acp/gemini-3.8-flash-low";
+    } catch {
+      resolvedModel =
+        DEFAULT_ROLE_MODELS[categoryKey]?.primaryModel ||
+        "antigravity-acp/gemini-3.8-flash-low";
+    }
+  }
+
+  let targetProvider = resolvedModel;
+  let targetModelName: string | undefined;
+
+  const slashIndex = resolvedModel.indexOf("/");
+  if (slashIndex !== -1) {
+    targetProvider = resolvedModel.slice(0, slashIndex).trim();
+    targetModelName = resolvedModel.slice(slashIndex + 1).trim() || undefined;
+  }
+
   // 1. Try SDK context.paseo.agents.create if available
   if (typeof (context?.paseo?.agents as any)?.create === "function") {
     try {
-      const created = await (context.paseo.agents as any).create({
+      const createPayload: Record<string, any> = {
         title: options.title,
         prompt: options.prompt,
-        model: options.model,
+        provider: targetProvider,
+        model: targetModelName,
         cwd: options.cwd,
         labels: options.labels,
         role: options.category,
-      });
+      };
+      if (targetProvider === "antigravity-acp") {
+        createPayload.mode = "yolo";
+      }
+
+      const created = await (context.paseo.agents as any).create(createPayload);
       const id = created?.id || created?.agent?.id;
       if (id) {
         return { ok: true, agentId: id };
@@ -717,8 +759,14 @@ async function spawnPaseoAgent(
   // 2. Fall back to CLI `paseo run -d ...`
   try {
     const args = ["run", "-d", "--title", options.title];
-    if (options.model) {
-      args.push("--model", options.model);
+    if (targetProvider) {
+      args.push("--provider", targetProvider);
+    }
+    if (targetModelName) {
+      args.push("--model", targetModelName);
+    }
+    if (targetProvider === "antigravity-acp") {
+      args.push("--mode", "yolo");
     }
     if (options.cwd) {
       args.push("--cwd", options.cwd);

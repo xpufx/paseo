@@ -14,6 +14,8 @@ import {
   handleUppidiAddOrchestrator,
   handleUppidiReplaceOrchestrator,
   handleUppidiToggleRepoMute,
+  spawnPaseoAgent,
+  setExecFileAsyncForTest,
 } from "./agents.js";
 
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel } from "./role-models.js";
@@ -633,6 +635,125 @@ describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
     assert.ok(Array.isArray(output.mutedRepos));
     assert.equal(typeof output.repoQueuedHooks, "object");
     assert.ok(output.tree.length > 0);
+  });
+
+  it("resolves provider and model from role models when input model is omitted (#426)", async () => {
+    let createdPayload: any = null;
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async (opts: any) => {
+            createdPayload = opts;
+            return {
+              agent: {
+                id: "agent-created-1",
+                name: opts.title,
+                role: opts.role,
+                status: "running",
+              },
+            };
+          },
+        },
+      },
+    };
+
+    // 1. handleUppidiCreateFrontDesk without explicit model
+    const fdRes = await handleUppidiCreateFrontDesk({}, mockContext);
+    assert.equal(fdRes.ok, true);
+    assert.equal(createdPayload.provider, "antigravity-acp");
+    assert.equal(createdPayload.model, "gemini-3.8-flash-low");
+    assert.equal(createdPayload.role, "front-desk");
+    assert.equal(createdPayload.mode, "yolo");
+
+    // 2. handleUppidiAddOrchestrator without explicit model
+    createdPayload = null;
+    const orchRes = await handleUppidiAddOrchestrator(
+      { repo: "xpufx-org/runner-containers" },
+      mockContext
+    );
+    assert.equal(orchRes.ok, true);
+    assert.equal(createdPayload.provider, "antigravity-acp");
+    assert.equal(createdPayload.model, "gemini-3.8-flash-low");
+    assert.equal(createdPayload.role, "orchestrator");
+    assert.equal(createdPayload.mode, "yolo");
+
+    // 3. handleUppidiAddOrchestrator with explicit model
+    createdPayload = null;
+    const orchCustomRes = await handleUppidiAddOrchestrator(
+      { repo: "xpufx-org/runner-containers", model: "codex/gpt-5.6-luna" },
+      mockContext
+    );
+    assert.equal(orchCustomRes.ok, true);
+    assert.equal(createdPayload.provider, "codex");
+    assert.equal(createdPayload.model, "gpt-5.6-luna");
+    assert.equal(createdPayload.role, "orchestrator");
+    assert.equal(createdPayload.mode, undefined);
+  });
+
+  it("spawnPaseoAgent invokes CLI fallback with --provider and appropriate args (#426)", async () => {
+    let capturedCmd = "";
+    let capturedArgs: readonly string[] = [];
+
+    setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
+      capturedCmd = cmd;
+      capturedArgs = args;
+      return { stdout: JSON.stringify({ id: "agent-spawned-cli" }) };
+    });
+
+    try {
+      // 1. Omitted model: resolves to role model (antigravity-acp/gemini-3.8-flash-low)
+      const resDefault = await spawnPaseoAgent(
+        {
+          title: "Front Desk CLI",
+          prompt: "Triaging requests",
+          category: "front-desk",
+        },
+        {} as any
+      );
+
+      assert.equal(resDefault.ok, true);
+      assert.equal(resDefault.agentId, "agent-spawned-cli");
+      assert.equal(capturedCmd, "paseo");
+      assert.ok(capturedArgs.includes("run"));
+      assert.ok(capturedArgs.includes("-d"));
+      assert.equal(capturedArgs[capturedArgs.indexOf("--provider") + 1], "antigravity-acp");
+      assert.equal(capturedArgs[capturedArgs.indexOf("--model") + 1], "gemini-3.8-flash-low");
+      assert.equal(capturedArgs[capturedArgs.indexOf("--mode") + 1], "yolo");
+
+      // 2. Explicit model with slash: e.g. codex/gpt-5.6-luna
+      const resExplicit = await spawnPaseoAgent(
+        {
+          title: "Orchestrator CLI",
+          prompt: "Supervising workers",
+          category: "orchestrator",
+          model: "codex/gpt-5.6-luna",
+        },
+        {} as any
+      );
+
+      assert.equal(resExplicit.ok, true);
+      assert.equal(capturedArgs[capturedArgs.indexOf("--provider") + 1], "codex");
+      assert.equal(capturedArgs[capturedArgs.indexOf("--model") + 1], "gpt-5.6-luna");
+      assert.equal(capturedArgs.includes("--mode"), false);
+
+      // 3. Explicit provider without model slash
+      const resProviderOnly = await spawnPaseoAgent(
+        {
+          title: "Worker CLI",
+          prompt: "Coding agent",
+          category: "worker",
+          model: "custom-provider",
+        },
+        {} as any
+      );
+
+      assert.equal(resProviderOnly.ok, true);
+      assert.equal(capturedArgs[capturedArgs.indexOf("--provider") + 1], "custom-provider");
+      assert.equal(capturedArgs.includes("--model"), false);
+      assert.equal(capturedArgs.includes("--mode"), false);
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
   });
 });
 
