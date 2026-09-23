@@ -2,17 +2,81 @@ import { createServer, type Server as HttpServer, type IncomingMessage, type Ser
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, renameSync, readdirSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
+import os from "node:os";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import type { PaseoApi } from "@getpaseo/client";
 import type {
   HookServiceStatusOutput,
   HookServiceActionOutput,
   HookLogTailOutput,
+  HookServiceConfigInput,
+  HookServiceConfigOutput,
 } from "../shared/contracts.js";
+
+export interface RouterConfig {
+  host?: string;
+  port?: number;
+}
+
+export function getAvailableNetworkInterfaces(): string[] {
+  const interfaces = os.networkInterfaces();
+  const result = new Set<string>();
+  result.add("127.0.0.1");
+  result.add("0.0.0.0");
+
+  for (const name of Object.keys(interfaces)) {
+    const netList = interfaces[name];
+    if (!netList) continue;
+    for (const item of netList as Array<{ family?: string | number; address?: string }>) {
+      const family = typeof item.family === "string" ? item.family : String(item.family ?? "");
+      if (family === "IPv4" || family === "4") {
+        if (item.address && typeof item.address === "string") {
+          result.add(item.address);
+        }
+      }
+    }
+  }
+
+  return Array.from(result);
+}
+
+export function getRouterConfigPath(): string {
+  const home = process.env.HOME ?? os.homedir();
+  return join(home, ".config", "uppidi-forge", "router-config.json");
+}
+
+export function loadRouterConfig(customPath?: string): RouterConfig {
+  const configPath = customPath ?? getRouterConfigPath();
+  if (existsSync(configPath)) {
+    try {
+      const raw = readFileSync(configPath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return {
+          host: typeof parsed.host === "string" && parsed.host.trim() ? parsed.host.trim() : undefined,
+          port: typeof parsed.port === "number" && !isNaN(parsed.port) ? parsed.port : undefined,
+        };
+      }
+    } catch {
+      // ignore corrupted config file
+    }
+  }
+  return {};
+}
+
+export function saveRouterConfig(config: RouterConfig, customPath?: string): void {
+  const configPath = customPath ?? getRouterConfigPath();
+  const dir = dirname(configPath);
+  mkdirSync(dir, { recursive: true });
+  const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify(config, null, 2), "utf8");
+  renameSync(tmp, configPath);
+}
 
 export interface HookRouterOptions {
   port?: number;
   host?: string;
+  configPath?: string;
   queueDir?: string;
   stateDir?: string;
   secret?: string;
@@ -157,8 +221,10 @@ export function clearHookLogs(): void {
 
 export class HookRouter {
   public configuredPort: number;
+  public configuredHost: string;
   public boundPort = 0;
-  public readonly host: string;
+  public boundHost = "";
+  public readonly configPath?: string;
   public readonly queueDir: string;
   public readonly stateDir: string;
   public readonly secret?: string;
@@ -179,15 +245,25 @@ export class HookRouter {
 
   constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
     this.server = server ?? null;
+    this.configPath = options?.configPath;
+    const persisted = loadRouterConfig(this.configPath);
+
     this.configuredPort =
       options?.port !== undefined
         ? options.port
-        : Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
-    this.host = options?.host ?? process.env.FORGE_HOOK_HOST ?? "127.0.0.1";
+        : persisted.port !== undefined
+          ? persisted.port
+          : Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
+    this.configuredHost =
+      options?.host !== undefined
+        ? options.host
+        : persisted.host !== undefined
+          ? persisted.host
+          : process.env.FORGE_HOOK_HOST ?? "127.0.0.1";
     this.secret = options?.secret ?? process.env.FORGE_HOOK_SECRET;
     this.activePaseo = options?.paseo ?? (server as any)?.paseo ?? null;
 
-    const home = process.env.HOME ?? "/home/xpufx";
+    const home = process.env.HOME ?? os.homedir();
     this.queueDir = options?.queueDir ?? process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-forge", "queues");
     this.stateDir =
       options?.stateDir ?? process.env.HOOK_STATE_DIR ?? join(home, ".paseo", "forgejo-hook", "orchestrators");
@@ -201,6 +277,10 @@ export class HookRouter {
 
   public get port(): number {
     return this.boundPort || this.configuredPort;
+  }
+
+  public get host(): string {
+    return (this.isListening() && this.boundHost) ? this.boundHost : this.configuredHost;
   }
 
   public getHttpServer(): HttpServer | null {
@@ -229,14 +309,20 @@ export class HookRouter {
 
   public getLifecycleStatus(): {
     listening: boolean;
+    host: string;
+    configuredHost: string;
     port: number;
+    configuredPort: number;
     uptime: number;
     totalQueued: number;
     repoCount: number;
   } {
     return {
       listening: this.isListening(),
+      host: this.host,
+      configuredHost: this.configuredHost,
       port: this.port,
+      configuredPort: this.configuredPort,
       uptime: this.getUptime(),
       totalQueued: this.getTotalQueued(),
       repoCount: this.queues.size,
@@ -696,13 +782,14 @@ export class HookRouter {
         }
       });
 
-      this.httpServer.listen(this.configuredPort, this.host, () => {
+      this.httpServer.listen(this.configuredPort, this.configuredHost, () => {
         const addr = this.httpServer?.address();
         if (addr && typeof addr === "object") {
           this.boundPort = addr.port;
+          this.boundHost = addr.address;
         }
         this.startedAt = Date.now();
-        this.log(`[info] Bundled hook router listening on http://${this.host}:${this.port}`);
+        this.log(`[info] Bundled hook router listening on http://${this.configuredHost}:${this.port}`);
         resolve();
       });
     });
@@ -726,12 +813,14 @@ export class HookRouter {
         this.httpServer.close(() => {
           this.httpServer = null;
           this.boundPort = 0;
+          this.boundHost = "";
           this.startedAt = null;
           this.log("[info] Bundled hook router stopped");
           resolve();
         });
       } else {
         this.boundPort = 0;
+        this.boundHost = "";
         this.startedAt = null;
         resolve();
       }
@@ -741,6 +830,49 @@ export class HookRouter {
   public async restart(): Promise<void> {
     await this.stop();
     await this.start();
+  }
+
+  public async configure(options: {
+    host?: string;
+    port?: number;
+    restart?: boolean;
+  }): Promise<{
+    configuredHost: string;
+    configuredPort: number;
+    activeHost: string;
+    activePort: number;
+    restarted: boolean;
+  }> {
+    const updatedHost =
+      options.host !== undefined && options.host.trim() ? options.host.trim() : this.configuredHost;
+    const updatedPort =
+      options.port !== undefined && options.port > 0 ? options.port : this.configuredPort;
+
+    saveRouterConfig(
+      {
+        host: updatedHost,
+        port: updatedPort,
+      },
+      this.configPath,
+    );
+
+    this.configuredHost = updatedHost;
+    this.configuredPort = updatedPort;
+
+    let restarted = false;
+    const shouldRestart = options.restart !== false;
+    if (shouldRestart && this.isListening()) {
+      await this.restart();
+      restarted = true;
+    }
+
+    return {
+      configuredHost: this.configuredHost,
+      configuredPort: this.configuredPort,
+      activeHost: this.isListening() ? this.host : this.configuredHost,
+      activePort: this.isListening() ? this.port : this.configuredPort,
+      restarted,
+    };
   }
 
   public async reload(): Promise<void> {
@@ -915,7 +1047,15 @@ export function getOrCreateHookRouter(
 export function getHookServiceStatus(): HookServiceStatusOutput {
   const router = getActiveHookRouter();
   const listening = router ? router.isListening() : false;
-  const port = router ? router.port : Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
+  const persisted = loadRouterConfig(router?.configPath);
+  const configuredPort = router
+    ? router.configuredPort
+    : (persisted.port ?? Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099));
+  const configuredHost = router
+    ? router.configuredHost
+    : (persisted.host ?? process.env.FORGE_HOOK_HOST ?? "127.0.0.1");
+  const port = listening && router ? router.port : undefined;
+  const host = listening && router ? router.host : undefined;
   const uptime = router ? router.getUptime() : 0;
   const queued = router ? router.getTotalQueued() : 0;
 
@@ -924,10 +1064,79 @@ export function getHookServiceStatus(): HookServiceStatusOutput {
     active: listening,
     state: listening ? "active" : "inactive",
     description: listening
-      ? `Bundled hook router listening on port ${port} (uptime: ${uptime}s, queued: ${queued})`
+      ? `Bundled hook router listening on port ${port} (${host}, uptime: ${uptime}s, queued: ${queued})`
       : "Bundled hook router is inactive",
     pid: process.pid,
+    host,
+    configuredHost,
+    port,
+    configuredPort,
+    availableInterfaces: getAvailableNetworkInterfaces(),
   };
+}
+
+export async function configureHookService(input: {
+  host?: string;
+  port?: number;
+  restart?: boolean;
+  configPath?: string;
+}): Promise<HookServiceConfigOutput> {
+  try {
+    let router = getActiveHookRouter();
+    if (!router) {
+      const persisted = loadRouterConfig(input.configPath);
+      const configuredHost =
+        input.host?.trim() || persisted.host || process.env.FORGE_HOOK_HOST || "127.0.0.1";
+      const configuredPort =
+        input.port || persisted.port || Number(process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT ?? 8099);
+
+      saveRouterConfig({ host: configuredHost, port: configuredPort }, input.configPath);
+
+      appendHookLog(`[info] Saved hook router configuration: host=${configuredHost}, port=${configuredPort}`);
+      return {
+        ok: true,
+        configuredHost,
+        configuredPort,
+        activeHost: configuredHost,
+        activePort: configuredPort,
+        restarted: false,
+        message: `Hook router configuration saved (${configuredHost}:${configuredPort})`,
+      };
+    }
+
+    const result = await router.configure(input);
+    appendHookLog(
+      `[info] Configured hook router: host=${result.configuredHost}, port=${result.configuredPort}, restarted=${result.restarted}`,
+    );
+
+    return {
+      ok: true,
+      configuredHost: result.configuredHost,
+      configuredPort: result.configuredPort,
+      activeHost: result.activeHost,
+      activePort: result.activePort,
+      restarted: result.restarted,
+      message: result.restarted
+        ? `Hook router reconfigured and restarted on ${result.configuredHost}:${result.configuredPort}`
+        : `Hook router configuration saved (${result.configuredHost}:${result.configuredPort})`,
+    };
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    appendHookLog(`[error] Failed to configure hook router: ${msg}`);
+    const router = getActiveHookRouter();
+    const persisted = loadRouterConfig(router?.configPath ?? input.configPath);
+    const cfgHost = router?.configuredHost ?? input.host ?? persisted.host ?? "127.0.0.1";
+    const cfgPort = router?.configuredPort ?? input.port ?? persisted.port ?? 8099;
+    return {
+      ok: false,
+      configuredHost: cfgHost,
+      configuredPort: cfgPort,
+      activeHost: router?.isListening() ? router.host : cfgHost,
+      activePort: router?.isListening() ? router.port : cfgPort,
+      restarted: false,
+      error: msg,
+    };
+  }
 }
 
 export async function executeHookServiceAction(

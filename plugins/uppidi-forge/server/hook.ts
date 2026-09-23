@@ -6,11 +6,14 @@ import {
   type HookServiceStatusOutput,
   type HookServiceActionOutput,
   type HookLogTailOutput,
+  type HookServiceConfigInput,
+  type HookServiceConfigOutput,
 } from "../shared/contracts.js";
 import {
   getHookServiceStatus,
   executeHookServiceAction,
   getHookLogTail,
+  configureHookService,
 } from "./hook-router.js";
 
 const DEFAULT_HOOK_URL = process.env.FORGE_HOOK_URL || "http://127.0.0.1:8099";
@@ -126,6 +129,13 @@ export async function handleHookServiceAction(input: {
   action: "start" | "stop" | "restart" | "reload";
 }): Promise<HookServiceActionOutput> {
   return executeHookServiceAction(input.action);
+}
+
+export async function handleHookConfigure(
+  input: HookServiceConfigInput,
+  _context?: PluginHandlerContext,
+): Promise<HookServiceConfigOutput> {
+  return configureHookService(input);
 }
 
 export async function handleHookLogTail(input?: { lines?: number }): Promise<HookLogTailOutput> {

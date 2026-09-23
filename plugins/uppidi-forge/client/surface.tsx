@@ -22,6 +22,7 @@ import {
   Stack,
   StatusDot,
   Tabs,
+  TextInput,
   usePluginTheme,
   useRpcQuery,
   useRpcMutation,
@@ -35,6 +36,7 @@ import {
   uppidiHookDrainContract,
   uppidiHookServiceStatusContract,
   uppidiHookServiceActionContract,
+  uppidiHookConfigureContract,
   uppidiHookLogTailContract,
   uppidiAgentsContract,
   uppidiRoleModelsContract,
@@ -219,12 +221,78 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
   const resumeMutation = useRpcMutation(uppidiHookResumeContract);
   const drainMutation = useRpcMutation(uppidiHookDrainContract);
   const serviceActionMutation = useRpcMutation(uppidiHookServiceActionContract);
+  const configureMutation = useRpcMutation(uppidiHookConfigureContract);
   const setRoleModelMutation = useRpcMutation(uppidiSetRoleModelContract);
   const archiveAgentMutation = useRpcMutation(uppidiArchiveAgentContract);
   const archiveBulkMutation = useRpcMutation(uppidiArchiveInactiveAgentsContract);
 
   const [archivingAgentId, setArchivingAgentId] = useState<string | null>(null);
   const [isBulkArchiving, setIsBulkArchiving] = useState(false);
+
+  // Hook service listen address configuration (#427)
+  const [hostSelection, setHostSelection] = useState<string>("127.0.0.1");
+  const [customHost, setCustomHost] = useState<string>("");
+  const [isCustomHost, setIsCustomHost] = useState<boolean>(false);
+  const [configuredPortInput, setConfiguredPortInput] = useState<string>("8099");
+  const [isConfiguring, setIsConfiguring] = useState<boolean>(false);
+  const configInitializedRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (serviceStatus && !configInitializedRef.current) {
+      configInitializedRef.current = true;
+      const cfgHost = serviceStatus.configuredHost || serviceStatus.host || "127.0.0.1";
+      const cfgPort = serviceStatus.configuredPort || serviceStatus.port || 8099;
+      setConfiguredPortInput(String(cfgPort));
+
+      const isDetected = (serviceStatus.availableInterfaces ?? []).includes(cfgHost);
+      if (cfgHost === "127.0.0.1" || cfgHost === "0.0.0.0" || isDetected) {
+        setHostSelection(cfgHost);
+        setIsCustomHost(false);
+      } else {
+        setHostSelection("custom");
+        setCustomHost(cfgHost);
+        setIsCustomHost(true);
+      }
+    }
+  }, [serviceStatus]);
+
+  const detectedIps = useMemo(() => {
+    const list = serviceStatus?.availableInterfaces ?? [];
+    return list.filter((ip) => ip !== "127.0.0.1" && ip !== "0.0.0.0");
+  }, [serviceStatus?.availableInterfaces]);
+
+  const handleApplyConfig = async () => {
+    const targetHost = isCustomHost ? customHost.trim() : hostSelection;
+    const parsedPort = parseInt(configuredPortInput.trim(), 10);
+    if (!targetHost) {
+      toast.error("Host cannot be empty");
+      return;
+    }
+    if (isNaN(parsedPort) || parsedPort <= 0 || parsedPort > 65535) {
+      toast.error("Please specify a valid port (1-65535)");
+      return;
+    }
+
+    try {
+      setIsConfiguring(true);
+      const res = await configureMutation.mutateAsync({
+        host: targetHost,
+        port: parsedPort,
+        restart: true,
+      });
+      if (res.ok) {
+        toast.show(res.message || `Hook service listening on ${res.activeHost}:${res.activePort}`);
+        void refetchServiceStatus();
+      } else {
+        toast.error(res.error || "Failed to configure hook service");
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Configuration error: ${msg}`);
+    } finally {
+      setIsConfiguring(false);
+    }
+  };
 
   const refetchAll = () => {
     void refetchIssues();
@@ -574,8 +642,26 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   </Row>
                 </Row>
                 <KeyValueGroup>
-                  <KeyValue label="Unit name" value="Bundled router (port 8099)" />
-                  <KeyValue label="Router endpoint" value="http://127.0.0.1:8099" />
+                  <KeyValue
+                    label="Unit name"
+                    value={`Bundled router (port ${serviceStatus?.port ?? serviceStatus?.configuredPort ?? 8099})`}
+                  />
+                  <KeyValue
+                    label="Router endpoint"
+                    value={`http://${serviceStatus?.host ?? "127.0.0.1"}:${serviceStatus?.port ?? 8099}`}
+                  />
+                  <KeyValue
+                    label="Active host"
+                    value={serviceStatus?.host ?? (isServiceRunning ? (serviceStatus?.configuredHost ?? "127.0.0.1") : "Not listening")}
+                  />
+                  <KeyValue
+                    label="Active port"
+                    value={serviceStatus?.port ? String(serviceStatus.port) : "Not listening"}
+                  />
+                  <KeyValue
+                    label="Configured address"
+                    value={`${serviceStatus?.configuredHost ?? "127.0.0.1"}:${serviceStatus?.configuredPort ?? 8099}`}
+                  />
                   <KeyValue
                     label="Front desk agent"
                     value={hookStatus?.frontDesk?.agentId ?? "None assigned"}
@@ -583,6 +669,84 @@ export function UppidiForgeSurface(props: PluginSurfaceProps) {
                   />
                   <KeyValue label="Total queued across repos" value={String(totalQueued)} />
                 </KeyValueGroup>
+
+                <Card variant="flat">
+                  <Stack gap="xs">
+                    <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
+                      Configure Listen Address & Port
+                    </Text>
+                    <Row gap="xs" wrap align="center">
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Host:</Text>
+                      <Button
+                        label="127.0.0.1 (Loopback)"
+                        size="sm"
+                        variant={!isCustomHost && hostSelection === "127.0.0.1" ? "primary" : "ghost"}
+                        onPress={() => {
+                          setIsCustomHost(false);
+                          setHostSelection("127.0.0.1");
+                        }}
+                      />
+                      <Button
+                        label="0.0.0.0 (All interfaces)"
+                        size="sm"
+                        variant={!isCustomHost && hostSelection === "0.0.0.0" ? "primary" : "ghost"}
+                        onPress={() => {
+                          setIsCustomHost(false);
+                          setHostSelection("0.0.0.0");
+                        }}
+                      />
+                      {detectedIps.map((ip) => (
+                        <Button
+                          key={ip}
+                          label={ip}
+                          size="sm"
+                          variant={!isCustomHost && hostSelection === ip ? "primary" : "ghost"}
+                          onPress={() => {
+                            setIsCustomHost(false);
+                            setHostSelection(ip);
+                          }}
+                        />
+                      ))}
+                      <Button
+                        label="Custom"
+                        size="sm"
+                        variant={isCustomHost ? "primary" : "ghost"}
+                        onPress={() => {
+                          setIsCustomHost(true);
+                          setHostSelection("custom");
+                        }}
+                      />
+                    </Row>
+                    <Row gap="sm" wrap align="flex-end">
+                      {isCustomHost && (
+                        <View style={{ flex: 1, minWidth: 160 }}>
+                          <TextInput
+                            label="Custom Host"
+                            value={customHost}
+                            onChangeText={setCustomHost}
+                            placeholder="127.0.0.1 or IP"
+                          />
+                        </View>
+                      )}
+                      <View style={{ width: 120 }}>
+                        <TextInput
+                          label="Port"
+                          value={configuredPortInput}
+                          onChangeText={setConfiguredPortInput}
+                          keyboardType="number-pad"
+                          placeholder="8099"
+                        />
+                      </View>
+                      <Button
+                        label={isConfiguring ? "Applying..." : "Apply & Restart"}
+                        size="sm"
+                        variant="primary"
+                        disabled={isConfiguring}
+                        onPress={handleApplyConfig}
+                      />
+                    </Row>
+                  </Stack>
+                </Card>
               </Stack>
             </Card>
           </Collapsible>

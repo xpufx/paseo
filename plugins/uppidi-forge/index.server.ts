@@ -8,6 +8,7 @@ import {
   uppidiHookDrainContract,
   uppidiHookServiceStatusContract,
   uppidiHookServiceActionContract,
+  uppidiHookConfigureContract,
   uppidiHookLogTailContract,
   uppidiAgentsContract,
   uppidiRoleModelsContract,
@@ -26,6 +27,7 @@ import {
   handleHookDrain,
   handleHookServiceStatus,
   handleHookServiceAction,
+  handleHookConfigure,
   handleHookLogTail,
 } from "./server/hook.js";
 import {
@@ -48,6 +50,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiHookDrainContract, handleHookDrain);
   server.handle(uppidiHookServiceStatusContract, handleHookServiceStatus);
   server.handle(uppidiHookServiceActionContract, handleHookServiceAction);
+  server.handle(uppidiHookConfigureContract, handleHookConfigure);
   server.handle(uppidiHookLogTailContract, handleHookLogTail);
   server.handle(uppidiAgentsContract, handleUppidiAgents);
   server.handle(uppidiRoleModelsContract, handleUppidiRoleModels);

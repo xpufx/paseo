@@ -20,6 +20,12 @@ import {
   clearHookLogs,
   getActiveHookRouter,
   setActiveHookRouter,
+  getAvailableNetworkInterfaces,
+  getRouterConfigPath,
+  loadRouterConfig,
+  saveRouterConfig,
+  configureHookService,
+  getHookServiceStatus,
 } from "./hook-router.js";
 
 describe("hook-router payload and key utilities", () => {
@@ -548,5 +554,120 @@ describe("hook-router bundled service lifecycle and log buffer", () => {
 
     clearHookLogs();
     assert.deepEqual(getHookLogs(), []);
+  });
+});
+
+describe("hook-router network interfaces and listen address configuration (#427)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "hook-router-config-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+    setActiveHookRouter(null);
+  });
+
+  it("discovers available network interfaces including loopback and wildcard", () => {
+    const ifaces = getAvailableNetworkInterfaces();
+    assert.ok(Array.isArray(ifaces));
+    assert.ok(ifaces.includes("127.0.0.1"), "Must include 127.0.0.1");
+    assert.ok(ifaces.includes("0.0.0.0"), "Must include 0.0.0.0");
+  });
+
+  it("saves and loads router configuration safely", () => {
+    const configPath = join(tmpDir, "router-config.json");
+    assert.deepEqual(loadRouterConfig(configPath), {});
+
+    saveRouterConfig({ host: "0.0.0.0", port: 9199 }, configPath);
+    assert.ok(existsSync(configPath));
+
+    const loaded = loadRouterConfig(configPath);
+    assert.equal(loaded.host, "0.0.0.0");
+    assert.equal(loaded.port, 9199);
+  });
+
+  it("initializes HookRouter with persisted configuration", () => {
+    const configPath = join(tmpDir, "router-config.json");
+    saveRouterConfig({ host: "0.0.0.0", port: 8200 }, configPath);
+
+    const router = new HookRouter(null, {
+      configPath,
+      queueDir: join(tmpDir, "queues"),
+      stateDir: join(tmpDir, "state"),
+    });
+
+    assert.equal(router.configuredHost, "0.0.0.0");
+    assert.equal(router.configuredPort, 8200);
+    assert.equal(router.host, "0.0.0.0");
+    assert.equal(router.port, 8200);
+  });
+
+  it("reconfigures host and port, saves config, and restarts listener", async () => {
+    const configPath = join(tmpDir, "router-config.json");
+    const router = new HookRouter(null, {
+      host: "127.0.0.1",
+      port: 0, // dynamic port for testing
+      configPath,
+      queueDir: join(tmpDir, "queues"),
+      stateDir: join(tmpDir, "state"),
+    });
+
+    await router.start();
+    assert.equal(router.isListening(), true);
+    assert.equal(router.host, "127.0.0.1");
+    const originalPort = router.port;
+    assert.ok(originalPort > 0);
+
+    // Reconfigure router with restart
+    const configureResult = await router.configure({
+      host: "127.0.0.1",
+      port: 0,
+      restart: true,
+    });
+
+    assert.equal(configureResult.configuredHost, "127.0.0.1");
+    assert.equal(configureResult.restarted, true);
+    assert.equal(router.isListening(), true);
+
+    const savedConfig = loadRouterConfig(configPath);
+    assert.equal(savedConfig.host, "127.0.0.1");
+
+    await router.stop();
+    assert.equal(router.isListening(), false);
+  });
+
+  it("configureHookService and getHookServiceStatus report accurate configuration and interfaces", async () => {
+    const configPath = join(tmpDir, "router-config.json");
+    const router = new HookRouter(null, {
+      host: "127.0.0.1",
+      port: 0,
+      configPath,
+      queueDir: join(tmpDir, "queues"),
+      stateDir: join(tmpDir, "state"),
+    });
+    setActiveHookRouter(router);
+
+    const statusBefore = getHookServiceStatus();
+    assert.equal(statusBefore.active, false);
+    assert.equal(statusBefore.configuredHost, "127.0.0.1");
+    assert.ok(statusBefore.availableInterfaces.includes("127.0.0.1"));
+
+    // Configure service
+    const configResult = await configureHookService({
+      host: "127.0.0.1",
+      port: 8888,
+      restart: false,
+      configPath,
+    });
+
+    assert.equal(configResult.ok, true);
+    assert.equal(configResult.configuredHost, "127.0.0.1");
+    assert.equal(configResult.configuredPort, 8888);
+
+    const statusAfter = getHookServiceStatus();
+    assert.equal(statusAfter.configuredHost, "127.0.0.1");
+    assert.equal(statusAfter.configuredPort, 8888);
   });
 });

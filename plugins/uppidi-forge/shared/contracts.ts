@@ -163,13 +163,18 @@ export const uppidiHookDrainContract = defineContract({
   output: HookQueueActionOutputSchema,
 });
 
-// Hook Service Management (Issue #368)
+// Hook Service Management (Issue #368, Issue #427)
 export const HookServiceStatusOutputSchema = z.object({
   ok: z.boolean(),
   active: z.boolean(),
   state: z.string(),
   description: z.string().optional(),
   pid: z.number().optional(),
+  host: z.string().optional(),
+  configuredHost: z.string().optional(),
+  port: z.number().optional(),
+  configuredPort: z.number().optional(),
+  availableInterfaces: z.array(z.string()).default([]),
   error: z.string().optional(),
 });
 export type HookServiceStatusOutput = z.infer<typeof HookServiceStatusOutputSchema>;
@@ -179,6 +184,32 @@ export const uppidiHookServiceStatusContract = defineContract({
   description: "Inspect bundled hook router service status",
   input: z.object({}),
   output: HookServiceStatusOutputSchema,
+});
+
+export const HookServiceConfigInputSchema = z.object({
+  host: z.string().optional(),
+  port: z.number().int().positive().optional(),
+  restart: z.boolean().default(true),
+});
+export type HookServiceConfigInput = z.infer<typeof HookServiceConfigInputSchema>;
+
+export const HookServiceConfigOutputSchema = z.object({
+  ok: z.boolean(),
+  configuredHost: z.string(),
+  configuredPort: z.number(),
+  activeHost: z.string(),
+  activePort: z.number(),
+  restarted: z.boolean(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type HookServiceConfigOutput = z.infer<typeof HookServiceConfigOutputSchema>;
+
+export const uppidiHookConfigureContract = defineContract({
+  name: "uppidi-forge.hook-configure",
+  description: "Configure host listen address and port for bundled hook service",
+  input: HookServiceConfigInputSchema,
+  output: HookServiceConfigOutputSchema,
 });
 
 export const HookServiceActionInputSchema = z.object({

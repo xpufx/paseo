@@ -4,6 +4,7 @@ import {
   resolveHookUrl,
   handleHookServiceStatus,
   handleHookServiceAction,
+  handleHookConfigure,
   handleHookLogTail,
 } from "./hook.js";
 import {
@@ -103,5 +104,33 @@ describe("uppidi-forge hook server handlers", () => {
     assert.equal(stoppedStatus.ok, true);
     assert.equal(stoppedStatus.active, false);
     assert.equal(stoppedStatus.state, "inactive");
+  });
+
+  it("configures hook service listen address and port (#427)", async () => {
+    // Start router
+    await handleHookServiceAction({ action: "start" });
+    const initialStatus = await handleHookServiceStatus();
+    assert.equal(initialStatus.active, true);
+    assert.ok(initialStatus.availableInterfaces.includes("127.0.0.1"));
+
+    // Configure new host and dynamic port with restart
+    const configureResult = await handleHookConfigure({
+      host: "127.0.0.1",
+      port: 0,
+      restart: true,
+    });
+
+    assert.equal(configureResult.ok, true);
+    assert.equal(configureResult.restarted, true);
+    assert.equal(configureResult.configuredHost, "127.0.0.1");
+    assert.equal(configureResult.activeHost, "127.0.0.1");
+    assert.ok(configureResult.activePort > 0);
+
+    const reconfiguredStatus = await handleHookServiceStatus();
+    assert.equal(reconfiguredStatus.active, true);
+    assert.equal(reconfiguredStatus.host, "127.0.0.1");
+    assert.equal(reconfiguredStatus.configuredHost, "127.0.0.1");
+
+    await handleHookServiceAction({ action: "stop" });
   });
 });

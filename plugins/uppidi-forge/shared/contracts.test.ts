@@ -20,6 +20,10 @@ import {
   uppidiArchiveInactiveAgentsContract,
   extractAgentWorktree,
   extractAgentProject,
+  HookServiceStatusOutputSchema,
+  HookServiceConfigInputSchema,
+  HookServiceConfigOutputSchema,
+  uppidiHookConfigureContract,
 } from "./contracts.js";
 
 
@@ -338,6 +342,58 @@ describe("uppidi-forge shared contracts", () => {
       extractAgentProject({ name: "Unassigned Worker" }),
       "Default Project"
     );
+  });
+
+  it("validates hook service configuration contract and schemas (#427)", () => {
+    assert.equal(uppidiHookConfigureContract.name, "uppidi-forge.hook-configure");
+
+    // Input schema with defaults
+    const defaultInput = HookServiceConfigInputSchema.parse({});
+    assert.equal(defaultInput.restart, true);
+    assert.equal(defaultInput.host, undefined);
+    assert.equal(defaultInput.port, undefined);
+
+    // Input schema with custom host and port
+    const customInput = HookServiceConfigInputSchema.parse({
+      host: "0.0.0.0",
+      port: 9000,
+      restart: false,
+    });
+    assert.equal(customInput.host, "0.0.0.0");
+    assert.equal(customInput.port, 9000);
+    assert.equal(customInput.restart, false);
+
+    // Output schema
+    const output = HookServiceConfigOutputSchema.parse({
+      ok: true,
+      configuredHost: "0.0.0.0",
+      configuredPort: 9000,
+      activeHost: "0.0.0.0",
+      activePort: 9000,
+      restarted: true,
+      message: "Reconfigured and restarted",
+    });
+    assert.equal(output.ok, true);
+    assert.equal(output.configuredHost, "0.0.0.0");
+    assert.equal(output.configuredPort, 9000);
+    assert.equal(output.restarted, true);
+
+    // Status output schema with new listen address fields
+    const statusOutput = HookServiceStatusOutputSchema.parse({
+      ok: true,
+      active: true,
+      state: "active",
+      host: "127.0.0.1",
+      configuredHost: "127.0.0.1",
+      port: 8099,
+      configuredPort: 8099,
+      availableInterfaces: ["127.0.0.1", "0.0.0.0", "192.168.1.50"],
+    });
+    assert.equal(statusOutput.host, "127.0.0.1");
+    assert.equal(statusOutput.configuredHost, "127.0.0.1");
+    assert.equal(statusOutput.port, 8099);
+    assert.equal(statusOutput.configuredPort, 8099);
+    assert.deepEqual(statusOutput.availableInterfaces, ["127.0.0.1", "0.0.0.0", "192.168.1.50"]);
   });
 });
 
