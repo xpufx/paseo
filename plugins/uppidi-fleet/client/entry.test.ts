@@ -105,6 +105,23 @@ describe("uppidi-fleet client entry contract", () => {
     );
   });
 
+  it("verifies client/tree-view.tsx renders main dirty indicator badge on orchestrator row (#450)", () => {
+    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+    assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
+    const source = fs.readFileSync(treeViewPath, "utf8");
+
+    assert.match(
+      source,
+      /agent\.isMainDirty/,
+      "client/tree-view.tsx must check agent.isMainDirty"
+    );
+    assert.match(
+      source,
+      /Main Dirty/,
+      "client/tree-view.tsx must render Main Dirty badge label"
+    );
+  });
+
   it("verifies client/tree-view.tsx defines getParentBadgeLabel and ParentAgentPill (#430)", () => {
     const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
     assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");

@@ -918,6 +918,7 @@ export function DenseAgentRow({
             )}
             <ParentAgentPill agent={agent} navigation={navigation} />
             <AgentLabelsRow agent={agent} />
+
           </Row>
 
           {/* Right side: State badge, Model, Issue, Worktree, Time, Archive */}
@@ -1148,6 +1149,33 @@ export function OrchestratorRow({
           <Badge label="Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
           <ParentAgentPill agent={agent} navigation={navigation} />
           <AgentLabelsRow agent={agent} />
+          {agent.isMainDirty && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Main workspace dirty (${agent.mainDirtySummary || "uncommitted changes"})`}
+              // @ts-ignore RN web title tooltip
+              title={`Main workspace has uncommitted changes (${agent.mainDirtySummary || "dirty"}). Click to open orchestrator.`}
+              onPress={(e: any) => {
+                e?.stopPropagation?.();
+                if (navigation?.openAgent) {
+                  navigation.openAgent({ agentId: agent.id });
+                }
+              }}
+              style={({ pressed }: any) => ({
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+                paddingHorizontal: 2,
+                paddingVertical: 1,
+              })}
+            >
+              <Badge
+                label={`● Main Dirty${agent.mainDirtySummary ? `: ${agent.mainDirtySummary}` : ""}`}
+                variant="warning"
+                size="sm"
+                textStyle={{ fontSize: 10, fontWeight: "600" }}
+              />
+            </Pressable>
+          )}
           {!isExpanded && hasChildren && childCount > 0 && (
             <Badge
               label={`${childCount} subagent${childCount === 1 ? "" : "s"}`}
