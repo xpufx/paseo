@@ -10,6 +10,7 @@ import {
   approvalTelegramSetConfig,
   daemonHealth,
   migrateLegacyNotificationTarget,
+  parseApprovers,
   pendingList,
   policyAddRule,
   recentList,
@@ -57,12 +58,7 @@ export default function contribute(server: PluginServerContext) {
         notificationTarget: next.notificationTarget,
       });
       if (next.telegramBotToken || next.telegramChatId || next.telegramApprovers) {
-        const approvers = next.telegramApprovers
-          ? next.telegramApprovers
-              .split(/[\s,]+/)
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : [];
+        const approvers = parseApprovers(next.telegramApprovers);
         void setTelegramConfig({
           botToken: next.telegramBotToken || undefined,
           chatId: next.telegramChatId || undefined,

@@ -2,7 +2,15 @@ import type { PluginClientContext, PluginSurfaceProps } from "@getpaseo/plugin/c
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, ScrollView, useToast } from "@getpaseo/plugin/client/react-native";
 import {
+  SettingsCard,
+  SettingsInput,
+  SettingsSection,
+  SettingsSelect,
+  SettingsSwitch,
+} from "@getpaseo/plugin/client/ui";
+import {
   initClientHelpers,
+  registerHelperSettingsScreen,
   registerSidebarSurface,
 } from "paseo-plugin-helper/client";
 import { ErrorBoundary } from "./client/error-boundary";
@@ -12,9 +20,17 @@ import {
   trackHeaderButton,
   untrackHeaderButton,
 } from "./client/approvals";
+import { approvalSettings } from "./shared/approval";
 
 export default function contribute(client: PluginClientContext) {
   initClientHelpers({ Icon, Modal, useRpc, useToast, ScrollView });
+
+  const removeSettings = registerHelperSettingsScreen(client, approvalSettings, {
+    ui: { SettingsCard, SettingsSection, SettingsSwitch, SettingsSelect, SettingsInput },
+    id: "twofado",
+    title: "2fado",
+    icon: "ShieldCheck",
+  });
 
   const Surface = (props: PluginSurfaceProps) => (
     <ErrorBoundary label="approvals surface" fallback={null}>
@@ -84,6 +100,7 @@ export default function contribute(client: PluginClientContext) {
     );
 
   return () => {
+    removeSettings();
     unsubscribe();
     for (const remove of buttons.values()) remove();
     buttons.clear();

@@ -272,6 +272,18 @@ export type ApprovalApi = {
   policyAddRule(params: PolicyAddRuleParams): Promise<PolicyAddRuleResult>;
 };
 
+/**
+ * Split the free-text `telegramApprovers` setting into recipient ids. The
+ * field is stored as one string (comma- or whitespace-separated) by the
+ * settings UI; the server and client both need the same normalization.
+ */
+export function parseApprovers(raw: string): string[] {
+  return raw
+    .split(/[\s,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 export function migrateLegacyNotificationTarget(input: unknown): {
   data: Record<string, unknown>;
   changed: boolean;

@@ -6,6 +6,7 @@ import type {
 } from "@getpaseo/plugin/client";
 import { Icon, useToast } from "@getpaseo/plugin/client/react-native";
 import {
+  ActionBar,
   AttentionBeacon,
   Badge,
   Button,
@@ -14,10 +15,12 @@ import {
   Collapsible,
   CommandBox,
   EmptyState,
+  FormRow,
   KeyValue,
   KeyValueGroup,
   ModalBody,
   PluginThemeProvider,
+  Select,
   StatusDot,
   Tabs,
   TextInput,
@@ -39,14 +42,16 @@ import {
   daemonHealth,
   isAskPetition,
   isNotifyPetition,
+  notificationTargets,
+  parseApprovers,
   pendingList,
   policyAddRule,
   recentList,
   verdict,
 } from "../shared/approval";
+import type { ApprovalSettingsValues, NotificationTarget } from "../shared/approval";
 
-const LIST_KEY = ["twofado", "pending"];
-const RECENT_KEY = ["twofado", "recent"];
+const LIST_KEY = ["twofado", "pending"];const RECENT_KEY = ["twofado", "recent"];
 const POLL_MS = 3000;
 const RECENT_POLL_MS = 5000;
 // The plugin SDK only takes a label string (the host owns the Text), so the
@@ -64,6 +69,20 @@ const COMMAND_BLOCK_MAX_HEIGHT = 280;
 
 const seenIds = new Set<string>();
 const SEEN_IDS_CAP = 500;
+
+export type ApprovalTabId = "pending" | "history" | "settings";
+
+/** Tab strip for the 2fado surface: approvals plus the configuration tab. */
+export const APPROVAL_TABS: ReadonlyArray<{
+  id: ApprovalTabId;
+  label: string;
+  icon: string;
+}> = [
+  { id: "pending", label: "Pending", icon: "ShieldCheck" },
+  { id: "history", label: "History", icon: "History" },
+  { id: "settings", label: "Settings", icon: "Settings" },
+];
+
 
 function useNewPendingToast(
   items: Array<{ id: string; step?: "initial" | "confirm" }> | undefined,
@@ -999,6 +1018,196 @@ function TelegramStatusBar() {
   );
 }
 
+const NOTIFICATION_TARGET_LABELS: Record<NotificationTarget, string> = {
+  telegram: "Telegram only",
+  paseo: "Paseo desktop only",
+  both: "Telegram + Paseo desktop",
+};
+
+/**
+ * Settings tab: daemon connection + Telegram configuration bound to the
+ * `twofado.settings` contract. Edits are kept in local draft state so a
+ * partially typed token/chat id is never persisted on every keystroke; Save
+ * writes the whole draft through `usePluginSettings` and Reset restores the
+ * contract defaults.
+ */
+function SettingsTab() {
+  const { colors } = usePluginTheme();
+  const toast = useToast();
+  const health = useDaemonHealth();
+  const { settings, updateSettingsAsync, resetSettings, isUpdating } = usePluginSettings(approvalSettings);
+
+  const [draft, setDraft] = useState<ApprovalSettingsValues>(settings);
+  const settingsSignature = JSON.stringify(settings);
+  const draftSignature = JSON.stringify(draft);
+  const dirty = draftSignature !== settingsSignature;
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+
+  // Adopt external changes (another window, or a reset) unless the operator has
+  // unsaved local edits in flight.
+  useEffect(() => {
+    if (dirtyRef.current) return;
+    setDraft(settings);
+  }, [settingsSignature]);
+
+  const reachable = health.data?.reachable === true;
+
+  const setField = <Key extends keyof ApprovalSettingsValues>(
+    key: Key,
+    value: ApprovalSettingsValues[Key],
+  ) => setDraft((prev) => ({ ...prev, [key]: value }));
+
+  const handleSave = async () => {
+    try {
+      await updateSettingsAsync(draft);
+      toast.show("2fado settings saved", { variant: "success" });
+    } catch (err) {
+      console.warn("[2fado] settings save failed:", err);
+      toast.error("Settings save failed — 2fadod unreachable.");
+    }
+  };
+
+  const handleReset = async () => {
+    try {
+      const reset = await resetSettings();
+      setDraft(reset);
+      toast.show("2fado settings reset to defaults", { variant: "default" });
+    } catch (err) {
+      console.warn("[2fado] settings reset failed:", err);
+      toast.error("Settings reset failed — 2fadod unreachable.");
+    }
+  };
+
+  const approverCount = parseApprovers(draft.telegramApprovers).length;
+
+  return (
+    <View style={{ gap: 10 }}>
+      <Card variant="flat" style={{ gap: 8 }}>
+        <Card.Header
+          title="2fado daemon"
+          subtitle="Socket connection to 2fadod"
+          icon="Server"
+        />
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <StatusDot
+            variant={reachable ? "success" : health.isError ? "danger" : "warning"}
+            size="md"
+            pulse={reachable}
+          />
+          <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>
+            {reachable
+              ? "Connected"
+              : health.isPending
+                ? "Probing…"
+                : "Unreachable"}
+          </Text>
+          {health.data?.reachable && "version" in health.data && health.data.version ? (
+            <Badge label={`v${health.data.version}`} variant="neutral" styleVariant="tinted" />
+          ) : null}
+          {health.data?.reachable && "pid" in health.data && health.data.pid ? (
+            <Badge label={`pid ${health.data.pid}`} variant="neutral" styleVariant="tinted" />
+          ) : null}
+        </View>
+        <FormRow
+          label="Socket path"
+          description="Unix socket 2fadod listens on. Saved changes are probed automatically."
+        >
+          <TextInput
+            value={draft.socketPath}
+            onChangeText={(value) => setField("socketPath", value)}
+            placeholder="/tmp/2fado.sock"
+            mono
+          />
+        </FormRow>
+      </Card>
+
+      <Card variant="flat" style={{ gap: 8 }}>
+        <Card.Header
+          title="Telegram notifications"
+          subtitle="Where approvals are delivered and who can act on them"
+          icon="Send"
+        />
+        <FormRow
+          label="Notification target"
+          description="Which channel receives new approval requests."
+        >
+          <Select
+            value={draft.notificationTarget}
+            options={notificationTargets.map((target) => ({
+              value: target,
+              label: NOTIFICATION_TARGET_LABELS[target],
+            }))}
+            onValueChange={(value) => setField("notificationTarget", value as NotificationTarget)}
+          />
+        </FormRow>
+        <FormRow
+          label="Bot token"
+          description="Telegram bot token used to deliver messages."
+        >
+          <TextInput
+            value={draft.telegramBotToken}
+            onChangeText={(value) => setField("telegramBotToken", value)}
+            placeholder="123456:ABC-DEF…"
+            secureTextEntry
+          />
+        </FormRow>
+        <FormRow
+          label="Chat ID"
+          description="Destination chat or channel for approval messages."
+        >
+          <TextInput
+            value={draft.telegramChatId}
+            onChangeText={(value) => setField("telegramChatId", value)}
+            placeholder="-1001234567890"
+            mono
+          />
+        </FormRow>
+        <FormRow
+          label="Approvers"
+          description="Telegram user ids allowed to approve, separated by commas or spaces."
+        >
+          <TextInput
+            value={draft.telegramApprovers}
+            onChangeText={(value) => setField("telegramApprovers", value)}
+            placeholder="123456789, 987654321"
+            mono
+          />
+        </FormRow>
+        {approverCount > 0 ? (
+          <Badge
+            label={`${approverCount} approver${approverCount === 1 ? "" : "s"}`}
+            variant="accent"
+            styleVariant="tinted"
+          />
+        ) : null}
+      </Card>
+
+      <ActionBar align="flex-end">
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <Button
+            label="Reset"
+            variant="secondary"
+            size="sm"
+            icon="RotateCcw"
+            disabled={isUpdating}
+            onPress={() => void handleReset()}
+          />
+          <Button
+            label={dirty ? "Save changes" : "Saved"}
+            variant="primary"
+            size="sm"
+            icon="Check"
+            loading={isUpdating}
+            disabled={isUpdating || !dirty}
+            onPress={() => void handleSave()}
+          />
+        </View>
+      </ActionBar>
+    </View>
+  );
+}
+
 function ApprovalSurfaceInner({
   theme,
   layout,
@@ -1034,7 +1243,7 @@ function ApprovalSurfaceInner({
   const [policyScope, setPolicyScope] = useState<"exact" | "base" | "custom">("exact");
   const [customPattern, setCustomPattern] = useState("");
   const [policySaving, setPolicySaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<"pending" | "history">("pending");
+  const [activeTab, setActiveTab] = useState<"pending" | "history" | "settings">("pending");
   const [activeExecutions, setActiveExecutions] = useState<
     Record<
       string,
@@ -1395,21 +1604,13 @@ function ApprovalSurfaceInner({
           <TelegramStatusBar />
 
           <Tabs
-            tabs={[
-              {
-                id: "pending",
-                label: "Pending",
-                icon: "ShieldCheck",
-                badge: items.length > 0 ? items.length : undefined,
-              },
-              {
-                id: "history",
-                label: "History",
-                icon: "History",
-              },
-            ]}
+            tabs={APPROVAL_TABS.map((tab) =>
+              tab.id === "pending"
+                ? { ...tab, badge: items.length > 0 ? items.length : undefined }
+                : tab,
+            )}
             activeTab={activeTab}
-            onTabChange={(id) => setActiveTab(id as "pending" | "history")}
+            onTabChange={(id) => setActiveTab(id as ApprovalTabId)}
           />
 
           {activeTab === "pending" ? (
@@ -1534,7 +1735,7 @@ function ApprovalSurfaceInner({
                 </>
               ) : null}
             </>
-          ) : (
+          ) : activeTab === "history" ? (
             <>
               {recent.isPending ? (
                 <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12 }}>Loading…</Text>
@@ -1550,6 +1751,8 @@ function ApprovalSurfaceInner({
                 <RecentItem key={item.id} item={item} />
               ))}
             </>
+          ) : (
+            <SettingsTab />
           )}
 
         </View>
