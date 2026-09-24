@@ -1,6 +1,6 @@
 # twofado
 
-> **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
+
 
 Approval-gate UI for the **2fado** privileged-command daemon, for
 [Paseo](https://github.com/getpaseo/paseo).
@@ -9,6 +9,8 @@ Surfaces pending risky command requests from `2fadod` and lets a human
 approve, deny, or acknowledge them without leaving Paseo. The plugin also
 registers a sidebar item, a workspace header button, and a command-center
 entry so the queue is one tap away.
+
+> **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
 Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
 
