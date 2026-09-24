@@ -9,6 +9,11 @@ triages, decomposes, and dispatches; ephemeral **coding workers** implement;
 and a **Cockpit** surface inside Paseo shows the whole thing — queues, agents,
 boards, and router health — in one place.
 
+> [!IMPORTANT]
+> **Uppidi Fleet is a work in progress.** It requires manual install of some
+> components and occasional intervention by humans. All features may not work
+> 100% reliably.
+
 This README is written for a **third party** who has never used the system and
 wants to stand one up for their own forge, repositories, models, and team
 rules. It explains the architecture, how the skills work and how to rewrite
@@ -45,22 +50,35 @@ which pieces you must supply because the plugin does not ship them ([§10](#10-g
 ## 1. The concept in one picture
 
 ```
-  Forgejo board (source of truth)                  Paseo daemon (per host)
-  ┌───────────────────────────────┐                ┌──────────────────────────────┐
-  │ issues · PRs · comments       │   webhooks     │  bundled hook router         │
-  │ scoped labels:                │ ─────────────▶ │  (server/hook-router.ts)     │
-  │   state/ priority/ attention/ │                │    POST /forgejo             │
-  │   spec/ target/ verify/       │                │        │                     │
-  └───────────────▲───────────────┘                │        ▼ per-repo queue     │
-                  │                                │   ┌─────────────┐            │
-                  │ labels, comments, commits      │   │ Front Desk  │◀─ operator │
-                  │ via CLI or direct API          │   └──────┬──────┘            │
-                  │                                │          │ escalation        │
-        ┌─────────┴─────────┐                      │          ▼                   │
-        │  coding workers   │◀──── dispatch ───────│  ┌───────────────┐           │
-        │ (ephemeral wtrees)│                      │  │ Orchestrator  │ per repo  │
-        └───────────────────┘                      │  └───────────────┘           │
-                                                   └──────────────────────────────┘
+  Forgejo board (source of truth)
+  ┌───────────────────────────────────────────────────────────────┐
+  │ issues · PRs · comments · scoped labels                       │
+  │   state/  priority/  attention/  spec/  target/  verify/      │
+  └───────────────────────────────┬───────────────────────────────┘
+                                  │ webhooks (POST /forgejo)
+                                  ▼
+  ┌───────────────────────────────────────────────────────────────┐
+  │ bundled hook router  (server/hook-router.ts)                  │
+  │   classify: routine repo events → that repo's Orchestrator    │
+  │             frontdesk events    → Front Desk                  │
+  └───────────────┬───────────────────────────────┬───────────────┘
+                  │ per-repo queue                │ frontdesk queue
+        routine repo events            frontdesk-directed events
+        (attention/*, comments,        (attention/frontdesk,
+         labels, PRs, pushes)           attention/2-user, /frontdesk)
+                  │                               │
+                  ▼                               ▼
+  ┌───────────────────────────────┐   ┌───────────────────────────┐
+  │ Orchestrator (one per repo)   │   │ Front Desk (operator      │
+  │ triage · shape · dispatch ·   │   │ liaison + triage intake)  │
+  │ review · merge                │   └─────────────▲─────────────┘
+  └───────────────┬───────────────┘                 │ operator chat
+                  │ dispatch                        │
+                  ▼                             operator
+  ┌───────────────────────────────┐
+  │ coding workers (ephemeral)    │
+  │ one isolated worktree each    │
+  └───────────────────────────────┘
 
   Cockpit UI (Paseo sidebar + workspace panel): agent tree, board, queues, router
   health, role models, and Front Desk / orchestrator spawn controls.
@@ -71,9 +89,13 @@ Four moving parts:
 1. **The forge** stores all durable state (issues, comments, labels, commits)
    and emits webhook events when that state changes.
 2. **The bundled hook router** receives those events, classifies them, queues
-   them per repository, and delivers them to the right agent over Paseo's
-   transport. This is the piece that wakes an idle fleet.
-3. **The agents** do the work. Three roles: **Front Desk** (operator liaison),
+   them per repository, and delivers them over Paseo's transport: routine
+   repository events go **directly to that repository's orchestrator**, while
+   frontdesk-directed events (`attention/frontdesk`, `attention/2-user`, a
+   `/frontdesk` comment) go to the **Front Desk**. This is the piece that wakes
+   an idle fleet.
+3. **The agents** do the work. Three roles: **Front Desk** (the operator-facing
+   liaison and triage intake — it only receives frontdesk-directed events),
    **orchestrator** (one per repo; triage + dispatch + review), and **coding
    workers** (ephemeral, one worktree each). Their behaviour is encoded in
    *Skills*, not in the plugin.
@@ -85,7 +107,7 @@ Four moving parts:
 
 | Role | How many | Owns | Never does |
 | --- | --- | --- | --- |
-| **Front Desk** | 0–1 per fleet | Talks to the operator in chat; routes escalations; registers with the router | Implement code |
+| **Front Desk** | 0–1 per fleet | Operator-facing liaison and triage intake; takes frontdesk-directed events; routes escalations; registers with the router | Implement code; receive routine per-repo webhooks |
 | **Orchestrator** | one per enrolled repo | Triage, shaping, dispatch, PR pre-flight/merge, board hygiene | Edit source files or check out feature branches itself |
 | **Coding worker** | one per ticket (ephemeral) | Implements in an isolated git worktree, opens a PR | Touch a checkout the operator is using; scan/self-claim |
 
@@ -115,7 +137,7 @@ the label seed in [§5](#5-board-labels-taxonomy-and-install) matters.
 | **A Forgejo or Gitea-family host** | Any `forgejo`/`gitea` instance; the API used is `/api/v1`. |
 | **Repository access token** | A PAT with issue write scope (see below). |
 | **An agent provider + model** | Any provider Paseo supports, per role. |
-| **A host runner** (only for the action workflow) | Forgejo Actions runner, host backend preferred. |
+| **A host runner** | **Required** for label triage and repository sweeps (the Forgejo Actions workflows in [§9](#9-forgejo-actions--automated-board-hygiene)). A Forgejo Actions runner with the host backend is preferred. |
 | **A git host remote named for your forge** | The CLI wrappers resolve board context from `origin`. |
 
 Minimum Forgejo/Gitea PAT scopes for the write surfaces:
@@ -131,13 +153,6 @@ From a local checkout (the reliable path in this monorepo):
 
 ```sh
 paseo plugin add xpufx/paseo --path plugins/uppidi-fleet
-```
-
-If your Paseo build resolves npm packages, and the package is published for
-your registry:
-
-```sh
-paseo plugin add npm:@xpufx/paseo-uppidi-fleet
 ```
 
 After install, the plugin appears as a sidebar item and a workspace panel named
@@ -160,9 +175,8 @@ The plugin registers one primary surface with three tabs:
 Key behaviours:
 
 - **Router health** is shown in the header (`Router Connected` / `Router active`).
-- **Worktree dispatch** buttons in the Work Queue are currently UI placeholders
-  that toast a message; real dispatch is driven by the orchestrator Skill, not
-  the button (see [§10](#10-gap-analysis--what-the-plugin-does-not-ship)).
+- **Dispatch is handled via the orchestrator protocol**, not from the UI: the
+  orchestrator Skill creates and drives each worker's isolated worktree.
 - The issue list is fetched by `uppidi-fleet.issues` from the forge API — see
   the host/repo caveat in [§10](#10-gap-analysis--what-the-plugin-does-not-ship).
 
@@ -260,17 +274,27 @@ maintainers' board, producing false "label not found" errors. Follow
 
 Skills are Markdown instruction sets living in a **skills directory** that
 Paseo/opencode loads on demand. **The plugin does not contain the fleet's
-Skills.** They are host-local, and this monorepo's live skills live under
-`.agents/skills/`, which is gitignored (`.agents/` in the root `.gitignore`).
-What the repository *does* ship are **adapted example Skills** under
-[`plugins/forges/examples/skills/`](../forges/examples/skills/):
+Skills.** In this repository they live at the repository root under
+`.agents/skills/`, *outside* the plugin package. Alongside them, the repository
+ships **adapted example Skills** you can copy and rewrite for your own
+environment, under [`plugins/forges/examples/skills/`](../forges/examples/skills/):
 
 | Example file | Role | Style |
 | --- | --- | --- |
 | [`coding-agent/SKILL.md`](../forges/examples/skills/coding-agent/SKILL.md) | coding worker | zero-dependency (plugin surfaces + embedded `/api/v1`) |
-| [`coding-agent-fgjx/SKILL.md`](../forges/examples/skills/coding-agent-fgjx/SKILL.md) | coding worker | CLI (`fgjx` over `fgj`) |
+| [`coding-agent-fgjx/SKILL.md`](../forges/examples/skills/coding-agent-fgjx/SKILL.md) | coding worker | CLI wrapper (`teax`/`fgjx`) |
 | [`orchestrator/SKILL.md`](../forges/examples/skills/orchestrator/SKILL.md) | orchestrator | zero-dependency |
-| [`orchestrator-fgjx/SKILL.md`](../forges/examples/skills/orchestrator-fgjx/SKILL.md) | orchestrator | CLI |
+| [`orchestrator-fgjx/SKILL.md`](../forges/examples/skills/orchestrator-fgjx/SKILL.md) | orchestrator | CLI wrapper |
+
+> [!NOTE]
+> **CLI tooling ships `teax` (over `tea`).** The fleet's rich CLI variant drives
+> the board through **`teax`**, an enhanced wrapper around the Gitea/Forgejo
+> `tea` CLI. `tea` is the authenticated transport (it owns the host URL and
+> token, and performs the raw `/api/v1` calls); `teax` adds board-shaped verbs
+> (label-name resolution, formatted issue/PR views, optional agent-envelope
+> stamping). If the underlying CLI is not found, `teax` prints a download link —
+> `https://gitea.com/gitea/tea/releases` — so you can install it. The
+> zero-dependency example needs no CLI at all.
 
 There is **no shipped Front Desk example** — the live `front-desk` skill is one
 team's, and you must author your own (see [§10](#10-gap-analysis--what-the-plugin-does-not-ship)).
@@ -292,13 +316,16 @@ team's, and you must author your own (see [§10](#10-gap-analysis--what-the-plug
 - Keep the composer window quiet; all communication is on the board or through
   Front Desk.
 
-**Front Desk** — the operator liaison:
+**Front Desk** — the operator-facing liaison and triage intake:
 
 - The operator talks only to Front Desk. Orchestrators reach it with
   `paseo send --steer --no-wait <frontDeskId> "..."`
   (`--steer` is mandatory so it never clobbers an active turn).
 - It registers itself with the router via `POST /frontdesk`
   ([§7.4](#74-control-endpoints)).
+- It receives only **frontdesk-directed events** — `attention/frontdesk`,
+  `attention/2-user`, or a `/frontdesk` comment — not the routine per-repo
+  webhooks, which go straight to each repository's orchestrator.
 - It shields the operator from routine chatter and surfaces only decisions,
   approvals, credentials/2FA requests, and completed deliverables.
 
@@ -321,8 +348,9 @@ team's, and you must author your own (see [§10](#10-gap-analysis--what-the-plug
    If you seeded fewer scopes, delete the references to the missing ones.
 4. **Choose a board-access style.** The zero-dependency examples need nothing
    installed and use the plugin's surfaces and a direct `/api/v1` client. The
-   `-fgjx` examples assume *your* `fgj` (the authenticated transport) plus an
-   optional envelope tool; the plugin never loads `fgjx`.
+   `-fgjx` examples assume the shipped `teax` (the board CLI wrapper) over
+   *your* `tea` (the authenticated transport), plus an optional envelope tool;
+   the plugin never loads either.
 5. **Pick your models per role** and record them (Cockpit → Agent Role Models,
    or `~/.paseo/uppidi-fleet-role-models.json`). See
    [§12](#12-runtime-state--file-map).
@@ -347,9 +375,6 @@ The router is **bundled into the plugin** at
 [`server/hook-router.ts`](./server/hook-router.ts) and started by
 [`index.server.ts`](./index.server.ts). It is a plain Node `http` server; you
 do not need a systemd unit or a separate bridge for the plugin's own queueing.
-(The monorepo's older `scripts/forgejo-hook.mjs` service and the `forges`
-example hook service are separate, generic bridges — the bundled router
-supersedes them for this plugin.)
 
 ### 7.1 Listen address
 
@@ -383,10 +408,10 @@ Ingress endpoints are `POST /forgejo` and `POST /hook` (aliases). Behaviour:
      changed label is `attention/frontdesk` or `attention/2-user`, or a comment
      body starts with `/frontdesk`.
    - **Bypass / SOS events** → jumped to the head of the queue. True when the
-     changed label is `priority/0-sos` (case-insensitive), `flag/stop-work`,
-     `ping/*`, or any `attention/*`, or a comment starts with `/orchestrator`,
-     `/hold`, `/rework`, `/approve`, `/verify`, `/done`, `/close`,
-     `/instruction`, `/agent`, `/sos`, or `/stop`.
+     changed label is `priority/0-SOS` (matched case-insensitively),
+     `flag/stop-work`, `ping/*`, or any `attention/*`, or a comment starts with
+     `/orchestrator`, `/hold`, `/rework`, `/approve`, `/verify`, `/done`,
+     `/close`, `/instruction`, `/agent`, `/sos`, or `/stop`.
    - **Routine comments stamped by the registered orchestrator** are suppressed
      so an orchestrator cannot wake itself with its own envelope footer.
    - **Everything else** → the repo's normal queue via **event coalescing**
@@ -590,11 +615,6 @@ exclusivity evicts `state/1-wip`). It invokes a **reusable workflow in an
 external repo** (`xpufx-org/platform`). If you want this, host your own
 reusable base and point the caller at it, or inline the logic.
 
-### 9.3 Other workflows (context)
-
-`install-smoke.yml`, `npm-stage.yml`, and `.github/workflows/mirror-sync.yml`
-are release/CI plumbing for the monorepo, not fleet behaviour.
-
 ---
 
 ## 10. Gap analysis — what the plugin does not ship
@@ -613,14 +633,16 @@ these gaps yourself.
 - **Action:** copy/adapt the seed (see [§5.3](#53-install-approaches)). Consider
   adding a small `seed-labels.sh` to your fork.
 
-### 10.2 The fleet's Skills are not in the repository
+### 10.2 The fleet's Skills live outside the plugin
 
-- The live `orchestrator`, `front-desk`, and `coding-agent` skills live under
-  `.agents/skills/`, which is **gitignored**. Only the *forges* example skills
-  ([§6](#6-skills-how-the-fleet-thinks)) ship, and there is **no Front Desk
-  example**.
-- **Action:** adapt the forges examples and author a Front Desk skill; keep them
-  in your own skills directory.
+- The live `orchestrator`, `front-desk`, and `coding-agent` skills live in this
+  repository at the root, under `.agents/skills/` — **in the repository, but
+  outside the plugin package**. The plugin itself ships no Skills.
+- The repository ships **adapted example Skills** under
+  [`plugins/forges/examples/skills/`](../forges/examples/skills/)
+  ([§6](#6-skills-how-the-fleet-thinks)), and there is **no Front Desk example**.
+- **Action:** copy the forges examples into your own `.agents/skills/`, adapt
+  them, and author a Front Desk skill.
 
 ### 10.3 Action workflow YAML is monorepo-level, host-specific
 
@@ -640,20 +662,14 @@ these gaps yourself.
 - **Action:** export `FORGEJO_HOST` and `FORGEJO_TOKEN`, and pass the desired
   repo (or patch the defaults) until a settings field is added.
 
-### 10.5 The `priority/0-SOS` bypass case mismatch is fixed
-
-- `isBypassEvent()` now lowercases the incoming label before comparing it to the
-  bypass label set, so an `issues:labeled` event carrying the canonical
-  `priority/0-SOS` is promoted to the head of the queue as intended.
-
-### 10.6 The webhook secret is not verified
+### 10.5 The webhook secret is not verified
 
 - The router stores `FORGE_HOOK_SECRET` but never validates
   `X-Forgejo-Signature` or an auth header ([§7.5](#75-security-notes)).
 - **Action:** keep the listener on loopback or front it with an authenticating
   proxy until signature verification lands.
 
-### 10.7 The Front Desk hand-off endpoint now exists
+### 10.6 The Front Desk hand-off endpoint exists
 
 - `POST /handoff` (aliased as `POST /frontdesk-handoff`) implements the rotation
   protocol: it seeds `latest-handoff.md`, projects the `Front Desk` role label,
@@ -661,34 +677,20 @@ these gaps yourself.
   orchestrators. `GET /handoff` reports the active registration and snapshot
   summary, matching the live Front Desk skill.
 
-### 10.8 UI dispatch buttons are placeholders
+### 10.7 Role models, metrics, and runners are mock / coming-soon
 
-- The Work Queue's **Dispatch work** / **Dispatch Worktree** buttons only toast;
-  they do not create worktrees. Dispatch is performed by the orchestrator Skill
-  (via `paseo workspace create` / `create_workspace`).
-- **Action:** drive dispatch through the orchestrator; treat the buttons as
-  future surface area.
-
-### 10.9 Hardcoded role models, metrics, and runner probing
-
-- Default role models ([`server/role-models.ts`](./server/role-models.ts)) and
-  fleet metrics ([`server/metrics.ts`](./server/metrics.ts)) ship one team's
-  model ids and benchmark numbers. Runner discovery
+- The bundled defaults are **mock / coming-soon**. Role models
+  ([`server/role-models.ts`](./server/role-models.ts)) and fleet metrics
+  ([`server/metrics.ts`](./server/metrics.ts)) ship one team's placeholder model
+  ids and benchmark numbers. Runner discovery
   ([`server/runners.ts`](./server/runners.ts)) shells `podman ps` / `tea whoami`
-  and contains a hardcoded runner id.
+  and contains a hardcoded runner id. None of this is wired to a real provider
+  fleet yet.
 - **Action:** override role models from the Cockpit or
   `~/.paseo/uppidi-fleet-role-models.json`; treat metrics and runners as
-  advisory stubs.
+  mock/coming-soon stubs.
 
-### 10.10 Legacy artefacts
-
-- `plugins/uppidi-forge` is a symlink to `plugins/uppidi-fleet`, kept for the
-  old name.
-- The monorepo `paseo.json` still declares a `forgejo-hook` service that points
-  at `scripts/forgejo-hook.mjs`, whose symlink target is a platform path not
-  present here. The bundled router in the plugin is the supported path.
-
-### 10.11 Adoption checklist
+### 10.8 Adoption checklist
 
 - [ ] Seed the scoped labels on every enrolled repo ([§5](#5-board-labels-taxonomy-and-install)).
 - [ ] Create a PAT with issue write scope and export it where the plugin reads it.
@@ -739,7 +741,7 @@ these gaps yourself.
 | `~/.paseo/uppidi-fleet-role-models.json` | Per-role primary model + fallback group. |
 | `~/.paseo/uppidi-fleet-metrics.json` | Fleet capability metrics. |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `enrolledRepos`, `mutedRepos`). |
-| `<skills dir>/.agents/skills/` | Host-local skills (gitignored here). |
+| `<repo-root>/.agents/skills/` | The fleet's operational skills, at the repository root (outside the plugin package). |
 
 Environment variables: `FORGE_HOOK_HOST`, `FORGE_HOOK_PORT`/`HOOK_PORT`,
 `FORGE_HOOK_SECRET` (stored, unenforced), `FORGE_HOOK_CONFIG`,
