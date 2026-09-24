@@ -26,6 +26,7 @@ export const PLUGINS = {
   "x-comms": ["client", "server", "shared", "mcp"],
   "twofado": ["client", "server", "shared"],
   "plugin-updates": ["client", "server", "shared"],
+  "wellbeing": ["client", "server", "shared"],
 };
 
 export const TREES = ["client", "core", "ui", "server", "shared", "mcp"];

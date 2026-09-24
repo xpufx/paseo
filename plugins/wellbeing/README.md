@@ -1,9 +1,15 @@
 # @xpufx/paseo-wellbeing
 
 > Operator presence tracking, circadian schedule management, and fatigue / wind-down
-> alerting for [Paseo](https://github.com/getpaseo). A deterministic mathematical
+> alerting for [Paseo](https://github.com/getpaseo/paseo). A deterministic mathematical
 > model that runs entirely inside the Paseo daemon event loop — **zero LLM tokens,
 > zero model calls, zero network round-trips.**
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/wellbeing/screenshots/wellbeing.jpg" alt="Wellbeing surface in Paseo Desktop" width="560" />
+</p>
+
+> **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
 `wellbeing` watches the *human* behind the fleet. It answers three questions on
 every tick:
@@ -17,6 +23,8 @@ Desktop, and a set of RPC contracts (`wellbeing.status` et al.) that agents,
 orchestrators, and the Front Desk can poll to decide *how* to talk to the operator
 — quick interactive turns during desk focus, async batching during idle, composer
 silence during Bed Mode.
+
+Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
 
 ---
 
@@ -75,13 +83,22 @@ Three design commitments follow from this:
 ### Requirements
 
 - Paseo `>=0.8.0` (declared in [`paseo-plugin.json`](paseo-plugin.json)).
-- The plugin is part of the monorepo workspace (`plugins/wellbeing`) and is
-  published as `@xpufx/paseo-wellbeing`.
 
-### Enabling it
+### Installing it
 
-Install / enable the plugin through the normal Paseo plugin flow, then reload the
-daemon. On load, `index.server.ts` logs:
+Install from npm:
+
+```sh
+paseo plugin add npm:@xpufx/paseo-wellbeing
+```
+
+Or install directly from the Git repository:
+
+```sh
+paseo plugin add xpufx/paseo --path plugins/wellbeing
+```
+
+Then reload the daemon. On load, `index.server.ts` logs:
 
 ```
 wellbeing plugin contributed: operator presence tracking & circadian wind-down live
