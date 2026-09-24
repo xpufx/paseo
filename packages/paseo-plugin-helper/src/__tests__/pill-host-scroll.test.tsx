@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import React from "react";
+import React, { useContext } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { Text, View } from "react-native";
 import {
@@ -10,6 +10,7 @@ import {
   registerComposerPill,
   resolvePillModalScrollable,
 } from "../client/pill.js";
+import { ModalBodyScrollOwnerContext } from "../client/layout/ModalBody.js";
 import { HostModalSection } from "../ui/modal.js";
 
 describe("resolvePillModalScrollable", () => {
@@ -178,6 +179,35 @@ describe("registerComposerPill legacy modal wrapper", () => {
     expect(renderer.root.findAllByType(HostContent)).toHaveLength(1);
     expect(contentProps.at(-1)?.scrollable).toBe(true);
     expect(renderer.root.findAllByType(HostModalSection)).toHaveLength(1);
+    dispose();
+  });
+
+  it("provides ModalBodyScrollOwnerContext 'required' when hostScroll is omitted/false", async () => {
+    let capturedScrollOwner: string | undefined;
+    function ScrollConsumer() {
+      capturedScrollOwner = useContext(ModalBodyScrollOwnerContext);
+      return <Text>scroll consumer</Text>;
+    }
+    const dispose = registerOnLegacyHost({
+      renderModal: () => <ScrollConsumer />,
+    });
+    await openPill();
+    expect(capturedScrollOwner).toBe("required");
+    dispose();
+  });
+
+  it("provides ModalBodyScrollOwnerContext 'host' when hostScroll is true", async () => {
+    let capturedScrollOwner: string | undefined;
+    function ScrollConsumer() {
+      capturedScrollOwner = useContext(ModalBodyScrollOwnerContext);
+      return <Text>scroll consumer</Text>;
+    }
+    const dispose = registerOnLegacyHost({
+      hostScroll: true,
+      renderModal: () => <ScrollConsumer />,
+    });
+    await openPill();
+    expect(capturedScrollOwner).toBe("host");
     dispose();
   });
 });

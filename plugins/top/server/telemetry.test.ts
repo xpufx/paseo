@@ -511,6 +511,10 @@ test("every top pill variant shares one centered presentation model", () => {
     3,
     "main, per-metric, and custom pills must all register through registerTopPill",
   );
+  assert.ok(
+    pillSource.includes('scrollMode="always"'),
+    "ResourceModal must explicitly specify scrollMode=\"always\" on ModalBody",
+  );
 });
 
 test("timeline cadence gates the card: never, every turn, every Nth turn", () => {

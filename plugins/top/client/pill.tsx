@@ -1111,6 +1111,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
       <ModalBody
         style={{ backgroundColor: colors.surface0 }}
         headerMode="pinned"
+        scrollMode="always"
         refreshing={isRefetching}
         onRefresh={handleRefresh}
         header={navbar}
@@ -1135,6 +1136,7 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
     <ModalBody
       style={{ backgroundColor: colors.surface0 }}
       headerMode="pinned"
+      scrollMode="always"
       refreshing={isLoading || isRefetching}
       onRefresh={handleRefresh}
       header={navbar}
