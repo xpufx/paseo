@@ -482,10 +482,125 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
     // Allow async drain to complete
     await new Promise((r) => setTimeout(r, 20));
 
-    // Message should now have been dispatched via in-process send with steer: true!
+    // Routine webhook message should now have been dispatched via in-process send with steer: false (#536)
     assert.equal(sentMessages.length, 1);
     assert.equal(sentMessages[0].text, "Prompt to orchestrator");
+    assert.equal(sentMessages[0].options?.steer, false);
+    assert.equal(router.getQueue(key).length, 0);
+  });
+
+  it("preempts busy agent immediately and delivers with steer: true on SOS emergency (#536)", async () => {
+    const key = "forge.mrs.uppidi.com/xpufx-org/paseo";
+    const targetAgentId = "agent-orchestrator-sos";
+
+    const sentMessages: Array<{ text: string; options: any }> = [];
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => {
+          assert.equal(id, targetAgentId);
+          return {
+            current: () => ({ id, status: "running", activeTurn: { id: "turn-1" } }),
+            send: async (text: string, options: any) => {
+              sentMessages.push({ text, options });
+            },
+          };
+        },
+      },
+    } as any;
+
+    const mockServer = {
+      paseo: mockPaseo,
+      events: { on: () => () => {} },
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    const router = new HookRouter(mockServer, { queueDir, stateDir, port: 0 });
+
+    router.writeOrchestrator(key, targetAgentId);
+
+    // Enqueue an SOS emergency message while agent is busy
+    router.enqueue(key, "EMERGENCY STOP", true);
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    // SOS must preempt immediately and pass steer: true
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].text, "EMERGENCY STOP");
     assert.equal(sentMessages[0].options?.steer, true);
+    assert.equal(router.getQueue(key).length, 0);
+  });
+
+  it("batches multiple queued messages into a single coalesced digest prompt (#536)", async () => {
+    const key = "forge.mrs.uppidi.com/xpufx-org/paseo";
+    const targetAgentId = "agent-orchestrator-batch";
+
+    let agentStatus: "running" | "idle" = "running";
+    const sentMessages: Array<{ text: string; options: any }> = [];
+    let turnEndedHandler: any = null;
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => {
+          assert.equal(id, targetAgentId);
+          return {
+            current: () => ({ id, status: agentStatus, activeTurn: agentStatus === "running" ? { id: "turn-1" } : null }),
+            send: async (text: string, options: any) => {
+              sentMessages.push({ text, options });
+            },
+          };
+        },
+      },
+    } as any;
+
+    const mockServer = {
+      paseo: mockPaseo,
+      events: { on: () => () => {} },
+      on: (name: string, handler: any) => {
+        if (name === "agent.turn_ended") {
+          turnEndedHandler = handler;
+        }
+        return () => {};
+      },
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    const router = new HookRouter(mockServer, { queueDir, stateDir, port: 0 });
+
+    router.writeOrchestrator(key, targetAgentId);
+
+    // Enqueue 3 messages while agent is busy
+    router.enqueue(key, "Event 1: PR closed");
+    router.enqueue(key, "Event 2: Action failure");
+    router.enqueue(key, "Event 3: Issue labeled");
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    // Agent busy, nothing sent yet
+    assert.equal(sentMessages.length, 0);
+    assert.equal(router.getQueue(key).length, 3);
+
+    // Agent finishes turn
+    agentStatus = "idle";
+    assert.ok(turnEndedHandler);
+    await turnEndedHandler({ agent: { id: targetAgentId } }, { paseo: mockPaseo });
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    // All 3 messages must be coalesced into a SINGLE batch turn with steer: false
+    assert.equal(sentMessages.length, 1);
+    assert.ok(sentMessages[0].text.includes("Batch notification (3 events)"));
+    assert.ok(sentMessages[0].text.includes("Event 1: PR closed"));
+    assert.ok(sentMessages[0].text.includes("Event 2: Action failure"));
+    assert.ok(sentMessages[0].text.includes("Event 3: Issue labeled"));
+    assert.equal(sentMessages[0].options?.steer, false);
     assert.equal(router.getQueue(key).length, 0);
   });
 

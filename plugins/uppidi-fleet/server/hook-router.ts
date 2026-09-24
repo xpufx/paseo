@@ -770,15 +770,17 @@ export class HookRouter {
       directOpts = { id: stableId(repoKey, `${msg}\nSOS transition ${transition}`) };
     }
 
+    const isSosEvent = sosState !== null || (typeof commentBody === "string" && /(?:^|\s)\/(?:sos|stop)\b/i.test(commentBody));
+
     if (this.coalesceDisable || bypass || issue == null) {
       if (!this.coalesceDisable && bypass && issue != null) {
         const bkey = bufferKey(repoKey, issue);
         const entry = this.coalesceBuffers.get(bkey);
-        this.handleMessage(repoKey, msg, directOpts?.id);
+        this.handleMessage(repoKey, msg, directOpts?.id, isSosEvent);
         if (entry && entry.events.length > 0) this.flushCoalesced(bkey);
         return "bypass";
       }
-      this.handleMessage(repoKey, msg, directOpts?.id);
+      this.handleMessage(repoKey, msg, directOpts?.id, isSosEvent);
       return this.coalesceDisable ? "disabled" : "direct";
     }
 
@@ -806,8 +808,8 @@ export class HookRouter {
     return "buffered";
   }
 
-  private handleMessage(key: string, msg: string, stableIdOverride?: string): QueueEntry {
-    return this.enqueue(key, msg, false, stableIdOverride);
+  private handleMessage(key: string, msg: string, stableIdOverride?: string, isSos = false): QueueEntry {
+    return this.enqueue(key, msg, isSos, stableIdOverride);
   }
 
   public async ingestWebhook(event: string, body: any): Promise<{
@@ -1114,10 +1116,11 @@ export class HookRouter {
     options?: { noWait?: boolean; steer?: boolean },
   ): Promise<boolean> {
     const paseo = this.getPaseo();
+    const shouldSteer = options?.steer ?? false;
     if (paseo?.agents?.ref) {
       try {
         const agentRef = paseo.agents.ref(targetAgentId);
-        await agentRef.send(msg, { steer: options?.steer ?? true } as any);
+        await agentRef.send(msg, { steer: shouldSteer } as any);
         return true;
       } catch (err) {
         this.log(`[warn] SDK send failed for ${targetAgentId}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`);
@@ -1128,6 +1131,9 @@ export class HookRouter {
       const args = ["send"];
       if (options?.noWait !== false) {
         args.push("--no-wait");
+      }
+      if (shouldSteer) {
+        args.push("--steer");
       }
       args.push(targetAgentId, msg);
       await execFileAsync("paseo", args, { timeout: options?.noWait ? 5000 : 15000 });
@@ -1920,8 +1926,9 @@ export class HookRouter {
       const paseo = this.getPaseo();
 
       const agentRef = paseo?.agents?.ref ? paseo.agents.ref(targetAgentId) : null;
+      const hasSos = Boolean(list[0]?.isSos);
 
-      if (agentRef) {
+      if (agentRef && !hasSos) {
         // Check if agent is currently busy
         try {
           const currentSnapshot = agentRef.current ? agentRef.current() : null;
@@ -1954,11 +1961,27 @@ export class HookRouter {
       this.busyQueues.delete(key);
       this.busyAttempts.delete(key);
 
-      // Deliver queued messages in FIFO order
-      while (list.length > 0) {
+      // Deliver queued messages: batch if multiple entries, or single entry with appropriate steering
+      if (list.length > 1) {
+        const isAnySos = list.some((e) => Boolean(e.isSos));
+        const batchCount = list.length;
+        const combinedMsg = `[forgejo-hook] Batch notification (${batchCount} events):\n\n` +
+          list.map((e, idx) => `### Event ${idx + 1}\n${e.msg}`).join("\n\n---\n\n");
+        const ok = await this.deliverMessage(targetAgentId, combinedMsg, {
+          steer: isAnySos,
+          noWait: false,
+        });
+        if (ok) {
+          list.length = 0;
+          this.persistQueue(key);
+          this.log(`[info] Delivered batch of ${batchCount} message(s) to agent ${targetAgentId} for ${key}`);
+        } else {
+          this.log(`[error] Failed to deliver batch to ${targetAgentId} for ${key}`);
+        }
+      } else if (list.length === 1) {
         const entry = list[0];
         const ok = await this.deliverMessage(targetAgentId, entry.msg, {
-          steer: !entry.isSos,
+          steer: Boolean(entry.isSos),
           noWait: false,
         });
         if (ok) {
@@ -1967,8 +1990,6 @@ export class HookRouter {
           this.log(`[info] Delivered message ${entry.id} to agent ${targetAgentId} for ${key}`);
         } else {
           this.log(`[error] Failed to deliver message to ${targetAgentId} for ${key}`);
-          // Keep message in queue, back off
-          break;
         }
       }
     } finally {
