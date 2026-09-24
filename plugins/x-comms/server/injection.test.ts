@@ -21,19 +21,47 @@ import {
 } from "./injection.ts";
 
 interface StubServer extends McpInjectionServer {
+  // One composed handler per hook name, chaining every registered handler in
+  // registration order — the daemon's plugin runtime invokes multiple
+  // `agent.create` handlers in sequence, feeding each the previous output.
   hooks: Map<string, McpInjectionHookHandler>;
   removed: boolean;
 }
 
 function createStubServer(): StubServer {
+  const registered = new Map<string, McpInjectionHookHandler[]>();
   const hooks = new Map<string, McpInjectionHookHandler>();
+  const compose = (name: string): void => {
+    const handlers = registered.get(name) ?? [];
+    if (handlers.length === 0) {
+      hooks.delete(name);
+      return;
+    }
+    // Handlers registered here are synchronous (registerMcpInjection and
+    // registerRecipientInstructions), so the chain composes synchronously too.
+    hooks.set(name, (input, context) => {
+      let current = input.request;
+      for (const handler of handlers) {
+        const next = handler({ request: current }, context);
+        if (next) current = next as AgentCreateInjectionRequest;
+      }
+      return current;
+    });
+  };
   return {
     hooks,
     removed: false,
     before(name: string, handler: McpInjectionHookHandler): () => void {
-      hooks.set(name, handler);
+      const handlers = registered.get(name) ?? [];
+      handlers.push(handler);
+      registered.set(name, handlers);
+      compose(name);
       return () => {
-        if (hooks.get(name) === handler) hooks.delete(name);
+        const current = registered.get(name);
+        if (!current) return;
+        const idx = current.indexOf(handler);
+        if (idx !== -1) current.splice(idx, 1);
+        compose(name);
       };
     },
   };

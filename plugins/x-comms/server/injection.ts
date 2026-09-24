@@ -11,6 +11,7 @@ import {
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { serverPath } from "./server-status.ts";
 import { stateDir } from "./registry.ts";
+import { registerRecipientInstructions } from "./recipient-instructions.ts";
 
 const log = createPluginLogger("paseo-x-comms", { subsystem: "injection" });
 
@@ -126,9 +127,11 @@ export function toInjectionServer(server: PluginServerContext): McpInjectionServ
 }
 
 /**
- * Register MCP injection when the daemon-wide toggle is on, otherwise do
- * nothing. Toggle changes take effect on plugin reload. Returns the
- * helper's remover for cleanup.
+ * Register MCP injection and the recipient standing instructions when the
+ * daemon-wide toggle is on, otherwise do nothing. Both are attached at the same
+ * `agent.create` gate so an agent that receives the tools also receives the
+ * envelope-handling contract (#381); the toggle covers both. Toggle changes take
+ * effect on plugin reload. Returns the helper's remover for cleanup.
  */
 export function maybeRegisterInjection(
   server: McpInjectionServer,
@@ -147,6 +150,11 @@ export function maybeRegisterInjection(
     log.error(`injection: stable server unavailable, skipping agent.create hook: ${cause instanceof Error ? cause.message : String(cause)}`);
     return () => {};
   }
-  log.info(`injection: registering agent.create hook under key '${serverName}'`);
-  return registerMcpInjection(server, { serverName, config });
+  log.info(`injection: registering agent.create hooks under key '${serverName}' (tools + recipient instructions)`);
+  const removeMcp = registerMcpInjection(server, { serverName, config });
+  const removeInstructions = registerRecipientInstructions(server);
+  return () => {
+    removeInstructions();
+    removeMcp();
+  };
 }

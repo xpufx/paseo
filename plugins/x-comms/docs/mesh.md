@@ -75,6 +75,11 @@ Implemented on this branch (`server/injection.ts`, wired in
   server path, so it works from git checkouts on foreign hosts.
 - No provider filter (all agents). Daemon-wide `injectionEnabled` toggle
   in plugin settings, default on; changes apply on plugin reload.
+- Recipient instructions ride the same gate (`server/recipient-instructions.ts`,
+  #381): the tools alone left a delivery indistinguishable from chat, so the
+  envelope-handling contract (detect/parse/attribute/reply) is folded into the
+  agent's `config.systemPrompt` alongside the MCP server. The toggle covers
+  both; no envelope-handling contract without the tools that answer it.
 - Per-agent opt-out deferred. MCP server, envelope, and presence untouched.
 
 ## Layer 3: Visibility (intended vs actual)
