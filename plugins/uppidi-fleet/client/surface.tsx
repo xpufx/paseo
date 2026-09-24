@@ -86,6 +86,20 @@ import {
 
 export type SurfaceTab = "tree" | "dashboard" | "settings";
 
+/**
+ * Narrows a possibly-partial RPC collection to an array. A truncated or legacy
+ * payload can deliver a non-array where the server types promise one; mapping
+ * or iterating it blanks the surface (#510).
+ */
+function toList<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+
+/** Enrolled repos are plain strings; reject null/empty entries defensively. */
+function toRepoList(value: string[] | null | undefined): string[] {
+  return Array.isArray(value) ? value.filter((r): r is string => typeof r === "string" && r.length > 0) : [];
+}
+
 const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
   { id: "all", label: "All work" },
   { id: "needs-you", label: "Needs You" },
@@ -500,9 +514,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     const set = new Set<string>();
     const defaultRepo = issuesData?.repo ?? "xpufx-org/paseo";
     set.add(defaultRepo);
-    for (const r of agentsData?.enrolledRepos ?? []) set.add(r);
-    for (const q of hookQueues?.queues ?? []) if (q.key) set.add(q.key);
-    for (const i of issuesData?.issues ?? []) if (i.repo) set.add(i.repo);
+    for (const r of toRepoList(agentsData?.enrolledRepos)) set.add(r);
+    for (const q of toList(hookQueues?.queues)) if (q?.key) set.add(q.key);
+    for (const i of toList(issuesData?.issues)) if (i?.repo) set.add(i.repo);
     return Array.from(set);
   }, [issuesData?.repo, issuesData?.issues, agentsData?.enrolledRepos, hookQueues?.queues]);
 
@@ -512,9 +526,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   ], [availableRepos]);
 
   const rawIssues = useMemo(() => {
-    const all = issuesData?.issues ?? [];
+    const all = toList(issuesData?.issues);
     if (selectedRepo === "all") return all;
-    return all.filter((i) => isRepoMatching(i.repo, selectedRepo) || i.repo.toLowerCase() === selectedRepo.toLowerCase());
+    return all.filter((i) => isRepoMatching(i?.repo, selectedRepo) || String(i?.repo ?? "").toLowerCase() === selectedRepo.toLowerCase());
   }, [issuesData?.issues, selectedRepo]);
 
   const visible = useMemo(() => {
@@ -532,7 +546,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const isConnected = hookStatus?.ok ?? false;
   const isServiceRunning = serviceStatus?.active ?? false;
   const totalQueued = hookStatus?.totalQueued ?? 0;
-  const queuesList = hookQueues?.queues ?? [];
+  const queuesList = toList(hookQueues?.queues);
 
   const visibleQueues = useMemo(() => {
     const filtered = filterQueues(queuesList, queuePreset, queueQuery);
@@ -541,9 +555,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
 
   const allAgents = useMemo(() => {
     return [
-      ...(agentsData?.frontDesk ?? []),
-      ...(agentsData?.orchestrators ?? []),
-      ...(agentsData?.workers ?? []),
+      ...toList(agentsData?.frontDesk),
+      ...toList(agentsData?.orchestrators),
+      ...toList(agentsData?.workers),
     ];
   }, [agentsData]);
 
@@ -588,13 +602,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   };
 
 
-  const rawRunners = runnersData?.runners ?? [];
+  const rawRunners = toList(runnersData?.runners);
   const visibleRunners = useMemo(() => {
     const filtered = filterRunners(rawRunners, runnerPreset, runnerQuery);
     return sortRunners(filtered, runnerSortField, runnerSortDir);
   }, [rawRunners, runnerPreset, runnerQuery, runnerSortField, runnerSortDir]);
 
-  const rawCandidates = metricsData?.candidates ?? [];
+  const rawCandidates = toList(metricsData?.candidates);
   const visibleCandidates = useMemo(() => {
     const filtered = filterMetricCandidates(rawCandidates, metricPreset, metricQuery);
     return sortMetricCandidates(filtered, metricSortField, metricSortDir);
@@ -844,36 +858,36 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                   </Text>
                 ) : (
                   visibleQueues.map((q) => (
-                    <Card key={q.key} variant="elevated">
+                    <Card key={q?.key} variant="elevated">
                       <Row justify="space-between" align="center" wrap gap="xs">
                         <Stack gap="xxs" style={{ flex: 1 }}>
                           <Row align="center" gap="xs">
-                            <Text style={{ color: colors.foreground, ...typography.heading }}>{q.key}</Text>
+                            <Text style={{ color: colors.foreground, ...typography.heading }}>{q?.key}</Text>
                             <Badge
-                              label={q.paused ? "Paused" : q.isBusy ? "Busy" : "Ready"}
-                              variant={q.paused ? "warning" : q.isBusy ? "info" : "success"}
+                              label={q?.paused ? "Paused" : q?.isBusy ? "Busy" : "Ready"}
+                              variant={q?.paused ? "warning" : q?.isBusy ? "info" : "success"}
                               size="sm"
                             />
-                            {q.depth > 0 && <Badge label={`${q.depth} queued`} variant="info" size="sm" />}
+                            {(q?.depth ?? 0) > 0 && <Badge label={`${q.depth} queued`} variant="info" size="sm" />}
                           </Row>
-                          {q.orchestrator?.agentId && (
+                          {q?.orchestrator?.agentId && (
                             <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                               Orchestrator: {q.orchestrator.agentId.slice(0, 8)}...
                             </Text>
                           )}
                         </Stack>
                         <Row gap="xs">
-                          {q.paused ? (
-                            <Button label="Resume" size="sm" variant="ghost" onPress={() => handleQueueResume(q.key)} />
+                          {q?.paused ? (
+                            <Button label="Resume" size="sm" variant="ghost" onPress={() => handleQueueResume(q?.key)} />
                           ) : (
-                            <Button label="Pause" size="sm" variant="ghost" onPress={() => handleQueuePause(q.key)} />
+                            <Button label="Pause" size="sm" variant="ghost" onPress={() => handleQueuePause(q?.key)} />
                           )}
-                          <Button label="Drain" size="sm" variant="danger" onPress={() => handleQueueDrain(q.key)} />
+                          <Button label="Drain" size="sm" variant="danger" onPress={() => handleQueueDrain(q?.key)} />
                         </Row>
                       </Row>
-                      {q.messages.length > 0 && (
+                      {toList(q?.messages).length > 0 && (
                         <Stack gap="xxs" style={{ marginTop: 6 }}>
-                          {q.messages.slice(0, 3).map((m) => (
+                          {toList(q?.messages).slice(0, 3).map((m) => (
                             <Text
                               key={m.id}
                               numberOfLines={1}
@@ -928,7 +942,12 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                   Configure primary model and fallback tiers for each agent role type:
                 </Text>
-                {Object.entries(roleModelsData?.roles ?? {}).map(([roleKey, cfg]) => (
+                {Object.entries(roleModelsData?.roles ?? {}).map(([roleKey, cfg]) => {
+                  // A role entry can be missing/partial in a stale payload; skip
+                  // it rather than dereferencing undefined fields (#510).
+                  if (!cfg || typeof cfg !== "object") return null;
+                  const fallbackGroup = Array.isArray(cfg.fallbackGroup) ? cfg.fallbackGroup : [];
+                  return (
                   <Card key={roleKey} variant="elevated">
                     <Row justify="space-between" align="center" wrap gap="xs">
                       <Stack gap="xxs" style={{ flex: 1 }}>
@@ -941,9 +960,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                         <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                           Primary: <Text style={{ color: colors.foreground, fontFamily: "monospace" }}>{cfg.primaryModel}</Text>
                         </Text>
-                        {cfg.fallbackGroup.length > 1 && (
+                        {fallbackGroup.length > 1 && (
                           <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
-                            Fallbacks: {cfg.fallbackGroup.join(" → ")}
+                            Fallbacks: {fallbackGroup.join(" → ")}
                           </Text>
                         )}
                       </Stack>
@@ -952,7 +971,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                         size="sm"
                         variant="ghost"
                         onPress={() => {
-                          const available = roleModelsData?.availableModels ?? [];
+                          const available = toList(roleModelsData?.availableModels);
                           if (available.length > 0) {
                             const nextIdx = (available.indexOf(cfg.primaryModel) + 1) % available.length;
                             const nextModel = available[nextIdx];
@@ -962,7 +981,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                       />
                     </Row>
                   </Card>
-                ))}
+                  );
+                })}
               </Stack>
             </Card>
           </Collapsible>
@@ -1027,24 +1047,24 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 />
                 {visibleRunners.length === 0 ? (
                   <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    {(runnersData?.runners ?? []).length === 0 ? "No registered runners found." : "No runners match the selected filter."}
+                    {toList(runnersData?.runners).length === 0 ? "No registered runners found." : "No runners match the selected filter."}
                   </Text>
                 ) : (
                   visibleRunners.map((r) => (
-                    <Card key={r.id} variant="elevated">
+                    <Card key={r?.id} variant="elevated">
                       <Row justify="space-between" align="center" wrap gap="xs">
                         <Stack gap="xxs">
                           <Row align="center" gap="xs">
-                            <StatusDot variant={r.status === "online" ? "success" : "neutral"} />
-                            <Text style={{ color: colors.foreground, ...typography.heading }}>{r.name}</Text>
-                            <Badge label={r.status} variant={r.status === "online" ? "success" : "neutral"} size="sm" />
+                            <StatusDot variant={r?.status === "online" ? "success" : "neutral"} />
+                            <Text style={{ color: colors.foreground, ...typography.heading }}>{r?.name}</Text>
+                            <Badge label={r?.status} variant={r?.status === "online" ? "success" : "neutral"} size="sm" />
                           </Row>
                           <Row gap="xs" wrap style={{ marginTop: 4 }}>
-                            {r.labels.map((lbl) => (
+                            {toList(r?.labels).map((lbl) => (
                               <Badge key={lbl} label={lbl} variant="neutral" size="sm" />
                             ))}
                           </Row>
-                          {r.lastJob && (
+                          {r?.lastJob && (
                             <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11, marginTop: 4 }}>
                               Last job: {r.lastJob}
                             </Text>
@@ -1150,19 +1170,19 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                   </Text>
                 ) : (
                   visibleCandidates.map((candidate) => (
-                    <Card key={candidate.model} variant="elevated">
+                    <Card key={candidate?.model} variant="elevated">
                       <Stack gap="xs">
                         <Row justify="space-between" align="center" wrap gap="xs">
                           <Row align="center" gap="xs">
-                            <StatusDot variant={candidate.overallPassRate >= 90 ? "success" : candidate.overallPassRate >= 80 ? "info" : "warning"} />
-                            <Text style={{ color: colors.foreground, ...typography.heading }}>{candidate.model}</Text>
-                            <Badge label={`${candidate.overallPassRate}% pass`} variant={candidate.overallPassRate >= 90 ? "success" : "neutral"} size="sm" />
-                            <Badge label={`${Math.round(candidate.medianWallMs / 1000)}s median`} variant="neutral" size="sm" />
-                            <Badge label={`${candidate.totalTrials} trials`} variant="neutral" size="sm" />
+                            <StatusDot variant={candidate?.overallPassRate >= 90 ? "success" : candidate?.overallPassRate >= 80 ? "info" : "warning"} />
+                            <Text style={{ color: colors.foreground, ...typography.heading }}>{candidate?.model}</Text>
+                            <Badge label={`${candidate?.overallPassRate}% pass`} variant={candidate?.overallPassRate >= 90 ? "success" : "neutral"} size="sm" />
+                            <Badge label={`${Math.round((candidate?.medianWallMs ?? 0) / 1000)}s median`} variant="neutral" size="sm" />
+                            <Badge label={`${candidate?.totalTrials} trials`} variant="neutral" size="sm" />
                           </Row>
                           <Row align="center" gap="xs" wrap>
                             <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Recommended roles:</Text>
-                            {candidate.recommendedRoles.map((role) => (
+                            {toList(candidate?.recommendedRoles).map((role) => (
                               <Badge key={role} label={role} variant="info" size="sm" />
                             ))}
                           </Row>
@@ -1170,30 +1190,35 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
 
                         {/* Task Profile breakdown */}
                         <Stack gap="xs" style={{ marginTop: 4 }}>
-                          {candidate.profiles.map((p) => (
-                            <Card key={p.taskProfile} variant="flat">
+                          {toList(candidate?.profiles).map((p) => {
+                            // A profile can arrive without its failure breakdown in
+                            // a partial payload; default it so the label reads (#510).
+                            const fb = p?.failureBreakdown ?? { quota: 0, timeout: 0, toolFailure: 0, checkFailure: 0 };
+                            return (
+                            <Card key={p?.taskProfile} variant="flat">
                               <Row justify="space-between" align="center" wrap gap="xs">
                                 <Stack gap="xxs" style={{ flex: 1, minWidth: 200 }}>
                                   <Row align="center" gap="xs">
                                     <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
-                                      {p.taskProfileLabel}
+                                      {p?.taskProfileLabel}
                                     </Text>
-                                    <Badge label={`${p.passRate}% pass`} variant={p.passRate >= 90 ? "success" : p.passRate >= 80 ? "info" : "warning"} size="sm" />
-                                    <Badge label={`${p.reworkRate}% rework`} variant="neutral" size="sm" />
-                                    <Badge label={p.confidence} variant={p.confidence === "high" ? "success" : "neutral"} size="sm" />
+                                    <Badge label={`${p?.passRate}% pass`} variant={p?.passRate >= 90 ? "success" : p?.passRate >= 80 ? "info" : "warning"} size="sm" />
+                                    <Badge label={`${p?.reworkRate}% rework`} variant="neutral" size="sm" />
+                                    <Badge label={p?.confidence} variant={p?.confidence === "high" ? "success" : "neutral"} size="sm" />
                                   </Row>
                                   <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                                    {p.advisory}
+                                    {p?.advisory}
                                   </Text>
                                 </Stack>
                                 <Row align="center" gap="xs">
                                   <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
-                                    Failures: Q:{p.failureBreakdown.quota} | T:{p.failureBreakdown.timeout} | Tool:{p.failureBreakdown.toolFailure} | Check:{p.failureBreakdown.checkFailure}
+                                    Failures: Q:{fb.quota} | T:{fb.timeout} | Tool:{fb.toolFailure} | Check:{fb.checkFailure}
                                   </Text>
                                 </Row>
                               </Row>
                             </Card>
-                          ))}
+                            );
+                          })}
                         </Stack>
                       </Stack>
                     </Card>
@@ -1509,9 +1534,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     {selected.title}
                   </Text>
 
-                  {selected.labels.length > 0 && (
+                  {toList(selected.labels).length > 0 && (
                     <Row wrap gap="xxs">
-                      {selected.labels.map((l) => (
+                      {toList(selected.labels).map((l) => (
                         <Badge key={l} label={l} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
                       ))}
                     </Row>

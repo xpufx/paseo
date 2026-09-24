@@ -34,8 +34,10 @@ export function getStatusLightColor(agent?: {
 } | null): string {
   if (!agent) return STATUS_LIGHT_ORANGE;
 
-  const detState = (agent.deterministicState || "").toLowerCase().trim();
-  const status = (agent.status || "").toLowerCase().trim();
+  // Partial/legacy payloads can carry non-string state or status; coerce rather
+  // than calling `.toLowerCase()` on whatever arrived (#510).
+  const detState = String(agent.deterministicState ?? "").toLowerCase().trim();
+  const status = String(agent.status ?? "").toLowerCase().trim();
 
   // 1. Red: error / failed / timeout / failure mode
   if (
@@ -103,32 +105,37 @@ export function filterIssues(
   preset: IssuePreset,
   query: string
 ): UppidiIssue[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  return issues.filter((issue) => {
+  const normalizedQuery = (query ?? "").trim().toLowerCase();
+  return (issues ?? []).filter((issue) => {
+    if (!issue) return false;
+    // Partial RPC payloads may omit fields the client relies on. Normalize once
+    // here so the presets and search below never dereference undefined (#510).
+    const attention = typeof issue.attention === "string" ? issue.attention : "";
+    const labels = Array.isArray(issue.labels) ? issue.labels : [];
     let matchesPreset = true;
     switch (preset) {
       case "needs-you":
-        matchesPreset = issue.attention === "attention/2-user";
+        matchesPreset = attention === "attention/2-user";
         break;
       case "needs-attention":
         matchesPreset =
-          issue.attention.startsWith("attention/0-") ||
-          issue.attention.startsWith("attention/1-") ||
-          issue.attention.startsWith("attention/2-");
+          attention.startsWith("attention/0-") ||
+          attention.startsWith("attention/1-") ||
+          attention.startsWith("attention/2-");
         break;
       case "triage-review":
         matchesPreset =
           issue.status === "Review" ||
-          issue.labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"));
+          labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"));
         break;
       case "in-progress":
         matchesPreset =
-          (issue.status === "In progress" && !issue.labels.some((l) => l.includes("state/3-verify") || l.includes("state/4-done"))) ||
-          issue.labels.some((l) => l.includes("state/1-wip"));
+          (issue.status === "In progress" && !labels.some((l) => l.includes("state/3-verify") || l.includes("state/4-done"))) ||
+          labels.some((l) => l.includes("state/1-wip"));
         break;
       case "verify":
         matchesPreset =
-          issue.labels.some((l) => l.includes("state/3-verify"));
+          labels.some((l) => l.includes("state/3-verify"));
         break;
       case "all":
       default:
@@ -144,7 +151,7 @@ export function filterIssues(
       issue.title,
       issue.repo,
       issue.branch ?? "",
-      issue.labels.join(" "),
+      labels.join(" "),
     ]
       .join(" ")
       .toLowerCase();
@@ -158,21 +165,22 @@ export function sortIssues(
   field: IssueSortField,
   direction: SortDirection
 ): UppidiIssue[] {
-  const sorted = [...issues];
+  const sorted = [...(Array.isArray(issues) ? issues : [])];
   const mul = direction === "asc" ? 1 : -1;
 
   sorted.sort((a, b) => {
+    if (!a || !b) return 0;
     switch (field) {
       case "number":
-        return (a.number - b.number) * mul;
+        return ((a.number ?? 0) - (b.number ?? 0)) * mul;
       case "title":
-        return a.title.localeCompare(b.title) * mul;
+        return String(a.title ?? "").localeCompare(String(b.title ?? "")) * mul;
       case "status":
-        return a.status.localeCompare(b.status) * mul;
+        return String(a.status ?? "").localeCompare(String(b.status ?? "")) * mul;
       case "comments":
-        return (a.comments - b.comments) * mul;
+        return ((a.comments ?? 0) - (b.comments ?? 0)) * mul;
       case "repo":
-        return a.repo.localeCompare(b.repo) * mul;
+        return String(a.repo ?? "").localeCompare(String(b.repo ?? "")) * mul;
       default:
         return 0;
     }
@@ -192,12 +200,13 @@ export function filterQueues(
   preset: QueuePreset,
   query: string
 ): HookQueueItem[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  return queues.filter((q) => {
+  const normalizedQuery = (query ?? "").trim().toLowerCase();
+  return (Array.isArray(queues) ? queues : []).filter((q) => {
+    if (!q) return false;
     let matchesPreset = true;
     switch (preset) {
       case "pending-processing":
-        matchesPreset = q.depth > 0 || q.isBusy;
+        matchesPreset = (q.depth ?? 0) > 0 || q.isBusy;
         break;
       case "dead-failed":
         matchesPreset = q.paused;
@@ -227,15 +236,16 @@ export function sortQueues(
   field: QueueSortField,
   direction: SortDirection
 ): HookQueueItem[] {
-  const sorted = [...queues];
+  const sorted = [...(Array.isArray(queues) ? queues : [])];
   const mul = direction === "asc" ? 1 : -1;
 
   sorted.sort((a, b) => {
+    if (!a || !b) return 0;
     switch (field) {
       case "repo":
-        return a.key.localeCompare(b.key) * mul;
+        return String(a.key ?? "").localeCompare(String(b.key ?? "")) * mul;
       case "depth":
-        return (a.depth - b.depth) * mul;
+        return ((a.depth ?? 0) - (b.depth ?? 0)) * mul;
       case "status": {
         const statusA = a.paused ? "paused" : a.isBusy ? "busy" : "ready";
         const statusB = b.paused ? "paused" : b.isBusy ? "busy" : "ready";
@@ -260,8 +270,9 @@ export function filterAgents(
   preset: AgentPreset,
   query: string
 ): UppidiAgent[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  return agents.filter((a) => {
+  const normalizedQuery = (query ?? "").trim().toLowerCase();
+  return (Array.isArray(agents) ? agents : []).filter((a) => {
+    if (!a) return false;
     let matchesPreset = true;
     switch (preset) {
       case "blocked":
@@ -317,17 +328,18 @@ export function sortAgents(
   field: AgentSortField,
   direction: SortDirection
 ): UppidiAgent[] {
-  const sorted = [...agents];
+  const sorted = [...(Array.isArray(agents) ? agents : [])];
   const mul = direction === "asc" ? 1 : -1;
 
   sorted.sort((a, b) => {
+    if (!a || !b) return 0;
     switch (field) {
       case "name":
-        return a.name.localeCompare(b.name) * mul;
+        return String(a.name ?? "").localeCompare(String(b.name ?? "")) * mul;
       case "status":
-        return a.status.localeCompare(b.status) * mul;
+        return String(a.status ?? "").localeCompare(String(b.status ?? "")) * mul;
       case "category":
-        return a.category.localeCompare(b.category) * mul;
+        return String(a.category ?? "").localeCompare(String(b.category ?? "")) * mul;
       case "provider":
         return (a.provider ?? "").localeCompare(b.provider ?? "") * mul;
       default:
@@ -351,12 +363,13 @@ export function sortAgents(
  *   - terminal statuses: closed, completed, terminated, done, failed, error
  */
 export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
+  if (!agent) return false;
   // 1. Safety rule: Never bulk-archive orchestrator or front-desk agents
   if (agent.category === "front-desk" || agent.category === "orchestrator") {
     return false;
   }
 
-  const normalizedStatus = (agent.status || "").toLowerCase();
+  const normalizedStatus = String(agent.status ?? "").toLowerCase();
 
   // 2. Safety rule: Never bulk-archive active/running/working agents
   if (
@@ -402,7 +415,7 @@ export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
 }
 
 export function filterBulkArchiveCandidates(agents: UppidiAgent[]): UppidiAgent[] {
-  return agents.filter(isAgentEligibleForBulkArchive);
+  return (agents ?? []).filter(isAgentEligibleForBulkArchive);
 }
 
 // --- CI Runners ---
@@ -416,8 +429,9 @@ export function filterRunners(
   preset: RunnerPreset,
   query: string
 ): UppidiRunner[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  return runners.filter((r) => {
+  const normalizedQuery = (query ?? "").trim().toLowerCase();
+  return (Array.isArray(runners) ? runners : []).filter((r) => {
+    if (!r) return false;
     let matchesPreset = true;
     switch (preset) {
       case "online":
@@ -438,7 +452,7 @@ export function filterRunners(
     const searchTarget = [
       r.id,
       r.name,
-      r.labels.join(" "),
+      (Array.isArray(r.labels) ? r.labels : []).join(" "),
       r.lastJob ?? "",
     ]
       .join(" ")
@@ -453,17 +467,18 @@ export function sortRunners(
   field: RunnerSortField,
   direction: SortDirection
 ): UppidiRunner[] {
-  const sorted = [...runners];
+  const sorted = [...(Array.isArray(runners) ? runners : [])];
   const mul = direction === "asc" ? 1 : -1;
 
   sorted.sort((a, b) => {
+    if (!a || !b) return 0;
     switch (field) {
       case "name":
-        return a.name.localeCompare(b.name) * mul;
+        return String(a.name ?? "").localeCompare(String(b.name ?? "")) * mul;
       case "status":
-        return a.status.localeCompare(b.status) * mul;
+        return String(a.status ?? "").localeCompare(String(b.status ?? "")) * mul;
       case "lastSeen":
-        return (a.lastSeen ?? "").localeCompare(b.lastSeen ?? "") * mul;
+        return String(a.lastSeen ?? "").localeCompare(String(b.lastSeen ?? "")) * mul;
       default:
         return 0;
     }
@@ -491,24 +506,27 @@ export function filterMetricCandidates(
   preset: MetricPreset,
   query: string
 ): CandidateModelMetrics[] {
-  const normalizedQuery = query.trim().toLowerCase();
-  return candidates.filter((c) => {
+  const normalizedQuery = (query ?? "").trim().toLowerCase();
+  return (Array.isArray(candidates) ? candidates : []).filter((c) => {
+    if (!c) return false;
+    const roles = Array.isArray(c.recommendedRoles) ? c.recommendedRoles : [];
+    const profiles = Array.isArray(c.profiles) ? c.profiles : [];
     let matchesPreset = true;
     switch (preset) {
       case "high-pass":
-        matchesPreset = c.overallPassRate >= 85;
+        matchesPreset = (c.overallPassRate ?? 0) >= 85;
         break;
       case "bugfix-suitable":
         matchesPreset =
-          c.recommendedRoles.includes("Worker/Coder") ||
-          c.recommendedRoles.includes("Code") ||
-          c.profiles.some((p: TaskProfileMetrics) => p.taskProfile === "code-modification" && p.passRate >= 80);
+          roles.includes("Worker/Coder") ||
+          roles.includes("Code") ||
+          profiles.some((p: TaskProfileMetrics) => p?.taskProfile === "code-modification" && (p?.passRate ?? 0) >= 80);
         break;
       case "liaison-suitable":
         matchesPreset =
-          c.recommendedRoles.includes("Front Desk") ||
-          c.recommendedRoles.includes("Liaison") ||
-          c.profiles.some((p: TaskProfileMetrics) => p.taskProfile === "chat-conversation" && p.passRate >= 85);
+          roles.includes("Front Desk") ||
+          roles.includes("Liaison") ||
+          profiles.some((p: TaskProfileMetrics) => p?.taskProfile === "chat-conversation" && (p?.passRate ?? 0) >= 85);
         break;
       case "all":
       default:
@@ -521,8 +539,8 @@ export function filterMetricCandidates(
 
     const searchTarget = [
       c.model,
-      c.recommendedRoles.join(" "),
-      c.profiles.map((p: TaskProfileMetrics) => `${p.taskProfile} ${p.advisory}`).join(" "),
+      roles.join(" "),
+      profiles.map((p: TaskProfileMetrics) => `${p?.taskProfile} ${p?.advisory}`).join(" "),
     ]
       .join(" ")
       .toLowerCase();
@@ -536,19 +554,20 @@ export function sortMetricCandidates(
   field: MetricSortField,
   direction: SortDirection
 ): CandidateModelMetrics[] {
-  const sorted = [...candidates];
+  const sorted = [...(Array.isArray(candidates) ? candidates : [])];
   const mul = direction === "asc" ? 1 : -1;
 
   sorted.sort((a, b) => {
+    if (!a || !b) return 0;
     switch (field) {
       case "passRate":
-        return (a.overallPassRate - b.overallPassRate) * mul;
+        return ((a.overallPassRate ?? 0) - (b.overallPassRate ?? 0)) * mul;
       case "latency":
-        return (a.medianWallMs - b.medianWallMs) * mul;
+        return ((a.medianWallMs ?? 0) - (b.medianWallMs ?? 0)) * mul;
       case "trials":
-        return (a.totalTrials - b.totalTrials) * mul;
+        return ((a.totalTrials ?? 0) - (b.totalTrials ?? 0)) * mul;
       case "model":
-        return a.model.localeCompare(b.model) * mul;
+        return String(a.model ?? "").localeCompare(String(b.model ?? "")) * mul;
       default:
         return 0;
     }
@@ -617,9 +636,14 @@ export function filterAgentTree(
   nodes: UppidiAgentTreeNode[],
   predicate: (agent: UppidiAgent) => boolean
 ): UppidiAgentTreeNode[] {
+  // Defense-in-depth for partial RPC payloads: a tree node may arrive without a
+  // `children` array, or `tree` itself may be a non-array. Iterating undefined
+  // throws "nodes is not iterable" and blanks the whole fleet page (#510).
+  if (!Array.isArray(nodes)) return [];
   const result: UppidiAgentTreeNode[] = [];
 
   for (const node of nodes) {
+    if (!node || !node.agent) continue;
     const matchingChildren = filterAgentTree(node.children, predicate);
     const selfMatches = predicate(node.agent);
 
@@ -636,8 +660,8 @@ export function filterAgentTree(
 }
 
 function isFrontDeskAgentActive(agent: UppidiAgent): boolean {
-  const state = (agent.deterministicState || "").toLowerCase();
-  const status = (agent.status || "").toLowerCase();
+  const state = String(agent.deterministicState ?? "").toLowerCase();
+  const status = String(agent.status ?? "").toLowerCase();
   return (
     state === "working" ||
     state === "running" ||
@@ -659,26 +683,27 @@ export function selectPrimaryFrontDeskNode(
   frontDeskNodes: UppidiAgentTreeNode[],
   registeredAgentId?: string | null
 ): { primary: UppidiAgentTreeNode | null; stale: UppidiAgentTreeNode[] } {
-  if (frontDeskNodes.length === 0) {
+  const nodes = (Array.isArray(frontDeskNodes) ? frontDeskNodes : []).filter((n) => n?.agent);
+  if (nodes.length === 0) {
     return { primary: null, stale: [] };
   }
 
   if (registeredAgentId) {
-    const registered = frontDeskNodes.find((n) => n.agent.id === registeredAgentId);
+    const registered = nodes.find((n) => n.agent.id === registeredAgentId);
     if (registered) {
       return {
         primary: registered,
-        stale: frontDeskNodes.filter((n) => n !== registered),
+        stale: nodes.filter((n) => n !== registered),
       };
     }
   }
 
-  if (frontDeskNodes.length === 1) {
-    return { primary: frontDeskNodes[0], stale: [] };
+  if (nodes.length === 1) {
+    return { primary: nodes[0], stale: [] };
   }
 
-  const active = frontDeskNodes.filter((n) => isFrontDeskAgentActive(n.agent));
-  const pool = active.length > 0 ? active : frontDeskNodes;
+  const active = nodes.filter((n) => isFrontDeskAgentActive(n.agent));
+  const pool = active.length > 0 ? active : nodes;
   const primary = [...pool].sort((a, b) => {
     const aTime = a.agent.lastActivityAt ? Date.parse(a.agent.lastActivityAt) : 0;
     const bTime = b.agent.lastActivityAt ? Date.parse(b.agent.lastActivityAt) : 0;
@@ -687,7 +712,7 @@ export function selectPrimaryFrontDeskNode(
 
   return {
     primary,
-    stale: frontDeskNodes.filter((n) => n !== primary),
+    stale: nodes.filter((n) => n !== primary),
   };
 }
 
@@ -704,6 +729,17 @@ export function buildProjectGroups(
   tree: UppidiAgentTreeNode[],
   options?: BuildProjectGroupsOptions
 ): BuildProjectGroupsResult {
+  // A partial RPC payload may hand us a non-array `tree`; fail soft to an empty
+  // fleet instead of iterating undefined and crashing the render (#510).
+  if (!Array.isArray(tree)) {
+    return {
+      frontDeskNodes: [],
+      staleFrontDeskNodes: [],
+      projectGroups: [],
+      enrolledGroups: [],
+      detachedGroups: [],
+    };
+  }
   const frontDeskCandidates: UppidiAgentTreeNode[] = [];
   const projectMap = new Map<
     string,
@@ -715,17 +751,20 @@ export function buildProjectGroups(
   >();
 
   function collectAllAgents(node: UppidiAgentTreeNode, list: UppidiAgent[]) {
+    if (!node || !node.agent) return;
     list.push(node.agent);
-    for (const child of node.children) {
+    const children = Array.isArray(node.children) ? node.children : [];
+    for (const child of children) {
       collectAllAgents(child, list);
     }
   }
 
   function adjustDepths(node: UppidiAgentTreeNode, depth: number = 0): UppidiAgentTreeNode {
+    const children = Array.isArray(node?.children) ? node.children : [];
     return {
       ...node,
       depth,
-      children: (node.children || []).map((child) => adjustDepths(child, depth + 1)),
+      children: children.map((child) => adjustDepths(child, depth + 1)),
     };
   }
 
@@ -744,9 +783,12 @@ export function buildProjectGroups(
 
   // First, populate from active tree nodes
   for (const node of tree) {
+    if (!node || !node.agent) continue;
+    const nodeChildren = Array.isArray(node.children) ? node.children : [];
     if (node.agent.category === "front-desk") {
       const remainingChildren: UppidiAgentTreeNode[] = [];
-      for (const child of node.children) {
+      for (const child of nodeChildren) {
+        if (!child || !child.agent) continue;
         if (child.agent.category === "orchestrator") {
           const orchNode = adjustDepths(child, 0);
           const project =
@@ -779,8 +821,10 @@ export function buildProjectGroups(
   }
 
   // If enrolled repos provided, ensure all enrolled repos exist in projectMap (Fleet Roster)
-  if (options?.enrolledRepos && options.enrolledRepos.length > 0) {
-    for (const repo of options.enrolledRepos) {
+  const enrolledRepos = Array.isArray(options?.enrolledRepos) ? options!.enrolledRepos : [];
+  const mutedRepos = Array.isArray(options?.mutedRepos) ? options!.mutedRepos : [];
+  if (enrolledRepos.length > 0) {
+    for (const repo of enrolledRepos) {
       const existingKey = Array.from(projectMap.keys()).find((k) => isRepoMatching(k, repo));
       if (!existingKey) {
         getOrCreateGroup(repo);
@@ -793,34 +837,31 @@ export function buildProjectGroups(
   ).map(([projectName, data]) => {
     const runningCount = data.allAgents.filter(
       (a) =>
-        a.deterministicState === "working" ||
-        a.deterministicState === "running" ||
-        (a.status === "running" &&
+        a?.deterministicState === "working" ||
+        a?.deterministicState === "running" ||
+        (a?.status === "running" &&
           a.deterministicState !== "sleeping" &&
           a.deterministicState !== "idle:waiting")
     ).length;
 
-    const hasExplicitEnrolled = Boolean(
-      options?.enrolledRepos && options.enrolledRepos.length > 0
-    );
+    const hasExplicitEnrolled = enrolledRepos.length > 0;
 
     const isEnrolled = hasExplicitEnrolled
-      ? options!.enrolledRepos!.some((r) => isRepoMatching(r, projectName))
+      ? enrolledRepos.some((r) => isRepoMatching(r, projectName))
       : projectName !== "Default Project";
 
     const isDetached = !isEnrolled;
     const hasOrchestrator = data.orchestrators.length > 0;
 
     const isMuted = Boolean(
-      options?.mutedRepos &&
-        options.mutedRepos.some((r) => isRepoMatching(r, projectName))
+      mutedRepos.some((r) => isRepoMatching(r, projectName))
     );
 
     let queuedHooksCount = 0;
-    if (options?.repoQueuedHooks) {
+    if (options?.repoQueuedHooks && typeof options.repoQueuedHooks === "object") {
       for (const [k, count] of Object.entries(options.repoQueuedHooks)) {
         if (isRepoMatching(k, projectName)) {
-          queuedHooksCount += count;
+          queuedHooksCount += typeof count === "number" ? count : 0;
         }
       }
     }

@@ -2,9 +2,158 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { pathToFileURL, fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Fleet-page crash regression harness (#510).
+ *
+ * The original bug — "Cannot read properties of undefined (reading
+ * 'prototype')" — is the read-a-property-off-undefined class. We reproduce it by
+ * driving the real render path (`UppidiFleetSurface` / `UppidiFleetTreeView`)
+ * with undefined and partial RPC payloads. `react-native` carries Flow syntax
+ * `tsx` cannot parse, so we alias it to a data-URL stub via a module resolve
+ * hook; every other module (react, react-test-renderer, react-query,
+ * paseo-plugin-helper) is the real thing.
+ */
+const require = createRequire(import.meta.url);
+const REACT_URL = pathToFileURL(require.resolve("react")).href;
+
+const RN_STUB_SOURCE = `
+import React from ${JSON.stringify(REACT_URL)};
+function stub(name) {
+  function RNStub(props) { return React.createElement(name, props, props?.children); }
+  Object.defineProperty(RNStub, "name", { value: "RN" + name });
+  return RNStub;
+}
+class AnimatedValue { constructor(v) { this.value = v; } setValue(v) { this.value = v; } interpolate(c) { return { config: c }; } }
+const anim = { start: (cb) => cb?.({ finished: true }), stop() {}, reset() {} };
+export const View = stub("View");
+export const Text = stub("Text");
+export const Pressable = stub("Pressable");
+export const ScrollView = stub("ScrollView");
+export const TextInput = stub("TextInput");
+export const Image = stub("Image");
+export const FlatList = stub("FlatList");
+export const RefreshControl = stub("RefreshControl");
+export const ActivityIndicator = stub("ActivityIndicator");
+// Select's overlay portal (helper >= #520) renders the option list in a RN
+// Modal; the stub must expose it so the real Select module instantiates.
+export const Modal = stub("Modal");
+export const TouchableWithoutFeedback = stub("TouchableWithoutFeedback");
+export const StyleSheet = { create: (s) => s, flatten: (s) => s, hairlineWidth: 1, compose: (a, b) => [a, b], absoluteFill: {} };
+export const Platform = { OS: "web", select: (o) => o.web ?? o.default };
+export const Appearance = { getColorScheme: () => "dark", addChangeListener: (cb) => { cb({ colorScheme: "dark" }); return { remove() {} }; } };
+export const useColorScheme = () => "dark";
+export const Dimensions = { get: () => ({ width: 800, height: 600, scale: 1, fontScale: 1 }) };
+export const useWindowDimensions = () => ({ width: 800, height: 600, scale: 1, fontScale: 1 });
+export const Linking = { openURL: async () => {}, canOpenURL: async () => true };
+export const PanResponder = { create: () => ({ panHandlers: {} }) };
+export const Animated = {
+  Value: AnimatedValue,
+  View: stub("AnimatedView"),
+  Text: stub("AnimatedText"),
+  loop: (a) => a ?? anim,
+  sequence: () => anim,
+  timing: () => anim,
+  spring: () => anim,
+};
+export const Easing = { linear: (v) => v, ease: (v) => v };
+export default {
+  View, Text, Pressable, ScrollView, TextInput, Image, FlatList, RefreshControl,
+  ActivityIndicator, StyleSheet, Platform, Appearance, useColorScheme, Dimensions,
+  useWindowDimensions, Linking, PanResponder, Animated, Easing,
+};
+`;
+
+const RN_STUB_URL = `data:text/javascript,${encodeURIComponent(RN_STUB_SOURCE)}`;
+
+const PASEO_RN_STUB_SOURCE = `
+import React from ${JSON.stringify(REACT_URL)};
+export const useToast = () => ({ show() {}, error() {}, copied() {} });
+export const Icon = (props) => React.createElement("mock-icon", { name: props?.name });
+export const Modal = Object.assign(
+  (props) => React.createElement("mock-modal", props, props?.children),
+  { Content: (props) => React.createElement("mock-modal-content", props, props?.children) },
+);
+export const ScrollView = (props) => React.createElement("mock-scroll", props, props?.children);
+export const FlatList = (props) => React.createElement("mock-flatlist", props, props?.children);
+export const TextInput = (props) => React.createElement("mock-textinput", props);
+export const copyText = async () => {};
+export const useRevealedText = (text) => text;
+`;
+
+const PASEO_RN_STUB_URL = `data:text/javascript,${encodeURIComponent(PASEO_RN_STUB_SOURCE)}`;
+
+interface FleetRenderHarness {
+  React: any;
+  UppidiFleetSurface: any;
+  UppidiFleetTreeView: any;
+  /** Mutable per-contract RPC payloads consulted by the injected `useRpc` seam. */
+  payloads: Record<string, unknown>;
+  render(element: unknown): Promise<unknown>;
+}
+
+let harnessPromise: Promise<FleetRenderHarness> | undefined;
+
+async function getHarness(): Promise<FleetRenderHarness> {
+  if (!harnessPromise) {
+    harnessPromise = (async () => {
+      const nodeModule = await import("node:module");
+      (nodeModule as any).registerHooks({
+        resolve(specifier: string, context: unknown, nextResolve: (s: string, c: unknown) => unknown) {
+          if (specifier === "react-native") return { url: RN_STUB_URL, shortCircuit: true };
+          if (specifier === "@getpaseo/plugin/client/react-native") {
+            return { url: PASEO_RN_STUB_URL, shortCircuit: true };
+          }
+          return nextResolve(specifier, context);
+        },
+      });
+
+      (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+      const React = (await import("react")).default;
+      const TestRenderer = (await import("react-test-renderer")).default;
+      const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+      const { initClientHelpers } = await import("paseo-plugin-helper/client");
+      const { UppidiFleetSurface } = await import("./surface.js");
+      const { UppidiFleetTreeView } = await import("./tree-view.js");
+
+      const payloads: Record<string, unknown> = {};
+
+      initClientHelpers({
+        Icon: () => null,
+        Modal: Object.assign(() => null, { Content: () => null }),
+        // Every RPC read resolves from the mutable payload map. A contract with
+        // no entry yields `undefined`, which is exactly the missing-data case.
+        useRpc: (contract: { name?: string }) => async () => payloads[contract?.name ?? ""],
+        useToast: () => ({ show() {}, error() {}, copied() {} }),
+      } as any);
+
+      async function render(element: unknown): Promise<unknown> {
+        const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+        let renderer: any;
+        await TestRenderer.act(async () => {
+          renderer = TestRenderer.create(
+            React.createElement(
+              QueryClientProvider,
+              { client: queryClient },
+              element as React.ReactNode,
+            ),
+          );
+          // Let React Query settle pending undefined-payload queries.
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        });
+        return renderer.toJSON();
+      }
+
+      return { React, UppidiFleetSurface, UppidiFleetTreeView, payloads, render };
+    })();
+  }
+  return harnessPromise;
+}
 
 describe("uppidi-fleet client entry contract", () => {
   it("verifies index.client.tsx registers sidebar surface and workspace panel via helper and client", () => {
@@ -753,6 +902,157 @@ describe("uppidi-fleet client entry contract", () => {
         metricsIdx >= 0 && filterBarIdx > metricsIdx && workQueueTableIdx > filterBarIdx,
         "Work Queue must render dense metrics bar, filter/action bar, then the Work queue table",
       );
+    });
+  });
+
+  describe("fleet page crash: undefined prototype/partial-payload class (#510)", () => {
+    // Real render-path mounts of the fleet dashboard surface and the tree view
+    // with undefined and malformed RPC payloads. Pre-fix each of these threw
+    // either "Cannot read properties of undefined (reading 'prototype')" or a
+    // sibling read-off-undefined error and blanked the page.
+    const validAgents = (tree: unknown[], over: Record<string, unknown> = {}) => ({
+      tree,
+      totalCount: tree.length,
+      runningCount: 0,
+      idleCount: tree.length,
+      errorCount: 0,
+      enrolledRepos: ["r"],
+      mutedRepos: [],
+      repoQueuedHooks: {},
+      ...over,
+    });
+    const agent = (over: Record<string, unknown> = {}) => ({
+      id: "a1",
+      shortId: "a1",
+      name: "Agent",
+      status: "idle",
+      deterministicState: "idle:waiting",
+      category: "worker",
+      labels: {},
+      ...over,
+    });
+
+    it("mounts UppidiFleetSurface with all RPC payloads undefined", async () => {
+      const { React, UppidiFleetSurface, render } = await getHarness();
+      const tree = await render(React.createElement(UppidiFleetSurface, {}));
+      assert.ok(tree, "surface must mount and render a fallback tree, not crash");
+      assert.ok(JSON.stringify(tree).length > 100, "surface fallback must be non-trivial");
+    });
+
+    it("mounts UppidiFleetTreeView with undefined agentsData and partial payloads", async () => {
+      const { React, UppidiFleetTreeView, render } = await getHarness();
+      const cases: Array<[string, unknown]> = [
+        ["undefined agentsData", undefined],
+        ["empty payload", {}],
+        ["tree node missing children", validAgents([{ agent: agent({ category: "orchestrator" }), depth: 0 }])],
+        ["tree node children is an object", validAgents([{ agent: agent(), depth: 0, children: {} }])],
+        ["tree is an object", { tree: { bad: true }, totalCount: 0 }],
+        ["null tree node", { tree: [null], totalCount: 0 }],
+        ["node without agent", { tree: [{ depth: 0, children: [] }], totalCount: 0 }],
+        ["non-array workers", { workers: "not-an-array", totalCount: 0 }],
+        ["non-array orchestrators", { orchestrators: 42, totalCount: 0 }],
+        ["non-array enrolledRepos", validAgents([{ agent: agent(), depth: 0, children: [] }], { enrolledRepos: { bad: 1 } })],
+        ["non-array mutedRepos", validAgents([{ agent: agent(), depth: 0, children: [] }], { mutedRepos: { bad: 1 } })],
+        ["partial agent (missing name/shortId/state)", validAgents([{ agent: { id: "a", labels: {} }, depth: 0, children: [] }])],
+        ["non-string deterministicState", validAgents([{ agent: agent({ deterministicState: 123 }), depth: 0, children: [] }])],
+      ];
+
+      for (const [label, agentsData] of cases) {
+        const tree = await render(
+          React.createElement(UppidiFleetTreeView, { agentsData: agentsData as any }),
+        );
+        assert.ok(
+          tree,
+          `UppidiFleetTreeView must not crash for: ${label}`,
+        );
+      }
+    });
+
+    it("mounts UppidiFleetSurface with partial/undefined RPC payloads per contract", async () => {
+      const { React, UppidiFleetSurface, render, payloads } = await getHarness();
+      const contracts = await import("../shared/contracts.js");
+
+      const cases: Array<[string, Record<string, unknown>]> = [
+        ["all payloads undefined", {}],
+        [
+          "agents tree node missing children",
+          { [contracts.uppidiAgentsContract.name]: validAgents([{ agent: agent({ category: "orchestrator" }), depth: 0 }]) },
+        ],
+        [
+          "agents tree children is an object",
+          { [contracts.uppidiAgentsContract.name]: validAgents([{ agent: agent(), depth: 0, children: {} }]) },
+        ],
+        [
+          "role models entry missing config",
+          { [contracts.uppidiRoleModelsContract.name]: { roles: { worker: undefined }, availableModels: [] } },
+        ],
+        [
+          "metrics candidate missing profiles/failureBreakdown",
+          {
+            [contracts.uppidiFleetMetricsContract.name]: {
+              candidates: [{ model: "m", overallPassRate: 90, medianWallMs: 1000, totalTrials: 1, recommendedRoles: [], profiles: [{ taskProfile: "x" }] }],
+              totalEvaluatedTrials: 1,
+            },
+          },
+        ],
+        [
+          "runner missing labels",
+          { [contracts.uppidiRunnersContract.name]: { runners: [{ id: "r", name: "R", status: "online" }], totalCount: 1, onlineCount: 1 } },
+        ],
+        [
+          "queue missing messages",
+          { [contracts.uppidiHookQueuesContract.name]: { queues: [{ key: "k", paused: false, isBusy: false, depth: 1 }] } },
+        ],
+        [
+          "issue missing labels",
+          {
+            [contracts.uppidiIssuesContract.name]: {
+              issues: [{ number: 1, title: "t", repo: "r", status: "open", comments: 0, attention: "attention/1-agent" }],
+              openCount: 1,
+              needsYouCount: 0,
+              reviewCount: 0,
+            },
+          },
+        ],
+        [
+          "non-array collections",
+          {
+            [contracts.uppidiAgentsContract.name]: { tree: {}, workers: "x", orchestrators: 5, totalCount: 0 },
+            [contracts.uppidiRunnersContract.name]: { runners: "x", totalCount: 0 },
+            [contracts.uppidiFleetMetricsContract.name]: { candidates: 7, totalEvaluatedTrials: 0 },
+          },
+        ],
+      ];
+
+      for (const [label, nextPayloads] of cases) {
+        for (const key of Object.keys(payloads)) delete payloads[key];
+        Object.assign(payloads, nextPayloads);
+        const tree = await render(React.createElement(UppidiFleetSurface, {}));
+        assert.ok(tree, `UppidiFleetSurface must not crash for: ${label}`);
+      }
+    });
+
+    it("never dereferences .prototype off a possibly-undefined value", () => {
+      // The crash class is a property read off undefined. The fleet client and
+      // shared render helpers must not contain a bare `.prototype` dereference;
+      // the only safe form is the guarded `Object.prototype.hasOwnProperty.call`.
+      const sources = [
+        path.resolve(__dirname, "surface.tsx"),
+        path.resolve(__dirname, "tree-view.tsx"),
+        path.resolve(__dirname, "panel.tsx"),
+        path.resolve(__dirname, "../shared/sort-filter.ts"),
+        path.resolve(__dirname, "../shared/contracts.ts"),
+      ];
+      for (const file of sources) {
+        const source = fs.readFileSync(file, "utf8");
+        const prototypeReads = source.match(/[A-Za-z0-9_$.\)\]]\s*\.\s*prototype/g) ?? [];
+        for (const read of prototypeReads) {
+          assert.ok(
+            read.includes("Object.prototype"),
+            `${path.basename(file)} must not dereference .prototype off an unguarded value: ${read}`,
+          );
+        }
+      }
     });
   });
 });

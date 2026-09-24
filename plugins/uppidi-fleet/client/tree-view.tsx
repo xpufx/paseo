@@ -58,6 +58,16 @@ export {
   STATUS_LIGHT_COLORS,
 };
 
+/**
+ * Coerces a possibly-partial RPC collection to an array of agents. The server
+ * types promise arrays, but a truncated or legacy payload can deliver a
+ * non-array (or `undefined`); spreading/calling `.filter` on that blanks the
+ * whole fleet page (#510).
+ */
+function toAgentArray(value: unknown): UppidiAgent[] {
+  return Array.isArray(value) ? (value.filter(Boolean) as UppidiAgent[]) : [];
+}
+
 export interface UppidiFleetTreeViewProps {
   agentsData?: UppidiAgentsOutput;
   isLoading?: boolean;
@@ -1681,10 +1691,10 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   // 1. Flatten all agents to extract counts and filters
   const allAgents = useMemo(() => {
     return [
-      ...(agentsData?.frontDesk ?? []),
-      ...(agentsData?.orchestrators ?? []),
-      ...(agentsData?.workers ?? []),
-    ];
+      ...toAgentArray(agentsData?.frontDesk),
+      ...toAgentArray(agentsData?.orchestrators),
+      ...toAgentArray(agentsData?.workers),
+    ].filter((agent): agent is UppidiAgent => Boolean(agent));
   }, [agentsData]);
 
   // Bulk archive candidates: closed/done/failed/cancelled
@@ -1696,13 +1706,13 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
 
   // 2. Build full tree with proper orchestrator-to-worker nesting
   const baseTree = useMemo(() => {
-    if (agentsData?.tree && agentsData.tree.length > 0) {
+    if (Array.isArray(agentsData?.tree) && agentsData.tree.length > 0) {
       return agentsData.tree;
     }
     const nodes: UppidiAgentTreeNode[] = [];
-    const workers = agentsData?.workers ?? [];
-    const orchestrators = agentsData?.orchestrators ?? [];
-    const frontDesk = agentsData?.frontDesk ?? [];
+    const workers = toAgentArray(agentsData?.workers);
+    const orchestrators = toAgentArray(agentsData?.orchestrators);
+    const frontDesk = toAgentArray(agentsData?.frontDesk);
 
     for (const fd of frontDesk) {
       nodes.push({ agent: fd, depth: 0, children: [] });
@@ -1774,23 +1784,27 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   // 3. Filter tree with matching predicate
   const filteredTree = useMemo(() => {
     const matches = (agent: UppidiAgent): boolean => {
+      if (!agent) return false;
+      // Partial RPC payloads can omit string fields; normalize before any
+      // `.startsWith`/`.toLowerCase` so a missing value never throws (#510).
+      const detState = String(agent.deterministicState ?? "");
       if (stateFilter !== "all") {
-        if (stateFilter === "working" && agent.deterministicState !== "working") return false;
+        if (stateFilter === "working" && detState !== "working") return false;
         if (
           stateFilter === "running" &&
-          !agent.deterministicState.startsWith("running") &&
-          agent.deterministicState !== "working"
+          !detState.startsWith("running") &&
+          detState !== "working"
         ) {
           return false;
         }
         if (
           stateFilter === "idle" &&
-          !agent.deterministicState.startsWith("idle") &&
-          agent.deterministicState !== "sleeping"
+          !detState.startsWith("idle") &&
+          detState !== "sleeping"
         ) {
           return false;
         }
-        if (stateFilter === "failed" && !agent.deterministicState.startsWith("failed")) {
+        if (stateFilter === "failed" && !detState.startsWith("failed")) {
           return false;
         }
       }
@@ -1799,9 +1813,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
       const worktree = agent.worktree || extractAgentWorktree(agent) || "";
       const project = agent.project || extractAgentProject(agent) || "";
       return (
-        agent.name.toLowerCase().includes(q) ||
-        agent.shortId.toLowerCase().includes(q) ||
-        agent.deterministicState.toLowerCase().includes(q) ||
+        String(agent.name ?? "").toLowerCase().includes(q) ||
+        String(agent.shortId ?? "").toLowerCase().includes(q) ||
+        detState.toLowerCase().includes(q) ||
         (agent.stateDetail && agent.stateDetail.toLowerCase().includes(q)) ||
         (agent.model && agent.model.toLowerCase().includes(q)) ||
         (agent.provider && agent.provider.toLowerCase().includes(q)) ||
@@ -1874,8 +1888,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
 
   // 5. Fleet Orchestrators for Front Desk Hero (#410)
   const allOrchestrators = useMemo(() => {
-    if (agentsData?.orchestrators && agentsData.orchestrators.length > 0) {
-      return agentsData.orchestrators;
+    const provided = toAgentArray(agentsData?.orchestrators);
+    if (provided.length > 0) {
+      return provided;
     }
     const list: UppidiAgent[] = [];
     for (const a of allAgents) {
@@ -1899,14 +1914,16 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     }
     const list: UppidiAgent[] = [];
     function collect(nodes: UppidiAgentTreeNode[]) {
+      if (!Array.isArray(nodes)) return;
       for (const n of nodes) {
+        if (!n || !n.agent) continue;
         if (n.agent.category === "orchestrator") {
           const proj = n.agent.project || extractAgentProject(n.agent) || "";
           if (!selectedRepo || selectedRepo === "all" || isRepoMatching(proj, selectedRepo) || proj.toLowerCase() === selectedRepo.toLowerCase()) {
             list.push(n.agent);
           }
         }
-        if (n.children && n.children.length > 0) {
+        if (Array.isArray(n.children) && n.children.length > 0) {
           collect(n.children);
         }
       }
