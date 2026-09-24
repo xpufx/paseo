@@ -127,6 +127,12 @@ Applying a label inside a scope evicts the previous one **if the label was
 created with `exclusive: true`** — that is the whole mechanism, and it is why
 the label seed in [§5](#5-board-labels-taxonomy-and-install) matters.
 
+> [!IMPORTANT]
+> **Operator Attention Policy**: Only `attention/2-user` (or `attention/user`) signals
+> that human operator intervention is required. `state/3-verify` or `state/2-review`
+> represent execution milestones and **never** imply operator attention or suppress
+> orchestrator sweeps unless explicitly paired with `attention/2-user`.
+
 ---
 
 ## 2. Prerequisites
@@ -193,8 +199,8 @@ scope — applying one evicts the other at the forge DB level.
 
 | Scope | Values | Meaning |
 | --- | --- | --- |
-| `state/` | `0-triage`, `1-wip`, `2-review`, `3-verify`, `4-done` | Execution lifecycle |
-| `attention/` | `0-orchestrator`, `1-agent`, `2-user`, `3-ignore` (+ optional `frontdesk`) | Who acts next (the operator's steering channel) |
+| `state/` | `0-triage`, `1-wip`, `2-review`, `3-verify`, `4-done` | Execution lifecycle (non-binding; does not signal human attention) |
+| `attention/` | `0-orchestrator`, `1-agent`, `2-user`, `3-ignore` (+ optional `frontdesk`) | Who acts next (`attention/2-user` is the sole human operator signal) |
 | `priority/` | `0-SOS`, `1-high`, `2-normal`, `3-low`, `4-backburner` | Queue ordering |
 | `spec/` | `0-needed`, `1-checklist`, `2-approved` | Pre-code shaping |
 | `target/` | one per managed component, e.g. `target/daemon`, `target/uppidi-fleet` | Which subsystem a ticket concerns |
