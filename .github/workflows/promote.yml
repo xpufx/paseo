@@ -1,0 +1,72 @@
+# Stage 2 of the two-stage publish chain (xpufx-org/paseo#511).
+#
+#   Forgejo --auto--> paseo-prv (staging) --this workflow, manual--> paseo (public)
+#
+# Dispatch-only: nothing here fires on push. Promotion to the public repo
+# happens only when a human runs this workflow from the Actions tab of
+# xpufx/paseo-prv. It re-runs the same scoped-mirror machinery (mirror-github.mjs)
+# from the prv checkout, so the public repo always receives exactly the tree
+# that was gated on Forgejo and staged on prv.
+#
+# Auth: secrets.PRV_MIRROR_TOKEN must be a GitHub fine-grained PAT with
+# Contents: Read and write on xpufx/paseo (public). github.token cannot push
+# cross-repo. A missing secret is a warning, not a failure.
+name: Promote to public
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Prepare and report the promotion commit without pushing"
+        required: false
+        default: false
+        type: boolean
+      force:
+        description: "Force-push the scoped tree (overwrites public main; use with extreme caution)"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: promote-public
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Scoped promotion push to xpufx/paseo
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PRV_MIRROR_TOKEN || github.token }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Push scoped tree to the public mirror
+        env:
+          PUB_MIRROR_TOKEN: ${{ secrets.PRV_MIRROR_TOKEN }}
+          FORCE_IN: ${{ inputs.force }}
+          DRY_RUN_IN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PUB_MIRROR_TOKEN:-}" ]; then
+            echo "::warning::PRV_MIRROR_TOKEN is not configured — the public mirror was NOT updated."
+            echo "::warning::Add repository/organization secret PRV_MIRROR_TOKEN (GitHub fine-grained PAT with Contents: Read and write on xpufx/paseo) to enable promotion."
+            exit 0
+          fi
+          ARGS=(--target="top,demo,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper")
+          [ "$DRY_RUN_IN" = "true" ] && ARGS+=(--dry-run)
+          [ "$FORCE_IN" = "true" ] && ARGS+=(--force)
+          # Remote MUST be named `github`: mirror-github.mjs resolves
+          # GITHUB_REMOTE (default "github") by name and falls back to the
+          # hardcoded public SSH URL when lookup fails.
+          git remote remove github 2>/dev/null || true
+          git remote add github https://github.com/xpufx/paseo.git
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PUB_MIRROR_TOKEN" | base64 | tr -d '\n')"
+          node scripts/mirror-github.mjs "${ARGS[@]}"

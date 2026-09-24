@@ -1,0 +1,62 @@
+# Stage 1 of the two-stage publish chain (xpufx-org/paseo#511).
+#
+#   Forgejo (this repo, source of truth)
+#     --auto on push to main-->  github.com/xpufx/paseo-prv   (private staging)
+#     --manual dispatch in prv--> github.com/xpufx/paseo     (public, .github/workflows/promote.yml)
+#
+# Every push to main re-publishes the full scoped mirror surface (all 8
+# plugins + helper, same target set as install-smoke.yml) to paseo-prv via
+# scripts/mirror-github.mjs. The script builds a synthetic scoped commit
+# (pruned dev-only paths, vendored helper imports, scoped root package.json)
+# and fast-forwards prv's main. A push that would not fast-forward fails the
+# job: force is never implied. If main must be reset on prv, do it by hand.
+#
+# Auth: secrets.FJ_PASEO_PRV_TOKEN must be a GitHub fine-grained PAT with
+# Contents: Read and write on xpufx/paseo-prv. A missing secret is a warning,
+# not a failure — matching install-smoke.yml's mirror-push convention.
+name: Mirror to private staging
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: mirror-prv
+  cancel-in-progress: true
+
+jobs:
+  mirror-prv:
+    name: Scoped mirror push to xpufx/paseo-prv
+    runs-on: alpine-docker
+    container:
+      image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
+    env:
+      # Cumulative mirror target set: every plugin directory plus helper. Must
+      # match install-smoke.yml — a subset would prune plugins from the target.
+      MIRROR_TARGETS: "top,demo,mcp-tools,forges,x-comms,slash,twofado,plugin-updates,helper"
+      GIT_AUTHOR_NAME: paseo-mirror
+      GIT_AUTHOR_EMAIL: mirror@paseo.invalid
+      GIT_COMMITTER_NAME: paseo-mirror
+      GIT_COMMITTER_EMAIL: mirror@paseo.invalid
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push scoped tree to paseo-prv
+        env:
+          PRV_MIRROR_TOKEN: ${{ secrets.FJ_PASEO_PRV_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${PRV_MIRROR_TOKEN:-}" ]; then
+            echo "::warning::FJ_PASEO_PRV_TOKEN is not configured — paseo-prv was NOT updated."
+            echo "::warning::Add repository/organization secret FJ_PASEO_PRV_TOKEN (GitHub fine-grained PAT with Contents: Read and write on xpufx/paseo-prv) to enable the staging mirror."
+            exit 0
+          fi
+          # Remote MUST be named `github`: mirror-github.mjs resolves
+          # GITHUB_REMOTE (default "github") by name and falls back to the
+          # hardcoded public SSH URL when lookup fails.
+          git remote remove github 2>/dev/null || true
+          git remote add github https://github.com/xpufx/paseo-prv.git
+          git config --local http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$PRV_MIRROR_TOKEN" | base64 | tr -d '\n')"
+          node scripts/mirror-github.mjs --target="$MIRROR_TARGETS"
+        # GITHUB_REMOTE defaults to "github" — set by the remote add above.
