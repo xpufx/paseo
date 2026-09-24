@@ -1271,6 +1271,24 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.ok(delivered.some((d) => d.msg.includes("requires attention (input). Operator or Front Desk triage required.")));
   });
 
+  it("ignores benign finished attention reason without alerting Front Desk (#488)", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-done-1", { id: "agent-done-1", title: "Worker Done", status: "idle", requiresAttention: true, attentionReason: "finished", pendingPermissions: [] }],
+      ["agent-orch-1", { id: "agent-orch-1", status: "idle", lastError: null }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-orch-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(
+      audit.anomalies.some((a) => a.type === "AGENT_ATTENTION_REQUIRED" && a.agentId === "agent-done-1"),
+      false,
+    );
+    assert.equal(delivered.some((d) => d.msg.includes("requires attention (finished)")), false);
+  });
+
   it("flags wedged queues and auto-recovers the registered orchestrator", async () => {
     (router as any).busyAttempts.set("wedged-with-orch", 12);
     (router as any).queues.set("wedged-with-orch", [{ id: "m1", key: "wedged-with-orch", msg: "pending", ts: Date.now() }]);

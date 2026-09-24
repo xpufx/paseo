@@ -1315,6 +1315,7 @@ export class HookRouter {
         } else if (
           agent.requiresAttention === true &&
           agent.attentionReason !== "error" &&
+          agent.attentionReason !== "finished" &&
           (!agent.pendingPermissions || agent.pendingPermissions.length === 0)
         ) {
           anomalies.push({
