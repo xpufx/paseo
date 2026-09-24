@@ -573,10 +573,19 @@ export interface BuildProjectGroupsOptions {
   enrolledRepos?: string[];
   mutedRepos?: string[];
   repoQueuedHooks?: Record<string, number>;
+  /**
+   * Agent id of the Front Desk currently registered with the hook daemon
+   * (``hookStatus.frontDesk.agentId``). Front Desk is a singleton; only this
+   * session is elevated as the authoritative primary Front Desk.
+   */
+  registeredFrontDeskAgentId?: string | null;
 }
 
 export interface BuildProjectGroupsResult {
+  /** At most one node: the singleton, registered Front Desk session. */
   frontDeskNodes: UppidiAgentTreeNode[];
+  /** Duplicate/orphaned front-desk sessions, excluded from the primary card. */
+  staleFrontDeskNodes: UppidiAgentTreeNode[];
   projectGroups: ProjectAgentGroup[];
   enrolledGroups: ProjectAgentGroup[];
   detachedGroups: ProjectAgentGroup[];
@@ -622,9 +631,66 @@ export function filterAgentTree(
   return result;
 }
 
+function isFrontDeskAgentActive(agent: UppidiAgent): boolean {
+  const state = (agent.deterministicState || "").toLowerCase();
+  const status = (agent.status || "").toLowerCase();
+  return (
+    state === "working" ||
+    state === "running" ||
+    status === "running" ||
+    status === "busy"
+  );
+}
+
+/**
+ * Front Desk is strictly a singleton registered with the hook daemon (#470).
+ * Selects the one authoritative primary session from a list of front-desk nodes:
+ * 1. The session whose id matches the hook-daemon registration (`registeredAgentId`).
+ * 2. Otherwise, the single active front desk (running/working, most recent first).
+ * 3. Otherwise, the most recently active session.
+ *
+ * Returns `{ primary, stale }`. `primary` is null only when no front-desk nodes exist.
+ */
+export function selectPrimaryFrontDeskNode(
+  frontDeskNodes: UppidiAgentTreeNode[],
+  registeredAgentId?: string | null
+): { primary: UppidiAgentTreeNode | null; stale: UppidiAgentTreeNode[] } {
+  if (frontDeskNodes.length === 0) {
+    return { primary: null, stale: [] };
+  }
+
+  if (registeredAgentId) {
+    const registered = frontDeskNodes.find((n) => n.agent.id === registeredAgentId);
+    if (registered) {
+      return {
+        primary: registered,
+        stale: frontDeskNodes.filter((n) => n !== registered),
+      };
+    }
+  }
+
+  if (frontDeskNodes.length === 1) {
+    return { primary: frontDeskNodes[0], stale: [] };
+  }
+
+  const active = frontDeskNodes.filter((n) => isFrontDeskAgentActive(n.agent));
+  const pool = active.length > 0 ? active : frontDeskNodes;
+  const primary = [...pool].sort((a, b) => {
+    const aTime = a.agent.lastActivityAt ? Date.parse(a.agent.lastActivityAt) : 0;
+    const bTime = b.agent.lastActivityAt ? Date.parse(b.agent.lastActivityAt) : 0;
+    return (Number.isNaN(bTime) ? 0 : bTime) - (Number.isNaN(aTime) ? 0 : aTime);
+  })[0];
+
+  return {
+    primary,
+    stale: frontDeskNodes.filter((n) => n !== primary),
+  };
+}
+
 /**
  * Builds project groups from the fleet tree.
- * - Elevates Front Desk nodes into frontDeskNodes.
+ * - Elevates the singleton primary Front Desk into frontDeskNodes and routes
+ *   duplicate/orphaned front-desk sessions to staleFrontDeskNodes (#470).
  * - Permanently includes enrolled repositories (even when unstaffed with 0 agents).
  * - Under each project, separates Orchestrators (with their children) and unparented workers.
  * - Labels enrolled repos vs detached / local workspaces.
@@ -634,7 +700,7 @@ export function buildProjectGroups(
   tree: UppidiAgentTreeNode[],
   options?: BuildProjectGroupsOptions
 ): BuildProjectGroupsResult {
-  const frontDeskNodes: UppidiAgentTreeNode[] = [];
+  const frontDeskCandidates: UppidiAgentTreeNode[] = [];
   const projectMap = new Map<
     string,
     {
@@ -688,7 +754,7 @@ export function buildProjectGroups(
           remainingChildren.push(child);
         }
       }
-      frontDeskNodes.push({
+      frontDeskCandidates.push({
         ...node,
         children: remainingChildren,
       });
@@ -797,8 +863,14 @@ export function buildProjectGroups(
   const enrolledGroups = projectGroups.filter((g) => !g.isDetached);
   const detachedGroups = projectGroups.filter((g) => g.isDetached);
 
+  const { primary, stale } = selectPrimaryFrontDeskNode(
+    frontDeskCandidates,
+    options?.registeredFrontDeskAgentId
+  );
+
   return {
-    frontDeskNodes,
+    frontDeskNodes: primary ? [primary] : [],
+    staleFrontDeskNodes: stale,
     projectGroups,
     enrolledGroups,
     detachedGroups,

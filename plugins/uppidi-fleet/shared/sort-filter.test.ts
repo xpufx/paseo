@@ -14,6 +14,7 @@ import {
   isAgentEligibleForBulkArchive,
   filterBulkArchiveCandidates,
   buildProjectGroups,
+  selectPrimaryFrontDeskNode,
   filterAgentTree,
   isRepoMatching,
   getStatusLightColor,
@@ -648,6 +649,147 @@ describe("Uppidi Fleet sort & filter predicates", () => {
       assert.deepEqual(
         aurGroup.allAgents.map((a) => a.id),
         ["orch-aur", "worker-aur-1"]
+      );
+    });
+
+    it("treats Front Desk as a singleton and elevates only the registered session (#470)", () => {
+      const makeFd = (
+        id: string,
+        overrides: Partial<UppidiAgent> = {}
+      ): UppidiAgentTreeNode => ({
+        agent: {
+          id,
+          shortId: id,
+          name: `Front Desk ${id}`,
+          category: "front-desk",
+          status: "running",
+          deterministicState: "running",
+          lastActivityAt: "2026-01-01T00:00:00.000Z",
+          ...overrides,
+        },
+        depth: 0,
+        children: [],
+      });
+
+      const registered = makeFd("fd-registered");
+      const duplicate = makeFd("fd-duplicate", {
+        lastActivityAt: "2026-05-01T00:00:00.000Z",
+        status: "idle",
+        deterministicState: "idle:waiting",
+      });
+
+      // 1. Hook-daemon registration decides the primary, regardless of activity
+      const result = buildProjectGroups([duplicate, registered], {
+        registeredFrontDeskAgentId: "fd-registered",
+      });
+      assert.equal(result.frontDeskNodes.length, 1);
+      assert.equal(result.frontDeskNodes[0].agent.id, "fd-registered");
+      assert.deepEqual(
+        result.staleFrontDeskNodes.map((n) => n.agent.id),
+        ["fd-duplicate"]
+      );
+
+      // 2. No "secondary front desk" grouping: at most one primary ever
+      assert.equal(result.frontDeskNodes.length, 1);
+    });
+
+    it("selects a single active front desk when none is registered (#470)", () => {
+      const makeFd = (
+        id: string,
+        overrides: Partial<UppidiAgent> = {}
+      ): UppidiAgentTreeNode => ({
+        agent: {
+          id,
+          shortId: id,
+          name: `Front Desk ${id}`,
+          category: "front-desk",
+          status: "idle",
+          deterministicState: "idle:waiting",
+          lastActivityAt: "2026-01-01T00:00:00.000Z",
+          ...overrides,
+        },
+        depth: 0,
+        children: [],
+      });
+
+      const idleOlder = makeFd("fd-idle-older", {
+        lastActivityAt: "2026-01-01T00:00:00.000Z",
+      });
+      const idleNewer = makeFd("fd-idle-newer", {
+        lastActivityAt: "2026-06-01T00:00:00.000Z",
+      });
+      const active = makeFd("fd-active", {
+        status: "running",
+        deterministicState: "working",
+        lastActivityAt: "2026-02-01T00:00:00.000Z",
+      });
+
+      // Active wins over newer idle; remaining sessions are stale, not secondary.
+      const { primary, stale } = selectPrimaryFrontDeskNode([
+        idleNewer,
+        idleOlder,
+        active,
+      ]);
+      assert.equal(primary?.agent.id, "fd-active");
+      assert.deepEqual(
+        stale.map((n) => n.agent.id).sort(),
+        ["fd-idle-newer", "fd-idle-older"]
+      );
+
+      // Fallback to most recently active when none are running/working.
+      const fallback = selectPrimaryFrontDeskNode([idleOlder, idleNewer]);
+      assert.equal(fallback.primary?.agent.id, "fd-idle-newer");
+      assert.deepEqual(
+        fallback.stale.map((n) => n.agent.id),
+        ["fd-idle-older"]
+      );
+
+      // Empty input yields no primary.
+      assert.equal(selectPrimaryFrontDeskNode([]).primary, null);
+    });
+
+    it("routes duplicate front-desk sessions to staleFrontDeskNodes instead of a secondary group (#470)", () => {
+      const fdNodes: UppidiAgentTreeNode[] = [
+        {
+          agent: {
+            id: "fd-primary",
+            shortId: "fdp",
+            name: "Front Desk Primary",
+            category: "front-desk",
+            status: "running",
+            deterministicState: "running",
+          },
+          depth: 0,
+          children: [],
+        },
+        {
+          agent: {
+            id: "fd-orphan",
+            shortId: "fdo",
+            name: "Front Desk Orphan",
+            category: "front-desk",
+            status: "idle",
+            deterministicState: "idle:waiting",
+          },
+          depth: 0,
+          children: [],
+        },
+      ];
+
+      const result = buildProjectGroups(fdNodes, {
+        registeredFrontDeskAgentId: "fd-primary",
+      });
+
+      assert.equal(result.frontDeskNodes.length, 1);
+      assert.equal(result.frontDeskNodes[0].agent.id, "fd-primary");
+      assert.equal(result.staleFrontDeskNodes.length, 1);
+      assert.equal(result.staleFrontDeskNodes[0].agent.id, "fd-orphan");
+      // Stale front-desk sessions must not leak into project groups.
+      assert.equal(
+        result.projectGroups.some((g) =>
+          g.allAgents.some((a) => a.category === "front-desk")
+        ),
+        false
       );
     });
   });

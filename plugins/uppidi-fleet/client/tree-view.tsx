@@ -72,6 +72,8 @@ export interface UppidiFleetTreeViewProps {
   onReplaceOrchestrator?: (repo: string, existingAgentId?: string) => Promise<void> | void;
   onToggleRepoMute?: (repo: string, muted?: boolean) => Promise<void> | void;
   selectedRepo?: string;
+  /** Agent id currently registered as Front Desk with the hook daemon (#470). */
+  registeredFrontDeskAgentId?: string | null;
 }
 
 export interface AgentStatusLightProps {
@@ -387,9 +389,13 @@ export function formatRelativeTime(dateStr?: string | null): string {
  * Dedicated Fleet Front Desk Header & Hero Card (#403)
  * Elevated at the top of the tree view as the fleet-wide liaison.
  * Displays interactive status lights for fleet orchestrators (#410).
+ *
+ * Front Desk is a singleton (#470): this renders the single registered primary
+ * session only. Duplicate/orphaned sessions are surfaced separately as stale
+ * cleanup candidates rather than a pseudo-official "secondary" grouping.
  */
 export function FrontDeskHero({
-  nodes,
+  node,
   orchestrators = [],
   colors,
   typography,
@@ -400,7 +406,7 @@ export function FrontDeskHero({
   onReplaceFrontDesk,
   isActionLoading = false,
 }: {
-  nodes: UppidiAgentTreeNode[];
+  node?: UppidiAgentTreeNode | null;
   orchestrators?: UppidiAgent[];
   colors: any;
   typography: any;
@@ -411,9 +417,7 @@ export function FrontDeskHero({
   onReplaceFrontDesk?: (existingAgentId?: string) => Promise<void> | void;
   isActionLoading?: boolean;
 }) {
-  const [secondaryExpanded, setSecondaryExpanded] = useState(false);
-
-  if (nodes.length === 0) {
+  if (!node) {
     return (
       <Card
         variant="elevated"
@@ -492,7 +496,7 @@ export function FrontDeskHero({
     );
   }
 
-  const primaryNode = nodes[0];
+  const primaryNode = node;
   const primaryAgent = primaryNode.agent;
   const primaryStateConfig = getDeterministicStateConfig(
     primaryAgent.deterministicState,
@@ -653,48 +657,6 @@ export function FrontDeskHero({
               size={9}
             />
           </Row>
-        )}
-
-        {/* If secondary front desk agents exist, render as dense rows */}
-        {nodes.length > 1 && (
-          <Stack gap={4} style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8 }}>
-            <Pressable
-              onPress={() => setSecondaryExpanded(!secondaryExpanded)}
-              style={({ pressed }: any) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-                paddingVertical: 2,
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="Toggle secondary front desk sessions"
-            >
-              <Icon
-                name={secondaryExpanded ? "ChevronDown" : "ChevronRight"}
-                size={13}
-                color={colors.foregroundMuted}
-              />
-              <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
-                Secondary Front Desk Sessions ({nodes.length - 1})
-              </Text>
-            </Pressable>
-            {secondaryExpanded &&
-              nodes.slice(1).map((secNode, idx) => (
-                <DenseAgentRow
-                  key={secNode.agent.id}
-                  node={secNode}
-                  depth={1}
-                  isLast={idx === nodes.length - 2}
-                  colors={colors}
-                  typography={typography}
-                  navigation={navigation}
-                  archivingAgentId={archivingAgentId}
-                  onArchiveAgent={onArchiveAgent}
-                />
-              ))}
-          </Stack>
         )}
       </Stack>
     </Card>
@@ -1586,6 +1548,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   onReplaceOrchestrator,
   onToggleRepoMute,
   selectedRepo,
+  registeredFrontDeskAgentId,
 }) => {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
@@ -1853,23 +1816,29 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     return filterAgentTree(baseTree, matches);
   }, [baseTree, query, stateFilter]);
 
-  // 4. Group by Front Desk and Projects (#403, #426)
-  const { frontDeskNodes, enrolledGroups, detachedGroups } = useMemo(() => {
+  // 4. Group by Front Desk and Projects (#403, #426, #470)
+  const { frontDeskNodes, staleFrontDeskNodes: filteredStaleFrontDeskNodes, enrolledGroups, detachedGroups } = useMemo(() => {
     return buildProjectGroups(filteredTree, {
       enrolledRepos: agentsData?.enrolledRepos,
       mutedRepos: agentsData?.mutedRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
+      registeredFrontDeskAgentId,
     });
-  }, [filteredTree, agentsData]);
+  }, [filteredTree, agentsData, registeredFrontDeskAgentId]);
 
-  // Unfiltered Front Desk nodes for top display when filter is active
-  const allFrontDeskNodes = useMemo(() => {
-    return buildProjectGroups(baseTree, {
+  // Unfiltered Front Desk nodes for top display when filter is active (#470)
+  const { primaryFrontDeskNode, staleFrontDeskNodes } = useMemo(() => {
+    const result = buildProjectGroups(baseTree, {
       enrolledRepos: agentsData?.enrolledRepos,
       mutedRepos: agentsData?.mutedRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
-    }).frontDeskNodes;
-  }, [baseTree, agentsData]);
+      registeredFrontDeskAgentId,
+    });
+    return {
+      primaryFrontDeskNode: result.frontDeskNodes[0] ?? null,
+      staleFrontDeskNodes: result.staleFrontDeskNodes,
+    };
+  }, [baseTree, agentsData, registeredFrontDeskAgentId]);
 
   const displayEnrolled = useMemo(() => {
     let list = enrolledGroups;
@@ -1900,7 +1869,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   const idleCount = agentsData?.idleCount ?? 0;
   const errorCount = agentsData?.errorCount ?? 0;
 
-  const displayFrontDesk = query.trim() || stateFilter !== "all" ? frontDeskNodes : allFrontDeskNodes;
+  // When a filter is active, honor it; otherwise always show the singleton primary.
+  const displayFrontDeskNode =
+    query.trim() || stateFilter !== "all" ? frontDeskNodes[0] ?? null : primaryFrontDeskNode;
 
   // 5. Fleet Orchestrators for Front Desk Hero (#410)
   const allOrchestrators = useMemo(() => {
@@ -2080,9 +2051,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
         </View>
       </Row>
 
-      {/* 1. Fleet Front Desk Hero (Elevated at Top of All) */}
+      {/* 1. Fleet Front Desk Hero (Elevated at Top of All) — singleton (#470) */}
       <FrontDeskHero
-        nodes={displayFrontDesk}
+        node={displayFrontDeskNode}
         orchestrators={displayOrchestrators}
         colors={colors}
         typography={typography}
@@ -2096,7 +2067,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
 
       {/* 2. Top-Level Project Groups (Enrolled Fleet Roster) */}
       {displayEnrolled.length === 0 && displayDetached.length === 0 ? (
-        displayFrontDesk.length === 0 ? (
+        !displayFrontDeskNode ? (
           <EmptyState
             title={isLoading ? "Scanning fleet..." : "No matching agents"}
             description={
@@ -2194,6 +2165,53 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
               </Stack>
             </Stack>
           )}
+        </Stack>
+      )}
+
+      {/* 4. Stale / Orphaned Front Desk Sessions (#470) */}
+      {filteredStaleFrontDeskNodes.length > 0 && (
+        <Stack
+          gap={6}
+          style={{
+            marginTop: 12,
+            paddingTop: 12,
+            borderTopWidth: 1,
+            borderTopColor: colors.border,
+          }}
+        >
+          <Row align="center" gap="xs">
+            <Icon name="Archive" size={14} color={colors.foregroundMuted} />
+            <Text
+              style={{
+                color: colors.foregroundMuted,
+                ...typography.caption,
+                fontWeight: "700",
+                textTransform: "uppercase",
+                letterSpacing: 0.8,
+              }}
+            >
+              Stale / Orphaned Front Desk Sessions ({filteredStaleFrontDeskNodes.length})
+            </Text>
+          </Row>
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+            Front Desk is a singleton. These duplicate or orphaned sessions are not registered with
+            the hook daemon and can be archived during cleanup.
+          </Text>
+          <Stack gap={2}>
+            {filteredStaleFrontDeskNodes.map((staleNode, idx) => (
+              <DenseAgentRow
+                key={staleNode.agent.id}
+                node={staleNode}
+                depth={1}
+                isLast={idx === filteredStaleFrontDeskNodes.length - 1}
+                colors={colors}
+                typography={typography}
+                navigation={navigation}
+                archivingAgentId={archivingAgentId}
+                onArchiveAgent={handleArchiveAgent}
+              />
+            ))}
+          </Stack>
         </Stack>
       )}
     </Stack>

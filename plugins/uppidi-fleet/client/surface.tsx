@@ -1207,6 +1207,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
           onArchiveBulk={handleArchiveBulk}
           isArchiving={isBulkArchiving}
           selectedRepo={selectedRepo}
+          registeredFrontDeskAgentId={hookStatus?.frontDesk?.agentId ?? null}
         />
       ) : (
         <Stack gap={6}>
