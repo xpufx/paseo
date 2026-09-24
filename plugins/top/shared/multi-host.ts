@@ -133,9 +133,16 @@ export function aggregateFleet(
   return aggregate;
 }
 
+export const DEFAULT_MULTI_HOST_INTERVAL_MS = 15_000;
+export const DEFAULT_MULTI_HOST_TIMEOUT_MS = 4_000;
+
 export class MultiHostPoller {
-  static readonly DEFAULT_INTERVAL_MS = 15_000;
-  static readonly DEFAULT_TIMEOUT_MS = 4_000;
+  static get DEFAULT_INTERVAL_MS(): number {
+    return DEFAULT_MULTI_HOST_INTERVAL_MS;
+  }
+  static get DEFAULT_TIMEOUT_MS(): number {
+    return DEFAULT_MULTI_HOST_TIMEOUT_MS;
+  }
 
   private readonly options: Required<
     Pick<MultiHostPollerOptions, "timeoutMs" | "intervalMs" | "now">
@@ -153,8 +160,8 @@ export class MultiHostPoller {
 
   constructor(options: MultiHostPollerOptions) {
     this.options = {
-      timeoutMs: options.timeoutMs ?? MultiHostPoller.DEFAULT_TIMEOUT_MS,
-      intervalMs: options.intervalMs ?? MultiHostPoller.DEFAULT_INTERVAL_MS,
+      timeoutMs: options.timeoutMs ?? DEFAULT_MULTI_HOST_TIMEOUT_MS,
+      intervalMs: options.intervalMs ?? DEFAULT_MULTI_HOST_INTERVAL_MS,
       now: options.now ?? (() => Date.now()),
       acquire: options.acquire,
       onUpdate: options.onUpdate,
