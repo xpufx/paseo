@@ -20,7 +20,7 @@ const PACKAGES = [
   { id: "mcp-tools", name: "@xpufx/paseo-mcp-tools", paseo: ">=0.8.0", runtime: [] },
   { id: "plugin-updates", name: "@xpufx/paseo-plugin-updates", paseo: ">=0.8.0", runtime: [] },
   { id: "slash", name: "@xpufx/paseo-slash", paseo: ">=0.8.0", runtime: [] },
-  { id: "top", name: "@xpufx/paseo-top", paseo: ">=0.8.0", runtime: [] },
+  { id: "top", name: "@xpufx/paseo-top", paseo: ">=0.9.0", runtime: [] },
   { id: "twofado", name: "@xpufx/paseo-twofado", paseo: ">=0.8.0", runtime: [] },
   {
     id: "x-comms",
