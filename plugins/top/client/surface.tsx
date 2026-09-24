@@ -30,11 +30,13 @@ import { PLUGIN_VERSION } from "../shared/version";
 import { notifySettingsChanged } from "./pill";
 import { ChoiceChips } from "./settings-ui";
 import { useTopResourceQuery } from "./resources-query";
+import { FleetView } from "./multi-host-view";
 
-type SurfaceTab = "system" | "settings" | "about";
+type SurfaceTab = "system" | "fleet" | "settings" | "about";
 
 const TABS = [
   { id: "system", label: "Activity", shortLabel: "Activity", icon: "Activity" },
+  { id: "fleet", label: "Fleet", shortLabel: "Fleet", icon: "Server" },
   { id: "settings", label: "Settings", shortLabel: "Settings", icon: "Sliders" },
   { id: "about", label: "About", shortLabel: "About", icon: "Info" },
 ];
@@ -169,6 +171,8 @@ export function TopDashboardSurface(_props: PluginSurfaceProps) {
           ) : null}
         </Stack>
       )}
+
+      {activeTab === "fleet" && <FleetView />}
 
       {activeTab === "settings" && (
         <Stack gap={12}>

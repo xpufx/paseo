@@ -6,7 +6,7 @@
   "scripts": {
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npx tsx --test server/telemetry.test.ts client/pill-labels.test.ts client/turn-counter.test.ts client/telemetry-copy.test.ts"
+    "test": "npm run typecheck && npx tsx --test server/telemetry.test.ts client/pill-labels.test.ts client/turn-counter.test.ts client/telemetry-copy.test.ts client/multi-host.test.ts"
   },
   "devDependencies": {
     "@getpaseo/plugin": "^0.9.0",

@@ -45,6 +45,7 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 ### 4. Fleet & MCP Integration
 - **MCP Server Health**: Bridges with `mcp-tools` to monitor connected MCP servers, distinguishing healthy, degraded, or offline servers alongside latency figures.
+- **Multi-Host Fleet View**: The dashboard **Fleet** tab enumerates hosts from `useHosts()` and shows one card per host with a status badge (`online` / `stale` / `offline` / `error`), probe latency, and per-host counts. Counts are summed across responsive hosts; CPU/RAM/load stay per-host and are never aggregated. Polling is bounded to one in-flight probe per host on a 15s cadence with a 4s per-host timeout that marks the host `stale` until the next tick. No remote shell or custom-command execution is performed.
 
 ### 5. Flexible Display Modes
 - **Cycle Mode**: Automatically cycles through enabled metric segments on each refresh interval.
@@ -75,7 +76,7 @@ Add user-defined metrics by dropping declarative `.jsonc` definitions into `~/.p
 
 ### 8. Native Modal Dashboard
 Clicking the pill opens a native dashboard with:
-- **Pinned Header Navbar**: Fixed tabs for System Resources, Activity Timeline, Custom Pills, Settings, and About. Content smoothly scrolls beneath the navbar.
+- **Pinned Header Navbar**: Fixed tabs for System Resources, Fleet, Activity Timeline, Custom Pills, Settings, and About. Content smoothly scrolls beneath the navbar.
 - **Visual Gauges**: Responsive bars showing CPU and RAM distribution.
 - **Full Settings Suite**: Live toggles for every metric and pill, with persistent state managed by `PluginStorage`.
 
