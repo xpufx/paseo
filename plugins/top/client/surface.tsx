@@ -27,7 +27,7 @@ import {
   type TopSettings,
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
-import { notifySettingsChanged } from "./pill";
+import { notifySettingsChanged } from "./settings-events";
 import { ChoiceChips } from "./settings-ui";
 import { useTopResourceQuery } from "./resources-query";
 import { FleetView } from "./multi-host-view";

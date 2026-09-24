@@ -35,7 +35,6 @@ import {
   usePluginTheme,
   getStatusColor,
   triggerHaptic,
-  shouldEmitSnapshotUpdate,
   type RenderModalProps,
   type RenderPillProps,
   type KeyValueProps,
@@ -72,6 +71,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { TopDashboardSurface } from "./surface";
+import { addSettingsListener, removeSettingsListener, notifySettingsChanged } from "./settings-events";
 import { useTopResourceQuery, useCustomPillsQuery } from "./resources-query";
 import { ChoiceChips } from "./settings-ui";
 import {
@@ -448,26 +448,8 @@ function PillItemContent({
   );
 }
 
-type SettingsListener = (settings: TopSettings) => void;
-const settingsListeners = new Set<SettingsListener>();
-let lastNotifiedSettings: TopSettings | null = null;
-
-export function notifySettingsChanged(settings: TopSettings) {
-  if (!shouldEmitSnapshotUpdate(
-    lastNotifiedSettings as unknown as Record<string, unknown> | null,
-    settings as unknown as Record<string, unknown>,
-  )) {
-    return;
-  }
-  lastNotifiedSettings = settings;
-  for (const listener of settingsListeners) {
-    try {
-      listener(settings);
-    } catch {
-      // Ignore listener errors
-    }
-  }
-}
+export { notifySettingsChanged } from "./settings-events";
+type SettingsListener = import("./settings-events").SettingsListener;
 
 function PillOffline() {
   const { colors } = usePluginTheme();
@@ -2104,7 +2086,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   }
 
   // Register settings listener
-  settingsListeners.add(syncPills);
+  addSettingsListener(syncPills);
 
   // Initial sync synchronously
   syncPills(topSettingsContract.defaultSettings);
@@ -2206,7 +2188,7 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
   const onSettingsChanged = () => {
     void syncCustomPills();
   };
-  settingsListeners.add(onSettingsChanged);
+  addSettingsListener(onSettingsChanged);
 
   let disposed = false;
   const cleanup = () => {
@@ -2218,8 +2200,8 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
       cleanupSidebar = null;
     }
     clearInterval(customPillInterval);
-    settingsListeners.delete(syncPills);
-    settingsListeners.delete(onSettingsChanged);
+    removeSettingsListener(syncPills);
+    removeSettingsListener(onSettingsChanged);
     for (const cleanup of activePills.values()) {
       cleanup();
     }
