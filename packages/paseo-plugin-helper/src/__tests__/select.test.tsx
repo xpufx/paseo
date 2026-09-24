@@ -204,10 +204,19 @@ describe("Select", () => {
 
     const container = tree.root.findAllByType(View)[0];
     expect(styleValue(container.props.style, "position")).toBe("relative");
+    // Closed: the container must not create a stacking context that leaks above
+    // siblings; only an open dropdown elevates its parent.
+    expect(styleValue(container.props.style, "zIndex")).toBeUndefined();
 
     act(() => {
       triggerOf(tree).props.onPress();
     });
+
+    // Open: the container elevates its stacking context so the option list
+    // paints above later siblings such as the Tabs bar (#484).
+    const openContainer = tree.root.findAllByType(View)[0];
+    expect(styleValue(openContainer.props.style, "zIndex")).toBe(1000);
+    expect(styleValue(openContainer.props.style, "elevation")).toBe(10);
 
     const optionList = tree.root.findAllByType(View).find((node) =>
       flatStyle(node.props.style).some(

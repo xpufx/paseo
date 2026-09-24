@@ -400,6 +400,17 @@ describe("uppidi-fleet client entry contract", () => {
       );
     });
 
+    it("elevates the header bar stacking context above the Tabs bar (#484)", () => {
+      const start = surfaceSource.indexOf("export function UppidiTopHeaderBar");
+      const end = surfaceSource.indexOf("export function UppidiFleetSurface");
+      const header = surfaceSource.slice(start, end);
+      assert.match(
+        header,
+        /<Row[\s\S]*?style=\{\{\s*paddingVertical:\s*2,\s*position:\s*["']relative["'],\s*zIndex:\s*\d+\s*\}\}/,
+        "UppidiTopHeaderBar's outer Row must create a stacking context above the Tabs bar",
+      );
+    });
+
     it("removes the workspace dropdown and its surface/tree-view wiring (#465)", () => {
       assert.doesNotMatch(
         surfaceSource,

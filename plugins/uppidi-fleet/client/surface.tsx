@@ -183,7 +183,13 @@ export function UppidiTopHeaderBar({
   const routerBadge = resolveRouterStatusBadge(isConnected, isServiceRunning);
 
   return (
-    <Row justify="space-between" align="center" wrap gap="xs" style={{ paddingVertical: 2 }}>
+    <Row
+      justify="space-between"
+      align="center"
+      wrap
+      gap="xs"
+      style={{ paddingVertical: 2, position: "relative", zIndex: 100 }}
+    >
       {/* Left: Brand mark, title, status dots & badges */}
       <Row align="center" gap="xs" wrap>
         <UppidiBrandMark size={18} />
