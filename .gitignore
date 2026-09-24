@@ -1,6 +1,10 @@
 node_modules/
 *.log
 
+# Stray lockfiles (this repo uses npm; package-lock.json is authoritative)
+pnpm-lock.yaml
+yarn.lock
+
 # OS & editor artifacts
 .DS_Store
 Thumbs.db
