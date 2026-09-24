@@ -2,7 +2,7 @@
   "name": "@xpufx/paseo-plugin-updates",
   "private": false,
   "license": "MIT",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Monitor installed Paseo plugins for git-source updates, with per-subdirectory status, source links, and one-click pulls.",
   "scripts": {
     "typecheck": "tsc --noEmit",
