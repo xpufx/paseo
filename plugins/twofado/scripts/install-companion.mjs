@@ -157,12 +157,17 @@ export async function installCompanion(options = {}) {
 // Direct CLI execution
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const force = process.argv.includes("--force");
+  const soft = process.argv.includes("--soft") || process.argv.includes("--optional") || process.env.TWOFADO_INSTALL_OPTIONAL === "1";
   installCompanion({ force })
     .then((res) => {
       console.log(`[2fado-install] Done: ${res.binPath} (${res.status})`);
       process.exit(0);
     })
     .catch((err) => {
+      if (soft) {
+        console.warn(`[2fado-install] Warning (soft-install): ${err.message}. Binary acquisition skipped; plugin will run with on-demand install / external daemon mode.`);
+        process.exit(0);
+      }
       console.error(`[2fado-install] Error: ${err.message}`);
       process.exit(1);
     });

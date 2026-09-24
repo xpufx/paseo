@@ -4,6 +4,6 @@
     "paseo": ">=0.8.0"
   },
   "build": [
-    ["node", "scripts/install-companion.mjs"]
+    ["node", "scripts/install-companion.mjs", "--optional"]
   ]
 }
