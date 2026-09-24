@@ -1322,45 +1322,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 {issuesData?.reviewCount ?? 0}
               </Text>
             </Pressable>
-
-            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
-
-            <Pressable
-              onPress={() => setHookQueuesExpanded((prev) => !prev)}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: 4,
-                backgroundColor: hookQueuesExpanded ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="Toggle hook queues"
-            >
-              <Icon name="Layers" size={13} color={totalQueued > 0 ? colors.accent : colors.foregroundMuted} />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
-                Hook queued:
-              </Text>
-              <Text
-                style={{
-                  color: totalQueued > 0 ? colors.accent : colors.foreground,
-                  fontWeight: "700",
-                  fontSize: 12,
-                }}
-              >
-                {totalQueued}
-              </Text>
-              <Badge
-                label={hookStatus?.frontDesk?.agentId ? "Front Desk" : "Bridge"}
-                variant="neutral"
-                size="sm"
-                textStyle={{ fontSize: 9 }}
-              />
-            </Pressable>
           </Row>
 
           {/* Action Bar & Filter Buttons */}

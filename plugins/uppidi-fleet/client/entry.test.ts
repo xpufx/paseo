@@ -395,7 +395,7 @@ describe("uppidi-fleet client entry contract", () => {
     });
 
     it("verifies dense metrics bar strip (#424)", () => {
-      // Must contain all 4 key metrics in horizontal strip
+      // Must contain all 3 issue backlog metrics in horizontal strip
       assert.match(
         surfaceSource,
         /Open issues:/,
@@ -411,11 +411,6 @@ describe("uppidi-fleet client entry contract", () => {
         /Awaiting review:/,
         "dense metrics bar must include 'Awaiting review:'",
       );
-      assert.match(
-        surfaceSource,
-        /Hook queued:/,
-        "dense metrics bar must include 'Hook queued:'",
-      );
 
       // Must support click-to-filter
       assert.match(
@@ -427,6 +422,46 @@ describe("uppidi-fleet client entry contract", () => {
         surfaceSource,
         /setFilter\(\s*["']triage-review["']\s*\)/,
         "dense metrics bar must support click-to-filter for triage-review",
+      );
+    });
+
+    it("removes the dead hook queue depth and Front Desk routing pill from the Work Queue filter bar (#476)", () => {
+      const workQueueStart = surfaceSource.indexOf("{/* Dense Metrics Bar");
+      const settingsStart = surfaceSource.indexOf('activeTab === "settings"');
+      assert.ok(
+        workQueueStart >= 0 && settingsStart >= 0 && settingsStart < workQueueStart,
+        "settings and dense metrics bar must be locatable",
+      );
+
+      const workQueueSource = surfaceSource.slice(workQueueStart);
+      assert.ok(
+        !workQueueSource.includes("Hook queued:"),
+        "Work Queue filter bar must not render the hook queue depth pill",
+      );
+      assert.ok(
+        !workQueueSource.includes("Toggle hook queues"),
+        "Work Queue filter bar must not render the dead hook queues toggle",
+      );
+      assert.ok(
+        !workQueueSource.includes("setHookQueuesExpanded"),
+        "Work Queue filter bar must not toggle hookQueuesExpanded",
+      );
+
+      // Hook queue depth and Front Desk routing status live only in Settings.
+      assert.match(
+        surfaceSource,
+        /Total queued across repos/,
+        "Settings must retain hook queue depth",
+      );
+      assert.match(
+        surfaceSource,
+        /Front desk agent/,
+        "Settings must retain Front Desk routing status",
+      );
+      assert.match(
+        surfaceSource,
+        /isExpanded=\{hookQueuesExpanded\}[\s\S]*onToggle=\{\(exp\) => setHookQueuesExpanded\(exp\)\}/,
+        "Settings must own the Hook Queues collapsible toggle",
       );
     });
 
