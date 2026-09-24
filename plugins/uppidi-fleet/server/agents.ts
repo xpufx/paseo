@@ -10,6 +10,8 @@ import type {
   UppidiAgentTreeNode,
   UppidiAgentWork,
   DeterministicAgentState,
+  PendingPermission,
+  AgentAttentionReason,
   UppidiArchiveAgentInput,
   UppidiArchiveAgentOutput,
   UppidiArchiveInactiveAgentsInput,
@@ -28,6 +30,7 @@ import type {
 import {
   extractAgentWorktree,
   extractAgentProject,
+  getPendingPermissionAction,
   DEFAULT_PROJECT,
 } from "../shared/contracts.js";
 import type { WorkspaceProjectMap } from "../shared/contracts.js";
@@ -73,6 +76,7 @@ export interface RawAgentRecord {
   lastError?: string;
   requiresAttention?: boolean;
   attentionReason?: string | null;
+  pendingPermissions?: Array<Record<string, any>> | null;
   lastUsage?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -157,6 +161,42 @@ export function extractAttributedWork(raw: RawAgentRecord): UppidiAgentWork | nu
   return null;
 }
 
+/**
+ * Normalizes a raw daemon `pendingPermissions` payload into the client contract
+ * shape (#534). Drops malformed entries rather than emitting partial rows.
+ */
+export function normalizePendingPermissions(
+  raw?: Array<Record<string, any>> | null
+): PendingPermission[] {
+  if (!Array.isArray(raw)) return [];
+  const result: PendingPermission[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const id = String(entry.id || entry.requestId || "").trim();
+    if (!id) continue;
+    const permission: PendingPermission = { id };
+    if (entry.requestId) permission.requestId = String(entry.requestId);
+    if (entry.name) permission.name = String(entry.name);
+    if (entry.title) permission.title = String(entry.title);
+    if (entry.tool) permission.tool = String(entry.tool);
+    if (entry.kind) permission.kind = String(entry.kind);
+    if (entry.description) permission.description = String(entry.description);
+    result.push(permission);
+  }
+  return result;
+}
+
+/** Normalizes the daemon attention reason into the client contract union (#534). */
+export function normalizeAttentionReason(
+  raw?: string | null
+): AgentAttentionReason | null {
+  if (!raw) return null;
+  if (raw === "finished" || raw === "error" || raw === "permission" || raw === "input") {
+    return raw;
+  }
+  return null;
+}
+
 export function deriveDeterministicState(
   raw: RawAgentRecord,
   attributedWork: UppidiAgentWork | null,
@@ -165,6 +205,17 @@ export function deriveDeterministicState(
   const status = (raw.status || "idle").toLowerCase();
   const errorMsg = (raw.lastError || "").toLowerCase();
   const hasQuotaAlert = raw.id ? quotaAlertAgentIds.has(raw.id) : false;
+  const permissions = normalizePendingPermissions(raw.pendingPermissions);
+  const attentionReason = normalizeAttentionReason(raw.attentionReason);
+
+  // 0. Blocked states (#534): a pending permission prompt or a permission
+  // attention flag means the agent cannot progress until a human adjudicates.
+  if (permissions.length > 0 || attentionReason === "permission") {
+    const action = permissions[0]
+      ? getPendingPermissionAction(permissions[0])
+      : "tool permission";
+    return { state: "permission-prompt", detail: action };
+  }
 
   // 1. Error / Failed states
   // Only evaluate errorMsg as a fatal failure when status is explicitly "error",
@@ -202,7 +253,14 @@ export function deriveDeterministicState(
     return { state: "failed:error", detail: raw.lastError || "Agent error" };
   }
 
-  // 2. Running states
+  // 2. Blocked awaiting operator input (#534): the daemon flagged a non-error,
+  // non-permission reason (e.g. an interactive ask question). Checked before
+  // "running" because a blocked turn can still report a running process.
+  if (raw.requiresAttention === true && attentionReason && attentionReason !== "finished" && attentionReason !== "error") {
+    return { state: "attention-required", detail: attentionReason };
+  }
+
+  // 3. Running states
   if (status === "running") {
     if (attributedWork?.issue) {
       const detail = `#${attributedWork.issue}${attributedWork.slug ? ` (${attributedWork.slug})` : ""}`;
@@ -211,7 +269,7 @@ export function deriveDeterministicState(
     return { state: "running", detail: "Active turn" };
   }
 
-  // 3. Idle states
+  // 4. Idle states
   if (status === "idle") {
     if (hasQuotaAlert) {
       return { state: "idle:quota-exhausted", detail: "Quota cooldown" };
@@ -252,6 +310,12 @@ export function normalizeRawAgent(
       : raw.labels?.["paseo.parent-agent-id"] || null;
 
   const attributedWork = extractAttributedWork(raw);
+  const pendingPermissions = normalizePendingPermissions(raw.pendingPermissions);
+  const attentionReason = normalizeAttentionReason(raw.attentionReason);
+  const requiresAttention =
+    pendingPermissions.length > 0 ||
+    (raw.requiresAttention === true && attentionReason !== "finished");
+
   const { state: deterministicState, detail: stateDetail } = deriveDeterministicState(
     raw,
     attributedWork,
@@ -286,6 +350,9 @@ export function normalizeRawAgent(
     worktree: extractAgentWorktree(raw),
     project,
     labels: raw.labels,
+    pendingPermissions,
+    requiresAttention,
+    attentionReason,
   };
 }
 
@@ -536,6 +603,7 @@ export function getAgentDiskMetadataMap(): Map<string, Partial<RawAgentRecord>> 
             lastError: data.lastError,
             requiresAttention: data.requiresAttention,
             attentionReason: data.attentionReason,
+            pendingPermissions: data.pendingPermissions,
             lastUsage: data.lastUsage,
           });
         } catch {
@@ -604,6 +672,7 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
             lastError: a.lastError || disk.lastError,
             requiresAttention: a.requiresAttention ?? disk.requiresAttention,
             attentionReason: a.attentionReason || disk.attentionReason,
+            pendingPermissions: a.pendingPermissions ?? disk.pendingPermissions,
             lastUsage: a.lastUsage || disk.lastUsage,
           });
         }
@@ -642,6 +711,7 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
             lastError: disk.lastError,
             requiresAttention: disk.requiresAttention,
             attentionReason: disk.attentionReason,
+            pendingPermissions: disk.pendingPermissions,
             lastUsage: disk.lastUsage,
           });
         }

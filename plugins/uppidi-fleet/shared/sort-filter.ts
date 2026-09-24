@@ -8,7 +8,7 @@ import type {
   TaskProfileMetrics,
   DeterministicAgentState,
 } from "./contracts.js";
-import { extractAgentProject, extractAgentWorktree } from "./contracts.js";
+import { extractAgentProject, extractAgentWorktree, agentRequiresAttention } from "./contracts.js";
 
 // --- Agent Status Lights (#410) ---
 
@@ -52,10 +52,12 @@ export function getStatusLightColor(agent?: {
     return STATUS_LIGHT_RED;
   }
 
-  // 2. Orange / Amber: idle / waiting / paused / ready / sleeping / non-failure mode
+  // 2. Orange / Amber: idle / waiting / paused / ready / sleeping / blocked (#534)
   if (
     detState.startsWith("idle") ||
     detState === "sleeping" ||
+    detState === "permission-prompt" ||
+    detState === "attention-required" ||
     status === "idle" ||
     status === "waiting" ||
     status === "paused" ||
@@ -278,6 +280,8 @@ export function filterAgents(
       case "blocked":
         matchesPreset =
           a.status === "error" ||
+          a.deterministicState === "permission-prompt" ||
+          a.deterministicState === "attention-required" ||
           a.deterministicState === "failed:error" ||
           a.deterministicState === "failed:quota-exhausted" ||
           a.deterministicState === "failed:spawn" ||
@@ -369,6 +373,12 @@ export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
     return false;
   }
 
+  // 1b. Safety rule (#534): Never bulk-archive an agent blocked on a pending
+  // permission or awaiting operator input — it is live, not terminal.
+  if (agentRequiresAttention(agent)) {
+    return false;
+  }
+
   const normalizedStatus = String(agent.status ?? "").toLowerCase();
 
   // 2. Safety rule: Never bulk-archive active/running/working agents
@@ -416,6 +426,23 @@ export function isAgentEligibleForBulkArchive(agent: UppidiAgent): boolean {
 
 export function filterBulkArchiveCandidates(agents: UppidiAgent[]): UppidiAgent[] {
   return (agents ?? []).filter(isAgentEligibleForBulkArchive);
+}
+
+/**
+ * Returns agents that are blocked awaiting human/operator clearance (#534):
+ * either sitting at a pending permission prompt or flagged `requiresAttention`.
+ * Benign `finished` attention flags (completed workers) are excluded by the
+ * contract helper.
+ */
+export function collectAttentionAgents(agents: UppidiAgent[]): UppidiAgent[] {
+  return (Array.isArray(agents) ? agents : []).filter((a) => !!a && agentRequiresAttention(a));
+}
+
+/** Counts agents sitting at a pending permission prompt (#534). */
+export function countPermissionAgents(agents: UppidiAgent[]): number {
+  return (Array.isArray(agents) ? agents : []).filter(
+    (a) => !!a && (a.pendingPermissions?.length ?? 0) > 0
+  ).length;
 }
 
 // --- CI Runners ---

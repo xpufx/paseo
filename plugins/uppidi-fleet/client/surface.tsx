@@ -4,12 +4,14 @@ import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   ActionBar,
+  AttentionBeacon,
   Badge,
   Button,
   Card,
   CardHeader,
   CodeBlock,
   Collapsible,
+  CommandBox,
   DataTable,
   EmptyState,
   Grid,
@@ -51,12 +53,16 @@ import {
   uppidiFleetMetricsContract,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
+  type UppidiAgent,
   type UppidiIssue,
   type AttentionLabel,
   type RoleModelConfig,
   type UppidiRunner,
   type CandidateModelMetrics,
   type TaskProfileMetrics,
+  getPendingPermissionAction,
+  getPermissionAdjudicationCommand,
+  getAgentAttentionReason,
 } from "../shared/contracts.js";
 import {
   filterIssues,
@@ -69,6 +75,8 @@ import {
   filterMetricCandidates,
   sortMetricCandidates,
   isRepoMatching,
+  collectAttentionAgents,
+  countPermissionAgents,
   type IssuePreset,
   type IssueSortField,
   type QueuePreset,
@@ -177,6 +185,10 @@ export interface UppidiTopHeaderBarProps {
   repoOptions: SelectOption[];
   onRepoChange: (repo: string) => void;
   onRefresh: () => void;
+  /** Number of agents blocked on a pending permission prompt (#534). */
+  permissionAttentionCount?: number;
+  /** Number of agents awaiting operator input (#534). */
+  inputAttentionCount?: number;
 }
 
 /**
@@ -192,9 +204,12 @@ export function UppidiTopHeaderBar({
   repoOptions,
   onRepoChange,
   onRefresh,
+  permissionAttentionCount = 0,
+  inputAttentionCount = 0,
 }: UppidiTopHeaderBarProps) {
   const { colors, typography } = usePluginTheme();
   const routerBadge = resolveRouterStatusBadge(isConnected, isServiceRunning);
+  const attentionCount = permissionAttentionCount + inputAttentionCount;
 
   return (
     <Row
@@ -226,6 +241,17 @@ export function UppidiTopHeaderBar({
           dot
           textStyle={{ fontSize: 10 }}
         />
+        {attentionCount > 0 && (
+          <AttentionBeacon mode="radar" tone="warning">
+            <Badge
+              label={`⚠️ ${attentionCount} Need Attention`}
+              variant="warning"
+              size="sm"
+              dot
+              textStyle={{ fontSize: 10, fontWeight: "700" }}
+            />
+          </AttentionBeacon>
+        )}
       </Row>
 
       {/* Right: Repo Selector & authoritative Refresh button (#449, #466) */}
@@ -254,6 +280,92 @@ export function UppidiTopHeaderBar({
         />
       </Row>
     </Row>
+  );
+}
+
+export interface AttentionAgentCardProps {
+  agent: UppidiAgent;
+  onOpen?: (agentId: string) => void;
+}
+
+/**
+ * Cockpit fleet attention card (#534): a prominent `AttentionBeacon`-wrapped row
+ * for an agent blocked at a permission prompt or awaiting operator input, with
+ * the Front Desk adjudication command rendered for one-click copy.
+ */
+export function AttentionAgentCard({ agent, onOpen }: AttentionAgentCardProps) {
+  const { colors, typography } = usePluginTheme();
+  const permissions = agent.pendingPermissions ?? [];
+  const hasPermission = permissions.length > 0;
+  const reason = getAgentAttentionReason(agent);
+  const tone: "warning" | "danger" = hasPermission ? "danger" : "warning";
+  const accentColor = hasPermission
+    ? colors.statusDanger ?? "#ef4444"
+    : colors.statusWarning ?? "#f59e0b";
+
+  return (
+    <AttentionBeacon
+      mode="radar"
+      tone={tone}
+      testID={`cockpit-attention-beacon-${agent.id}`}
+      accessibilityLabel={
+        hasPermission ? `Permission needed for ${agent.name}` : `Awaiting input for ${agent.name}`
+      }
+    >
+      <Card variant="flat" style={{ borderColor: accentColor, borderWidth: 1 }}>
+        <Row justify="space-between" align="center" wrap gap="xs">
+          <Stack gap="xxs" style={{ flexShrink: 1 }}>
+            <Row align="center" gap="xs" wrap>
+              <Badge
+                label={
+                  hasPermission
+                    ? `⚠️ Permission Needed: ${getPendingPermissionAction(permissions[0]!)}`
+                    : `⏸ Awaiting Input${reason ? `: ${reason}` : ""}`
+                }
+                variant={tone}
+                size="sm"
+                dot
+                style={{ borderColor: accentColor }}
+                textStyle={{ fontSize: 10, fontWeight: "700" }}
+              />
+              <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
+                {agent.name}
+              </Text>
+              <Badge
+                label={agent.shortId}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontFamily: "monospace", fontSize: 10 }}
+              />
+            </Row>
+            {hasPermission && permissions.length > 1 && (
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                +{permissions.length - 1} more pending permission request
+                {permissions.length - 1 === 1 ? "" : "s"}
+              </Text>
+            )}
+          </Stack>
+          {onOpen && (
+            <Button
+              label="Open agent"
+              icon="ExternalLink"
+              size="sm"
+              variant="ghost"
+              onPress={() => onOpen(agent.id)}
+            />
+          )}
+        </Row>
+        {hasPermission && (
+          <Row style={{ marginTop: 4 }}>
+            <CommandBox
+              command={getPermissionAdjudicationCommand(agent.id, permissions[0])}
+              copyLabel={`Copy adjudication command for ${agent.name}`}
+              style={{ flexShrink: 1 }}
+            />
+          </Row>
+        )}
+      </Card>
+    </AttentionBeacon>
   );
 }
 
@@ -565,6 +677,17 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     return filterBulkArchiveCandidates(allAgents);
   }, [allAgents]);
 
+  const attentionAgents = useMemo(() => collectAttentionAgents(allAgents), [allAgents]);
+  const permissionAgentCount = useMemo(() => countPermissionAgents(allAgents), [allAgents]);
+
+  const handleOpenAgent = (agentId: string) => {
+    if (props.navigation?.openAgent) {
+      props.navigation.openAgent({ agentId });
+      return;
+    }
+    Linking.openURL(`paseo://agent/${agentId}`).catch(() => {});
+  };
+
   const handleArchiveAgent = async (agentId: string) => {
     try {
       setArchivingAgentId(agentId);
@@ -626,6 +749,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             repoOptions={repoOptions}
             onRepoChange={setSelectedRepo}
             onRefresh={refetchAll}
+            permissionAttentionCount={permissionAgentCount}
+            inputAttentionCount={attentionAgents.length - permissionAgentCount}
           />
           <Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />
         </Stack>
@@ -1243,6 +1368,37 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
         />
       ) : (
         <Stack gap={6}>
+          {/* Fleet Attention Board (#534): blocked agents need immediate clearance */}
+          {attentionAgents.length > 0 && (
+            <Card variant="tinted" style={{ borderColor: colors.statusWarning, borderWidth: 1 }}>
+              <CardHeader
+                title={`Fleet Needs Attention (${attentionAgents.length})`}
+                subtitle={
+                  permissionAgentCount > 0
+                    ? `${permissionAgentCount} agent${
+                        permissionAgentCount === 1 ? "" : "s"
+                      } awaiting permission clearance`
+                    : "Agents blocked awaiting operator input"
+                }
+                icon="BellRing"
+              />
+              <Stack gap="xs">
+                {attentionAgents.slice(0, 5).map((agent) => (
+                  <AttentionAgentCard
+                    key={agent.id}
+                    agent={agent}
+                    onOpen={handleOpenAgent}
+                  />
+                ))}
+                {attentionAgents.length > 5 && (
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                    +{attentionAgents.length - 5} more blocked agents — see the Agents &amp; Fleet tab.
+                  </Text>
+                )}
+              </Stack>
+            </Card>
+          )}
+
           {/* Dense Metrics Bar (#424) */}
           <Row
             wrap

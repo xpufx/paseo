@@ -13,6 +13,8 @@ import {
   sortMetricCandidates,
   isAgentEligibleForBulkArchive,
   filterBulkArchiveCandidates,
+  collectAttentionAgents,
+  countPermissionAgents,
   buildProjectGroups,
   selectPrimaryFrontDeskNode,
   filterAgentTree,
@@ -430,6 +432,94 @@ describe("Uppidi Fleet sort & filter predicates", () => {
         candidates.map((c) => c.id),
         ["w-failed", "w-completed"]
       );
+    });
+  });
+
+  describe("blocked agent attention collection (#534)", () => {
+    const base = (id: string): UppidiAgent => ({
+      id,
+      shortId: id,
+      name: id,
+      category: "worker",
+      status: "running",
+      deterministicState: "permission-prompt",
+    });
+
+    it("collects permission-prompt and non-benign attention agents only", () => {
+      const fleet: UppidiAgent[] = [
+        {
+          ...base("perm"),
+          pendingPermissions: [{ id: "req-1", tool: "run_command" }],
+          requiresAttention: true,
+          attentionReason: "permission",
+        },
+        {
+          ...base("input"),
+          deterministicState: "attention-required",
+          pendingPermissions: [],
+          requiresAttention: true,
+          attentionReason: "input",
+        },
+        {
+          ...base("done"),
+          deterministicState: "idle:waiting",
+          pendingPermissions: [],
+          requiresAttention: true,
+          attentionReason: "finished",
+        },
+        { ...base("healthy"), deterministicState: "working" },
+      ];
+
+      const attention = collectAttentionAgents(fleet);
+      assert.deepEqual(
+        attention.map((a) => a.id),
+        ["perm", "input"]
+      );
+
+      assert.equal(countPermissionAgents(fleet), 1);
+    });
+
+    it("treats a pending permission as attention even without the flag", () => {
+      const agent: UppidiAgent = {
+        ...base("perm-only"),
+        pendingPermissions: [{ id: "req-2", title: "access external dir" }],
+        requiresAttention: false,
+      };
+      assert.deepEqual(
+        collectAttentionAgents([agent]).map((a) => a.id),
+        ["perm-only"]
+      );
+    });
+
+    it("counts blocked states as the blocked agent preset", () => {
+      const fleet: UppidiAgent[] = [
+        { ...base("perm"), pendingPermissions: [{ id: "req-1" }] },
+        { ...base("att"), deterministicState: "attention-required" },
+        { ...base("idle"), deterministicState: "idle:waiting" },
+      ];
+      assert.deepEqual(
+        filterAgents(fleet, "blocked", "").map((a) => a.id),
+        ["perm", "att"]
+      );
+    });
+
+    it("never bulk-archives blocked agents awaiting clearance", () => {
+      const blocked: UppidiAgent = {
+        ...base("blocked"),
+        status: "closed",
+        deterministicState: "attention-required",
+        requiresAttention: true,
+        attentionReason: "input",
+      };
+      assert.equal(isAgentEligibleForBulkArchive(blocked), false);
+
+      const blockedPerm: UppidiAgent = {
+        ...base("blocked-perm"),
+        status: "closed",
+        deterministicState: "permission-prompt",
+        pendingPermissions: [{ id: "req-3" }],
+      };
+      assert.equal(isAgentEligibleForBulkArchive(blockedPerm), false);
     });
   });
 

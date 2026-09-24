@@ -1,9 +1,11 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { Animated, Linking, Platform, Pressable, Text, View } from "react-native";
 import {
+  AttentionBeacon,
   Badge,
   Button,
   Card,
+  CommandBox,
   EmptyState,
   Icon,
   Row,
@@ -24,6 +26,9 @@ import {
   type DeterministicStateConfig,
   getAgentCategoryIcon,
   getDeterministicStateConfig,
+  getPendingPermissionAction,
+  getPermissionAdjudicationCommand,
+  getAgentAttentionReason,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
   uppidiCreateFrontDeskContract,
@@ -640,6 +645,11 @@ export function FrontDeskHero({
           </Row>
         </Row>
 
+        {/* Prominent permission / attention indicator for the primary Front Desk (#534) */}
+        {(primaryAgent.pendingPermissions?.length || primaryAgent.requiresAttention) && (
+          <AgentAttentionBanner agent={primaryAgent} />
+        )}
+
         {/* Fleet Orchestrator Status Lights (#410) */}
         {orchestrators && orchestrators.length > 0 && (
           <Row
@@ -782,6 +792,112 @@ export function ParentAgentPill({ agent, navigation }: ParentAgentPillProps) {
   }
 
   return badge;
+}
+
+export interface AgentAttentionBannerProps {
+  agent: UppidiAgent;
+  /** Compact mode renders inline badges without the adjudication command block. */
+  compact?: boolean;
+}
+
+/**
+ * Prominent fleet attention banner for blocked agents (#534).
+ * Renders a pulsing `AttentionBeacon` warning when the agent sits at a pending
+ * permission prompt (with a copyable Front Desk adjudication command), or an
+ * `Awaiting Input` badge carrying the daemon-provided reason when the agent is
+ * blocked on operator input. Returns null for healthy agents.
+ */
+export function AgentAttentionBanner({ agent, compact = false }: AgentAttentionBannerProps) {
+  const { colors, typography } = usePluginTheme();
+  const toast = useToast();
+  const permissions = agent.pendingPermissions ?? [];
+  const hasPermission = permissions.length > 0;
+  const reason = getAgentAttentionReason(agent);
+
+  if (!hasPermission && !agent.requiresAttention) return null;
+
+  const tone: "warning" | "danger" = hasPermission ? "danger" : "warning";
+  const accentColor = hasPermission
+    ? colors.statusDanger ?? "#ef4444"
+    : colors.statusWarning ?? "#f59e0b";
+
+  const handleCopyCommand = async (command: string) => {
+    const ok = await copyToClipboard(command, { toast, toastMessage: "Adjudication command" });
+    if (!ok) toast.error("Failed to copy command");
+  };
+
+  return (
+    <AttentionBeacon
+      mode="radar"
+      tone={tone}
+      testID={`agent-attention-beacon-${agent.id}`}
+      accessibilityLabel={
+        hasPermission
+          ? `Permission needed for ${agent.name}`
+          : `Awaiting input for ${agent.name}`
+      }
+      style={{ flexShrink: 1 }}
+    >
+      <Stack
+        gap="xxs"
+        style={{
+          borderWidth: 1,
+          borderColor: accentColor,
+          borderRadius: 6,
+          paddingHorizontal: 8,
+          paddingVertical: 5,
+          backgroundColor: `${accentColor}22`,
+          flexShrink: 1,
+        }}
+      >
+        <Row align="center" gap="xs" wrap style={{ flexShrink: 1 }}>
+          <Badge
+            label={
+              hasPermission
+                ? `⚠️ Permission Needed: ${getPendingPermissionAction(permissions[0]!)}`
+                : `⏸ Awaiting Input${reason ? `: ${reason}` : ""}`
+            }
+            variant={tone}
+            size="sm"
+            dot
+            style={{ borderColor: accentColor }}
+            textStyle={{ fontSize: 10, fontWeight: "700" }}
+          />
+          {hasPermission && permissions.length > 1 && (
+            <Badge
+              label={`+${permissions.length - 1} more`}
+              variant={tone}
+              size="sm"
+              textStyle={{ fontSize: 9 }}
+            />
+          )}
+        </Row>
+
+        {hasPermission && !compact && (
+          <Row align="center" gap="xs" wrap style={{ flexShrink: 1 }}>
+            <CommandBox
+              command={getPermissionAdjudicationCommand(agent.id, permissions[0])}
+              copyLabel={`Copy adjudication command for ${agent.name}`}
+              style={{ flexShrink: 1 }}
+            />
+          </Row>
+        )}
+
+        {hasPermission && compact && (
+          <Button
+            label="Copy permit command"
+            icon="Copy"
+            size="sm"
+            variant="ghost"
+            onPress={() =>
+              handleCopyCommand(getPermissionAdjudicationCommand(agent.id, permissions[0]))
+            }
+            style={{ alignSelf: "flex-start", paddingVertical: 1, minHeight: 20 }}
+          />
+        )}
+      </Stack>
+    </AttentionBeacon>
+  );
 }
 
 export interface DenseAgentRowProps {
@@ -958,6 +1074,13 @@ export function DenseAgentRow({
             />
           </Row>
         </Row>
+
+        {/* Prominent permission / attention indicator (#534) */}
+        {(agent.pendingPermissions?.length || agent.requiresAttention) && (
+          <View style={{ marginTop: 2 }}>
+            <AgentAttentionBanner agent={agent} compact />
+          </View>
+        )}
       </View>
 
       {/* Descendant subagents (recursive) - Still NO cards! */}
@@ -1224,6 +1347,13 @@ export function OrchestratorRow({
           />
         </Row>
       </Row>
+
+      {/* Prominent permission / attention indicator (#534) */}
+      {(agent.pendingPermissions?.length || agent.requiresAttention) && (
+        <View style={{ marginTop: 2 }}>
+          <AgentAttentionBanner agent={agent} />
+        </View>
+      )}
     </View>
   );
 }

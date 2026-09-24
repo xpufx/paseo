@@ -10,6 +10,9 @@ if (!process.env.NODE_ENV) {
 
 import {
   normalizeRawAgent,
+  normalizePendingPermissions,
+  normalizeAttentionReason,
+  handleUppidiAgents,
   getWorkspaceProjectMap,
   setWorkspaceProjectMapForTest,
   applyParentProjectInheritance,
@@ -164,5 +167,144 @@ describe("authoritative agent project resolution (#530)", () => {
       setWorkspaceProjectMapForTest(null);
       fs.rmSync(tempHome, { recursive: true, force: true });
     }
+  });
+});
+
+describe("agent pending permissions and attention mapping (#534)", () => {
+  it("maps daemon pendingPermissions and requiresAttention into the client payload", () => {
+    const agent = normalizeRawAgent(
+      {
+        id: "agent-perm-534",
+        name: "Worker Perm",
+        status: "running",
+        requiresAttention: true,
+        attentionReason: "permission",
+        pendingPermissions: [
+          {
+            id: "perm-req-534",
+            tool: "run_command",
+            title: "run bash command",
+            kind: "tool",
+          },
+        ],
+      },
+      new Set(),
+      {}
+    );
+
+    assert.equal(agent.pendingPermissions?.length, 1);
+    assert.equal(agent.pendingPermissions?.[0]?.id, "perm-req-534");
+    assert.equal(agent.pendingPermissions?.[0]?.tool, "run_command");
+    assert.equal(agent.pendingPermissions?.[0]?.title, "run bash command");
+    assert.equal(agent.requiresAttention, true);
+    assert.equal(agent.attentionReason, "permission");
+    assert.equal(agent.deterministicState, "permission-prompt");
+    assert.equal(agent.stateDetail, "run bash command");
+  });
+
+  it("marks a non-permission attention agent as attention-required", () => {
+    const agent = normalizeRawAgent(
+      {
+        id: "agent-att-534",
+        name: "Worker Input",
+        status: "idle",
+        requiresAttention: true,
+        attentionReason: "input",
+        pendingPermissions: [],
+      },
+      new Set(),
+      {}
+    );
+
+    assert.equal(agent.requiresAttention, true);
+    assert.equal(agent.attentionReason, "input");
+    assert.equal(agent.deterministicState, "attention-required");
+    assert.equal(agent.stateDetail, "input");
+  });
+
+  it("ignores a benign finished attention flag but keeps healthy state", () => {
+    const agent = normalizeRawAgent(
+      {
+        id: "agent-done-534",
+        name: "Worker Done",
+        status: "idle",
+        requiresAttention: true,
+        attentionReason: "finished",
+      },
+      new Set(),
+      {}
+    );
+
+    assert.equal(agent.requiresAttention, false);
+    assert.equal(agent.pendingPermissions?.length, 0);
+    assert.equal(agent.deterministicState, "idle:waiting");
+  });
+
+  it("drops malformed permission entries rather than emitting partial rows", () => {
+    const permissions = normalizePendingPermissions([
+      { id: "ok-1", tool: "run_command" },
+      { tool: "no-id" } as any,
+      null as any,
+    ]);
+    assert.equal(permissions.length, 1);
+    assert.equal(permissions[0].id, "ok-1");
+  });
+
+  it("normalizes unknown attention reasons to null", () => {
+    assert.equal(normalizeAttentionReason("permission"), "permission");
+    assert.equal(normalizeAttentionReason("input"), "input");
+    assert.equal(normalizeAttentionReason("stalled"), null);
+    assert.equal(normalizeAttentionReason(undefined), null);
+  });
+
+  it("surfaces pendingPermissions and requiresAttention through the agents RPC handler", async () => {
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              {
+                agent: {
+                  id: "rpc-perm-534",
+                  title: "Worker Permission",
+                  status: "running",
+                  requiresAttention: true,
+                  attentionReason: "permission",
+                  pendingPermissions: [
+                    { id: "req-rpc-534", tool: "external_directory", title: "access external dir" },
+                  ],
+                },
+              },
+              {
+                agent: {
+                  id: "rpc-input-534",
+                  title: "Worker Input",
+                  status: "idle",
+                  requiresAttention: true,
+                  attentionReason: "input",
+                  pendingPermissions: [],
+                },
+              },
+            ],
+          }),
+        },
+      },
+    };
+
+    const res = await handleUppidiAgents({}, mockContext);
+    assert.equal(res.ok, true);
+
+    const permissionAgent = res.workers.find((a) => a.id === "rpc-perm-534");
+    assert.ok(permissionAgent);
+    assert.equal(permissionAgent?.pendingPermissions?.length, 1);
+    assert.equal(permissionAgent?.pendingPermissions?.[0]?.id, "req-rpc-534");
+    assert.equal(permissionAgent?.requiresAttention, true);
+    assert.equal(permissionAgent?.deterministicState, "permission-prompt");
+
+    const inputAgent = res.workers.find((a) => a.id === "rpc-input-534");
+    assert.ok(inputAgent);
+    assert.equal(inputAgent?.requiresAttention, true);
+    assert.equal(inputAgent?.attentionReason, "input");
+    assert.equal(inputAgent?.deterministicState, "attention-required");
   });
 });

@@ -374,8 +374,7 @@ describe("uppidi-fleet client entry contract", () => {
     );
   });
 
-  it("verifies AgentStatusLight renders floating tooltip with agent name on hover (#410)", () => {
-    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+  it("verifies AgentStatusLight renders floating tooltip with agent name on hover (#410)", () => {    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
     assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
     const source = fs.readFileSync(treeViewPath, "utf8");
 
@@ -474,6 +473,108 @@ describe("uppidi-fleet client entry contract", () => {
       source,
       /overflow:\s*["']visible["']/,
       "AgentStatusLightsRow must ensure overflow: visible to prevent clipping floating tooltips",
+    );
+  });
+
+  it("verifies tree-view renders prominent permission and attention indicators (#534)", () => {
+    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+    assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
+    const source = fs.readFileSync(treeViewPath, "utf8");
+
+    // Exported attention banner component built on AttentionBeacon.
+    assert.match(
+      source,
+      /export\s+function\s+AgentAttentionBanner\s*\(/,
+      "tree-view.tsx must export AgentAttentionBanner",
+    );
+    assert.match(
+      source,
+      /<AttentionBeacon/,
+      "AgentAttentionBanner must wrap its content in AttentionBeacon",
+    );
+
+    // Permission prompt renders a prominent badge with the tool/action.
+    assert.match(
+      source,
+      /Permission Needed:/,
+      "tree-view.tsx must render a 'Permission Needed:' indicator",
+    );
+    assert.match(
+      source,
+      /getPendingPermissionAction\(permissions\[0\]!?\)/,
+      "permission badge must name the pending tool/action via getPendingPermissionAction",
+    );
+
+    // Awaiting input badge with contextual reason.
+    assert.match(
+      source,
+      /Awaiting Input/,
+      "tree-view.tsx must render an 'Awaiting Input' badge",
+    );
+    assert.match(
+      source,
+      /getAgentAttentionReason\(agent\)/,
+      "awaiting-input badge must include the contextual reason via getAgentAttentionReason",
+    );
+
+    // Adjudication command is rendered for permission prompts.
+    assert.match(
+      source,
+      /getPermissionAdjudicationCommand\(agent\.id,\s*permissions\[0\]\)/,
+      "tree-view.tsx must render the Front Desk adjudication command",
+    );
+
+    // The banner is actually rendered by the row components.
+    assert.match(
+      source,
+      /<AgentAttentionBanner\s+agent=\{agent\}\s+compact\s*\/>/,
+      "DenseAgentRow must render the attention banner",
+    );
+    assert.match(
+      source,
+      /<AgentAttentionBanner\s+agent=\{primaryAgent\}\s*\/>/,
+      "FrontDeskHero must render the attention banner for the primary agent",
+    );
+  });
+
+  it("verifies Cockpit surface renders the fleet attention board and header badge (#534)", () => {
+    const surfacePath = path.resolve(__dirname, "surface.tsx");
+    const source = fs.readFileSync(surfacePath, "utf8");
+
+    assert.match(
+      source,
+      /export\s+function\s+AttentionAgentCard\s*\(/,
+      "surface.tsx must export AttentionAgentCard",
+    );
+    assert.match(
+      source,
+      /<AttentionBeacon[\s\S]*?tone=\{tone\}/,
+      "AttentionAgentCard must wrap its content in an AttentionBeacon with a tone",
+    );
+    assert.match(
+      source,
+      /Permission Needed:/,
+      "surface.tsx must render a 'Permission Needed:' indicator",
+    );
+    assert.match(
+      source,
+      /Awaiting Input/,
+      "surface.tsx must render an 'Awaiting Input' indicator",
+    );
+    assert.match(
+      source,
+      /Fleet Needs Attention/,
+      "surface.tsx must render the 'Fleet Needs Attention' board",
+    );
+    assert.match(
+      source,
+      /collectAttentionAgents\(allAgents\)/,
+      "surface.tsx must collect attention agents via collectAttentionAgents",
+    );
+    assert.match(
+      source,
+      /permissionAttentionCount=\{permissionAgentCount\}/,
+      "UppidiTopHeaderBar must receive the permission attention count",
     );
   });
 

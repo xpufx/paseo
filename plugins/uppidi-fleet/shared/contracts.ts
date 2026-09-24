@@ -262,6 +262,8 @@ export const DeterministicAgentStateSchema = z.enum([
   "sleeping",               // Idle orchestrator/frontdesk inactive > 15 minutes
   "idle:waiting",           // Idle agent waiting for turn/prompt
   "idle:quota-exhausted",   // Idle due to model quota exhaustion cooldown
+  "attention-required",     // Blocked awaiting operator input/decision (#534)
+  "permission-prompt",      // Blocked on a pending tool/permission request (#534)
   "failed:quota-exhausted", // Failed/aborted due to usage/quota limit
   "failed:spawn",           // Failed during process or session spawn
   "failed:timeout",         // Execution or connection timeout
@@ -346,6 +348,22 @@ export function getDeterministicStateConfig(
       pulse = false;
       label = "Quota Cooldown";
       break;
+    case "permission-prompt":
+      color = "#f59e0b"; // warning/amber
+      badgeVariant = "warning";
+      dotVariant = "warning";
+      stateIcon = "ShieldAlert";
+      pulse = true;
+      label = "Permission Needed";
+      break;
+    case "attention-required":
+      color = "#f59e0b"; // warning/amber
+      badgeVariant = "warning";
+      dotVariant = "warning";
+      stateIcon = "BellRing";
+      pulse = true;
+      label = "Awaiting Input";
+      break;
     case "failed:quota-exhausted":
       color = "#f97316"; // warning/orange
       badgeVariant = "warning";
@@ -403,6 +421,83 @@ export const UppidiAgentUsageSchema = z.object({
 });
 export type UppidiAgentUsage = z.infer<typeof UppidiAgentUsageSchema>;
 
+/** Daemon attention reason for an agent awaiting operator input (#534). */
+export const AgentAttentionReasonSchema = z.enum(["finished", "error", "permission", "input"]);
+export type AgentAttentionReason = z.infer<typeof AgentAttentionReasonSchema>;
+
+/**
+ * A pending tool/permission request surfaced by the Paseo daemon (#534).
+ * Mirrors the daemon `AgentPermissionRequest` shape closely enough for the
+ * fleet queue to render a prompt and an adjudication command.
+ */
+export const PendingPermissionSchema = z.object({
+  id: z.string(),
+  requestId: z.string().optional(),
+  name: z.string().optional(),
+  title: z.string().optional(),
+  tool: z.string().optional(),
+  kind: z.string().optional(),
+  description: z.string().optional(),
+});
+export type PendingPermission = z.infer<typeof PendingPermissionSchema>;
+
+/** Human-readable label for a pending permission prompt (#534). */
+export function getPendingPermissionAction(permission: PendingPermission): string {
+  return (
+    permission.title?.trim() ||
+    permission.tool?.trim() ||
+    permission.name?.trim() ||
+    permission.kind?.trim() ||
+    "tool permission"
+  );
+}
+
+/** Front Desk adjudication command to allow a pending permission request (#534). */
+export function getPermissionAdjudicationCommand(
+  agentId: string,
+  permission?: PendingPermission | null,
+): string {
+  const reqId = permission?.id || permission?.requestId;
+  return reqId ? `paseo permit allow ${agentId} ${reqId}` : `paseo permit allow ${agentId}`;
+}
+
+/**
+ * An agent needs prominent attention when it has a pending permission prompt or
+ * a non-benign attention flag set by the daemon (#534). Benign `finished`
+ * signals are ignored so completed workers do not scream for an operator.
+ */
+export function agentRequiresAttention(agent: {
+  pendingPermissions?: PendingPermission[] | null;
+  requiresAttention?: boolean;
+  attentionReason?: AgentAttentionReason | string | null;
+} | null | undefined): boolean {
+  if (!agent) return false;
+  const permissions = Array.isArray(agent.pendingPermissions) ? agent.pendingPermissions : [];
+  if (permissions.length > 0) return true;
+  if (agent.requiresAttention !== true) return false;
+  return agent.attentionReason !== "finished";
+}
+
+/** Reason string rendered alongside the Awaiting Input badge (#534). */
+export function getAgentAttentionReason(agent: {
+  attentionReason?: AgentAttentionReason | string | null;
+}): string | undefined {
+  const reason = agent.attentionReason;
+  if (!reason) return undefined;
+  switch (reason) {
+    case "permission":
+      return "permission request";
+    case "input":
+      return "operator input";
+    case "error":
+      return "error";
+    case "finished":
+      return "finished";
+    default:
+      return String(reason);
+  }
+}
+
 export const UppidiAgentSchema = z.object({
   id: z.string(),
   shortId: z.string(),
@@ -434,6 +529,12 @@ export const UppidiAgentSchema = z.object({
   labels: z.record(z.string(), z.string()).optional(),
   isMainDirty: z.boolean().optional(),
   mainDirtySummary: z.string().optional(),
+  /** Pending daemon permission prompts blocking this agent (#534). */
+  pendingPermissions: z.array(PendingPermissionSchema).optional(),
+  /** True when the agent is blocked awaiting operator clearance (#534). */
+  requiresAttention: z.boolean().optional(),
+  /** Daemon-provided contextual reason for the attention flag (#534). */
+  attentionReason: AgentAttentionReasonSchema.nullable().optional(),
 });
 export type UppidiAgent = z.infer<typeof UppidiAgentSchema>;
 

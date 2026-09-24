@@ -12,6 +12,10 @@ import {
   UppidiAgentsOutputSchema,
   getDeterministicStateConfig,
   getAgentCategoryIcon,
+  getPendingPermissionAction,
+  getPermissionAdjudicationCommand,
+  getAgentAttentionReason,
+  agentRequiresAttention,
   UppidiArchiveAgentInputSchema,
   UppidiArchiveAgentOutputSchema,
   uppidiArchiveAgentContract,
@@ -88,6 +92,8 @@ describe("uppidi-fleet shared contracts", () => {
       "sleeping",
       "idle:waiting",
       "idle:quota-exhausted",
+      "attention-required",
+      "permission-prompt",
       "failed:quota-exhausted",
       "failed:spawn",
       "failed:timeout",
@@ -227,6 +233,63 @@ describe("uppidi-fleet shared contracts", () => {
     assert.equal(getAgentCategoryIcon("orchestrator"), "Network");
     assert.equal(getAgentCategoryIcon("worker"), "Terminal");
     assert.equal(getAgentCategoryIcon(undefined), "Bot");
+  });
+
+  it("maps blocked permission and attention states to prominent warning configs (#534)", () => {
+    const permission = getDeterministicStateConfig("permission-prompt", "worker");
+    assert.equal(permission.badgeVariant, "warning");
+    assert.equal(permission.dotVariant, "warning");
+    assert.equal(permission.label, "Permission Needed");
+    assert.equal(permission.pulse, true);
+
+    const attention = getDeterministicStateConfig("attention-required", "orchestrator");
+    assert.equal(attention.badgeVariant, "warning");
+    assert.equal(attention.label, "Awaiting Input");
+    assert.equal(attention.pulse, true);
+  });
+
+  it("derives permission action labels, adjudication commands, and attention flags (#534)", () => {
+    assert.equal(getPendingPermissionAction({ id: "r1", title: "run bash command" }), "run bash command");
+    assert.equal(getPendingPermissionAction({ id: "r1", tool: "run_command" }), "run_command");
+    assert.equal(getPendingPermissionAction({ id: "r1", name: "external_directory" }), "external_directory");
+    assert.equal(getPendingPermissionAction({ id: "r1" }), "tool permission");
+
+    assert.equal(
+      getPermissionAdjudicationCommand("agent-1", { id: "req-42" }),
+      "paseo permit allow agent-1 req-42"
+    );
+    assert.equal(
+      getPermissionAdjudicationCommand("agent-1", { id: "req-42", requestId: "fallback" }),
+      "paseo permit allow agent-1 req-42"
+    );
+    assert.equal(getPermissionAdjudicationCommand("agent-1", { id: "req-42", title: "" }), "paseo permit allow agent-1 req-42");
+
+    assert.equal(getAgentAttentionReason({ attentionReason: "permission" }), "permission request");
+    assert.equal(getAgentAttentionReason({ attentionReason: "input" }), "operator input");
+    assert.equal(getAgentAttentionReason({ attentionReason: null }), undefined);
+
+    assert.equal(agentRequiresAttention({ pendingPermissions: [{ id: "r1" }] }), true);
+    assert.equal(agentRequiresAttention({ requiresAttention: true, attentionReason: "input" }), true);
+    assert.equal(agentRequiresAttention({ requiresAttention: true, attentionReason: "finished" }), false);
+    assert.equal(agentRequiresAttention({ requiresAttention: false }), false);
+  });
+
+  it("parses pendingPermissions and attention fields on UppidiAgentSchema (#534)", () => {
+    const agent = UppidiAgentSchema.parse({
+      id: "agent-534",
+      shortId: "ag534",
+      name: "Worker Blocked",
+      category: "worker",
+      status: "running",
+      deterministicState: "permission-prompt",
+      requiresAttention: true,
+      attentionReason: "permission",
+      pendingPermissions: [{ id: "req-534", tool: "run_command", title: "run bash command" }],
+    });
+    assert.equal(agent.pendingPermissions?.length, 1);
+    assert.equal(agent.pendingPermissions?.[0]?.id, "req-534");
+    assert.equal(agent.requiresAttention, true);
+    assert.equal(agent.attentionReason, "permission");
   });
 
   it("validates UppidiAgentSchema with optional url", () => {

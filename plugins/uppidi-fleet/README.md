@@ -174,13 +174,21 @@ The plugin registers one primary surface with three tabs:
 
 | Tab | What it shows |
 | --- | --- |
-| **Agents & Fleet** (tree) | Hierarchical view: projects → orchestrators → workers, with deterministic state badges (working / running / sleeping / idle / quota / failed), worktree names, parentage, and per-repo enrolment/mute flags. Hosts the `+ Create Front Desk`, `+ Add Orchestrator`, `Replace`, archive, and repo-mute controls. |
-| **Work Queue** (dashboard) | Open issues from the board with status, owner, and labels; filter presets (Needs Attention, Triage/Review, In Progress, Verify). Also the collapsible Hook Service, Hook Queues, log tail, Agent Role Models, CI Runner fleet, and fleet-metrics sections. |
+| **Agents & Fleet** (tree) | Hierarchical view: projects → orchestrators → workers, with deterministic state badges (working / running / permission-prompt / attention-required / sleeping / idle / quota / failed), worktree names, parentage, and per-repo enrolment/mute flags. Hosts the `+ Create Front Desk`, `+ Add Orchestrator`, `Replace`, archive, and repo-mute controls. |
+| **Work Queue** (dashboard) | Open issues from the board with status, owner, and labels; a **Fleet Needs Attention** board at the top surfaces blocked agents, filter presets (Needs Attention, Triage/Review, In Progress, Verify). Also the collapsible Hook Service, Hook Queues, log tail, Agent Role Models, CI Runner fleet, and fleet-metrics sections. |
 | **Settings** | Hook service management (start/stop/restart, listen host + port), links into role-model editing. |
 
 Key behaviours:
 
-- **Router health** is shown in the header (`Router Connected` / `Router active`).
+- **Blocked agents are surfaced prominently (#534)**: an agent sitting at a
+  pending permission prompt (`pendingPermissions.length > 0`) renders a pulsing
+  `AttentionBeacon` warning (`⚠️ Permission Needed: <tool/action>`) with a
+  copyable Front Desk adjudication command (`paseo permit allow <agent> <req>`);
+  an agent flagged `requiresAttention` (e.g. an interactive ask question)
+  renders an `Awaiting Input` badge carrying the daemon reason. The Cockpit
+  header shows a fleet-wide `⚠️ N Need Attention` badge and the **Fleet Needs
+  Attention** board lists every blocked agent with one-click access.
+- **Router health** is shown in the header (`Router Active` / `Router Starting` / `Router Disconnected`).
 - **Dispatch is handled via the orchestrator protocol**, not from the UI: the
   orchestrator Skill creates and drives each worker's isolated worktree.
 - The issue list is fetched by `uppidi-fleet.issues` from the forge API — see
