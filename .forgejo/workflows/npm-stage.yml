@@ -106,11 +106,15 @@ jobs:
           npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
           # Authenticate for `npm stage publish` (any token type works, no 2FA).
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
-          # Fail before registry mutation when the configured notify-only
-          # 2fado path is unavailable; the helper uses the supported `list`
-          # request against the configured socket before staging anything.
+          # The 2fado notification is best-effort: the notify-only CLI is
+          # typically absent in the runner container, so a missing binary or
+          # unreachable daemon only warns and staging still proceeds.
           export TWOFADO_NOTIFY_BIN="${TWOFADO_NOTIFY_BIN:-2fado}"
-          command -v "$TWOFADO_NOTIFY_BIN" >/dev/null || { echo "::error::2fado notify CLI is unavailable"; exit 1; }
+          if command -v "$TWOFADO_NOTIFY_BIN" >/dev/null; then
+            echo "2fado notify CLI found at $(command -v "$TWOFADO_NOTIFY_BIN"); notifications enabled."
+          else
+            echo "::warning::2fado notify CLI is unavailable; skipping notification"
+          fi
           # This helper retains duplicate-version skips and sends 2fado's
           # notify-only petition only after npm accepts a fresh staged package.
           # It never publishes or approves a version, and a failed npm command

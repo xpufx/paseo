@@ -91,11 +91,10 @@ Registry-native alternative (npm >= 11.19): only an explicitly dispatched
 `npm stage publish <tarball>` (no 2FA). It skips versions already pending in
 npm staging; after each newly accepted version it uses the existing
 notify-only `2fado notify` CLI path to send a package/version outcome. The
-workflow runner must therefore have `2fado` available and its normal
-`TWOFADO_SOCKET` configuration; the workflow checks that connection before
-making a registry mutation with the supported `2fado list` request. Duplicate
-skips and failed staging attempts do not notify; the human runs `npm stage
-approve <stage-id>` (2FA).
+notification is **best-effort**: when `2fado` is missing from the runner or its
+daemon socket is unreachable, the workflow and helper log a warning and still
+stage and upload the tarballs. Duplicate skips and failed staging attempts do
+not notify; the human runs `npm stage approve <stage-id>` (2FA).
 
 ## Native npm acquisition support
 

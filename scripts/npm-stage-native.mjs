@@ -18,13 +18,33 @@ export function notificationSummary(packageName, version) {
   return `npm staging accepted ${packageName}@${version}; awaiting manual npm stage approve (2FA).`;
 }
 
-/** Confirm that the configured notify-only daemon accepts a supported request. */
+/**
+ * Best-effort probe for the notify-only daemon. Returns whether notifications
+ * are possible; a missing CLI or unreachable socket only warns and never stops
+ * staging.
+ */
 export function preflightNotifyDaemon({ run = commandResult, notifyBin = "2fado" } = {}) {
-  run(notifyBin, ["list"]);
+  try {
+    run(notifyBin, ["list"]);
+    return true;
+  } catch (err) {
+    console.warn(`[npm-stage] 2fado notify CLI/daemon unavailable (${err.message}); staging without notification.`);
+    return false;
+  }
+}
+
+/** Send one best-effort notify; a failed daemon never propagates. */
+function notifyStaged({ run, notifyBin, link }, entry) {
+  try {
+    run(notifyBin, ["notify", "--link", link, "--summary", notificationSummary(entry.publishAs, entry.version)]);
+    console.log(`[npm-stage] notified 2fado: ${entry.publishAs}@${entry.version} accepted for staging.`);
+  } catch (err) {
+    console.warn(`[npm-stage] 2fado notify failed (continuing): ${err.message}`);
+  }
 }
 
 /** Stage one tarball; skips and npm errors deliberately return before notify. */
-export function stagePackage(entry, { run = commandResult, npmBin = "npm", notifyBin = "2fado", link }) {
+export function stagePackage(entry, { run = commandResult, npmBin = "npm", notifyBin = "2fado", link, notify = true }) {
   const stages = JSON.parse(run(npmBin, ["stage", "list", entry.publishAs, "--json"]));
   if (hasStagedVersion(stages, entry.publishAs, entry.version)) {
     console.log(`[npm-stage] skipping ${entry.publishAs}@${entry.version}: already staged; not a fresh stage.`);
@@ -33,15 +53,14 @@ export function stagePackage(entry, { run = commandResult, npmBin = "npm", notif
 
   console.log(`[npm-stage] staging ${entry.publishAs}@${entry.version} from ${entry.tarball}`);
   run(npmBin, ["stage", "publish", entry.tarball, "--access", "public"]);
-  run(notifyBin, ["notify", "--link", link, "--summary", notificationSummary(entry.publishAs, entry.version)]);
-  console.log(`[npm-stage] notified 2fado: ${entry.publishAs}@${entry.version} accepted for staging.`);
+  if (notify) notifyStaged({ run, notifyBin, link }, entry);
   return { outcome: "staged" };
 }
 
 export function stagePackages(manifest, options) {
   if (!Array.isArray(manifest?.packages)) throw new Error("manifest packages must be an array");
-  preflightNotifyDaemon(options);
-  return manifest.packages.map((entry) => stagePackage(entry, options));
+  const notify = options?.notify ?? preflightNotifyDaemon(options ?? {});
+  return manifest.packages.map((entry) => stagePackage(entry, { ...options, notify }));
 }
 
 function parseArgs(argv) {
