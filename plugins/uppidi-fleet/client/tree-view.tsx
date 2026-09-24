@@ -1646,7 +1646,6 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
         const res = await replaceOrchestratorMutation.mutateAsync({ repo, existingAgentId });
         if (res.ok) {
           toast.show(res.message || `Orchestrator replaced for ${repo}`);
-          onRefresh?.();
         } else {
           toast.error(res.error || `Failed to replace orchestrator for ${repo}`);
         }
@@ -1654,6 +1653,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     } catch (err: any) {
       toast.error(err?.message || String(err));
     } finally {
+      onRefresh?.();
       setActionLoadingRepo(null);
     }
   };

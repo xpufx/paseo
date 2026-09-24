@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npx tsx --test shared/contracts.test.ts shared/sort-filter.test.ts server/hook.test.ts server/fleet.test.ts server/metrics.test.ts server/hook-router.test.ts client/entry.test.ts"
+    "test": "npm run typecheck && NODE_ENV=test npx tsx --test shared/contracts.test.ts shared/sort-filter.test.ts server/hook.test.ts server/fleet.test.ts server/metrics.test.ts server/hook-router.test.ts client/entry.test.ts"
   },
   "devDependencies": {
     "@getpaseo/plugin": "^0.9.0",

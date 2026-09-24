@@ -1,5 +1,15 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+
+if (!process.env.NODE_ENV) {
+  process.env.NODE_ENV = "test";
+}
+if (!process.env.HOOK_STATE_DIR) {
+  process.env.HOOK_STATE_DIR = path.join(os.tmpdir(), `paseo-fleet-test-${process.pid}`);
+}
+
 import {
   categorizeAgent,
   normalizeRawAgent,
@@ -16,6 +26,8 @@ import {
   handleUppidiToggleRepoMute,
   spawnPaseoAgent,
   setExecFileAsyncForTest,
+  resolveRepoWorkspace,
+  getPersistedStateDir,
 } from "./agents.js";
 
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel } from "./role-models.js";
@@ -753,6 +765,112 @@ describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
       assert.equal(capturedArgs.includes("--mode"), false);
     } finally {
       setExecFileAsyncForTest(null);
+    }
+  });
+});
+
+describe("orchestrator workspace resolution and state isolation (#485, #486)", () => {
+  it("resolveRepoWorkspace extracts workspaceId and prefers local workspace over worktrees", async () => {
+    setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "paseo" && args[0] === "workspace" && args[1] === "ls") {
+        return {
+          stdout: JSON.stringify([
+            {
+              workspaceId: "wks_worktree_1",
+              project: "paseo",
+              name: "fix-branch",
+              isolation: "worktree",
+              cwd: "/home/user/.paseo/worktrees/fix-branch",
+            },
+            {
+              workspaceId: "wks_local_main",
+              project: "paseo",
+              name: "Paseo",
+              isolation: "local",
+              cwd: "/home/user/code/paseo",
+            },
+          ]),
+        };
+      }
+      return { stdout: "[]" };
+    });
+
+    try {
+      const res = await resolveRepoWorkspace("xpufx-org/paseo");
+      assert.equal(res.workspaceId, "wks_local_main");
+      assert.equal(res.cwd, "/home/user/code/paseo");
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+  });
+
+  it("handleUppidiAddOrchestrator supplies workspaceId and default orchestrator skill prompt", async () => {
+    let capturedPayload: any = null;
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async (opts: any) => {
+            capturedPayload = opts;
+            return {
+              agent: {
+                id: "agent-orch-skill-test",
+                name: opts.title,
+                role: opts.role,
+                status: "running",
+              },
+            };
+          },
+        },
+      },
+    };
+
+    setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
+      if (cmd === "paseo" && args[0] === "workspace" && args[1] === "ls") {
+        return {
+          stdout: JSON.stringify([
+            {
+              workspaceId: "wks_sample_repo",
+              project: "sample-repo",
+              name: "Main",
+              isolation: "local",
+              cwd: "/home/user/code/sample-repo",
+            },
+          ]),
+        };
+      }
+      return { stdout: "[]" };
+    });
+
+    try {
+      const res = await handleUppidiAddOrchestrator(
+        { repo: "xpufx-org/sample-repo" },
+        mockContext
+      );
+
+      assert.equal(res.ok, true);
+      assert.equal(res.agentId, "agent-orch-skill-test");
+      assert.equal(capturedPayload.workspaceId, "wks_sample_repo");
+      assert.equal(capturedPayload.cwd, "/home/user/code/sample-repo");
+      assert.ok(capturedPayload.prompt.includes("/home/xpufx/code/platform/skills/orchestrator/SKILL.md"));
+      assert.ok(capturedPayload.prompt.includes("fgjx"));
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+  });
+
+  it("getPersistedStateDir isolates test state and respects HOOK_STATE_DIR", () => {
+    const originalHookState = process.env.HOOK_STATE_DIR;
+    try {
+      process.env.HOOK_STATE_DIR = "/tmp/custom-hook-state-dir";
+      assert.equal(getPersistedStateDir(), "/tmp/custom-hook-state-dir");
+
+      delete process.env.HOOK_STATE_DIR;
+      process.env.NODE_ENV = "test";
+      const isolatedDir = getPersistedStateDir();
+      assert.ok(isolatedDir.includes("paseo-uppidi-fleet-state-"));
+      assert.ok(!isolatedDir.includes(".paseo/forgejo-hook"));
+    } finally {
+      process.env.HOOK_STATE_DIR = originalHookState;
     }
   });
 });

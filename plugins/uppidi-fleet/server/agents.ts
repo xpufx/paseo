@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs, { mkdirSync, writeFileSync, renameSync } from "node:fs";
-import os from "node:os";
+import os, { tmpdir } from "node:os";
 import path, { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type {
@@ -771,6 +771,10 @@ export async function spawnPaseoAgent(
         labels: options.labels,
         role: options.category,
       };
+      if (options.workspaceId) {
+        createPayload.workspaceId = options.workspaceId;
+        createPayload.workspace = options.workspaceId;
+      }
       if (targetProvider === "antigravity-acp") {
         createPayload.mode = "yolo";
       }
@@ -831,9 +835,20 @@ export async function spawnPaseoAgent(
   }
 }
 
-function writePersistedFrontDesk(agentId: string): void {
+export function getPersistedStateDir(): string {
+  const custom = process.env.HOOK_STATE_DIR;
+  if (custom && custom.trim().length > 0) {
+    return custom.trim();
+  }
+  if (process.env.NODE_ENV === "test") {
+    return join(tmpdir(), `paseo-uppidi-fleet-state-${process.pid}`);
+  }
   const home = process.env.HOME ?? os.homedir();
-  const dir = join(home, ".paseo", "forgejo-hook");
+  return join(home, ".paseo", "forgejo-hook");
+}
+
+function writePersistedFrontDesk(agentId: string): void {
+  const dir = getPersistedStateDir();
   mkdirSync(dir, { recursive: true });
   const file = join(dir, "frontdesk.json");
   const record = {
@@ -848,8 +863,7 @@ function writePersistedFrontDesk(agentId: string): void {
 }
 
 function writePersistedOrchestrator(repo: string, agentId: string): void {
-  const home = process.env.HOME ?? os.homedir();
-  const dir = join(home, ".paseo", "forgejo-hook", "orchestrators");
+  const dir = join(getPersistedStateDir(), "orchestrators");
   mkdirSync(dir, { recursive: true });
   const sanitized = repo.replace(/[^a-zA-Z0-9_.-]/g, "_");
   const file = join(dir, `${sanitized}.json`);
@@ -866,6 +880,9 @@ function writePersistedOrchestrator(repo: string, agentId: string): void {
 }
 
 function enrollPersistedRepo(repo: string): void {
+  if (process.env.NODE_ENV === "test" && !process.env.FORGE_HOOK_CONFIG) {
+    return;
+  }
   const config = loadRouterConfig();
   const enrolled = new Set(config.enrolledRepos ?? []);
   enrolled.add(repo);
@@ -985,14 +1002,17 @@ export async function resolveRepoWorkspace(
     const { stdout } = await execFileAsync("paseo", ["workspace", "ls", "--json"], { timeout: 5000 });
     const list = JSON.parse(stdout);
     if (Array.isArray(list)) {
-      const match = list.find((w: any) => {
+      const matches = list.filter((w: any) => {
         const proj = String(w.project || "").toLowerCase();
         const name = String(w.name || "").toLowerCase();
         const base = repoBasename.toLowerCase();
         return isRepoMatching(proj, repo) || proj === base || name === base;
       });
-      if (match?.id) {
-        return { cwd: match.cwd, workspaceId: match.id };
+      // Prefer local workspace over ephemeral worktree
+      const match = matches.find((w: any) => w.isolation === "local") || matches[0];
+      const resolvedWorkspaceId = match?.workspaceId || match?.id;
+      if (resolvedWorkspaceId) {
+        return { cwd: match.cwd || match.path, workspaceId: resolvedWorkspaceId };
       }
     }
   } catch {}
@@ -1005,7 +1025,7 @@ export async function resolveRepoWorkspace(
         (a) => a.cwd && isRepoMatching(a.project || extractAgentProject(a), repo)
       );
       if (matching?.cwd && fs.existsSync(matching.cwd)) {
-        return { cwd: matching.cwd };
+        return { cwd: matching.cwd, workspaceId: (matching as any).workspaceId };
       }
     } catch {}
   }
@@ -1041,17 +1061,19 @@ export async function handleUppidiAddOrchestrator(
 
   try {
     const title = input.title?.trim() || `Orchestrator · ${repo}`;
-    const prompt =
-      input.prompt?.trim() ||
-      `You are the project orchestrator for ${repo}. Coordinate tasks, supervise worker agents, and manage pull requests and issues for this repository.`;
+    const defaultPrompt =
+      `You are the project orchestrator for ${repo}.\n` +
+      `Follow the orchestrator skill at /home/xpufx/code/platform/skills/orchestrator/SKILL.md.\n` +
+      `Coordinate tasks, supervise worker agents, and manage pull requests and issues for this repository using the forge CLI (fgjx) and Paseo conventions.`;
+    const prompt = input.prompt?.trim() || defaultPrompt;
 
     let cwd = input.workspacePath?.trim();
     let workspaceId: string | undefined;
+    const resolved = await resolveRepoWorkspace(repo, context);
     if (!cwd) {
-      const resolved = await resolveRepoWorkspace(repo, context);
       cwd = resolved.cwd;
-      workspaceId = resolved.workspaceId;
     }
+    workspaceId = resolved.workspaceId;
 
     const spawnRes = await spawnPaseoAgent(
       {

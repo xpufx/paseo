@@ -642,7 +642,7 @@ export class HookRouter {
     })();
 
     const envPort = process.env.FORGE_HOOK_PORT ?? process.env.HOOK_PORT;
-    const isTestMode = process.env.NODE_ENV === "test" && !process.env.FORGE_HOOK_CONFIG;
+    const isTestMode = process.env.NODE_ENV === "test" && !process.env.FORGE_HOOK_CONFIG && !options?.configPath;
 
     this.configuredPort =
       options?.port !== undefined
