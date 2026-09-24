@@ -162,7 +162,16 @@ export function deriveDeterministicState(
   const hasQuotaAlert = raw.id ? quotaAlertAgentIds.has(raw.id) : false;
 
   // 1. Error / Failed states
-  if (status === "error" || (raw.requiresAttention && raw.attentionReason === "error") || errorMsg.length > 0) {
+  // Only evaluate errorMsg as a fatal failure when status is explicitly "error",
+  // requiresAttention is set with an error reason, or status is unknown/empty with an errorMsg.
+  // Stale or transient errors (e.g. foreground turn lock) on active "running" or "idle"
+  // agents must not override the healthy state (#516).
+  const isExplicitError =
+    status === "error" ||
+    Boolean(raw.requiresAttention && raw.attentionReason === "error") ||
+    (status !== "running" && status !== "idle" && errorMsg.length > 0);
+
+  if (isExplicitError) {
     if (
       hasQuotaAlert ||
       errorMsg.includes("quota") ||

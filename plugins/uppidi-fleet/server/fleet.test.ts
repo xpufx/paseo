@@ -133,6 +133,42 @@ describe("fleet and agents classification", () => {
       null
     );
     assert.equal(s9.state, "failed:error");
+
+    // 10. Stale / transient lastError on running or idle agent (#516)
+    const s10Running = deriveDeterministicState(
+      {
+        id: "a10",
+        name: "Worker 10",
+        status: "running",
+        lastError: "A foreground turn is already active",
+      },
+      null
+    );
+    assert.equal(s10Running.state, "running");
+
+    const s10Idle = deriveDeterministicState(
+      {
+        id: "a11",
+        name: "Worker 11",
+        status: "idle",
+        lastError: "A foreground turn is already active",
+      },
+      null
+    );
+    assert.equal(s10Idle.state, "idle:waiting");
+
+    // But if requiresAttention has error reason, it should still fail even if status is idle
+    const s10Attention = deriveDeterministicState(
+      {
+        id: "a12",
+        status: "idle",
+        requiresAttention: true,
+        attentionReason: "error",
+        lastError: "Connection refused",
+      },
+      null
+    );
+    assert.equal(s10Attention.state, "failed:spawn");
   });
 
   it("builds hierarchy tree correctly with depths and children", () => {
