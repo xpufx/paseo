@@ -38,6 +38,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { notifyReloadOutcome } from "./reload-notify.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -368,6 +369,7 @@ async function diagnose() {
     npmHelperDeps: [],
     vendorLinked: [],
     reloaded: [],
+    reloadFailed: [],
   };
 
   const state = {
@@ -697,6 +699,7 @@ async function remediate(result, state) {
         ps.pluginData.status = "reloaded";
         ps.pluginData.detail = "Reloaded just now";
       } catch (err) {
+        result.reloadFailed.push(ps.pluginId);
         ps.pluginData.detail = `Reload failed: ${err.message}`;
       }
     }
@@ -860,6 +863,13 @@ async function main() {
   const { result, state } = await diagnose();
   if (shouldReload) {
     await remediate(result, state);
+    // One best-effort 2fado ping for the whole batch; the daemon being down
+    // must never fail the doctor run.
+    await notifyReloadOutcome({
+      reloaded: result.reloaded,
+      failed: result.reloadFailed,
+      repoHead: result.repoHead,
+    });
   }
   const exitCode = output(result);
   printDiagnostics();
