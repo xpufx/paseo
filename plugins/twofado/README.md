@@ -16,9 +16,11 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 > [!NOTE]
 > **Prerequisites & Platform Support**:
-> - Requires a running `2fadod`; the daemon is reached over a unix socket.
->   The socket path is configurable and otherwise falls back to
->   `$TWOFADO_SOCKET`, `$FADO_SOCKET`, then `/tmp/2fado.sock`.
+> - Requires a `2fadod`; the daemon is reached over a unix socket. The plugin
+>   acquires the platform binary during install and can supervise the daemon
+>   directly when no external one is running. The socket path is configurable
+>   and otherwise falls back to `$TWOFADO_SOCKET`, `$FADO_SOCKET`, then
+>   `/tmp/2fado.sock`.
 > - Developed and tested primarily on **Linux**.
 
 ## What it does
@@ -41,6 +43,13 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
   exit code, and a truncated output preview.
 - **Health.** The header reports daemon reachability and a down state when
   the socket cannot be probed.
+- **Companion daemon lifecycle.** When no external daemon serves the configured
+  socket, the plugin acquires the platform `2fado` binary during install
+  (`scripts/install-companion.mjs`) and supervises the daemon process in Node
+  (`scripts/daemon-supervisor.mjs`). The settings tab exposes process state,
+  PID/uptime, start/stop/restart, on-demand binary install, and the supervised
+  log ring buffer. An external daemon (systemd or standalone) is adopted, never
+  killed by the plugin.
 - **Notification target.** Choose whether notifications go to Telegram, the
   Paseo client, or both; Telegram bot token, chat id, and approver list are
   configurable in settings.
@@ -58,7 +67,11 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 - `approval.telegram_info` / `approval.telegram_set_config`: read and sync the
   daemon-side notification configuration.
 - `approval.policy_add_rule`: persist a policy rule derived from a request.
-- `twofado.settings`: socket path, notification target, and Telegram config.
+- `daemon.status` / `daemon.start` / `daemon.stop` / `daemon.restart` /
+  `daemon.logs` / `daemon.install`: supervised daemon lifecycle, log ring
+  buffer, and on-demand companion binary acquisition.
+- `twofado.settings`: socket path, notification target, Telegram config, and
+  companion auto-start.
 
 ## Install
 

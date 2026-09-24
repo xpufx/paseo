@@ -49,7 +49,16 @@ import {
   recentList,
   verdict,
 } from "../shared/approval";
+import {
+  daemonInstall,
+  daemonLogs,
+  daemonRestart,
+  daemonStart,
+  daemonStatus,
+  daemonStop,
+} from "../shared/companion";
 import type { ApprovalSettingsValues, NotificationTarget } from "../shared/approval";
+import type { DaemonLogEntry } from "../shared/companion";
 
 const LIST_KEY = ["twofado", "pending"];const RECENT_KEY = ["twofado", "recent"];
 const POLL_MS = 3000;
@@ -174,6 +183,24 @@ export function useDaemonHealth() {
         return { reachable: false as const };
       }
     },
+    refetchInterval: POLL_MS,
+    retry: false,
+  });
+}
+
+const COMPANION_KEY = ["twofado", "companion"];
+
+/**
+ * Supervised-daemon state, distinct from the socket-only `daemonHealth` probe:
+ * it reports whether this plugin manages the process, an external daemon
+ * (systemd/standalone) is adopted, or nothing is running.
+ */
+export function useCompanionStatus() {
+  const status = useRpc(daemonStatus);
+  const socketPath = useSocketPath();
+  return useQuery({
+    queryKey: [...COMPANION_KEY, socketPath ?? ""],
+    queryFn: () => status({ socketPath }),
     refetchInterval: POLL_MS,
     retry: false,
   });
@@ -1024,6 +1051,180 @@ const NOTIFICATION_TARGET_LABELS: Record<NotificationTarget, string> = {
   both: "Telegram + Paseo desktop",
 };
 
+const COMPANION_STATE_LABELS: Record<string, { label: string; variant: "success" | "warning" | "danger" | "neutral" }> = {
+  online: { label: "Online", variant: "success" },
+  starting: { label: "Starting…", variant: "warning" },
+  offline: { label: "Offline", variant: "danger" },
+};
+
+/**
+ * Companion daemon controls: state, PID/uptime, start/stop/restart, on-demand
+ * binary acquisition, and the supervised log ring buffer. All actions are
+ * explicit operator choices; nothing here spawns a process on render.
+ */
+function CompanionControls({ socketPath }: { socketPath: string | undefined }) {
+  const { colors } = usePluginTheme();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const state = useCompanionStatus();
+  const start = useRpc(daemonStart);
+  const stop = useRpc(daemonStop);
+  const restart = useRpc(daemonRestart);
+  const install = useRpc(daemonInstall);
+  const logs = useRpc(daemonLogs);
+  const [busy, setBusy] = useState<"start" | "stop" | "restart" | "install" | null>(null);
+  const [showLogs, setShowLogs] = useState(false);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: COMPANION_KEY });
+
+  const run = async (
+    action: "start" | "stop" | "restart" | "install",
+    fn: () => Promise<{ success?: boolean; error?: string; status?: string; stopped?: boolean }>,
+  ) => {
+    setBusy(action);
+    try {
+      const result = await fn();
+      if (result.success === false || result.stopped === false) {
+        toast.error(result.error || `2fado daemon ${action} failed.`);
+      } else {
+        toast.show(`2fado daemon ${action} requested`, { variant: "success" });
+      }
+      await refresh();
+    } catch (err) {
+      console.warn(`[2fado] companion ${action} failed:`, err);
+      toast.error(`2fado daemon ${action} failed.`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const data = state.data;
+  const stateInfo = COMPANION_STATE_LABELS[data?.state ?? "offline"] ?? COMPANION_STATE_LABELS.offline;
+
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <StatusDot
+          variant={stateInfo.variant}
+          size="md"
+          pulse={data?.state === "online"}
+        />
+        <Badge label={`Process: ${stateInfo.label}`} variant={stateInfo.variant} styleVariant="tinted" />
+        {data?.managed ? (
+          <Badge
+            label={data.managed === "supervisor" ? "Supervised by Paseo" : data.managed === "external" ? "External daemon" : "Not managed"}
+            variant={data.managed === "supervisor" ? "accent" : "neutral"}
+            styleVariant="tinted"
+          />
+        ) : null}
+      </View>
+
+      <KeyValueGroup columns={2}>
+        <KeyValue label="PID" value={data?.pid ?? "—"} mono />
+        <KeyValue
+          label="Uptime"
+          value={
+            data?.uptimeSeconds != null ? `${Math.floor(data.uptimeSeconds / 60)}m ${data.uptimeSeconds % 60}s` : "—"
+          }
+        />
+      </KeyValueGroup>
+
+      <ActionBar align="flex-start">
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          <Button
+            label="Start"
+            variant="primary"
+            size="sm"
+            icon="Play"
+            disabled={busy !== null || data?.state === "online"}
+            loading={busy === "start"}
+            onPress={() => void run("start", () => start({ socketPath }))}
+          />
+          <Button
+            label="Restart"
+            variant="secondary"
+            size="sm"
+            icon="RotateCcw"
+            disabled={busy !== null}
+            loading={busy === "restart"}
+            onPress={() => void run("restart", () => restart({ socketPath }))}
+          />
+          <Button
+            label="Stop"
+            variant="danger"
+            size="sm"
+            icon="Square"
+            disabled={busy !== null || data?.managed !== "supervisor"}
+            loading={busy === "stop"}
+            onPress={() => void run("stop", () => stop({}))}
+          />
+          <Button
+            label="Install binary"
+            variant="ghost"
+            size="sm"
+            icon="Download"
+            disabled={busy !== null}
+            loading={busy === "install"}
+            onPress={() => void run("install", () => install({}))}
+          />
+          <Button
+            label={showLogs ? "Hide logs" : "View logs"}
+            variant="ghost"
+            size="sm"
+            icon="ScrollText"
+            disabled={busy !== null}
+            onPress={() => setShowLogs((prev) => !prev)}
+          />
+        </View>
+      </ActionBar>
+
+      {showLogs ? <CompanionLogs logs={logs} visible={showLogs} /> : null}
+
+      {data?.managed === "external" ? (
+        <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+          An external daemon serves this socket; Paseo adopts it without taking over its lifecycle.
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function CompanionLogs({
+  logs,
+  visible,
+}: {
+  logs: (input: { limit?: number }) => Promise<{ entries: DaemonLogEntry[] }>;
+  visible: boolean;
+}) {
+  const { colors } = usePluginTheme();
+  const query = useQuery({
+    queryKey: [...COMPANION_KEY, "logs"],
+    queryFn: () => logs({ limit: 100 }),
+    enabled: visible,
+    refetchInterval: 5000,
+    retry: false,
+  });
+
+  const entries = query.data?.entries ?? [];
+  const code = entries
+    .map((entry) => `${entry.timestamp} [${entry.stream}] ${entry.message}`)
+    .join("\n");
+
+  if (query.isPending) {
+    return <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>Loading logs…</Text>;
+  }
+  if (entries.length === 0) {
+    return (
+      <EmptyState
+        icon="ScrollText"
+        title="No daemon logs yet"
+        description="Logs appear once this plugin has spawned the 2fado daemon."
+      />
+    );
+  }
+  return <CodeBlock code={code} title="2fadod logs" maxHeight={240} copyable />;
+}
+
 /**
  * Settings tab: daemon connection + Telegram configuration bound to the
  * `twofado.settings` contract. Edits are kept in local draft state so a
@@ -1035,6 +1236,7 @@ function SettingsTab() {
   const { colors } = usePluginTheme();
   const toast = useToast();
   const health = useDaemonHealth();
+  const socketPath = useSocketPath();
   const { settings, updateSettingsAsync, resetSettings, isUpdating } = usePluginSettings(approvalSettings);
 
   const [draft, setDraft] = useState<ApprovalSettingsValues>(settings);
@@ -1109,6 +1311,7 @@ function SettingsTab() {
             <Badge label={`pid ${health.data.pid}`} variant="neutral" styleVariant="tinted" />
           ) : null}
         </View>
+        <CompanionControls socketPath={socketPath} />
         <FormRow
           label="Socket path"
           description="Unix socket 2fadod listens on. Saved changes are probed automatically."

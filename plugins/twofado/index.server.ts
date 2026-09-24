@@ -18,6 +18,15 @@ import {
 } from "./shared/approval";
 import type { ApprovalSettingsValues } from "./shared/approval";
 import {
+  daemonInstall,
+  daemonLogs,
+  daemonRestart,
+  daemonStart,
+  daemonStatus,
+  daemonStop,
+} from "./shared/companion";
+import { createCompanionController } from "./server/companion";
+import {
   addPolicyRule,
   getHealth,
   getStatus,
@@ -51,12 +60,36 @@ export default function contribute(server: PluginServerContext) {
     schema: approvalSettings.schema,
   });
   migrateLegacySettingsFile(storage);
+  const companion = createCompanionController();
+
+  const maybeAutoStart = (autoStart: boolean, socketPath: string) => {
+    if (!autoStart) {
+      log.info("companion auto-start disabled by settings");
+      return;
+    }
+    // Socket-first: an already-serving daemon (systemd/standalone) is adopted,
+    // not duplicated; a missing socket means the supervisor spawns one.
+    void companion
+      .start({ socketPath })
+      .then((result) => {
+        log.info("companion daemon ensure attempted", {
+          success: result.success,
+          managed: result.managed,
+          pid: result.pid,
+        });
+      })
+      .catch((err) => log.warn("companion auto-start failed", { error: err }));
+  };
+
   registerSettingsRpc(server, approvalSettings, storage, {
     onUpdate: (next, prev) => {
       log.info("settings updated", {
         socketPath: next.socketPath,
         notificationTarget: next.notificationTarget,
       });
+      if (prev && next.autoStartDaemon && !prev.autoStartDaemon) {
+        maybeAutoStart(true, next.socketPath);
+      }
       if (next.telegramBotToken || next.telegramChatId || next.telegramApprovers) {
         const approvers = parseApprovers(next.telegramApprovers);
         void setTelegramConfig({
@@ -92,5 +125,19 @@ export default function contribute(server: PluginServerContext) {
   server.handle(approvalTelegramInfo, (input) => getTelegramInfo(input));
   server.handle(approvalTelegramSetConfig, (input) => setTelegramConfig(input));
   server.handle(policyAddRule, (input) => addPolicyRule(input));
-  return () => {};
+  server.handle(daemonStatus, (input) => companion.status(input));
+  server.handle(daemonStart, (input) => companion.start(input));
+  server.handle(daemonStop, () => companion.stop());
+  server.handle(daemonRestart, (input) => companion.restart(input));
+  server.handle(daemonLogs, (input) => companion.logs(input));
+  server.handle(daemonInstall, (input) => companion.install(input));
+
+  const initial = storage.read();
+  maybeAutoStart(initial.autoStartDaemon, initial.socketPath);
+
+  return () => {
+    // Only a child this plugin spawned is stopped; an adopted external daemon
+    // is left running for its own supervisor (systemd or standalone).
+    void companion.shutdown();
+  };
 }

@@ -319,6 +319,10 @@ const settingsSchema = z.object({
   telegramBotToken: z.string().default("").describe("Telegram bot token"),
   telegramChatId: z.string().default("").describe("Telegram chat ID"),
   telegramApprovers: z.string().default("").describe("Telegram approvers"),
+  autoStartDaemon: z
+    .boolean()
+    .default(true)
+    .describe("Start and supervise the 2fado daemon with Paseo"),
 });
 
 export type ApprovalSettingsValues = z.output<typeof settingsSchema>;
