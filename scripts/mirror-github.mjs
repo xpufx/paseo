@@ -6,11 +6,29 @@ import path from "node:path";
 import os from "node:os";
 import { rewriteBareSpecifiers, hasBareHelperSpecifier } from "./lib/plugin-helper-layout.mjs";
 
+// List the direct entries under <ref>:<surface>. Returns null when the ref or
+// tree is not readable locally (e.g. a shallow fetch that failed), so callers
+// can skip the guard rather than emit false positives.
+function listDirs(ref, surface) {
+  try {
+    const out = execFileSync(
+      "git",
+      ["ls-tree", "--name-only", "-z", `${ref}:${surface}`],
+      { encoding: "utf-8" }
+    );
+    return new Set(out.split("\0").filter(Boolean));
+  } catch {
+    return null;
+  }
+}
+
+
 // CLI Arguments
 const args = process.argv.slice(2);
 const isDryRun = args.includes("--dry-run");
 const isForce = args.includes("--force");
 const isAll = args.includes("--all");
+const allowPrune = args.includes("--allow-prune");
 const targetRemote = process.env.GITHUB_REMOTE || "github";
 const targetBranch = process.env.GITHUB_BRANCH || "main";
 const targetUrl = "git@github.com:xpufx/paseo.git";
@@ -229,6 +247,7 @@ try {
 
   // 6. Determine remote parent commit for clean fast-forward
   let parentArgs = [];
+  let remoteHead = null;
   try {
     const lsRemote = execFileSync(
       "git",
@@ -236,8 +255,9 @@ try {
       { encoding: "utf-8" }
     ).trim();
     if (lsRemote) {
-      const remoteHead = lsRemote.split(/\s+/)[0];
-      if (remoteHead && /^[0-9a-f]{40}$/.test(remoteHead)) {
+      const head = lsRemote.split(/\s+/)[0];
+      if (head && /^[0-9a-f]{40}$/.test(head)) {
+        remoteHead = head;
         try {
           execFileSync("git", ["cat-file", "-e", remoteHead], { stdio: "ignore" });
         } catch {
@@ -254,6 +274,34 @@ try {
     }
   } catch (err) {
     console.warn("[mirror-github] Could not query remote HEAD; committing as root or manual parent.");
+  }
+
+  // 6b. Prune guard: a partial --target tree drops every plugin/package not
+  // selected. Pushing that over a fuller remote silently deletes the others
+  // (the 2026-09-24 top-only incident). Detect remote dirs missing from the
+  // new tree and refuse unless the caller explicitly opts in.
+  if (remoteHead) {
+    for (const surface of ["plugins", "packages"]) {
+      // Nothing on the remote to lose: skip (also covers a first push and a
+      // ref/tree we could not read).
+      const remoteDirs = listDirs(remoteHead, surface);
+      if (!remoteDirs) continue;
+      // The new tree may omit the surface entirely (e.g. `--target=top` prunes
+      // all of packages/); that is exactly the full surface being dropped.
+      const newDirs = listDirs(treeId, surface) ?? new Set();
+      const dropped = [...remoteDirs].filter((d) => !newDirs.has(d)).sort();
+      if (dropped.length === 0) continue;
+
+      const msg = `[mirror-github] would drop ${dropped.length} ${surface} entr${dropped.length === 1 ? "y" : "ies"} present on ${targetRemote}:${targetBranch}: ${dropped.join(", ")}`;
+      if (isDryRun || allowPrune || isForce) {
+        console.warn(`${msg} (continuing: ${isDryRun ? "dry-run" : allowPrune ? "--allow-prune" : "--force"})`);
+      } else {
+        console.error(`[mirror-github] error: ${msg}`);
+        console.error(`[mirror-github] Refusing to overwrite a fuller mirror with a subset.`);
+        console.error(`[mirror-github] If this prune is intended, re-run with --allow-prune (or --force).`);
+        process.exit(1);
+      }
+    }
   }
 
   // 7. Get latest commit subject from local HEAD
