@@ -429,8 +429,8 @@ describe("uppidi-fleet client entry contract", () => {
       // Must support click-to-filter
       assert.match(
         surfaceSource,
-        /setFilter\(\s*["']needs-attention["']\s*\)/,
-        "dense metrics bar must support click-to-filter for needs-attention",
+        /setFilter\(\s*["']needs-you["']\s*\)/,
+        "dense metrics bar must support click-to-filter for needs-you (operator attention)",
       );
       assert.match(
         surfaceSource,

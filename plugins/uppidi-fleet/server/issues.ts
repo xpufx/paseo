@@ -81,10 +81,21 @@ export async function handleUppidiIssues(
 
     const issues: UppidiIssue[] = rawList.map((raw) => {
       const labelNames = (raw.labels ?? []).map((l) => l.name);
+      const normalizedLabels = labelNames.map((l) => l.trim().toLowerCase());
+
+      // Operator attention is strictly signaled by user attention labels. The
+      // canonical, scoped form is `attention/2-user`; legacy `attention/user`
+      // and `attention:user` spellings normalize to the same operator signal.
+      const hasUserAttention = normalizedLabels.some(
+        (l) => l === "attention/2-user" || l === "attention/user" || l === "attention:user",
+      );
+      const hasOrchestratorAttention = normalizedLabels.some(
+        (l) => l === "attention/0-orchestrator" || l === "attention/orchestrator" || l === "attention:orchestrator",
+      );
 
       let attention: AttentionLabel = "attention/1-agent";
-      if (labelNames.includes("attention/2-user")) attention = "attention/2-user";
-      else if (labelNames.includes("attention/0-orchestrator")) attention = "attention/0-orchestrator";
+      if (hasUserAttention) attention = "attention/2-user";
+      else if (hasOrchestratorAttention) attention = "attention/0-orchestrator";
 
       let status: "Backlog" | "In progress" | "Review" | "Done" = "Backlog";
       if (raw.state === "closed") {

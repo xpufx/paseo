@@ -88,6 +88,7 @@ export type SurfaceTab = "tree" | "dashboard" | "settings";
 
 const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
   { id: "all", label: "All work" },
+  { id: "needs-you", label: "Needs You" },
   { id: "needs-attention", label: "Needs Attention" },
   { id: "triage-review", label: "Triage / Review" },
   { id: "in-progress", label: "In Progress" },
@@ -1253,7 +1254,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
 
             <Pressable
-              onPress={() => setFilter("needs-attention")}
+              onPress={() => setFilter("needs-you")}
               style={({ pressed }) => ({
                 flexDirection: "row",
                 alignItems: "center",
@@ -1261,7 +1262,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 paddingHorizontal: 8,
                 paddingVertical: 3,
                 borderRadius: 4,
-                backgroundColor: filter === "needs-attention" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                backgroundColor: filter === "needs-you" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
                 opacity: pressed ? 0.7 : 1,
                 cursor: "pointer",
               })}
@@ -1331,7 +1332,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               {issuePresetFilters.map(({ id, label }) => {
                 let count = 0;
                 if (id === "all") count = rawIssues.length;
-                else if (id === "needs-attention") {
+                else if (id === "needs-you") {
+                  count = rawIssues.filter((i) => i.attention === "attention/2-user").length;
+                } else if (id === "needs-attention") {
                   count = rawIssues.filter(
                     (i) =>
                       i.attention.startsWith("attention/0-") ||

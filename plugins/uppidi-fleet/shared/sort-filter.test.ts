@@ -70,6 +70,9 @@ describe("Uppidi Fleet sort & filter predicates", () => {
   it("filters issues by preset and query", () => {
     assert.equal(filterIssues(issues, "all", "").length, 3);
     assert.equal(filterIssues(issues, "needs-attention", "").length, 3);
+    assert.equal(filterIssues(issues, "needs-you", "").length, 1);
+    assert.equal(filterIssues(issues, "needs-you", "")[0].number, 20);
+    assert.equal(filterIssues(issues, "needs-you", "")[0].attention, "attention/2-user");
     assert.equal(filterIssues(issues, "in-progress", "").length, 1);
     assert.equal(filterIssues(issues, "in-progress", "")[0].number, 10);
     assert.equal(filterIssues(issues, "triage-review", "").length, 1);

@@ -212,10 +212,25 @@ export function envelopeAgentId(body: any): string | null {
   return AGENT_ENVELOPE_ID_RE.exec(comment)?.[1] ?? null;
 }
 
+/**
+ * Operator attention is strictly signaled by user attention labels. The
+ * canonical scoped form is `attention/2-user`; legacy `attention/user` and
+ * `attention:user` spellings are accepted case-insensitively.
+ */
+export const USER_ATTENTION_LABELS = new Set([
+  "attention/2-user",
+  "attention/user",
+  "attention:user",
+]);
+
+export function isUserAttentionLabel(label: string): boolean {
+  return USER_ATTENTION_LABELS.has((label ?? "").trim().toLowerCase());
+}
+
 export function isFrontDeskEvent(body: any): boolean {
   if (!body || typeof body !== "object") return false;
   const label = body.label?.name ?? "";
-  if (label === "attention/frontdesk" || label === "attention/2-user") return true;
+  if (label === "attention/frontdesk" || isUserAttentionLabel(label)) return true;
   const comment = body.comment?.body ?? body.review?.body;
   if (typeof comment === "string" && /(?:^|\s)\/frontdesk\b/i.test(comment)) return true;
   return false;
@@ -229,7 +244,12 @@ export function isBypassEvent(event: string, body: any): boolean {
   if (!body || typeof body !== "object") return false;
   const label = body.label?.name ?? "";
   const lowerLabel = label.toLowerCase();
-  if (lowerLabel.startsWith("attention/") || BYPASS_LABELS.has(lowerLabel) || lowerLabel.startsWith("ping/")) {
+  if (
+    lowerLabel.startsWith("attention/") ||
+    isUserAttentionLabel(lowerLabel) ||
+    BYPASS_LABELS.has(lowerLabel) ||
+    lowerLabel.startsWith("ping/")
+  ) {
     return true;
   }
   const comment = body.comment?.body ?? body.review?.body;

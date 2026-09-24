@@ -88,6 +88,9 @@ describe("hook-router payload and key utilities", () => {
   it("identifies frontdesk events correctly", () => {
     assert.equal(isFrontDeskEvent({ label: { name: "attention/frontdesk" } }), true);
     assert.equal(isFrontDeskEvent({ label: { name: "attention/2-user" } }), true);
+    assert.equal(isFrontDeskEvent({ label: { name: "attention/user" } }), true);
+    assert.equal(isFrontDeskEvent({ label: { name: "attention:user" } }), true);
+    assert.equal(isFrontDeskEvent({ label: { name: "ATTENTION/2-USER" } }), true);
     assert.equal(isFrontDeskEvent({ comment: { body: "Hey /frontdesk please check this" } }), true);
     assert.equal(isFrontDeskEvent({ comment: { body: "Just a regular comment" } }), false);
     assert.equal(isFrontDeskEvent({ label: { name: "state/1-wip" } }), false);
@@ -97,6 +100,8 @@ describe("hook-router payload and key utilities", () => {
     assert.equal(isBypassEvent("issues", { label: { name: "priority/0-sos" } }), true);
     assert.equal(isBypassEvent("issues", { label: { name: "flag/stop-work" } }), true);
     assert.equal(isBypassEvent("issues", { label: { name: "attention/1-triager" } }), true);
+    assert.equal(isBypassEvent("issues", { label: { name: "attention/user" } }), true);
+    assert.equal(isBypassEvent("issues", { label: { name: "attention:user" } }), true);
     assert.equal(isBypassEvent("issue_comment", { comment: { body: "/orchestrator restart" } }), true);
     assert.equal(isBypassEvent("issue_comment", { comment: { body: "/hold this for now" } }), true);
     assert.equal(isBypassEvent("issue_comment", { comment: { body: "/rework required" } }), true);

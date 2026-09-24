@@ -83,6 +83,7 @@ export function getStatusLightColor(agent?: {
 
 export type IssuePreset =
   | "all"
+  | "needs-you"
   | "needs-attention"
   | "triage-review"
   | "in-progress"
@@ -106,6 +107,9 @@ export function filterIssues(
   return issues.filter((issue) => {
     let matchesPreset = true;
     switch (preset) {
+      case "needs-you":
+        matchesPreset = issue.attention === "attention/2-user";
+        break;
       case "needs-attention":
         matchesPreset =
           issue.attention.startsWith("attention/0-") ||
