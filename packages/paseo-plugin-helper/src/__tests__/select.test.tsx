@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { Pressable, ScrollView, Text } from "react-native";
+import { Pressable, ScrollView, Text, View } from "react-native";
 import { initClientHelpers } from "../client/host.js";
 import * as themeProvider from "../client/theme/provider.js";
 import { resolveTypography } from "../client/theme/tokens.js";
@@ -197,5 +197,31 @@ describe("Select", () => {
   it("disables the trigger when there are no options", () => {
     const tree = render(<Select value="" options={[]} onValueChange={() => {}} />);
     expect(triggerOf(tree).props.disabled).toBe(true);
+  });
+
+  it("overlays the option list without expanding the trigger container (#484)", () => {
+    const tree = render(<Select value="" options={options} onValueChange={() => {}} />);
+
+    const container = tree.root.findAllByType(View)[0];
+    expect(styleValue(container.props.style, "position")).toBe("relative");
+
+    act(() => {
+      triggerOf(tree).props.onPress();
+    });
+
+    const optionList = tree.root.findAllByType(View).find((node) =>
+      flatStyle(node.props.style).some(
+        (s) => s && s.position === "absolute" && s.zIndex === 1000,
+      ),
+    );
+    expect(optionList).toBeTruthy();
+
+    const optionListStyle = optionList!.props.style;
+    expect(styleValue(optionListStyle, "position")).toBe("absolute");
+    expect(styleValue(optionListStyle, "top")).toBe("100%");
+    expect(styleValue(optionListStyle, "left")).toBe(0);
+    expect(styleValue(optionListStyle, "right")).toBe(0);
+    expect(styleValue(optionListStyle, "zIndex")).toBe(1000);
+    expect(styleValue(optionListStyle, "elevation")).toBe(10);
   });
 });

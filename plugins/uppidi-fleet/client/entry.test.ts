@@ -363,6 +363,20 @@ describe("uppidi-fleet client entry contract", () => {
       );
     });
 
+    it("defaults the global repo selector to All Repositories (#484)", () => {
+      assert.match(
+        surfaceSource,
+        /const\s+\[selectedRepo,\s*setSelectedRepo\]\s*=\s*useState<string>\(\s*["']all["']\s*\)/,
+        "selectedRepo must default to 'all' on initial mount",
+      );
+
+      assert.match(
+        surfaceSource,
+        /repoOptions\s*=\s*useMemo<SelectOption\[\]>\(\(\)\s*=>\s*\[\s*\{\s*label:\s*["']All Repositories["'],\s*value:\s*["']all["']\s*\}/,
+        "repoOptions must start with the All Repositories / 'all' option",
+      );
+    });
+
     it("verifies compact unified top header bar (#424, #466)", () => {
       assert.match(
         surfaceSource,

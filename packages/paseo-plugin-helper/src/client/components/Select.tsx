@@ -35,7 +35,8 @@ const OPTION_LIST_MAX_HEIGHT = 216;
 /**
  * Compact single-choice picker sized to sit inside a {@link FormRow}. The
  * closed trigger stays one line tall; opening reveals a bounded, scrollable
- * option list, so a long list degrades to scrolling rather than overflow.
+ * option list that overlays the content below, so a long list degrades to
+ * scrolling instead of expanding the trigger's parent container.
  */
 export function Select({
   value,
@@ -191,6 +192,7 @@ export function Select({
 const styles = StyleSheet.create({
   container: {
     width: "100%",
+    position: "relative",
   },
   trigger: {
     flexDirection: "row",
@@ -204,6 +206,12 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   optionList: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    elevation: 10,
     borderWidth: 1,
     overflow: "hidden",
   },

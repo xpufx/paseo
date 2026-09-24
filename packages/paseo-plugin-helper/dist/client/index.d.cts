@@ -366,7 +366,8 @@ interface SelectProps {
 /**
  * Compact single-choice picker sized to sit inside a {@link FormRow}. The
  * closed trigger stays one line tall; opening reveals a bounded, scrollable
- * option list, so a long list degrades to scrolling rather than overflow.
+ * option list that overlays the content below, so a long list degrades to
+ * scrolling instead of expanding the trigger's parent container.
  */
 declare function Select({ value, options, onValueChange, label, size, placeholder, disabled, style, }: SelectProps): React__default.JSX.Element;
 

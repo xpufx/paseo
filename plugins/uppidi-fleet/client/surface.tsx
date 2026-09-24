@@ -241,7 +241,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const toast = useToast();
   const { settings, updateSettings, isUpdating: isUpdatingSettings } = usePluginSettings(uppidiFleetSettingsContract);
   const [activeTab, setActiveTab] = useState<SurfaceTab>("tree");
-  const [selectedRepo, setSelectedRepo] = useState<string>("xpufx-org/paseo");
+  const [selectedRepo, setSelectedRepo] = useState<string>("all");
 
   // Section 1: Issues sort & filter state
   const [filter, setFilter] = useState<IssuePreset>("all");
