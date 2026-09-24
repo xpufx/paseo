@@ -51,7 +51,6 @@ export default function contribute(client: PluginClientContext) {
     labels: {
       hookHost: "Hook service listen host",
       hookPort: "Hook service listen port",
-      density: "Cockpit density",
     },
   });
 

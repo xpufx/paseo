@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Linking, Pressable, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
@@ -51,7 +51,6 @@ import {
   uppidiFleetMetricsContract,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
-  extractAgentWorktree,
   type UppidiIssue,
   type AttentionLabel,
   type RoleModelConfig,
@@ -80,36 +79,12 @@ import {
   type MetricSortField,
   type SortDirection,
 } from "../shared/sort-filter.js";
-import { UppidiFleetStaticMockup, UppidiForgeStaticMockup } from "./static-mockup.js";
 import {
   UppidiFleetTreeView,
   UppidiForgeTreeView,
 } from "./tree-view.js";
 
-export type SurfaceTab = "tree" | "dashboard" | "settings" | "mockup";
-
-export const DENSITY_STORAGE_KEY = "uppidi-fleet-density";
-export type SurfaceDensity = "dense" | "standard";
-
-export function getStoredDensity(): SurfaceDensity {
-  try {
-    if (typeof localStorage !== "undefined") {
-      const val = localStorage.getItem(DENSITY_STORAGE_KEY);
-      if (val === "standard" || val === "dense") {
-        return val;
-      }
-    }
-  } catch {}
-  return "dense";
-}
-
-export function setStoredDensity(density: SurfaceDensity): void {
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(DENSITY_STORAGE_KEY, density);
-    }
-  } catch {}
-}
+export type SurfaceTab = "tree" | "dashboard" | "settings";
 
 const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
   { id: "all", label: "All work" },
@@ -123,7 +98,6 @@ const tabs = [
   { id: "tree", label: "Agents & Fleet", shortLabel: "Fleet", icon: "FolderTree" },
   { id: "dashboard", label: "Work Queue", shortLabel: "Queue", icon: "LayoutDashboard" },
   { id: "settings", label: "Settings", shortLabel: "Settings", icon: "Sliders" },
-  { id: "mockup", label: "Static mockup", shortLabel: "Mockup", icon: "PanelTop" },
 ];
 
 const attentionMap: Record<AttentionLabel, string> = {
@@ -184,50 +158,40 @@ export function resolveRouterStatusBadge(
 export interface UppidiTopHeaderBarProps {
   isConnected: boolean;
   isServiceRunning: boolean;
-  selectedWorkspace?: string;
-  workspaceOptions?: SelectOption[];
-  onWorkspaceChange?: (workspace: string) => void;
   selectedRepo: string;
   repoOptions: SelectOption[];
   onRepoChange: (repo: string) => void;
-  density: SurfaceDensity;
-  onDensityChange: (density: SurfaceDensity) => void;
   onRefresh: () => void;
 }
 
 /**
- * Compact Unified Header Bar (#424, #425, #449)
+ * Compact Unified Header Bar (#424, #425)
  * Merges brand mark, Cockpit title, Uppidi Fleet badge, router status,
- * workspace selector, global repo selector, stateful sizing selector, and refresh button into a single tight row.
+ * global repo selector, and refresh button into a single tight row.
  * Multi-line subtitle descriptions are eliminated to reduce vertical footprint by >50%.
  */
 export function UppidiTopHeaderBar({
   isConnected,
   isServiceRunning,
-  selectedWorkspace = "all",
-  workspaceOptions = [{ label: "All Workspaces", value: "all" }],
-  onWorkspaceChange = () => {},
   selectedRepo,
   repoOptions,
   onRepoChange,
-  density,
-  onDensityChange,
   onRefresh,
 }: UppidiTopHeaderBarProps) {
   const { colors, typography } = usePluginTheme();
   const routerBadge = resolveRouterStatusBadge(isConnected, isServiceRunning);
 
   return (
-    <Row justify="space-between" align="center" wrap gap="xs" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
+    <Row justify="space-between" align="center" wrap gap="xs" style={{ paddingVertical: 2 }}>
       {/* Left: Brand mark, title, status dots & badges */}
       <Row align="center" gap="xs" wrap>
-        <UppidiBrandMark size={density === "dense" ? 18 : 20} />
+        <UppidiBrandMark size={18} />
         <StatusDot variant={routerBadge.variant} pulse={routerBadge.pulse} />
         <Text
           style={{
             color: colors.foreground,
             ...typography.title,
-            fontSize: density === "dense" ? 15 : 17,
+            fontSize: 15,
             fontWeight: "700",
           }}
         >
@@ -243,19 +207,8 @@ export function UppidiTopHeaderBar({
         />
       </Row>
 
-      {/* Right: Workspace & Repo Selectors, Sizing Selector, Refresh button (#449) */}
+      {/* Right: Repo Selector & authoritative Refresh button (#449, #466) */}
       <Row align="center" gap="xs" wrap>
-        {/* Workspace Selector (#449) */}
-        <View style={{ minWidth: 140, maxWidth: 200 }}>
-          <Select
-            value={selectedWorkspace}
-            options={workspaceOptions}
-            onValueChange={onWorkspaceChange}
-            size="sm"
-            placeholder="Select workspace…"
-          />
-        </View>
-
         {/* Global Repo Selector */}
         <View style={{ minWidth: 150, maxWidth: 220 }}>
           <Select
@@ -266,42 +219,6 @@ export function UppidiTopHeaderBar({
           />
         </View>
 
-        {/* Stateful Sizing / Density Selector (#425) */}
-        <Row
-          align="center"
-          gap="xxs"
-          style={{
-            backgroundColor: colors.surface1,
-            padding: 2,
-            borderRadius: 6,
-            borderWidth: 1,
-            borderColor: colors.border ?? "transparent",
-          }}
-        >
-          <Button
-            label="Dense"
-            size="sm"
-            variant={density === "dense" ? "primary" : "ghost"}
-            style={{
-              paddingHorizontal: 6,
-              paddingVertical: 1,
-              minHeight: 22,
-            }}
-            onPress={() => onDensityChange("dense")}
-          />
-          <Button
-            label="Standard"
-            size="sm"
-            variant={density === "standard" ? "primary" : "ghost"}
-            style={{
-              paddingHorizontal: 6,
-              paddingVertical: 1,
-              minHeight: 22,
-            }}
-            onPress={() => onDensityChange("standard")}
-          />
-        </Row>
-
         <Button
           label="Refresh"
           icon="RefreshCw"
@@ -309,8 +226,8 @@ export function UppidiTopHeaderBar({
           variant="secondary"
           style={{
             paddingHorizontal: 8,
-            paddingVertical: density === "dense" ? 2 : 4,
-            minHeight: density === "dense" ? 22 : 26,
+            paddingVertical: 2,
+            minHeight: 22,
           }}
           onPress={onRefresh}
         />
@@ -324,23 +241,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const toast = useToast();
   const { settings, updateSettings, isUpdating: isUpdatingSettings } = usePluginSettings(uppidiFleetSettingsContract);
   const [activeTab, setActiveTab] = useState<SurfaceTab>("tree");
-  const [density, setDensity] = useState<SurfaceDensity>(getStoredDensity);
-
-  const handleDensityChange = (newDensity: SurfaceDensity) => {
-    setDensity(newDensity);
-    setStoredDensity(newDensity);
-    void updateSettings({ density: newDensity });
-  };
-
-  React.useEffect(() => {
-    if (settings?.density && settings.density !== density) {
-      setDensity(settings.density);
-      setStoredDensity(settings.density);
-    }
-  }, [settings?.density]);
-
   const [selectedRepo, setSelectedRepo] = useState<string>("xpufx-org/paseo");
-  const [selectedWorkspace, setSelectedWorkspace] = useState<string>((props as any)?.workspaceId ?? "all");
 
   // Section 1: Issues sort & filter state
   const [filter, setFilter] = useState<IssuePreset>("all");
@@ -639,38 +540,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     ];
   }, [agentsData]);
 
-  const availableWorkspaces = useMemo(() => {
-    const map = new Map<string, string>();
-    const currentWks = (props as any)?.workspaceId;
-    if (currentWks) {
-      map.set(currentWks, currentWks);
-    }
-    for (const a of allAgents) {
-      if (a.workspaceId) {
-        const label = extractAgentWorktree(a) || a.worktree || a.workspaceId;
-        if (!map.has(a.workspaceId)) {
-          map.set(a.workspaceId, label);
-        }
-      }
-    }
-    return Array.from(map.entries()).map(([id, label]) => ({ id, label }));
-  }, [allAgents, (props as any)?.workspaceId]);
-
-  const workspaceOptions = useMemo<SelectOption[]>(() => [
-    { label: "All Workspaces", value: "all" },
-    ...availableWorkspaces.map((w) => ({
-      label: w.label && w.label !== w.id ? `${w.label} (${w.id.length > 8 ? w.id.slice(0, 8) : w.id})` : w.id,
-      value: w.id,
-    })),
-  ], [availableWorkspaces]);
-
-  const handleWorkspaceChange = useCallback((workspaceId: string) => {
-    setSelectedWorkspace(workspaceId);
-    if (workspaceId !== "all" && props.navigation?.openWorkspace) {
-      props.navigation.openWorkspace({ workspaceId });
-    }
-  }, [props.navigation]);
-
   const eligibleBulkAgents = useMemo(() => {
     return filterBulkArchiveCandidates(allAgents);
   }, [allAgents]);
@@ -728,18 +597,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     <ModalBody
       headerMode="pinned"
       header={
-        <Stack gap={density === "dense" ? 4 : 8}>
+        <Stack gap={4}>
           <UppidiTopHeaderBar
             isConnected={isConnected}
             isServiceRunning={isServiceRunning}
-            selectedWorkspace={selectedWorkspace}
-            workspaceOptions={workspaceOptions}
-            onWorkspaceChange={handleWorkspaceChange}
             selectedRepo={selectedRepo}
             repoOptions={repoOptions}
             onRepoChange={setSelectedRepo}
-            density={density}
-            onDensityChange={handleDensityChange}
             onRefresh={refetchAll}
           />
           <Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />
@@ -747,20 +611,18 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
       }
       headerStyle={{
         backgroundColor: colors.surface0,
-        paddingHorizontal: density === "dense" ? 8 : 12,
-        paddingTop: density === "dense" ? 6 : 10,
-        paddingBottom: density === "dense" ? 4 : 6,
+        paddingHorizontal: 8,
+        paddingTop: 6,
+        paddingBottom: 4,
       }}
       contentContainerStyle={{
-        gap: density === "dense" ? 6 : 12,
-        paddingHorizontal: density === "dense" ? 8 : 12,
-        paddingTop: density === "dense" ? 4 : 6,
+        gap: 6,
+        paddingHorizontal: 8,
+        paddingTop: 4,
       }}
     >
-      {activeTab === "mockup" ? (
-        <UppidiFleetStaticMockup {...props} />
-      ) : activeTab === "settings" ? (
-        <Stack gap={density === "dense" ? 6 : 12}>
+      {activeTab === "settings" ? (
+        <Stack gap={6}>
           {/* Collapsible Section: Hook Service Management (#368) */}
           <Collapsible
             title={`Hook Service Management (${serviceStatus?.state ?? "checking"})`}
@@ -1334,29 +1196,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          <Card variant="flat">
-            <Stack gap="sm" style={{ padding: density === "dense" ? 8 : 12 }}>
-              <CardHeader
-                title="Cockpit Display Density"
-                subtitle="Adjust UI density across agent tree, queue, and tables"
-                icon="Sliders"
-              />
-              <Row gap="xs">
-                <Button
-                  label="Dense"
-                  size="sm"
-                  variant={density === "dense" ? "primary" : "ghost"}
-                  onPress={() => handleDensityChange("dense")}
-                />
-                <Button
-                  label="Standard"
-                  size="sm"
-                  variant={density === "standard" ? "primary" : "ghost"}
-                  onPress={() => handleDensityChange("standard")}
-                />
-              </Row>
-            </Stack>
-          </Card>
         </Stack>
       ) : activeTab === "tree" ? (
         <UppidiFleetTreeView
@@ -1367,12 +1206,10 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
           onArchiveAgent={handleArchiveAgent}
           onArchiveBulk={handleArchiveBulk}
           isArchiving={isBulkArchiving}
-          density={density}
           selectedRepo={selectedRepo}
-          selectedWorkspace={selectedWorkspace}
         />
       ) : (
-        <Stack gap={density === "dense" ? 6 : 12}>
+        <Stack gap={6}>
           {/* Dense Metrics Bar (#424) */}
           <Row
             wrap
@@ -1380,8 +1217,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             align="center"
             style={{
               backgroundColor: colors.surface1 ?? "rgba(255,255,255,0.03)",
-              paddingHorizontal: density === "dense" ? 6 : 10,
-              paddingVertical: density === "dense" ? 4 : 6,
+              paddingHorizontal: 6,
+              paddingVertical: 4,
               borderRadius: 6,
               borderWidth: 1,
               borderColor: colors.border ?? "transparent",
@@ -1404,10 +1241,10 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               accessibilityLabel="Filter all open issues"
             >
               <Icon name="CircleDot" size={13} color={colors.accent} />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
                 Open issues:
               </Text>
-              <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: density === "dense" ? 12 : 13 }}>
+              <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 12 }}>
                 {issuesData?.openCount ?? rawIssues.length}
               </Text>
             </Pressable>
@@ -1435,14 +1272,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 size={13}
                 color={(issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foregroundMuted}
               />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
                 Needs your attention:
               </Text>
               <Text
                 style={{
                   color: (issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foreground,
                   fontWeight: "700",
-                  fontSize: density === "dense" ? 12 : 13,
+                  fontSize: 12,
                 }}
               >
                 {issuesData?.needsYouCount ?? 0}
@@ -1472,14 +1309,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 size={13}
                 color={(issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foregroundMuted}
               />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
                 Awaiting review:
               </Text>
               <Text
                 style={{
                   color: (issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foreground,
                   fontWeight: "700",
-                  fontSize: density === "dense" ? 12 : 13,
+                  fontSize: 12,
                 }}
               >
                 {issuesData?.reviewCount ?? 0}
@@ -1505,14 +1342,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               accessibilityLabel="Toggle hook queues"
             >
               <Icon name="Layers" size={13} color={totalQueued > 0 ? colors.accent : colors.foregroundMuted} />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
                 Hook queued:
               </Text>
               <Text
                 style={{
                   color: totalQueued > 0 ? colors.accent : colors.foreground,
                   fontWeight: "700",
-                  fontSize: density === "dense" ? 12 : 13,
+                  fontSize: 12,
                 }}
               >
                 {totalQueued}
@@ -1527,7 +1364,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
           </Row>
 
           {/* Action Bar & Filter Buttons */}
-          <ActionBar align="space-between" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
+          <ActionBar align="space-between" style={{ paddingVertical: 2 }}>
             <Row wrap gap="xs" align="center">
               {issuePresetFilters.map(({ id, label }) => {
                 let count = 0;
@@ -1561,16 +1398,16 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     size="sm"
                     variant={filter === id ? "primary" : "ghost"}
                     style={{
-                      paddingHorizontal: density === "dense" ? 6 : 10,
-                      paddingVertical: density === "dense" ? 2 : 4,
-                      minHeight: density === "dense" ? 22 : 28,
+                      paddingHorizontal: 6,
+                      paddingVertical: 2,
+                      minHeight: 22,
                     }}
                     onPress={() => setFilter(id)}
                   />
                 );
               })}
             </Row>
-            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 10 : 11 }}>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 10 }}>
               {selectedRepo === "all" ? "All Repositories" : `Repo: ${selectedRepo}`}
             </Text>
           </ActionBar>
@@ -1683,7 +1520,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               }}
             >
               <ModalContent size="large">
-                <Stack gap={density === "dense" ? "xs" : "sm"}>
+                <Stack gap="xs">
                   <Row justify="space-between" align="center" wrap gap="xs">
                     <Text style={{ color: colors.accent, ...typography.caption, fontWeight: "600" }}>
                       {selected.repo} #{selected.number}

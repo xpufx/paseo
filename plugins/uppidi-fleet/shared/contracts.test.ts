@@ -534,20 +534,17 @@ describe("uppidi-fleet shared contracts", () => {
     const defaults = uppidiFleetSettingsSchema.parse({});
     assert.equal(defaults.hookHost, "127.0.0.1");
     assert.equal(defaults.hookPort, 8099);
-    assert.equal(defaults.density, "dense");
     assert.deepEqual(defaults.enrolledRepos, []);
     assert.deepEqual(defaults.mutedRepos, []);
 
     const customized = uppidiFleetSettingsSchema.parse({
       hookHost: "0.0.0.0",
       hookPort: 9000,
-      density: "standard",
       enrolledRepos: ["xpufx-org/paseo"],
       mutedRepos: ["xpufx-org/other"],
     });
     assert.equal(customized.hookHost, "0.0.0.0");
     assert.equal(customized.hookPort, 9000);
-    assert.equal(customized.density, "standard");
     assert.deepEqual(customized.enrolledRepos, ["xpufx-org/paseo"]);
     assert.deepEqual(customized.mutedRepos, ["xpufx-org/other"]);
   });

@@ -261,11 +261,11 @@ describe("uppidi-fleet client entry contract", () => {
         "default activeTab must be 'tree'",
       );
 
-      // 2. Tab order: tree first, then dashboard, then mockup
+      // 2. Tab order: tree first, then dashboard, then settings
       assert.match(
         surfaceSource,
-        /id:\s*["']tree["'][\s\S]*id:\s*["']dashboard["'][\s\S]*id:\s*["']mockup["']/,
-        "tabs order must be tree, dashboard, mockup",
+        /id:\s*["']tree["'][\s\S]*id:\s*["']dashboard["'][\s\S]*id:\s*["']settings["']/,
+        "tabs order must be tree, dashboard, settings",
       );
 
       // 3. Tab labels
@@ -281,26 +281,25 @@ describe("uppidi-fleet client entry contract", () => {
       );
     });
 
-    it("verifies density state and localStorage persistence (#425)", () => {
-      assert.match(
+    it("removes the static mockup tab, component, and wiring (#465)", () => {
+      assert.doesNotMatch(
         surfaceSource,
-        /export\s+const\s+DENSITY_STORAGE_KEY\s*=\s*["']uppidi-fleet-density["']/,
-        "must define DENSITY_STORAGE_KEY as 'uppidi-fleet-density'",
+        /Static mockup/,
+        "surface.tsx must not register the 'Static mockup' tab",
       );
-      assert.match(
+      assert.doesNotMatch(
         surfaceSource,
-        /export\s+function\s+getStoredDensity\(\)/,
-        "must export getStoredDensity helper",
+        /UppidiFleetStaticMockup|UppidiForgeStaticMockup/,
+        "surface.tsx must not import or render the static mockup components",
       );
-      assert.match(
+      assert.doesNotMatch(
         surfaceSource,
-        /export\s+function\s+setStoredDensity\(/,
-        "must export setStoredDensity helper",
+        /["']mockup["']/,
+        "surface.tsx must not reference the mockup tab id",
       );
-      assert.match(
-        surfaceSource,
-        /useState<SurfaceDensity>\(getStoredDensity\)/,
-        "must initialize density state using getStoredDensity()",
+      assert.ok(
+        !fs.existsSync(path.resolve(__dirname, "static-mockup.tsx")),
+        "client/static-mockup.tsx must be removed",
       );
     });
 
@@ -346,7 +345,25 @@ describe("uppidi-fleet client entry contract", () => {
       assert.match(surfaceSource, /label:\s*["']Router Disconnected["']/, "offline state label must be 'Router Disconnected'");
     });
 
-    it("verifies compact unified top header bar (#424)", () => {
+    it("freezes density to dense and removes density controls/wiring (#465)", () => {
+      assert.doesNotMatch(
+        surfaceSource,
+        /DENSITY_STORAGE_KEY|getStoredDensity|setStoredDensity|SurfaceDensity/,
+        "surface.tsx must not keep density state, storage helpers, or types",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /onDensityChange|handleDensityChange|Cockpit Display Density/,
+        "surface.tsx must not keep density toggle wiring or settings card",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /label=["']Standard["']/,
+        "surface.tsx must not render a Standard density toggle",
+      );
+    });
+
+    it("verifies compact unified top header bar (#424, #466)", () => {
       assert.match(
         surfaceSource,
         /export\s+function\s+UppidiTopHeaderBar/,
@@ -354,51 +371,26 @@ describe("uppidi-fleet client entry contract", () => {
       );
       assert.match(
         surfaceSource,
-        /<UppidiBrandMark\s+size=\{density\s*===\s*["']dense["']\s*\?\s*18\s*:\s*20\}/,
+        /<UppidiBrandMark\s+size=\{18\}/,
         "UppidiTopHeaderBar must render compact brand mark",
-      );
-      assert.match(
-        surfaceSource,
-        /label=["']Dense["'][\s\S]*label=["']Standard["']/,
-        "UppidiTopHeaderBar must render Dense and Standard density selector buttons",
       );
       assert.match(
         surfaceSource,
         /<Select[\s\S]*value=\{selectedRepo\}[\s\S]*options=\{repoOptions\}/,
         "UppidiTopHeaderBar must render global repository Select dropdown",
       );
+      assert.match(
+        surfaceSource,
+        /label="Refresh"[\s\S]*onPress=\{onRefresh\}/,
+        "UppidiTopHeaderBar must render the authoritative Refresh button",
+      );
     });
 
-    it("verifies workspace dropdown selector renders on desktop viewports (#449)", () => {
-      assert.match(
+    it("removes the workspace dropdown and its surface/tree-view wiring (#465)", () => {
+      assert.doesNotMatch(
         surfaceSource,
-        /selectedWorkspace\?:\s*string/,
-        "UppidiTopHeaderBarProps must define selectedWorkspace",
-      );
-      assert.match(
-        surfaceSource,
-        /workspaceOptions\?:\s*SelectOption\[\]/,
-        "UppidiTopHeaderBarProps must define workspaceOptions",
-      );
-      assert.match(
-        surfaceSource,
-        /onWorkspaceChange\?:\s*\(workspace:\s*string\)\s*=>\s*void/,
-        "UppidiTopHeaderBarProps must define onWorkspaceChange",
-      );
-      assert.match(
-        surfaceSource,
-        /<Select[\s\S]*value=\{selectedWorkspace\}[\s\S]*options=\{workspaceOptions\}[\s\S]*onValueChange=\{onWorkspaceChange\}/,
-        "UppidiTopHeaderBar must render workspace Select dropdown selector alongside repo selector",
-      );
-      assert.match(
-        surfaceSource,
-        /<UppidiTopHeaderBar[\s\S]*selectedWorkspace=\{selectedWorkspace\}[\s\S]*workspaceOptions=\{workspaceOptions\}[\s\S]*onWorkspaceChange=\{handleWorkspaceChange\}/,
-        "UppidiFleetSurface must pass workspace options and selection handlers to UppidiTopHeaderBar",
-      );
-      assert.match(
-        surfaceSource,
-        /<UppidiFleetTreeView[\s\S]*selectedWorkspace=\{selectedWorkspace\}/,
-        "UppidiFleetSurface must wire selectedWorkspace to UppidiFleetTreeView",
+        /selectedWorkspace|workspaceOptions|onWorkspaceChange|handleWorkspaceChange|availableWorkspaces/,
+        "surface.tsx must not keep workspace dropdown state or wiring",
       );
     });
 
@@ -477,14 +469,19 @@ describe("uppidi-fleet client entry contract", () => {
       );
     });
 
-    it("verifies tree-view supports density and selectedRepo filtering (#425)", () => {
+    it("verifies tree-view supports selectedRepo filtering and drops density/workspace props (#425, #465)", () => {
       const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
       const treeViewSource = fs.readFileSync(treeViewPath, "utf8");
 
-      assert.match(
+      assert.doesNotMatch(
         treeViewSource,
         /density\?:?\s*["']dense["']\s*\|\s*["']standard["']/,
-        "UppidiFleetTreeViewProps must declare density prop",
+        "UppidiFleetTreeViewProps must not declare a density prop",
+      );
+      assert.doesNotMatch(
+        treeViewSource,
+        /selectedWorkspace/,
+        "UppidiFleetTreeViewProps must not declare or use selectedWorkspace (#465)",
       );
       assert.match(
         treeViewSource,
@@ -493,18 +490,19 @@ describe("uppidi-fleet client entry contract", () => {
       );
       assert.match(
         treeViewSource,
-        /selectedWorkspace\?:?\s*string/,
-        "UppidiFleetTreeViewProps must declare selectedWorkspace prop (#449)",
-      );
-      assert.match(
-        treeViewSource,
         /isRepoMatching\(\s*g\.projectName,\s*selectedRepo\s*\)/,
         "tree-view must filter enrolled and detached groups with isRepoMatching",
       );
-      assert.match(
+    });
+
+    it("removes the duplicate Refresh button from the tree-view toolbar (#466)", () => {
+      const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+      const treeViewSource = fs.readFileSync(treeViewPath, "utf8");
+
+      assert.doesNotMatch(
         treeViewSource,
-        /agent\.workspaceId\s*!==\s*selectedWorkspace/,
-        "tree-view must filter agents by selectedWorkspace (#449)",
+        /label=["']Refresh(?: Fleet)?["']/,
+        "tree-view must not render its own Refresh button; the header bar is authoritative",
       );
     });
 

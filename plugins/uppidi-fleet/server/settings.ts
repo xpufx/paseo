@@ -80,7 +80,6 @@ export function migrateLegacyConfigIfNeeded(
         const initial: UppidiFleetSettings = {
           hookHost: legacy.host ?? "127.0.0.1",
           hookPort: legacy.port ?? 8099,
-          density: "dense",
           enrolledRepos: legacy.enrolledRepos ?? [],
           mutedRepos: legacy.mutedRepos ?? [],
         };

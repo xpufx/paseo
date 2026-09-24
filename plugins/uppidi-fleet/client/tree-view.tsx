@@ -71,9 +71,7 @@ export interface UppidiFleetTreeViewProps {
   onAddOrchestrator?: (repo: string) => Promise<void> | void;
   onReplaceOrchestrator?: (repo: string, existingAgentId?: string) => Promise<void> | void;
   onToggleRepoMute?: (repo: string, muted?: boolean) => Promise<void> | void;
-  density?: "dense" | "standard";
   selectedRepo?: string;
-  selectedWorkspace?: string;
 }
 
 export interface AgentStatusLightProps {
@@ -1587,9 +1585,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   onAddOrchestrator,
   onReplaceOrchestrator,
   onToggleRepoMute,
-  density = "dense",
   selectedRepo,
-  selectedWorkspace,
 }) => {
   const { colors, typography } = usePluginTheme();
   const toast = useToast();
@@ -1816,9 +1812,6 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   // 3. Filter tree with matching predicate
   const filteredTree = useMemo(() => {
     const matches = (agent: UppidiAgent): boolean => {
-      if (selectedWorkspace && selectedWorkspace !== "all") {
-        if (agent.workspaceId !== selectedWorkspace) return false;
-      }
       if (stateFilter !== "all") {
         if (stateFilter === "working" && agent.deterministicState !== "working") return false;
         if (
@@ -1858,7 +1851,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     };
 
     return filterAgentTree(baseTree, matches);
-  }, [baseTree, query, stateFilter, selectedWorkspace]);
+  }, [baseTree, query, stateFilter]);
 
   // 4. Group by Front Desk and Projects (#403, #426)
   const { frontDeskNodes, enrolledGroups, detachedGroups } = useMemo(() => {
@@ -1883,30 +1876,24 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     if (selectedRepo && selectedRepo !== "all") {
       list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
-    if (selectedWorkspace && selectedWorkspace !== "all") {
-      list = list.filter((g) => g.allAgents.some((a) => a.workspaceId === selectedWorkspace));
-    }
     if (!query.trim() && stateFilter === "all") {
       return list;
     }
     return list.filter(
       (g) => g.allAgents.length > 0 || g.projectName.toLowerCase().includes(query.toLowerCase())
     );
-  }, [query, stateFilter, enrolledGroups, selectedRepo, selectedWorkspace]);
+  }, [query, stateFilter, enrolledGroups, selectedRepo]);
 
   const displayDetached = useMemo(() => {
     let list = detachedGroups;
     if (selectedRepo && selectedRepo !== "all") {
       list = list.filter((g) => isRepoMatching(g.projectName, selectedRepo) || g.projectName.toLowerCase() === selectedRepo.toLowerCase());
     }
-    if (selectedWorkspace && selectedWorkspace !== "all") {
-      list = list.filter((g) => g.allAgents.some((a) => a.workspaceId === selectedWorkspace));
-    }
     if (!query.trim() && stateFilter === "all") {
       return list;
     }
     return list.filter((g) => g.allAgents.length > 0);
-  }, [query, stateFilter, detachedGroups, selectedRepo, selectedWorkspace]);
+  }, [query, stateFilter, detachedGroups, selectedRepo]);
 
   const totalCount = agentsData?.totalCount ?? allAgents.length;
   const runningCount = agentsData?.runningCount ?? 0;
@@ -2026,13 +2013,13 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   };
 
   return (
-    <Stack gap={density === "dense" ? 6 : 12}>
+    <Stack gap={6}>
       {/* Header & Metric Badges */}
-      <Row justify="space-between" align="center" wrap gap="sm" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
+      <Row justify="space-between" align="center" wrap gap="sm" style={{ paddingVertical: 2 }}>
         <Stack gap="xxs" style={{ flex: 1 }}>
           <Row align="center" gap="sm">
             <StatusDot variant={runningCount > 0 ? "success" : "neutral"} pulse={runningCount > 0} />
-            <Text style={{ color: colors.foreground, ...typography.title, fontSize: density === "dense" ? 15 : 17 }}>
+            <Text style={{ color: colors.foreground, ...typography.title, fontSize: 15 }}>
               Fleet Lineage Tree
             </Text>
             <Badge label={`${totalCount} Total`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
@@ -2052,18 +2039,8 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
             disabled={eligibleBulkCount === 0 || isBulkArchiving}
             loading={isBulkArchiving}
             onPress={handleBulkArchive}
-            style={{ paddingVertical: density === "dense" ? 2 : 4, minHeight: density === "dense" ? 24 : 28 }}
+            style={{ paddingVertical: 2, minHeight: 24 }}
           />
-          {onRefresh && (
-            <Button
-              label="Refresh Fleet"
-              icon="RefreshCw"
-              variant="secondary"
-              size="sm"
-              onPress={onRefresh}
-              style={{ paddingVertical: density === "dense" ? 2 : 4, minHeight: density === "dense" ? 24 : 28 }}
-            />
-          )}
         </Row>
       </Row>
 

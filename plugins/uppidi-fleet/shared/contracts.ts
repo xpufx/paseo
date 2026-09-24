@@ -780,7 +780,6 @@ export const uppidiToggleRepoMuteContract = defineContract({
 export const uppidiFleetSettingsSchema = z.object({
   hookHost: z.string().default("127.0.0.1"),
   hookPort: z.number().int().min(1).max(65535).default(8099),
-  density: z.enum(["dense", "standard"]).default("dense"),
   enrolledRepos: z.array(z.string()).default([]),
   mutedRepos: z.array(z.string()).default([]),
 });

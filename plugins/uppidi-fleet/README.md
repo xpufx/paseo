@@ -149,14 +149,13 @@ the bundled webhook router automatically via `startHookRouter(server)`.
 
 ## 4. The Cockpit surface
 
-The plugin registers one primary surface with four tabs:
+The plugin registers one primary surface with three tabs:
 
 | Tab | What it shows |
 | --- | --- |
 | **Agents & Fleet** (tree) | Hierarchical view: projects → orchestrators → workers, with deterministic state badges (working / running / sleeping / idle / quota / failed), worktree names, parentage, and per-repo enrolment/mute flags. Hosts the `+ Create Front Desk`, `+ Add Orchestrator`, `Replace`, archive, and repo-mute controls. |
 | **Work Queue** (dashboard) | Open issues from the board with status, owner, and labels; filter presets (Needs Attention, Triage/Review, In Progress, Verify). Also the collapsible Hook Service, Hook Queues, log tail, Agent Role Models, CI Runner fleet, and fleet-metrics sections. |
-| **Settings** | Hook service management (start/stop/restart, listen host + port), cockpit density, links into role-model editing. |
-| **Static mockup** | A non-live demo snapshot, kept for reference. |
+| **Settings** | Hook service management (start/stop/restart, listen host + port), links into role-model editing. |
 
 Key behaviours:
 
@@ -692,7 +691,7 @@ these gaps yourself.
 | `~/.paseo/forgejo-hook/frontdesk.json` | Front Desk agent id. |
 | `~/.paseo/uppidi-fleet-role-models.json` | Per-role primary model + fallback group. |
 | `~/.paseo/uppidi-fleet-metrics.json` | Fleet capability metrics. |
-| `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `density`, `enrolledRepos`, `mutedRepos`). |
+| `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `enrolledRepos`, `mutedRepos`). |
 | `<skills dir>/.agents/skills/` | Host-local skills (gitignored here). |
 
 Environment variables: `FORGE_HOOK_HOST`, `FORGE_HOOK_PORT`/`HOOK_PORT`,
