@@ -851,7 +851,11 @@ describe("orchestrator workspace resolution and state isolation (#485, #486)", (
       assert.equal(res.agentId, "agent-orch-skill-test");
       assert.equal(capturedPayload.workspaceId, "wks_sample_repo");
       assert.equal(capturedPayload.cwd, "/home/user/code/sample-repo");
-      assert.ok(capturedPayload.prompt.includes("/home/xpufx/code/platform/skills/orchestrator/SKILL.md"));
+      assert.ok(
+        capturedPayload.prompt.includes(
+          path.join(os.homedir(), "code/platform/skills/orchestrator/SKILL.md")
+        )
+      );
       assert.ok(capturedPayload.prompt.includes("fgjx"));
     } finally {
       setExecFileAsyncForTest(null);

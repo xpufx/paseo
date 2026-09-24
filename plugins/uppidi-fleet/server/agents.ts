@@ -1063,7 +1063,7 @@ export async function handleUppidiAddOrchestrator(
     const title = input.title?.trim() || `Orchestrator · ${repo}`;
     const defaultPrompt =
       `You are the project orchestrator for ${repo}.\n` +
-      `Follow the orchestrator skill at /home/xpufx/code/platform/skills/orchestrator/SKILL.md.\n` +
+      `Follow the orchestrator skill at ${path.join(os.homedir(), "code/platform/skills/orchestrator/SKILL.md")}.\n` +
       `Coordinate tasks, supervise worker agents, and manage pull requests and issues for this repository using the forge CLI (fgjx) and Paseo conventions.`;
     const prompt = input.prompt?.trim() || defaultPrompt;
 

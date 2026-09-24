@@ -1605,7 +1605,7 @@ export class HookRouter {
   // -------------------------------------------------------------------------
 
   public async runBoardCheck(repo: string, hostname = "forge.mrs.uppidi.com"): Promise<BoardCheckResult> {
-    const script = process.env.FORGEJO_ISSUES_CHECK ?? "/home/xpufx/bin/forgejo-issues-check";
+    const script = process.env.FORGEJO_ISSUES_CHECK ?? join(os.homedir(), "bin", "forgejo-issues-check");
     // Enrolled keys may be `owner/repo` or the forge-qualified `host/owner/repo`;
     // the checker's `-R` argument always wants the trailing `owner/repo`.
     const parts = String(repo ?? "").split("/").filter(Boolean);
