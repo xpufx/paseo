@@ -4,6 +4,7 @@ import type { RpcInput, RpcOutput } from "paseo-plugin-helper/shared";
 import { createPluginLogger, guardRpcHandler } from "paseo-plugin-helper/server";
 import {
   approvalAck,
+  approvalSelect,
   approvalSettings,
   approvalStatus,
   approvalTelegramInfo,
@@ -34,6 +35,18 @@ function socketCandidates(configured?: string): string[] {
   return candidates;
 }
 
+/**
+ * 2fado stores ask options as plain label strings. Give each a stable id (its
+ * 0-based index) so the client can submit back an option identity without
+ * relying on array order surviving a refetch.
+ */
+export function mapAskOptions(
+  options: string[] | undefined,
+): { id: string; label: string }[] | undefined {
+  if (!Array.isArray(options) || options.length === 0) return undefined;
+  return options.map((label, index) => ({ id: String(index), label }));
+}
+
 interface DaemonPendingItem {
   id: string;
   argv: string[];
@@ -45,6 +58,13 @@ interface DaemonPendingItem {
   kind?: string;
   link?: string;
   summary?: string;
+  question?: string;
+  options?: string[];
+  multi_select?: boolean;
+  allow_write_in?: boolean;
+  recommended_index?: number;
+  selection?: string;
+  selection_idx?: number;
   acked?: boolean;
   ack_by?: string;
   auth_url?: string;
@@ -75,6 +95,10 @@ interface DaemonRecentItem {
   kind?: string;
   link?: string;
   summary?: string;
+  question?: string;
+  options?: string[];
+  selection?: string;
+  selection_idx?: number;
   acked?: boolean;
   ack_by?: string;
   auth_url?: string;
@@ -100,6 +124,10 @@ interface DaemonStatusResponse {
   kind?: string;
   link?: string;
   summary?: string;
+  question?: string;
+  options?: string[];
+  selection?: string;
+  selection_idx?: number;
   acked?: boolean;
   ack_by?: string;
   ack_at?: number;
@@ -175,23 +203,30 @@ async function listPendingInner(
         caller: String(item.uid),
         cwd: typeof item.cwd === "string" ? item.cwd : "",
         expiresIn: typeof item.expires_in === "number" ? item.expires_in : 0,
-      step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
-      confirmOf: item.confirm_of,
-      kind: item.kind,
-      link: item.link,
-      summary: item.summary,
-      acked: item.acked,
-      ackBy: item.ack_by,
-      authUrl: item.auth_url,
-      preview: item.preview
-        ? {
-            resolvedBinary: item.preview.resolved_binary,
-            targetCwd: item.preview.target_cwd,
-            affectedCount: item.preview.affected_count,
-            samplePaths: item.preview.sample_paths,
-            riskLevel: item.preview.risk_level,
-            riskReason: item.preview.risk_reason,
-          }
+        step: item.step === "confirm" ? ("confirm" as const) : ("initial" as const),
+        confirmOf: item.confirm_of,
+        kind: item.kind,
+        link: item.link,
+        summary: item.summary,
+        question: item.question,
+        options: mapAskOptions(item.options),
+        multiSelect: item.multi_select,
+        allowWriteIn: item.allow_write_in,
+        recommendedIndex: item.recommended_index,
+        selection: item.selection,
+        selectionIdx: item.selection_idx,
+        acked: item.acked,
+        ackBy: item.ack_by,
+        authUrl: item.auth_url,
+        preview: item.preview
+          ? {
+              resolvedBinary: item.preview.resolved_binary,
+              targetCwd: item.preview.target_cwd,
+              affectedCount: item.preview.affected_count,
+              samplePaths: item.preview.sample_paths,
+              riskLevel: item.preview.risk_level,
+              riskReason: item.preview.risk_reason,
+            }
           : undefined,
       })),
     };
@@ -247,6 +282,10 @@ async function listRecentInner(
         kind: item.kind,
         link: item.link,
         summary: item.summary,
+        question: item.question,
+        options: mapAskOptions(item.options),
+        selection: item.selection,
+        selectionIdx: item.selection_idx,
         acked: item.acked,
         ackBy: item.ack_by,
         authUrl: item.auth_url,
@@ -297,6 +336,60 @@ export const submitAck = guardRpcHandler(submitAckInner, {
   onSaturated: (info) => log.warn("ack saturated, shedding load", info),
 });
 
+interface DaemonSelectResponse {
+  selected?: boolean;
+  error?: string;
+}
+
+/**
+ * Submit an ask-petition answer.
+ *
+ * The reference 2fadod does not expose a consumer op for ask selection yet: the
+ * MVP wires `Store.Select` only to the in-daemon Telegram callback, and
+ * `verdict` accepts just approve/deny. This sends the proposed `select`
+ * op shape (verbatim `selection` + 0-based `selection_idx`), matching
+ * 2fado's `SelectionRecord`, and fails soft with `selected:false` plus a
+ * machine-readable `error` when the daemon does not implement it. The client
+ * uses `approval.health`'s op probe to warn ahead of time instead of pretending
+ * the answer landed.
+ */
+async function submitSelectionInner(
+  input?: RpcInput<typeof approvalSelect>,
+): Promise<RpcOutput<typeof approvalSelect>> {
+  if (input === undefined || !input.id || !input.selection) {
+    return { selected: false, error: "missing id or selection" };
+  }
+  try {
+    const raw = (await callDaemon(
+      {
+        select: {
+          id: input.id,
+          selection: input.selection,
+          selection_idx: input.selectionIdx,
+          write_in: input.writeIn,
+          by: "paseo",
+        },
+      },
+      input.socketPath,
+    )) as DaemonSelectResponse;
+    if (raw?.error !== undefined) {
+      log.warn("select op rejected", { id: input.id, error: raw.error });
+      return { selected: false, error: raw.error };
+    }
+    return { selected: raw?.selected === true };
+  } catch (err) {
+    log.warn("selection submit failed", { id: input.id, error: err });
+    return { selected: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export const submitSelection = guardRpcHandler(submitSelectionInner, {
+  timeoutMs: 5000,
+  maxInflight: 4,
+  onTimeout: (info) => log.warn("selection timed out", info),
+  onSaturated: (info) => log.warn("selection saturated, shedding load", info),
+});
+
 async function statusInner(
   input?: RpcInput<typeof approvalStatus>,
 ): Promise<RpcOutput<typeof approvalStatus>> {
@@ -319,6 +412,8 @@ async function statusInner(
       "client_aborted",
       "confirmation_timeout",
       "acked",
+      "selected",
+      "cancelled",
     ] as const;
     const rawStatus = raw?.status as (typeof validStatuses)[number];
     const status = validStatuses.includes(rawStatus) ? rawStatus : "not_found";
@@ -337,6 +432,10 @@ async function statusInner(
       kind: raw?.kind,
       link: raw?.link,
       summary: raw?.summary,
+      question: raw?.question,
+      options: mapAskOptions(raw?.options),
+      selection: raw?.selection,
+      selectionIdx: raw?.selection_idx,
       acked: raw?.acked,
       ackBy: raw?.ack_by,
       ackAt: raw?.ack_at,
@@ -469,14 +568,29 @@ async function healthInner(
 ): Promise<RpcOutput<typeof daemonHealth>> {
   try {
     const raw = (await callDaemon({ version: {} }, input?.socketPath, 1500)) as DaemonVersionResponse;
+    let supportsSelect: boolean | undefined;
+    let ops: string[] = [];
+    try {
+      const help = (await callDaemon({ help: {} }, input?.socketPath, 1500)) as {
+        ops?: Array<{ op?: string }>;
+      };
+      ops = Array.isArray(help?.ops)
+        ? help.ops.map((entry) => entry?.op).filter((op): op is string => typeof op === "string")
+        : [];
+      supportsSelect = ops.includes("select");
+    } catch (err) {
+      log.warn("help probe failed; selection support unknown", { error: err });
+    }
     return {
       reachable: true,
       version: typeof raw?.version === "string" ? raw.version : undefined,
       pid: typeof raw?.pid === "number" ? raw.pid : undefined,
+      ops,
+      supportsSelect,
     };
   } catch (err) {
     log.warn("health probe failed", { error: err });
-    return { reachable: false };
+    return { reachable: false, ops: [] };
   }
 }
 

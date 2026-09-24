@@ -27,6 +27,11 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 - **Approve / deny.** A decision is submitted for the request id; two-step
   confirmations are distinguished, and notify-only petitions expose an
   **Ack** action instead of a binding verdict.
+- **Interactive questions.** `kind: "ask"` petitions render the question,
+  recommended option, and single- or multi-select option buttons plus an
+  optional write-in answer; submitting calls `approval.select`, which forwards
+  the daemon's `select` op. First-selection-wins: a resolved petition (from
+  Telegram or another client) locks the card to its chosen answer.
 - **Policy shortcuts.** From a pending item, save an always-approve or
   always-deny rule scoped to the exact argv, the resolved binary's base, or a
   custom matcher.
@@ -40,10 +45,14 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 ## RPC contracts (`shared/approval.ts`)
 
-- `approval.list` / `approval.recent`: pending and recently decided requests.
-- `approval.verdict` / `approval.ack`: record a decision, or acknowledge a
-  notify-only petition.
+- `approval.list` / `approval.recent`: pending and recently decided requests,
+  including `ask` question/options/selection fields.
+- `approval.verdict` / `approval.ack` / `approval.select`: record an
+  approve/deny decision, acknowledge a notify-only petition, or answer an
+  interactive `ask` question.
 - `approval.status` / `approval.health`: per-request status and daemon probe.
+  `approval.health` also reports the daemon's advertised ops so the surface can
+  tell an `ask` card it cannot submit yet when the daemon lacks the `select` op.
 - `approval.telegram_info` / `approval.telegram_set_config`: read and sync the
   daemon-side notification configuration.
 - `approval.policy_add_rule`: persist a policy rule derived from a request.
@@ -67,4 +76,12 @@ paseo plugin add xpufx/paseo --path plugins/twofado
 
 ```sh
 npm run typecheck --workspace=plugins/twofado
+npm test --workspace=plugins/twofado
 ```
+
+> [!NOTE]
+> Ask-card submission requires a 2fadod that advertises the `select` socket op.
+> Reference daemon builds today expose ask options on `list`/`status` but wire
+> selection only through the Telegram callback; when `select` is absent the card
+> renders read-only with an explicit "cannot submit" notice rather than
+> pretending the answer landed.

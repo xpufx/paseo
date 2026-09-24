@@ -4,6 +4,37 @@ import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shar
 export const notificationTargets = ["telegram", "paseo", "both"] as const;
 export type NotificationTarget = (typeof notificationTargets)[number];
 
+/**
+ * One selectable answer on an `ask` petition. 2fado stores options as plain
+ * strings; the server assigns `id` (the option's 0-based index) when mapping
+ * so the client can round-trip an identity without trusting array position.
+ */
+export const approvalOption = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+});
+export type ApprovalOption = z.infer<typeof approvalOption>;
+
+/** Ask-petition fields shared by list, recent, and status payloads. */
+const askFields = {
+  question: z.string().optional(),
+  options: z.array(approvalOption).optional(),
+  multiSelect: z.boolean().optional(),
+  allowWriteIn: z.boolean().optional(),
+  recommendedIndex: z.number().int().optional(),
+  selection: z.string().optional(),
+  selectionIdx: z.number().int().optional(),
+};
+
+export function isAskPetition(kind: string | undefined): boolean {
+  return kind === "ask";
+}
+
+export function isNotifyPetition(kind: string | undefined): boolean {
+  return kind === "notify";
+}
+
 export const pendingList = defineContract({
   name: "approval.list",
   input: z.object({ socketPath: z.string().min(1).optional() }),
@@ -21,6 +52,7 @@ export const pendingList = defineContract({
         kind: z.string().optional(),
         link: z.string().optional(),
         summary: z.string().optional(),
+        ...askFields,
         acked: z.boolean().optional(),
         ackBy: z.string().optional(),
         authUrl: z.string().optional(),
@@ -61,6 +93,30 @@ export const approvalAck = defineContract({
   description: "Acknowledge a notify-only 2fado petition (non-binding visibility signal)",
 });
 
+/**
+ * Submit an answer to an `ask` petition. Mirrors 2fado's first-selection-wins
+ * `SelectionRecord` (verbatim `selection` label + 0-based `selectionIdx`).
+ *
+ * A write-in carries the operator's free text in `selection` with no index;
+ * a multi-select joins the chosen labels with ", " (2fado's runtime is
+ * single-select today — see `docs/backend-api.md` in the 2fado repository).
+ */
+export const approvalSelect = defineContract({
+  name: "approval.select",
+  input: z.object({
+    id: z.string().min(1),
+    selection: z.string().min(1),
+    selectionIdx: z.number().int().min(0).optional(),
+    writeIn: z.boolean().optional(),
+    socketPath: z.string().min(1).optional(),
+  }),
+  output: z.object({
+    selected: z.boolean(),
+    error: z.string().optional(),
+  }),
+  description: "Submit an ask-petition option selection or write-in answer",
+});
+
 export const recentList = defineContract({
   name: "approval.recent",
   input: z.object({
@@ -82,6 +138,7 @@ export const recentList = defineContract({
         kind: z.string().optional(),
         link: z.string().optional(),
         summary: z.string().optional(),
+        ...askFields,
         acked: z.boolean().optional(),
         ackBy: z.string().optional(),
         authUrl: z.string().optional(),
@@ -110,6 +167,8 @@ export const approvalStatus = defineContract({
       "client_aborted",
       "confirmation_timeout",
       "acked",
+      "selected",
+      "cancelled",
     ]),
     argv: z.array(z.string()).optional(),
     cwd: z.string().optional(),
@@ -123,6 +182,7 @@ export const approvalStatus = defineContract({
     kind: z.string().optional(),
     link: z.string().optional(),
     summary: z.string().optional(),
+    ...askFields,
     acked: z.boolean().optional(),
     ackBy: z.string().optional(),
     ackAt: z.number().optional(),
@@ -172,8 +232,12 @@ export const daemonHealth = defineContract({
     reachable: z.boolean(),
     version: z.string().optional(),
     pid: z.number().optional(),
+    ops: z.array(z.string()).default([]),
+    // Omitted (undefined) when the op list could not be enumerated: the client
+    // must not warn about a missing `select` op on an unprobed daemon.
+    supportsSelect: z.boolean().optional(),
   }),
-  description: "Probe 2fadod reachability via version handshake",
+  description: "Probe 2fadod reachability and advertised socket ops",
 });
 
 export interface PolicyAddRuleParams {

@@ -29,12 +29,16 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Easing, Text, View } from "react-native";
 import { ErrorBoundary } from "./error-boundary";
+import { AskItem, type AskSelectionPayload } from "./ask";
 import {
   approvalAck,
+  approvalSelect,
   approvalSettings,
   approvalStatus,
   approvalTelegramInfo,
   daemonHealth,
+  isAskPetition,
+  isNotifyPetition,
   pendingList,
   policyAddRule,
   recentList,
@@ -1002,9 +1006,11 @@ function ApprovalSurfaceInner({
   const toast = useToast();
   const query = usePendingList();
   const recent = useRecentList();
+  const health = useDaemonHealth();
   const socketPath = useSocketPath();
   const decide = useRpc(verdict);
   const ackNotify = useRpc(approvalAck);
+  const submitSelect = useRpc(approvalSelect);
   const getStatus = useRpc(approvalStatus);
   const addRule = useRpc(policyAddRule);
   const queryClient = useQueryClient();
@@ -1019,6 +1025,8 @@ function ApprovalSurfaceInner({
 
   const [decidingMap, setDecidingMap] = useState<Record<string, "approve" | "deny">>({});
   const [ackingMap, setAckingMap] = useState<Record<string, boolean>>({});
+  const [selectingMap, setSelectingMap] = useState<Record<string, boolean>>({});
+  const [selectErrorMap, setSelectErrorMap] = useState<Record<string, string>>({});
   const [policyDialog, setPolicyDialog] = useState<{
     item: { id: string; argv: string[]; cwd: string; preview?: { resolvedBinary?: string } };
     target: "whitelist" | "blacklist";
@@ -1234,11 +1242,68 @@ function ApprovalSurfaceInner({
     }
   };
 
+  const handleSelect = async (item: { id: string }, payload: AskSelectionPayload) => {
+    const { id } = item;
+    setSelectingMap((prev) => ({ ...prev, [id]: true }));
+    setSelectErrorMap((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    try {
+      const res = await submitSelect({
+        id,
+        selection: payload.selection,
+        selectionIdx: payload.selectionIdx,
+        writeIn: payload.writeIn,
+        socketPath,
+      });
+      if (!isMountedRef.current) return;
+      setSelectingMap((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      if (!res.selected) {
+        const reason = res.error === "unknown-request"
+          ? "2fadod does not support selection yet."
+          : res.error ?? "Already answered, expired, or 2fadod unreachable.";
+        setSelectErrorMap((prev) => ({ ...prev, [id]: reason }));
+        toast.error(reason);
+        void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+        return;
+      }
+      toast.show("Answer submitted", { variant: "success" });
+      void queryClient.invalidateQueries({ queryKey: LIST_KEY });
+      void queryClient.invalidateQueries({ queryKey: RECENT_KEY });
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      setSelectingMap((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      console.warn("[2fado] Selection RPC failed:", err);
+      const message = "Answer failed — 2fadod unreachable.";
+      setSelectErrorMap((prev) => ({ ...prev, [id]: message }));
+      toast.error(message);
+    }
+  };
+
   useNewPendingToast(query.data?.items);
 
   const items = query.data?.items ?? [];
-  const notifyItems = items.filter((i) => i.kind === "notify");
-  const execItems = items.filter((i) => i.kind !== "notify");
+  const askItems = items.filter((i) => isAskPetition(i.kind));
+  const notifyItems = items.filter((i) => isNotifyPetition(i.kind));
+  const execItems = items.filter((i) => !isAskPetition(i.kind) && !isNotifyPetition(i.kind));
+  // Only warn about a missing selection op once the daemon is confirmed up and
+  // has explicitly reported a `select`-less op list; an unreachable daemon or a
+  // failed op probe (supportsSelect undefined) must not add a second
+  // "unsupported" message on top of the unreachable card.
+  const selectSupported =
+    health.data?.reachable && health.data.supportsSelect !== undefined
+      ? health.data.supportsSelect
+      : true;
   const rawRecentItems = recent.data?.items ?? [];
 
   // When a 2-step confirmation is in progress, the second approval replaces the first one:
@@ -1372,6 +1437,16 @@ function ApprovalSurfaceInner({
                   description="No commands waiting for authorization."
                 />
               ) : null}
+              {askItems.map((item) => (
+                <AskItem
+                  key={item.id}
+                  item={item}
+                  submitting={selectingMap[item.id]}
+                  selectSupported={selectSupported}
+                  errorText={selectErrorMap[item.id]}
+                  onSubmit={(payload) => void handleSelect(item, payload)}
+                />
+              ))}
               {notifyItems.map((item) => (
                 <NotifyItem
                   key={item.id}
