@@ -304,6 +304,48 @@ describe("uppidi-fleet client entry contract", () => {
       );
     });
 
+    it("verifies single unified router status badge in header bar (#464)", () => {
+      assert.match(
+        surfaceSource,
+        /export\s+function\s+resolveRouterStatusBadge\s*\(/,
+        "surface.tsx must export resolveRouterStatusBadge helper",
+      );
+      assert.match(
+        surfaceSource,
+        /<UppidiTopHeaderBar[\s\S]*isConnected=\{isConnected\}[\s\S]*isServiceRunning=\{isServiceRunning\}/,
+        "surface.tsx must pass both router flags to UppidiTopHeaderBar",
+      );
+
+      // The header renders exactly one router badge driven by the resolved status.
+      assert.match(
+        surfaceSource,
+        /const\s+routerBadge\s*=\s*resolveRouterStatusBadge\(isConnected,\s*isServiceRunning\)/,
+        "UppidiTopHeaderBar must derive a single routerBadge from resolveRouterStatusBadge",
+      );
+      assert.match(
+        surfaceSource,
+        /label=\{routerBadge\.label\}[\s\S]*variant=\{routerBadge\.variant\}/,
+        "UppidiTopHeaderBar must render the single unified router Badge from routerBadge",
+      );
+
+      // Legacy contradictory badges must be gone.
+      assert.doesNotMatch(
+        surfaceSource,
+        /Router Connected/,
+        "must not render legacy 'Router Connected' badge",
+      );
+      assert.doesNotMatch(
+        surfaceSource,
+        /label=["']Router active["']/,
+        "must not render redundant 'Router active' badge",
+      );
+
+      // Coherent labels for each state.
+      assert.match(surfaceSource, /label:\s*["']Router Active["']/, "connected state label must be 'Router Active'");
+      assert.match(surfaceSource, /label:\s*["']Router Starting["']/, "degraded state label must be 'Router Starting'");
+      assert.match(surfaceSource, /label:\s*["']Router Disconnected["']/, "offline state label must be 'Router Disconnected'");
+    });
+
     it("verifies compact unified top header bar (#424)", () => {
       assert.match(
         surfaceSource,

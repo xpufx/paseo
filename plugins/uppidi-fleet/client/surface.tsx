@@ -158,6 +158,29 @@ export function UppidiBrandMark({ size = 20, color }: { size?: number; color?: s
   );
 }
 
+export interface RouterStatusBadge {
+  label: string;
+  variant: "success" | "warning" | "danger";
+  pulse: boolean;
+}
+
+/**
+ * Single source of truth for the router status indicator (#464). Prevents the
+ * header from rendering contradictory connect + service badges side by side.
+ */
+export function resolveRouterStatusBadge(
+  isConnected: boolean,
+  isServiceRunning: boolean,
+): RouterStatusBadge {
+  if (isConnected) {
+    return { label: "Router Active", variant: "success", pulse: true };
+  }
+  if (isServiceRunning) {
+    return { label: "Router Starting", variant: "warning", pulse: false };
+  }
+  return { label: "Router Disconnected", variant: "danger", pulse: false };
+}
+
 export interface UppidiTopHeaderBarProps {
   isConnected: boolean;
   isServiceRunning: boolean;
@@ -192,13 +215,14 @@ export function UppidiTopHeaderBar({
   onRefresh,
 }: UppidiTopHeaderBarProps) {
   const { colors, typography } = usePluginTheme();
+  const routerBadge = resolveRouterStatusBadge(isConnected, isServiceRunning);
 
   return (
     <Row justify="space-between" align="center" wrap gap="xs" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
       {/* Left: Brand mark, title, status dots & badges */}
       <Row align="center" gap="xs" wrap>
         <UppidiBrandMark size={density === "dense" ? 18 : 20} />
-        <StatusDot variant={isConnected ? "success" : "danger"} pulse={isConnected} />
+        <StatusDot variant={routerBadge.variant} pulse={routerBadge.pulse} />
         <Text
           style={{
             color: colors.foreground,
@@ -211,15 +235,12 @@ export function UppidiTopHeaderBar({
         </Text>
         <Badge label="Uppidi Fleet" variant="accent" size="sm" textStyle={{ fontSize: 10 }} />
         <Badge
-          label={isConnected ? "Router Connected" : "Router Disconnected"}
-          variant={isConnected ? "success" : "danger"}
+          label={routerBadge.label}
+          variant={routerBadge.variant}
           size="sm"
           dot
           textStyle={{ fontSize: 10 }}
         />
-        {isServiceRunning && (
-          <Badge label="Router active" variant="info" size="sm" textStyle={{ fontSize: 10 }} />
-        )}
       </Row>
 
       {/* Right: Workspace & Repo Selectors, Sizing Selector, Refresh button (#449) */}

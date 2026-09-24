@@ -14,16 +14,64 @@ import {
   executeHookServiceAction,
   getHookLogTail,
   configureHookService,
+  getActiveHookRouter,
+  loadRouterConfig,
 } from "./hook-router.js";
 import { getUppidiFleetSettingsStorage } from "./settings.js";
 
-const DEFAULT_HOOK_URL = process.env.FORGE_HOOK_URL || "http://127.0.0.1:8099";
+const FALLBACK_HOOK_URL = "http://127.0.0.1:8099";
 
+function loopbackHost(host: string | null | undefined): string {
+  if (!host || host === "0.0.0.0" || host === "::") return "127.0.0.1";
+  return host;
+}
+
+function formatHookUrl(host: string | null | undefined, port: number | null | undefined): string | null {
+  if (port === undefined || port === null || port <= 0) return null;
+  return `http://${loopbackHost(host)}:${port}`;
+}
+
+/**
+ * Resolves the hook router endpoint (#464). An explicit `provided` URL wins, then
+ * `FORGE_HOOK_URL`, then the active router's bound/configured address, then persisted
+ * settings/config, finally the loopback default. Wildcard binds map to 127.0.0.1.
+ */
 export function resolveHookUrl(provided?: string): string {
   if (provided && typeof provided === "string" && provided.trim()) {
     return provided.trim().replace(/\/+$/, "");
   }
-  return DEFAULT_HOOK_URL.replace(/\/+$/, "");
+
+  const envUrl = process.env.FORGE_HOOK_URL;
+  if (envUrl && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, "");
+  }
+
+  const router = getActiveHookRouter();
+  if (router) {
+    const status = router.getLifecycleStatus();
+    const activeUrl = status.listening
+      ? formatHookUrl(status.host, status.port)
+      : formatHookUrl(status.configuredHost, status.configuredPort);
+    if (activeUrl) return activeUrl;
+  }
+
+  try {
+    const settings = getUppidiFleetSettingsStorage().read();
+    const settingsUrl = formatHookUrl(settings?.hookHost, settings?.hookPort);
+    if (settingsUrl) return settingsUrl;
+  } catch {
+    // ignore storage read failures
+  }
+
+  try {
+    const persisted = loadRouterConfig();
+    const persistedUrl = formatHookUrl(persisted.host ?? "127.0.0.1", persisted.port);
+    if (persistedUrl) return persistedUrl;
+  } catch {
+    // ignore config read failures
+  }
+
+  return FALLBACK_HOOK_URL;
 }
 
 export async function handleHookStatus(

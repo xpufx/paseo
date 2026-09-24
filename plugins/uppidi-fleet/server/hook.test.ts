@@ -63,6 +63,47 @@ describe("uppidi-fleet hook server handlers", () => {
     assert.equal(resolveHookUrl("http://localhost:9000///"), "http://localhost:9000");
   });
 
+  it("resolves FORGE_HOOK_URL when no explicit URL is provided (#464)", () => {
+    const prev = process.env.FORGE_HOOK_URL;
+    try {
+      process.env.FORGE_HOOK_URL = "http://10.20.30.24:8123/";
+      assert.equal(resolveHookUrl(), "http://10.20.30.24:8123");
+      assert.equal(resolveHookUrl("http://localhost:9000"), "http://localhost:9000");
+    } finally {
+      if (prev !== undefined) process.env.FORGE_HOOK_URL = prev;
+      else delete process.env.FORGE_HOOK_URL;
+    }
+  });
+
+  it("resolves the active hook router address dynamically (#464)", async () => {
+    await handleHookServiceAction({ action: "start" });
+    const router = getActiveHookRouter();
+    assert.ok(router, "active router must exist after start");
+
+    const status = await handleHookServiceStatus();
+    assert.equal(status.active, true);
+    assert.ok(status.port && status.port > 0);
+    assert.equal(resolveHookUrl(), `http://127.0.0.1:${status.port}`);
+
+    await handleHookServiceAction({ action: "stop" });
+  });
+
+  it("maps wildcard-bound router hosts to loopback (#464)", async () => {
+    await handleHookServiceAction({ action: "start" });
+    const router = getActiveHookRouter();
+    assert.ok(router, "active router must exist after start");
+
+    const configured = await handleHookConfigure({ host: "0.0.0.0", port: 0, restart: true });
+    assert.equal(configured.ok, true);
+    assert.equal(configured.activePort && configured.activePort > 0, true);
+
+    const status = await handleHookServiceStatus();
+    assert.equal(status.host, "0.0.0.0");
+    assert.equal(resolveHookUrl(), `http://127.0.0.1:${status.port}`);
+
+    await handleHookServiceAction({ action: "stop" });
+  });
+
   it("manages bundled hook service lifecycle without systemctl", async () => {
     // 1. Initial status when not running
     const initialStatus = await handleHookServiceStatus();
