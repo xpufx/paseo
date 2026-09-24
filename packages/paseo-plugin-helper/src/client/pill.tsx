@@ -477,6 +477,7 @@ export function registerComposerPill<TPayload = any>(
                     onStartShouldSetResponder={() => true}
                     onTouchEnd={stopBubbling}
                     {...(eventBoundaryProps as any)}
+                    style={{ flex: 1, minHeight: 0 }}
                   >
                     <PluginThemeProvider theme={theme} layout={layout} flair={options.flair}>
                       <ModalBodyScrollOwnerContext.Provider
