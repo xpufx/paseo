@@ -1,7 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { McpServerSchema, McpStatusSnapshot, McpToolsSettings } from "../shared/mcp";
 import { McpToolsSettingsSchema, buildHealthDigest } from "../shared/mcp";
@@ -77,23 +74,8 @@ async function loadAgent(agentId: string, context: PluginHandlerContext) {
 }
 
 async function findStoredRecord(agentId: string): Promise<Record<string, unknown> | null> {
-  const base = path.join(os.homedir(), ".paseo", "agents");
-  if (!existsSync(base)) return null;
-  try {
-    const projects = await readdir(base, { withFileTypes: true });
-    for (const ent of projects) {
-      const cand = ent.isDirectory()
-        ? path.join(base, ent.name, `${agentId}.json`)
-        : path.join(base, ent.name);
-      if (ent.isFile() && ent.name !== `${agentId}.json`) continue;
-      if (existsSync(cand)) {
-        try {
-          return JSON.parse(await readFile(cand, "utf8")) as Record<string, unknown>;
-        } catch {}
-      }
-    }
-  } catch {}
-  return null;
+  const { findStoredAgentRecord } = await import("./providers/paseo.js");
+  return findStoredAgentRecord(agentId);
 }
 
 // Cache provider probe results keyed by `provider:cwd` to avoid redundant

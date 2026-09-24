@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHealthDigest, McpToolsSettingsSchema, splitNamespacedTool } from "./mcp";
+import { buildHealthDigest, McpServerSchema, McpToolsSettingsSchema, splitNamespacedTool } from "./mcp";
 
 describe("splitNamespacedTool", () => {
   it("splits gateway multiplexed names", () => {
@@ -28,5 +28,23 @@ describe("buildHealthDigest", () => {
 describe("settings defaults", () => {
   it("keeps digest rows off unless explicitly enabled", () => {
     expect(McpToolsSettingsSchema.parse({}).healthDigestRows).toBe(false);
+  });
+});
+
+describe("McpServerSchema headers", () => {
+  it("accepts servers with and without headers", () => {
+    const base = {
+      id: "session:paseo",
+      name: "Paseo (Builtin)",
+      transport: "http",
+      source: { kind: "paseo", label: "Paseo", path: "http://127.0.0.1:6767/mcp/agents" },
+      command: null,
+      url: "http://127.0.0.1:6767/mcp/agents",
+      description: "Paseo control plane",
+      hasSecrets: false,
+      configPreview: "{}",
+    } as const;
+    expect(McpServerSchema.safeParse(base).success).toBe(true);
+    expect(McpServerSchema.safeParse({ ...base, headers: { Authorization: "Bearer cap" } }).success).toBe(true);
   });
 });

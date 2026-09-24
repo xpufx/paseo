@@ -6,8 +6,12 @@ import { matchesFamily } from "./family";
 import type { McpProbe, ProbeContext, ProbeResult, DiagnosticStep } from "../discovery/types";
 import type { McpServer } from "../../shared/mcp";
 
+export function paseoHomeDir(): string {
+  return process.env.PASEO_HOME || path.join(os.homedir(), ".paseo");
+}
+
 export async function findStoredAgentRecord(agentId: string): Promise<Record<string, unknown> | null> {
-  const base = path.join(os.homedir(), ".paseo", "agents");
+  const base = path.join(paseoHomeDir(), "agents");
   if (!existsSync(base)) return null;
   try {
     const projects = await readdir(base, { withFileTypes: true });
@@ -56,11 +60,22 @@ export const paseoProbe: McpProbe = {
 
     let url: string | null = null;
     let hasSecrets = false;
+    let headers: Record<string, string> | undefined;
     if (paseoDef && typeof paseoDef.url === "string") {
       url = paseoDef.url;
       hasSecrets = Boolean(paseoDef.headers);
+      if (paseoDef.headers && typeof paseoDef.headers === "object") {
+        headers = paseoDef.headers as Record<string, string>;
+      }
     } else {
-      const configPath = path.join(os.homedir(), ".paseo", "config.json");
+      // Daemon password doubles as the MCP bearer (see auth.ts
+      // isAgentMcpRequestAuthorized). PASEO_PASSWORD is in the plugin env.
+      const password = process.env.PASEO_PASSWORD?.trim();
+      if (password) {
+        headers = { Authorization: `Bearer ${password}` };
+        hasSecrets = true;
+      }
+      const configPath = path.join(paseoHomeDir(), "config.json");
       if (existsSync(configPath)) {
         try {
           const configJson = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
@@ -100,6 +115,7 @@ export const paseoProbe: McpProbe = {
       source: { kind: "paseo", label: "Paseo · Built-in", path: url },
       command: null,
       url,
+      ...(headers ? { headers } : {}),
       description: "Paseo control plane, agent automation & browser tools",
       hasSecrets,
       configPreview: JSON.stringify({ name: "Paseo (Builtin)", url }, null, 2),

@@ -146,6 +146,11 @@ export function normalizeMcpServer(
     command ||
     "";
 
+  const headers =
+    def.headers && typeof def.headers === "object" && !Array.isArray(def.headers)
+      ? (def.headers as Record<string, string>)
+      : undefined;
+
   return {
     id: `session:${idPrefix}:${name}`,
     name,
@@ -158,6 +163,7 @@ export function normalizeMcpServer(
     command,
     args: argv,
     url,
+    ...(headers ? { headers } : {}),
     description,
     hasSecrets,
     configPreview: JSON.stringify(redactSecrets(def, { mask: "•••" }), null, 2),

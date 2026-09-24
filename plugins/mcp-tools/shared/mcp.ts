@@ -15,6 +15,7 @@ export const McpServerSchema = z.object({
   command: z.string().nullable(),
   args: z.array(z.string()).nullable().optional(),
   url: z.string().nullable(),
+  headers: z.record(z.string(), z.string()).optional(),
   description: z.string(),
   hasSecrets: z.boolean(),
   configPreview: z.string(),

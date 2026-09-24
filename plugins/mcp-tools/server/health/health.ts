@@ -61,7 +61,11 @@ function splitCommand(command: string): { command: string; args: string[] } {
 function dial(server: McpServer, timeoutMs: number): HelperClient | null {
   const clientInfo = { name: "paseo-mcp-health", version: "1.0.0" };
   if (server.url) {
-    return McpClient.forHttp(server.url, { timeoutMs, clientInfo });
+    return McpClient.forHttp(server.url, {
+      timeoutMs,
+      clientInfo,
+      ...(server.headers ? { headers: server.headers } : {}),
+    });
   }
   if (server.command) {
     // Prefer the structured args when the server definition carries
