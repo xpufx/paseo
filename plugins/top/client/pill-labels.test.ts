@@ -293,3 +293,35 @@ test("describeSegment keeps render-only decorations out of the host label", () =
   assert.equal(mcp.text, "3/4 MCP");
   assert.ok(!formatSegmentLabel("mcp", richSnap).includes("●"));
 });
+
+/**
+ * Regression for xpufx-org/paseo#507: a present-but-blank host field is not
+ * "missing". `??` treated "" as present, so the descriptor emitted an empty
+ * label and the pill body rendered nothing (icon-only / collapsed) on mobile.
+ */
+test("describeSegment never emits a blank label when host fields are blank strings", () => {
+  const blankSnap = {
+    data: { branch: "" } as never,
+    agent: {
+      title: "",
+      model: "",
+      provider: "",
+      status: "",
+      lastActivityAt: "",
+    },
+    agentId: "",
+    worktreeLocationText: "",
+  };
+  for (const item of ALL_ITEMS) {
+    const d = describeSegment(item, blankSnap);
+    assert.ok(
+      d.text.trim().length > 0,
+      `${item} descriptor must carry non-blank text for blank host fields`,
+    );
+    assert.ok(
+      formatSegmentLabel(item, blankSnap).trim().length > 0,
+      `${item} flat label must be non-blank for blank host fields`,
+    );
+  }
+});
+

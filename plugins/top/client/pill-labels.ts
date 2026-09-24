@@ -56,6 +56,20 @@ export interface SegmentSnapshot {
   worktreeLocationText?: string;
 }
 
+/**
+ * First non-blank string wins, else the fallback. `??` only guards null and
+ * undefined, so a present-but-empty host field (blank `title`, `provider`,
+ * `branch`, `agentId`) slipped through as an empty label. On a button-shaped
+ * host an empty label renders icon-only, which reads as the pill collapsing to
+ * a skinny/empty line (xpufx-org/paseo#507).
+ */
+function firstNonBlank(fallback: string, ...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return fallback;
+}
+
 export interface TokenMetrics {
   inputTokens?: number;
   outputTokens?: number;
@@ -262,28 +276,38 @@ export function describeSegment(
   const prefix = def?.shortLabel ? `${def.shortLabel} ` : "";
   switch (item) {
     case "branch":
-      return { icon, iconTone: "accent", text: data?.branch ?? "--", tone: "foreground" };
+      return {
+        icon,
+        iconTone: "accent",
+        text: firstNonBlank("--", data?.branch),
+        tone: "foreground",
+      };
     case "worktree":
       return {
         icon,
         iconTone: "accent",
-        text: worktreeLocationText || "--",
+        text: firstNonBlank("--", worktreeLocationText),
         tone: "foreground",
       };
     case "agent_title":
-      return { icon, iconTone: "accent", text: agent?.title ?? "Agent", tone: "foreground" };
+      return {
+        icon,
+        iconTone: "accent",
+        text: firstNonBlank("Agent", agent?.title),
+        tone: "foreground",
+      };
     case "agent":
       return {
         icon,
         iconTone: "accent",
-        text: agent?.model || agent?.provider || "Agent",
+        text: firstNonBlank("Agent", agent?.model, agent?.provider),
         tone: "foreground",
       };
     case "agent_provider":
       return {
         icon,
         iconTone: "accent",
-        text: agent?.provider ?? "Provider",
+        text: firstNonBlank("Provider", agent?.provider),
         tone: "foreground",
       };
     case "agent_activity": {
@@ -299,7 +323,7 @@ export function describeSegment(
       return {
         icon,
         iconTone: "accent",
-        text: agentId && agentId.length > 7 ? agentId.slice(0, 7) : agentId ?? "--",
+        text: agentId && agentId.length > 7 ? agentId.slice(0, 7) : firstNonBlank("--", agentId),
         tone: "foreground",
       };
     case "load":

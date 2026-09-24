@@ -2234,6 +2234,11 @@ const styles = {
     overflow: "hidden",
     flexShrink: 1,
     minWidth: 0,
+    // The pill label is one short line; without a height floor a body that
+    // momentarily renders no text (loading, or a blank host field) collapses to
+    // an unreadable skinny line on mobile (xpufx-org/paseo#507). The host
+    // composer pill is 32pt; keep the inner body at least a line tall.
+    minHeight: 20,
   },
   pillText: {
     fontSize: 11,
@@ -2399,6 +2404,8 @@ const styles = {
     overflow: "hidden",
     flexShrink: 1,
     minWidth: 0,
+    // See pillContainer: the combined pill must keep a line-height floor too.
+    minHeight: 20,
   },
   dividerText: {
     fontSize: 10,
