@@ -40,7 +40,10 @@ export function WellbeingSurface() {
     // Immediate initial heartbeat when surface opens
     reportActivity("client_surface");
 
-    if (typeof window !== "undefined") {
+    // React Native defines `window` as an alias of `global` but provides no
+    // DOM event API, so `window.addEventListener` is undefined on mobile.
+    // Gate on the function itself, not the global's existence.
+    if (typeof window?.addEventListener === "function") {
       const handlePointer = () => reportActivity("client_interaction");
       const handleKey = () => reportActivity("client_interaction");
       const handleFocus = () => reportActivity("client_interaction");
@@ -79,7 +82,7 @@ export function WellbeingSurface() {
     );
   }
 
-  const s: WellbeingStatus = (status as WellbeingStatus) || {
+  const defaults: WellbeingStatus = {
     phase: "working",
     fleetPosture: "active-focus",
     fleetDirective: "Operator Status: Active (Desk Focus).",
@@ -105,6 +108,13 @@ export function WellbeingSurface() {
       fatigueAlertCooldownMinutes: 60,
       notifyVia2fado: true,
     },
+  };
+  // Older daemons may omit newer fields (protocol drift), so merge the
+  // payload over defaults instead of crashing on a partial `settings`.
+  const s: WellbeingStatus = {
+    ...defaults,
+    ...((status as WellbeingStatus | undefined) ?? {}),
+    settings: { ...defaults.settings, ...((status as WellbeingStatus | undefined)?.settings ?? {}) },
   };
 
   const phaseThemeMap: Record<OperatorPhase, { bg: string; text: string; label: string }> = {
