@@ -477,16 +477,21 @@ export function registerComposerPill<TPayload = any>(
                     onStartShouldSetResponder={() => true}
                     onTouchEnd={stopBubbling}
                     {...(eventBoundaryProps as any)}
+                    style={{ flex: 1, minHeight: 0 }}
                   >
                     <PluginThemeProvider theme={theme} layout={layout} flair={options.flair}>
-                      {options.renderModal({
-                        agentId,
-                        workspaceId: props.workspaceId ?? "",
-                        theme,
-                        layout,
-                        host: props.host ?? { id: "", label: "" },
-                        close: () => setCenteredOpen(agentId, false),
-                      })}
+                      <ModalBodyScrollOwnerContext.Provider
+                        value={resolvePillModalScrollable(options.hostScroll) ? "host" : "required"}
+                      >
+                        {options.renderModal({
+                          agentId,
+                          workspaceId: props.workspaceId ?? "",
+                          theme,
+                          layout,
+                          host: props.host ?? { id: "", label: "" },
+                          close: () => setCenteredOpen(agentId, false),
+                        })}
+                      </ModalBodyScrollOwnerContext.Provider>
                     </PluginThemeProvider>
                   </View>
                 ) : null}
@@ -630,11 +635,15 @@ export function registerComposerPill<TPayload = any>(
           <Modal.Content scrollable={resolvePillModalScrollable(options.hostScroll)}>
             {open ? (
               <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
-                {options.renderModal?.({
-                  ...props,
-                  close: () => setOpen(false),
-                  payload,
-                })}
+                <ModalBodyScrollOwnerContext.Provider
+                  value={resolvePillModalScrollable(options.hostScroll) ? "host" : "required"}
+                >
+                  {options.renderModal?.({
+                    ...props,
+                    close: () => setOpen(false),
+                    payload,
+                  })}
+                </ModalBodyScrollOwnerContext.Provider>
               </PluginThemeProvider>
             ) : null}
           </Modal.Content>

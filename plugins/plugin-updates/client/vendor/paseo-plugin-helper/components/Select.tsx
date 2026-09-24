@@ -1,9 +1,11 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import {
+  Modal,
   Pressable,
   ScrollView as FallbackScrollView,
   StyleSheet,
   Text,
+  TouchableWithoutFeedback,
   View,
   type StyleProp,
   type ViewStyle,
@@ -32,11 +34,25 @@ export interface SelectProps {
 
 const OPTION_LIST_MAX_HEIGHT = 216;
 
+interface TriggerCoords {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+// When `measureInWindow` is unavailable or never invokes its callback (node
+// test renderers, host shims), the menu still opens anchored to a zeroed box
+// rather than swallowing the press.
+const FALLBACK_COORDS: TriggerCoords = { x: 0, y: 0, width: 0, height: 0 };
+
 /**
  * Compact single-choice picker sized to sit inside a {@link FormRow}. The
- * closed trigger stays one line tall; opening reveals a bounded, scrollable
- * option list that overlays the content below, so a long list degrades to
- * scrolling instead of expanding the trigger's parent container.
+ * closed trigger stays one line tall; opening mounts the menu in a root
+ * transparent `<Modal>` overlay portal, so a long list never expands the
+ * trigger's parent container, is never clipped by an ancestor
+ * `overflow: "hidden"` (Card/Tabs/Modal), and always paints above later
+ * siblings regardless of local stacking context.
  */
 export function Select({
   value,
@@ -49,12 +65,14 @@ export function Select({
   style,
 }: SelectProps) {
   const { Icon } = getClientHost();
-  // The dropdown option list is a bounded box nested inside the host sheet,
-  // so it scrolls with a plain React Native ScrollView — never the host
-  // sheet-gesture scroller (#219).
+  // The option list is mounted in the root modal overlay, so it scrolls with
+  // a plain React Native ScrollView — never the host sheet-gesture scroller
+  // (#219) and never a scroller owned by the trigger's parent.
   const { colors, resolveRadius, typography, isCompact, touchTargetMin, alpha } =
     usePluginTheme();
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<TriggerCoords | null>(null);
+  const triggerRef = useRef<View>(null);
 
   const caption = typography?.caption ?? {
     fontSize: 11,
@@ -77,17 +95,40 @@ export function Select({
 
   const triggerMinHeight = size === "sm" ? 28 : Math.max(34, touchTargetMin);
 
+  const openAt = (next: TriggerCoords) => {
+    setCoords(next);
+    setOpen(true);
+  };
+
+  const handleToggle = () => {
+    if (isOpen) {
+      setOpen(false);
+      return;
+    }
+
+    const node = triggerRef.current;
+    // A node/shim without `measureInWindow` (node test renderers, stripped
+    // host shims) still opens anchored to a zeroed box rather than swallowing
+    // the press (#520).
+    if (!node || typeof node.measureInWindow !== "function") {
+      openAt(FALLBACK_COORDS);
+      return;
+    }
+
+    node.measureInWindow((x, y, width, height) => {
+      openAt({ x, y, width, height });
+    });
+  };
+
   return (
-    // Elevate the container's stacking context while open so the absolutely
-    // positioned option list (zIndex 1000) paints above later siblings that
-    // share the parent context — e.g. the Tabs bar below the header (#484).
-    <View style={[styles.container, isOpen && styles.containerOpen, style]}>
+    <View style={[styles.container, style]}>
       <Pressable
+        ref={triggerRef}
         accessibilityRole="button"
         accessibilityLabel={label ? `${label}: ${display}` : display}
         accessibilityState={{ expanded: isOpen, disabled }}
         disabled={!canOpen}
-        onPress={() => setOpen((prev) => !prev)}
+        onPress={handleToggle}
         style={({ pressed }) => [
           styles.trigger,
           {
@@ -126,67 +167,84 @@ export function Select({
         />
       </Pressable>
 
-      {isOpen ? (
-        <View
-          style={[
-            styles.optionList,
-            {
-              borderRadius: radius,
-              borderColor: colors.border,
-              backgroundColor: colors.surface0,
-              marginTop: spacing.xs,
-            },
-          ]}
+      {isOpen && coords ? (
+        <Modal
+          transparent
+          visible={isOpen}
+          animationType="none"
+          onRequestClose={() => setOpen(false)}
         >
-          <FallbackScrollView
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
-            style={{ maxHeight: OPTION_LIST_MAX_HEIGHT }}
+          <TouchableWithoutFeedback
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss options"
+            onPress={() => setOpen(false)}
           >
-            {options.map((option) => {
-              const isSelected = option.value === value;
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="button"
-                  accessibilityLabel={option.label}
-                  accessibilityState={{ selected: isSelected }}
-                  onPress={() => {
-                    onValueChange(option.value);
-                    setOpen(false);
-                  }}
-                  style={({ pressed }) => [
-                    styles.option,
-                    {
-                      paddingVertical,
-                      paddingHorizontal,
-                      backgroundColor: isSelected
-                        ? colors.surface2
-                        : pressed
-                          ? alpha(colors.surface2, 0.5)
-                          : "transparent",
-                    },
-                  ]}
-                >
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.optionText,
+            <View style={StyleSheet.absoluteFill} />
+          </TouchableWithoutFeedback>
+
+          <View
+            style={[
+              styles.overlayList,
+              {
+                top: coords.y + coords.height + spacing.xs,
+                left: coords.x,
+                minWidth: coords.width,
+                borderRadius: radius,
+                borderColor: colors.border,
+                backgroundColor: colors.surface0,
+              },
+            ]}
+          >
+            <FallbackScrollView
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: OPTION_LIST_MAX_HEIGHT }}
+            >
+              {options.map((option) => {
+                const isSelected = option.value === value;
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="button"
+                    accessibilityLabel={option.label}
+                    accessibilityState={{ selected: isSelected }}
+                    onPress={() => {
+                      onValueChange(option.value);
+                      setOpen(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.option,
                       {
-                        color: isSelected ? colors.foreground : colors.foregroundMuted,
-                        fontSize: isCompact ? fontSize : fontSize + 1,
-                        lineHeight,
-                        fontWeight: isSelected ? "600" : "400",
+                        paddingVertical,
+                        paddingHorizontal,
+                        backgroundColor: isSelected
+                          ? colors.surface2
+                          : pressed
+                            ? alpha(colors.surface2, 0.5)
+                            : "transparent",
                       },
                     ]}
                   >
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </FallbackScrollView>
-        </View>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.optionText,
+                        {
+                          color: isSelected ? colors.foreground : colors.foregroundMuted,
+                          fontSize: isCompact ? fontSize : fontSize + 1,
+                          lineHeight,
+                          fontWeight: isSelected ? "600" : "400",
+                        },
+                      ]}
+                    >
+                      {option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </FallbackScrollView>
+          </View>
+        </Modal>
       ) : null}
     </View>
   );
@@ -195,11 +253,6 @@ export function Select({
 const styles = StyleSheet.create({
   container: {
     width: "100%",
-    position: "relative",
-  },
-  containerOpen: {
-    zIndex: 1000,
-    elevation: 10,
   },
   trigger: {
     flexDirection: "row",
@@ -212,15 +265,15 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     minWidth: 0,
   },
-  optionList: {
+  overlayList: {
     position: "absolute",
-    top: "100%",
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    elevation: 10,
     borderWidth: 1,
     overflow: "hidden",
+    elevation: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
   },
   option: {},
   optionText: {

@@ -1,7 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import * as RN from "react-native";
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  Text,
+  TouchableWithoutFeedback,
+  View,
+} from "react-native";
 import { initClientHelpers } from "../client/host.js";
 import * as themeProvider from "../client/theme/provider.js";
 import { resolveTypography } from "../client/theme/tokens.js";
@@ -199,38 +207,82 @@ describe("Select", () => {
     expect(triggerOf(tree).props.disabled).toBe(true);
   });
 
-  it("overlays the option list without expanding the trigger container (#484)", () => {
+  it("keeps the closed trigger container out of any local stacking context (#484)", () => {
     const tree = render(<Select value="" options={options} onValueChange={() => {}} />);
 
     const container = tree.root.findAllByType(View)[0];
-    expect(styleValue(container.props.style, "position")).toBe("relative");
-    // Closed: the container must not create a stacking context that leaks above
-    // siblings; only an open dropdown elevates its parent.
+    // No `position: relative`/`zIndex`: the menu lives in the root portal, so
+    // the trigger container must never create a local stacking context that
+    // leaks above later siblings.
+    expect(styleValue(container.props.style, "position")).toBeUndefined();
     expect(styleValue(container.props.style, "zIndex")).toBeUndefined();
+  });
+
+  it("renders the open menu inside a transparent Modal overlay portal (#520)", () => {
+    const tree = render(<Select value="" options={options} onValueChange={() => {}} />);
+
+    expect(tree.root.findAllByType(Modal)).toHaveLength(0);
 
     act(() => {
       triggerOf(tree).props.onPress();
     });
 
-    // Open: the container elevates its stacking context so the option list
-    // paints above later siblings such as the Tabs bar (#484).
-    const openContainer = tree.root.findAllByType(View)[0];
-    expect(styleValue(openContainer.props.style, "zIndex")).toBe(1000);
-    expect(styleValue(openContainer.props.style, "elevation")).toBe(10);
+    const modal = tree.root.findByType(Modal);
+    expect(modal.props.transparent).toBe(true);
+    expect(modal.props.visible).toBe(true);
 
+    // The menu is never an in-flow child of the trigger container: it is not
+    // inside the first View (the container), and it is absolutely positioned.
+    // The backdrop also uses absoluteFill, so select the bordered menu box.
     const optionList = tree.root.findAllByType(View).find((node) =>
-      flatStyle(node.props.style).some(
-        (s) => s && s.position === "absolute" && s.zIndex === 1000,
-      ),
+      flatStyle(node.props.style).some((s) => s && s.position === "absolute" && s.borderWidth === 1),
     );
     expect(optionList).toBeTruthy();
+    expect(styleValue(optionList!.props.style, "position")).toBe("absolute");
+    // Anchored to the measured trigger box (fallback coords 0/0/0/0 + xs gap).
+    expect(styleValue(optionList!.props.style, "top")).toBe(4);
+    expect(styleValue(optionList!.props.style, "left")).toBe(0);
+    expect(styleValue(optionList!.props.style, "minWidth")).toBe(0);
+  });
 
-    const optionListStyle = optionList!.props.style;
-    expect(styleValue(optionListStyle, "position")).toBe("absolute");
-    expect(styleValue(optionListStyle, "top")).toBe("100%");
-    expect(styleValue(optionListStyle, "left")).toBe(0);
-    expect(styleValue(optionListStyle, "right")).toBe(0);
-    expect(styleValue(optionListStyle, "zIndex")).toBe(1000);
-    expect(styleValue(optionListStyle, "elevation")).toBe(10);
+  it("dismisses the open menu from the full-screen backdrop (#520)", () => {
+    const tree = render(<Select value="" options={options} onValueChange={() => {}} />);
+
+    act(() => {
+      triggerOf(tree).props.onPress();
+    });
+
+    const backdrop = tree.root.findByType(TouchableWithoutFeedback);
+    expect(backdrop.props.onPress).toBeTypeOf("function");
+
+    act(() => {
+      backdrop.props.onPress();
+    });
+
+    expect(tree.root.findAllByType(Modal)).toHaveLength(0);
+    expect(tree.root.findAllByType(ScrollView)).toHaveLength(0);
+  });
+
+  it("anchors the menu to the measured window coordinates (#520)", () => {
+    const { hostMeasureState } = RN as any;
+    hostMeasureState.coords = [24, 120, 200, 34];
+    hostMeasureState.calls = 0;
+
+    const tree = render(<Select value="" options={options} onValueChange={() => {}} />);
+
+    act(() => {
+      triggerOf(tree).props.onPress();
+    });
+
+    expect(hostMeasureState.calls).toBeGreaterThan(0);
+
+    const optionList = tree.root.findAllByType(View).find((node) =>
+      flatStyle(node.props.style).some((s) => s && s.position === "absolute" && s.borderWidth === 1),
+    );
+    const style = optionList!.props.style;
+    // top = y + height + spacing.xs(4); left/minWidth from the trigger box.
+    expect(styleValue(style, "top")).toBe(120 + 34 + 4);
+    expect(styleValue(style, "left")).toBe(24);
+    expect(styleValue(style, "minWidth")).toBe(200);
   });
 });
