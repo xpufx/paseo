@@ -1263,6 +1263,9 @@ export function ProjectGroupCard({
       style={{
         paddingVertical: 2,
         opacity: group.isMuted ? 0.65 : 1,
+        borderLeftWidth: group.isMuted ? 2 : 0,
+        borderLeftColor: group.isMuted ? colors.warning || colors.accent : "transparent",
+        paddingLeft: group.isMuted ? 6 : 0,
         overflow: "visible",
       }}
     >
@@ -1323,11 +1326,17 @@ export function ProjectGroupCard({
               />
 
               {/* Fleet Roster Enrolled & Detached Badges (#426) */}
+              {group.isMuted && (
+                <Badge
+                  label="🔇 Muted"
+                  variant="warning"
+                  size="sm"
+                  dot
+                  textStyle={{ fontSize: 10, fontWeight: "700" }}
+                />
+              )}
               {group.isEnrolled && (
                 <>
-                  {group.isMuted && (
-                    <Badge label="Muted" variant="warning" size="sm" dot textStyle={{ fontSize: 10 }} />
-                  )}
                   {!group.hasOrchestrator && (
                     <Badge label="⚪ No Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
                   )}
@@ -1358,7 +1367,7 @@ export function ProjectGroupCard({
                   variant="ghost"
                   disabled={isActionLoading}
                   loading={isActionLoading}
-                  onPress={() => onToggleMute(group.projectName, group.isMuted)}
+                  onPress={() => onToggleMute(group.projectName, !group.isMuted)}
                 />
               )}
 
@@ -1654,7 +1663,9 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
       } else {
         const res = await toggleRepoMuteMutation.mutateAsync({ repo, muted });
         if (res.ok) {
-          toast.show(res.message || `Repo ${repo} ${muted ? "muted" : "unmuted"}`);
+          toast.show(
+            res.message || `Repo ${repo} ${res.isMuted ? "muted" : "unmuted"}`,
+          );
           onRefresh?.();
         } else {
           toast.error(res.error || `Failed to toggle mute for ${repo}`);

@@ -181,6 +181,50 @@ describe("uppidi-fleet client entry contract", () => {
     );
   });
 
+  it("verifies ProjectGroupCard mute toggle passes inverted target state and renders stateful label/icon (#532)", () => {
+    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+    assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
+    const source = fs.readFileSync(treeViewPath, "utf8");
+
+    // 1. onToggleMute must receive the target inverted state, never the current state.
+    assert.match(
+      source,
+      /onToggleMute\(\s*group\.projectName,\s*!group\.isMuted\s*\)/,
+      "onToggleMute must be invoked with !group.isMuted (target state)",
+    );
+    assert.doesNotMatch(
+      source,
+      /onToggleMute\(\s*group\.projectName,\s*group\.isMuted\s*\)/,
+      "onToggleMute must not be invoked with the current group.isMuted state",
+    );
+
+    // 2. Button label/icon must reflect the current muted state.
+    assert.match(
+      source,
+      /label=\{group\.isMuted\s*\?\s*["']Unmute["']\s*:\s*["']Mute["']\}/,
+      "mute button label must be 'Unmute' when muted and 'Mute' when unmuted",
+    );
+    assert.match(
+      source,
+      /icon=\{group\.isMuted\s*\?\s*["']Volume2["']\s*:\s*["']VolumeX["']\}/,
+      "mute button icon must be 'Volume2' when muted and 'VolumeX' when unmuted",
+    );
+
+    // 3. A visible muted indicator must render when group.isMuted is true.
+    assert.match(
+      source,
+      /group\.isMuted\s*&&\s*\(\s*<Badge[\s\S]*?label=["'][^"']*Muted[^"']*["']/,
+      "ProjectGroupCard must render a visible Muted badge when group.isMuted is true",
+    );
+
+    // 4. Toast must reflect the authoritative returned mute state.
+    assert.match(
+      source,
+      /res\.message\s*\|\|\s*`Repo \$\{repo\} \$\{res\.isMuted\s*\?\s*["']muted["']\s*:\s*["']unmuted["']\}`/,
+      "handleToggleRepoMute toast must reflect res.isMuted rather than the requested input",
+    );
+  });
+
   it("verifies AgentStatusLight renders floating tooltip with agent name on hover (#410)", () => {
     const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
     assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
