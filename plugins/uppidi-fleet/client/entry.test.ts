@@ -578,5 +578,44 @@ describe("uppidi-fleet client entry contract", () => {
         "surface.tsx must register dedicated Settings tab",
       );
     });
+
+    it("verifies management cards live in Settings and not in the Work Queue (#462)", () => {
+      const settingsStart = surfaceSource.indexOf('activeTab === "settings"');
+      const treeStart = surfaceSource.indexOf('activeTab === "tree"');
+      const workQueueStart = surfaceSource.indexOf("{/* Dense Metrics Bar");
+      assert.ok(settingsStart >= 0 && treeStart > settingsStart && workQueueStart > treeStart, "tab branches must be locatable");
+
+      const settingsSource = surfaceSource.slice(settingsStart, treeStart);
+      const workQueueSource = surfaceSource.slice(workQueueStart);
+
+      const managementTitles = [
+        "Hook Service Management",
+        "Hook Queues",
+        "Hook Log Tail",
+        "Agent Role Models & Fallback Groups",
+        "CI Runner Fleet",
+        "Fleet Capability & Benchmark Matrix",
+      ];
+
+      for (const title of managementTitles) {
+        assert.ok(
+          settingsSource.includes(title),
+          `Settings tab must contain management card: ${title}`,
+        );
+        assert.ok(
+          !workQueueSource.includes(title),
+          `Work Queue tab must not contain management card: ${title}`,
+        );
+      }
+
+      // Work Queue renders filters (metrics bar, then filter/action bar) directly above the Work queue table.
+      const metricsIdx = workQueueSource.indexOf("{/* Dense Metrics Bar");
+      const filterBarIdx = workQueueSource.indexOf("{/* Action Bar & Filter Buttons */}");
+      const workQueueTableIdx = workQueueSource.indexOf('title="Work queue"');
+      assert.ok(
+        metricsIdx >= 0 && filterBarIdx > metricsIdx && workQueueTableIdx > filterBarIdx,
+        "Work Queue must render dense metrics bar, filter/action bar, then the Work queue table",
+      );
+    });
   });
 });

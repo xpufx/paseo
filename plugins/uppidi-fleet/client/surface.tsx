@@ -761,379 +761,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
         <UppidiFleetStaticMockup {...props} />
       ) : activeTab === "settings" ? (
         <Stack gap={density === "dense" ? 6 : 12}>
-          <Card variant="flat">
-            <Stack gap="sm" style={{ padding: density === "dense" ? 8 : 12 }}>
-              <CardHeader
-                title="Hook Service Management"
-                subtitle="Persistent network address & port for the bundled webhook router"
-                icon="Server"
-              />
-              <Row justify="space-between" align="center" wrap gap="sm">
-                <Row align="center" gap="xs">
-                  <StatusDot variant={isServiceRunning ? "success" : "danger"} />
-                  <Text style={{ color: colors.foreground, ...typography.heading }}>
-                    Bundled router: {serviceStatus?.state ?? "unknown"}
-                  </Text>
-                </Row>
-                <Row gap="xs">
-                  <Button
-                    label="Start"
-                    size="sm"
-                    variant="primary"
-                    disabled={isServiceRunning}
-                    onPress={() => handleServiceAction("start")}
-                  />
-                  <Button
-                    label="Restart"
-                    size="sm"
-                    variant="secondary"
-                    onPress={() => handleServiceAction("restart")}
-                  />
-                  <Button
-                    label="Stop"
-                    size="sm"
-                    variant="danger"
-                    disabled={!isServiceRunning}
-                    onPress={() => handleServiceAction("stop")}
-                  />
-                </Row>
-              </Row>
-              <KeyValueGroup>
-                <KeyValue
-                  label="Configured host"
-                  value={settings?.hookHost ?? serviceStatus?.configuredHost ?? "127.0.0.1"}
-                />
-                <KeyValue
-                  label="Configured port"
-                  value={String(settings?.hookPort ?? serviceStatus?.configuredPort ?? 8099)}
-                />
-                <KeyValue
-                  label="Active endpoint"
-                  value={`http://${serviceStatus?.host ?? settings?.hookHost ?? "127.0.0.1"}:${serviceStatus?.port ?? settings?.hookPort ?? 8099}`}
-                />
-              </KeyValueGroup>
-
-              <Card variant="flat">
-                <Stack gap="xs">
-                  <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
-                    Configure Listen Address & Port
-                  </Text>
-                  <Row gap="xs" wrap align="center">
-                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Host:</Text>
-                    <Button
-                      label="127.0.0.1 (Loopback)"
-                      size="sm"
-                      variant={!isCustomHost && hostSelection === "127.0.0.1" ? "primary" : "ghost"}
-                      onPress={() => {
-                        setIsCustomHost(false);
-                        setHostSelection("127.0.0.1");
-                      }}
-                    />
-                    <Button
-                      label="0.0.0.0 (All interfaces)"
-                      size="sm"
-                      variant={!isCustomHost && hostSelection === "0.0.0.0" ? "primary" : "ghost"}
-                      onPress={() => {
-                        setIsCustomHost(false);
-                        setHostSelection("0.0.0.0");
-                      }}
-                    />
-                    {detectedIps.map((ip) => (
-                      <Button
-                        key={ip}
-                        label={ip}
-                        size="sm"
-                        variant={!isCustomHost && hostSelection === ip ? "primary" : "ghost"}
-                        onPress={() => {
-                          setIsCustomHost(false);
-                          setHostSelection(ip);
-                        }}
-                      />
-                    ))}
-                    <Button
-                      label="Custom"
-                      size="sm"
-                      variant={isCustomHost ? "primary" : "ghost"}
-                      onPress={() => {
-                        setIsCustomHost(true);
-                        setHostSelection("custom");
-                      }}
-                    />
-                  </Row>
-                  <Row gap="sm" wrap align="flex-end">
-                    {isCustomHost && (
-                      <View style={{ flex: 1, minWidth: 160 }}>
-                        <TextInput
-                          label="Custom Host"
-                          value={customHost}
-                          onChangeText={setCustomHost}
-                          placeholder="127.0.0.1 or IP"
-                        />
-                      </View>
-                    )}
-                    <View style={{ width: 120 }}>
-                      <TextInput
-                        label="Port"
-                        value={configuredPortInput}
-                        onChangeText={setConfiguredPortInput}
-                        keyboardType="number-pad"
-                        placeholder="8099"
-                      />
-                    </View>
-                    <Button
-                      label={isConfiguring ? "Applying..." : "Apply & Persist"}
-                      size="sm"
-                      variant="primary"
-                      disabled={isConfiguring}
-                      onPress={handleApplyConfig}
-                    />
-                  </Row>
-                </Stack>
-              </Card>
-            </Stack>
-          </Card>
-
-          <Card variant="flat">
-            <Stack gap="sm" style={{ padding: density === "dense" ? 8 : 12 }}>
-              <CardHeader
-                title="Cockpit Display Density"
-                subtitle="Adjust UI density across agent tree, queue, and tables"
-                icon="Sliders"
-              />
-              <Row gap="xs">
-                <Button
-                  label="Dense"
-                  size="sm"
-                  variant={density === "dense" ? "primary" : "ghost"}
-                  onPress={() => handleDensityChange("dense")}
-                />
-                <Button
-                  label="Standard"
-                  size="sm"
-                  variant={density === "standard" ? "primary" : "ghost"}
-                  onPress={() => handleDensityChange("standard")}
-                />
-              </Row>
-            </Stack>
-          </Card>
-        </Stack>
-      ) : activeTab === "tree" ? (
-        <UppidiFleetTreeView
-          agentsData={agentsData}
-          isLoading={agentsLoading}
-          onRefresh={refetchAgents}
-          navigation={props.navigation}
-          onArchiveAgent={handleArchiveAgent}
-          onArchiveBulk={handleArchiveBulk}
-          isArchiving={isBulkArchiving}
-          density={density}
-          selectedRepo={selectedRepo}
-          selectedWorkspace={selectedWorkspace}
-        />
-      ) : (
-        <Stack gap={density === "dense" ? 6 : 12}>
-          {/* Dense Metrics Bar (#424) */}
-          <Row
-            wrap
-            gap="xs"
-            align="center"
-            style={{
-              backgroundColor: colors.surface1 ?? "rgba(255,255,255,0.03)",
-              paddingHorizontal: density === "dense" ? 6 : 10,
-              paddingVertical: density === "dense" ? 4 : 6,
-              borderRadius: 6,
-              borderWidth: 1,
-              borderColor: colors.border ?? "transparent",
-            }}
-          >
-            <Pressable
-              onPress={() => setFilter("all")}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: 4,
-                backgroundColor: filter === "all" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="Filter all open issues"
-            >
-              <Icon name="CircleDot" size={13} color={colors.accent} />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
-                Open issues:
-              </Text>
-              <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: density === "dense" ? 12 : 13 }}>
-                {issuesData?.openCount ?? rawIssues.length}
-              </Text>
-            </Pressable>
-
-            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
-
-            <Pressable
-              onPress={() => setFilter("needs-attention")}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: 4,
-                backgroundColor: filter === "needs-attention" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="Filter needs your attention"
-            >
-              <Icon
-                name="Bot"
-                size={13}
-                color={(issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foregroundMuted}
-              />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
-                Needs your attention:
-              </Text>
-              <Text
-                style={{
-                  color: (issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foreground,
-                  fontWeight: "700",
-                  fontSize: density === "dense" ? 12 : 13,
-                }}
-              >
-                {issuesData?.needsYouCount ?? 0}
-              </Text>
-            </Pressable>
-
-            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
-
-            <Pressable
-              onPress={() => setFilter("triage-review")}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: 4,
-                backgroundColor: filter === "triage-review" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="Filter awaiting review"
-            >
-              <Icon
-                name="GitPullRequest"
-                size={13}
-                color={(issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foregroundMuted}
-              />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
-                Awaiting review:
-              </Text>
-              <Text
-                style={{
-                  color: (issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foreground,
-                  fontWeight: "700",
-                  fontSize: density === "dense" ? 12 : 13,
-                }}
-              >
-                {issuesData?.reviewCount ?? 0}
-              </Text>
-            </Pressable>
-
-            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
-
-            <Pressable
-              onPress={() => setHookQueuesExpanded((prev) => !prev)}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 5,
-                paddingHorizontal: 8,
-                paddingVertical: 3,
-                borderRadius: 4,
-                backgroundColor: hookQueuesExpanded ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
-              accessibilityRole="button"
-              accessibilityLabel="Toggle hook queues"
-            >
-              <Icon name="Layers" size={13} color={totalQueued > 0 ? colors.accent : colors.foregroundMuted} />
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
-                Hook queued:
-              </Text>
-              <Text
-                style={{
-                  color: totalQueued > 0 ? colors.accent : colors.foreground,
-                  fontWeight: "700",
-                  fontSize: density === "dense" ? 12 : 13,
-                }}
-              >
-                {totalQueued}
-              </Text>
-              <Badge
-                label={hookStatus?.frontDesk?.agentId ? "Front Desk" : "Bridge"}
-                variant="neutral"
-                size="sm"
-                textStyle={{ fontSize: 9 }}
-              />
-            </Pressable>
-          </Row>
-
-          {/* Action Bar & Filter Buttons */}
-          <ActionBar align="space-between" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
-            <Row wrap gap="xs" align="center">
-              {issuePresetFilters.map(({ id, label }) => {
-                let count = 0;
-                if (id === "all") count = rawIssues.length;
-                else if (id === "needs-attention") {
-                  count = rawIssues.filter(
-                    (i) =>
-                      i.attention.startsWith("attention/0-") ||
-                      i.attention.startsWith("attention/1-") ||
-                      i.attention.startsWith("attention/2-")
-                  ).length;
-                } else if (id === "triage-review") {
-                  count = rawIssues.filter(
-                    (i) =>
-                      i.status === "Review" ||
-                      i.labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"))
-                  ).length;
-                } else if (id === "in-progress") {
-                  count = rawIssues.filter(
-                    (i) =>
-                      i.status === "In progress" ||
-                      i.labels.some((l) => l.includes("state/1-wip"))
-                  ).length;
-                } else if (id === "verify") {
-                  count = rawIssues.filter((i) => i.labels.some((l) => l.includes("state/3-verify"))).length;
-                }
-                return (
-                  <Button
-                    key={id}
-                    label={`${label} (${count})`}
-                    size="sm"
-                    variant={filter === id ? "primary" : "ghost"}
-                    style={{
-                      paddingHorizontal: density === "dense" ? 6 : 10,
-                      paddingVertical: density === "dense" ? 2 : 4,
-                      minHeight: density === "dense" ? 22 : 28,
-                    }}
-                    onPress={() => setFilter(id)}
-                  />
-                );
-              })}
-            </Row>
-            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 10 : 11 }}>
-              {selectedRepo === "all" ? "All Repositories" : `Repo: ${selectedRepo}`}
-            </Text>
-          </ActionBar>
-
           {/* Collapsible Section: Hook Service Management (#368) */}
           <Collapsible
             title={`Hook Service Management (${serviceStatus?.state ?? "checking"})`}
@@ -1706,6 +1333,247 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               </Stack>
             </Card>
           </Collapsible>
+
+          <Card variant="flat">
+            <Stack gap="sm" style={{ padding: density === "dense" ? 8 : 12 }}>
+              <CardHeader
+                title="Cockpit Display Density"
+                subtitle="Adjust UI density across agent tree, queue, and tables"
+                icon="Sliders"
+              />
+              <Row gap="xs">
+                <Button
+                  label="Dense"
+                  size="sm"
+                  variant={density === "dense" ? "primary" : "ghost"}
+                  onPress={() => handleDensityChange("dense")}
+                />
+                <Button
+                  label="Standard"
+                  size="sm"
+                  variant={density === "standard" ? "primary" : "ghost"}
+                  onPress={() => handleDensityChange("standard")}
+                />
+              </Row>
+            </Stack>
+          </Card>
+        </Stack>
+      ) : activeTab === "tree" ? (
+        <UppidiFleetTreeView
+          agentsData={agentsData}
+          isLoading={agentsLoading}
+          onRefresh={refetchAgents}
+          navigation={props.navigation}
+          onArchiveAgent={handleArchiveAgent}
+          onArchiveBulk={handleArchiveBulk}
+          isArchiving={isBulkArchiving}
+          density={density}
+          selectedRepo={selectedRepo}
+          selectedWorkspace={selectedWorkspace}
+        />
+      ) : (
+        <Stack gap={density === "dense" ? 6 : 12}>
+          {/* Dense Metrics Bar (#424) */}
+          <Row
+            wrap
+            gap="xs"
+            align="center"
+            style={{
+              backgroundColor: colors.surface1 ?? "rgba(255,255,255,0.03)",
+              paddingHorizontal: density === "dense" ? 6 : 10,
+              paddingVertical: density === "dense" ? 4 : 6,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: colors.border ?? "transparent",
+            }}
+          >
+            <Pressable
+              onPress={() => setFilter("all")}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: filter === "all" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Filter all open issues"
+            >
+              <Icon name="CircleDot" size={13} color={colors.accent} />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Open issues:
+              </Text>
+              <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: density === "dense" ? 12 : 13 }}>
+                {issuesData?.openCount ?? rawIssues.length}
+              </Text>
+            </Pressable>
+
+            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+
+            <Pressable
+              onPress={() => setFilter("needs-attention")}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: filter === "needs-attention" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Filter needs your attention"
+            >
+              <Icon
+                name="Bot"
+                size={13}
+                color={(issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foregroundMuted}
+              />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Needs your attention:
+              </Text>
+              <Text
+                style={{
+                  color: (issuesData?.needsYouCount ?? 0) > 0 ? (colors.statusWarning ?? "#f59e0b") : colors.foreground,
+                  fontWeight: "700",
+                  fontSize: density === "dense" ? 12 : 13,
+                }}
+              >
+                {issuesData?.needsYouCount ?? 0}
+              </Text>
+            </Pressable>
+
+            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+
+            <Pressable
+              onPress={() => setFilter("triage-review")}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: filter === "triage-review" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Filter awaiting review"
+            >
+              <Icon
+                name="GitPullRequest"
+                size={13}
+                color={(issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foregroundMuted}
+              />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Awaiting review:
+              </Text>
+              <Text
+                style={{
+                  color: (issuesData?.reviewCount ?? 0) > 0 ? (colors.accent ?? "#38bdf8") : colors.foreground,
+                  fontWeight: "700",
+                  fontSize: density === "dense" ? 12 : 13,
+                }}
+              >
+                {issuesData?.reviewCount ?? 0}
+              </Text>
+            </Pressable>
+
+            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+
+            <Pressable
+              onPress={() => setHookQueuesExpanded((prev) => !prev)}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 5,
+                paddingHorizontal: 8,
+                paddingVertical: 3,
+                borderRadius: 4,
+                backgroundColor: hookQueuesExpanded ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                opacity: pressed ? 0.7 : 1,
+                cursor: "pointer",
+              })}
+              accessibilityRole="button"
+              accessibilityLabel="Toggle hook queues"
+            >
+              <Icon name="Layers" size={13} color={totalQueued > 0 ? colors.accent : colors.foregroundMuted} />
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 11 : 12 }}>
+                Hook queued:
+              </Text>
+              <Text
+                style={{
+                  color: totalQueued > 0 ? colors.accent : colors.foreground,
+                  fontWeight: "700",
+                  fontSize: density === "dense" ? 12 : 13,
+                }}
+              >
+                {totalQueued}
+              </Text>
+              <Badge
+                label={hookStatus?.frontDesk?.agentId ? "Front Desk" : "Bridge"}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontSize: 9 }}
+              />
+            </Pressable>
+          </Row>
+
+          {/* Action Bar & Filter Buttons */}
+          <ActionBar align="space-between" style={{ paddingVertical: density === "dense" ? 2 : 4 }}>
+            <Row wrap gap="xs" align="center">
+              {issuePresetFilters.map(({ id, label }) => {
+                let count = 0;
+                if (id === "all") count = rawIssues.length;
+                else if (id === "needs-attention") {
+                  count = rawIssues.filter(
+                    (i) =>
+                      i.attention.startsWith("attention/0-") ||
+                      i.attention.startsWith("attention/1-") ||
+                      i.attention.startsWith("attention/2-")
+                  ).length;
+                } else if (id === "triage-review") {
+                  count = rawIssues.filter(
+                    (i) =>
+                      i.status === "Review" ||
+                      i.labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"))
+                  ).length;
+                } else if (id === "in-progress") {
+                  count = rawIssues.filter(
+                    (i) =>
+                      i.status === "In progress" ||
+                      i.labels.some((l) => l.includes("state/1-wip"))
+                  ).length;
+                } else if (id === "verify") {
+                  count = rawIssues.filter((i) => i.labels.some((l) => l.includes("state/3-verify"))).length;
+                }
+                return (
+                  <Button
+                    key={id}
+                    label={`${label} (${count})`}
+                    size="sm"
+                    variant={filter === id ? "primary" : "ghost"}
+                    style={{
+                      paddingHorizontal: density === "dense" ? 6 : 10,
+                      paddingVertical: density === "dense" ? 2 : 4,
+                      minHeight: density === "dense" ? 22 : 28,
+                    }}
+                    onPress={() => setFilter(id)}
+                  />
+                );
+              })}
+            </Row>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: density === "dense" ? 10 : 11 }}>
+              {selectedRepo === "all" ? "All Repositories" : `Repo: ${selectedRepo}`}
+            </Text>
+          </ActionBar>
 
           {/* Work Queue (Full Width) (#425) */}
           <Card variant="elevated" style={{ width: "100%" }}>
