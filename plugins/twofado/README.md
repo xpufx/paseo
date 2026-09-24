@@ -2,7 +2,7 @@
 
 
 
-Approval-gate UI for the **2fado** privileged-command daemon, for
+Approval-gate UI and notifications for the **2fado** privileged-command daemon, for
 [Paseo](https://github.com/getpaseo/paseo).
 
 Surfaces pending risky command requests from `2fadod` and lets a human
