@@ -146,6 +146,41 @@ describe("uppidi-fleet client entry contract", () => {
     );
   });
 
+  it("renders a single small Add Orchestrator button for unstaffed enrolled repos (#528)", () => {
+    const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
+    assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
+    const source = fs.readFileSync(treeViewPath, "utf8");
+
+    const buttonMatches = source.match(/label="\+ Add Orchestrator"/g) ?? [];
+    assert.equal(
+      buttonMatches.length,
+      1,
+      "tree-view.tsx must render exactly one Add Orchestrator button",
+    );
+
+    assert.match(
+      source,
+      /label="\+ Add Orchestrator"[\s\S]*?size="sm"/,
+      "the Add Orchestrator button must be small (size='sm')",
+    );
+
+    const unstaffedIdx = source.indexOf("Enrolled repository is unstaffed");
+    assert.ok(unstaffedIdx >= 0, "tree-view.tsx must render the unstaffed placeholder message");
+    const placeholderRowEnd = source.indexOf("</Row>", unstaffedIdx);
+    assert.ok(placeholderRowEnd > unstaffedIdx, "unstaffed placeholder Row must be locatable");
+    const placeholderSource = source.slice(unstaffedIdx, placeholderRowEnd);
+    assert.doesNotMatch(
+      placeholderSource,
+      /Add Orchestrator/,
+      "the unstaffed placeholder Row must not render a duplicate Add Orchestrator button",
+    );
+    assert.doesNotMatch(
+      placeholderSource,
+      /<Button/,
+      "the unstaffed placeholder Row must not render any button",
+    );
+  });
+
   it("verifies AgentStatusLight renders floating tooltip with agent name on hover (#410)", () => {
     const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
     assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");

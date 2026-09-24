@@ -1427,7 +1427,6 @@ export function ProjectGroupCard({
             {group.totalCount === 0 ? (
               <Row
                 align="center"
-                justify="space-between"
                 wrap
                 gap="xs"
                 style={{ paddingVertical: 8, paddingHorizontal: 6 }}
@@ -1435,17 +1434,6 @@ export function ProjectGroupCard({
                 <Text style={{ color: colors.foregroundMuted, fontSize: 12, fontStyle: "italic" }}>
                   No agents active. Enrolled repository is unstaffed.
                 </Text>
-                {onAddOrchestrator && (
-                  <Button
-                    label="+ Add Orchestrator"
-                    icon="Plus"
-                    size="sm"
-                    variant="secondary"
-                    disabled={isActionLoading}
-                    loading={isActionLoading}
-                    onPress={() => onAddOrchestrator(group.projectName)}
-                  />
-                )}
               </Row>
             ) : (
             <Stack gap={2}>
