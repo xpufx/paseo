@@ -316,7 +316,8 @@ describe("fleet and agents classification", () => {
     assert.equal(agent.deterministicState, "idle:waiting");
     assert.equal(agent.url, "paseo://agent/64d89202-acaa-4071-b658-90db710875bd");
     assert.equal(agent.worktree, "meta");
-    assert.equal(agent.project, "xpufx-org/meta");
+    // cwd is not authoritative for project resolution (#530)
+    assert.equal(agent.project, "Default Project");
 
     const custom = normalizeRawAgent({
       id: "agent-custom",

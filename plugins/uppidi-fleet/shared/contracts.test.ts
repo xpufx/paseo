@@ -321,8 +321,8 @@ describe("uppidi-fleet shared contracts", () => {
     );
   });
 
-  it("extracts agent project accurately (#403)", () => {
-    // 1. From project property
+  it("extracts agent project from authoritative metadata only (#530)", () => {
+    // 1. From resolved project property
     assert.equal(
       extractAgentProject({ project: "xpufx-org/paseo" }),
       "xpufx-org/paseo"
@@ -334,31 +334,67 @@ describe("uppidi-fleet shared contracts", () => {
       "xpufx-org/platform"
     );
 
-    // 3. From name pattern
+    // 3. From authoritative workspace -> project mapping
     assert.equal(
-      extractAgentProject({ name: "Orchestrator · xpufx-org/paseo" }),
-      "xpufx-org/paseo"
-    );
-
-    // 4. From attributed work
-    assert.equal(
-      extractAgentProject({ attributedWork: { repo: "xpufx-org/aur-automation" } }),
+      extractAgentProject(
+        { workspaceId: "wks_abc" },
+        undefined,
+        { wks_abc: "xpufx-org/aur-automation" }
+      ),
       "xpufx-org/aur-automation"
     );
 
-    // 5. From cwd
+    // 4. Workspace mapping takes precedence over unresolved default project
     assert.equal(
-      extractAgentProject({ cwd: "/home/user/code/paseo" }),
+      extractAgentProject(
+        { workspaceId: "wks_abc", project: "Default Project" },
+        undefined,
+        { wks_abc: "xpufx-org/paseo" }
+      ),
       "xpufx-org/paseo"
     );
 
-    // 6. Inherited from parent
+    // 5. Workspace mapping takes precedence over labels
+    assert.equal(
+      extractAgentProject(
+        { workspaceId: "wks_abc", labels: { repo: "xpufx-org/platform" } },
+        undefined,
+        { wks_abc: "xpufx-org/paseo" }
+      ),
+      "xpufx-org/paseo"
+    );
+
+    // 6. Labels used when the workspace is not in the map
+    assert.equal(
+      extractAgentProject(
+        { workspaceId: "wks_missing", labels: { repo: "xpufx-org/platform" } },
+        undefined,
+        { wks_abc: "xpufx-org/paseo" }
+      ),
+      "xpufx-org/platform"
+    );
+
+    // 7. Inherited from parent hierarchy
     assert.equal(
       extractAgentProject({ name: "Worker" }, "xpufx-org/paseo"),
       "xpufx-org/paseo"
     );
 
-    // 7. Fallback
+    // 8. Title and cwd heuristics are NOT used
+    assert.equal(
+      extractAgentProject({ name: "Orchestrator · xpufx-org/paseo" }),
+      "Default Project"
+    );
+    assert.equal(
+      extractAgentProject({ cwd: "/home/user/code/paseo" }),
+      "Default Project"
+    );
+    assert.equal(
+      extractAgentProject({ cwd: "/home/user/.paseo/worktrees/2h0dw6vb/ghost" }),
+      "Default Project"
+    );
+
+    // 9. Fallback when no authoritative source is available
     assert.equal(
       extractAgentProject({ name: "Unassigned Worker" }),
       "Default Project"

@@ -25,7 +25,12 @@ import type {
   UppidiToggleRepoMuteInput,
   UppidiToggleRepoMuteOutput,
 } from "../shared/contracts.js";
-import { extractAgentWorktree, extractAgentProject } from "../shared/contracts.js";
+import {
+  extractAgentWorktree,
+  extractAgentProject,
+  DEFAULT_PROJECT,
+} from "../shared/contracts.js";
+import type { WorkspaceProjectMap } from "../shared/contracts.js";
 import { isAgentEligibleForBulkArchive, isRepoMatching } from "../shared/sort-filter.js";
 import {
   getActiveHookRouter,
@@ -230,7 +235,8 @@ export function deriveDeterministicState(
 
 export function normalizeRawAgent(
   raw: RawAgentRecord,
-  quotaAlertAgentIds: Set<string> = new Set()
+  quotaAlertAgentIds: Set<string> = new Set(),
+  workspaceProjectMap?: WorkspaceProjectMap
 ): UppidiAgent {
   const id = raw.id || "";
   const shortId = raw.shortId || id.slice(0, 7);
@@ -250,6 +256,12 @@ export function normalizeRawAgent(
     raw,
     attributedWork,
     quotaAlertAgentIds
+  );
+
+  const project = extractAgentProject(
+    raw,
+    undefined,
+    workspaceProjectMap ?? getWorkspaceProjectMap()
   );
 
   return {
@@ -272,7 +284,7 @@ export function normalizeRawAgent(
     usage: raw.lastUsage || null,
     url: raw.url || (id ? `paseo://agent/${id}` : undefined),
     worktree: extractAgentWorktree(raw),
-    project: extractAgentProject(raw),
+    project,
     labels: raw.labels,
   };
 }
@@ -335,6 +347,136 @@ export function buildAgentTree(agents: UppidiAgent[]): UppidiAgentTreeNode[] {
   }
 
   return tree;
+}
+
+// --- Authoritative workspace -> project resolution (#530) ---
+
+interface WorkspaceProjectRecord {
+  workspaceId?: string;
+  projectId?: string;
+  cwd?: string;
+  worktreeRoot?: string | null;
+  mainRepoRoot?: string | null;
+  displayName?: string;
+  kind?: string;
+}
+
+interface ProjectRecord {
+  projectId?: string;
+  rootPath?: string;
+  displayName?: string;
+  projectKey?: string | null;
+}
+
+const WORKSPACE_PROJECT_CACHE_TTL_MS = 30_000;
+let workspaceProjectCache: { map: WorkspaceProjectMap; cachedAt: number } | null = null;
+
+function parseProjectKey(key?: string | null): string | undefined {
+  const cleaned = key?.trim().replace(/\.git$/, "");
+  if (!cleaned || !cleaned.startsWith("remote:")) return undefined;
+  const body = cleaned.slice("remote:".length);
+  const slash = body.indexOf("/");
+  if (slash === -1) return undefined;
+  const segments = body.slice(slash + 1).split("/").filter(Boolean);
+  if (segments.length >= 2) return segments.slice(-2).join("/");
+  return segments[0];
+}
+
+function deriveRepoFromWorkspace(
+  workspace: WorkspaceProjectRecord | undefined,
+  project: ProjectRecord | undefined
+): string | undefined {
+  const fromKey = parseProjectKey(project?.projectKey);
+  if (fromKey) return fromKey;
+
+  const displayName = project?.displayName?.trim() || workspace?.displayName?.trim();
+  if (displayName) return displayName;
+
+  const root =
+    workspace?.mainRepoRoot ||
+    project?.rootPath ||
+    workspace?.worktreeRoot ||
+    workspace?.cwd;
+  if (root) {
+    const base = root.replace(/\/+$/, "").split("/").filter(Boolean).pop();
+    if (base) return base;
+  }
+
+  return undefined;
+}
+
+/**
+ * Builds a cached map of Paseo workspaceId -> canonical repository by joining
+ * ~/.paseo/projects/workspaces.json with ~/.paseo/projects/projects.json.
+ */
+export function getWorkspaceProjectMap(options: { forceRefresh?: boolean } = {}): WorkspaceProjectMap {
+  const now = Date.now();
+  if (
+    !options.forceRefresh &&
+    workspaceProjectCache &&
+    now - workspaceProjectCache.cachedAt < WORKSPACE_PROJECT_CACHE_TTL_MS
+  ) {
+    return workspaceProjectCache.map;
+  }
+
+  const map: WorkspaceProjectMap = {};
+  try {
+    const projectsDir = path.join(os.homedir(), ".paseo", "projects");
+
+    const projectsById = new Map<string, ProjectRecord>();
+    const projectsPath = path.join(projectsDir, "projects.json");
+    if (fs.existsSync(projectsPath)) {
+      const projects = JSON.parse(fs.readFileSync(projectsPath, "utf-8"));
+      if (Array.isArray(projects)) {
+        for (const project of projects) {
+          if (project?.projectId) projectsById.set(project.projectId, project);
+        }
+      }
+    }
+
+    const workspacesPath = path.join(projectsDir, "workspaces.json");
+    if (fs.existsSync(workspacesPath)) {
+      const workspaces = JSON.parse(fs.readFileSync(workspacesPath, "utf-8"));
+      if (Array.isArray(workspaces)) {
+        for (const workspace of workspaces) {
+          if (!workspace?.workspaceId) continue;
+          const repo = deriveRepoFromWorkspace(workspace, projectsById.get(workspace.projectId));
+          if (repo) map[workspace.workspaceId] = repo;
+        }
+      }
+    }
+  } catch {
+    // Best-effort: authoritative metadata unavailable, callers fall back.
+  }
+
+  workspaceProjectCache = { map, cachedAt: now };
+  return map;
+}
+
+export function setWorkspaceProjectMapForTest(map: WorkspaceProjectMap | null): void {
+  workspaceProjectCache = map ? { map, cachedAt: Date.now() } : null;
+}
+
+/**
+ * Propagates a resolved project from parent agents to their children, walking
+ * multi-level hierarchies until stable. `parentId` is authoritative (#530).
+ */
+export function applyParentProjectInheritance(agents: UppidiAgent[]): void {
+  const agentMap = new Map(agents.map((a) => [a.id, a]));
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < agents.length + 1) {
+    changed = false;
+    guard++;
+    for (const agent of agents) {
+      if (agent.project && agent.project !== DEFAULT_PROJECT) continue;
+      const parent = agent.parentId ? agentMap.get(agent.parentId) : undefined;
+      if (parent?.project && parent.project !== DEFAULT_PROJECT) {
+        agent.project = parent.project;
+        changed = true;
+      }
+    }
+  }
 }
 
 // Read quota alerts from ~/.paseo/limit-alerts.json
@@ -509,7 +651,15 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
     }
   }
 
-  return Array.from(mergedAgents.values()).map((raw) => normalizeRawAgent(raw, quotaAlerts));
+  const workspaceProjectMap = getWorkspaceProjectMap();
+  const agents = Array.from(mergedAgents.values()).map((raw) =>
+    normalizeRawAgent(raw, quotaAlerts, workspaceProjectMap)
+  );
+
+  // Children inherit their parent's project when no authoritative mapping exists (#530).
+  applyParentProjectInheritance(agents);
+
+  return agents;
 }
 
 export async function handleUppidiAgents(
@@ -541,21 +691,12 @@ export async function handleUppidiAgents(
       }
     }
 
-    // Propagate project from parent orchestrator to child agents if needed
-    const agentMap = new Map(agents.map((a) => [a.id, a]));
-    for (const a of agents) {
-      if ((!a.project || a.project === "Default Project") && a.parentId) {
-        const parent = agentMap.get(a.parentId);
-        if (parent?.project && parent.project !== "Default Project") {
-          a.project = parent.project;
-        }
-      }
-    }
+    // Parent-project inheritance already applied in fetchPaseoAgents (#530).
 
     const { enrolledRepos, mutedRepos, repoQueuedHooks } = getFleetRosterInfo();
 
     for (const a of agents) {
-      const proj = a.project || extractAgentProject(a);
+      const proj = a.project || DEFAULT_PROJECT;
       const isEnrolled = enrolledRepos.some((r) => isRepoMatching(r, proj));
       a.isEnrolled = isEnrolled;
       a.isDetached = !isEnrolled;
@@ -1031,7 +1172,7 @@ export async function resolveRepoWorkspace(
     try {
       const agents = await fetchPaseoAgents(context).catch(() => []);
       const matching = agents.find(
-        (a) => a.cwd && isRepoMatching(a.project || extractAgentProject(a), repo)
+        (a) => a.cwd && isRepoMatching(a.project || extractAgentProject(a, undefined, getWorkspaceProjectMap()), repo)
       );
       if (matching?.cwd && fs.existsSync(matching.cwd)) {
         return { cwd: matching.cwd, workspaceId: (matching as any).workspaceId };
@@ -1150,7 +1291,7 @@ export async function handleUppidiReplaceOrchestrator(
       const existing = agents.find(
         (a) =>
           a.category === "orchestrator" &&
-          isRepoMatching(a.project || extractAgentProject(a), repo)
+          isRepoMatching(a.project || extractAgentProject(a, undefined, getWorkspaceProjectMap()), repo)
       );
       if (existing) {
         oldAgentId = existing.id;

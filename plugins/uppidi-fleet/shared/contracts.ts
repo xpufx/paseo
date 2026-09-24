@@ -835,49 +835,55 @@ export function extractAgentWorktree(agent: {
   return undefined;
 }
 
+/** Canonical repository for an agent, keyed by Paseo workspaceId. */
+export type WorkspaceProjectMap = Record<string, string>;
+
+/** Sentinel bucket for agents with no authoritative project metadata. */
+export const DEFAULT_PROJECT = "Default Project";
+
 /**
- * Extracts or infers a project identifier (e.g. "xpufx-org/paseo") from an agent record.
- * Falls back to parentProject if provided, or "Default Project".
+ * Extracts an agent's project identifier (e.g. "xpufx-org/paseo") from
+ * authoritative metadata only (#530):
+ *   1. An already-resolved `project` field.
+ *   2. Canonical workspace mapping (`workspaceId` -> repository).
+ *   3. Explicit agent labels (`repo` / `project`).
+ *   4. Parent hierarchy inheritance (`parentProject`).
+ * Falls back to "Default Project" when no authoritative source is available.
+ *
+ * Title and cwd regex heuristics are intentionally not used: they misassign
+ * worktree workers and ad-hoc agents into detached ghost projects.
  */
 export function extractAgentProject(
   agent: {
     project?: string;
     labels?: Record<string, string>;
+    workspaceId?: string;
+    /** Accepted for call-site compatibility but intentionally not consulted (#530). */
     attributedWork?: { repo?: string } | null;
     name?: string;
     title?: string;
     cwd?: string;
   },
-  parentProject?: string
+  parentProject?: string,
+  workspaceProjectMap?: WorkspaceProjectMap
 ): string {
-  if (agent.project && agent.project.trim()) return agent.project.trim();
+  if (agent.project && agent.project.trim() && agent.project.trim() !== DEFAULT_PROJECT) {
+    return agent.project.trim();
+  }
+
+  if (agent.workspaceId && workspaceProjectMap) {
+    const mapped = workspaceProjectMap[agent.workspaceId];
+    if (mapped && mapped.trim()) return mapped.trim();
+  }
+
   if (agent.labels?.["repo"] && agent.labels["repo"].trim()) return agent.labels["repo"].trim();
   if (agent.labels?.["project"] && agent.labels["project"].trim()) return agent.labels["project"].trim();
-  if (agent.attributedWork?.repo && agent.attributedWork.repo.trim()) return agent.attributedWork.repo.trim();
 
-  const text = `${agent.name || ""} ${agent.title || ""}`;
-  const match = text.match(/Orchestrator\s+[·-]\s*([a-zA-Z0-9_.-]+(?:\/[a-zA-Z0-9_.-]+)?)/i);
-  if (match && match[1]) {
-    return match[1];
+  if (parentProject && parentProject.trim() && parentProject.trim() !== DEFAULT_PROJECT) {
+    return parentProject.trim();
   }
 
-  const issueMatch = text.match(/([a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+)#\d+/);
-  if (issueMatch && issueMatch[1]) {
-    return issueMatch[1];
-  }
-
-  if (agent.cwd) {
-    const cwdMatch = agent.cwd.match(/\/code\/([a-zA-Z0-9_-]+)/);
-    if (cwdMatch && cwdMatch[1]) {
-      return `xpufx-org/${cwdMatch[1]}`;
-    }
-  }
-
-  if (parentProject) {
-    return parentProject;
-  }
-
-  return "Default Project";
+  return DEFAULT_PROJECT;
 }
 
 
