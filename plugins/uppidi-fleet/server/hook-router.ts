@@ -119,6 +119,11 @@ export interface HookRouterOptions {
   secret?: string;
   paseo?: PaseoApi;
   debounceMs?: number;
+  coalesceDisable?: boolean;
+  watchdogIntervalMs?: number;
+  watchdogBusyThreshold?: number;
+  watchdogAlertCooldownMs?: number;
+  boardSweepIntervalMs?: number;
 }
 
 export interface QueueEntry {
@@ -159,9 +164,16 @@ export function normalizeRepoKey(raw: string | null | undefined): string | null 
   return s || null;
 }
 
+export function repositoryFromPayload(body: any): any {
+  return body?.repository ?? body?.run?.repository ?? {};
+}
+
+export function senderFromPayload(body: any): any {
+  return body?.sender ?? body?.run?.sender ?? body?.run?.trigger_user ?? {};
+}
+
 export function keyFromPayload(body: any): string | null {
-  if (!body || typeof body !== "object") return null;
-  const repo = body.repository ?? body.run?.repository;
+  const repo = body?.repository ?? body?.run?.repository;
   if (!repo) return null;
   return (
     normalizeRepoKey(repo.html_url) ||
@@ -171,57 +183,378 @@ export function keyFromPayload(body: any): string | null {
   );
 }
 
+export function issueNumberOf(body: any): number | null {
+  return body?.issue?.number ?? body?.pull_request?.number ?? null;
+}
+
+export function labelNamesOf(body: any): string[] {
+  const names: string[] = [];
+  if (body?.label?.name) names.push(String(body.label.name));
+  for (const l of body?.issue?.labels ?? body?.pull_request?.labels ?? []) {
+    if (typeof l === "string") names.push(l);
+    else if (l?.name) names.push(String(l.name));
+  }
+  return names;
+}
+
+export function isPingEvent(body: any): boolean {
+  return labelNamesOf(body).some((n) => n.toLowerCase().startsWith("ping/"));
+}
+
+// Forgejo agents share an account, so sender.login cannot distinguish the
+// orchestrator from workers. The standard envelope carries the short Paseo
+// agent id, which can be matched to this repository's registered orchestrator.
+const AGENT_ENVELOPE_ID_RE = /<sub>\s*🤖[\s\S]*?\(`([^`]+)`\)[\s\S]*?<\/sub>/i;
+
+export function envelopeAgentId(body: any): string | null {
+  const comment = body?.comment?.body ?? body?.review?.body;
+  if (typeof comment !== "string") return null;
+  return AGENT_ENVELOPE_ID_RE.exec(comment)?.[1] ?? null;
+}
+
 export function isFrontDeskEvent(body: any): boolean {
   if (!body || typeof body !== "object") return false;
   const label = body.label?.name ?? "";
   if (label === "attention/frontdesk" || label === "attention/2-user") return true;
-  const comment = body.comment?.body;
+  const comment = body.comment?.body ?? body.review?.body;
   if (typeof comment === "string" && /(?:^|\s)\/frontdesk\b/i.test(comment)) return true;
   return false;
 }
 
+const SLASH_BYPASS_RE = /(?:^|\s)\/(?:orchestrator|hold|rework|approve|verify|done|close|instruction|agent|sos|stop)\b/i;
+const BYPASS_LABELS = new Set(["priority/0-sos", "flag/stop-work", "attention/frontdesk", "ping/req"]);
+const SOS_STATE_LABELS = new Set(["priority/0-sos", "flag/stop-work"]);
+
 export function isBypassEvent(event: string, body: any): boolean {
   if (!body || typeof body !== "object") return false;
   const label = body.label?.name ?? "";
-  if (label === "priority/0-sos" || label === "flag/stop-work" || label.startsWith("attention/")) return true;
-  const comment = body.comment?.body;
-  if (typeof comment === "string" && /(?:^|\s)\/(?:orchestrator|hold|rework|sos|stop)\b/i.test(comment)) return true;
+  const lowerLabel = label.toLowerCase();
+  if (lowerLabel.startsWith("attention/") || BYPASS_LABELS.has(lowerLabel) || lowerLabel.startsWith("ping/")) {
+    return true;
+  }
+  const comment = body.comment?.body ?? body.review?.body;
+  if (typeof comment === "string" && SLASH_BYPASS_RE.test(comment)) return true;
   return false;
 }
 
+/**
+ * A label transition can produce several webhook deliveries (e.g. an edit or
+ * comment after the label was applied). SOS and stop-work must still bypass the
+ * debounce, but only the first delivery for each resulting SOS state should
+ * interrupt. Slash commands deliberately remain outside this guard.
+ */
+export function sosStateOf(event: string, body: any): string | null {
+  if (event !== "issues") return null;
+  const command = body?.comment?.body ?? body?.review?.body ?? "";
+  if (typeof command === "string" && /^\s*\/hold\b/im.test(command)) return null;
+
+  const action = String(body?.action ?? "").toLowerCase();
+  const changed = String(body?.label?.name ?? "").toLowerCase();
+  const subject = body?.issue ?? body?.pull_request ?? {};
+  const labels = new Set(
+    (subject?.labels ?? [])
+      .map((label: any) => (typeof label === "string" ? label : label?.name))
+      .filter(Boolean)
+      .map((label: any) => String(label).toLowerCase())
+      .filter((label: string) => SOS_STATE_LABELS.has(label)),
+  );
+  if (SOS_STATE_LABELS.has(changed)) {
+    if (action === "unlabeled") labels.delete(changed);
+    else if (action === "labeled") labels.add(changed);
+  }
+  return labels.size > 0 || SOS_STATE_LABELS.has(changed) ? [...labels].sort().join(",") : null;
+}
+
+export function eventKind(event: string, body: any): string {
+  const action = String(body?.action ?? "");
+  if (event === "issues" && ["labeled", "unlabeled", "edited", "label_updated"].includes(action)) {
+    const names = labelNamesOf(body).map((n) => n.toLowerCase());
+    if (names.some((n) => n.startsWith("state/") || n.startsWith("priority/") || n.startsWith("flag/"))) {
+      return "state-transition";
+    }
+  }
+  return `${event}:${action || "event"}`;
+}
+
+export function eventHash(repoKey: string, issue: number | null, kind: string, actor: string, bodyText?: string): string {
+  return `${repoKey}#${issue}|${kind}|${actor}|${bodyText ?? ""}`;
+}
+
+export const FORGEJO_DIGEST_PREFIX = "🔔 Forgejo digest";
+
+export interface CoalesceEvent {
+  hash: string;
+  kind: string;
+  msg: string;
+  commentBody?: string;
+  title?: string;
+  stateLabels?: string[];
+  url?: string;
+}
+
+export interface CoalesceEntry {
+  repoKey: string;
+  issue: number | null;
+  events: CoalesceEvent[];
+  firstAt: number;
+  timer: NodeJS.Timeout | null;
+}
+
+export type CoalesceResult =
+  | "direct"
+  | "disabled"
+  | "bypass"
+  | "buffered"
+  | "capped"
+  | "window-capped"
+  | "deduped"
+  | "sos-deduped"
+  | "suppressed";
+
+export interface CoalesceInput {
+  repoKey: string;
+  issue: number | null;
+  kind: string;
+  actor: string;
+  commentBody?: string;
+  title?: string;
+  stateLabels?: string[];
+  url?: string;
+  msg: string;
+  bypass: boolean;
+  sosState?: string | null;
+}
+
+function latestCommentBody(buffered: CoalesceEvent[]): string {
+  for (let i = buffered.length - 1; i >= 0; i--) {
+    if (buffered[i].commentBody) return buffered[i].commentBody as string;
+  }
+  return "";
+}
+
+export function formatDigest(repoKey: string, issue: number | null, buffered: CoalesceEvent[]): string {
+  const counts: Record<string, number> = {};
+  for (const e of buffered) counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+  const parts = Object.entries(counts).map(([k, n]) => (n > 1 ? `${k} x${n}` : k));
+  const last = buffered[buffered.length - 1];
+  const line = `#${issue} ${last?.title ?? ""} [${(last?.stateLabels ?? []).join(", ")}]`.trim();
+  const head = `${FORGEJO_DIGEST_PREFIX} ${repoKey}${line} (${buffered.length} events: ${parts.join(", ")})`;
+  const bodyText = latestCommentBody(buffered);
+  const withBody = bodyText ? `${head}\nLatest comment: ${bodyText.slice(0, 2000)}` : head;
+  return last?.url && !withBody.includes(last.url) ? `${withBody} ${last.url}` : withBody;
+}
+
+export function bufferKey(repoKey: string, issue: number | null): string {
+  return `${repoKey}#${issue ?? "?"}`;
+}
+
+export interface WatchdogPermission {
+  id?: string;
+  requestId?: string;
+  title?: string;
+  tool?: string;
+  name?: string;
+}
+
+export interface WatchdogAgent {
+  id: string;
+  title?: string | null;
+  name?: string | null;
+  status?: string | null;
+  lastError?: string | null;
+  requiresAttention?: boolean;
+  attentionReason?: string | null;
+  pendingPermissions?: WatchdogPermission[] | null;
+  archivedAt?: string | null;
+}
+
+export interface WatchdogAnomaly {
+  type: "AGENT_PERMISSION_REQUIRED" | "AGENT_ATTENTION_REQUIRED" | "AGENT_ERROR" | "ORCHESTRATOR_MISSING" | "QUEUE_WEDGED";
+  agentId?: string;
+  key?: string;
+  title?: string | null;
+  reason?: string | null;
+  error?: string;
+  permissions?: WatchdogPermission[];
+  attempts?: number;
+  queueDepth?: number;
+}
+
+export interface WatchdogAuditOptions {
+  now?: number;
+  agentMap?: Map<string, WatchdogAgent> | null;
+  orchestratorRecords?: OrchestratorRecord[];
+  frontDeskId?: string | null;
+  deliver?: (targetAgentId: string, msg: string, options?: { noWait?: boolean; steer?: boolean }) => Promise<boolean>;
+  reloadAgent?: (id: string) => Promise<{ ok: boolean; error?: string }>;
+}
+
+export interface WatchdogAuditResult {
+  ok: boolean;
+  timestamp: number;
+  audited: { orchestrators: number; agents: number; queues: number };
+  anomalies: WatchdogAnomaly[];
+}
+
+export interface PruneResult {
+  ok: boolean;
+  prunedCount: number;
+  pruned: Array<{ key: string; agentId: string; reason: string }>;
+  error?: string;
+}
+
+export interface HandoffStatus {
+  agentId: string | null;
+  updatedAt: string | null;
+  handoffPath: string;
+  summary: string;
+}
+
+export interface HandoffResult extends HandoffStatus {
+  orchestratorsNotified: number;
+}
+
+export interface BoardCandidate {
+  number: number;
+  title: string;
+  labels: string[];
+  category: string;
+  is_dispatchable: boolean;
+  reason: string;
+}
+
+export interface BoardCheckResult {
+  repo: string;
+  ok: boolean;
+  candidates: BoardCandidate[];
+  error?: string;
+}
+
+export interface BoardSweepResult {
+  ok: boolean;
+  swept: number;
+  actionable: Array<{ repo: string; count: number; dispatchable: number }>;
+  notified: number;
+  error?: string;
+}
+
+/** Append a bare URL so chat linkifiers can pick it up. */
+function withUrl(text: string, url: unknown): string {
+  const value = typeof url === "string" ? url.trim() : "";
+  if (!value || text.includes(value)) return text;
+  return `${text} ${value}`;
+}
+
+export function httpError(status: number, message: string): Error {
+  const error = new Error(message) as Error & { status: number };
+  error.status = status;
+  return error;
+}
+
+export function issueCommentUrl(issue: any, comment: any): string {
+  const issueUrl = typeof issue?.html_url === "string" ? issue.html_url.trim() : "";
+  return (
+    (typeof comment?.html_url === "string" && comment.html_url.trim()) ||
+    (issueUrl && comment?.id != null ? `${issueUrl}#issuecomment-${comment.id}` : issueUrl)
+  );
+}
+
 export function forgejoEnvelope(event: string, body: any): Record<string, unknown> {
-  const repo = body?.repository ?? body?.run?.repository ?? {};
-  const sender = body?.sender ?? {};
-  const subject = body?.issue ?? body?.pull_request ?? body?.release ?? body?.review ?? null;
-  return {
+  const repository = repositoryFromPayload(body);
+  const sender = senderFromPayload(body);
+  const name = repository.full_name ?? repository.name ?? "unknown repo";
+  const envelope: any = {
     forgejo: {
       version: 1,
-      event,
-      action: body?.action ?? null,
-      repo: repo.full_name ?? repo.name ?? null,
-      repoUrl: repo.html_url ?? repo.clone_url ?? null,
-      sender: sender.login ?? sender.username ?? null,
-      subject: subject
-        ? {
-            kind: body?.pull_request ? "pull_request" : body?.issue ? "issue" : "other",
-            number: subject.number ?? null,
-            title: subject.title ?? null,
-            url: subject.html_url ?? null,
-          }
-        : null,
+      event: String(event ?? "unknown"),
+      action: String(body?.action ?? ""),
+      repo: name,
+      repoUrl: typeof repository.html_url === "string" ? repository.html_url : "",
+      sender: sender.login ?? sender.username ?? "unknown",
+      subject: { kind: "unknown" },
     },
   };
+
+  if (event === "issues") {
+    const issue = body?.issue ?? {};
+    envelope.forgejo.subject = {
+      kind: "issue",
+      number: issue.number ?? null,
+      title: issue.title ?? "",
+      url: typeof issue.html_url === "string" ? issue.html_url : "",
+    };
+  } else if (event === "issue_comment") {
+    const issue = body?.issue ?? {};
+    const comment = body?.comment ?? {};
+    envelope.forgejo.subject = {
+      kind: "issue_comment",
+      number: issue.number ?? null,
+      title: issue.title ?? "",
+      url: issueCommentUrl(issue, comment),
+      commentId: comment.id ?? null,
+    };
+  } else if (event === "pull_request") {
+    const pr = body?.pull_request ?? {};
+    envelope.forgejo.subject = {
+      kind: "pull_request",
+      number: pr.number ?? null,
+      title: pr.title ?? "",
+      url: typeof pr.html_url === "string" ? pr.html_url : "",
+    };
+  } else if (event === "push") {
+    envelope.forgejo.subject = {
+      kind: "push",
+      ref: body?.ref ?? "",
+      commits: Array.isArray(body?.commits) ? body.commits.length : 0,
+    };
+  }
+
+  return envelope;
 }
 
 export function summarize(event: string, body: any): string {
-  const repo = body?.repository?.full_name ?? body?.repository?.name ?? "unknown-repo";
-  const sender = body?.sender?.login ?? body?.sender?.username ?? "unknown";
-  const action = body?.action ? `:${body.action}` : "";
-  const issue = body?.issue ?? body?.pull_request;
-  const num = issue?.number ? `#${issue.number}` : "";
-  const title = issue?.title ? ` "${issue.title}"` : "";
-  const url = issue?.html_url ?? body?.repository?.html_url ?? "";
-  return `🔔 Forgejo webhook incoming [${event}${action}] ${repo}${num}${title} (by ${sender})\n${url}`.trim();
+  const repository = repositoryFromPayload(body);
+  const actor = senderFromPayload(body);
+  const repo = repository?.full_name ?? "unknown repo";
+  const sender = actor?.login ?? actor?.username ?? "unknown";
+  const isPing = isPingEvent(body);
+  const pingLabel = labelNamesOf(body).find((n) => n.toLowerCase().startsWith("ping/"));
+  const head = isPing ? `🔔 Operator Ping [${pingLabel ?? "ping"}]` : "🔔 Forgejo webhook incoming";
+  if (event === "ping") return `${head} (ping test) ${repo} (by ${sender})`;
+  if (event === "issues") {
+    const issue = body?.issue ?? {};
+    const action = body?.action ?? "";
+    const prefix = isPing ? head : `${head} [issues:${action}]`;
+    return withUrl(
+      `${prefix} ${repo}#${issue.number ?? "?"} ${issue.title ?? ""} (by ${sender})`.trim(),
+      issue.html_url,
+    );
+  }
+  if (event === "issue_comment") {
+    const issue = body?.issue ?? {};
+    const comment = body?.comment ?? {};
+    const action = body?.action ?? "";
+    const commentUrl = issueCommentUrl(issue, comment);
+    return withUrl(
+      `${head} [issue_comment:${action}] ${repo}#${issue.number ?? "?"} ${issue.title ?? ""} (by ${sender})`.trim(),
+      commentUrl,
+    );
+  }
+  if (event === "push") {
+    const commits = (body?.commits ?? []).length;
+    return withUrl(
+      `${head} [push] ${repo} ${body?.ref ?? ""} ${commits} commit(s) by ${sender}`,
+      repository?.html_url,
+    );
+  }
+  if (event === "pull_request") {
+    const pr = body?.pull_request ?? {};
+    return withUrl(
+      `${head} [pull_request:${body?.action ?? ""}] ${repo}#${pr.number ?? "?"} ${pr.title ?? ""} (by ${sender})`,
+      pr.html_url,
+    );
+  }
+  return withUrl(`${head} [${event}] ${repo} (by ${sender})`, repository?.html_url);
 }
 
 export function formatWebhookMessage(event: string, body: any): string {
@@ -282,6 +615,20 @@ export class HookRouter {
   private mutedRepos = new Set<string>();
   private enrolledRepos = new Set<string>();
 
+  public readonly coalesceBuffers = new Map<string, CoalesceEntry>();
+  public readonly sosStates = new Map<string, { state: string; transition: number }>();
+  public readonly watchdogAlerts = new Map<string, number>();
+  public readonly coalesceDisable: boolean;
+  public readonly debounceMs: number;
+  public readonly coalesceMaxEvents: number;
+  public readonly coalesceWindowMaxMs: number;
+  public readonly watchdogIntervalMs: number;
+  public readonly watchdogBusyThreshold: number;
+  public readonly watchdogAlertCooldownMs: number;
+  public readonly boardSweepIntervalMs: number;
+  private watchdogTimer: NodeJS.Timeout | null = null;
+  private boardSweepTimer: NodeJS.Timeout | null = null;
+
   constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
     this.server = server ?? null;
     this.configPath = options?.configPath;
@@ -336,11 +683,165 @@ export class HookRouter {
     this.stateDir =
       options?.stateDir ?? process.env.HOOK_STATE_DIR ?? join(home, ".paseo", "forgejo-hook", "orchestrators");
 
+    this.coalesceDisable =
+      options?.coalesceDisable ??
+      (isTestMode ? true : (process.env.HOOK_COALESCE_DISABLE ?? "") === "1");
+    this.debounceMs = options?.debounceMs ?? Number(process.env.HOOK_DEBOUNCE_MS ?? 7000);
+    this.coalesceMaxEvents = Number(process.env.HOOK_COALESCE_MAX ?? 20);
+    this.coalesceWindowMaxMs = Number(process.env.HOOK_COALESCE_WINDOW_MAX_MS ?? 30000);
+    this.watchdogIntervalMs =
+      options?.watchdogIntervalMs ?? (isTestMode ? 0 : Number(process.env.WATCHDOG_INTERVAL_MS ?? 60000));
+    this.watchdogBusyThreshold =
+      options?.watchdogBusyThreshold ?? Number(process.env.WATCHDOG_BUSY_THRESHOLD ?? 10);
+    this.watchdogAlertCooldownMs =
+      options?.watchdogAlertCooldownMs ?? Number(process.env.WATCHDOG_ALERT_COOLDOWN_MS ?? 15 * 60 * 1000);
+    this.boardSweepIntervalMs =
+      options?.boardSweepIntervalMs ?? (isTestMode ? 0 : Number(process.env.BOARD_SWEEP_INTERVAL_MS ?? 15 * 60 * 1000));
+
     mkdirSync(this.queueDir, { recursive: true });
     mkdirSync(this.stateDir, { recursive: true });
 
     this.loadPersistedQueues();
     this.bindLifecycleEvents();
+  }
+
+  // -------------------------------------------------------------------------
+  // Event coalescing & digest
+  // -------------------------------------------------------------------------
+
+  public flushCoalesced(bkey: string): void {
+    const entry = this.coalesceBuffers.get(bkey);
+    if (!entry || entry.events.length === 0) {
+      this.coalesceBuffers.delete(bkey);
+      return;
+    }
+    this.coalesceBuffers.delete(bkey);
+    if (entry.timer) clearTimeout(entry.timer);
+    const { repoKey, issue, events } = entry;
+    if (events.length === 1) {
+      this.handleMessage(repoKey, events[0].msg);
+      return;
+    }
+    this.handleMessage(repoKey, formatDigest(repoKey, issue, events));
+  }
+
+  public coalesceOrSend(input: CoalesceInput): CoalesceResult {
+    const {
+      repoKey,
+      issue,
+      kind,
+      actor,
+      commentBody,
+      title,
+      stateLabels,
+      url,
+      msg,
+      bypass,
+      sosState = null,
+    } = input;
+
+    let directOpts: { id: string } | undefined;
+    if (bypass && sosState !== null && issue != null) {
+      const key = bufferKey(repoKey, issue);
+      const previous = this.sosStates.get(key);
+      if (previous?.state === sosState) return "sos-deduped";
+      const transition = (previous?.transition ?? 0) + 1;
+      this.sosStates.set(key, { state: sosState, transition });
+      directOpts = { id: stableId(repoKey, `${msg}\nSOS transition ${transition}`) };
+    }
+
+    if (this.coalesceDisable || bypass || issue == null) {
+      if (!this.coalesceDisable && bypass && issue != null) {
+        const bkey = bufferKey(repoKey, issue);
+        const entry = this.coalesceBuffers.get(bkey);
+        this.handleMessage(repoKey, msg, directOpts?.id);
+        if (entry && entry.events.length > 0) this.flushCoalesced(bkey);
+        return "bypass";
+      }
+      this.handleMessage(repoKey, msg, directOpts?.id);
+      return this.coalesceDisable ? "disabled" : "direct";
+    }
+
+    const bkey = bufferKey(repoKey, issue);
+    let entry = this.coalesceBuffers.get(bkey);
+    if (!entry) {
+      entry = { repoKey, issue, events: [], firstAt: Date.now(), timer: null };
+      this.coalesceBuffers.set(bkey, entry);
+    }
+    const hash = eventHash(repoKey, issue, kind, actor, commentBody ?? kind);
+    const last = entry.events[entry.events.length - 1];
+    if (last && last.hash === hash) return "deduped";
+    entry.events.push({ hash, kind, msg, commentBody, title, stateLabels, url });
+    if (entry.events.length >= this.coalesceMaxEvents) {
+      this.flushCoalesced(bkey);
+      return "capped";
+    }
+    if (Date.now() - entry.firstAt >= this.coalesceWindowMaxMs) {
+      this.flushCoalesced(bkey);
+      return "window-capped";
+    }
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.timer = setTimeout(() => this.flushCoalesced(bkey), this.debounceMs);
+    entry.timer.unref?.();
+    return "buffered";
+  }
+
+  private handleMessage(key: string, msg: string, stableIdOverride?: string): QueueEntry {
+    return this.enqueue(key, msg, false, stableIdOverride);
+  }
+
+  public async ingestWebhook(event: string, body: any): Promise<{
+    key: string;
+    result: CoalesceResult;
+    frontDesk: boolean;
+    bypass: boolean;
+  }> {
+    const repoKey = keyFromPayload(body);
+    if (!repoKey) {
+      throw new Error("Could not derive repository key from payload");
+    }
+    const ev = String(event ?? "unknown");
+    const issue = issueNumberOf(body);
+    const actor = senderFromPayload(body)?.login ?? "unknown";
+    const kind = eventKind(ev, body);
+    const isFd = isFrontDeskEvent(body);
+    const bypass = isFd || isBypassEvent(ev, body);
+    const sosState = sosStateOf(ev, body);
+    const commentBody = typeof body?.comment?.body === "string" ? body.comment.body : "";
+    const subj = body?.issue ?? body?.pull_request ?? {};
+    const stateLabels = (subj?.labels ?? [])
+      .map((l: any) => (typeof l === "string" ? l : l?.name))
+      .filter(Boolean);
+    const msg = formatWebhookMessage(ev, body);
+
+    const orch = isFd ? null : this.readOrchestrator(repoKey);
+    if (!isFd && !bypass && ev === "issue_comment") {
+      const stampedId = envelopeAgentId(body);
+      if (orch && stampedId && stampedId === orch.agentId.slice(0, 7)) {
+        this.log(`[info] Suppressing routine self-authored orchestrator comment for ${repoKey}#${issue ?? "?"}`);
+        return { key: repoKey, result: "suppressed", frontDesk: false, bypass: false };
+      }
+    }
+
+    if (isFd) {
+      this.enqueue("frontdesk", msg, bypass);
+      return { key: "frontdesk", result: bypass ? "bypass" : "direct", frontDesk: true, bypass };
+    }
+
+    const result = this.coalesceOrSend({
+      repoKey,
+      issue,
+      kind,
+      actor,
+      commentBody: commentBody || kind,
+      title: subj?.title ?? "",
+      stateLabels,
+      url: subj?.html_url ?? "",
+      msg,
+      bypass,
+      sosState,
+    });
+    return { key: repoKey, result, frontDesk: false, bypass };
   }
 
   public isRepoMuted(repoKey: string): boolean {
@@ -687,6 +1188,484 @@ export class HookRouter {
     return Array.from(ids);
   }
 
+  public listOrchestratorRecords(): OrchestratorRecord[] {
+    const records: OrchestratorRecord[] = [];
+    try {
+      if (existsSync(this.stateDir)) {
+        const files = readdirSync(this.stateDir);
+        for (const file of files) {
+          if (!file.endsWith(".json") || file === "frontdesk.json") continue;
+          try {
+            const raw = readFileSync(join(this.stateDir, file), "utf8");
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.key === "string" && typeof parsed.agentId === "string" && parsed.agentId) {
+              records.push({
+                key: parsed.key,
+                agentId: parsed.agentId,
+                updatedAt: parsed.updatedAt ?? null,
+                by: parsed.by ?? null,
+              });
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+    return records.sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  public deleteOrchestrator(repoOrKey: string): { ok: boolean; key?: string; error?: string; path?: string } {
+    const key = normalizeRepoKey(repoOrKey) ?? (typeof repoOrKey === "string" && repoOrKey.trim() ? repoOrKey.trim() : null);
+    if (!key) return { ok: false, error: "invalid repo key" };
+    const target = join(this.stateDir, `${sanitizeKey(key)}.json`);
+    if (existsSync(target)) {
+      try {
+        unlinkSync(target);
+        return { ok: true, key, path: target };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err), key };
+      }
+    }
+    return { ok: false, error: "not found", key };
+  }
+
+  public async fetchAgentMap(): Promise<Map<string, WatchdogAgent> | null> {
+    const map = new Map<string, WatchdogAgent>();
+    const paseo = this.getPaseo();
+    if (paseo?.agents) {
+      try {
+        const list = await (paseo.agents as any).list();
+        const entries = list?.entries ?? list;
+        if (Array.isArray(entries)) {
+          for (const entry of entries) {
+            const a: any = entry?.agent ?? entry;
+            if (a?.id) map.set(a.id, a);
+          }
+          if (map.size > 0) return map;
+        }
+      } catch {
+        // fall through to CLI
+      }
+    }
+    try {
+      const { stdout } = await execFileAsync("paseo", ["ls", "--json"], { timeout: 5000 });
+      const parsed = JSON.parse(stdout);
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (item?.id) map.set(item.id, item);
+        }
+      }
+      return map;
+    } catch {
+      return null;
+    }
+  }
+
+  public canWatchdogAlert(alertKey: string, now = Date.now()): boolean {
+    const last = this.watchdogAlerts.get(alertKey) ?? 0;
+    return now - last >= this.watchdogAlertCooldownMs;
+  }
+
+  public reloadAgent(id: string): Promise<{ ok: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      execFile("paseo", ["agent", "reload", id], { timeout: 10000 }, (err) => {
+        if (err) resolve({ ok: false, error: err.message });
+        else resolve({ ok: true });
+      });
+    });
+  }
+
+  /**
+   * Zero-token fleet audit: intercepts stuck permission requests, attempts
+   * auto-recovery of ACP turn locks, and detects missing/stalled orchestrators
+   * and wedged queues. Alerts are throttled per key by the watchdog cooldown.
+   */
+  public async runWatchdogAudit(opts: WatchdogAuditOptions = {}): Promise<WatchdogAuditResult> {
+    const now = opts.now ?? Date.now();
+    const reloadFn = opts.reloadAgent ?? ((id: string) => this.reloadAgent(id));
+    const deliverFn = opts.deliver ?? ((id: string, msg: string, o?: any) => this.deliverMessage(id, msg, o));
+    const anomalies: WatchdogAnomaly[] = [];
+
+    let agentMap = opts.agentMap ?? null;
+    if (!agentMap) {
+      agentMap = await this.fetchAgentMap();
+    }
+
+    const frontDeskId = opts.frontDeskId ?? this.readFrontDesk()?.agentId ?? null;
+    const orchRecords = opts.orchestratorRecords ?? this.listOrchestratorRecords();
+
+    if (agentMap) {
+      for (const agent of agentMap.values()) {
+        if (agent.pendingPermissions && agent.pendingPermissions.length > 0) {
+          const perm = agent.pendingPermissions[0] || {};
+          const reqId = perm.id || perm.requestId;
+          const action = perm.title || perm.tool || perm.name || "tool permission";
+          anomalies.push({
+            type: "AGENT_PERMISSION_REQUIRED",
+            agentId: agent.id,
+            title: agent.title || agent.name,
+            permissions: agent.pendingPermissions,
+          });
+          const alertKey = `permission:${agent.id}:${reqId || "pending"}`;
+          if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+            this.watchdogAlerts.set(alertKey, now);
+            const cmd = reqId ? `paseo permit allow ${agent.id} ${reqId}` : `paseo permit allow ${agent.id}`;
+            const alert = `[Fleet Watchdog] Agent ${agent.title || agent.id.slice(0, 7)} (${agent.id.slice(0, 7)}) requires permission: ${action}. Front Desk adjudication command: ${cmd}`;
+            void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+          }
+        } else if (
+          agent.requiresAttention === true &&
+          agent.attentionReason !== "error" &&
+          (!agent.pendingPermissions || agent.pendingPermissions.length === 0)
+        ) {
+          anomalies.push({
+            type: "AGENT_ATTENTION_REQUIRED",
+            agentId: agent.id,
+            title: agent.title || agent.name,
+            reason: agent.attentionReason,
+          });
+          const alertKey = `attention:${agent.id}:${agent.attentionReason || "stall"}`;
+          if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+            this.watchdogAlerts.set(alertKey, now);
+            const alert = `[Fleet Watchdog] Agent ${agent.title || agent.id.slice(0, 7)} (${agent.id.slice(0, 7)}) requires attention (${agent.attentionReason || "stalled"}). Operator or Front Desk triage required.`;
+            void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+          }
+        }
+      }
+
+      for (const record of orchRecords) {
+        const { key, agentId } = record;
+        if (!agentId) continue;
+        const agent = agentMap.get(agentId);
+        if (!agent) {
+          anomalies.push({ type: "ORCHESTRATOR_MISSING", key, agentId });
+          const alertKey = `missing:${agentId}`;
+          if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+            this.watchdogAlerts.set(alertKey, now);
+            const alert = `[Fleet Watchdog] Registered orchestrator for ${key} (${agentId.slice(0, 7)}) was not found on daemon.`;
+            void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+          }
+          continue;
+        }
+
+        if (agent.status === "error" || (agent.requiresAttention && agent.attentionReason === "error")) {
+          const rawErr = agent.lastError ?? "";
+          const errMsg = rawErr || "unknown error";
+          anomalies.push({ type: "AGENT_ERROR", key, agentId, error: errMsg });
+
+          const isUnrecoverable = /usage limit|quota|upgrade to pro|rate limit/i.test(errMsg);
+          const isTurnLock =
+            /foreground turn is already active/i.test(errMsg) ||
+            (!rawErr && agent.requiresAttention && agent.attentionReason === "error");
+
+          if (!isUnrecoverable) {
+            this.log(`[info] watchdog: attempting auto-recovery reload for ${agentId.slice(0, 7)} (${key})`);
+            const reloadRes = await reloadFn(agentId);
+            if (reloadRes.ok) {
+              this.log(`[info] watchdog: successfully reloaded ${agentId.slice(0, 7)}`);
+              const alertKey = `recovered:${agentId}`;
+              if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+                this.watchdogAlerts.set(alertKey, now);
+                const reasonDesc = isTurnLock ? "clearing foreground turn lock" : "reloading agent";
+                const alert = `[Fleet Watchdog] Auto-recovered orchestrator for ${key} (${agentId.slice(0, 7)}) by ${reasonDesc}.`;
+                void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+              }
+              continue;
+            }
+          }
+
+          const alertKey = `error:${agentId}`;
+          if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+            this.watchdogAlerts.set(alertKey, now);
+            const alert = `[Fleet Watchdog] Orchestrator for ${key} (${agentId.slice(0, 7)}) is in status error: "${errMsg}". Operator attention may be required.`;
+            void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+          }
+        }
+      }
+    }
+
+    for (const [key, attempts] of this.busyAttempts.entries()) {
+      if (attempts >= this.watchdogBusyThreshold) {
+        const q = this.queues.get(key) ?? [];
+        if (q.length > 0) {
+          anomalies.push({ type: "QUEUE_WEDGED", key, attempts, queueDepth: q.length });
+          const orchId = orchRecords.find((r) => r.key === key)?.agentId;
+          let reloaded = false;
+          if (orchId && reloadFn) {
+            this.log(`[info] watchdog: attempting auto-recovery reload for wedged orchestrator ${orchId.slice(0, 7)} (${key})`);
+            const reloadRes = await reloadFn(orchId);
+            if (reloadRes.ok) {
+              this.busyAttempts.delete(key);
+              this.busyQueues.delete(key);
+              const timer = this.backoffTimers.get(key);
+              if (timer) {
+                clearTimeout(timer);
+                this.backoffTimers.delete(key);
+              }
+              reloaded = true;
+              void this.drain(key);
+            }
+          }
+
+          const alertKey = `queue_wedged:${key}`;
+          if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+            this.watchdogAlerts.set(alertKey, now);
+            const alert = reloaded
+              ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${q.length} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`
+              : `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) and has failed delivery ${attempts} times.`;
+            void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+          }
+        }
+      }
+    }
+
+    return {
+      ok: true,
+      timestamp: now,
+      audited: {
+        orchestrators: orchRecords.length,
+        agents: agentMap ? agentMap.size : 0,
+        queues: this.busyAttempts.size,
+      },
+      anomalies,
+    };
+  }
+
+  public async pruneOrchestrators(opts: {
+    agentMap?: Map<string, WatchdogAgent> | null;
+    orchestratorRecords?: OrchestratorRecord[];
+  } = {}): Promise<PruneResult> {
+    let agentMap = opts.agentMap ?? null;
+    if (!agentMap) {
+      agentMap = await this.fetchAgentMap();
+    }
+    if (!agentMap) {
+      return { ok: false, error: "daemon unreachable", prunedCount: 0, pruned: [] };
+    }
+
+    const orchRecords = opts.orchestratorRecords ?? this.listOrchestratorRecords();
+    const pruned: Array<{ key: string; agentId: string; reason: string }> = [];
+    for (const record of orchRecords) {
+      const { key, agentId } = record;
+      if (!agentId || !agentMap.has(agentId)) {
+        const res = this.deleteOrchestrator(key);
+        if (res.ok) {
+          pruned.push({ key, agentId, reason: "agent not found on daemon" });
+        }
+      }
+    }
+    return { ok: true, prunedCount: pruned.length, pruned };
+  }
+
+  // -------------------------------------------------------------------------
+  // Front Desk context handoff
+  // -------------------------------------------------------------------------
+
+  public handoffPath(): string {
+    return join(dirname(this.stateDir), "latest-handoff.md");
+  }
+
+  public readHandoff(): string | null {
+    try {
+      const text = readFileSync(this.handoffPath(), "utf8");
+      return text || null;
+    } catch {
+      return null;
+    }
+  }
+
+  public writeHandoff(text: string): string {
+    const target = this.handoffPath();
+    mkdirSync(dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, String(text ?? ""), "utf8");
+    renameSync(tmp, target);
+    return target;
+  }
+
+  public handoffSummary(text: string | null, maxChars = 500): string {
+    if (!text) return "";
+    const flat = String(text).replace(/\s+/g, " ").trim();
+    return flat.length > maxChars ? `${flat.slice(0, maxChars)}…` : flat;
+  }
+
+  public frontDeskHandoffStatus(): HandoffStatus {
+    const current = this.readFrontDesk();
+    return {
+      agentId: current?.agentId ?? null,
+      updatedAt: current?.updatedAt ?? null,
+      handoffPath: this.handoffPath(),
+      summary: this.handoffSummary(this.readHandoff()),
+    };
+  }
+
+  public async doFrontDeskHandoff(input: {
+    agentId?: string | null;
+    handoffText?: string | null;
+    handoffFile?: string | null;
+  }): Promise<HandoffResult> {
+    const id = String(input.agentId ?? "").trim();
+    const text = typeof input.handoffText === "string" && input.handoffText.trim() ? input.handoffText : null;
+    let snapshot: string | null = text;
+    if (!snapshot && typeof input.handoffFile === "string" && input.handoffFile.trim()) {
+      try {
+        snapshot = readFileSync(input.handoffFile.trim(), "utf8");
+      } catch {
+        throw httpError(400, `could not read handoffFile: ${input.handoffFile.trim()}`);
+      }
+      if (!snapshot || !snapshot.trim()) throw httpError(400, "handoffFile is empty");
+    }
+    if (snapshot) this.writeHandoff(snapshot);
+    else snapshot = this.readHandoff();
+
+    if (!id) {
+      if (!text && !input.handoffFile?.trim?.()) throw httpError(400, "handoffText or agentId is required");
+      return {
+        agentId: null,
+        updatedAt: new Date().toISOString(),
+        handoffPath: this.handoffPath(),
+        summary: this.handoffSummary(snapshot),
+        orchestratorsNotified: 0,
+      };
+    }
+    if (!snapshot || !String(snapshot).trim()) throw httpError(400, "no handoff snapshot available");
+
+    const previous = this.readFrontDesk()?.agentId ?? null;
+    const paseo = this.getPaseo();
+    if (paseo?.agents?.ref) {
+      try {
+        const ref = paseo.agents.ref(id);
+        const current = ref.current?.();
+        if (!current) {
+          const refreshed = await ref.refresh?.().catch(() => null);
+          const agent = refreshed?.agent;
+          if (!agent?.id) throw httpError(404, `agent not found: ${id}`);
+        }
+      } catch (err) {
+        if ((err as any)?.status) throw err;
+      }
+    }
+
+    await this.updateAgentMetadata(id, "Front Desk", { role: "front-desk" });
+    if (previous && previous !== id) {
+      await this.updateAgentMetadata(previous, "Front Desk (retired)", { role: "retired-front-desk" });
+    }
+
+    const updatedAt = new Date().toISOString();
+    this.writeFrontDesk(id, "frontdesk-handoff");
+    void this.drain("frontdesk");
+
+    const onboarding =
+      `You are now the Front Desk agent. Read the active handoff snapshot at ${this.handoffPath()}. ` +
+      `Handoff snapshot:\n${String(snapshot).slice(0, 4000)}`;
+    await this.deliverMessage(id, onboarding, { noWait: true, steer: true });
+
+    const orchestrators = this.listOrchestratorAgentIds();
+    const notice = `Front Desk handover: ${id} is now Front Desk (handoff at ${this.handoffPath()}). Route operator escalations to it via 'paseo send --no-wait ${id} <msg>'.`;
+    let notified = 0;
+    for (const orchId of orchestrators) {
+      if (orchId !== id) {
+        const ok = await this.deliverMessage(orchId, notice, { noWait: true, steer: true });
+        if (ok) notified++;
+      }
+    }
+
+    this.log(`[info] front desk handoff -> ${id.slice(0, 7)}, notified ${notified} orchestrator(s)`);
+    return {
+      agentId: id,
+      updatedAt,
+      handoffPath: this.handoffPath(),
+      summary: this.handoffSummary(snapshot),
+      orchestratorsNotified: notified,
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Deterministic board sweep
+  // -------------------------------------------------------------------------
+
+  public async runBoardCheck(repo: string, hostname = "forge.mrs.uppidi.com"): Promise<BoardCheckResult> {
+    const script = process.env.FORGEJO_ISSUES_CHECK ?? "/home/xpufx/bin/forgejo-issues-check";
+    // Enrolled keys may be `owner/repo` or the forge-qualified `host/owner/repo`;
+    // the checker's `-R` argument always wants the trailing `owner/repo`.
+    const parts = String(repo ?? "").split("/").filter(Boolean);
+    const ownerRepo = parts.length > 2 ? parts.slice(-2).join("/") : parts.join("/");
+    try {
+      const { stdout } = await execFileAsync(script, ["--hostname", hostname, "-R", ownerRepo, "--json"], {
+        timeout: 30000,
+        maxBuffer: 5 * 1024 * 1024,
+      });
+      const parsed = JSON.parse(stdout || "{}");
+      const candidates: BoardCandidate[] = Array.isArray(parsed?.ranked_candidates)
+        ? parsed.ranked_candidates
+        : [];
+      return { repo, ok: true, candidates };
+    } catch (err: any) {
+      // The checker exits 1 whenever candidates exist; stdout still carries the report.
+      if (err?.stdout) {
+        try {
+          const parsed = JSON.parse(err.stdout);
+          const candidates: BoardCandidate[] = Array.isArray(parsed?.ranked_candidates)
+            ? parsed.ranked_candidates
+            : [];
+          return { repo, ok: true, candidates };
+        } catch {}
+      }
+      return { repo, ok: false, candidates: [], error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  public async runBoardSweep(repos?: string[]): Promise<BoardSweepResult> {
+    const targets = Array.from(
+      new Set((repos ?? this.getEnrolledRepos()).filter((k) => k && k !== "frontdesk")),
+    );
+    const actionable: Array<{ repo: string; count: number; dispatchable: number }> = [];
+    for (const repo of targets) {
+      const res = await this.runBoardCheck(repo);
+      if (!res.ok || res.candidates.length === 0) continue;
+      const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
+      actionable.push({ repo, count: res.candidates.length, dispatchable });
+    }
+
+    let notified = 0;
+    const frontDeskId = this.readFrontDesk()?.agentId ?? null;
+    if (actionable.length > 0 && frontDeskId) {
+      const lines = actionable.map(
+        (a) => `- ${a.repo}: ${a.count} actionable (${a.dispatchable} dispatchable)`,
+      );
+      const msg = `[Fleet Board Sweep] ${actionable.length} repo(s) with actionable tickets:\n${lines.join("\n")}`;
+      const ok = await this.deliverMessage(frontDeskId, msg, { noWait: true, steer: true });
+      if (ok) notified = 1;
+    }
+    this.log(`[info] Board sweep complete: ${targets.length} repo(s) swept, ${actionable.length} actionable`);
+    return { ok: true, swept: targets.length, actionable, notified };
+  }
+
+  public startBackgroundLoops(): void {
+    if (this.watchdogIntervalMs > 0 && !this.watchdogTimer) {
+      this.watchdogTimer = setInterval(() => {
+        void this.runWatchdogAudit().catch(() => {});
+      }, this.watchdogIntervalMs);
+      this.watchdogTimer.unref?.();
+    }
+    if (this.boardSweepIntervalMs > 0 && !this.boardSweepTimer) {
+      this.boardSweepTimer = setInterval(() => {
+        void this.runBoardSweep().catch(() => {});
+      }, this.boardSweepIntervalMs);
+      this.boardSweepTimer.unref?.();
+    }
+  }
+
+  public stopBackgroundLoops(): void {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    if (this.boardSweepTimer) {
+      clearInterval(this.boardSweepTimer);
+      this.boardSweepTimer = null;
+    }
+  }
+
   private queueFilePath(key: string): string {
     return join(this.queueDir, `${sanitizeKey(key)}.json`);
   }
@@ -753,9 +1732,9 @@ export class HookRouter {
     }
   }
 
-  public enqueue(key: string, msg: string, isSos = false): QueueEntry {
+  public enqueue(key: string, msg: string, isSos = false, stableIdOverride?: string): QueueEntry {
     const list = this.queues.get(key) ?? [];
-    const id = stableId(key, msg);
+    const id = stableIdOverride ?? stableId(key, msg);
 
     const existingIdx = list.findIndex((item) => item.id === id);
     if (existingIdx !== -1) {
@@ -1053,6 +2032,7 @@ export class HookRouter {
     return new Promise((resolve, reject) => {
       this.isClosed = false;
       this.bindLifecycleEvents();
+      this.startBackgroundLoops();
 
       if (this.httpServer && this.httpServer.listening) {
         resolve();
@@ -1086,6 +2066,7 @@ export class HookRouter {
         }
         this.startedAt = Date.now();
         this.log(`[info] Bundled hook router listening on http://${this.configuredHost}:${this.port}`);
+        this.startBackgroundLoops();
         resolve();
       });
     });
@@ -1093,11 +2074,17 @@ export class HookRouter {
 
   public stop(): Promise<void> {
     this.isClosed = true;
+    this.stopBackgroundLoops();
 
     for (const timer of this.backoffTimers.values()) {
       clearTimeout(timer);
     }
     this.backoffTimers.clear();
+
+    for (const entry of this.coalesceBuffers.values()) {
+      if (entry.timer) clearTimeout(entry.timer);
+    }
+    this.coalesceBuffers.clear();
 
     if (this.unsubscribeLifecycle) {
       this.unsubscribeLifecycle();
@@ -1267,6 +2254,54 @@ export class HookRouter {
         return;
       }
 
+      if (req.method === "GET" && (pathname === "/frontdesk-handoff" || pathname === "/handoff")) {
+        this.sendJson(res, 200, this.frontDeskHandoffStatus());
+        return;
+      }
+
+      if (req.method === "POST" && (pathname === "/frontdesk-handoff" || pathname === "/handoff")) {
+        const body = await this.readJsonBody(req);
+        if (body === null || typeof body !== "object" || Array.isArray(body)) {
+          this.sendJson(res, 400, { ok: false, error: "body must be a JSON object" });
+          return;
+        }
+        try {
+          const out = await this.doFrontDeskHandoff({
+            agentId: body.agentId,
+            handoffText: body.handoffText,
+            handoffFile: body.handoffFile,
+          });
+          this.sendJson(res, 200, out);
+        } catch (err: any) {
+          this.sendJson(res, Number(err?.status) || 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/orchestrators/prune") {
+        try {
+          const result = await this.pruneOrchestrators();
+          this.sendJson(res, 200, result);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/board-sweep") {
+        try {
+          const body = await this.readJsonBody(req).catch(() => ({}));
+          const repos = Array.isArray(body?.repos)
+            ? body.repos.filter((r: unknown) => typeof r === "string")
+            : undefined;
+          const result = await this.runBoardSweep(repos);
+          this.sendJson(res, 200, result);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
       if (req.method === "GET" && (pathname === "/orchestrators" || pathname.startsWith("/orchestrators/"))) {
         const pathRepo = pathname.startsWith("/orchestrators/")
           ? decodeURIComponent(pathname.slice("/orchestrators/".length))
@@ -1370,20 +2405,15 @@ export class HookRouter {
           return;
         }
 
-        const isFd = isFrontDeskEvent(body);
-        const isBypass = isBypassEvent(event, body);
-        const targetKey = isFd ? "frontdesk" : repoKey;
-        const msg = formatWebhookMessage(event, body);
-
-        this.log(`[info] Webhook received: event=${event} repo=${targetKey} bypass=${isBypass} frontDesk=${isFd}`);
-        const entry = this.enqueue(targetKey, msg, isBypass);
+        this.log(`[info] Webhook received: event=${event} repo=${isFrontDeskEvent(body) ? "frontdesk" : repoKey}`);
+        const outcome = await this.ingestWebhook(event, body);
         this.sendJson(res, 200, {
           ok: true,
           queued: true,
-          key: targetKey,
-          id: entry.id,
-          isBypass,
-          frontDesk: isFd,
+          key: outcome.key,
+          isBypass: outcome.bypass,
+          frontDesk: outcome.frontDesk,
+          coalesce: outcome.result,
         });
         return;
       }

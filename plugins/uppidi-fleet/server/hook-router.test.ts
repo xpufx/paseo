@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
@@ -27,6 +27,15 @@ import {
   configureHookService,
   getHookServiceStatus,
   getFleetRosterInfo,
+  eventKind,
+  eventHash,
+  sosStateOf,
+  formatDigest,
+  bufferKey,
+  FORGEJO_DIGEST_PREFIX,
+  envelopeAgentId,
+  type CoalesceEvent,
+  type WatchdogAgent,
 } from "./hook-router.js";
 
 describe("hook-router payload and key utilities", () => {
@@ -110,7 +119,7 @@ describe("hook-router payload and key utilities", () => {
     assert.equal((env as any).forgejo.subject.number, 380);
 
     const summary = summarize("issues", payload);
-    assert.match(summary, /🔔 Forgejo webhook incoming \[issues:opened\] xpufx-org\/paseo#380 "Test issue"/);
+    assert.match(summary, /🔔 Forgejo webhook incoming \[issues:opened\] xpufx-org\/paseo#380 Test issue \(by testuser\)/);
 
     const fullMessage = formatWebhookMessage("issues", payload);
     assert.ok(fullMessage.startsWith("[forgejo-hook] {"));
@@ -901,5 +910,634 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     assert.ok(info.enrolledRepos.includes("xpufx-org/aur-automation"));
     assert.deepEqual(info.mutedRepos, ["xpufx-org/aur-automation"]);
     assert.equal(info.repoQueuedHooks["xpufx-org/paseo"], 2);
+  });
+});
+
+describe("hook-router event coalescing and digest (#458)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-coalesce-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("derives deterministic event kind and hash", () => {
+    const key = "forge.mrs.uppidi.com/xpufx-org/paseo";
+    const labeled = { action: "labeled", label: { name: "state/1-wip" }, issue: { number: 42 } };
+    const commented = { action: "created", comment: { body: "hello" }, issue: { number: 42 } };
+
+    assert.equal(eventKind("issues", labeled), "state-transition");
+    assert.equal(eventKind("issues", commented), "issues:created");
+    assert.equal(eventKind("issue_comment", commented), "issue_comment:created");
+
+    const h1 = eventHash(key, 42, "state-transition", "operator", "body");
+    const h2 = eventHash(key, 42, "state-transition", "operator", "body");
+    const h3 = eventHash(key, 42, "state-transition", "operator", "other");
+    assert.equal(h1, h2);
+    assert.notEqual(h1, h3);
+    assert.equal(bufferKey(key, 42), `${key}#42`);
+    assert.equal(bufferKey(key, null), `${key}#?`);
+  });
+
+  it("identifies SOS state transitions, including cleared and retained states", () => {
+    const sosEvent = (action: string, labels: string[]) => ({
+      action,
+      label: { name: "priority/0-SOS" },
+      issue: { labels: labels.map((name) => ({ name })) },
+    });
+    assert.equal(sosStateOf("issues", sosEvent("labeled", ["priority/0-SOS"])), "priority/0-sos");
+    assert.equal(sosStateOf("issues", sosEvent("unlabeled", [])), "");
+    assert.equal(
+      sosStateOf("issues", {
+        action: "labeled",
+        label: { name: "flag/stop-work" },
+        issue: { labels: [{ name: "flag/stop-work" }] },
+      }),
+      "flag/stop-work",
+    );
+    assert.equal(sosStateOf("issue_comment", { comment: { body: "hi" } }), null);
+  });
+
+  it("formats a digest card with event counts, latest comment, and trailing URL", () => {
+    const buffered: CoalesceEvent[] = [
+      {
+        hash: "a",
+        kind: "issue_comment:created",
+        msg: "first",
+        commentBody: "first comment",
+        title: "Digest test",
+        stateLabels: ["state/1-wip"],
+        url: "https://forge.test/xpufx-org/paseo/issues/42",
+      },
+      {
+        hash: "b",
+        kind: "state-transition",
+        msg: "second",
+        commentBody: "latest comment body",
+        title: "Digest test",
+        stateLabels: ["state/2-review"],
+        url: "https://forge.test/xpufx-org/paseo/issues/42",
+      },
+    ];
+    const digest = formatDigest("forge.mrs.uppidi.com/xpufx-org/paseo", 42, buffered);
+    assert.ok(digest.startsWith(`${FORGEJO_DIGEST_PREFIX} `));
+    assert.match(digest, /#42 Digest test \[state\/2-review\]/);
+    assert.match(digest, /\(2 events: issue_comment:created, state-transition\)/);
+    assert.ok(digest.includes("Latest comment: latest comment body"));
+    assert.ok(digest.endsWith("https://forge.test/xpufx-org/paseo/issues/42"));
+  });
+
+  it("buffers burst events, dedupes identical deliveries, and flushes one digest", async () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      coalesceDisable: false,
+      debounceMs: 25,
+    });
+    const key = "forge.mrs.uppidi.com/xpufx-org/paseo";
+    const base = { repoKey: key, issue: 42, actor: "operator", title: "Burst", stateLabels: [], url: "", bypass: false };
+
+    assert.equal(router.coalesceOrSend({ ...base, kind: "issues:opened", commentBody: "opened", msg: "msg-1" }), "buffered");
+    assert.equal(router.coalesceOrSend({ ...base, kind: "issues:edited", commentBody: "edited", msg: "msg-2" }), "buffered");
+    assert.equal(router.coalesceOrSend({ ...base, kind: "issues:edited", commentBody: "edited", msg: "msg-2" }), "deduped");
+    assert.equal(router.getQueue(key).length, 0, "digest withheld until debounce");
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    const queue = router.getQueue(key);
+    assert.equal(queue.length, 1);
+    assert.ok(queue[0].msg.startsWith(FORGEJO_DIGEST_PREFIX));
+    assert.match(queue[0].msg, /2 events/);
+  });
+
+  it("bypass events skip the buffer while flushing any pending digest first", () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      coalesceDisable: false,
+      debounceMs: 10000,
+    });
+    const key = "forge.mrs.uppidi.com/xpufx-org/paseo";
+    const base = { repoKey: key, issue: 42, actor: "operator", title: "Burst", stateLabels: [], url: "", bypass: false };
+
+    assert.equal(router.coalesceOrSend({ ...base, kind: "issues:opened", commentBody: "opened", msg: "buffered-1" }), "buffered");
+    const result = router.coalesceOrSend({
+      ...base,
+      kind: "state-transition",
+      commentBody: "SOS",
+      msg: "SOS interrupt",
+      bypass: true,
+      sosState: "priority/0-sos",
+    });
+    assert.equal(result, "bypass");
+
+    const msgs = router.getQueue(key).map((e) => e.msg);
+    assert.ok(msgs.includes("SOS interrupt"));
+    assert.ok(msgs.some((m) => m.startsWith(FORGEJO_DIGEST_PREFIX) || m === "buffered-1"));
+  });
+
+  it("dedupes repeated SOS transitions but re-interrupts on a distinct state change", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0, coalesceDisable: false, debounceMs: 10000 });
+    const key = "forge.mrs.uppidi.com/xpufx-org/sos-dedup";
+    const base = { repoKey: key, issue: 79, actor: "operator", title: "SOS", stateLabels: [], url: "" };
+    const sendSos = (sosState: string) =>
+      router.coalesceOrSend({ ...base, kind: "state-transition", commentBody: "state-transition", msg: `SOS ${sosState}`, bypass: true, sosState });
+
+    assert.equal(sendSos("priority/0-sos"), "bypass");
+    assert.equal(sendSos("priority/0-sos"), "sos-deduped");
+    assert.equal(sendSos(""), "bypass");
+    assert.equal(sendSos("priority/0-sos"), "bypass");
+    assert.equal(router.getQueue(key).length, 3, "one message per distinct transition");
+  });
+
+  it("extracts the agent envelope id from a stamped comment footer", () => {
+    const body = {
+      comment: {
+        body: "Pre-flight complete.\n\n---\n<sub>🤖 **Orchestrator** (`agent-1`) · `model` · `platform:main` · _now_</sub>",
+      },
+    };
+    assert.equal(envelopeAgentId(body), "agent-1");
+    assert.equal(envelopeAgentId({ comment: { body: "plain comment" } }), null);
+  });
+});
+
+describe("hook-router fleet watchdog audit (#458)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let router: HookRouter;
+  let delivered: Array<{ id: string; msg: string }>;
+  let reloaded: string[];
+  let fakeDeliver: (id: string, msg: string) => Promise<boolean>;
+  let fakeReload: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  const frontDeskId = "fd-watchdog-agent";
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-watchdog-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeFrontDesk(frontDeskId, "test");
+    delivered = [];
+    reloaded = [];
+    fakeDeliver = async (id, msg) => {
+      delivered.push({ id, msg });
+      return true;
+    };
+    fakeReload = async (id) => {
+      reloaded.push(id);
+      return { ok: true };
+    };
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("reports a clean audit when no anomalies are present", async () => {
+    const cleanMap = new Map<string, WatchdogAgent>([
+      ["agent-1", { id: "agent-1", status: "idle", lastError: null }],
+      ["agent-2", { id: "agent-2", status: "running", lastError: null }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: cleanMap,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(audit.ok, true);
+    assert.equal(audit.anomalies.length, 0);
+    assert.equal(audit.audited.agents, 2);
+    assert.equal(audit.audited.orchestrators, 1);
+  });
+
+  it("detects missing orchestrators and alerts Front Desk", async () => {
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: new Map(),
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.ok(audit.anomalies.some((a) => a.type === "ORCHESTRATOR_MISSING"));
+    assert.ok(delivered.some((d) => d.id === frontDeskId && d.msg.includes("was not found on daemon")));
+  });
+
+  it("auto-recovers a foreground turn lock and notifies Front Desk", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-1", { id: "agent-1", status: "error", lastError: "A foreground turn is already active" }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.ok(audit.anomalies.some((a) => a.type === "AGENT_ERROR"));
+    assert.ok(reloaded.includes("agent-1"));
+    assert.ok(delivered.some((d) => d.id === frontDeskId && d.msg.includes("Auto-recovered")));
+  });
+
+  it("auto-recovers an ACP attention error with no lastError", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-1", { id: "agent-1", status: "running", requiresAttention: true, attentionReason: "error", lastError: null }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.ok(audit.anomalies.some((a) => a.type === "AGENT_ERROR"));
+    assert.ok(reloaded.includes("agent-1"));
+    assert.ok(delivered.some((d) => d.msg.includes("Auto-recovered")));
+  });
+
+  it("escalates when auto-reload fails", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-1", { id: "agent-1", status: "error", lastError: "A foreground turn is already active" }],
+    ]);
+    await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: async () => ({ ok: false, error: "daemon died" }),
+    });
+    assert.ok(delivered.some((d) => d.msg.includes("Operator attention may be required")));
+  });
+
+  it("does not reload on quota exhaustion and escalates instead", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-1", { id: "agent-1", status: "error", lastError: "You've hit your usage limit" }],
+    ]);
+    await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(reloaded.length, 0);
+    assert.ok(delivered.some((d) => d.msg.includes("usage limit")));
+  });
+
+  it("throttles repeat alerts within the cooldown window", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-1", { id: "agent-1", status: "error", lastError: "fatal boom" }],
+    ]);
+    await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: async () => ({ ok: false, error: "nope" }),
+    });
+    const first = delivered.length;
+    assert.ok(first > 0);
+    await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: async () => ({ ok: false, error: "nope" }),
+    });
+    assert.equal(delivered.length, first, "no duplicate alerts within cooldown");
+  });
+
+  it("intercepts pending permission requests with the permit command hint", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      [
+        "agent-perm-1",
+        {
+          id: "agent-perm-1",
+          title: "Worker Perm",
+          status: "running",
+          pendingPermissions: [{ id: "perm-req-42", tool: "run_command", title: "run bash command" }],
+        },
+      ],
+      ["agent-orch-1", { id: "agent-orch-1", status: "idle", lastError: null }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-orch-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.ok(
+      audit.anomalies.some(
+        (a) =>
+          a.type === "AGENT_PERMISSION_REQUIRED" &&
+          a.agentId === "agent-perm-1" &&
+          a.title === "Worker Perm" &&
+          Array.isArray(a.permissions) &&
+          a.permissions.length === 1,
+      ),
+    );
+    assert.ok(
+      delivered.some(
+        (d) =>
+          d.msg.includes("[Fleet Watchdog] Agent Worker Perm (agent-p)") &&
+          d.msg.includes("requires permission: run bash command") &&
+          d.msg.includes("paseo permit allow agent-perm-1 perm-req-42"),
+      ),
+    );
+  });
+
+  it("detects non-error attention stalls and alerts Front Desk", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-att-1", { id: "agent-att-1", title: "Worker Input", status: "idle", requiresAttention: true, attentionReason: "input", pendingPermissions: [] }],
+      ["agent-orch-1", { id: "agent-orch-1", status: "idle", lastError: null }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-orch-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.ok(
+      audit.anomalies.some(
+        (a) => a.type === "AGENT_ATTENTION_REQUIRED" && a.agentId === "agent-att-1" && a.reason === "input",
+      ),
+    );
+    assert.ok(delivered.some((d) => d.msg.includes("requires attention (input). Operator or Front Desk triage required.")));
+  });
+
+  it("flags wedged queues and auto-recovers the registered orchestrator", async () => {
+    (router as any).busyAttempts.set("wedged-with-orch", 12);
+    (router as any).queues.set("wedged-with-orch", [{ id: "m1", key: "wedged-with-orch", msg: "pending", ts: Date.now() }]);
+
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "wedged-with-orch", agentId: "agent-wedged" }],
+      agentMap: new Map([["agent-wedged", { id: "agent-wedged", status: "idle" }]]),
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.ok(audit.anomalies.some((a) => a.type === "QUEUE_WEDGED" && a.key === "wedged-with-orch"));
+    assert.ok(reloaded.includes("agent-wedged"));
+    assert.equal((router as any).busyAttempts.has("wedged-with-orch"), false);
+    assert.ok(delivered.some((d) => d.msg.includes("Auto-recovered wedged queue for wedged-with-orch")));
+  });
+});
+
+describe("hook-router orchestrator pruning (#458)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-prune-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("deletes orchestrator records for agents that no longer exist on the daemon", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-keep", "agent-keep");
+    router.writeOrchestrator("repo-prune", "agent-dead");
+
+    const result = await router.pruneOrchestrators({
+      orchestratorRecords: [
+        { key: "repo-keep", agentId: "agent-keep" },
+        { key: "repo-prune", agentId: "agent-dead" },
+      ],
+      agentMap: new Map([["agent-keep", { id: "agent-keep", status: "idle" }]]),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.prunedCount, 1);
+    assert.equal(result.pruned[0].key, "repo-prune");
+    assert.equal(router.readOrchestrator("repo-keep")?.agentId, "agent-keep");
+    assert.equal(router.readOrchestrator("repo-prune"), null);
+  });
+
+  it("deleteOrchestrator reports not found on a repeat delete", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-del", "agent-del");
+    assert.equal(router.deleteOrchestrator("repo-del").ok, true);
+    const second = router.deleteOrchestrator("repo-del");
+    assert.equal(second.ok, false);
+    assert.equal(second.error, "not found");
+  });
+});
+
+describe("hook-router Front Desk handoff (#458)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let router: HookRouter;
+  let sent: Array<{ id: string; text: string }>;
+  let updated: Array<{ id: string; name: string; labels: Record<string, string> }>;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-handoff-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    sent = [];
+    updated = [];
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          id,
+          current: () => ({ id, status: "idle", activeTurn: null }),
+          refresh: async () => ({ agent: { id, status: "idle" } }),
+          send: async (text: string) => {
+            sent.push({ id, text });
+          },
+          update: async (update: { name: string; labels: Record<string, string> }) => {
+            updated.push({ id, name: update.name, labels: update.labels });
+          },
+        }),
+      },
+    } as any;
+
+    const server = {
+      paseo: mockPaseo,
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("seeds the handoff snapshot without registering an agent", async () => {
+    const out = await router.doFrontDeskHandoff({ handoffText: "# staged\n\nOperator context." });
+    assert.equal(out.agentId, null);
+    assert.equal(router.readHandoff(), "# staged\n\nOperator context.");
+  });
+
+  it("rotates Front Desk, updates metadata, persists state, and notifies orchestrators", async () => {
+    router.writeOrchestrator("forge.test/xpufx-org/paseo", "orch-agent-1");
+    router.writeFrontDesk("fd-old", "test");
+
+    const out = await router.doFrontDeskHandoff({ agentId: "fd-new", handoffText: "# New Front Desk\n\nUse this context." });
+
+    assert.equal(out.agentId, "fd-new");
+    assert.equal(router.readFrontDesk()?.agentId, "fd-new");
+    assert.equal(router.readHandoff(), "# New Front Desk\n\nUse this context.");
+    assert.ok(updated.some((u) => u.id === "fd-new" && u.name === "Front Desk" && u.labels.role === "front-desk"));
+    assert.ok(
+      updated.some((u) => u.id === "fd-old" && u.name === "Front Desk (retired)" && u.labels.role === "retired-front-desk"),
+    );
+    assert.ok(sent.some((s) => s.id === "fd-new" && s.text.includes("handoff snapshot")));
+    assert.ok(sent.some((s) => s.id === "orch-agent-1" && s.text.includes("Front Desk handover")));
+    assert.equal(out.orchestratorsNotified, 1);
+  });
+
+  it("reads the handoff snapshot from a file", async () => {
+    const file = join(tempDir, "incoming.md");
+    writeFileSync(file, "# From file\n\nfile snapshot");
+    await router.doFrontDeskHandoff({ agentId: "fd-file", handoffFile: file });
+    assert.equal(router.readHandoff(), "# From file\n\nfile snapshot");
+    assert.equal(router.readFrontDesk()?.agentId, "fd-file");
+  });
+
+  it("rejects a handoff with neither text nor agentId", async () => {
+    await assert.rejects(() => router.doFrontDeskHandoff({}), /handoffText or agentId is required/);
+  });
+
+  it("exposes handoff status for the registered agent", async () => {
+    await router.doFrontDeskHandoff({ agentId: "fd-status", handoffText: "status snapshot" });
+    const status = router.frontDeskHandoffStatus();
+    assert.equal(status.agentId, "fd-status");
+    assert.equal(status.handoffPath, router.handoffPath());
+    assert.ok(status.summary.includes("status snapshot"));
+  });
+});
+
+describe("hook-router HTTP handoff, prune, and board sweep routes (#458)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let router: HookRouter;
+  let prevNodeEnv: string | undefined;
+
+  beforeEach(async () => {
+    prevNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "test";
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-http-extra-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+    await router.start();
+  });
+
+  afterEach(async () => {
+    await router.stop();
+    if (prevNodeEnv !== undefined) process.env.NODE_ENV = prevNodeEnv;
+    else delete process.env.NODE_ENV;
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("seeds and reports handoff via GET/POST /handoff", async () => {
+    const getInitial = await fetch(`http://127.0.0.1:${router.port}/handoff`);
+    assert.equal(getInitial.status, 200);
+    const initialBody = await getInitial.json();
+    assert.equal(initialBody.agentId, null);
+
+    const post = await fetch(`http://127.0.0.1:${router.port}/handoff`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handoffText: "# HTTP staged\n\nsnapshot" }),
+    });
+    assert.equal(post.status, 200);
+    const postBody = await post.json();
+    assert.equal(postBody.agentId, null);
+    assert.ok(postBody.summary.includes("HTTP staged"));
+
+    const getAfter = await fetch(`http://127.0.0.1:${router.port}/handoff`);
+    const afterBody = await getAfter.json();
+    assert.equal(afterBody.handoffPath, router.handoffPath());
+  });
+
+  it("prunes stale orchestrators via POST /orchestrators/prune", async () => {
+    router.writeOrchestrator("repo-stale", "agent-does-not-exist");
+    const res = await fetch(`http://127.0.0.1:${router.port}/orchestrators/prune`, { method: "POST" });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(typeof body.prunedCount, "number");
+  });
+
+  it("runs a board sweep via POST /board-sweep over explicit repos", async () => {
+    const fakeScript = join(tempDir, "fake-check.sh");
+    writeFileSync(
+      fakeScript,
+      `#!/bin/sh\ncat <<'JSON'\n{"ranked_candidates":[{"number":1,"title":"t","labels":[],"category":"dispatchable","is_dispatchable":true,"reason":"r"}]}\nJSON\n`,
+      { mode: 0o755 },
+    );
+    const prevScript = process.env.FORGEJO_ISSUES_CHECK;
+    process.env.FORGEJO_ISSUES_CHECK = fakeScript;
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/board-sweep`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repos: ["forge.test/xpufx-org/paseo"] }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.swept, 1);
+      assert.equal(body.actionable.length, 1);
+      assert.equal(body.actionable[0].dispatchable, 1);
+    } finally {
+      if (prevScript !== undefined) process.env.FORGEJO_ISSUES_CHECK = prevScript;
+      else delete process.env.FORGEJO_ISSUES_CHECK;
+    }
+  });
+
+  it("parses board check JSON even when the checker exits non-zero", async () => {
+    const fakeScript = join(tempDir, "fake-check-fail.sh");
+    writeFileSync(
+      fakeScript,
+      `#!/bin/sh\ncat <<'JSON'\n{"ranked_candidates":[{"number":7,"title":"x","labels":["state/1-wip"],"category":"verification","is_dispatchable":false,"reason":"r"}]}\nJSON\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const prevScript = process.env.FORGEJO_ISSUES_CHECK;
+    process.env.FORGEJO_ISSUES_CHECK = fakeScript;
+    try {
+      const result = await router.runBoardCheck("forge.test/xpufx-org/paseo");
+      assert.equal(result.ok, true);
+      assert.equal(result.candidates.length, 1);
+      assert.equal(result.candidates[0].number, 7);
+    } finally {
+      if (prevScript !== undefined) process.env.FORGEJO_ISSUES_CHECK = prevScript;
+      else delete process.env.FORGEJO_ISSUES_CHECK;
+    }
   });
 });

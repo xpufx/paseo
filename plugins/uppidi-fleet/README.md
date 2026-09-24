@@ -383,19 +383,23 @@ Ingress endpoints are `POST /forgejo` and `POST /hook` (aliases). Behaviour:
      changed label is `attention/frontdesk` or `attention/2-user`, or a comment
      body starts with `/frontdesk`.
    - **Bypass / SOS events** → jumped to the head of the queue. True when the
-     changed label is `priority/0-sos`, `flag/stop-work`, or any
-     `attention/*`, or a comment starts with `/orchestrator`, `/hold`,
-     `/rework`, `/sos`, or `/stop`. (Note the `priority/0-sos` spelling — see
-     the case warning in [§10](#10-gap-analysis--what-the-plugin-does-not-ship).)
-   - **Everything else** → the repo's normal queue, FIFO.
-5. Format a human-readable message and enqueue it.
+     changed label is `priority/0-sos` (case-insensitive), `flag/stop-work`,
+     `ping/*`, or any `attention/*`, or a comment starts with `/orchestrator`,
+     `/hold`, `/rework`, `/approve`, `/verify`, `/done`, `/close`,
+     `/instruction`, `/agent`, `/sos`, or `/stop`.
+   - **Routine comments stamped by the registered orchestrator** are suppressed
+     so an orchestrator cannot wake itself with its own envelope footer.
+   - **Everything else** → the repo's normal queue via **event coalescing**
+     (see [§7.6](#76-event-coalescing--digest)).
+5. Format a human-readable message and enqueue it (or buffer it for coalescing).
 
-The delivered message has this shape:
+The delivered message has this shape (the URL is appended so chat linkifiers can
+pick it up):
 
 ```
 [forgejo-hook] {"forgejo":{"version":1,"event":"issues","action":"opened", ...}}
 
-🔔 Forgejo webhook incoming [issues:opened] your-org/your-repo#42 "Fix the thing" (by alice)
+🔔 Forgejo webhook incoming [issues:opened] your-org/your-repo#42 Fix the thing (by alice)
 https://forge.example.com/your-org/your-repo/issues/42
 ```
 
@@ -430,8 +434,11 @@ Beyond ingress, the router exposes:
 | `GET /status` | Front desk record, paused queues, totals, repo count. |
 | `GET /queues` | Per-repo queue depth, busy state, orchestrator, message previews. |
 | `GET /frontdesk` · `POST /frontdesk` | Read / register the Front Desk (`{agentId, instruction?}`); notifies orchestrators. |
+| `GET /handoff` · `POST /handoff` (alias `/frontdesk-handoff`) | Front Desk rotation: seed `latest-handoff.md`, project role labels, retire the previous agent, persist `frontdesk.json`, notify orchestrators. |
 | `GET /orchestrators[/:repo]` | Read one or all orchestrator registrations. |
 | `POST /orchestrator` (alias `/orchestrate`) | Register `{repo, agentId}`. |
+| `POST /orchestrators/prune` | Delete registrations whose agent no longer exists on the daemon. |
+| `POST /board-sweep` | Run `~/bin/forgejo-issues-check` (`{repos?: string[]}`); notify Front Desk of actionable tickets. |
 | `POST /queues/:key/pause` · `/resume` · `/drain` | Per-queue control (also `POST /queue/{pause,resume,drain}` with `{repo}`). |
 
 Example registration (loopback, no secret needed):
@@ -442,6 +449,9 @@ curl -s -X POST http://127.0.0.1:8099/frontdesk \
 curl -s -X POST http://127.0.0.1:8099/orchestrator \
   -H 'Content-Type: application/json' \
   -d '{"repo":"forge.example.com/your-org/your-repo","agentId":"<YOUR_ORCH_ID>"}'
+curl -s -X POST http://127.0.0.1:8099/handoff \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"<NEW_FRONT_DESK_ID>","handoffText":"# Handoff\n\nOperator context."}'
 ```
 
 ### 7.5 Security notes
@@ -452,6 +462,45 @@ curl -s -X POST http://127.0.0.1:8099/orchestrator \
   or put an authenticating proxy in front. (Tracked in
   [§10](#10-gap-analysis--what-the-plugin-does-not-ship).)
 - Config uses atomic writes (temp file + rename) for queues, state, and config.
+
+### 7.6 Event coalescing & digest
+
+Rapid webhook bursts on the same `(repo, issue)` are buffered for
+`HOOK_DEBOUNCE_MS` (default `7000`) and flushed as one
+`🔔 Forgejo digest <repo>#<issue> … (N events: …)` card — the `forges` plugin
+renders that prefix as a presentation card. Identical deliveries are dropped;
+a burst is flushed early at `HOOK_COALESCE_MAX` (default `20`) events or once it
+has been open for `HOOK_COALESCE_WINDOW_MAX_MS` (default `30000`). Bypass events
+skip the buffer and are queued ahead of any pending digest, but a repeated SOS
+state is deduplicated so a single label flip does not re-interrupt per delivery.
+Set `HOOK_COALESCE_DISABLE=1` (or `coalesceDisable: true`) to enqueue every
+event directly.
+
+### 7.7 Fleet watchdog & auto-recovery
+
+A zero-token background loop (`WATCHDOG_INTERVAL_MS`, default `60000`) audits the
+daemon:
+
+- **Pending permissions** → `AGENT_PERMISSION_REQUIRED`; alerts Front Desk with
+  the adjudication command `paseo permit allow <agent> <requestId>`.
+- **ACP turn locks / attention errors** → `AGENT_ERROR`; an unrecoverable message
+  (quota / rate limit) escalates to Front Desk, otherwise the router runs
+  `paseo agent reload <id>` and reports the auto-recovery.
+- **Missing orchestrators** → `ORCHESTRATOR_MISSING`.
+- **Wedged queues** → `QUEUE_WEDGED` once `busyAttempts` reaches
+  `WATCHDOG_BUSY_THRESHOLD` (default `10`); the registered orchestrator is
+  reloaded and the queue drained.
+
+Alerts are throttled per subject by `WATCHDOG_ALERT_COOLDOWN_MS` (default
+`900000`, 15 min). `POST /orchestrators/prune` removes state files whose agent is
+gone.
+
+### 7.8 Deterministic board sweep
+
+`BOARD_SWEEP_INTERVAL_MS` (default `900000`, 15 min) runs
+`~/bin/forgejo-issues-check --json` across enrolled repos and alerts Front Desk
+when new actionable tickets surface. Run it on demand with `POST /board-sweep`.
+Override the script path with `FORGEJO_ISSUES_CHECK`.
 
 ---
 
@@ -591,14 +640,11 @@ these gaps yourself.
 - **Action:** export `FORGEJO_HOST` and `FORGEJO_TOKEN`, and pass the desired
   repo (or patch the defaults) until a settings field is added.
 
-### 10.5 The `priority/0-SOS` bypass has a case mismatch
+### 10.5 The `priority/0-SOS` bypass case mismatch is fixed
 
-- `isBypassEvent()` compares the label to `priority/0-sos` (lowercase) while the
-  canonical label is `priority/0-SOS`. As a result an `issues:labeled`
-  event carrying `priority/0-SOS` is **not** promoted to the head of the queue.
-  An `attention/*` label or a `/sos` comment still bypasses.
-- **Action:** be aware; fix the comparison upstream if you rely on SOS label
-  promotion. (A `/sos` comment always works.)
+- `isBypassEvent()` now lowercases the incoming label before comparing it to the
+  bypass label set, so an `issues:labeled` event carrying the canonical
+  `priority/0-SOS` is promoted to the head of the queue as intended.
 
 ### 10.6 The webhook secret is not verified
 
@@ -607,13 +653,13 @@ these gaps yourself.
 - **Action:** keep the listener on loopback or front it with an authenticating
   proxy until signature verification lands.
 
-### 10.7 The Front Desk hand-off endpoint does not exist
+### 10.7 The Front Desk hand-off endpoint now exists
 
-- The live Front Desk skill references `POST /frontdesk-handoff` and a
-  `latest-handoff.md`, but the bundled router implements **no such route**;
-  hand-off must be done with `POST /frontdesk {agentId}`.
-- **Action:** use the register endpoint (which also notifies orchestrators), or
-  implement the hand-off route.
+- `POST /handoff` (aliased as `POST /frontdesk-handoff`) implements the rotation
+  protocol: it seeds `latest-handoff.md`, projects the `Front Desk` role label,
+  retires the previous agent, persists `frontdesk.json`, and notifies
+  orchestrators. `GET /handoff` reports the active registration and snapshot
+  summary, matching the live Front Desk skill.
 
 ### 10.8 UI dispatch buttons are placeholders
 
@@ -689,6 +735,7 @@ these gaps yourself.
 | `~/.config/uppidi-fleet/queues/` | Persisted per-repo webhook queues. |
 | `~/.paseo/forgejo-hook/orchestrators/<key>.json` | Repo → orchestrator agent id. |
 | `~/.paseo/forgejo-hook/frontdesk.json` | Front Desk agent id. |
+| `~/.paseo/forgejo-hook/latest-handoff.md` | Active Front Desk hand-off snapshot. |
 | `~/.paseo/uppidi-fleet-role-models.json` | Per-role primary model + fallback group. |
 | `~/.paseo/uppidi-fleet-metrics.json` | Fleet capability metrics. |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `enrolledRepos`, `mutedRepos`). |
@@ -697,7 +744,10 @@ these gaps yourself.
 Environment variables: `FORGE_HOOK_HOST`, `FORGE_HOOK_PORT`/`HOOK_PORT`,
 `FORGE_HOOK_SECRET` (stored, unenforced), `FORGE_HOOK_CONFIG`,
 `HOOK_QUEUE_DIR`, `HOOK_STATE_DIR`, `FORGE_HOOK_URL`, `FORGEJO_HOST`,
-`FORGEJO_TOKEN`/`GITEA_TOKEN`.
+`FORGEJO_TOKEN`/`GITEA_TOKEN`, `HOOK_COALESCE_DISABLE`, `HOOK_DEBOUNCE_MS`,
+`HOOK_COALESCE_MAX`, `HOOK_COALESCE_WINDOW_MAX_MS`, `WATCHDOG_INTERVAL_MS`,
+`WATCHDOG_BUSY_THRESHOLD`, `WATCHDOG_ALERT_COOLDOWN_MS`,
+`BOARD_SWEEP_INTERVAL_MS`, `FORGEJO_ISSUES_CHECK`.
 
 ---
 
