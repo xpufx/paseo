@@ -517,44 +517,155 @@ event directly.
 
 ### 7.7 Fleet watchdog & auto-recovery
 
-A zero-token background loop (`WATCHDOG_INTERVAL_MS`, default `60000`) fuses the
-daemon view with persisted `~/.paseo/agents` metadata and the `~/.paseo` daemon
-logs, classifying every live agent against the deterministic anomaly taxonomy:
+A zero-token background loop audits the fleet every `WATCHDOG_INTERVAL_MS`
+(default `60000`, 1 min; `0` disables the loop) by fusing the daemon view with
+persisted `~/.paseo/agents/*/<id>.json` metadata and the `~/.paseo` daemon
+logs. Classifiers and recovery are deterministic — no model calls. Source of
+truth: [`server/hook-router.ts`](./server/hook-router.ts) — the taxonomy
+constants (`WATCHDOG_TAXONOMY`, `WATCHDOG_SEVERITIES`), the `detect*`
+classifiers, `assessAgentHealth`, `planWatchdogRecovery` /
+`recoverWatchdogAgent`, and the audit loop `runWatchdogAudit`.
 
-- `TURN_CONCURRENCY_LOCK` — `error` carrying a turn-concurrency failure.
-- `TURN_CANCELLATION_TIMEOUT` — a recent `cancelAgentRun` force-cancel in the
-  daemon logs for an `error`/`idle` agent.
-- `IDLE_POST_ERROR_AMNESIA` — `idle` with a stalled attention reason or ghost
-  `lastError`, and no live children.
-- `ZOMBIE_HUNG_TURN` — `running` with no activity for more than
-  `1800s` (`runningStaleSeconds`).
-- `STALE_ERROR_GHOSTING` — `idle`/`running` with a lingering disk `lastError`.
-- `PROVIDER_QUOTA_EXHAUSTION` — fatal quota/rate-limit errors; circuit-break.
+#### 7.7.1 Anomaly taxonomy
 
-Eligible findings (everything except quota exhaustion) run the ordered 4-step
-recovery pipeline: `paseo agent stop <id>` → wipe `lastError` from
-`~/.paseo/agents/*/<id>.json` → wipe `requiresAttention`/`attentionReason`/
-`attentionTimestamp` → `paseo send --steer --no-wait <id>` wake pulse. Recovery
-shares the watchdog cooldown, so a persistent finding is not acted on every tick.
-Quota exhaustion never auto-steers; it alerts Front Desk for an operator
-circuit-break.
+Every live, non-archived agent is classified against six taxonomy types
+(severity drives nothing on its own — it is reported in the anomaly payload):
 
-Additionally:
+| Type | Sev | Trigger |
+| --- | --- | --- |
+| `TURN_CONCURRENCY_LOCK` | high | Lifecycle `error` whose `lastError` matches a turn-concurrency marker (`foreground turn is already active`, `concurrent turn`, …). The legacy spelling — ACP attention with `attentionReason="error"` and no disk error — also matches. |
+| `TURN_CANCELLATION_TIMEOUT` | high | Daemon logs contain the `cancelagentrun: acknowledged turn still active after timeout` force-cancel for this agent (within the 24 h recency window) while the lifecycle is `error` or `idle`. |
+| `IDLE_POST_ERROR_AMNESIA` | medium | `idle`, zero running children, and a stall signal: attention reason in {`error`, `stalled`, `interrupted`, `failed`}, a ghost `lastError`, or `requiresAttention` with pending work assumed. Plain `attentionReason="finished"` is normal completion and is **not** flagged. |
+| `ZOMBIE_HUNG_TURN` | high | `running` with no recorded activity for ≥ 1800 s (`DEFAULT_RUNNING_STALE_SECONDS`). |
+| `STALE_ERROR_GHOSTING` | medium | Lifecycle `idle`/`running` (healthy) while disk metadata still carries a `lastError`. |
+| `PROVIDER_QUOTA_EXHAUSTION` | high | `lastError` matches a quota marker (quota, rate limit, 429, usage limit, insufficient credit, …) and no transient marker (fetch failed, econnreset, etimedout, …). Circuit-break: alert-only, never auto-steered. |
 
-- **Pending permissions** → `AGENT_PERMISSION_REQUIRED`; alerts Front Desk with
-  the adjudication command `paseo permit allow <agent> <requestId>`.
-- **ACP attention stalls** → `AGENT_ATTENTION_REQUIRED`.
-- **Generic orchestrator errors not owned by the taxonomy** → `AGENT_ERROR`; an
-  unrecoverable message (quota / rate limit) escalates to Front Desk, otherwise
-  the router runs `paseo agent reload <id>` and reports the auto-recovery.
-- **Missing orchestrators** → `ORCHESTRATOR_MISSING`.
-- **Wedged queues** → `QUEUE_WEDGED` once `busyAttempts` reaches
-  `WATCHDOG_BUSY_THRESHOLD` (default `10`); the registered orchestrator is
-  reloaded and the queue drained.
+Legacy (pre-taxonomy) findings are still raised alongside:
 
-Alerts are throttled per subject by `WATCHDOG_ALERT_COOLDOWN_MS` (default
-`900000`, 15 min). `POST /orchestrators/prune` removes state files whose agent is
-gone.
+| Type | Trigger |
+| --- | --- |
+| `AGENT_PERMISSION_REQUIRED` | Agent has `pendingPermissions`. |
+| `AGENT_ATTENTION_REQUIRED` | `requiresAttention` with a reason other than `error`/`finished` (which the taxonomy owns). |
+| `AGENT_ERROR` | Registered orchestrator is `status: error` and the taxonomy pass did not already handle it. |
+| `ORCHESTRATOR_MISSING` | A `<key>.json` state file references an agent id that no longer exists on the daemon. |
+| `QUEUE_WEDGED` | A queue has accumulated `WATCHDOG_BUSY_THRESHOLD` (default `10`) failed delivery attempts. |
+
+#### 7.7.2 Alert message formats
+
+All alerts are single-line strings delivered to Front Desk. `<name>` is the
+agent title (falling back to the 7-char id), `<id7>` is the first 7 chars of
+the agent id, `<key>` is the enrolled repo key:
+
+| Anomaly | Alert string |
+| --- | --- |
+| `AGENT_PERMISSION_REQUIRED` | `[Fleet Watchdog] Agent <name> (<id7>) requires permission: <action>. Front Desk adjudication command: paseo permit allow <agentId> <requestId>` — `<action>` is the pending permission's title/tool; the command drops `<requestId>` when the request carries none. |
+| `AGENT_ATTENTION_REQUIRED` | `[Fleet Watchdog] Agent <name> (<id7>) requires attention (<attentionReason \| "stalled">). Operator or Front Desk triage required.` |
+| Quota circuit-break | `[Fleet Watchdog] Agent <name> (<id7>) hit provider/quota exhaustion: "<lastError>". Circuit-break: no auto-steer; operator required.` |
+| Taxonomy auto-recovered | `[Fleet Watchdog] Auto-recovered agent <name> (<id7>) [<TYPE, TYPE>] via <actions joined by " -> ">.` — actions read `stop:ok`, `clear_error:ok`, `clear_attention:noop`, `steer:ok`. |
+| Taxonomy unhealthy (not steered) | `[Fleet Watchdog] Agent <name> (<id7>) unhealthy [<TYPE, TYPE>]. Operator attention may be required.` |
+| `AGENT_ERROR` auto-recovered | `[Fleet Watchdog] Auto-recovered orchestrator for <key> (<id7>) by clearing foreground turn lock.` or `… by reloading agent.` |
+| `AGENT_ERROR` escalated | `[Fleet Watchdog] Orchestrator for <key> (<id7>) is in status error: "<error>". Operator attention may be required.` |
+| `ORCHESTRATOR_MISSING` | `[Fleet Watchdog] Registered orchestrator for <key> (<id7>) was not found on daemon.` |
+| `QUEUE_WEDGED` (reloaded) | `[Fleet Watchdog] Auto-recovered wedged queue for <key> (<N> pending, <M> failed attempts) by reloading orchestrator <id7>.` |
+| `QUEUE_WEDGED` (stuck) | `[Fleet Watchdog] Queue for <key> has <N> pending message(s) and has failed delivery <M> times.` |
+
+#### 7.7.3 Recipient routing & delivery
+
+- The recipient is resolved by `readFrontDesk()` from the **first existing**
+  file, in order: `<stateDir>/frontdesk.json`
+  (default `~/.paseo/forgejo-hook/orchestrators/frontdesk.json`),
+  `dirname(stateDir)/frontdesk.json`
+  (default `~/.paseo/forgejo-hook/frontdesk.json` — where registration and
+  handoff actually write), then `<queueDir>/frontdesk.json`
+  (default `~/.config/uppidi-fleet/queues/frontdesk.json`). The filename is
+  `frontdesk.json` (no hyphen). The first file with a non-empty `agentId`
+  wins; corrupt JSON is ignored.
+- **No resolvable Front Desk ⇒ no alerts are sent.** Auto-recovery still runs,
+  but the watchdog is silent — register one via `POST /frontdesk` (§7.4).
+- Every alert is delivered with `{noWait: true, steer: true}`: SDK
+  `paseo.agents.ref(id).send(msg, {steer: true})`, falling back to
+  `paseo send --no-wait --steer <id> <msg>`. The alert lands immediately and
+  steers into (interrupts) the Front Desk's active turn.
+
+#### 7.7.4 Configuration & throttling
+
+| Env | Default | Purpose |
+| --- | --- | --- |
+| `WATCHDOG_INTERVAL_MS` | `60000` | Audit loop cadence (`0` disables the loop; test mode starts at `0`). |
+| `WATCHDOG_ALERT_COOLDOWN_MS` | `900000` (15 min) | Per-subject deduplication cooldown. |
+| `WATCHDOG_BUSY_THRESHOLD` | `10` | Failed delivery attempts before `QUEUE_WEDGED`. |
+
+Cooldown semantics (`canWatchdogAlert`): each alert subject is keyed —
+`permission:<agentId>:<reqId>`, `attention:<agentId>:<reason>`,
+`taxonomy:<agentId>:<types>`, `missing:<agentId>`, `error:<agentId>`,
+`recovered:<agentId>`, `queue_wedged:<key>` — and fires when
+`now - last >= cooldown`. First sighting stamps the key and fires immediately;
+repeat alerts (and repeat recovery) are suppressed until the cooldown elapses.
+**Alerts and recovery share the same key and gate:** a finding that is not
+cooldown-eligible is neither re-alerted nor re-recovered, so a persistently
+wedged agent is not stop/steered on every tick. The taxonomy key embeds the
+full type list, so a materially different finding re-keys (and re-alerts)
+immediately.
+
+#### 7.7.5 Operator runbook
+
+**Reading watchdog logs.** The router keeps a 1000-line in-memory ring buffer;
+tail it with the `uppidi-fleet.hook-log-tail` plugin tool. Watchdog lines:
+
+- `[info] watchdog: stop <id7> -> ok` — recovery step 1 executed.
+- `[info] watchdog: steer wake pulse <id7> -> ok|failed` — recovery step 4.
+- `[warn] watchdog: provider/quota exhaustion requires operator circuit-break for <id7>` — recovery refused.
+- `[info] watchdog: successfully reloaded <id7>` / `attempting auto-recovery reload` — legacy `AGENT_ERROR` path.
+
+Silence in the log means the audit found nothing. Front Desk alerts are the
+primary operator surface.
+
+**Manual adjudication.** Permission alerts embed the exact command — run it
+verbatim: `paseo permit allow <agentId> <requestId>` (or approve from the
+Cockpit's pending-permission surface). An alert repeating after the cooldown
+means the request is still pending.
+
+**What the 4-step recovery pipeline does per taxonomy.** For cooldown-eligible
+findings, `recoverWatchdogAgent` executes the ordered conservative pipeline,
+skipping steps the plan does not call for:
+
+| Taxonomy | 1 stop | 2 clear_error | 3 clear_attention | 4 steer |
+| --- | --- | --- | --- | --- |
+| `TURN_CONCURRENCY_LOCK` | ✓ | ✓ | — | ✓ |
+| `TURN_CANCELLATION_TIMEOUT` | ✓ | ✓ | — | ✓ |
+| `ZOMBIE_HUNG_TURN` | ✓ | ✓ | — | ✓ |
+| `IDLE_POST_ERROR_AMNESIA` | — | — | ✓ | ✓ |
+| `STALE_ERROR_GHOSTING` | — | ✓ | — | — |
+| `PROVIDER_QUOTA_EXHAUSTION` | — | — | — | — (blocked) |
+
+Concretely: `paseo agent stop <id>` → delete `lastError` from
+`~/.paseo/agents/*/<id>.json` (atomic rewrite) → delete
+`requiresAttention` / `attentionReason` / `attentionTimestamp` → steer a wake
+pulse with the canned health-check message ("Health check: your previous turn
+ended without resuming work. Sweep the board for triage and continue
+dispatching pending work."). The delivered auto-recovery alert records which
+steps ran (`via stop:ok -> clear_error:ok -> clear_attention:ok -> steer:ok`).
+Legacy `AGENT_ERROR` (orchestrator `status: error` not owned by the taxonomy)
+instead runs a single `paseo agent reload <id>`; `QUEUE_WEDGED` reloads the
+registered orchestrator and drains the queue.
+
+**When operator intervention is required.**
+
+- **`PROVIDER_QUOTA_EXHAUSTION` is a hard circuit-break.** `planWatchdogRecovery`
+  refuses the entire pipeline (no stop, no wipe, no steer — steering a
+  quota-dead turn only burns more of an exhausted budget). The alert repeats
+  every cooldown with the raw `lastError` inline. Fix the cause (top up
+  credits, wait out the rate limit, or switch model), then wake the agent with
+  `paseo send --no-wait --steer <id> <msg>` or restart it from the Paseo UI.
+- **`AGENT_ERROR` escalation**: the auto-reload failed (or the error text
+  matched a quota pattern) — triage the error string in the alert, then reload
+  manually.
+- **`AGENT_ATTENTION_REQUIRED`**: inspect with `paseo ls --json` / the Cockpit,
+  resolve the stall (interrupted/failed/stalled), steer or archive the agent.
+- **`ORCHESTRATOR_MISSING`**: re-register with `POST /orchestrator`, or remove
+  the orphaned state file with `POST /orchestrators/prune`.
+- **`QUEUE_WEDGED` (stuck variant)**: no reloadable orchestrator is registered
+  — register one (`POST /orchestrator`) and drain (`POST /queues/<key>/drain`).
 
 ### 7.8 Deterministic board sweep
 
@@ -772,7 +883,7 @@ these gaps yourself.
 | `~/.config/uppidi-fleet/router-config.json` | Legacy/compat router host, port, enrolled & muted repos. |
 | `~/.config/uppidi-fleet/queues/` | Persisted per-repo webhook queues. |
 | `~/.paseo/forgejo-hook/orchestrators/<key>.json` | Repo → orchestrator agent id. |
-| `~/.paseo/forgejo-hook/frontdesk.json` | Front Desk agent id. |
+| `~/.paseo/forgejo-hook/frontdesk.json` | Front Desk agent id (watchdog recipient; resolved via fallbacks — see [§7.7.3](#773-recipient-routing--delivery)). |
 | `~/.paseo/forgejo-hook/latest-handoff.md` | Active Front Desk hand-off snapshot. |
 | `~/.paseo/uppidi-fleet-role-models.json` | Per-role primary model + fallback group. |
 | `~/.paseo/uppidi-fleet-metrics.json` | Fleet capability metrics. |
