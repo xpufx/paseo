@@ -19,6 +19,15 @@ export function notificationSummary(packageName, version) {
 }
 
 /**
+ * npm reads a bare `user/repo` argument as a `github:` shorthand and refuses to
+ * fetch git dependencies when they are disabled (EALLOWGIT). Manifest tarballs
+ * are repo-relative paths like `demo/pkg.tgz`, so force npm to see a local path.
+ */
+export function localTarballPath(tarball) {
+  return tarball.startsWith(".") || path.isAbsolute(tarball) ? tarball : `./${tarball}`;
+}
+
+/**
  * Best-effort probe for the notify-only daemon. Returns whether notifications
  * are possible; a missing CLI or unreachable socket only warns and never stops
  * staging.
@@ -52,7 +61,7 @@ export function stagePackage(entry, { run = commandResult, npmBin = "npm", notif
   }
 
   console.log(`[npm-stage] staging ${entry.publishAs}@${entry.version} from ${entry.tarball}`);
-  run(npmBin, ["stage", "publish", entry.tarball, "--access", "public"]);
+  run(npmBin, ["stage", "publish", localTarballPath(entry.tarball), "--access", "public"]);
   if (notify) notifyStaged({ run, notifyBin, link }, entry);
   return { outcome: "staged" };
 }

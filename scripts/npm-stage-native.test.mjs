@@ -1,5 +1,5 @@
 /** Deterministic unit tests for the npm-native stage → 2fado notify path. */
-import { hasStagedVersion, notificationSummary, preflightNotifyDaemon, stagePackage, stagePackages } from "./npm-stage-native.mjs";
+import { hasStagedVersion, localTarballPath, notificationSummary, preflightNotifyDaemon, stagePackage, stagePackages } from "./npm-stage-native.mjs";
 
 let pass = 0;
 let fail = 0;
@@ -58,7 +58,7 @@ const quiet = (fn) => {
   };
   const result = stagePackage(entry, { run, link: "https://forge.example/runs/42" });
   check("success reports staged", result.outcome === "staged");
-  check("success publishes to npm stage", JSON.stringify(calls[1]) === JSON.stringify(["npm", ["stage", "publish", entry.tarball, "--access", "public"]]));
+  check("success publishes to npm stage", JSON.stringify(calls[1]) === JSON.stringify(["npm", ["stage", "publish", `./${entry.tarball}`, "--access", "public"]]));
   check("success emits one 2fado notify", JSON.stringify(calls[2]) === JSON.stringify(["2fado", ["notify", "--link", "https://forge.example/runs/42", "--summary", notificationSummary(entry.publishAs, entry.version)]]));
 }
 
@@ -100,6 +100,13 @@ const quiet = (fn) => {
   } catch { threw = true; }
   check("failed stage propagates failure", threw);
   check("failed stage does not notify", calls.length === 2 && calls.every(([command]) => command === "npm"));
+}
+
+{
+  check("bare relative tarball is rooted", localTarballPath("demo/pkg.tgz") === "./demo/pkg.tgz");
+  check("dot-prefixed tarball is preserved", localTarballPath("./demo/pkg.tgz") === "./demo/pkg.tgz");
+  check("parent-relative tarball is preserved", localTarballPath("../shared/pkg.tgz") === "../shared/pkg.tgz");
+  check("absolute tarball is preserved", localTarballPath("/tmp/stage/pkg.tgz") === "/tmp/stage/pkg.tgz");
 }
 
 check("duplicate matching is exact", hasStagedVersion([{ packageName: entry.publishAs, version: "1.2.4" }], entry.publishAs, entry.version) === false);
