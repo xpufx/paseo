@@ -49,6 +49,7 @@ Everything else (`spec/*`, `attention/*`, `state/*`, missing labels, one-word ti
 - One ticket = one worker. Isolate by package dir. Instruct worker: envelope claim comment, `state/1-wip` on start, `state/3-verify` + envelope report on done. Never `git add -A` (stage explicit paths only).
 - Tree conflicts gate dispatch: queue, don't collide. Single shared checkout means one worker in the tree at a time until worktree isolation (#52) exists.
 - Workers run via subagents; provider/model copied from a known-good session record, never guessed.
+- Workers labelled `paseo.parent-agent-id` now emit **reactive lifecycle wakeups** to you (`agent.child_waiting_for_input` / `agent.child_completed` / `agent.child_errored`) — do not poll `paseo permit ls` inside a turn. Spawn-time capability grants (`mode`, `allowPaths`) are available too. Contract: `plugins/uppidi-fleet/README.md` §13.6.
 
 ## 4. Pre-flight before human testing (only real gate)
 

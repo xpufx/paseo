@@ -12,6 +12,8 @@ import type {
   DeterministicAgentState,
   PendingPermission,
   AgentAttentionReason,
+  AgentBlockDetail,
+  AgentLifecycleState,
   UppidiArchiveAgentInput,
   UppidiArchiveAgentOutput,
   UppidiArchiveInactiveAgentsInput,
@@ -31,6 +33,9 @@ import {
   extractAgentWorktree,
   extractAgentProject,
   getPendingPermissionAction,
+  extractPermissionScope,
+  buildAgentBlockDetail,
+  deriveLifecycleState,
   DEFAULT_PROJECT,
 } from "../shared/contracts.js";
 import type { WorkspaceProjectMap } from "../shared/contracts.js";
@@ -181,6 +186,12 @@ export function normalizePendingPermissions(
     if (entry.tool) permission.tool = String(entry.tool);
     if (entry.kind) permission.kind = String(entry.kind);
     if (entry.description) permission.description = String(entry.description);
+    const input = entry.input && typeof entry.input === "object" ? entry.input : entry.metadata;
+    if (input && typeof input === "object") {
+      permission.input = input as Record<string, unknown>;
+    }
+    const scope = extractPermissionScope(permission);
+    if (scope) permission.scope = scope;
     result.push(permission);
   }
   return result;
@@ -214,7 +225,8 @@ export function deriveDeterministicState(
     const action = permissions[0]
       ? getPendingPermissionAction(permissions[0])
       : "tool permission";
-    return { state: "permission-prompt", detail: action };
+    const scope = permissions[0] ? extractPermissionScope(permissions[0]) : undefined;
+    return { state: "permission-prompt", detail: scope ? `${action} (${scope})` : action };
   }
 
   // 1. Error / Failed states
@@ -321,6 +333,11 @@ export function normalizeRawAgent(
     attributedWork,
     quotaAlertAgentIds
   );
+  const lifecycleState: AgentLifecycleState = deriveLifecycleState(deterministicState);
+  const blockDetail: AgentBlockDetail | undefined =
+    lifecycleState === "waiting_for_input"
+      ? buildAgentBlockDetail(id, pendingPermissions)
+      : undefined;
 
   const project = extractAgentProject(
     raw,
@@ -344,6 +361,8 @@ export function normalizeRawAgent(
     parentId: parentId || null,
     deterministicState,
     stateDetail,
+    lifecycleState,
+    blockDetail: blockDetail ?? null,
     attributedWork,
     usage: raw.lastUsage || null,
     url: raw.url || (id ? `paseo://agent/${id}` : undefined),
@@ -942,6 +961,231 @@ export async function handleUppidiArchiveInactiveAgents(
 
 // --- Front Desk & Orchestrator Lifecycle + Muting Handlers (#426) ---
 
+/**
+ * Declarative capabilities a spawner may grant a child at creation time (#537).
+ *
+ * The daemon has no pre-grant surface today (see README §13.6), so this is
+ * best-effort: `mode` is forwarded only for providers that accept it, and
+ * `allowPaths` triggers a bounded, post-spawn auto-allow of the first pending
+ * permission whose scope falls under a declared prefix.
+ */
+export interface SpawnCapabilities {
+  /** Provider mode to request at spawn (e.g. "yolo", "bypass"). */
+  mode?: string;
+  /** Providers that accept `mode`; defaults to `["antigravity-acp"]`. */
+  modeProviders?: string[];
+  /** Directory scope prefixes the child is expected to use. */
+  allowPaths?: string[];
+  /** Auto-allow the first scope-matching pending permission (default: true when allowPaths is set). */
+  autoAllow?: boolean;
+}
+
+export interface SpawnCapabilityResult {
+  /** Whether a requested spawn mode was actually forwarded to the provider. */
+  modeApplied?: boolean;
+  /** Result of the best-effort post-spawn auto-allow. */
+  autoAllow?: { allowed: boolean; permissionId?: string; scope?: string; reason?: string };
+}
+
+export interface RawPendingPermissionLike {
+  id?: string;
+  requestId?: string;
+  name?: string;
+  title?: string;
+  tool?: string;
+  kind?: string;
+  description?: string;
+  input?: Record<string, unknown>;
+}
+
+/** Default providers that accept an explicit spawn `mode`. */
+export const DEFAULT_SPAWN_MODE_PROVIDERS = ["antigravity-acp"];
+
+const AUTO_ALLOW_POLL_MS_DEFAULT = 500;
+const AUTO_ALLOW_TIMEOUT_MS_DEFAULT = 15_000;
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Resolves the provider-specific spawn mode from declared capabilities. */
+export function resolveSpawnMode(
+  provider: string,
+  capabilities?: SpawnCapabilities,
+): string | undefined {
+  const modeProviders = capabilities?.modeProviders ?? DEFAULT_SPAWN_MODE_PROVIDERS;
+  const requested = capabilities?.mode ?? (provider === "antigravity-acp" ? "yolo" : undefined);
+  if (!requested || !modeProviders.includes(provider)) return undefined;
+  return requested;
+}
+
+/**
+ * Lists pending permission requests per agent id, preferring the live SDK
+ * snapshot and falling back to `paseo permit ls --json`. Best-effort: returns
+ * an empty map when neither source answers.
+ */
+export async function listPendingPermissionsByAgent(
+  context?: PluginHandlerContext,
+): Promise<Map<string, RawPendingPermissionLike[]>> {
+  const byAgent = new Map<string, RawPendingPermissionLike[]>();
+  if (typeof (context?.paseo?.agents as any)?.list === "function") {
+    try {
+      const list = await (context!.paseo.agents as any).list();
+      const entries = list?.entries ?? list;
+      if (Array.isArray(entries)) {
+        for (const entry of entries) {
+          const a: any = entry?.agent ?? entry;
+          if (a?.id && Array.isArray(a.pendingPermissions) && a.pendingPermissions.length > 0) {
+            byAgent.set(a.id, a.pendingPermissions);
+          }
+        }
+        if (byAgent.size > 0) return byAgent;
+      }
+    } catch {
+      // fall through to CLI
+    }
+  }
+  try {
+    const { stdout } = await execFileAsync("paseo", ["permit", "ls", "--json"], {
+      timeout: 5000,
+      encoding: "utf-8",
+    });
+    const parsed = JSON.parse(stdout);
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        const agentId = item?.agentId;
+        if (!agentId) continue;
+        const list = byAgent.get(agentId) ?? [];
+        list.push(item);
+        byAgent.set(agentId, list);
+      }
+    }
+  } catch {
+    // best-effort: no CLI available
+  }
+  return byAgent;
+}
+
+/** Fetches the live pending permissions for one agent, SDK first, CLI fallback. */
+export async function fetchAgentPendingPermissions(
+  agentId: string,
+  context?: PluginHandlerContext,
+): Promise<RawPendingPermissionLike[]> {
+  if (typeof (context?.paseo?.agents as any)?.ref === "function") {
+    try {
+      const ref: any = context!.paseo.agents.ref(agentId);
+      let snapshot: any = typeof ref?.current === "function" ? ref.current() : null;
+      if (!snapshot && typeof ref?.refresh === "function") {
+        const refreshed = await ref.refresh();
+        snapshot = refreshed?.agent ?? refreshed;
+      }
+      const perms = snapshot?.pendingPermissions;
+      if (Array.isArray(perms)) return perms;
+    } catch {
+      // fall through to CLI
+    }
+  }
+  const byAgent = await listPendingPermissionsByAgent(undefined);
+  return byAgent.get(agentId) ?? [];
+}
+
+/** Returns the first pending permission whose scope falls under a prefix. */
+export function findScopeMatchingPermission(
+  permissions: RawPendingPermissionLike[],
+  scopePrefixes: readonly string[],
+): { permission: RawPendingPermissionLike; scope: string; prefix: string } | undefined {
+  const prefixes = scopePrefixes
+    .map((p) => p?.trim())
+    .filter((p): p is string => Boolean(p));
+  if (prefixes.length === 0) return undefined;
+  for (const permission of permissions) {
+    const scope = extractPermissionScope(permission as PendingPermission);
+    if (!scope) continue;
+    for (const prefix of prefixes) {
+      const normalized = prefix.endsWith("/") ? prefix : `${prefix}/`;
+      if (scope === prefix || scope.startsWith(normalized)) {
+        return { permission, scope, prefix };
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Best-effort post-spawn auto-allow: polls for a pending permission whose scope
+ * falls under a declared prefix and allows exactly one. Logs the outcome; never
+ * throws. Bounded by `timeoutMs` (default 15s) with `pollMs` cadence.
+ */
+export async function autoAllowScopedPermission(
+  agentId: string,
+  scopePrefixes: readonly string[],
+  context?: PluginHandlerContext,
+  opts: { timeoutMs?: number; pollMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<{ allowed: boolean; permissionId?: string; scope?: string; reason?: string }> {
+  if (!agentId || scopePrefixes.length === 0) return { allowed: false, reason: "no scope prefixes" };
+  const timeoutMs = opts.timeoutMs ?? AUTO_ALLOW_TIMEOUT_MS_DEFAULT;
+  const pollMs = opts.pollMs ?? AUTO_ALLOW_POLL_MS_DEFAULT;
+  const sleep = opts.sleep ?? defaultSleep;
+  const deadline = Date.now() + Math.max(0, timeoutMs);
+
+  do {
+    const permissions = await fetchAgentPendingPermissions(agentId, context).catch(() => []);
+    const match = findScopeMatchingPermission(permissions, scopePrefixes);
+    if (match) {
+      const requestId = match.permission.id || match.permission.requestId;
+      if (!requestId) break;
+      const allowed = await allowPermission(agentId, requestId, context);
+      if (allowed) {
+        console.info(
+          `[uppidi-fleet:agents] capability auto-allow: ${agentId} ${requestId} scope=${match.scope}`,
+        );
+        return { allowed: true, permissionId: requestId, scope: match.scope };
+      }
+      console.warn(`[uppidi-fleet:agents] capability auto-allow failed for ${agentId} ${requestId}`);
+      return { allowed: false, permissionId: requestId, scope: match.scope, reason: "allow failed" };
+    }
+    if (Date.now() >= deadline) break;
+    await sleep(pollMs);
+  } while (Date.now() <= deadline);
+
+  return { allowed: false, reason: "no scope-matching pending permission" };
+}
+
+/** Allows one permission request via SDK, falling back to the CLI. */
+export async function allowPermission(
+  agentId: string,
+  requestId: string,
+  context?: PluginHandlerContext,
+): Promise<boolean> {
+  if (typeof (context?.paseo?.agents as any)?.ref === "function") {
+    try {
+      const ref: any = context!.paseo.agents.ref(agentId);
+      if (typeof ref?.respondToPermission === "function") {
+        await ref.respondToPermission({ requestId, response: { behavior: "allow" } });
+        return true;
+      }
+    } catch (err: any) {
+      console.warn(
+        `[uppidi-fleet:agents] SDK respondToPermission failed for ${agentId} ${requestId}, falling back to CLI:`,
+        err?.message || err,
+      );
+    }
+  }
+  try {
+    await execFileAsync("paseo", ["permit", "allow", agentId, requestId], {
+      timeout: 10000,
+      encoding: "utf-8",
+    });
+    return true;
+  } catch (err: any) {
+    console.warn(
+      `[uppidi-fleet:agents] CLI permit allow failed for ${agentId} ${requestId}:`,
+      err?.message || err,
+    );
+    return false;
+  }
+}
+
 export async function spawnPaseoAgent(
   options: {
     title: string;
@@ -951,9 +1195,11 @@ export async function spawnPaseoAgent(
     cwd?: string;
     workspaceId?: string;
     labels?: Record<string, string>;
+    /** Declarative capability grant applied at/after spawn (#537). */
+    capabilities?: SpawnCapabilities;
   },
   context: PluginHandlerContext
-): Promise<{ ok: boolean; agentId?: string; error?: string }> {
+): Promise<{ ok: boolean; agentId?: string; error?: string } & SpawnCapabilityResult> {
   const categoryKey = options.category === "front-desk" ? "front-desk" : "orchestrator";
   let resolvedModel = options.model?.trim();
   if (!resolvedModel) {
@@ -979,6 +1225,15 @@ export async function spawnPaseoAgent(
     targetModelName = resolvedModel.slice(slashIndex + 1).trim() || undefined;
   }
 
+  const spawnMode = resolveSpawnMode(targetProvider, options.capabilities);
+  const allowPaths = options.capabilities?.allowPaths ?? [];
+  const shouldAutoAllow = options.capabilities?.autoAllow ?? allowPaths.length > 0;
+  const applyAutoAllow = async (id: string): Promise<SpawnCapabilityResult> => {
+    if (!shouldAutoAllow || allowPaths.length === 0) return {};
+    const autoAllow = await autoAllowScopedPermission(id, allowPaths, context);
+    return { autoAllow };
+  };
+
   // 1. Try SDK context.paseo.agents.create if available
   if (typeof (context?.paseo?.agents as any)?.create === "function") {
     try {
@@ -995,14 +1250,14 @@ export async function spawnPaseoAgent(
         createPayload.workspaceId = options.workspaceId;
         createPayload.workspace = options.workspaceId;
       }
-      if (targetProvider === "antigravity-acp") {
-        createPayload.mode = "yolo";
+      if (spawnMode) {
+        createPayload.mode = spawnMode;
       }
 
       const created = await (context.paseo.agents as any).create(createPayload);
       const id = created?.id || created?.agent?.id;
       if (id) {
-        return { ok: true, agentId: id };
+        return { ok: true, agentId: id, modeApplied: Boolean(spawnMode), ...(await applyAutoAllow(id)) };
       }
     } catch (err: any) {
       console.warn("[uppidi-fleet:agents] context.paseo.agents.create failed, falling back to CLI:", err?.message || err);
@@ -1018,8 +1273,8 @@ export async function spawnPaseoAgent(
     if (targetModelName) {
       args.push("--model", targetModelName);
     }
-    if (targetProvider === "antigravity-acp") {
-      args.push("--mode", "yolo");
+    if (spawnMode) {
+      args.push("--mode", spawnMode);
     }
     if (options.workspaceId) {
       args.push("--workspace", options.workspaceId);
@@ -1049,7 +1304,8 @@ export async function spawnPaseoAgent(
       }
     }
 
-    return { ok: true, agentId: agentId || `spawned-${Date.now()}` };
+    const resolvedId = agentId || `spawned-${Date.now()}`;
+    return { ok: true, agentId: resolvedId, modeApplied: Boolean(spawnMode), ...(await applyAutoAllow(resolvedId)) };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
   }

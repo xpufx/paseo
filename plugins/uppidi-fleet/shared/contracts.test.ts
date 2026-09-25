@@ -16,6 +16,12 @@ import {
   getPermissionAdjudicationCommand,
   getAgentAttentionReason,
   agentRequiresAttention,
+  deriveLifecycleState,
+  resolveAgentLifecycleState,
+  isBlockedLifecycleState,
+  extractPermissionScope,
+  buildAgentBlockDetail,
+  AgentLifecycleStateSchema,
   UppidiArchiveAgentInputSchema,
   UppidiArchiveAgentOutputSchema,
   uppidiArchiveAgentContract,
@@ -646,6 +652,102 @@ describe("uppidi-fleet shared contracts", () => {
     assert.equal(customized.hookPort, 9000);
     assert.deepEqual(customized.enrolledRepos, ["xpufx-org/paseo"]);
     assert.deepEqual(customized.mutedRepos, ["xpufx-org/other"]);
+  });
+});
+
+describe("subagent lifecycle contract & structured block detail (#537)", () => {
+  it("exposes the five canonical lifecycle states", () => {
+    const states = AgentLifecycleStateSchema.options;
+    assert.deepEqual([...states].sort(), [
+      "completed",
+      "errored",
+      "idle",
+      "running",
+      "waiting_for_input",
+    ]);
+  });
+
+  it("projects deterministic states onto the lifecycle contract without renaming #534", () => {
+    assert.equal(deriveLifecycleState("permission-prompt"), "waiting_for_input");
+    assert.equal(deriveLifecycleState("attention-required"), "waiting_for_input");
+    assert.equal(deriveLifecycleState("working"), "running");
+    assert.equal(deriveLifecycleState("running"), "running");
+    assert.equal(deriveLifecycleState("idle:waiting"), "idle");
+    assert.equal(deriveLifecycleState("sleeping"), "idle");
+    assert.equal(deriveLifecycleState("idle:quota-exhausted"), "idle");
+    assert.equal(deriveLifecycleState("failed:error"), "errored");
+    assert.equal(deriveLifecycleState("failed:quota-exhausted"), "errored");
+    assert.equal(deriveLifecycleState("unknown"), "idle");
+    assert.equal(isBlockedLifecycleState("waiting_for_input"), true);
+    assert.equal(isBlockedLifecycleState("running"), false);
+  });
+
+  it("resolves lifecycle from a payload, falling back to deterministicState", () => {
+    assert.equal(resolveAgentLifecycleState({ lifecycleState: "errored" }), "errored");
+    assert.equal(resolveAgentLifecycleState({ deterministicState: "permission-prompt" }), "waiting_for_input");
+    assert.equal(resolveAgentLifecycleState(null), "idle");
+  });
+
+  it("extracts scope from input keys, then a Scope: description", () => {
+    assert.equal(extractPermissionScope({ input: { path: "/tmp/work" } }), "/tmp/work");
+    assert.equal(extractPermissionScope({ input: { paths: ["/a", "/b"] } }), "/a, /b");
+    assert.equal(
+      extractPermissionScope({ description: "Scope: /home/xpufx/code/paseo/*" }),
+      "/home/xpufx/code/paseo/*",
+    );
+    assert.equal(extractPermissionScope({ description: "no scope here" }), "no scope here");
+    assert.equal(extractPermissionScope({}), undefined);
+    // Explicit scope wins.
+    assert.equal(
+      extractPermissionScope({ scope: "/explicit", input: { path: "/ignored" } }),
+      "/explicit",
+    );
+  });
+
+  it("builds structured block detail with required permission id, scope, and command", () => {
+    const detail = buildAgentBlockDetail("agent-537", [
+      {
+        id: "perm-req-537",
+        title: "run bash command",
+        description: "Scope: /tmp/worktree",
+      },
+    ]);
+    assert.ok(detail);
+    assert.equal(detail?.requiredPermissionId, "perm-req-537");
+    assert.equal(detail?.scope, "/tmp/worktree");
+    assert.equal(detail?.action, "run bash command");
+    assert.equal(detail?.command, "paseo permit allow agent-537 perm-req-537");
+    assert.equal(buildAgentBlockDetail("agent-537", []), undefined);
+  });
+
+  it("parses lifecycleState and blockDetail on UppidiAgentSchema", () => {
+    const agent = UppidiAgentSchema.parse({
+      id: "a-537",
+      shortId: "a-537",
+      name: "Worker",
+      category: "worker",
+      status: "running",
+      deterministicState: "permission-prompt",
+      lifecycleState: "waiting_for_input",
+      blockDetail: {
+        requiredPermissionId: "req-537",
+        scope: "/tmp",
+        command: "paseo permit allow a-537 req-537",
+      },
+    });
+    assert.equal(agent.lifecycleState, "waiting_for_input");
+    assert.equal(agent.blockDetail?.requiredPermissionId, "req-537");
+
+    // Legacy payloads without the new fields remain parseable.
+    const legacy = UppidiAgentSchema.parse({
+      id: "a-legacy",
+      shortId: "a-legacy",
+      name: "Legacy",
+      category: "worker",
+      status: "idle",
+    });
+    assert.equal(legacy.lifecycleState, undefined);
+    assert.equal(resolveAgentLifecycleState(legacy), "idle");
   });
 });
 

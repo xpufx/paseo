@@ -184,10 +184,13 @@ Key behaviours:
   pending permission prompt (`pendingPermissions.length > 0`) renders a pulsing
   `AttentionBeacon` warning (`⚠️ Permission Needed: <tool/action>`) with a
   copyable Front Desk adjudication command (`paseo permit allow <agent> <req>`);
-  an agent flagged `requiresAttention` (e.g. an interactive ask question)
+  an agent flagged   `requiresAttention` (e.g. an interactive ask question)
   renders an `Awaiting Input` badge carrying the daemon reason. The Cockpit
   header shows a fleet-wide `⚠️ N Need Attention` badge and the **Fleet Needs
-  Attention** board lists every blocked agent with one-click access.
+  Attention** board lists every blocked agent with one-click access. The
+  canonical subagent lifecycle state (`waiting_for_input`, …) and its structured
+  `blockDetail` (required permission id + scope) ride the same payload — see
+  [§13.6](#136-subagent-lifecycle-contract-reactive-wakeups--capability-grants).
 - **Router health** is shown in the header (`Router Active` / `Router Starting` / `Router Disconnected`).
 - **Dispatch is handled via the orchestrator protocol**, not from the UI: the
   orchestrator Skill creates and drives each worker's isolated worktree.
@@ -549,6 +552,7 @@ Legacy (pre-taxonomy) findings are still raised alongside:
 | `AGENT_ERROR` | Registered orchestrator is `status: error` and the taxonomy pass did not already handle it. |
 | `ORCHESTRATOR_MISSING` | A `<key>.json` state file references an agent id that no longer exists on the daemon. |
 | `QUEUE_WEDGED` | A queue has accumulated `WATCHDOG_BUSY_THRESHOLD` (default `10`) failed delivery attempts. |
+| `CHILD_WAKEUP` | A worker labelled `paseo.parent-agent-id` transitioned into a block / error / completion; a reactive pulse is steered into the parent (#537). See [§13.6](#136-subagent-lifecycle-contract-reactive-wakeups--capability-grants). |
 
 #### 7.7.2 Alert message formats
 
@@ -598,7 +602,9 @@ the agent id, `<key>` is the enrolled repo key:
 Cooldown semantics (`canWatchdogAlert`): each alert subject is keyed —
 `permission:<agentId>:<reqId>`, `attention:<agentId>:<reason>`,
 `taxonomy:<agentId>:<types>`, `missing:<agentId>`, `error:<agentId>`,
-`recovered:<agentId>`, `queue_wedged:<key>` — and fires when
+`recovered:<agentId>`, `queue_wedged:<key>`, `child_waiting:<child>:<reqId|reason>`,
+`child_errored:<child>`, `child_completed:<child>` (the `child_*` keys gate the
+reactive parent wakeups of [§13.6](#136-subagent-lifecycle-contract-reactive-wakeups--capability-grants)) — and fires when
 `now - last >= cooldown`. First sighting stamps the key and fires immediately;
 repeat alerts (and repeat recovery) are suppressed until the cooldown elapses.
 **Alerts and recovery share the same key and gate:** a finding that is not
@@ -965,6 +971,11 @@ mandate — see [§6](#6-skills-how-the-fleet-thinks) for the example skills thi
 references. The spawn also registers the agent with the router
 (`writeOrchestrator` + `enrollRepo`) so webhooks route to it.
 
+`spawnPaseoAgent` also accepts an optional `capabilities` grant (spawn `mode`
+plus `allowPaths` auto-allow seeds) and emits reactive lifecycle wakeups back to
+the parent — both covered in
+[§13.6](#136-subagent-lifecycle-contract-reactive-wakeups--capability-grants).
+
 ## 13.2 Test state isolation
 
 Tests that touch hook-router state, Front Desk/orchestrator registrations, or
@@ -1056,6 +1067,81 @@ report the active registration plus a snapshot summary). Body:
 5. Steer an onboarding message to the new agent (handoff path + snapshot
    excerpt) and notify every registered orchestrator with the handover notice
    and the escalation route (`paseo send --no-wait <id> <msg>`).
+
+## 13.6 Subagent lifecycle contract, reactive wakeups & capability grants
+
+The deterministic subagent contract from #537. It **extends** the #534 blocked
+states — nothing is renamed — and lives on the server `UppidiAgent` payload and
+in [`shared/contracts.ts`](./shared/contracts.ts).
+
+**Canonical lifecycle states.** Alongside the finer-grained
+`deterministicState`, every normalized agent carries a first-class
+`lifecycleState` projected by `deriveLifecycleState`:
+
+| `lifecycleState` | Source `deterministicState` | Meaning |
+| --- | --- | --- |
+| `running` | `working`, `running` | Active turn |
+| `waiting_for_input` | `permission-prompt`, `attention-required` | Blocked on a permission or operator input |
+| `idle` | `idle:waiting`, `sleeping`, `idle:quota-exhausted`, `unknown` | Alive, waiting for a turn |
+| `errored` | `failed:spawn` / `failed:timeout` / `failed:error` / `failed:quota-exhausted` | Terminal failure |
+| `completed` | (observed as idle + `attentionReason: "finished"`) | Finished a turn |
+
+Read it defensively with `resolveAgentLifecycleState(agent)`, which falls back to
+the deterministic projection for legacy/partial payloads. `lifecycleState` is
+optional on `UppidiAgentSchema` (so old payloads still parse); the server always
+populates it.
+
+**Structured block detail.** When `lifecycleState === "waiting_for_input"`, the
+agent also carries `blockDetail`:
+
+```json
+{
+  "requiredPermissionId": "per_0d5f…",
+  "scope": "/home/xpufx/code/paseo/*",
+  "action": "access external dir",
+  "command": "paseo permit allow <agentId> <requiredPermissionId>"
+}
+```
+
+`requiredPermissionId` is the request id for `paseo permit allow <agent> <req>`;
+`scope` is extracted from the request `input` (a `path`/`directory`/… key) and
+falls back to a daemon `description` of the form `Scope: <path>` (the
+`external_directory` shape). `stateDetail` also folds the scope in
+(`<action> (<scope>)`). Source: `normalizePendingPermissions` +
+`buildAgentBlockDetail`.
+
+**Reactive child wakeups.** The watchdog tick (§7.7, same
+`WATCHDOG_INTERVAL_MS` cadence — no new polling thread) also acts as a bounded
+watcher over workers labelled `paseo.parent-agent-id`. When such a child
+transitions:
+
+- into a block → `agent.child_waiting_for_input`
+  (`… is waiting for input: <action> scope=<scope>. Adjudicate: paseo permit allow <child> <req>`)
+- into error → `agent.child_errored`
+- into idle/`finished` completion → `agent.child_completed`
+
+…the pulse is delivered **directly to the parent** with
+`paseo send --steer --no-wait <parentId>` (the same `deliver()` primitive as
+Front Desk alerts; no Front Desk routing). Dedup reuses `canWatchdogAlert` with
+per-`(child,event)` keys — `child_waiting:<id>:<reqId|reason>`,
+`child_errored:<id>`, `child_completed:<id>` — so a persistently blocked child
+is not re-pinged every tick, and a **changed** permission request re-keys and
+re-notifies immediately. Each pulse also raises a `CHILD_WAKEUP` anomaly with
+`parentAgentId`, `event`, `permissionId`, and `scope`. Disable with
+`childWakeups: false` in the audit options.
+
+**Capability grants at spawn.** `spawnPaseoAgent` accepts an optional
+`capabilities` grant. Where the daemon CLI/SDK supports it, `mode` is forwarded
+to declared `modeProviders` (default `["antigravity-acp"]` → `yolo`); other
+providers ignore it. `allowPaths` seeds a bounded, best-effort auto-allow:
+after spawn the plugin polls `pendingPermissions` (SDK `ref()`, falling back to
+`paseo permit ls --json`) and allows **exactly one** request whose scope falls
+under a declared prefix, logging the outcome. This is a plugin-surface shim —
+**the daemon has no pre-grant/permission-inheritance surface today**, so
+capability inheritance is best-effort, not enforced (daemon-side gap tracked in
+[#537](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/537)). Cross-ref:
+[§13.1](#131-daemon-workspace-scoping--orchestrator-spawning) for the spawn
+target contract this builds on.
 
 ---
 

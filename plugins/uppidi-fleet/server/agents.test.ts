@@ -16,6 +16,10 @@ import {
   getWorkspaceProjectMap,
   setWorkspaceProjectMapForTest,
   applyParentProjectInheritance,
+  resolveSpawnMode,
+  findScopeMatchingPermission,
+  autoAllowScopedPermission,
+  setExecFileAsyncForTest,
 } from "./agents.js";
 import { DEFAULT_PROJECT } from "../shared/contracts.js";
 
@@ -306,5 +310,129 @@ describe("agent pending permissions and attention mapping (#534)", () => {
     assert.equal(inputAgent?.requiresAttention, true);
     assert.equal(inputAgent?.attentionReason, "input");
     assert.equal(inputAgent?.deterministicState, "attention-required");
+  });
+});
+
+describe("subagent lifecycle projection & structured block detail (#537)", () => {
+  it("maps permission blocks onto waiting_for_input with stateDetail scope and blockDetail", () => {
+    const agent = normalizeRawAgent(
+      {
+        id: "agent-lifecycle-537",
+        name: "Worker Lifecycle",
+        status: "running",
+        pendingPermissions: [
+          {
+            id: "perm-req-537",
+            name: "external_directory",
+            title: "access external dir",
+            description: "Scope: /home/xpufx/code/paseo/*",
+          },
+        ],
+      },
+      new Set(),
+      {}
+    );
+
+    assert.equal(agent.deterministicState, "permission-prompt");
+    assert.equal(agent.lifecycleState, "waiting_for_input");
+    assert.equal(agent.stateDetail, "access external dir (/home/xpufx/code/paseo/*)");
+    assert.equal(agent.blockDetail?.requiredPermissionId, "perm-req-537");
+    assert.equal(agent.blockDetail?.scope, "/home/xpufx/code/paseo/*");
+    assert.equal(agent.blockDetail?.command, "paseo permit allow agent-lifecycle-537 perm-req-537");
+  });
+
+  it("derives lifecycleState for idle and error agents without block detail", () => {
+    const idle = normalizeRawAgent({ id: "idle-537", status: "idle" }, new Set(), {});
+    assert.equal(idle.lifecycleState, "idle");
+    assert.equal(idle.blockDetail ?? null, null);
+
+    const errored = normalizeRawAgent(
+      { id: "err-537", status: "error", lastError: "boom" },
+      new Set(),
+      {}
+    );
+    assert.equal(errored.lifecycleState, "errored");
+  });
+
+  it("normalizes permission input metadata into a scope", () => {
+    const [permission] = normalizePendingPermissions([
+      { id: "p-537", tool: "external_directory", metadata: { path: "/tmp/scratch" } },
+    ]);
+    assert.equal(permission?.scope, "/tmp/scratch");
+  });
+
+  it("resolves the spawn mode per provider and declared capabilities", () => {
+    assert.equal(resolveSpawnMode("antigravity-acp"), "yolo");
+    assert.equal(resolveSpawnMode("opencode"), undefined);
+    assert.equal(
+      resolveSpawnMode("opencode", { mode: "bypass", modeProviders: ["opencode"] }),
+      "bypass",
+    );
+    assert.equal(resolveSpawnMode("antigravity-acp", { mode: "plan" }), "plan");
+  });
+
+  it("matches only pending permissions whose scope falls under a declared prefix", () => {
+    const perms = [
+      { id: "unrelated", description: "Scope: /var/other" },
+      { id: "match", description: "Scope: /tmp/worktree/sub" },
+    ];
+    const match = findScopeMatchingPermission(perms, ["/tmp/worktree"]);
+    assert.equal(match?.permission.id, "match");
+    assert.equal(match?.scope, "/tmp/worktree/sub");
+    assert.equal(findScopeMatchingPermission(perms, ["/nope"]), undefined);
+    assert.equal(findScopeMatchingPermission(perms, []), undefined);
+  });
+});
+
+describe("spawn capability auto-allow (#537)", () => {
+  it("allows the first scope-matching pending permission via the CLI fallback", async () => {
+    const calls: string[][] = [];
+    setExecFileAsyncForTest(async (file, args) => {
+      calls.push([file, ...args]);
+      if (args[0] === "permit" && args[1] === "ls") {
+        return {
+          stdout: JSON.stringify([
+            { id: "other", agentId: "agent-auto-537", description: "Scope: /var/elsewhere" },
+            { id: "target-req", agentId: "agent-auto-537", description: "Scope: /tmp/worktree" },
+          ]),
+        };
+      }
+      return { stdout: "" };
+    });
+    try {
+      const res = await autoAllowScopedPermission("agent-auto-537", ["/tmp/worktree"], undefined, {
+        timeoutMs: 0,
+        pollMs: 0,
+      });
+      assert.equal(res.allowed, true);
+      assert.equal(res.permissionId, "target-req");
+      assert.equal(res.scope, "/tmp/worktree");
+      assert.ok(
+        calls.some(
+          (c) => c[0] === "paseo" && c[1] === "permit" && c[2] === "allow" && c[4] === "target-req",
+        ),
+      );
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+  });
+
+  it("reports no match when nothing falls under the declared prefix", async () => {
+    setExecFileAsyncForTest(async (file, args) => {
+      if (args[0] === "permit" && args[1] === "ls") {
+        return { stdout: JSON.stringify([{ id: "x", agentId: "agent-none", description: "Scope: /var/other" }]) };
+      }
+      return { stdout: "" };
+    });
+    try {
+      const res = await autoAllowScopedPermission("agent-none", ["/tmp/worktree"], undefined, {
+        timeoutMs: 0,
+        pollMs: 0,
+      });
+      assert.equal(res.allowed, false);
+      assert.equal(res.reason, "no scope-matching pending permission");
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
   });
 });

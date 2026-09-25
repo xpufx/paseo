@@ -46,6 +46,9 @@ import {
   loadAgentDiskMetadata,
   scanCancellationTimeouts,
   countActiveWorkers,
+  assessChildWakeup,
+  formatChildWakeupMessage,
+  CHILD_WAKEUP_EVENTS,
   type CoalesceEvent,
   type WatchdogAgent,
   type WatchdogAgentDisk,
@@ -1447,6 +1450,147 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.ok(reloaded.includes("agent-wedged"));
     assert.equal((router as any).busyAttempts.has("wedged-with-orch"), false);
     assert.ok(delivered.some((d) => d.msg.includes("Auto-recovered wedged queue for wedged-with-orch")));
+  });
+});
+
+describe("reactive child-lifecycle wakeups (#537)", () => {
+  let tempDir: string;
+  let router: HookRouter;
+  let delivered: Array<{ id: string; msg: string }>;
+  const parentId = "parent-orch-537";
+  const childLabels = { "paseo.parent-agent-id": parentId };
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-child-wakeup-test-"));
+    router = new HookRouter(null, {
+      queueDir: join(tempDir, "queues"),
+      stateDir: join(tempDir, "state"),
+      port: 0,
+    });
+    delivered = [];
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  const deliver = (id: string, msg: string) => {
+    delivered.push({ id, msg });
+    return Promise.resolve(true);
+  };
+
+  const parentAgent: WatchdogAgent = { id: parentId, title: "Project Orchestrator", status: "running" };
+
+  it("classifies blocked children as waiting and derives permission id + scope", () => {
+    const assessment = assessChildWakeup("child-blocked", {
+      id: "child-blocked",
+      title: "Blocked Child",
+      status: "running",
+      labels: childLabels,
+      pendingPermissions: [{ id: "req-537", name: "external_directory", description: "Scope: /tmp/wt" }],
+    });
+    assert.equal(assessment?.kind, "waiting");
+    assert.equal(assessment?.event, CHILD_WAKEUP_EVENTS.waiting);
+    assert.equal(assessment?.permissionId, "req-537");
+    assert.equal(assessment?.scope, "/tmp/wt");
+    assert.equal(assessment?.alertKey, "child_waiting:child-blocked:req-537");
+  });
+
+  it("classifies errored and completed children", () => {
+    assert.equal(assessChildWakeup("c-err", { id: "c-err", status: "error" })?.kind, "errored");
+    assert.equal(assessChildWakeup("c-fin", { id: "c-fin", status: "idle", attentionReason: "finished" })?.kind, "completed");
+    assert.equal(assessChildWakeup("c-idle", { id: "c-idle", status: "idle" })?.kind, "completed");
+    assert.equal(assessChildWakeup("c-run", { id: "c-run", status: "running" }), null);
+  });
+
+  it("formats a waiting wakeup with the adjudication command", () => {
+    const message = formatChildWakeupMessage(
+      { id: "child-blocked", title: "Blocked Child" },
+      { kind: "waiting", event: CHILD_WAKEUP_EVENTS.waiting, alertKey: "k", detail: "access external dir", permissionId: "req-537", scope: "/tmp/wt" },
+    );
+    assert.ok(message.includes("waiting for input: access external dir"));
+    assert.ok(message.includes("scope=/tmp/wt"));
+    assert.ok(message.includes("paseo permit allow child-blocked req-537"));
+  });
+
+  it("wakes the parent only, once per (child,event), and never the Front Desk", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      [parentId, parentAgent],
+      [
+        "child-blocked",
+        {
+          id: "child-blocked",
+          title: "Blocked Child",
+          status: "running",
+          labels: childLabels,
+          pendingPermissions: [{ id: "req-537", description: "Scope: /tmp/wt" }],
+        },
+      ],
+      ["child-done", { id: "child-done", title: "Done Child", status: "idle", labels: childLabels }],
+    ]);
+
+    const audit = await router.runWatchdogAudit({ agentMap: map, deliver, reloadAgent: async () => ({ ok: true }) });
+    assert.equal(audit.anomalies.filter((a) => a.type === "CHILD_WAKEUP").length, 2);
+    const waiting = audit.anomalies.find((a) => a.event === CHILD_WAKEUP_EVENTS.waiting);
+    assert.equal(waiting?.parentAgentId, parentId);
+    assert.equal(waiting?.permissionId, "req-537");
+    assert.equal(waiting?.scope, "/tmp/wt");
+    assert.ok(delivered.every((d) => d.id === parentId), "no wakeup is routed to Front Desk");
+    assert.ok(delivered.some((d) => d.msg.includes("waiting for input")));
+    assert.ok(delivered.some((d) => d.msg.includes("completed and is idle")));
+
+    // Second tick within the cooldown must not re-deliver or re-report.
+    const before = delivered.length;
+    const second = await router.runWatchdogAudit({ agentMap: map, deliver, reloadAgent: async () => ({ ok: true }) });
+    assert.equal(second.anomalies.filter((a) => a.type === "CHILD_WAKEUP").length, 0);
+    assert.equal(delivered.length, before);
+  });
+
+  it("re-keys a waiting wakeup when the permission request changes", async () => {
+    const child = (requestId: string) => ({
+      id: "child-rekey",
+      title: "Rekey Child",
+      status: "running",
+      labels: childLabels,
+      pendingPermissions: [{ id: requestId }],
+    });
+    const first = new Map<string, WatchdogAgent>([[parentId, parentAgent], ["child-rekey", child("req-1")]]);
+    await router.runWatchdogAudit({ agentMap: first, deliver, reloadAgent: async () => ({ ok: true }) });
+    const countAfterFirst = delivered.length;
+    assert.ok(countAfterFirst > 0);
+
+    const second = new Map<string, WatchdogAgent>([[parentId, parentAgent], ["child-rekey", child("req-2")]]);
+    await router.runWatchdogAudit({ agentMap: second, deliver, reloadAgent: async () => ({ ok: true }) });
+    assert.ok(delivered.some((d) => d.msg.includes("permit allow child-rekey req-2")));
+  });
+
+  it("skips children with no parent, a missing parent, an archived parent, or archived child", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      [parentId, { ...parentAgent, archivedAt: "2026-01-01T00:00:00Z" }],
+      ["orphan", { id: "orphan", status: "idle", labels: childLabels }],
+      ["no-parent", { id: "no-parent", status: "idle" }],
+      ["archived-child", { id: "archived-child", status: "idle", labels: childLabels, archivedAt: "2026-01-01T00:00:00Z" }],
+    ]);
+    const audit = await router.runWatchdogAudit({ agentMap: map, deliver, reloadAgent: async () => ({ ok: true }) });
+    assert.equal(audit.anomalies.filter((a) => a.type === "CHILD_WAKEUP").length, 0);
+    assert.equal(delivered.length, 0);
+  });
+
+  it("can be disabled via childWakeups: false", async () => {
+    const map = new Map<string, WatchdogAgent>([
+      [parentId, parentAgent],
+      ["child-done", { id: "child-done", status: "idle", labels: childLabels }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      agentMap: map,
+      deliver,
+      reloadAgent: async () => ({ ok: true }),
+      childWakeups: false,
+    });
+    assert.equal(audit.anomalies.filter((a) => a.type === "CHILD_WAKEUP").length, 0);
+    assert.equal(delivered.length, 0);
   });
 });
 

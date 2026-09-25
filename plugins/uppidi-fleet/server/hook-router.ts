@@ -16,6 +16,7 @@ import type {
   HookServiceConfigInput,
   HookServiceConfigOutput,
 } from "../shared/contracts.js";
+import { extractPermissionScope } from "../shared/contracts.js";
 import { getUppidiFleetSettingsStorage } from "./settings.js";
 
 export interface RouterConfig {
@@ -374,6 +375,9 @@ export interface WatchdogPermission {
   title?: string;
   tool?: string;
   name?: string;
+  kind?: string;
+  description?: string;
+  input?: Record<string, unknown>;
 }
 
 export interface WatchdogAgent {
@@ -407,6 +411,14 @@ export interface WatchdogAnomaly {
   details?: Partial<Record<WatchdogTaxonomyType, string>>;
   recovered?: boolean;
   recoveryActions?: string[];
+  /** Parent agent woken by a reactive child-lifecycle pulse (#537). */
+  parentAgentId?: string;
+  /** Event name of the wake pulse (#537). */
+  event?: string;
+  /** Required permission request id surfaced in a child wakeup (#537). */
+  permissionId?: string;
+  /** Target scope/path surfaced in a child wakeup (#537). */
+  scope?: string;
 }
 
 export interface WatchdogAuditOptions {
@@ -433,6 +445,11 @@ export interface WatchdogAuditOptions {
   cancellationRecencySeconds?: number;
   /** Also treat a plain finished idle agent as stalled (aggressive amnesia detection). */
   assumePendingWork?: boolean;
+  /**
+   * Enable the reactive child-lifecycle wakeup watcher (#537). Defaults to
+   * `true` in production; tests inject `false` when exercising unrelated paths.
+   */
+  childWakeups?: boolean;
 }
 
 export interface WatchdogAuditResult {
@@ -469,6 +486,7 @@ export type WatchdogAnomalyType =
   | "AGENT_ERROR"
   | "ORCHESTRATOR_MISSING"
   | "QUEUE_WEDGED"
+  | "CHILD_WAKEUP"
   | WatchdogTaxonomyType;
 
 export const DEFAULT_RUNNING_STALE_SECONDS = 1800;
@@ -614,6 +632,118 @@ export function detectZombieHungTurn(
   const activity = parseIsoTimestamp(lastActivityAt);
   if (activity === null) return false;
   return (now - activity) / 1000 >= staleSeconds;
+}
+
+// ---------------------------------------------------------------------------
+// Reactive child-lifecycle wakeups (#537)
+//
+// The watchdog tick also acts as the bounded, dedup-guarded watcher that wakes
+// a parent agent (`paseo send --steer --no-wait <parent>`) when one of its
+// labelled children becomes blocked, errors, or finishes. Pure assessment
+// helpers live here so tests can exercise the transition rules directly.
+// ---------------------------------------------------------------------------
+
+/** Wakeup event names emitted to a parent when its child changes lifecycle (#537). */
+export const CHILD_WAKEUP_EVENTS = {
+  waiting: "agent.child_waiting_for_input",
+  completed: "agent.child_completed",
+  errored: "agent.child_errored",
+} as const;
+export type ChildWakeupKind = keyof typeof CHILD_WAKEUP_EVENTS;
+
+export interface ChildWakeupAssessment {
+  kind: ChildWakeupKind;
+  event: string;
+  /** Per-(agent,event) dedup key consumed by `canWatchdogAlert`. */
+  alertKey: string;
+  detail?: string;
+  permissionId?: string;
+  scope?: string;
+}
+
+/**
+ * Classifies a single child agent into at most one wakeup transition (#537).
+ * Blocked (permission / input) wins over error over completion. Benign idle
+ * children carrying no attention flag are treated as completed, matching the
+ * "child completed" contract.
+ */
+export function assessChildWakeup(
+  agentId: string,
+  agent: WatchdogAgent,
+): ChildWakeupAssessment | null {
+  if (!agent || agent.archivedAt) return null;
+  const status = String(agent.status ?? "").toLowerCase();
+  const permissions = agent.pendingPermissions ?? [];
+  const reason = agent.attentionReason ?? null;
+  const requiresAttention = agent.requiresAttention === true;
+
+  // Explicit error status/reason wins, mirroring `deriveDeterministicState`.
+  const blocked =
+    status !== "error" &&
+    reason !== "error" &&
+    (permissions.length > 0 ||
+      reason === "permission" ||
+      (requiresAttention && reason !== "finished"));
+  if (blocked) {
+    const permission = permissions[0];
+    const permissionId = permission?.id || permission?.requestId;
+    const scope = permission ? extractPermissionScope(permission) : undefined;
+    return {
+      kind: "waiting",
+      event: CHILD_WAKEUP_EVENTS.waiting,
+      alertKey: `child_waiting:${agentId}:${permissionId || reason || "input"}`,
+      detail: reason ?? undefined,
+      permissionId,
+      scope,
+    };
+  }
+
+  if (status === "error" || reason === "error") {
+    return {
+      kind: "errored",
+      event: CHILD_WAKEUP_EVENTS.errored,
+      alertKey: `child_errored:${agentId}`,
+    };
+  }
+
+  const completedSignal = reason === "finished" || status === "closed" || status === "completed";
+  const finishedIdle =
+    status === "idle" && !requiresAttention && reason === null && permissions.length === 0;
+  if (completedSignal || finishedIdle) {
+    return {
+      kind: "completed",
+      event: CHILD_WAKEUP_EVENTS.completed,
+      alertKey: `child_completed:${agentId}`,
+    };
+  }
+
+  return null;
+}
+
+/** Formats the parent-facing wake pulse for one child transition (#537). */
+export function formatChildWakeupMessage(
+  child: { id: string; title?: string | null; name?: string | null; lastError?: string | null },
+  assessment: ChildWakeupAssessment,
+): string {
+  const label = child.title || child.name || child.id.slice(0, 7);
+  const id7 = child.id.slice(0, 7);
+  switch (assessment.kind) {
+    case "waiting": {
+      const action = assessment.detail || "permission request";
+      const scope = assessment.scope ? ` scope=${assessment.scope}` : "";
+      const cmd = assessment.permissionId
+        ? `paseo permit allow ${child.id} ${assessment.permissionId}`
+        : `paseo permit allow ${child.id}`;
+      return `[Fleet Watchdog] Subagent ${label} (${id7}) is waiting for input: ${action}${scope}. Adjudicate: ${cmd}`;
+    }
+    case "errored": {
+      const err = child.lastError?.trim();
+      return `[Fleet Watchdog] Subagent ${label} (${id7}) errored${err ? `: "${err}"` : ""}. Triage or replace it.`;
+    }
+    case "completed":
+    default:
+      return `[Fleet Watchdog] Subagent ${label} (${id7}) completed and is idle. Collect its result and dispatch next work.`;
+  }
 }
 
 /** Persisted agent metadata from `~/.paseo/agents` subdirectories (fusion input). */
@@ -2006,6 +2136,38 @@ export class HookRouter {
         } else {
           const alert = `[Fleet Watchdog] Agent ${label} (${assessment.agentId.slice(0, 7)}) unhealthy [${assessment.taxonomy.join(", ")}]. Operator attention may be required.`;
           void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+        }
+      }
+
+      // Reactive child-lifecycle wakeups (#537): reuse this same tick as a
+      // bounded, dedup-guarded watcher. A labelled child (paseo.parent-agent-id)
+      // that becomes blocked, errors, or completes steers a wake pulse directly
+      // into its parent orchestrator's context — no extra polling thread.
+      if (opts.childWakeups !== false) {
+        for (const child of agentMap.values()) {
+          const parentId = child.labels?.["paseo.parent-agent-id"]?.trim();
+          if (!parentId) continue;
+          const parent = agentMap.get(parentId);
+          if (!parent || parent.archivedAt) continue;
+
+          const assessment = assessChildWakeup(child.id, child);
+          if (!assessment) continue;
+          if (!this.canWatchdogAlert(assessment.alertKey, now)) continue;
+          this.watchdogAlerts.set(assessment.alertKey, now);
+
+          const message = formatChildWakeupMessage(child, assessment);
+          void deliverFn(parentId, message, { noWait: true, steer: true });
+          anomalies.push({
+            type: "CHILD_WAKEUP",
+            agentId: child.id,
+            title: child.title || child.name,
+            parentAgentId: parentId,
+            event: assessment.event,
+            reason: assessment.detail,
+            permissionId: assessment.permissionId,
+            scope: assessment.scope,
+            severity: "high",
+          });
         }
       }
 

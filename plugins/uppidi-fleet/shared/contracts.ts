@@ -272,6 +272,64 @@ export const DeterministicAgentStateSchema = z.enum([
 ]);
 export type DeterministicAgentState = z.infer<typeof DeterministicAgentStateSchema>;
 
+/**
+ * Canonical subagent lifecycle contract (#537). A first-class, provider-agnostic
+ * projection over the finer-grained `deterministicState`. This **extends** the
+ * #534 blocked states rather than renaming them: `permission-prompt` and
+ * `attention-required` both project to `waiting_for_input`, while the full
+ * `deterministicState` keeps rendering in the fleet UI.
+ */
+export const AgentLifecycleStateSchema = z.enum([
+  "running",
+  "waiting_for_input",
+  "idle",
+  "errored",
+  "completed",
+]);
+export type AgentLifecycleState = z.infer<typeof AgentLifecycleStateSchema>;
+
+/** Projects a deterministic fleet state onto the canonical lifecycle contract. */
+export function deriveLifecycleState(state: DeterministicAgentState): AgentLifecycleState {
+  switch (state) {
+    case "permission-prompt":
+    case "attention-required":
+      return "waiting_for_input";
+    case "working":
+    case "running":
+      return "running";
+    case "failed:quota-exhausted":
+    case "failed:spawn":
+    case "failed:timeout":
+    case "failed:error":
+      return "errored";
+    case "idle:quota-exhausted":
+    case "idle:waiting":
+    case "sleeping":
+      return "idle";
+    case "unknown":
+    default:
+      return "idle";
+  }
+}
+
+/** True when a lifecycle state means the agent is blocked awaiting clearance. */
+export function isBlockedLifecycleState(state: AgentLifecycleState): boolean {
+  return state === "waiting_for_input";
+}
+
+/**
+ * Resolves the canonical lifecycle state from a payload, falling back to the
+ * deterministic projection when `lifecycleState` was not populated (#537).
+ */
+export function resolveAgentLifecycleState(agent: {
+  lifecycleState?: AgentLifecycleState | null;
+  deterministicState?: DeterministicAgentState | null;
+} | null | undefined): AgentLifecycleState {
+  if (!agent) return "idle";
+  if (agent.lifecycleState) return agent.lifecycleState;
+  return deriveLifecycleState(agent.deterministicState ?? "unknown");
+}
+
 export interface DeterministicStateConfig {
   state: DeterministicAgentState;
   color: string;
@@ -438,8 +496,108 @@ export const PendingPermissionSchema = z.object({
   tool: z.string().optional(),
   kind: z.string().optional(),
   description: z.string().optional(),
+  /** Provider-native request input parameters (may carry the target path). */
+  input: z.record(z.string(), z.unknown()).optional(),
+  /** Target scope/path the request applies to, extracted from `input` (#537). */
+  scope: z.string().optional(),
 });
 export type PendingPermission = z.infer<typeof PendingPermissionSchema>;
+
+const SCOPE_INPUT_KEYS = [
+  "path",
+  "paths",
+  "directory",
+  "directories",
+  "dir",
+  "cwd",
+  "target",
+  "scope",
+  "file_path",
+  "filePath",
+  "file",
+] as const;
+
+const SCOPE_DESCRIPTION_PREFIX = /^\s*scope\s*:\s*/i;
+
+function coerceScopeValue(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed || undefined;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map(coerceScopeValue)
+      .filter((v): v is string => Boolean(v));
+    return parts.length > 0 ? parts.join(", ") : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Extracts the target scope/path from a pending permission request (#537).
+ * Prefers a recognized input key (`path`, `directory`, …); falls back to a
+ * daemon `description` of the form `Scope: <path>` (the `external_directory`
+ * shape) and finally to any `description`. Returns undefined when nothing
+ * usable is present.
+ */
+export function extractPermissionScope(
+  permission: Pick<PendingPermission, "input" | "description" | "scope">,
+): string | undefined {
+  const explicit = permission.scope?.trim();
+  if (explicit) return explicit;
+  const input = permission.input;
+  if (input && typeof input === "object") {
+    for (const key of SCOPE_INPUT_KEYS) {
+      const found = coerceScopeValue((input as Record<string, unknown>)[key]);
+      if (found) return found;
+    }
+  }
+  const description = permission.description?.trim();
+  if (!description) return undefined;
+  const scoped = description.replace(SCOPE_DESCRIPTION_PREFIX, "").trim();
+  return scoped || undefined;
+}
+
+/**
+ * Structured block detail for a child agent awaiting input (#537): which
+ * permission request is blocking it, the target scope, the tool/action, and
+ * the exact adjudication command. Null when the agent is not blocked on a
+ * single resolvable permission request.
+ */
+export const AgentBlockDetailSchema = z.object({
+  /** Required permission request id (`paseo permit allow <agent> <id>`). */
+  requiredPermissionId: z.string().optional(),
+  /** Target scope/path the permission applies to, when the daemon exposes it. */
+  scope: z.string().optional(),
+  /** Human-readable action/tool label for the request. */
+  action: z.string().optional(),
+  /** Suggested adjudication command, e.g. `paseo permit allow <agent> <req>`. */
+  command: z.string(),
+});
+export type AgentBlockDetail = z.infer<typeof AgentBlockDetailSchema>;
+
+/**
+ * Builds the structured block detail from an agent's pending permissions
+ * (#537). Uses the first pending request as the required one and surfaces both
+ * its scope and a ready-to-run adjudication command.
+ */
+export function buildAgentBlockDetail(
+  agentId: string,
+  permissions: PendingPermission[] | null | undefined,
+): AgentBlockDetail | undefined {
+  if (!Array.isArray(permissions) || permissions.length === 0) return undefined;
+  const permission = permissions[0]!;
+  const reqId = permission.id || permission.requestId;
+  const detail: AgentBlockDetail = {
+    command: getPermissionAdjudicationCommand(agentId, permission),
+  };
+  if (reqId) detail.requiredPermissionId = reqId;
+  const scope = extractPermissionScope(permission);
+  if (scope) detail.scope = scope;
+  const action = getPendingPermissionAction(permission);
+  if (action) detail.action = action;
+  return detail;
+}
 
 /** Human-readable label for a pending permission prompt (#534). */
 export function getPendingPermissionAction(permission: PendingPermission): string {
@@ -516,6 +674,15 @@ export const UppidiAgentSchema = z.object({
   parentCategory: UppidiAgentCategorySchema.optional(),
   deterministicState: DeterministicAgentStateSchema.default("unknown"),
   stateDetail: z.string().optional(),
+  /**
+   * Canonical subagent lifecycle state projected from `deterministicState`
+   * (#537). Optional so legacy/partial payloads stay parseable; the server's
+   * `normalizeRawAgent` always populates it — use `resolveAgentLifecycleState`
+   * when reading raw payloads.
+   */
+  lifecycleState: AgentLifecycleStateSchema.optional(),
+  /** Structured block detail when `lifecycleState === "waiting_for_input"` (#537). */
+  blockDetail: AgentBlockDetailSchema.nullable().optional(),
   attributedWork: UppidiAgentWorkSchema.nullable().optional(),
   usage: UppidiAgentUsageSchema.nullable().optional(),
   url: z.string().optional(),
