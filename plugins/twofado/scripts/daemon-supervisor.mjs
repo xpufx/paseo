@@ -22,7 +22,8 @@ const MAX_LOG_LINES = 150;
 export class DaemonSupervisor {
   constructor(options = {}) {
     this.rootDir = options.rootDir || ROOT_DIR;
-    this.binDir = options.binDir || join(this.rootDir, "bin");
+    this.managedBinDir = options.binDir || null;
+    this.binDir = this.managedBinDir || join(this.rootDir, "bin");
     this.defaultBinPath = join(this.binDir, "2fado");
     this.configuredSocket = options.socketPath || process.env.TWOFADO_SOCKET;
     this.child = null;
@@ -48,8 +49,10 @@ export class DaemonSupervisor {
   }
 
   resolveSocketPath(custom) {
-    if (custom) return custom;
+    const trimmed = typeof custom === "string" ? custom.trim() : "";
+    if (trimmed) return trimmed;
     if (this.configuredSocket) return this.configuredSocket;
+    if (this.managedBinDir) return join(dirname(this.managedBinDir), "run", "2fado.sock");
     if (process.env.XDG_RUNTIME_DIR) {
       return join(process.env.XDG_RUNTIME_DIR, "2fado", "2fado.sock");
     }
@@ -201,6 +204,9 @@ export class DaemonSupervisor {
       ...(options.runDir ? { TWOFADO_RUN_DIR: options.runDir } : {}),
       ...(options.conf ? { TWOFADO_CONF: options.conf } : {}),
     };
+
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(dirname(sockPath), { recursive: true });
 
     try {
       this.child = spawn(bin, ["daemon"], {

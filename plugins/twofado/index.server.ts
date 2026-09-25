@@ -61,6 +61,9 @@ export default function contribute(server: PluginServerContext) {
     schema: approvalSettings.schema,
   });
   migrateLegacySettingsFile(storage);
+  if (!process.env.TWOFADO_SOCKET?.trim()) {
+    process.env.TWOFADO_SOCKET = join(storage.pluginDir, "run", "2fado.sock");
+  }
   const companion = createCompanionController({
     binDir: join(storage.pluginDir, "bin"),
   });
