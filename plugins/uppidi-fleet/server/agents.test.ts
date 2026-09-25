@@ -12,6 +12,7 @@ import {
   normalizeRawAgent,
   normalizePendingPermissions,
   normalizeAttentionReason,
+  normalizeAgentMetrics,
   handleUppidiAgents,
   getWorkspaceProjectMap,
   setWorkspaceProjectMapForTest,
@@ -434,5 +435,118 @@ describe("spawn capability auto-allow (#537)", () => {
     } finally {
       setExecFileAsyncForTest(null);
     }
+  });
+});
+
+describe("agent health metrics mapping (#560)", () => {
+  it("projects lastUsage/activeTurn/attentionTimestamp onto the metrics block", () => {
+    const metrics = normalizeAgentMetrics({
+      id: "agent-metrics-560",
+      status: "running",
+      lastUsage: {
+        inputTokens: 1200,
+        outputTokens: 800,
+        cachedInputTokens: 600,
+        totalCostUsd: 1.23,
+        contextWindowUsedTokens: 96000,
+        contextWindowMaxTokens: 128000,
+      },
+      activeTurn: { turnId: "t1", startedAt: "2026-09-25T10:00:00.000Z" },
+      attentionTimestamp: "2026-09-25T10:05:00.000Z",
+    });
+
+    assert.ok(metrics);
+    assert.equal(metrics?.contextUsedTokens, 96000);
+    assert.equal(metrics?.contextMaxTokens, 128000);
+    assert.equal(metrics?.cachedTokens, 600);
+    assert.equal(metrics?.inputTokens, 1200);
+    assert.equal(metrics?.outputTokens, 800);
+    assert.equal(metrics?.costUsd, 1.23);
+    assert.equal(metrics?.activeTurnStartedAt, "2026-09-25T10:00:00.000Z");
+    assert.equal(metrics?.attentionTimestamp, "2026-09-25T10:05:00.000Z");
+  });
+
+  it("returns null for a legacy payload with no usage or turn signals", () => {
+    assert.equal(normalizeAgentMetrics({ id: "legacy-560", status: "idle" }), null);
+  });
+
+  it("drops malformed numeric and timestamp values rather than emitting partials", () => {
+    const metrics = normalizeAgentMetrics({
+      id: "malformed-560",
+      lastUsage: {
+        inputTokens: Number.NaN as any,
+        contextWindowUsedTokens: "96000" as any,
+        contextWindowMaxTokens: 128000,
+      },
+      activeTurn: { startedAt: 42 as any },
+    });
+
+    assert.ok(metrics);
+    assert.equal(metrics?.inputTokens, undefined);
+    assert.equal(metrics?.contextUsedTokens, undefined);
+    assert.equal(metrics?.contextMaxTokens, 128000);
+    assert.equal(metrics?.activeTurnStartedAt, undefined);
+  });
+
+  it("exposes metrics and lastError through normalizeRawAgent", () => {
+    const agent = normalizeRawAgent({
+      id: "agent-normalize-560",
+      name: "Worker Metrics",
+      status: "running",
+      lastError: "",
+      lastUsage: { contextWindowUsedTokens: 64000, contextWindowMaxTokens: 128000 },
+      activeTurn: { startedAt: "2026-09-25T10:00:00.000Z" },
+    });
+
+    assert.ok(agent.metrics);
+    assert.equal(agent.metrics?.contextUsedTokens, 64000);
+    assert.equal(agent.metrics?.contextMaxTokens, 128000);
+    assert.equal(agent.metrics?.activeTurnStartedAt, "2026-09-25T10:00:00.000Z");
+    // Empty error string normalizes to null so the gauge does not light red.
+    assert.equal(agent.lastError, null);
+  });
+
+  it("omits the metrics block (null) for a legacy normalizeRawAgent payload", () => {
+    const agent = normalizeRawAgent({
+      id: "agent-legacy-560",
+      name: "Legacy Worker",
+      status: "idle",
+    });
+    assert.equal(agent.metrics, null);
+    assert.equal(agent.lastError, null);
+  });
+
+  it("surfaces metrics through the agents RPC handler", async () => {
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              {
+                agent: {
+                  id: "rpc-metrics-560",
+                  title: "Worker Metrics",
+                  status: "running",
+                  lastUsage: {
+                    contextWindowUsedTokens: 120000,
+                    contextWindowMaxTokens: 128000,
+                    totalCostUsd: 4.5,
+                  },
+                  activeTurn: { turnId: "t-rpc", startedAt: "2026-09-25T10:00:00.000Z" },
+                },
+              },
+            ],
+          }),
+        },
+      },
+    };
+
+    const res = await handleUppidiAgents({}, mockContext);
+    const worker = res.workers.find((a) => a.id === "rpc-metrics-560");
+    assert.ok(worker);
+    assert.equal(worker?.metrics?.contextUsedTokens, 120000);
+    assert.equal(worker?.metrics?.contextMaxTokens, 128000);
+    assert.equal(worker?.metrics?.costUsd, 4.5);
+    assert.equal(worker?.metrics?.activeTurnStartedAt, "2026-09-25T10:00:00.000Z");
   });
 });

@@ -24,6 +24,8 @@ import {
   STATUS_LIGHT_ORANGE,
   STATUS_LIGHT_RED,
   STATUS_LIGHT_COLORS,
+  deriveHealthGauge,
+  DEFAULT_HEALTH_GAUGE_THRESHOLDS,
 } from "./sort-filter.js";
 
 import type {
@@ -1150,6 +1152,138 @@ describe("Uppidi Fleet sort & filter predicates", () => {
       assert.equal(result.projectGroups.length, 2);
       assert.equal(result.projectGroups[0].projectName, "xpufx-org/paseo");
       assert.equal(result.projectGroups[1].projectName, "scratch-local-wks");
+    });
+  });
+
+  describe("compact agent health gauge (#560)", () => {
+    const NOW = Date.parse("2026-09-25T12:00:00.000Z");
+    const minutesAgo = (m: number) => new Date(NOW - m * 60 * 1000).toISOString();
+
+    const segment = (gauge: ReturnType<typeof deriveHealthGauge>, kind: string) =>
+      gauge.segments.find((s) => s.kind === kind)!;
+
+    it("exports the default thresholds (context 75/90, turn 5m)", () => {
+      assert.equal(DEFAULT_HEALTH_GAUGE_THRESHOLDS.contextWarn, 0.75);
+      assert.equal(DEFAULT_HEALTH_GAUGE_THRESHOLDS.contextCritical, 0.9);
+      assert.equal(DEFAULT_HEALTH_GAUGE_THRESHOLDS.turnWarnMs, 5 * 60 * 1000);
+    });
+
+    it("yields three fixed-order ok segments when metrics are absent", () => {
+      const gauge = deriveHealthGauge({ metrics: null }, undefined, NOW);
+      assert.deepEqual(
+        gauge.segments.map((s) => s.kind),
+        ["context", "turn", "error"]
+      );
+      assert.ok(gauge.segments.every((s) => s.ratio === 0 && s.tone === "ok"));
+      assert.equal(gauge.overall, "ok");
+    });
+
+    it("treats null/undefined agents safely", () => {
+      assert.equal(deriveHealthGauge(undefined, undefined, NOW).overall, "ok");
+      assert.equal(deriveHealthGauge(null, undefined, NOW).overall, "ok");
+    });
+
+    it("derives context segment tones across the 75/90 boundaries", () => {
+      const cases: Array<[number, number, string]> = [
+        [50, 100, "ok"],
+        [74, 100, "ok"],
+        [75, 100, "warn"],
+        [89, 100, "warn"],
+        [90, 100, "critical"],
+        [100, 100, "critical"],
+      ];
+      for (const [used, max, expected] of cases) {
+        const gauge = deriveHealthGauge(
+          { metrics: { contextUsedTokens: used, contextMaxTokens: max } },
+          undefined,
+          NOW
+        );
+        const ctx = segment(gauge, "context");
+        assert.equal(ctx.tone, expected, `context ${used}/${max} should be ${expected}`);
+        assert.equal(ctx.ratio, Math.min(1, used / max));
+      }
+    });
+
+    it("ignores a zero/missing context max rather than dividing by zero", () => {
+      const gauge = deriveHealthGauge(
+        { metrics: { contextUsedTokens: 1000, contextMaxTokens: 0 } },
+        undefined,
+        NOW
+      );
+      const ctx = segment(gauge, "context");
+      assert.equal(ctx.ratio, 0);
+      assert.equal(ctx.tone, "ok");
+    });
+
+    it("derives turn segment from active turn elapsed time", () => {
+      const fresh = segment(
+        deriveHealthGauge({ metrics: { activeTurnStartedAt: minutesAgo(1) } }, undefined, NOW),
+        "turn"
+      );
+      assert.equal(fresh.tone, "ok");
+      assert.equal(fresh.ratio, 0.2);
+
+      const stalled = segment(
+        deriveHealthGauge({ metrics: { activeTurnStartedAt: minutesAgo(5) } }, undefined, NOW),
+        "turn"
+      );
+      assert.equal(stalled.tone, "warn");
+      assert.equal(stalled.ratio, 1);
+
+      // Over the threshold clamps the fill at 1 but stays amber.
+      const overdue = segment(
+        deriveHealthGauge({ metrics: { activeTurnStartedAt: minutesAgo(20) } }, undefined, NOW),
+        "turn"
+      );
+      assert.equal(overdue.tone, "warn");
+      assert.equal(overdue.ratio, 1);
+    });
+
+    it("honours custom turn/context thresholds", () => {
+      const gauge = deriveHealthGauge(
+        { metrics: { activeTurnStartedAt: minutesAgo(2), contextUsedTokens: 80, contextMaxTokens: 100 } },
+        { contextWarn: 0.5, contextCritical: 0.95, turnWarnMs: 60 * 1000 },
+        NOW
+      );
+      assert.equal(segment(gauge, "context").tone, "warn");
+      assert.equal(segment(gauge, "turn").tone, "warn");
+      assert.equal(gauge.overall, "warn");
+    });
+
+    it("lights the error segment on a fatal error string or failed:* state", () => {
+      const byError = deriveHealthGauge(
+        { metrics: { inputTokens: 1 }, lastError: "boom" },
+        undefined,
+        NOW
+      );
+      assert.equal(segment(byError, "error").tone, "critical");
+      assert.equal(segment(byError, "error").ratio, 1);
+      assert.equal(byError.overall, "critical");
+
+      const byState = deriveHealthGauge(
+        { metrics: { inputTokens: 1 }, deterministicState: "failed:timeout" },
+        undefined,
+        NOW
+      );
+      assert.equal(segment(byState, "error").tone, "critical");
+
+      const healthy = deriveHealthGauge(
+        { metrics: { inputTokens: 1 }, deterministicState: "running", lastError: "" },
+        undefined,
+        NOW
+      );
+      assert.equal(segment(healthy, "error").tone, "ok");
+      assert.equal(healthy.overall, "ok");
+    });
+
+    it("reports the worst tone across segments as overall", () => {
+      // context critical dominates an otherwise ok gauge
+      const gauge = deriveHealthGauge(
+        { metrics: { contextUsedTokens: 95, contextMaxTokens: 100 } },
+        undefined,
+        NOW
+      );
+      assert.equal(gauge.overall, "critical");
     });
   });
 });

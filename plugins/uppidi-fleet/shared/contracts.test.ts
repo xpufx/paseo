@@ -780,6 +780,45 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
     assert.equal(legacy.lifecycleState, undefined);
     assert.equal(resolveAgentLifecycleState(legacy), "idle");
   });
+
+  it("parses the optional metrics block and lastError on UppidiAgentSchema (#560)", () => {
+    const agent = UppidiAgentSchema.parse({
+      id: "a-560",
+      shortId: "a-560",
+      name: "Worker Metrics",
+      category: "worker",
+      status: "running",
+      metrics: {
+        contextUsedTokens: 96000,
+        contextMaxTokens: 128000,
+        cachedTokens: 600,
+        inputTokens: 1200,
+        outputTokens: 800,
+        costUsd: 1.23,
+        activeTurnStartedAt: "2026-09-25T10:00:00.000Z",
+        attentionTimestamp: "2026-09-25T10:05:00.000Z",
+      },
+      lastError: "boom",
+    });
+    assert.equal(agent.metrics?.contextUsedTokens, 96000);
+    assert.equal(agent.metrics?.contextMaxTokens, 128000);
+    assert.equal(agent.metrics?.cachedTokens, 600);
+    assert.equal(agent.metrics?.costUsd, 1.23);
+    assert.equal(agent.metrics?.activeTurnStartedAt, "2026-09-25T10:00:00.000Z");
+    assert.equal(agent.metrics?.attentionTimestamp, "2026-09-25T10:05:00.000Z");
+    assert.equal(agent.lastError, "boom");
+
+    // Legacy payloads without metrics stay parseable and absent.
+    const legacy = UppidiAgentSchema.parse({
+      id: "a-560-legacy",
+      shortId: "a-560-legacy",
+      name: "Legacy",
+      category: "worker",
+      status: "idle",
+    });
+    assert.equal(legacy.metrics, undefined);
+    assert.equal(legacy.lastError, undefined);
+  });
 });
 
 

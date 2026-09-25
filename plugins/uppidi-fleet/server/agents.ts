@@ -9,6 +9,7 @@ import type {
   UppidiAgentsOutput,
   UppidiAgentTreeNode,
   UppidiAgentWork,
+  UppidiAgentMetrics,
   DeterministicAgentState,
   PendingPermission,
   AgentAttentionReason,
@@ -81,12 +82,16 @@ export interface RawAgentRecord {
   lastError?: string;
   requiresAttention?: boolean;
   attentionReason?: string | null;
+  attentionTimestamp?: string | null;
   pendingPermissions?: Array<Record<string, any>> | null;
+  activeTurn?: { turnId?: string; startedAt?: string | null } | null;
   lastUsage?: {
     inputTokens?: number;
     outputTokens?: number;
     cachedInputTokens?: number;
     totalCostUsd?: number;
+    contextWindowUsedTokens?: number;
+    contextWindowMaxTokens?: number;
   } | null;
   url?: string;
 }
@@ -206,6 +211,44 @@ export function normalizeAttentionReason(
     return raw;
   }
   return null;
+}
+
+/** Coerces a finite number, dropping malformed/legacy values (#510 idiom). */
+function coerceFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Projects the daemon snapshot's `lastUsage`/`activeTurn`/`attentionTimestamp`
+ * onto the optional client metrics block (#560). Returns null when none of the
+ * signals are present so legacy payloads render no gauge at all.
+ */
+export function normalizeAgentMetrics(raw: RawAgentRecord): UppidiAgentMetrics | null {
+  const usage = raw.lastUsage ?? null;
+  const activeTurn = raw.activeTurn ?? null;
+
+  const metrics: UppidiAgentMetrics = {};
+  const contextUsedTokens = coerceFiniteNumber(usage?.contextWindowUsedTokens);
+  const contextMaxTokens = coerceFiniteNumber(usage?.contextWindowMaxTokens);
+  const cachedTokens = coerceFiniteNumber(usage?.cachedInputTokens);
+  const inputTokens = coerceFiniteNumber(usage?.inputTokens);
+  const outputTokens = coerceFiniteNumber(usage?.outputTokens);
+  const costUsd = coerceFiniteNumber(usage?.totalCostUsd);
+  const activeTurnStartedAt =
+    typeof activeTurn?.startedAt === "string" ? activeTurn.startedAt : undefined;
+  const attentionTimestamp =
+    typeof raw.attentionTimestamp === "string" ? raw.attentionTimestamp : undefined;
+
+  if (contextUsedTokens !== undefined) metrics.contextUsedTokens = contextUsedTokens;
+  if (contextMaxTokens !== undefined) metrics.contextMaxTokens = contextMaxTokens;
+  if (cachedTokens !== undefined) metrics.cachedTokens = cachedTokens;
+  if (inputTokens !== undefined) metrics.inputTokens = inputTokens;
+  if (outputTokens !== undefined) metrics.outputTokens = outputTokens;
+  if (costUsd !== undefined) metrics.costUsd = costUsd;
+  if (activeTurnStartedAt !== undefined) metrics.activeTurnStartedAt = activeTurnStartedAt;
+  if (attentionTimestamp !== undefined) metrics.attentionTimestamp = attentionTimestamp;
+
+  return Object.keys(metrics).length > 0 ? metrics : null;
 }
 
 export function deriveDeterministicState(
@@ -338,6 +381,7 @@ export function normalizeRawAgent(
     lifecycleState === "waiting_for_input"
       ? buildAgentBlockDetail(id, pendingPermissions)
       : undefined;
+  const metrics = normalizeAgentMetrics(raw);
 
   const project = extractAgentProject(
     raw,
@@ -365,6 +409,8 @@ export function normalizeRawAgent(
     blockDetail: blockDetail ?? null,
     attributedWork,
     usage: raw.lastUsage || null,
+    metrics,
+    lastError: raw.lastError || null,
     url: raw.url || (id ? `paseo://agent/${id}` : undefined),
     worktree: extractAgentWorktree(raw),
     project,
@@ -622,7 +668,9 @@ export function getAgentDiskMetadataMap(): Map<string, Partial<RawAgentRecord>> 
             lastError: data.lastError,
             requiresAttention: data.requiresAttention,
             attentionReason: data.attentionReason,
+            attentionTimestamp: data.attentionTimestamp,
             pendingPermissions: data.pendingPermissions,
+            activeTurn: data.activeTurn,
             lastUsage: data.lastUsage,
           });
         } catch {
@@ -691,7 +739,9 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
             lastError: a.lastError || disk.lastError,
             requiresAttention: a.requiresAttention ?? disk.requiresAttention,
             attentionReason: a.attentionReason || disk.attentionReason,
+            attentionTimestamp: a.attentionTimestamp || disk.attentionTimestamp,
             pendingPermissions: a.pendingPermissions ?? disk.pendingPermissions,
+            activeTurn: a.activeTurn || disk.activeTurn,
             lastUsage: a.lastUsage || disk.lastUsage,
           });
         }
@@ -730,7 +780,9 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
             lastError: disk.lastError,
             requiresAttention: disk.requiresAttention,
             attentionReason: disk.attentionReason,
+            attentionTimestamp: disk.attentionTimestamp,
             pendingPermissions: disk.pendingPermissions,
+            activeTurn: disk.activeTurn,
             lastUsage: disk.lastUsage,
           });
         }

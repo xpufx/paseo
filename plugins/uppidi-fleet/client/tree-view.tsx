@@ -8,6 +8,8 @@ import {
   CommandBox,
   EmptyState,
   Icon,
+  KeyValue,
+  KeyValueGroup,
   Row,
   SearchInput,
   Stack,
@@ -44,6 +46,11 @@ import {
   buildProjectGroups,
   filterAgentTree,
   getStatusLightColor,
+  deriveHealthGauge,
+  DEFAULT_HEALTH_GAUGE_THRESHOLDS,
+  type HealthGauge,
+  type HealthGaugeSegment,
+  type HealthGaugeTone,
   STATUS_LIGHT_GREEN,
   STATUS_LIGHT_ORANGE,
   STATUS_LIGHT_RED,
@@ -400,6 +407,283 @@ export function formatRelativeTime(dateStr?: string | null): string {
   return `${diffDays}d ago`;
 }
 
+/** Compact duration rendering for the health metrics card (#560). */
+export function formatDurationMs(ms?: number | null): string {
+  if (ms === undefined || ms === null || !Number.isFinite(ms) || ms < 0) return "—";
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min < 60) return sec ? `${min}m ${sec}s` : `${min}m`;
+  const hours = Math.floor(min / 60);
+  const remMin = min % 60;
+  if (hours < 24) return remMin ? `${hours}h ${remMin}m` : `${hours}h`;
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours ? `${days}d ${remHours}h` : `${days}d`;
+}
+
+function healthToneColor(tone: HealthGaugeTone, colors: any): string {
+  if (tone === "critical") return colors.statusDanger ?? STATUS_LIGHT_RED;
+  if (tone === "warn") return colors.statusWarning ?? STATUS_LIGHT_ORANGE;
+  return colors.statusSuccess ?? STATUS_LIGHT_GREEN;
+}
+
+/** Milliseconds since an ISO timestamp, or undefined when unparseable. */
+function elapsedSince(iso?: string | null, now: number = Date.now()): number | undefined {
+  if (!iso) return undefined;
+  const started = Date.parse(iso);
+  if (!Number.isFinite(started)) return undefined;
+  return Math.max(0, now - started);
+}
+
+export interface AgentHealthGaugeProps {
+  agent: UppidiAgent;
+  /** Compact surfaces halve the track width (28px vs 56px) (#560). */
+  compact?: boolean;
+  onToggle?: () => void;
+  expanded?: boolean;
+  now?: number;
+}
+
+/**
+ * Compact agent health gauge (#560): a thin 3-4px stacked micro-bar (context /
+ * turn / error) on the row's trailing edge, or a clock-arc sweep when the agent
+ * is running an active turn. Renders nothing at all for legacy payloads with no
+ * metrics block, so the agent line never grows or gains a second status surface
+ * next to `AgentStatusLight`.
+ */
+export function AgentHealthGauge({
+  agent,
+  compact = false,
+  onToggle,
+  expanded = false,
+  now = Date.now(),
+}: AgentHealthGaugeProps) {
+  const { colors } = usePluginTheme();
+  const metrics = agent.metrics;
+  // Absent gauge for legacy payloads: no metrics block, nothing rendered.
+  if (!metrics) return null;
+
+  const gauge: HealthGauge = deriveHealthGauge(agent, DEFAULT_HEALTH_GAUGE_THRESHOLDS, now);
+  const toneColor = healthToneColor(gauge.overall, colors);
+  const trackColor = colors.surface2 ?? "#334155";
+  const width = compact ? 28 : 56;
+  const height = 4;
+
+  const isRunning =
+    String(agent.status ?? "").toLowerCase() === "running" &&
+    Boolean(metrics.activeTurnStartedAt);
+  const turnElapsed = elapsedSince(metrics.activeTurnStartedAt, now);
+  const sweepRatio =
+    turnElapsed === undefined
+      ? 0
+      : Math.max(
+          0,
+          Math.min(1, turnElapsed / DEFAULT_HEALTH_GAUGE_THRESHOLDS.turnWarnMs)
+        );
+  const angleDeg = sweepRatio * 360;
+
+  const label = `${agent.name} health: ${gauge.overall}`;
+
+  const body = isRunning ? (
+    // Clock-arc variant: a tiny clock face whose hand sweeps proportional to the
+    // active turn duration (full sweep at the stall threshold).
+    <View
+      style={{
+        width: compact ? 12 : 14,
+        height: compact ? 12 : 14,
+        borderRadius: compact ? 6 : 7,
+        borderWidth: 1.5,
+        borderColor: trackColor,
+        alignItems: "center",
+        justifyContent: "center",
+        position: "relative",
+      }}
+    >
+      <View
+        style={{
+          position: "absolute",
+          width: compact ? 12 : 14,
+          height: compact ? 12 : 14,
+          alignItems: "center",
+          transform: [{ rotate: `${angleDeg}deg` }],
+        }}
+      >
+        <View
+          style={{
+            width: 1.5,
+            height: (compact ? 12 : 14) / 2 - 2,
+            backgroundColor: toneColor,
+            borderRadius: 1,
+          }}
+        />
+      </View>
+    </View>
+  ) : (
+    // Thin stacked micro-bar: three side-by-side segments (context / turn / error).
+    <View
+      testID={`agent-health-gauge-track-${agent.id}`}
+      style={{ width, height, flexDirection: "row", gap: 2 }}
+    >
+      {gauge.segments.map((segment: HealthGaugeSegment) => (
+        <View
+          key={segment.kind}
+          testID={`agent-health-gauge-segment-${segment.kind}`}
+          style={{
+            flex: 1,
+            height,
+            borderRadius: 2,
+            backgroundColor: trackColor,
+            overflow: "hidden",
+          }}
+        >
+          <View
+            style={{
+              width: `${Math.round(segment.ratio * 100)}%`,
+              height: "100%",
+              borderRadius: 2,
+              backgroundColor: healthToneColor(segment.tone, colors),
+            }}
+          />
+        </View>
+      ))}
+    </View>
+  );
+
+  if (!onToggle) return body;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      // @ts-ignore RN web title tooltip
+      title={`${label} — tap for metrics`}
+      testID={`agent-health-gauge-${agent.id}`}
+      onPress={(e: any) => {
+        e?.stopPropagation?.();
+        onToggle();
+      }}
+      style={({ pressed }: any) => ({
+        paddingHorizontal: 2,
+        paddingVertical: 1,
+        borderRadius: 3,
+        cursor: "pointer",
+        opacity: pressed ? 0.7 : expanded ? 1 : 0.85,
+        alignItems: "center",
+        justifyContent: "center",
+      })}
+    >
+      {body}
+    </Pressable>
+  );
+}
+
+export interface AgentMetricsCardProps {
+  agent: UppidiAgent;
+  now?: number;
+}
+
+/**
+ * Expandable metrics card (#560). Inserted between the agent row and its
+ * children on tap; carries the full inventory table — context %, cached ratio,
+ * cost, turn duration, session lifetime, permission-wait, and errors.
+ * Renders null when the agent has no metrics block.
+ */
+export function AgentMetricsCard({ agent, now = Date.now() }: AgentMetricsCardProps) {
+  const { colors, typography } = usePluginTheme();
+  const metrics = agent.metrics;
+  if (!metrics) return null;
+
+  const contextPct =
+    metrics.contextUsedTokens !== undefined &&
+    metrics.contextMaxTokens !== undefined &&
+    metrics.contextMaxTokens > 0
+      ? Math.round((metrics.contextUsedTokens / metrics.contextMaxTokens) * 100)
+      : undefined;
+
+  const cachedDenom =
+    (metrics.cachedTokens ?? 0) + (metrics.inputTokens ?? 0);
+  const cachedPct =
+    metrics.cachedTokens !== undefined && cachedDenom > 0
+      ? Math.round((metrics.cachedTokens / cachedDenom) * 100)
+      : undefined;
+  const cachedPctText = cachedPct !== undefined ? `${cachedPct}%` : "—";
+  const cachedSub =
+    metrics.cachedTokens !== undefined
+      ? `${metrics.cachedTokens.toLocaleString()} cached`
+      : undefined;
+
+  const costText =
+    metrics.costUsd !== undefined ? `$${metrics.costUsd.toFixed(2)}` : "—";
+
+  const turnMs = elapsedSince(metrics.activeTurnStartedAt, now);
+  const turnText = turnMs !== undefined ? formatDurationMs(turnMs) : "—";
+
+  let lifetimeText = "—";
+  if (agent.created && agent.updatedAt) {
+    const createdMs = Date.parse(agent.created);
+    const updatedMs = Date.parse(agent.updatedAt);
+    if (Number.isFinite(createdMs) && Number.isFinite(updatedMs) && updatedMs >= createdMs) {
+      lifetimeText = formatDurationMs(updatedMs - createdMs);
+    }
+  }
+
+  const permissionWaitMs = elapsedSince(metrics.attentionTimestamp, now);
+  const permissionWaitText =
+    permissionWaitMs !== undefined ? formatDurationMs(permissionWaitMs) : "—";
+
+  const errorText = agent.lastError?.trim() || "None";
+
+  return (
+    <View testID={`agent-metrics-card-${agent.id}`} style={{ marginTop: 2, marginBottom: 2 }}>
+      <Card
+        variant="elevated"
+        style={{
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          borderColor: colors.border,
+          borderRadius: 6,
+        }}
+      >
+        <Stack gap="xs">
+          <Row align="center" gap="xs">
+            <Icon name="Activity" size={12} color={colors.foregroundMuted} />
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontWeight: "700" }}>
+              Agent Metrics
+            </Text>
+          </Row>
+          <KeyValueGroup columns={3} collapse="never" gap={8}>
+            <KeyValue
+              label="Context"
+              value={contextPct !== undefined ? `${contextPct}%` : "—"}
+              subValue={
+                metrics.contextUsedTokens !== undefined && metrics.contextMaxTokens !== undefined
+                  ? `${metrics.contextUsedTokens.toLocaleString()} / ${metrics.contextMaxTokens.toLocaleString()}`
+                  : undefined
+              }
+            />
+            <KeyValue label="Cached ratio" value={cachedPctText} subValue={cachedSub} />
+            <KeyValue label="Cost" value={costText} />
+            <KeyValue
+              label="Input tokens"
+              value={metrics.inputTokens !== undefined ? metrics.inputTokens.toLocaleString() : "—"}
+            />
+            <KeyValue
+              label="Output tokens"
+              value={metrics.outputTokens !== undefined ? metrics.outputTokens.toLocaleString() : "—"}
+            />
+            <KeyValue label="Turn duration" value={turnText} />
+            <KeyValue label="Session lifetime" value={lifetimeText} />
+            <KeyValue label="Permission wait" value={permissionWaitText} />
+            <KeyValue label="Errors" value={errorText} />
+          </KeyValueGroup>
+        </Stack>
+      </Card>
+    </View>
+  );
+}
+
 /**
  * Dedicated Fleet Front Desk Header & Hero Card (#403)
  * Elevated at the top of the tree view as the fleet-wide liaison.
@@ -432,6 +716,8 @@ export function FrontDeskHero({
   onReplaceFrontDesk?: (existingAgentId?: string) => Promise<void> | void;
   isActionLoading?: boolean;
 }) {
+  const [metricsOpen, setMetricsOpen] = useState(false);
+
   if (!node) {
     return (
       <Card
@@ -642,8 +928,18 @@ export function FrontDeskHero({
               loading={archivingAgentId === primaryAgent.id}
               onPress={() => onArchiveAgent(primaryAgent.id)}
             />
+
+            {/* Compact health gauge for the Front Desk (#560). */}
+            <AgentHealthGauge
+              agent={primaryAgent}
+              expanded={metricsOpen}
+              onToggle={() => setMetricsOpen((open) => !open)}
+            />
           </Row>
         </Row>
+
+        {/* Expanded metrics card (#560). */}
+        {metricsOpen && <AgentMetricsCard agent={primaryAgent} />}
 
         {/* Prominent permission / attention indicator for the primary Front Desk (#534) */}
         {(primaryAgent.pendingPermissions?.length || primaryAgent.requiresAttention) && (
@@ -928,6 +1224,7 @@ export function DenseAgentRow({
 }: DenseAgentRowProps) {
   const { alpha } = usePluginTheme();
   const [isHovered, setIsHovered] = useState(false);
+  const [metricsOpen, setMetricsOpen] = useState(false);
   const agent = node.agent;
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
@@ -1072,6 +1369,14 @@ export function DenseAgentRow({
               loading={archivingAgentId === agent.id}
               onPress={() => onArchiveAgent(agent.id)}
             />
+
+            {/* Compact health gauge on the trailing edge (#560). */}
+            <AgentHealthGauge
+              agent={agent}
+              compact
+              expanded={metricsOpen}
+              onToggle={() => setMetricsOpen((open) => !open)}
+            />
           </Row>
         </Row>
 
@@ -1081,6 +1386,9 @@ export function DenseAgentRow({
             <AgentAttentionBanner agent={agent} compact />
           </View>
         )}
+
+        {/* Expanded metrics card sits between the row and its children (#560). */}
+        {metricsOpen && <AgentMetricsCard agent={agent} />}
       </View>
 
       {/* Descendant subagents (recursive) - Still NO cards! */}
@@ -1146,6 +1454,7 @@ export function OrchestratorRow({
 }) {
   const { alpha } = usePluginTheme();
   const [isHovered, setIsHovered] = useState(false);
+  const [metricsOpen, setMetricsOpen] = useState(false);
   const agent = node.agent;
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
@@ -1345,6 +1654,13 @@ export function OrchestratorRow({
             loading={archivingAgentId === agent.id}
             onPress={() => onArchiveAgent(agent.id)}
           />
+
+          {/* Compact health gauge on the trailing edge (#560). */}
+          <AgentHealthGauge
+            agent={agent}
+            expanded={metricsOpen}
+            onToggle={() => setMetricsOpen((open) => !open)}
+          />
         </Row>
       </Row>
 
@@ -1354,6 +1670,9 @@ export function OrchestratorRow({
           <AgentAttentionBanner agent={agent} />
         </View>
       )}
+
+      {/* Expanded metrics card (#560). */}
+      {metricsOpen && <AgentMetricsCard agent={agent} />}
     </View>
   );
 }

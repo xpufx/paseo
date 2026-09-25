@@ -91,9 +91,13 @@ interface FleetRenderHarness {
   React: any;
   UppidiFleetSurface: any;
   UppidiFleetTreeView: any;
+  DenseAgentRow: any;
+  TestRenderer: any;
   /** Mutable per-contract RPC payloads consulted by the injected `useRpc` seam. */
   payloads: Record<string, unknown>;
   render(element: unknown): Promise<unknown>;
+  /** Like `render` but also exposes the test renderer root for interaction. */
+  renderWithRoot(element: unknown): Promise<{ tree: unknown; root: any; renderer: any }>;
 }
 
 let harnessPromise: Promise<FleetRenderHarness> | undefined;
@@ -119,7 +123,7 @@ async function getHarness(): Promise<FleetRenderHarness> {
       const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
       const { initClientHelpers } = await import("paseo-plugin-helper/client");
       const { UppidiFleetSurface } = await import("./surface.js");
-      const { UppidiFleetTreeView } = await import("./tree-view.js");
+      const { UppidiFleetTreeView, DenseAgentRow } = await import("./tree-view.js");
 
       const payloads: Record<string, unknown> = {};
 
@@ -132,7 +136,7 @@ async function getHarness(): Promise<FleetRenderHarness> {
         useToast: () => ({ show() {}, error() {}, copied() {} }),
       } as any);
 
-      async function render(element: unknown): Promise<unknown> {
+      async function renderWithRoot(element: unknown): Promise<{ tree: unknown; root: any; renderer: any }> {
         const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
         let renderer: any;
         await TestRenderer.act(async () => {
@@ -146,10 +150,14 @@ async function getHarness(): Promise<FleetRenderHarness> {
           // Let React Query settle pending undefined-payload queries.
           await new Promise((resolve) => setTimeout(resolve, 5));
         });
-        return renderer.toJSON();
+        return { tree: renderer.toJSON(), root: renderer.root, renderer };
       }
 
-      return { React, UppidiFleetSurface, UppidiFleetTreeView, payloads, render };
+      async function render(element: unknown): Promise<unknown> {
+        return (await renderWithRoot(element)).tree;
+      }
+
+      return { React, UppidiFleetSurface, UppidiFleetTreeView, DenseAgentRow, TestRenderer, payloads, render, renderWithRoot };
     })();
   }
   return harnessPromise;
@@ -1154,6 +1162,201 @@ describe("uppidi-fleet client entry contract", () => {
           );
         }
       }
+    });
+  });
+
+  describe("compact agent health gauge and metrics card (#560)", () => {
+    const agentWithMetrics = (over: Record<string, unknown> = {}) => ({
+      id: "gauge-1",
+      shortId: "gauge-1",
+      name: "Gauge Agent",
+      status: "idle",
+      deterministicState: "idle:waiting",
+      category: "worker",
+      labels: {},
+      metrics: {
+        contextUsedTokens: 96000,
+        contextMaxTokens: 128000,
+        cachedTokens: 600,
+        inputTokens: 1200,
+        outputTokens: 800,
+        costUsd: 1.23,
+        activeTurnStartedAt: "2026-09-25T10:00:00.000Z",
+        attentionTimestamp: "2026-09-25T10:05:00.000Z",
+      },
+      ...over,
+    });
+    const legacyAgent = (over: Record<string, unknown> = {}) => ({
+      id: "legacy-1",
+      shortId: "legacy-1",
+      name: "Legacy Agent",
+      status: "idle",
+      deterministicState: "idle:waiting",
+      category: "worker",
+      labels: {},
+      ...over,
+    });
+
+    const flatten = (node: any, out: any[] = []): any[] => {
+      if (!node || typeof node !== "object") return out;
+      out.push(node);
+      const children = Array.isArray(node.children) ? node.children : [];
+      for (const child of children) flatten(child, out);
+      return out;
+    };
+
+    const findByTestID = (node: any, testID: string): any[] =>
+      flatten(node).filter((n) => n?.props?.testID === testID);
+
+    it("renders no gauge for agents without a metrics block", async () => {
+      const { React, DenseAgentRow, render } = await getHarness();
+      const node = { agent: legacyAgent(), depth: 1, children: [] };
+      const tree = await render(
+        React.createElement(DenseAgentRow, {
+          node,
+          colors: {},
+          typography: {},
+          onArchiveAgent: async () => {},
+        }),
+      );
+      assert.equal(
+        findByTestID(tree, "agent-health-gauge-legacy-1").length,
+        0,
+        "legacy agents must render no health gauge",
+      );
+      assert.equal(
+        findByTestID(tree, "agent-metrics-card-legacy-1").length,
+        0,
+        "legacy agents must render no metrics card",
+      );
+    });
+
+    it("renders the gauge for agents with metrics and keeps the collapsed line height stable", async () => {
+      // Render two rows via the tree view so we can compare line structure.
+      const payload = {
+        ok: true,
+        tree: [
+          { agent: agentWithMetrics(), depth: 0, children: [] },
+          { agent: legacyAgent(), depth: 0, children: [] },
+        ],
+        totalCount: 2,
+        runningCount: 0,
+        idleCount: 2,
+        errorCount: 0,
+        enrolledRepos: [],
+        mutedRepos: [],
+        repoQueuedHooks: {},
+      };
+      const { React, UppidiFleetTreeView, render } = await getHarness();
+      const tree = await render(
+        React.createElement(UppidiFleetTreeView, { agentsData: payload }),
+      );
+      const gauge = findByTestID(tree, "agent-health-gauge-gauge-1");
+      assert.equal(gauge.length, 1, "agent with metrics must render the gauge");
+
+      // Collapsed: no metrics card until the gauge is tapped.
+      assert.equal(
+        findByTestID(tree, "agent-metrics-card-gauge-1").length,
+        0,
+        "metrics card must stay collapsed until tapped",
+      );
+
+      // The gauge bar itself is 4px tall — the agent line does not grow.
+      const track = findByTestID(tree, "agent-health-gauge-track-gauge-1");
+      assert.equal(track.length, 1, "collapsed gauge renders its thin track");
+      const heights = [].concat(track[0].props.style ?? [])
+        .map((s: any) => s?.height)
+        .filter((h: any) => typeof h === "number");
+      assert.ok(
+        heights.length > 0 && heights.every((h: number) => h <= 4),
+        `collapsed gauge must stay <=4px tall, saw ${JSON.stringify(heights)}`,
+      );
+    });
+
+    it("opens the metrics card with metric rows on tap and closes on second tap", async () => {
+      const { React, DenseAgentRow, renderWithRoot, TestRenderer } = await getHarness();
+      const node = { agent: agentWithMetrics(), depth: 1, children: [] };
+      const { tree, root, renderer } = await renderWithRoot(
+        React.createElement(DenseAgentRow, {
+          node,
+          colors: {},
+          typography: {},
+          onArchiveAgent: async () => {},
+        }),
+      );
+
+      assert.equal(
+        findByTestID(tree, "agent-metrics-card-gauge-1").length,
+        0,
+        "card starts collapsed",
+      );
+
+      const gaugeRoot = root.find(
+        (n: any) => n.props?.testID === "agent-health-gauge-gauge-1",
+      );
+      assert.ok(gaugeRoot, "gauge pressable must exist to toggle the card");
+
+      await TestRenderer.act(async () => {
+        gaugeRoot.props.onPress();
+      });
+
+      let opened = findByTestID(
+        renderer.toJSON(),
+        "agent-metrics-card-gauge-1",
+      );
+      assert.equal(opened.length, 1, "tapping the gauge opens the metrics card");
+
+      // The metric inventory renders as key/value rows.
+      const openedText = JSON.stringify(renderer.toJSON());
+      for (const label of [
+        "Context",
+        "Cached ratio",
+        "Cost",
+        "Turn duration",
+        "Session lifetime",
+        "Permission wait",
+        "Errors",
+      ]) {
+        assert.ok(openedText.includes(label), `metrics card must include the ${label} row`);
+      }
+
+      // Second tap collapses it again.
+      const gaugeRootAgain = root.find(
+        (n: any) => n.props?.testID === "agent-health-gauge-gauge-1",
+      );
+      await TestRenderer.act(async () => {
+        gaugeRootAgain.props.onPress();
+      });
+      opened = findByTestID(renderer.toJSON(), "agent-metrics-card-gauge-1");
+      assert.equal(opened.length, 0, "second tap collapses the metrics card");
+    });
+
+    it("renders the clock-arc variant for a running agent with an active turn", async () => {
+      const { React, DenseAgentRow, render } = await getHarness();
+      const node = {
+        agent: agentWithMetrics({ status: "running", deterministicState: "running" }),
+        depth: 1,
+        children: [],
+      };
+      const tree = await render(
+        React.createElement(DenseAgentRow, {
+          node,
+          colors: {},
+          typography: {},
+          onArchiveAgent: async () => {},
+        }),
+      );
+      // Clock variant omits the stacked micro-bar segments.
+      assert.equal(
+        findByTestID(tree, "agent-health-gauge-segment-context").length,
+        0,
+        "running agent with an active turn must render the clock-arc, not the bar",
+      );
+      assert.equal(
+        findByTestID(tree, "agent-health-gauge-gauge-1").length,
+        1,
+        "clock-arc gauge remains on the trailing edge",
+      );
     });
   });
 });

@@ -506,6 +506,32 @@ export const UppidiAgentUsageSchema = z.object({
 });
 export type UppidiAgentUsage = z.infer<typeof UppidiAgentUsageSchema>;
 
+/**
+ * Live health signals projected from the daemon snapshot's `lastUsage` and
+ * `activeTurn` (#560). Every field is optional and null-safe: a legacy payload
+ * with no usage/turn data yields no metrics block, and the client renders no
+ * gauge at all rather than a misleading zero.
+ */
+export const UppidiAgentMetricsSchema = z.object({
+  /** Context window tokens consumed at last snapshot. */
+  contextUsedTokens: z.number().optional(),
+  /** Context window ceiling (for the utilisation ratio). */
+  contextMaxTokens: z.number().optional(),
+  /** Cached prompt tokens (for the cache-hit ratio). */
+  cachedTokens: z.number().optional(),
+  /** Last-turn input tokens. */
+  inputTokens: z.number().optional(),
+  /** Last-turn output tokens. */
+  outputTokens: z.number().optional(),
+  /** Cumulative USD spend reported by the daemon. */
+  costUsd: z.number().optional(),
+  /** ISO timestamp the current active turn began (clock-arc / turn duration). */
+  activeTurnStartedAt: z.string().optional(),
+  /** ISO timestamp the daemon flagged attention (permission-wait duration). */
+  attentionTimestamp: z.string().optional(),
+});
+export type UppidiAgentMetrics = z.infer<typeof UppidiAgentMetricsSchema>;
+
 /** Daemon attention reason for an agent awaiting operator input (#534). */
 export const AgentAttentionReasonSchema = z.enum(["finished", "error", "permission", "input"]);
 export type AgentAttentionReason = z.infer<typeof AgentAttentionReasonSchema>;
@@ -712,6 +738,10 @@ export const UppidiAgentSchema = z.object({
   blockDetail: AgentBlockDetailSchema.nullable().optional(),
   attributedWork: UppidiAgentWorkSchema.nullable().optional(),
   usage: UppidiAgentUsageSchema.nullable().optional(),
+  /** Live health signals mapped from the daemon snapshot (#560). */
+  metrics: UppidiAgentMetricsSchema.nullable().optional(),
+  /** Last fatal daemon error string, used for the health error segment (#560). */
+  lastError: z.string().nullable().optional(),
   url: z.string().optional(),
   worktree: z.string().optional(),
   project: z.string().optional(),

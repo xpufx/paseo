@@ -4,6 +4,7 @@ import type {
   UppidiAgent,
   UppidiAgentTreeNode,
   UppidiRunner,
+  UppidiAgentMetrics,
   CandidateModelMetrics,
   TaskProfileMetrics,
   DeterministicAgentState,
@@ -81,6 +82,120 @@ export function getStatusLightColor(agent?: {
 
   // Fallback: non-failure mode defaults to Orange
   return STATUS_LIGHT_ORANGE;
+}
+
+// --- Compact Agent Health Gauge (#560) ---
+
+export type HealthGaugeKind = "context" | "turn" | "error";
+export type HealthGaugeTone = "ok" | "warn" | "critical";
+
+export interface HealthGaugeSegment {
+  kind: HealthGaugeKind;
+  /** Fill level toward the unhealthy end of the track, clamped to 0..1. */
+  ratio: number;
+  tone: HealthGaugeTone;
+}
+
+export interface HealthGauge {
+  /** Fixed-order context, turn, error segments for the stacked micro-bar. */
+  segments: HealthGaugeSegment[];
+  /** Worst tone across all segments. */
+  overall: HealthGaugeTone;
+}
+
+export interface HealthGaugeThresholds {
+  /** Context utilisation ratio that turns the segment amber (default 0.75). */
+  contextWarn: number;
+  /** Context utilisation ratio that turns the segment red (default 0.90). */
+  contextCritical: number;
+  /** Active-turn duration after which the segment turns amber (default 5 min). */
+  turnWarnMs: number;
+}
+
+export const DEFAULT_HEALTH_GAUGE_THRESHOLDS: HealthGaugeThresholds = {
+  contextWarn: 0.75,
+  contextCritical: 0.9,
+  turnWarnMs: 5 * 60 * 1000,
+};
+
+const HEALTH_GAUGE_TONE_RANK: Record<HealthGaugeTone, number> = {
+  ok: 0,
+  warn: 1,
+  critical: 2,
+};
+
+function clampRatio(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(1, value));
+}
+
+function worstTone(tones: HealthGaugeTone[]): HealthGaugeTone {
+  return tones.reduce<HealthGaugeTone>(
+    (worst, tone) => (HEALTH_GAUGE_TONE_RANK[tone] > HEALTH_GAUGE_TONE_RANK[worst] ? tone : worst),
+    "ok"
+  );
+}
+
+/**
+ * Pure health-gauge derivation (#560). Maps the optional metrics block plus the
+ * error signals onto three fixed stacked segments — context utilisation, active
+ * turn duration, and error state — each with a fill ratio and a colour tone.
+ *
+ * A metric that is absent contributes a zero-ratio `ok` segment rather than
+ * throwing; callers decide whether to render the gauge at all by checking for
+ * the metrics block (#510 coercion idiom).
+ */
+export function deriveHealthGauge(
+  agent:
+    | {
+        metrics?: UppidiAgentMetrics | null;
+        lastError?: string | null;
+        deterministicState?: DeterministicAgentState | string | null;
+      }
+    | null
+    | undefined,
+  thresholds: HealthGaugeThresholds = DEFAULT_HEALTH_GAUGE_THRESHOLDS,
+  now: number = Date.now()
+): HealthGauge {
+  const metrics = agent?.metrics ?? null;
+
+  // Context: utilisation of the context window.
+  const used = metrics?.contextUsedTokens;
+  const max = metrics?.contextMaxTokens;
+  const hasContext =
+    typeof used === "number" && Number.isFinite(used) && typeof max === "number" && max > 0;
+  const contextRatio = hasContext ? clampRatio(used! / max!) : 0;
+  const contextTone: HealthGaugeTone = !hasContext
+    ? "ok"
+    : contextRatio >= thresholds.contextCritical
+    ? "critical"
+    : contextRatio >= thresholds.contextWarn
+    ? "warn"
+    : "ok";
+
+  // Turn: elapsed active-turn time relative to the stall threshold.
+  const startedAt = metrics?.activeTurnStartedAt;
+  const startedMs = startedAt ? Date.parse(startedAt) : NaN;
+  const elapsedMs = Number.isFinite(startedMs) ? now - startedMs : NaN;
+  const hasTurn = Number.isFinite(elapsedMs) && elapsedMs >= 0;
+  const turnRatio = hasTurn ? clampRatio(elapsedMs / thresholds.turnWarnMs) : 0;
+  const turnTone: HealthGaugeTone = hasTurn && elapsedMs >= thresholds.turnWarnMs ? "warn" : "ok";
+
+  // Error: lights red on a fatal error string or any failed:* state.
+  const failedState = String(agent?.deterministicState ?? "").toLowerCase().startsWith("failed");
+  const hasError = failedState || String(agent?.lastError ?? "").trim().length > 0;
+  const errorTone: HealthGaugeTone = hasError ? "critical" : "ok";
+
+  const segments: HealthGaugeSegment[] = [
+    { kind: "context", ratio: contextRatio, tone: contextTone },
+    { kind: "turn", ratio: turnRatio, tone: turnTone },
+    { kind: "error", ratio: hasError ? 1 : 0, tone: errorTone },
+  ];
+
+  return {
+    segments,
+    overall: worstTone([contextTone, turnTone, errorTone]),
+  };
 }
 
 // --- Issues & PRs ---
