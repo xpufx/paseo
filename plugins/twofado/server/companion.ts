@@ -55,6 +55,10 @@ export interface CompanionControllerOptions {
   rootDir?: string;
   /** Managed binary dir (plugin storage); preferred for install and resolve. */
   binDir?: string;
+  /** Managed state dir (plugin storage); isolates daemon history and config. */
+  stateDir?: string;
+  /** Managed user config path (plugin storage); isolates Telegram identity. */
+  userConfigPath?: string;
   env?: NodeJS.ProcessEnv;
   home?: string;
 }
@@ -220,6 +224,8 @@ export function createCompanionController(
     supervisor = new module.DaemonSupervisor({
       rootDir: resolvedRoot ?? undefined,
       binDir: options.binDir,
+      stateDir: options.stateDir,
+      userConfigPath: options.userConfigPath,
       socketPath: options.env?.TWOFADO_SOCKET,
     });
     log.info("companion supervisor initialized", { rootDir: resolvedRoot });

@@ -66,6 +66,8 @@ export default function contribute(server: PluginServerContext) {
   }
   const companion = createCompanionController({
     binDir: join(storage.pluginDir, "bin"),
+    stateDir: join(storage.pluginDir, "state"),
+    userConfigPath: join(storage.pluginDir, "config.json"),
   });
 
   const maybeAutoStart = (autoStart: boolean, socketPath: string) => {

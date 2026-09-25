@@ -24,6 +24,8 @@ export class DaemonSupervisor {
     this.rootDir = options.rootDir || ROOT_DIR;
     this.managedBinDir = options.binDir || null;
     this.binDir = this.managedBinDir || join(this.rootDir, "bin");
+    this.stateDir = options.stateDir || null;
+    this.userConfigPath = options.userConfigPath || null;
     this.defaultBinPath = join(this.binDir, "2fado");
     this.configuredSocket = options.socketPath || process.env.TWOFADO_SOCKET;
     this.child = null;
@@ -197,10 +199,13 @@ export class DaemonSupervisor {
     }
     this.appendLog("system", `Spawning 2fado daemon (${bin})...`);
 
+    const stateDir = options.stateDir || this.stateDir;
+    const userConfigPath = options.userConfigPath || this.userConfigPath;
     const env = {
       ...process.env,
       TWOFADO_SOCKET: sockPath,
-      ...(options.stateDir ? { TWOFADO_STATE_DIR: options.stateDir } : {}),
+      ...(stateDir ? { TWOFADO_STATE_DIR: stateDir } : {}),
+      ...(userConfigPath ? { TWOFADO_USER_CONFIG: userConfigPath } : {}),
       ...(options.runDir ? { TWOFADO_RUN_DIR: options.runDir } : {}),
       ...(options.conf ? { TWOFADO_CONF: options.conf } : {}),
     };
