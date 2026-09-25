@@ -9,7 +9,7 @@
   <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/wellbeing/screenshots/wellbeing.jpg" alt="Wellbeing surface in Paseo Desktop" width="560" />
 </p>
 
-> **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
+> **Wellbeing is an experiment.** The available metrics and sensors are not settled yet. It currently cannot provide reliable status but is provided as an example of what may be possible as the project progresses.
 
 `wellbeing` watches the *human* behind the fleet. It answers three questions on
 every tick:
