@@ -206,20 +206,24 @@ export function AgentStatusLight({
             }}
           />
           <Text
+            numberOfLines={1}
             style={{
               color: colors.foreground || "#f8fafc",
               fontSize: 11,
               fontWeight: "600",
               whiteSpace: "nowrap" as any,
+              flexShrink: 1,
             } as any}
           >
             {agent.name}
           </Text>
           <Text
+            numberOfLines={1}
             style={{
               color: colors.foregroundMuted || "#94a3b8",
               fontSize: 10,
               whiteSpace: "nowrap" as any,
+              flexShrink: 1,
             } as any}
           >
             ({statusDetail})
@@ -638,7 +642,15 @@ export function AgentMetricsCard({ agent, now = Date.now() }: AgentMetricsCardPr
         <Stack gap="xs">
           <Row align="center" gap="xs">
             <Icon name="Activity" size={12} color={colors.foregroundMuted} />
-            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontWeight: "700" }}>
+            <Text
+              numberOfLines={1}
+              style={{
+                color: colors.foregroundMuted,
+                ...typography.caption,
+                fontWeight: "700",
+                flexShrink: 1,
+              }}
+            >
               Agent Metrics
             </Text>
           </Row>
@@ -727,12 +739,29 @@ export function FrontDeskHero({
               <Icon name="Inbox" size={18} color={colors.foregroundMuted} />
               <Stack gap={2}>
                 <Row align="center" gap="xs">
-                  <Text style={{ color: colors.foreground, ...typography.heading, fontWeight: "700" }}>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      color: colors.foreground,
+                      ...typography.heading,
+                      fontWeight: "700",
+                      flexShrink: 1,
+                    }}
+                  >
                     Fleet Front Desk
                   </Text>
                   <Badge label="Liaison" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
                 </Row>
-                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                <Text
+                  style={{
+                    color: colors.foregroundMuted,
+                    ...typography.caption,
+                    // Prose, not a label: it wraps onto its own lines rather than
+                    // ellipsizing. Either way it must be allowed to compress, or it
+                    // demands its full 357px and pushes the hero past the viewport.
+                    flexShrink: 1,
+                  }}
+                >
                   No active front desk liaison session running. Webhook events route to standbys.
                 </Text>
               </Stack>
@@ -770,7 +799,15 @@ export function FrontDeskHero({
             >
               <Row align="center" gap="xs" style={{ overflow: "visible" }}>
                 <Icon name="Network" size={13} color={colors.foregroundMuted} />
-                <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: colors.foregroundMuted,
+                    fontSize: 11,
+                    fontWeight: "600",
+                    flexShrink: 1,
+                  }}
+                >
                   Orchestrators ({orchestrators.length}):
                 </Text>
               </Row>
@@ -820,12 +857,14 @@ export function FrontDeskHero({
             <Stack gap={2} style={{ flexShrink: 1 }}>
               <Row align="center" gap="xs" wrap>
                 <Text
+                  numberOfLines={1}
                   style={{
                     color: colors.foregroundMuted,
                     fontSize: 10,
                     fontWeight: "700",
                     letterSpacing: 0.8,
                     textTransform: "uppercase",
+                    flexShrink: 1,
                   }}
                 >
                   Fleet Front Desk
@@ -877,10 +916,12 @@ export function FrontDeskHero({
 
             {primaryAgent.lastActivityAt && (
               <Text
+                numberOfLines={1}
                 style={{
                   color: colors.foregroundMuted,
                   ...typography.caption,
                   fontSize: 11,
+                  flexShrink: 1,
                 }}
               >
                 {formatRelativeTime(primaryAgent.lastActivityAt)}
@@ -952,7 +993,15 @@ export function FrontDeskHero({
           >
             <Row align="center" gap="xs" style={{ overflow: "visible" }}>
               <Icon name="Network" size={13} color={colors.foregroundMuted} />
-              <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "600" }}>
+              <Text
+                numberOfLines={1}
+                style={{
+                  color: colors.foregroundMuted,
+                  fontSize: 11,
+                  fontWeight: "600",
+                  flexShrink: 1,
+                }}
+              >
                 Fleet Orchestrators ({orchestrators.length}):
               </Text>
             </Row>
@@ -1324,11 +1373,13 @@ export function DenseAgentRow({
 
             {agent.lastActivityAt && (
               <Text
+                numberOfLines={1}
                 style={{
                   color: colors.foregroundMuted,
                   ...typography.caption,
                   fontSize: 11,
                   lineHeight: 14,
+                  flexShrink: 1,
                 }}
               >
                 {formatRelativeTime(agent.lastActivityAt)}
@@ -1607,10 +1658,12 @@ export function OrchestratorRow({
 
           {agent.lastActivityAt && (
             <Text
+              numberOfLines={1}
               style={{
                 color: colors.foregroundMuted,
                 ...typography.caption,
                 fontSize: 11,
+                flexShrink: 1,
               }}
             >
               {formatRelativeTime(agent.lastActivityAt)}
@@ -1734,11 +1787,13 @@ export function ProjectGroupCard({
               )}
               <Icon name="FolderGit2" size={16} color={colors.accent} />
               <Text
+                numberOfLines={1}
                 style={{
                   color: colors.foreground,
                   ...typography.heading,
                   fontWeight: "700",
                   fontSize: 14,
+                  flexShrink: 1,
                 }}
               >
                 {group.projectName}
@@ -1873,7 +1928,14 @@ export function ProjectGroupCard({
                 gap="xs"
                 style={{ paddingVertical: 8, paddingHorizontal: 6 }}
               >
-                <Text style={{ color: colors.foregroundMuted, fontSize: 12, fontStyle: "italic" }}>
+                <Text
+                  style={{
+                    color: colors.foregroundMuted,
+                    fontSize: 12,
+                    fontStyle: "italic",
+                    flexShrink: 1,
+                  }}
+                >
                   No agents active. Enrolled repository is unstaffed.
                 </Text>
               </Row>
@@ -2429,7 +2491,20 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
         <Stack gap="xxs" style={{ flex: 1 }}>
           <Row align="center" gap="sm">
             <StatusDot variant={runningCount > 0 ? "success" : "neutral"} pulse={runningCount > 0} />
-            <Text style={{ color: colors.foreground, ...typography.title, fontSize: 15 }}>
+            <Text
+              numberOfLines={1}
+              style={{
+                color: colors.foreground,
+                ...typography.title,
+                fontSize: 15,
+                // The badges beside this title carry the counts and keep their
+                // pixels; the title yields. Unbounded, it adds its full 129px to
+                // the header's demand, and the header shares an ancestor with the
+                // hero below it — so it is a contributor to that ancestor's
+                // overflow, not a row that overflows on its own.
+                flexShrink: 1,
+              }}
+            >
               Fleet Lineage Tree
             </Text>
             <Badge label={`${totalCount} Total`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
@@ -2570,12 +2645,14 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
               <Row align="center" gap="xs">
                 <Icon name="FolderGit2" size={14} color={colors.foregroundMuted} />
                 <Text
+                  numberOfLines={1}
                   style={{
                     color: colors.foregroundMuted,
                     ...typography.caption,
                     fontWeight: "700",
                     textTransform: "uppercase",
                     letterSpacing: 0.8,
+                    flexShrink: 1,
                   }}
                 >
                   Detached / Local Workspaces ({displayDetached.length})
@@ -2621,18 +2698,27 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
           <Row align="center" gap="xs">
             <Icon name="Archive" size={14} color={colors.foregroundMuted} />
             <Text
+              numberOfLines={1}
               style={{
                 color: colors.foregroundMuted,
                 ...typography.caption,
                 fontWeight: "700",
                 textTransform: "uppercase",
                 letterSpacing: 0.8,
+                flexShrink: 1,
               }}
             >
               Stale / Orphaned Front Desk Sessions ({filteredStaleFrontDeskNodes.length})
             </Text>
           </Row>
-          <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+          <Text
+            style={{
+              color: colors.foregroundMuted,
+              ...typography.caption,
+              fontSize: 11,
+              flexShrink: 1,
+            }}
+          >
             Front Desk is a singleton. These duplicate or orphaned sessions are not registered with
             the hook daemon and can be archived during cleanup.
           </Text>

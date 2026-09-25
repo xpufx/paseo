@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getFleetHarness } from "./testing/fleet-harness.js";
-import { installPayloads } from "./testing/fleet-fixtures.js";
+import {
+  agentsPayload,
+  agentsPayloadNoFrontDesk,
+  installPayloads,
+} from "./testing/fleet-fixtures.js";
 import {
   findHorizontalOverflows,
   type OverflowFinding,
@@ -40,6 +44,16 @@ const PHONE_WIDTHS = [320, 360, 390, 430];
 /** The surface's three tabs, in render order. */
 const TABS = ["tree", "dashboard", "settings"] as const;
 
+/**
+ * Routine fleet states, each rendered in full. The hero draws different content
+ * depending on whether a front desk is seated, and the two states fail
+ * differently, so both are swept.
+ */
+const FLEET_STATES: [string, () => Record<string, unknown>][] = [
+  ["front-desk-seated", agentsPayload],
+  ["front-desk-ended", agentsPayloadNoFrontDesk],
+];
+
 function formatFindings(label: string, findings: OverflowFinding[]): string {
   return [
     `${label}: ${findings.length} horizontal overflow(s)`,
@@ -64,36 +78,75 @@ function countType(tree: unknown, type: string): number {
   return count;
 }
 
-function assertNoOverflow(label: string, tree: unknown, width: number): void {
-  const findings = findHorizontalOverflows(tree, width).filter(
-    (f) => f.excess > GLYPH_ESTIMATE_BAND_PX,
-  );
-  assert.equal(
-    findings.length,
-    0,
-    `${formatFindings(`${label} at ${width}px`, findings)}\n` +
-      `A row whose children cannot shrink past the viewport overlaps its sibling. ` +
-      `Give the text a numberOfLines/flexShrink budget (Badge/Button now do this ` +
-      `by default) and drop any minWidth that floors the shrink.`,
-  );
+/**
+ * Accumulates overflow findings across a whole sweep instead of asserting on the
+ * first one. A guard that aborts on the first failing cell hides every other
+ * width, and the width profile is the evidence: 430px passing while 320px fails
+ * is what distinguishes a bounded string from a `minWidth` floor.
+ */
+class OverflowSweep {
+  private readonly results: { label: string; width: number; findings: OverflowFinding[] }[] = [];
+
+  collect(label: string, tree: unknown, width: number): void {
+    this.results.push({
+      label,
+      width,
+      findings: findHorizontalOverflows(tree, width).filter(
+        (f) => f.excess > GLYPH_ESTIMATE_BAND_PX,
+      ),
+    });
+  }
+
+  /** Asserts the sweep clean, reporting every offending cell at once. */
+  assertClean(): void {
+    const total = this.results.reduce((acc, r) => acc + r.findings.length, 0);
+    if (total === 0) return;
+    const byWidth = PHONE_WIDTHS.map((w) => {
+      const n = this.results
+        .filter((r) => r.width === w)
+        .reduce((acc, r) => acc + r.findings.length, 0);
+      return `${w}px=${n}`;
+    }).join("  ");
+    assert.equal(
+      total,
+      0,
+      this.results
+        .filter((r) => r.findings.length > 0)
+        .map((r) => formatFindings(`${r.label} at ${r.width}px`, r.findings))
+        .join("\n") +
+        `\nfindings per width: ${byWidth}  (total ${total})\n` +
+          `A row whose children cannot shrink past the viewport overlaps its sibling. ` +
+          `Give the text a numberOfLines/flexShrink budget (Badge/Button now do this ` +
+          `by default) and drop any minWidth that floors the shrink.`,
+    );
+  }
 }
 
 describe("uppidi-fleet mobile layout (#621)", () => {
   it("lays out every surface tab without horizontal overflow at phone widths", async () => {
     const h = await getFleetHarness();
-    installPayloads(h.payloads);
+    const sweep = new OverflowSweep();
 
-    for (const width of PHONE_WIDTHS) {
-      for (let tab = 0; tab < TABS.length; tab += 1) {
-        const { tree } = await h.renderPanelAtWidth(width, tab);
-        assertNoOverflow(`UppidiFleetPanel[${TABS[tab]}]`, tree, width);
+    // Both routine fleet states, because the hero renders different content in
+    // each: seated front desk, and front desk session ended. The second is the
+    // operator's line.
+    for (const [label, fleet] of FLEET_STATES) {
+      installPayloads(h.payloads, fleet());
+      for (const width of PHONE_WIDTHS) {
+        for (let tab = 0; tab < TABS.length; tab += 1) {
+          const { tree } = await h.renderPanelAtWidth(width, tab);
+          sweep.collect(`UppidiFleetPanel[${TABS[tab]}] ${label}`, tree, width);
+        }
       }
     }
+
+    sweep.assertClean();
   });
 
   it("lays out the agent tree standalone at phone widths", async () => {
     const h = await getFleetHarness();
     installPayloads(h.payloads);
+    const sweep = new OverflowSweep();
 
     for (const width of PHONE_WIDTHS) {
       const tree = await h.render(
@@ -101,33 +154,67 @@ describe("uppidi-fleet mobile layout (#621)", () => {
           agentsData: h.payloads["uppidi-fleet.agents"],
         }),
       );
-      assertNoOverflow("UppidiFleetTreeView", tree, width);
+      sweep.collect("UppidiFleetTreeView", tree, width);
     }
+
+    sweep.assertClean();
   });
 
   it("lays out a dense agent row with its worst-case chips at phone widths", async () => {
     const h = await getFleetHarness();
     installPayloads(h.payloads);
-    const agents = (h.payloads["uppidi-fleet.agents"] as any).tree;
-    const rows = [
-      ...agents[0].children,
-      agents[0],
-      agents[1],
-    ];
+    const fleet = h.payloads["uppidi-fleet.agents"] as any;
+    // Every row the live fleet renders, at the depth it nests to.
+    const rows = [...fleet.tree.flatMap((n: any) => n.children), ...fleet.tree];
 
+    const sweep = new OverflowSweep();
     for (const width of PHONE_WIDTHS) {
       for (const node of rows) {
         const tree = await h.render(
           h.React.createElement(h.DenseAgentRow, {
             node,
+            orchestrators: fleet.orchestrators,
             colors: {},
             typography: {},
             onArchiveAgent: async () => {},
           }),
         );
-        assertNoOverflow(`DenseAgentRow(${node.agent.shortId})`, tree, width);
+        sweep.collect(`DenseAgentRow(${node.agent.shortId})`, tree, width);
       }
     }
+
+    sweep.assertClean();
+  });
+
+  it("survives the full tree-indent range at phone widths", async () => {
+    // `DenseAgentRow` indents its content by `(depth - 1) * 16`, capped at 64px
+    // (indentPadding). A nested row therefore gets 64px less width than a
+    // top-level one, and any `minWidth` floor on the row's left cluster is
+    // measured against that reduced box, not against the viewport. The fleet
+    // nests three levels today, so the shallow depths alone cannot show whether
+    // such a floor binds — this sweeps the whole range, past where the cap sits.
+    const h = await getFleetHarness();
+    installPayloads(h.payloads);
+    const fleet = h.payloads["uppidi-fleet.agents"] as any;
+    const node = fleet.tree[0];
+
+    const sweep = new OverflowSweep();
+    for (const width of PHONE_WIDTHS) {
+      for (let depth = 1; depth <= 6; depth += 1) {
+        const tree = await h.render(
+          h.React.createElement(h.DenseAgentRow, {
+            node,
+            depth,
+            colors: {},
+            typography: {},
+            onArchiveAgent: async () => {},
+          }),
+        );
+        sweep.collect(`DenseAgentRow(${node.agent.shortId}) depth=${depth}`, tree, width);
+      }
+    }
+
+    sweep.assertClean();
   });
 
   it("keeps exactly one scroll owner so the surface stays reachable (#326 class)", async () => {
@@ -158,6 +245,7 @@ describe("uppidi-fleet mobile layout (#621)", () => {
     const h = await getFleetHarness();
     installPayloads(h.payloads);
     const node = (h.payloads["uppidi-fleet.agents"] as any).tree[0];
+    const sweep = new OverflowSweep();
 
     for (const width of PHONE_WIDTHS) {
       const { root, renderer } = await h.renderWithRoot(
@@ -174,7 +262,9 @@ describe("uppidi-fleet mobile layout (#621)", () => {
       await h.TestRenderer.act(async () => {
         gauge.props.onPress();
       });
-      assertNoOverflow("DenseAgentRow(metrics expanded)", renderer.toJSON(), width);
+      sweep.collect("DenseAgentRow(metrics expanded)", renderer.toJSON(), width);
     }
+
+    sweep.assertClean();
   });
 });
