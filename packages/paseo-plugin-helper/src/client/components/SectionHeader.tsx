@@ -41,6 +41,8 @@ export function SectionHeader({
   return (
     <View style={[styles.container, style]}>
       <Text
+        numberOfLines={1}
+        ellipsizeMode="tail"
         style={[
           styles.title,
           {
@@ -73,8 +75,13 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
     marginBottom: 2,
+    flexShrink: 1,
+    maxWidth: "100%",
   },
   title: {
     letterSpacing: 0.8,
+    // Section titles are caller-supplied and unbounded; the title must be
+    // allowed to compress for `numberOfLines` to engage.
+    flexShrink: 1,
   },
 });
