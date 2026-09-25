@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
-import { Animated, Linking, Platform, Pressable, Text, View } from "react-native";
+import { Animated, Linking, Platform, Text, View } from "react-native";
 import {
   AttentionBeacon,
   Badge,
@@ -8,6 +8,7 @@ import {
   CommandBox,
   EmptyState,
   Icon,
+  InteractiveRow,
   KeyValue,
   KeyValueGroup,
   Row,
@@ -149,25 +150,20 @@ export function AgentStatusLight({
   };
 
   return (
-    <Pressable
+    <InteractiveRow
       accessibilityRole="link"
       accessibilityLabel={tooltip}
-      // @ts-ignore RN web tooltip attribute
       title={tooltip}
       onPress={handlePress}
-      // @ts-ignore RN web hover
-      onMouseEnter={() => setHovered(true)}
-      // @ts-ignore RN web hover
-      onMouseLeave={() => setHovered(false)}
-      style={({ pressed }: any) => ({
+      onHoverChange={setHovered}
+      pressedOpacity={0.7}
+      style={{
         padding: 2,
         alignItems: "center",
         justifyContent: "center",
-        cursor: "pointer",
-        opacity: pressed ? 0.7 : 1,
         position: "relative",
         overflow: "visible",
-      })}
+      }}
     >
       <View style={{ transform: [{ scale: hovered ? 1.3 : 1 }] }}>
         <AgentStateDot color={color} pulse={isWorking} size={size} />
@@ -230,7 +226,7 @@ export function AgentStatusLight({
           </Text>
         </View>
       )}
-    </Pressable>
+    </InteractiveRow>
   );
 }
 
@@ -360,19 +356,13 @@ export function AgentTitleLink({
   };
 
   return (
-    <Pressable
+    <InteractiveRow
       accessibilityRole="link"
       accessibilityLabel={`Open Paseo agent ${agent.name}`}
       onPress={handlePress}
-      // @ts-ignore RN web hover
-      onMouseEnter={() => setHovered(true)}
-      // @ts-ignore RN web hover
-      onMouseLeave={() => setHovered(false)}
-      style={({ pressed }: any) => ({
-        opacity: pressed ? 0.75 : 1,
-        cursor: "pointer",
-        flexShrink: 1,
-      })}
+      onHoverChange={setHovered}
+      pressedOpacity={0.75}
+      style={{ flexShrink: 1 }}
     >
       <Text
         style={{
@@ -386,7 +376,7 @@ export function AgentTitleLink({
       >
         {agent.name}
       </Text>
-    </Pressable>
+    </InteractiveRow>
   );
 }
 
@@ -554,28 +544,27 @@ export function AgentHealthGauge({
   if (!onToggle) return body;
 
   return (
-    <Pressable
+    <InteractiveRow
       accessibilityRole="button"
       accessibilityLabel={label}
-      // @ts-ignore RN web title tooltip
       title={`${label} — tap for metrics`}
       testID={`agent-health-gauge-${agent.id}`}
-      onPress={(e: any) => {
+      onPress={(e) => {
         e?.stopPropagation?.();
         onToggle();
       }}
-      style={({ pressed }: any) => ({
+      opacity={expanded ? 1 : 0.85}
+      pressedOpacity={0.7}
+      style={{
         paddingHorizontal: 2,
         paddingVertical: 1,
         borderRadius: 3,
-        cursor: "pointer",
-        opacity: pressed ? 0.7 : expanded ? 1 : 0.85,
         alignItems: "center",
         justifyContent: "center",
-      })}
+      }}
     >
       {body}
-    </Pressable>
+    </InteractiveRow>
   );
 }
 
@@ -1067,23 +1056,19 @@ export function ParentAgentPill({ agent, navigation }: ParentAgentPillProps) {
 
   if (navigation?.openAgent && agent.parentId) {
     return (
-      <Pressable
+      <InteractiveRow
         accessibilityRole="button"
         accessibilityLabel={`Open parent agent (${label})`}
         accessibilityHint="Click to open parent agent session"
-        // @ts-ignore RN web title tooltip
         title={agent.parentName ? `Parent: ${agent.parentName}` : label}
-        onPress={(e: any) => {
+        onPress={(e) => {
           e?.stopPropagation?.();
           navigation.openAgent?.({ agentId: agent.parentId! });
         }}
-        style={({ pressed }: any) => ({
-          opacity: pressed ? 0.7 : 1,
-          cursor: "pointer",
-        })}
+        pressedOpacity={0.7}
       >
         {badge}
-      </Pressable>
+      </InteractiveRow>
     );
   }
 
@@ -1513,14 +1498,13 @@ export function OrchestratorRow({
           </View>
 
           {hasChildren && onToggleExpand ? (
-            <Pressable
+            <InteractiveRow
               onPress={onToggleExpand}
-              style={({ pressed }: any) => ({
-                opacity: pressed ? 0.6 : 1,
-                cursor: "pointer",
+              pressedOpacity={0.6}
+              style={{
                 padding: 2,
                 marginRight: 2,
-              })}
+              }}
               accessibilityRole="button"
               accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} subagents of ${agent.name}`}
             >
@@ -1529,7 +1513,7 @@ export function OrchestratorRow({
                 size={14}
                 color={colors.foregroundMuted}
               />
-            </Pressable>
+            </InteractiveRow>
           ) : (
             <View style={{ width: 14 }} />
           )}
@@ -1552,23 +1536,21 @@ export function OrchestratorRow({
           <ParentAgentPill agent={agent} navigation={navigation} />
           <AgentLabelsRow agent={agent} />
           {agent.isMainDirty && (
-            <Pressable
+            <InteractiveRow
               accessibilityRole="button"
               accessibilityLabel={`Main workspace dirty (${agent.mainDirtySummary || "uncommitted changes"})`}
-              // @ts-ignore RN web title tooltip
               title={`Main workspace has uncommitted changes (${agent.mainDirtySummary || "dirty"}). Click to open orchestrator.`}
-              onPress={(e: any) => {
+              onPress={(e) => {
                 e?.stopPropagation?.();
                 if (navigation?.openAgent) {
                   navigation.openAgent({ agentId: agent.id });
                 }
               }}
-              style={({ pressed }: any) => ({
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
+              pressedOpacity={0.7}
+              style={{
                 paddingHorizontal: 2,
                 paddingVertical: 1,
-              })}
+              }}
             >
               <Badge
                 label={`● Main Dirty${agent.mainDirtySummary ? `: ${agent.mainDirtySummary}` : ""}`}
@@ -1576,7 +1558,7 @@ export function OrchestratorRow({
                 size="sm"
                 textStyle={{ fontSize: 10, fontWeight: "600" }}
               />
-            </Pressable>
+            </InteractiveRow>
           )}
           {!isExpanded && hasChildren && childCount > 0 && (
             <Badge
@@ -1713,8 +1695,6 @@ export function ProjectGroupCard({
   onToggleMute?: (repo: string, currentlyMuted?: boolean) => Promise<void> | void;
   isActionLoading?: boolean;
 }) {
-  const { alpha } = usePluginTheme();
-  const [isHeaderHovered, setIsHeaderHovered] = useState(false);
   const workerCount = group.totalCount - group.orchestrators.length;
 
   return (
@@ -1730,22 +1710,16 @@ export function ProjectGroupCard({
     >
       <Stack gap={4}>
         {/* Project Group Header - interactive expand/collapse */}
-        <Pressable
+        <InteractiveRow
           onPress={onToggleExpand}
-          // @ts-ignore RN web hover
-          onMouseEnter={() => setIsHeaderHovered(true)}
-          // @ts-ignore RN web hover
-          onMouseLeave={() => setIsHeaderHovered(false)}
-          style={({ pressed }: any) => ({
+          hoverTint
+          hoverTintOpacity={0.04}
+          pressedOpacity={0.75}
+          style={{
             paddingHorizontal: 6,
             paddingVertical: 4,
             borderRadius: 6,
-            backgroundColor: isHeaderHovered
-              ? (alpha?.(colors.accent, 0.04) || colors.surface1 || "transparent")
-              : "transparent",
-            opacity: pressed ? 0.75 : 1,
-            cursor: (onToggleExpand ? "pointer" : "auto") as any,
-          })}
+          }}
           accessibilityRole="button"
           accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} project group ${group.projectName}`}
         >
@@ -1878,7 +1852,7 @@ export function ProjectGroupCard({
               )}
             </Row>
           </Row>
-        </Pressable>
+        </InteractiveRow>
 
         {/* Orchestrators & their subagents (rendered when project is expanded) */}
         {isExpanded && (

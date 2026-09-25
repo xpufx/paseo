@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Linking, Pressable, Text, View } from "react-native";
+import { Linking, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import {
@@ -17,6 +17,7 @@ import {
   Grid,
   Icon,
   ForgeIcon,
+  InteractiveRow,
   KeyValue,
   KeyValueGroup,
   ModalBody,
@@ -1413,9 +1414,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               borderColor: colors.border ?? "transparent",
             }}
           >
-            <Pressable
+            <InteractiveRow
               onPress={() => setFilter("all")}
-              style={({ pressed }) => ({
+              style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 5,
@@ -1423,9 +1424,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 paddingVertical: 3,
                 borderRadius: 4,
                 backgroundColor: filter === "all" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
+              }}
+              pressedOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel="Filter all open issues"
             >
@@ -1436,13 +1436,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 12 }}>
                 {issuesData?.openCount ?? rawIssues.length}
               </Text>
-            </Pressable>
+            </InteractiveRow>
 
             <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
 
-            <Pressable
+            <InteractiveRow
               onPress={() => setFilter("needs-you")}
-              style={({ pressed }) => ({
+              style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 5,
@@ -1450,9 +1450,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 paddingVertical: 3,
                 borderRadius: 4,
                 backgroundColor: filter === "needs-you" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
+              }}
+              pressedOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel="Filter needs your attention"
             >
@@ -1473,13 +1472,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               >
                 {issuesData?.needsYouCount ?? 0}
               </Text>
-            </Pressable>
+            </InteractiveRow>
 
             <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
 
-            <Pressable
+            <InteractiveRow
               onPress={() => setFilter("triage-review")}
-              style={({ pressed }) => ({
+              style={{
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 5,
@@ -1487,9 +1486,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 paddingVertical: 3,
                 borderRadius: 4,
                 backgroundColor: filter === "triage-review" ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
-                opacity: pressed ? 0.7 : 1,
-                cursor: "pointer",
-              })}
+              }}
+              pressedOpacity={0.7}
               accessibilityRole="button"
               accessibilityLabel="Filter awaiting review"
             >
@@ -1510,7 +1508,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               >
                 {issuesData?.reviewCount ?? 0}
               </Text>
-            </Pressable>
+            </InteractiveRow>
           </Row>
 
           {/* Action Bar & Filter Buttons */}

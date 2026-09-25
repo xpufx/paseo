@@ -332,6 +332,36 @@ Responsive button supporting 4 visual variants, loading spinners, icons, and min
 />
 ```
 
+### `<InteractiveRow>`
+Hover-aware, pressable row container for dense interactive content. Use it where a labeled `<Button>` does not fit: a row of status dots, badges, and metric readouts that still needs a hover state, an RN-web `title` tooltip, pressed opacity, a pointer cursor, and press-event control. Content is arbitrary, and a nested control can call `event.stopPropagation()` because `onPress` receives the raw event.
+
+```tsx
+<InteractiveRow
+  title={`${agent.name} (${agent.state})`}
+  hoverTint
+  accessibilityRole="button"
+  accessibilityLabel={`Open agent ${agent.name}`}
+  onPress={(event) => {
+    event.stopPropagation();
+    openAgent(agent.id);
+  }}
+>
+  <StatusDot variant="success" />
+  <Text>{agent.name}</Text>
+  <Badge label={agent.shortId} size="sm" />
+</InteractiveRow>
+```
+
+#### Properties:
+- `children`: Row content; any composition is allowed.
+- `onPress(event)`: Press handler receiving the raw `GestureResponderEvent` for propagation control.
+- `title`: RN-web tooltip text attached to the hit area.
+- `hoverTint` / `hoverTintOpacity`: Paint a subtle accent tint while hovered (default opacity `0.05`).
+- `hoverStyle`: Extra style layered only while hovered.
+- `pressedOpacity` / `hoveredOpacity` / `opacity` / `disabledOpacity`: Interaction opacity overrides (defaults `0.7` / `opacity` / `1` / `0.45`).
+- `onHoverChange(hovered)`: Notified on every hover flip, for callers that tint their own children.
+- `disabled`, `accessibilityRole`, `accessibilityLabel`, `accessibilityHint`, `testID`, `style`, `hitSlop`: forwarded to the underlying `Pressable`; `accessibilityRole` defaults to `"button"` when `onPress` is set.
+
 ### `<TextInput>`
 Form input with label, placeholder, helper or error text, secure text entry, and automatic focus ring highlighting.
 

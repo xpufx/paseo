@@ -2,7 +2,7 @@ import { D as DensityStyle, S as SurfaceStyle, o as BadgeSize, p as ButtonProps,
 export { A as AttentionBeacon, s as AttentionBeaconMode, u as AttentionBeaconProps, v as AttentionBeaconTone, w as Badge, x as BadgeProps, B as BadgeRecipeOptions, a as BadgeRecipeResult, y as BadgeStyle, z as Button, E as ButtonAttention, b as ButtonRecipeOptions, c as ButtonRecipeResult, F as ButtonSize, G as ButtonVariant, C as CardRecipeOptions, d as CardRecipeResult, H as ElevationLevel, J as ElevationStyle, K as FALLBACK_ACCENT_FOREGROUND, L as HeadingTransform, M as HostFontVariables, N as HostThemeVariables, I as InputRecipeOptions, e as InputRecipeResult, P as PASEO_HOST_CSS_VARIABLES, O as PaseoHostCssVariable, Q as PluginThemeContextValue, R as PluginThemeProvider, U as PluginThemeProviderProps, W as RadiusStyle, X as SpacingKey, T as TabItemRecipeOptions, f as TabItemRecipeResult, g as TabStripRecipeOptions, h as TabStripRecipeResult, i as ThemeInput, Y as TypographyScale, Z as TypographyToken, j as badgeRecipe, k as buttonRecipe, l as cardRecipe, _ as defaultDarkTheme, $ as defaultFlair, a0 as defaultLightTheme, a1 as elevationForPlatform, a2 as getDefaultTheme, m as inputRecipe, a3 as mergeThemeColors, a4 as normalizeBeaconMode, a5 as readHostThemeVariables, a6 as resolveBeaconToneColor, a7 as resolveButtonAttentionMode, a8 as resolveButtonAttentionTone, a9 as resolveElevation, aa as resolveRadius, ab as resolveSpacing, r as resolveThemeColors, ac as resolveTypography, ad as spacing, t as tabItemRecipe, n as tabStripRecipe, ae as useAppearanceScheme, af as usePluginTheme } from '../recipes-CXstFtFR.cjs';
 import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, d as CustomPillState } from '../custom-pills-C98QP7Cg.cjs';
 import React__default, { ReactNode, Ref, ComponentType } from 'react';
-import { StyleProp, ViewStyle, TextStyle, KeyboardTypeOptions, ImageSourcePropType, ScrollView, ImageStyle } from 'react-native';
+import { StyleProp, ViewStyle, TextStyle, GestureResponderEvent, AccessibilityRole, KeyboardTypeOptions, ImageSourcePropType, ScrollView, ImageStyle } from 'react-native';
 import { M as MetricThresholds, f as TruncatePathOptions, a as ForgeMarkInput, F as ForgeKind } from '../forge-CtVqWZsy.cjs';
 export { R as ResolvedForgeMark, g as forgeKindFromHost, m as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark } from '../forge-CtVqWZsy.cjs';
 import { q as HostPillProps, r as ComposerPillRegistrar, P as PluginCleanup, o as HostSurfaceProps, t as HostAgentPanelProps, u as HostWorkspacePanelProps, h as HostToast, v as HostIconProps } from '../host-DatQ2QJE.cjs';
@@ -195,6 +195,53 @@ interface InlineButtonProps {
 }
 /** Compact text/link action for inline cards and timeline content. */
 declare function InlineButton({ label, onPress, icon, disabled, accessibilityLabel, accessibilityRole, style, textStyle, }: InlineButtonProps): React__default.JSX.Element;
+
+interface InteractiveRowProps {
+    /** Arbitrary row content — status dots, badges, text, metric readouts. */
+    children?: ReactNode;
+    /**
+     * Press handler. Receives the raw event so callers can control propagation
+     * (e.g. a nested status light calling `event.stopPropagation()`).
+     */
+    onPress?: (event: GestureResponderEvent) => void;
+    /** Native / RN-web tooltip text attached to the hit area. */
+    title?: string;
+    disabled?: boolean;
+    accessibilityRole?: AccessibilityRole;
+    accessibilityLabel?: string;
+    accessibilityHint?: string;
+    testID?: string;
+    /** Base layout style, merged before the interaction layers. */
+    style?: StyleProp<ViewStyle>;
+    /** Extra style layered only while hovered (and not disabled). */
+    hoverStyle?: StyleProp<ViewStyle>;
+    /** Apply a subtle theme accent tint while hovered. Default: false. */
+    hoverTint?: boolean;
+    /** Accent opacity used by `hoverTint`. Default: 0.05. */
+    hoverTintOpacity?: number;
+    /** Opacity while pressed. Default: 0.7. */
+    pressedOpacity?: number;
+    /** Opacity while hovered but not pressed. Defaults to `opacity`. */
+    hoveredOpacity?: number;
+    /** Opacity at rest. Default: 1. */
+    opacity?: number;
+    /** Opacity when disabled. Default: 0.45. */
+    disabledOpacity?: number;
+    /** Expanded touch target beyond the visual bounds. */
+    hitSlop?: number;
+    /** Notified whenever the hover state flips, for callers that tint their own children. */
+    onHoverChange?: (hovered: boolean) => void;
+}
+/**
+ * Hover-aware, pressable row container for dense interactive content (#580).
+ *
+ * Owns the interaction concerns a labeled `Button` cannot: a hover state (with
+ * optional accent tint), an RN-web `title` tooltip, pressed opacity, a pointer
+ * cursor, and an `onPress` that forwards the event for `stopPropagation`.
+ * Content is arbitrary, so a status dot, badges, and metric readouts compose
+ * inside without wrapping each in its own control.
+ */
+declare function InteractiveRow({ children, onPress, title, disabled, accessibilityRole, accessibilityLabel, accessibilityHint, testID, style, hoverStyle, hoverTint, hoverTintOpacity, pressedOpacity, hoveredOpacity, opacity, disabledOpacity, hitSlop, onHoverChange, }: InteractiveRowProps): React__default.JSX.Element;
 
 interface StatusDotProps {
     variant?: StatusVariant;
@@ -1333,4 +1380,4 @@ interface ForgeIconProps extends ForgeMarkInput {
  */
 declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, BadgeSize, ButtonProps, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, type ClipboardEnvironment, type ClipboardTier, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, CopyButton, type CopyButtonFeedback, type CopyButtonProps, type CopyButtonSize, type CopyButtonVariant, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, DensityStyle, EmptyState, type EmptyStateProps, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, HostIconProps, HostPillProps, HostSurfaceProps, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, ProgressBar, type ProgressBarProps, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseResponsiveResult, VStack, VisualFlair, type WorkspacePanelRegistrar, alpha, clipboardTierOrder, copyToClipboard, forgeMarkSource, formatCommandLine, getContrastColor, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveCopyButtonFeedback, resolveEffectiveCompact, resolveGridColumns, resolvePadding, resolvePillModalScrollable, responsiveSelect, responsiveValue, triggerHaptic, useResponsive };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, BadgeSize, ButtonProps, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, type ClipboardEnvironment, type ClipboardTier, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, CopyButton, type CopyButtonFeedback, type CopyButtonProps, type CopyButtonSize, type CopyButtonVariant, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, DensityStyle, EmptyState, type EmptyStateProps, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, HostIconProps, HostPillProps, HostSurfaceProps, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, InteractiveRow, type InteractiveRowProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, ProgressBar, type ProgressBarProps, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseResponsiveResult, VStack, VisualFlair, type WorkspacePanelRegistrar, alpha, clipboardTierOrder, copyToClipboard, forgeMarkSource, formatCommandLine, getContrastColor, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveCopyButtonFeedback, resolveEffectiveCompact, resolveGridColumns, resolvePadding, resolvePillModalScrollable, responsiveSelect, responsiveValue, triggerHaptic, useResponsive };

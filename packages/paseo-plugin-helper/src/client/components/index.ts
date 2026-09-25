@@ -1,5 +1,6 @@
 export * from "./Button.js";
 export * from "./InlineButton.js";
+export * from "./InteractiveRow.js";
 export * from "./AttentionBeacon.js";
 export * from "./Badge.js";
 export * from "./StatusDot.js";

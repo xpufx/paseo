@@ -1,10 +1,13 @@
 import React, { useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from "react-native";
+import { View, Text, ActivityIndicator } from "react-native";
 import {
+  Button,
   usePluginTheme,
   useRpcQuery,
   useRpcMutation,
   ProgressBar,
+  Row,
+  Stack,
 } from "paseo-plugin-helper/client";
 import {
   statusRpc,
@@ -73,12 +76,17 @@ export function WellbeingSurface() {
 
   if (isLoading) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.surface0 }]}>
+      <Stack
+        gap={0}
+        align="center"
+        justify="center"
+        style={{ flex: 1, padding: 24, backgroundColor: colors.surface0 }}
+      >
         <ActivityIndicator size="small" color={colors.accent} />
-        <Text style={[styles.subtext, { color: colors.foregroundMuted, ...typography.caption }]}>
+        <Text style={{ marginTop: 2, color: colors.foregroundMuted, ...typography.caption }}>
           Loading operator presence telemetry...
         </Text>
-      </View>
+      </Stack>
     );
   }
 
@@ -154,49 +162,66 @@ export function WellbeingSurface() {
   const stretchProgress = Math.min(100, Math.round((s.activeStretchMinutes / stretchThreshold) * 100));
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surface0 }]}>
+    <Stack gap={0} style={{ flex: 1, padding: 16, backgroundColor: colors.surface0 }}>
       {/* Header Row */}
-      <View style={styles.headerRow}>
+      <Row gap={0} align="center" justify="space-between" style={{ marginBottom: 16 }}>
         <View>
-          <Text style={[styles.title, { color: colors.foreground, ...typography.heading }]}>
+          <Text style={{ color: colors.foreground, ...typography.heading }}>
             Operator Wellbeing
           </Text>
-          <Text style={[styles.subtext, { color: colors.foregroundMuted, ...typography.caption }]}>
+          <Text style={{ marginTop: 2, color: colors.foregroundMuted, ...typography.caption }}>
             {s.lastActivitySource
               ? `Telemetry: ${sourceLabels[s.lastActivitySource] || s.lastActivitySource}`
               : "Telemetry: Standby"}
           </Text>
         </View>
-        <View style={[styles.badge, { backgroundColor: currentPhase.bg, borderRadius: radiusPill }]}>
-          <Text style={[styles.badgeText, { color: currentPhase.text }]}>{currentPhase.label}</Text>
+        <View
+          style={{
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            backgroundColor: currentPhase.bg,
+            borderRadius: radiusPill,
+          }}
+        >
+          <Text style={{ fontSize: 10, fontWeight: "700", letterSpacing: 0.5, color: currentPhase.text }}>
+            {currentPhase.label}
+          </Text>
         </View>
-      </View>
+      </Row>
 
       {/* Stretch Progress & Telemetry Card */}
       <View
-        style={[
-          styles.card,
-          {
-            backgroundColor: colors.surface1,
-            borderColor: colors.border,
-            borderRadius: radiusRounded,
-          },
-        ]}
+        style={{
+          borderWidth: 1,
+          padding: 14,
+          marginBottom: 12,
+          backgroundColor: colors.surface1,
+          borderColor: colors.border,
+          borderRadius: radiusRounded,
+        }}
       >
-        <View style={styles.rowSpace}>
-          <Text style={[styles.cardLabel, { color: colors.foregroundMuted, ...typography.label }]}>
+        <Row gap={0} justify="space-between" align="center">
+          <Text
+            style={{
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              marginBottom: 4,
+              color: colors.foregroundMuted,
+              ...typography.label,
+            }}
+          >
             Continuous Active Stretch
           </Text>
-          <Text style={[styles.subValue, { color: colors.foregroundMuted, ...typography.caption }]}>
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
             Limit: {stretchThreshold}m
           </Text>
-        </View>
+        </Row>
 
-        <Text style={[styles.metricLarge, { color: colors.foreground }]}>
-          {s.activeStretchMinutes} <Text style={styles.metricUnit}>min</Text>
+        <Text style={{ fontSize: 26, fontWeight: "800", marginVertical: 4, color: colors.foreground }}>
+          {s.activeStretchMinutes} <Text style={{ fontSize: 14, fontWeight: "500" }}>min</Text>
         </Text>
 
-        <View style={styles.progressWrap}>
+        <View style={{ marginTop: 8 }}>
           <ProgressBar
             value={stretchProgress}
             autoStatusColor
@@ -206,293 +231,155 @@ export function WellbeingSurface() {
         </View>
 
         {s.phase === "extended-stretch" && (
-          <View
-            style={[
-              styles.alertBox,
-              {
-                backgroundColor: colors.surface2,
-                borderColor: colors.statusWarning,
-                borderRadius: radiusRounded,
-              },
-            ]}
+          <Row
+            gap={0}
+            align="center"
+            justify="space-between"
+            style={{
+              marginTop: 12,
+              padding: 10,
+              borderWidth: 1,
+              backgroundColor: colors.surface2,
+              borderColor: colors.statusWarning,
+              borderRadius: radiusRounded,
+            }}
           >
-            <Text style={[styles.alertText, { color: colors.foreground, ...typography.caption }]}>
+            <Text style={{ flex: 1, marginRight: 8, color: colors.foreground, ...typography.caption }}>
               ⚠️ Unbroken focus exceeds healthy limits. Take a macro-break!
             </Text>
-            <TouchableOpacity
-              style={[styles.snoozeBtn, { backgroundColor: colors.surface1, borderRadius: radiusRounded }]}
+            <Button
+              label="💤 Snooze 15m"
+              size="sm"
+              variant="secondary"
+              loading={snoozeMutation.isPending}
               onPress={() => handleSnooze(15)}
-              disabled={snoozeMutation.isPending}
-            >
-              <Text style={[styles.snoozeBtnText, { color: colors.foreground, ...typography.caption }]}>
-                💤 Snooze 15m
-              </Text>
-            </TouchableOpacity>
-          </View>
+            />
+          </Row>
         )}
       </View>
 
       {/* 2x2 Daily Metrics Grid */}
-      <View style={styles.metricsGrid}>
+      <Row gap={10} style={{ marginBottom: 12 }}>
         <View
-          style={[
-            styles.metricTile,
-            {
-              backgroundColor: colors.surface1,
-              borderColor: colors.border,
-              borderRadius: radiusRounded,
-            },
-          ]}
+          style={{
+            flex: 1,
+            borderWidth: 1,
+            padding: 12,
+            backgroundColor: colors.surface1,
+            borderColor: colors.border,
+            borderRadius: radiusRounded,
+          }}
         >
-          <Text style={[styles.cardLabel, { color: colors.foregroundMuted, ...typography.label }]}>
+          <Text
+            style={{
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              marginBottom: 4,
+              color: colors.foregroundMuted,
+              ...typography.label,
+            }}
+          >
             Total Active Today
           </Text>
-          <Text style={[styles.metricText, { color: colors.foreground }]}>
+          <Text style={{ fontSize: 18, fontWeight: "700", marginTop: 2, marginBottom: 4, color: colors.foreground }}>
             {Math.floor(s.dailyUsageMinutes / 60)}h {s.dailyUsageMinutes % 60}m
           </Text>
-          <Text style={[styles.microText, { color: colors.foregroundMuted, ...typography.caption }]}>
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
             Window: {s.settings.workingHours.start}–{s.settings.workingHours.end}
           </Text>
         </View>
 
         <View
-          style={[
-            styles.metricTile,
-            {
-              backgroundColor: colors.surface1,
-              borderColor: colors.border,
-              borderRadius: radiusRounded,
-            },
-          ]}
-        >
-          <Text style={[styles.cardLabel, { color: colors.foregroundMuted, ...typography.label }]}>
-            Breaks Taken
-          </Text>
-          <Text style={[styles.metricText, { color: colors.foreground }]}>{s.breaksTaken}</Text>
-          <Text style={[styles.microText, { color: colors.foregroundMuted, ...typography.caption }]}>
-            Longest: {s.longestStretchMinutes}m
-          </Text>
-        </View>
-      </View>
-
-      {/* Fleet Posture Directive Box */}
-      <View
-        style={[
-          styles.postureCard,
-          {
+          style={{
+            flex: 1,
+            borderWidth: 1,
+            padding: 12,
             backgroundColor: colors.surface1,
             borderColor: colors.border,
             borderRadius: radiusRounded,
-          },
-        ]}
-      >
-        <Text style={[styles.cardLabel, { color: colors.foregroundMuted, ...typography.label }]}>
-          Fleet Posture Directive
-        </Text>
-        <Text style={[styles.directiveText, { color: colors.foreground, ...typography.body }]}>
-          {s.fleetDirective}
-        </Text>
-        <View style={styles.circadianRow}>
-          <Text style={[styles.microText, { color: colors.foregroundMuted, ...typography.caption }]}>
-            🌙 Wind-Down: {s.settings.windDownTime}
+          }}
+        >
+          <Text
+            style={{
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              marginBottom: 4,
+              color: colors.foregroundMuted,
+              ...typography.label,
+            }}
+          >
+            Breaks Taken
           </Text>
-          <Text style={[styles.microText, { color: colors.foregroundMuted, ...typography.caption }]}>
-            ☀️ Wake: {s.settings.wakeUpTime}
+          <Text style={{ fontSize: 18, fontWeight: "700", marginTop: 2, marginBottom: 4, color: colors.foreground }}>
+            {s.breaksTaken}
+          </Text>
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+            Longest: {s.longestStretchMinutes}m
           </Text>
         </View>
+      </Row>
+
+      {/* Fleet Posture Directive Box */}
+      <View
+        style={{
+          borderWidth: 1,
+          padding: 12,
+          marginBottom: 16,
+          backgroundColor: colors.surface1,
+          borderColor: colors.border,
+          borderRadius: radiusRounded,
+        }}
+      >
+        <Text
+          style={{
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+            marginBottom: 4,
+            color: colors.foregroundMuted,
+            ...typography.label,
+          }}
+        >
+          Fleet Posture Directive
+        </Text>
+        <Text style={{ marginTop: 2, marginBottom: 8, color: colors.foreground, ...typography.body }}>
+          {s.fleetDirective}
+        </Text>
+        <Row
+          gap={0}
+          justify="space-between"
+          style={{
+            borderTopWidth: 1,
+            paddingTop: 6,
+            borderColor: "rgba(128,128,128,0.2)",
+          }}
+        >
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+            🌙 Wind-Down: {s.settings.windDownTime}
+          </Text>
+          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+            ☀️ Wake: {s.settings.wakeUpTime}
+          </Text>
+        </Row>
       </View>
 
       {/* Action Controls */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={[
-            styles.actionButton,
-            {
-              backgroundColor: s.isBedMode ? colors.accent : colors.surface2,
-              borderRadius: radiusRounded,
-              borderColor: colors.border,
-              flex: 1,
-            },
-          ]}
+      <Row gap={8} align="center">
+        <Button
+          label={s.isBedMode ? "🌙 Bed Mode Active (Resume)" : "🛌 Shift to Bed Mode"}
+          size="lg"
+          variant={s.isBedMode ? "primary" : "secondary"}
+          loading={toggleMutation.isPending}
+          style={{ flex: 1 }}
           onPress={handleToggle}
-          disabled={toggleMutation.isPending}
-        >
-          <Text
-            style={[
-              styles.actionButtonText,
-              { color: s.isBedMode ? colors.accentForeground : colors.foreground },
-            ]}
-          >
-            {s.isBedMode ? "🌙 Bed Mode Active (Resume)" : "🛌 Shift to Bed Mode"}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.pulseButton,
-            {
-              backgroundColor: colors.surface1,
-              borderRadius: radiusRounded,
-              borderColor: colors.border,
-            },
-          ]}
+        />
+        <Button
+          label="⚡ Log Focus"
+          size="lg"
+          variant="secondary"
+          loading={recordActivityMutation.isPending}
           onPress={handleManualPulse}
-          disabled={recordActivityMutation.isPending}
-        >
-          <Text style={[styles.pulseButtonText, { color: colors.foregroundMuted, ...typography.caption }]}>
-            ⚡ Log Focus
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+        />
+      </Row>
+    </Stack>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    padding: 16,
-    flex: 1,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  subtext: {
-    marginTop: 2,
-  },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 0.5,
-  },
-  card: {
-    borderWidth: 1,
-    padding: 14,
-    marginBottom: 12,
-  },
-  rowSpace: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  cardLabel: {
-    fontSize: 11,
-    fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  subValue: {
-    fontSize: 11,
-  },
-  metricLarge: {
-    fontSize: 26,
-    fontWeight: "800",
-    marginVertical: 4,
-  },
-  metricUnit: {
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  progressWrap: {
-    marginTop: 8,
-  },
-  alertBox: {
-    marginTop: 12,
-    padding: 10,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  alertText: {
-    fontSize: 11,
-    flex: 1,
-    marginRight: 8,
-  },
-  snoozeBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  snoozeBtnText: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  metricsGrid: {
-    flexDirection: "row",
-    gap: 10,
-    marginBottom: 12,
-  },
-  metricTile: {
-    flex: 1,
-    borderWidth: 1,
-    padding: 12,
-  },
-  metricText: {
-    fontSize: 18,
-    fontWeight: "700",
-    marginTop: 2,
-    marginBottom: 4,
-  },
-  microText: {
-    fontSize: 10,
-  },
-  postureCard: {
-    borderWidth: 1,
-    padding: 12,
-    marginBottom: 16,
-  },
-  directiveText: {
-    fontSize: 12,
-    fontWeight: "500",
-    marginTop: 2,
-    marginBottom: 8,
-  },
-  circadianRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: 6,
-    borderColor: "rgba(128,128,128,0.2)",
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 8,
-    alignItems: "center",
-  },
-  actionButton: {
-    paddingVertical: 12,
-    alignItems: "center",
-    borderWidth: 1,
-  },
-  actionButtonText: {
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  pulseButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    borderWidth: 1,
-  },
-  pulseButtonText: {
-    fontWeight: "600",
-  },
-});

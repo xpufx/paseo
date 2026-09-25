@@ -398,16 +398,13 @@ describe("uppidi-fleet client entry contract", () => {
       "tree-view.tsx must export AgentStatusLightsRow",
     );
 
-    // 2. Interactive hover tracking and conditional floating tooltip rendering
+    // 2. Interactive hover tracking and conditional floating tooltip rendering.
+    // Hover is delegated to the helper-owned InteractiveRow (#580): the row
+    // reports its hover state back through onHoverChange.
     assert.match(
       source,
-      /onMouseEnter=\{[^{}]*setHovered\(true\)[^{}]*\}/,
-      "AgentStatusLight must handle onMouseEnter to set hovered state",
-    );
-    assert.match(
-      source,
-      /onMouseLeave=\{[^{}]*setHovered\(false\)[^{}]*\}/,
-      "AgentStatusLight must handle onMouseLeave to reset hovered state",
+      /<InteractiveRow[\s\S]*?onHoverChange=\{setHovered\}/,
+      "AgentStatusLight must delegate hover tracking to InteractiveRow via onHoverChange",
     );
     assert.match(
       source,
