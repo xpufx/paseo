@@ -21,6 +21,12 @@ import {
   findScopeMatchingPermission,
   autoAllowScopedPermission,
   setExecFileAsyncForTest,
+  evaluateSpawnAuthority,
+  resolveSpawnCallerAgentId,
+  resolveDeskWorkingDirs,
+  SPAWN_AUTHORITY_WORKER_ERROR,
+  SPAWN_AUTHORITY_WORKSPACE_ERROR,
+  spawnPaseoAgent,
 } from "./agents.js";
 import { DEFAULT_PROJECT } from "../shared/contracts.js";
 
@@ -549,4 +555,205 @@ describe("agent health metrics mapping (#560)", () => {
     assert.equal(worker?.metrics?.costUsd, 4.5);
     assert.equal(worker?.metrics?.activeTurnStartedAt, "2026-09-25T10:00:00.000Z");
   });
+});
+
+describe("two-tier spawn authority guard (#573)", () => {
+  const DESK = "desk-agent-573";
+  const ORCH = "orch-agent-573";
+  const deskDirs = new Set(["/home/user/code/meta", "/home/user/desk-cwd"]);
+
+  const deps = {
+    frontDeskAgentId: () => DESK,
+    deskWorkingDirs: () => deskDirs,
+  };
+
+  it("rejects a worker spawn attributed to the front desk, naming the remediation paths verbatim", () => {
+    const decision = evaluateSpawnAuthority({ category: "worker", callerAgentId: DESK }, undefined, deps);
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.error, SPAWN_AUTHORITY_WORKER_ERROR);
+    assert.ok(decision.error?.includes("paseo send --steer --no-wait <orchId>"));
+    assert.ok(decision.error?.includes("POST <hook-host>:<port>/orchestrator"));
+  });
+
+  it("allows a worker spawn from an orchestrator (or unattributed) caller", () => {
+    for (const callerAgentId of [ORCH, undefined]) {
+      const decision = evaluateSpawnAuthority({ category: "worker", callerAgentId }, undefined, deps);
+      assert.equal(decision.allowed, true, `caller=${String(callerAgentId)}`);
+    }
+  });
+
+  it("rejects a desk orchestrator spawn with no workspaceId or cwd", () => {
+    const decision = evaluateSpawnAuthority({ category: "orchestrator", callerAgentId: DESK }, undefined, deps);
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.error, SPAWN_AUTHORITY_WORKSPACE_ERROR);
+  });
+
+  it("rejects a desk orchestrator spawn inheriting a desk working directory", () => {
+    const deskCwd = evaluateSpawnAuthority(
+      { category: "orchestrator", callerAgentId: DESK, cwd: "/home/user/code/meta" },
+      undefined,
+      deps,
+    );
+    assert.equal(deskCwd.allowed, false);
+    assert.equal(deskCwd.error, SPAWN_AUTHORITY_WORKSPACE_ERROR);
+
+    const recordedCwd = evaluateSpawnAuthority(
+      { category: "orchestrator", callerAgentId: DESK, cwd: "/home/user/desk-cwd/" },
+      undefined,
+      deps,
+    );
+    assert.equal(recordedCwd.allowed, false);
+  });
+
+  it("allows a desk orchestrator spawn with an explicit workspaceId or repo-local cwd", () => {
+    const byWorkspace = evaluateSpawnAuthority(
+      { category: "orchestrator", callerAgentId: DESK, workspaceId: "wks_paseo" },
+      undefined,
+      deps,
+    );
+    assert.equal(byWorkspace.allowed, true);
+
+    const byCwd = evaluateSpawnAuthority(
+      { category: "orchestrator", callerAgentId: DESK, cwd: "/home/user/code/paseo" },
+      undefined,
+      deps,
+    );
+    assert.equal(byCwd.allowed, true);
+  });
+
+  it("abstains when the caller is unattributed or the registered desk is unknown", () => {
+    assert.equal(
+      evaluateSpawnAuthority({ category: "worker" }, undefined, deps).allowed,
+      true,
+    );
+    assert.equal(
+      evaluateSpawnAuthority({ category: "worker", callerAgentId: DESK }, undefined, {
+        frontDeskAgentId: () => null,
+        deskWorkingDirs: () => deskDirs,
+      }).allowed,
+      true,
+    );
+  });
+
+  it("resolveSpawnCallerAgentId prefers the request id over a context id and ignores ambient env", () => {
+    const originalEnv = process.env.PASEO_AGENT_ID;
+    process.env.PASEO_AGENT_ID = "ambient-env-agent";
+    try {
+      assert.equal(resolveSpawnCallerAgentId({ callerAgentId: " req-agent " }), "req-agent");
+      assert.equal(
+        resolveSpawnCallerAgentId({}, { callerAgentId: "ctx-agent" } as any),
+        "ctx-agent",
+      );
+      assert.equal(resolveSpawnCallerAgentId({}), undefined);
+    } finally {
+      if (originalEnv === undefined) delete process.env.PASEO_AGENT_ID;
+      else process.env.PASEO_AGENT_ID = originalEnv;
+    }
+  });
+
+  it("resolveDeskWorkingDirs includes ~/code/meta and the desk's recorded cwd", () => {
+    const originalHome = process.env.HOME;
+    process.env.HOME = "/home/user";
+    try {
+      const dirs = resolveDeskWorkingDirs(null);
+      assert.ok(dirs.has("/home/user/code/meta"));
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+    }
+  });
+
+  it("spawnPaseoAgent refuses a desk worker spawn before any SDK/CLI call", async () => {
+    const originalEnv = process.env.HOOK_STATE_DIR;
+    process.env.HOOK_STATE_DIR = path.join(
+      os.tmpdir(),
+      `paseo-573-authority-${process.pid}-${Date.now()}`,
+    );
+    fs.mkdirSync(process.env.HOOK_STATE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(process.env.HOOK_STATE_DIR, "frontdesk.json"),
+      JSON.stringify({ version: 1, agentId: DESK }),
+    );
+
+    let sdkCalled = false;
+    let cliCalled = false;
+    setExecFileAsyncForTest(async () => {
+      cliCalled = true;
+      return { stdout: JSON.stringify({ id: "should-not-spawn" }) };
+    });
+    const context: any = {
+      paseo: {
+        agents: {
+          create: async () => {
+            sdkCalled = true;
+            return { agent: { id: "should-not-spawn" } };
+          },
+        },
+      },
+    };
+
+    try {
+      const res = await spawnPaseoAgent(
+        {
+          title: "worker",
+          prompt: "do work",
+          category: "worker",
+          callerAgentId: DESK,
+        },
+        context,
+      );
+      assert.equal(res.ok, false);
+      assert.equal(res.error, SPAWN_AUTHORITY_WORKER_ERROR);
+      assert.equal(sdkCalled, false);
+      assert.equal(cliCalled, false);
+    } finally {
+      setExecFileAsyncForTest(null);
+      if (originalEnv === undefined) delete process.env.HOOK_STATE_DIR;
+      else process.env.HOOK_STATE_DIR = originalEnv;
+    }
+  });
+
+  it("spawnPaseoAgent lets a non-desk worker spawn through the SDK path", async () => {
+    const originalEnv = process.env.HOOK_STATE_DIR;
+    process.env.HOOK_STATE_DIR = path.join(
+      os.tmpdir(),
+      `paseo-573-allow-${process.pid}-${Date.now()}`,
+    );
+    fs.mkdirSync(process.env.HOOK_STATE_DIR, { recursive: true });
+    fs.writeFileSync(
+      path.join(process.env.HOOK_STATE_DIR, "frontdesk.json"),
+      JSON.stringify({ version: 1, agentId: DESK }),
+    );
+
+    let sdkCalled = false;
+    const context: any = {
+      paseo: {
+        agents: {
+          create: async () => {
+            sdkCalled = true;
+            return { agent: { id: "worker-ok" } };
+          },
+        },
+      },
+    };
+
+    try {
+      const res = await spawnPaseoAgent(
+        {
+          title: "worker",
+          prompt: "do work",
+          category: "worker",
+          callerAgentId: ORCH,
+        },
+        context,
+      );
+      assert.equal(res.ok, true);
+      assert.equal(res.agentId, "worker-ok");
+      assert.equal(sdkCalled, true);
+    } finally {
+      if (originalEnv === undefined) delete process.env.HOOK_STATE_DIR;
+      else process.env.HOOK_STATE_DIR = originalEnv;
+    }
+  });
+
 });

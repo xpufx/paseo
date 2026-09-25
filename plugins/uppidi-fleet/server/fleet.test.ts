@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -913,6 +914,172 @@ describe("orchestrator workspace resolution and state isolation (#485, #486)", (
     } finally {
       process.env.HOOK_STATE_DIR = originalHookState;
     }
+  });
+});
+
+describe("two-tier spawn authority guard (#573)", () => {
+  const DESK = "desk-fleet-573";
+  const ORCH = "orch-fleet-573";
+
+  function withPersistedFrontDesk<T>(fn: () => Promise<T>): Promise<T> {
+    const originalHookState = process.env.HOOK_STATE_DIR;
+    const dir = path.join(os.tmpdir(), `paseo-573-fleet-${process.pid}-${Date.now()}`);
+    process.env.HOOK_STATE_DIR = dir;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "frontdesk.json"),
+      JSON.stringify({ version: 1, agentId: DESK })
+    );
+    return fn().finally(() => {
+      fs.rmSync(dir, { recursive: true, force: true });
+      if (originalHookState === undefined) delete process.env.HOOK_STATE_DIR;
+      else process.env.HOOK_STATE_DIR = originalHookState;
+    });
+  }
+
+  it("handleUppidiAddOrchestrator rejects a desk spawn with no explicit repo workspace", async () => {
+    await withPersistedFrontDesk(async () => {
+      let created = false;
+      const mockContext: any = {
+        paseo: {
+          agents: {
+            list: async () => ({ entries: [] }),
+            create: async () => {
+              created = true;
+              return { agent: { id: "should-not-spawn" } };
+            },
+          },
+        },
+      };
+
+      // No matching workspace and a repo that has no ~/code/<basename> checkout,
+      // so resolveRepoWorkspace yields neither workspaceId nor cwd.
+      setExecFileAsyncForTest(async () => ({ stdout: "[]" }));
+      try {
+        const res = await handleUppidiAddOrchestrator(
+          { repo: "xpufx-org/no-checkout-573", callerAgentId: DESK },
+          mockContext
+        );
+        assert.equal(res.ok, false);
+        assert.ok(res.error?.includes("two-tier spawn authority"));
+        assert.ok(res.error?.includes("paseo send --steer --no-wait <orchId>"));
+        assert.ok(res.error?.includes("POST <hook-host>:<port>/orchestrator"));
+        assert.equal(created, false);
+      } finally {
+        setExecFileAsyncForTest(null);
+      }
+    });
+  });
+
+  it("handleUppidiAddOrchestrator allows a desk spawn with an explicit repo-local cwd", async () => {
+    await withPersistedFrontDesk(async () => {
+      let createdPayload: any = null;
+      const mockContext: any = {
+        paseo: {
+          agents: {
+            create: async (opts: any) => {
+              createdPayload = opts;
+              return { agent: { id: "orch-desk-573" } };
+            },
+          },
+        },
+      };
+
+      setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
+        if (cmd === "paseo" && args[0] === "workspace" && args[1] === "ls") {
+          return {
+            stdout: JSON.stringify([
+              {
+                workspaceId: "wks_paseo_573",
+                project: "paseo",
+                name: "Paseo",
+                isolation: "local",
+                cwd: "/home/user/code/paseo",
+              },
+            ]),
+          };
+        }
+        return { stdout: "[]" };
+      });
+
+      try {
+        const res = await handleUppidiAddOrchestrator(
+          { repo: "xpufx-org/paseo", callerAgentId: DESK },
+          mockContext
+        );
+        assert.equal(res.ok, true);
+        assert.equal(res.agentId, "orch-desk-573");
+        assert.equal(createdPayload.workspaceId, "wks_paseo_573");
+      } finally {
+        setExecFileAsyncForTest(null);
+      }
+    });
+  });
+
+  it("handleUppidiAddOrchestrator allows an unattributed orchestrator self-registration", async () => {
+    await withPersistedFrontDesk(async () => {
+      const mockContext: any = {
+        paseo: {
+          agents: {
+            list: async () => ({ entries: [] }),
+            create: async () => ({ agent: { id: "orch-self-573" } }),
+          },
+        },
+      };
+
+      setExecFileAsyncForTest(async () => ({ stdout: "[]" }));
+      try {
+        const res = await handleUppidiAddOrchestrator(
+          { repo: "xpufx-org/aur-automation" },
+          mockContext
+        );
+        assert.equal(res.ok, true);
+        assert.equal(res.agentId, "orch-self-573");
+      } finally {
+        setExecFileAsyncForTest(null);
+      }
+    });
+  });
+
+  it("spawnPaseoAgent rejects a desk worker spawn and names both remediation paths", async () => {
+    await withPersistedFrontDesk(async () => {
+      const res = await spawnPaseoAgent(
+        {
+          title: "worker",
+          prompt: "do work",
+          category: "worker",
+          callerAgentId: DESK,
+        },
+        {} as any
+      );
+      assert.equal(res.ok, false);
+      assert.ok(res.error?.includes("paseo send --steer --no-wait <orchId>"));
+      assert.ok(res.error?.includes("POST <hook-host>:<port>/orchestrator"));
+    });
+  });
+
+  it("spawnPaseoAgent does not restrict worker spawns from an orchestrator caller", async () => {
+    await withPersistedFrontDesk(async () => {
+      setExecFileAsyncForTest(async () => ({
+        stdout: JSON.stringify({ id: "worker-from-orch-573" }),
+      }));
+      try {
+        const res = await spawnPaseoAgent(
+          {
+            title: "worker",
+            prompt: "do work",
+            category: "worker",
+            callerAgentId: ORCH,
+            model: "custom-provider",
+          },
+          {} as any
+        );
+        assert.equal(res.ok, true);
+        assert.equal(res.agentId, "worker-from-orch-573");
+      } finally {
+        setExecFileAsyncForTest(null);
+      }
+    });
   });
 });
 

@@ -1032,6 +1032,8 @@ export const UppidiAddOrchestratorInputSchema = z.object({
   model: z.string().optional(),
   prompt: z.string().optional(),
   title: z.string().optional(),
+  /** Caller agent id used by the two-tier spawn authority guard (#573). */
+  callerAgentId: z.string().optional(),
 });
 export type UppidiAddOrchestratorInput = z.infer<typeof UppidiAddOrchestratorInputSchema>;
 
@@ -1058,6 +1060,8 @@ export const UppidiReplaceOrchestratorInputSchema = z.object({
   model: z.string().optional(),
   prompt: z.string().optional(),
   title: z.string().optional(),
+  /** Caller agent id used by the two-tier spawn authority guard (#573). */
+  callerAgentId: z.string().optional(),
 });
 export type UppidiReplaceOrchestratorInput = z.infer<typeof UppidiReplaceOrchestratorInputSchema>;
 

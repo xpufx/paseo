@@ -976,6 +976,34 @@ plus `allowPaths` auto-allow seeds) and emits reactive lifecycle wakeups back to
 the parent — both covered in
 [§13.6](#136-subagent-lifecycle-contract-reactive-wakeups--capability-grants).
 
+**Two-tier spawn authority (front desk spawns orchestrators only).** The fleet
+topology is a strict two-tier authority chain, enforced deterministically in
+`spawnPaseoAgent` (`evaluateSpawnAuthority`, [#573]):
+[platform#172](https://forge.mrs.uppidi.com/xpufx-org/platform/issues/172).
+
+1. The **front desk may spawn discrete orchestrators** — but each desk-spawned
+   orchestrator must carry an explicit repo workspace (`workspaceId` or a
+   repo-local `cwd`). The desk's own working directory (`~/code/meta`, or the
+   desk agent's recorded cwd) is rejected, so a child never inherits the desk's
+   root context (the workspace-root bug class behind
+   [paseo#530](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/530)).
+2. The **front desk must never spawn workers**. Worker spawning is
+   orchestrator-exclusive; the desk's dispatch paths are steering a registered
+   orchestrator (`paseo send --steer --no-wait <orchId>`), the router API
+   (`POST <hook-host>:<port>/orchestrator`, `/board-sweep`), or operator
+   escalation.
+
+Attribution is positive-only: the guard reads the caller agent id from the spawn
+request (`callerAgentId`, forwarded by the `add-orchestrator` /
+`replace-orchestrator` RPCs) and compares it against the router's registered
+front desk (`readFrontDesk()`, falling back to `frontdesk.json`). If no caller id
+resolves or no desk is registered, the guard abstains rather than guess, so
+orchestrator self-registration and legitimate worker spawns never regress. Every
+decision is logged through the plugin log (`spawn-authority: allowed|rejected`),
+and rejections name both remediation paths verbatim. Callers that spawn through
+the RPC surface should pass their own agent id as `callerAgentId` to be
+attributed.
+
 ## 13.2 Test state isolation
 
 Tests that touch hook-router state, Front Desk/orchestrator registrations, or

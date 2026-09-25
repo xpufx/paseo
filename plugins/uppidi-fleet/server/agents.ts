@@ -42,6 +42,7 @@ import {
 import type { WorkspaceProjectMap } from "../shared/contracts.js";
 import { isAgentEligibleForBulkArchive, isRepoMatching } from "../shared/sort-filter.js";
 import {
+  appendHookLog,
   getActiveHookRouter,
   getFleetRosterInfo,
   loadRouterConfig,
@@ -1238,6 +1239,164 @@ export async function allowPermission(
   }
 }
 
+/**
+ * Remediation text shared by the two-tier spawn authority rejections (#573).
+ * Quoted verbatim so operators and agents see the exact dispatch paths.
+ */
+const SPAWN_AUTHORITY_REMEDIATION =
+  "steer the registered orchestrator: paseo send --steer --no-wait <orchId>, or self-register via POST <hook-host>:<port>/orchestrator";
+
+/** The front desk may never spawn subagents (workers). */
+export const SPAWN_AUTHORITY_WORKER_ERROR =
+  `two-tier spawn authority: the front-desk agent must not spawn workers; ${SPAWN_AUTHORITY_REMEDIATION}`;
+
+/** Desk-spawned orchestrators must bind to an explicit repo workspace, not inherit the desk cwd. */
+export const SPAWN_AUTHORITY_WORKSPACE_ERROR =
+  `two-tier spawn authority: a front-desk-spawned orchestrator needs an explicit repo workspace (workspaceId or repo-local cwd, never the desk working directory); ${SPAWN_AUTHORITY_REMEDIATION}`;
+
+export interface SpawnAuthorityDecision {
+  allowed: boolean;
+  /** Present only when `allowed` is false; names the remediation paths verbatim. */
+  error?: string;
+  /** Deterministic, human-readable reason for logging (never an LLM judgement). */
+  reason: string;
+}
+
+/**
+ * Resolves the caller agent id for a spawn request (#573).
+ *
+ * paseo 0.9.x `PluginHandlerContext` is `{ paseo }` and carries no caller id,
+ * so attribution comes from the explicit `callerAgentId` on the request, or a
+ * host-provided `context.callerAgentId` (forward-compatible). Returns undefined
+ * when the caller is genuinely unattributed — the guard then abstains rather
+ * than guess, because ambient process env belongs to the daemon, not the RPC
+ * caller.
+ */
+export function resolveSpawnCallerAgentId(
+  options: { callerAgentId?: string },
+  context?: PluginHandlerContext,
+): string | undefined {
+  const fromOptions = options.callerAgentId?.trim();
+  if (fromOptions) return fromOptions;
+  const fromContext = (context as any)?.callerAgentId;
+  if (typeof fromContext === "string" && fromContext.trim()) return fromContext.trim();
+  return undefined;
+}
+
+/**
+ * Reads the registered front-desk agent id from the live router, falling back
+ * to the persisted `frontdesk.json` (mirroring `HookRouter.readFrontDesk`).
+ */
+export function resolveRegisteredFrontDeskAgentId(): string | null {
+  const router = getActiveHookRouter();
+  const fromRouter = router?.readFrontDesk()?.agentId;
+  if (fromRouter) return fromRouter;
+
+  const dir = getPersistedStateDir();
+  const candidates = [join(dir, "frontdesk.json"), join(path.dirname(dir), "frontdesk.json")];
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (parsed && typeof parsed.agentId === "string" && parsed.agentId.trim()) {
+        return parsed.agentId.trim();
+      }
+    } catch {
+      // ignore corrupted/missing state
+    }
+  }
+  return null;
+}
+
+/** Normalizes a directory for equality comparison (absolute, no trailing sep). */
+function normalizeSpawnDir(dir: string | undefined): string | undefined {
+  if (!dir || !dir.trim()) return undefined;
+  const normalized = path.resolve(dir.trim()).replace(/[\\/]+$/, "");
+  return normalized || undefined;
+}
+
+/**
+ * Deterministic set of directories an orchestrator must never inherit as its
+ * root: the desk's conventional `~/code/meta` checkout plus the desk agent's
+ * recorded cwd (#573, same bug class as #530).
+ */
+export function resolveDeskWorkingDirs(deskAgentId: string | null): Set<string> {
+  const dirs = new Set<string>();
+  const home = process.env.HOME ?? os.homedir();
+  if (home) {
+    const meta = normalizeSpawnDir(join(home, "code", "meta"));
+    if (meta) dirs.add(meta);
+  }
+  if (deskAgentId) {
+    const disk = getAgentDiskMetadataMap().get(deskAgentId);
+    const recorded = normalizeSpawnDir(disk?.cwd);
+    if (recorded) dirs.add(recorded);
+  }
+  return dirs;
+}
+
+/**
+ * Pure, deterministic two-tier spawn authority check (#573, platform#172).
+ *
+ * - A front-desk caller may not spawn `category: "worker"`.
+ * - A front-desk caller spawning `category: "orchestrator"` must supply an
+ *   explicit `workspaceId` or a repo-local `cwd` that is not one of the desk's
+ *   own working directories.
+ *
+ * Enforcement is by positive attribution: when no caller id resolves, or the
+ * registered desk is unknown, the spawn is allowed so legitimate orchestrator
+ * self-registration and worker spawning never regress.
+ */
+export function evaluateSpawnAuthority(
+  options: { category?: "front-desk" | "orchestrator" | "worker"; cwd?: string; workspaceId?: string; callerAgentId?: string },
+  context?: PluginHandlerContext,
+  deps: { frontDeskAgentId?: () => string | null; deskWorkingDirs?: (id: string | null) => Set<string> } = {},
+): SpawnAuthorityDecision {
+  const callerAgentId = resolveSpawnCallerAgentId(options, context);
+  const frontDeskAgentId = (deps.frontDeskAgentId ?? resolveRegisteredFrontDeskAgentId)();
+  const isDeskCaller = Boolean(callerAgentId && frontDeskAgentId && callerAgentId === frontDeskAgentId);
+
+  if (!isDeskCaller) {
+    return {
+      allowed: true,
+      reason: callerAgentId
+        ? `caller ${callerAgentId} is not the registered front desk`
+        : "unattributed caller; spawn authority guard not applicable",
+    };
+  }
+
+  if (options.category === "worker") {
+    return {
+      allowed: false,
+      error: SPAWN_AUTHORITY_WORKER_ERROR,
+      reason: `front desk ${callerAgentId} attempted to spawn a worker`,
+    };
+  }
+
+  if (options.category === "orchestrator") {
+    const workspaceId = options.workspaceId?.trim();
+    const cwd = normalizeSpawnDir(options.cwd);
+    const deskDirs = (deps.deskWorkingDirs ?? resolveDeskWorkingDirs)(frontDeskAgentId);
+
+    if (!workspaceId && !cwd) {
+      return {
+        allowed: false,
+        error: SPAWN_AUTHORITY_WORKSPACE_ERROR,
+        reason: `front desk ${callerAgentId} spawned an orchestrator without workspaceId or cwd`,
+      };
+    }
+    if (!workspaceId && cwd && deskDirs.has(cwd)) {
+      return {
+        allowed: false,
+        error: SPAWN_AUTHORITY_WORKSPACE_ERROR,
+        reason: `front desk ${callerAgentId} spawned an orchestrator inheriting the desk cwd ${cwd}`,
+      };
+    }
+  }
+
+  return { allowed: true, reason: `front desk ${callerAgentId} spawn permitted` };
+}
+
 export async function spawnPaseoAgent(
   options: {
     title: string;
@@ -1249,9 +1408,19 @@ export async function spawnPaseoAgent(
     labels?: Record<string, string>;
     /** Declarative capability grant applied at/after spawn (#537). */
     capabilities?: SpawnCapabilities;
+    /** Caller agent id for the two-tier spawn authority guard (#573). */
+    callerAgentId?: string;
   },
   context: PluginHandlerContext
 ): Promise<{ ok: boolean; agentId?: string; error?: string } & SpawnCapabilityResult> {
+  const authority = evaluateSpawnAuthority(options, context);
+  if (!authority.allowed) {
+    appendHookLog(`[warn] spawn-authority: rejected: ${authority.reason}`);
+    console.warn(`[uppidi-fleet:agents] spawn-authority rejected: ${authority.reason}`);
+    return { ok: false, error: authority.error || SPAWN_AUTHORITY_WORKER_ERROR };
+  }
+  appendHookLog(`[info] spawn-authority: allowed: ${authority.reason}`);
+
   const categoryKey = options.category === "front-desk" ? "front-desk" : "orchestrator";
   let resolvedModel = options.model?.trim();
   if (!resolvedModel) {
@@ -1611,6 +1780,7 @@ export async function handleUppidiAddOrchestrator(
         model: input.model,
         cwd,
         workspaceId,
+        callerAgentId: input.callerAgentId,
         labels: {
           role: "orchestrator",
           category: "orchestrator",
@@ -1687,6 +1857,7 @@ export async function handleUppidiReplaceOrchestrator(
         model: input.model,
         prompt: input.prompt,
         title: input.title,
+        callerAgentId: input.callerAgentId,
       },
       context
     );
