@@ -43,7 +43,7 @@ describe("index.server companion wiring", () => {
   });
 
   it("creates the controller and tears it down on cleanup", () => {
-    expect(source).toMatch(/createCompanionController\(\)/);
+    expect(source).toMatch(/createCompanionController\(\{[\s\S]*?\bbinDir\b/);
     expect(source).toMatch(/companion\.shutdown\(\)/);
   });
 
