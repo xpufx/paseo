@@ -156,7 +156,13 @@ describe("mergeOperationBindings", () => {
 
   it("adds custom bindings without dropping the seeds", () => {
     const merged = mergeOperationBindings([
-      { name: "fleet.orch", primitive: "slash.orchestrate", params: {}, target: "http://10.20.30.24:8099" },
+      {
+        name: "fleet.orch",
+        kind: "primitive",
+        primitive: "slash.orchestrate",
+        params: {},
+        target: "http://10.20.30.24:8099",
+      },
     ]);
     expect(merged.map((b) => b.name)).toContain("fleet.orch");
     expect(merged.map((b) => b.name)).toContain("slash.orchestrate");
@@ -164,11 +170,30 @@ describe("mergeOperationBindings", () => {
 
   it("lets a custom binding override a seed with the same name", () => {
     const merged = mergeOperationBindings([
-      { name: "slash.orchestrate", primitive: "slash.orchestrate", params: {}, target: "http://elsewhere:9" },
+      {
+        name: "slash.orchestrate",
+        kind: "primitive",
+        primitive: "slash.orchestrate",
+        params: {},
+        target: "http://elsewhere:9",
+      },
     ]);
     const orchestrate = merged.filter((b) => b.name === "slash.orchestrate");
     expect(orchestrate).toHaveLength(1);
     expect(orchestrate[0]?.target).toBe("http://elsewhere:9");
+  });
+
+  it("carries an http binding as catalog data", () => {
+    const merged = mergeOperationBindings([
+      {
+        name: "docs.search",
+        kind: "http",
+        http: { method: "GET", path: "/search", bodyParams: [] },
+        auth: false,
+        params: {},
+      },
+    ]);
+    expect(merged.find((b) => b.name === "docs.search")).toMatchObject({ kind: "http" });
   });
 });
 
@@ -184,12 +209,48 @@ describe("SlashSettingsSchema operation/hook fields", () => {
     expect(
       SlashSettingsSchema.parse({
         commands: [],
-        operationBindings: [{ name: "a", primitive: "slash.ping", params: { x: 1 }, target: "http://h:1" }],
+        operationBindings: [
+          { name: "a", kind: "primitive", primitive: "slash.ping", params: { x: 1 }, target: "http://h:1" },
+        ],
       }).operationBindings,
     ).toHaveLength(1);
     expect(
       SlashSettingsSchema.safeParse({ commands: [], operationBindings: [{ name: "a" }] }).success,
     ).toBe(false);
+  });
+
+  it("validates an http binding shape and defaults auth/bodyParams", () => {
+    const parsed = SlashSettingsSchema.parse({
+      commands: [],
+      operationBindings: [
+        { name: "docs.search", kind: "http", http: { method: "GET", path: "/search" } },
+      ],
+    });
+    expect(parsed.operationBindings[0]).toMatchObject({
+      name: "docs.search",
+      kind: "http",
+      auth: false,
+      http: { method: "GET", path: "/search", bodyParams: [] },
+    });
+    expect(
+      SlashSettingsSchema.safeParse({
+        commands: [],
+        operationBindings: [{ name: "bad", kind: "http", http: { method: "DELETE", path: "/x" } }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("infers primitive kind for legacy bindings without kind", () => {
+    const parsed = SlashSettingsSchema.parse({
+      commands: [],
+      operationBindings: [{ name: "legacy", primitive: "slash.ping", params: {} }],
+    });
+    expect(parsed.operationBindings[0]).toMatchObject({ name: "legacy", kind: "primitive" });
+  });
+
+  it("seeds a primitive-kind binding for slash.orchestrate (backward compat)", () => {
+    const orchestrate = SEED_OPERATION_BINDINGS.find((b) => b.name === "slash.orchestrate");
+    expect(orchestrate).toMatchObject({ kind: "primitive", primitive: "slash.orchestrate" });
   });
 });
 

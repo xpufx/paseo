@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_HOOK_URL, orchestrateHandover } from "./orchestrate";
-import { allowedOperations, runOperation } from "./resources";
+import { allowedOperations, handleListOperations, redactHeaders, runOperation } from "./resources";
 import { getSlashSettingsStorage } from "./settings";
 
 const SECRET = "hook-secret-value";
@@ -145,7 +145,9 @@ describe("slash.orchestrate operation", () => {
 describe("settings-driven operation bindings", () => {
   it("allowlists a custom binding layered over the seeds", async () => {
     setSettings({
-      operationBindings: [{ name: "fleet.orch", primitive: "slash.orchestrate", params: {}, target: "" }],
+      operationBindings: [
+        { name: "fleet.orch", kind: "primitive", primitive: "slash.orchestrate", params: {}, target: "" },
+      ],
     });
     const operations = await allowedOperations();
     expect(operations).toContain("fleet.orch");
@@ -155,7 +157,13 @@ describe("settings-driven operation bindings", () => {
   it("routes a custom binding to its target endpoint without code changes", async () => {
     setSettings({
       operationBindings: [
-        { name: "fleet.orch", primitive: "slash.orchestrate", params: {}, target: "http://10.20.30.24:8099" },
+        {
+          name: "fleet.orch",
+          kind: "primitive",
+          primitive: "slash.orchestrate",
+          params: {},
+          target: "http://10.20.30.24:8099",
+        },
       ],
     });
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response("{}", { status: 200 }));
@@ -167,14 +175,22 @@ describe("settings-driven operation bindings", () => {
 
   it("rejects a binding that references an unknown primitive", async () => {
     setSettings({
-      operationBindings: [{ name: "bogus", primitive: "nope.nope", params: {} }],
+      operationBindings: [{ name: "bogus", kind: "primitive", primitive: "nope.nope", params: {} }],
     });
     await expect(runOperation("bogus", {}, {})).rejects.toThrow("unknown primitive: nope.nope");
   });
 
   it("keeps slash.orchestrate resolvable after a custom binding is added (backward compat)", async () => {
     setSettings({
-      operationBindings: [{ name: "fleet.orch", primitive: "slash.orchestrate", params: {}, target: "http://10.20.30.24:8099" }],
+      operationBindings: [
+        {
+          name: "fleet.orch",
+          kind: "primitive",
+          primitive: "slash.orchestrate",
+          params: {},
+          target: "http://10.20.30.24:8099",
+        },
+      ],
     });
     expect(await allowedOperations()).toContain("slash.orchestrate");
 
@@ -182,5 +198,155 @@ describe("settings-driven operation bindings", () => {
     vi.stubGlobal("fetch", fetchMock);
     await runOperation("slash.orchestrate", {}, { agentId: "agent-1" });
     expect(fetchMock.mock.calls[0]?.[0]).toBe(`${DEFAULT_HOOK_URL}/orchestrate`);
+  });
+});
+
+describe("data-driven http operation bindings", () => {
+  function setHttpBinding(binding: Record<string, unknown>): void {
+    setSettings({ operationBindings: [binding] });
+  }
+
+  it("executes a settings-defined http binding with zero code changes", async () => {
+    setHttpBinding({
+      name: "httpbin.get",
+      kind: "http",
+      http: { method: "GET", path: "/get", headers: { "x-tenant": "acme" } },
+      auth: false,
+      params: {},
+      target: "http://hooks.example.com",
+    });
+    expect(await allowedOperations()).toContain("httpbin.get");
+
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runOperation("httpbin.get", {}, {})).resolves.toEqual({ ok: true });
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://hooks.example.com/get");
+    expect(init.method).toBe("GET");
+    expect((init.headers as Record<string, string>)["x-tenant"]).toBe("acme");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("falls back to hookUrl for the target and builds a POST body from bodyParams only", async () => {
+    setSettings({ hookUrl: "http://10.0.0.1:8099", operationBindings: [] });
+    getSlashSettingsStorage().update((prev) => ({
+      ...prev,
+      operationBindings: [
+        {
+          name: "notes.create",
+          kind: "http",
+          http: { method: "POST", path: "/notes", bodyParams: ["title"] },
+          auth: false,
+          params: {},
+        },
+      ],
+    }));
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runOperation("notes.create", { title: "hello", secret: "drop-me" }, {});
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://10.0.0.1:8099/notes");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({ title: "hello" });
+  });
+
+  it("attaches the hook bearer secret only when auth is true", async () => {
+    setSettings({ hookSecretFile: secretFile("http-secret") });
+    getSlashSettingsStorage().update((prev) => ({
+      ...prev,
+      operationBindings: [
+        { name: "auth.op", kind: "http", http: { method: "GET", path: "/a", bodyParams: [] }, auth: true, params: {} },
+        { name: "open.op", kind: "http", http: { method: "GET", path: "/b", bodyParams: [] }, auth: false, params: {} },
+      ],
+    }));
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runOperation("auth.op", {}, {});
+    await runOperation("open.op", {}, {});
+
+    const authHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    const openHeaders = fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>;
+    expect(authHeaders.authorization).toBe("Bearer http-secret");
+    expect(openHeaders.authorization).toBeUndefined();
+  });
+
+  it("redacts secret-bearing headers and never surfaces the secret on failure", async () => {
+    setSettings({ hookSecretFile: secretFile("top-secret") });
+    getSlashSettingsStorage().update((prev) => ({
+      ...prev,
+      operationBindings: [
+        { name: "auth.fail", kind: "http", http: { method: "GET", path: "/x", bodyParams: [] }, auth: true, params: {} },
+      ],
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string, _init: RequestInit) =>
+        new Response(JSON.stringify({ error: "nope" }), { status: 500 }),
+      ),
+    );
+
+    await expect(runOperation("auth.fail", {}, {})).rejects.toThrow('rejected (500): nope');
+    await expect(runOperation("auth.fail", {}, {})).rejects.not.toThrow("top-secret");
+  });
+
+  it("redacts secret-bearing header values while preserving others", () => {
+    expect(
+      redactHeaders({ authorization: "Bearer x", Cookie: "a=b", "x-tenant": "acme", "proxy-authorization": "p" }),
+    ).toEqual({
+      authorization: "[redacted]",
+      Cookie: "[redacted]",
+      "x-tenant": "acme",
+      "proxy-authorization": "[redacted]",
+    });
+  });
+
+  it("refuses non-http(s) targets before fetch", async () => {
+    setHttpBinding({
+      name: "file.read",
+      kind: "http",
+      http: { method: "GET", path: "/etc/passwd" },
+      auth: false,
+      params: {},
+      target: "file://",
+    });
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(runOperation("file.read", {}, {})).rejects.toThrow("must use http or https");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("caps oversized responses and flags truncation", async () => {
+    setHttpBinding({
+      name: "big.get",
+      kind: "http",
+      http: { method: "GET", path: "/big" },
+      auth: false,
+      params: {},
+      target: "http://hooks.example.com",
+    });
+    const huge = JSON.stringify({ data: "x".repeat(200_000) });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, _init: RequestInit) => new Response(huge, { status: 200 })));
+
+    const result = (await runOperation("big.get", {}, {})) as { truncated?: boolean };
+    expect(result.truncated).toBe(true);
+  });
+
+  it("reflects the settings-defined catalog via slash.operations.list", async () => {
+    setHttpBinding({
+      name: "catalog.op",
+      kind: "http",
+      http: { method: "GET", path: "/catalog" },
+      auth: false,
+      params: {},
+      target: "http://hooks.example.com",
+    });
+    const listed = await handleListOperations();
+    expect(listed.rpc).toContain("catalog.op");
   });
 });

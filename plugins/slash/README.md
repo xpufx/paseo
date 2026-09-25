@@ -16,7 +16,8 @@ A command carries one of three actions:
 
 - **send** — interpolate `{args}` into a prompt template and send it to the agent.
 - **open** — open a named plugin surface.
-- **rpc** — run an allowlisted daemon operation (shipped: `slash.ping`, `slash.echo`).
+- **rpc** — run a settings-defined operation (built-in primitives, or arbitrary
+  HTTP operations declared as data).
 
 Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages/paseo-plugin-helper), the shared Paseo plugin runtime.
 
@@ -50,24 +51,48 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 ## RPC operations: primitives vs bindings
 
-Built-in primitive handlers (`slash.ping`, `slash.echo`, `slash.orchestrate`) are
-code. User-visible operations are **data** in settings:
+The **catalog is data**. An operation binding is either a named built-in
+primitive (`kind: "primitive"`) or an arbitrary HTTP request (`kind: "http"`):
+
+- `kind: "primitive"` — names a built-in code handler: `slash.ping`, `slash.echo`,
+  `slash.orchestrate`. Use this only for operations that need code semantics.
+- `kind: "http"` — declares `method` (`GET`/`POST`), `path`, optional static
+  `headers`, and the names of call-time `bodyParams` allowed into a POST body.
+  Every http binding runs through one generic handler, so adding a callable rpc
+  is a settings change, never a code change.
 
 ```json
 {
   "operationBindings": [
-    { "name": "fleet.orch", "primitive": "slash.orchestrate", "params": {}, "target": "http://10.20.30.24:8099" }
+    {
+      "name": "notes.create",
+      "kind": "http",
+      "http": {
+        "method": "POST",
+        "path": "/notes",
+        "headers": { "x-tenant": "acme" },
+        "bodyParams": ["title"]
+      },
+      "auth": true,
+      "target": "http://10.20.30.24:8099"
+    },
+    { "name": "fleet.orch", "kind": "primitive", "primitive": "slash.orchestrate", "target": "http://10.20.30.24:8099" }
   ]
 }
 ```
 
-Custom bindings are merged over the seed bindings, so a new rpc slash command
-targeting a different endpoint needs no plugin code change. A binding with the
-same name as a seed overrides it. The hook endpoint resolves from the binding
-`target`, then the settings `hookUrl`, then `PASEO_FORGEJO_HOOK_URL`, then the
-loopback default. Secret paths resolve from settings `hookSecretFile`, then
-`PASEO_FORGEJO_HOOK_SECRET_FILE`, then `~/.paseo/forgejo-hook.secret`; the secret
-value is never stored in settings.
+Bindings are merged over the seed bindings (`slash.ping`, `slash.echo`,
+`slash.orchestrate`), so a new rpc slash command needs no plugin code change; a
+binding with the same name as a seed overrides it. `slash.operations.list` and the
+console rpc-operation picker both reflect the merged catalog.
+
+Endpoint resolution is shared by primitives and http bindings: binding `target`,
+then settings `hookUrl`, then `PASEO_FORGEJO_HOOK_URL`, then the loopback default.
+A binding with `"auth": true` attaches the hook bearer secret; the secret path
+resolves from settings `hookSecretFile`, then `PASEO_FORGEJO_HOOK_SECRET_FILE`,
+then `~/.paseo/forgejo-hook.secret`. The secret value is never stored in settings,
+never logged, and request headers are redacted in any preview. Only `http(s)`
+targets are allowed; responses are capped at 64KB with a 10s timeout.
 
 ## Install
 

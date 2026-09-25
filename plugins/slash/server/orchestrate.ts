@@ -5,7 +5,7 @@ import { getSlashSettingsStorage } from "./settings";
 
 export const DEFAULT_HOOK_URL = "http://127.0.0.1:8099";
 
-const HOOK_TIMEOUT_MS = 10_000;
+export const HOOK_TIMEOUT_MS = 10_000;
 
 function readHookSettings(): { hookUrl: string; hookSecretFile: string } {
   try {
@@ -24,7 +24,7 @@ function readHookSettings(): { hookUrl: string; hookSecretFile: string } {
  * plugin's configured `hookUrl`, then `PASEO_FORGEJO_HOOK_URL`, then the loopback
  * default (issue #544).
  */
-function resolveHookUrl(target?: string): string {
+export function resolveHookUrl(target?: string): string {
   const bindingTarget = target?.trim();
   if (bindingTarget) return bindingTarget;
   const fromSettings = readHookSettings().hookUrl;
@@ -37,12 +37,17 @@ function resolveHookUrl(target?: string): string {
  * `PASEO_FORGEJO_HOOK_SECRET_FILE`, then the conventional path. The secret value
  * itself is never persisted in settings.
  */
-function resolveSecretFile(): string {
+export function resolveSecretFile(): string {
   const fromSettings = readHookSettings().hookSecretFile;
   if (fromSettings) return fromSettings;
   const override = process.env.PASEO_FORGEJO_HOOK_SECRET_FILE?.trim();
   if (override) return override;
   return join(process.env.HOME || homedir(), ".paseo", "forgejo-hook.secret");
+}
+
+/** Reads the hook bearer secret; the value is never logged or returned in errors. */
+export function readHookSecret(): string {
+  return readSecret();
 }
 
 function readSecret(): string {

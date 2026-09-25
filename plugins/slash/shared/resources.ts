@@ -53,17 +53,72 @@ export const SlashCommandSchema = z.object({
 });
 export type SlashCommand = z.infer<typeof SlashCommandSchema>;
 
-// Operation bindings are data: a user-visible rpc operation name bound to one of
-// the plugin's built-in primitive handlers, plus optional params and an optional
-// endpoint target. Adding an rpc command that targets a different endpoint needs
-// no code change (issue #544).
-export const RpcOperationBindingSchema = z.object({
+export const RpcHttpMethodSchema = z.enum(["GET", "POST"]);
+export type RpcHttpMethod = z.infer<typeof RpcHttpMethodSchema>;
+
+// An http operation is fully declarative: method, path, static headers, and the
+// names of params that may be copied into a POST body. It is executed by the
+// single generic `http` primitive, so a new callable rpc needs no code (issue #544).
+export const RpcHttpOperationSchema = z.object({
+  method: RpcHttpMethodSchema,
+  path: z.string().min(1).max(2000),
+  headers: z.record(z.string(), z.string()).optional(),
+  // Names of call-time params allowed into a POST body; empty means no body keys.
+  bodyParams: z.array(z.string().min(1).max(200)).default([]),
+});
+export type RpcHttpOperation = z.infer<typeof RpcHttpOperationSchema>;
+
+export const RpcPrimitiveKindSchema = z.literal("primitive");
+export const RpcHttpKindSchema = z.literal("http");
+
+export const RpcPrimitiveOperationBindingSchema = z.object({
   name: z.string().min(1).max(200),
+  kind: RpcPrimitiveKindSchema,
   primitive: z.string().min(1).max(200),
   params: z.record(z.string(), z.unknown()).default({}),
   target: z.string().max(2000).optional(),
 });
-export type RpcOperationBinding = z.infer<typeof RpcOperationBindingSchema>;
+
+export const RpcHttpOperationBindingSchema = z.object({
+  name: z.string().min(1).max(200),
+  kind: RpcHttpKindSchema,
+  http: RpcHttpOperationSchema,
+  // Attach the hook bearer secret (from resolveSecretFile) to the request.
+  auth: z.boolean().default(false),
+  params: z.record(z.string(), z.unknown()).default({}),
+  target: z.string().max(2000).optional(),
+});
+
+// A persisted binding written before `kind` existed carried `primitive` alone;
+// infer the primitive kind so an upgrade never invalidates the whole settings doc.
+function normalizeOperationBinding(raw: unknown): unknown {
+  if (
+    raw &&
+    typeof raw === "object" &&
+    !("kind" in raw) &&
+    "primitive" in raw
+  ) {
+    return { ...raw, kind: "primitive" };
+  }
+  return raw;
+}
+
+// Operation bindings are data: a user-visible rpc operation name bound either to
+// one of the plugin's built-in primitive handlers (`kind: "primitive"`) or to an
+// arbitrary HTTP request (`kind: "http"`), plus optional params and an optional
+// endpoint target. Adding a callable rpc operation needs no code change (#544).
+const RpcOperationBindingUnion = z.discriminatedUnion("kind", [
+  RpcPrimitiveOperationBindingSchema,
+  RpcHttpOperationBindingSchema,
+]);
+export const RpcOperationBindingSchema = z.preprocess(
+  normalizeOperationBinding,
+  RpcOperationBindingUnion,
+);
+// Parsed binding: defaulted fields (`params`, `auth`, `bodyParams`) are present.
+export type RpcOperationBinding = z.infer<typeof RpcOperationBindingUnion>;
+export type RpcPrimitiveOperationBinding = z.infer<typeof RpcPrimitiveOperationBindingSchema>;
+export type RpcHttpOperationBinding = z.infer<typeof RpcHttpOperationBindingSchema>;
 
 export const SlashSettingsSchema = z.object({
   prefix: z.string().max(32).default("slash-"),
@@ -136,11 +191,12 @@ export const SEED_COMMANDS: SlashCommand[] = [
 
 // Built-in primitive handlers are code; these are the seed bindings (data) that
 // name them. `slash.orchestrate` stays bound here for backward compatibility with
-// existing settings documents that already reference it.
+// existing settings documents and commands that already reference it. Every other
+// callable operation is expected to be a `kind: "http"` binding in settings.
 export const SEED_OPERATION_BINDINGS: RpcOperationBinding[] = [
-  { name: "slash.ping", primitive: "slash.ping", params: {} },
-  { name: "slash.echo", primitive: "slash.echo", params: {} },
-  { name: "slash.orchestrate", primitive: "slash.orchestrate", params: {} },
+  { name: "slash.ping", kind: "primitive", primitive: "slash.ping", params: {} },
+  { name: "slash.echo", kind: "primitive", primitive: "slash.echo", params: {} },
+  { name: "slash.orchestrate", kind: "primitive", primitive: "slash.orchestrate", params: {} },
 ];
 
 /** Merges custom bindings over the seed defaults; a custom name wins outright. */
