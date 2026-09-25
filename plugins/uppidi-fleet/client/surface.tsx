@@ -1217,9 +1217,22 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             <Card variant="flat">
               <Stack gap="sm">
                 <Row justify="space-between" align="center" wrap gap="xs">
-                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    Empirical task benchmark evaluation matrix comparing candidate models against repeatable task profiles (platform#18).
-                  </Text>
+                  <Stack gap="xxs" style={{ flex: 1 }}>
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                      Empirical task benchmark evaluation matrix comparing candidate models against repeatable task profiles (platform#18).
+                    </Text>
+                    <Row align="center" gap="xs" wrap>
+                      <Badge
+                        label={
+                          metricsData?.dataSource === "empirical"
+                            ? `${metricsData?.totalEvaluatedTrials ?? 0} empirical trials across ${metricsData?.modelCount ?? 0} models`
+                            : "no empirical data yet"
+                        }
+                        variant={metricsData?.dataSource === "empirical" ? "success" : "neutral"}
+                        size="sm"
+                      />
+                    </Row>
+                  </Stack>
                   <Button label="Refresh metrics" size="sm" variant="ghost" icon="RefreshCw" onPress={() => void refetchMetrics()} />
                 </Row>
 
@@ -1292,7 +1305,9 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
 
                 {visibleCandidates.length === 0 ? (
                   <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    {rawCandidates.length === 0 ? "No benchmark candidate data available." : "No model candidates match the selected filter."}
+                    {rawCandidates.length === 0
+                      ? "No empirical benchmark data yet — receipts accumulate from live fleet turns."
+                      : "No model candidates match the selected filter."}
                   </Text>
                 ) : (
                   visibleCandidates.map((candidate) => (

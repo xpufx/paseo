@@ -833,18 +833,19 @@ these gaps yourself.
 
 ### 10.7 Role models, metrics, and runners are mock / coming-soon
 
-- The bundled defaults are **mock / coming-soon**. Role models
-  ([`server/role-models.ts`](./server/role-models.ts)) and fleet metrics
-  ([`server/metrics.ts`](./server/metrics.ts)) ship one team's placeholder model
-  ids and benchmark numbers. Runner discovery
+- The bundled **role-model** defaults are mock / coming-soon
+  ([`server/role-models.ts`](./server/role-models.ts)) and runner discovery
   ([`server/runners.ts`](./server/runners.ts)) shells `podman ps` / `tea whoami`
-  and contains a hardcoded runner id. None of this is wired to a real provider
-  fleet yet.
+  and contains a hardcoded runner id.
+- **Fleet metrics are now empirical** ([`server/metrics.ts`](./server/metrics.ts)):
+  the watchdog tick rolls live per-agent signals into minimized receipts in
+  `~/.paseo/uppidi-fleet-metrics.json`, and the matrix serves only those
+  receipts. The checked-in `BASELINE_CANDIDATES` matrix is retired as served
+  data — it remains exported for tests/back-compat, but a missing/empty file
+  yields an explicit empty state ("no empirical data yet"), never placeholders.
 - **Action:** override role models from the Cockpit or
-  `~/.paseo/uppidi-fleet-role-models.json`; treat metrics and runners as
-  mock/coming-soon stubs. Metrics specifically still serves a seeded baseline
-  matrix when the metrics file is absent — the empty-by-default contract is
-  not yet implemented ([§13.4](#134-fleet-metrics-baseline-not-empty)).
+  `~/.paseo/uppidi-fleet-role-models.json`; treat runners as mock/coming-soon.
+  Metrics need no seeding — they populate as agents run ([§13.4](#134-fleet-metrics-empirical-receipts-empty-until-earned)).
 
 ### 10.8 Adoption checklist
 
@@ -1047,24 +1048,29 @@ production loop does not set it; tests inject it. Do not "fix" a finished-idle
 orchestrator by removing this exclusion — it exists precisely to stop
 false-positive spam on idle orchestrators.
 
-## 13.4 Fleet metrics: baseline, not empty
+## 13.4 Fleet metrics: empirical receipts, empty until earned
 
-The Platform #18 audit expectation was "no hardcoded metrics — empty until
-`~/.paseo/uppidi-fleet-metrics.json` has empirical receipts". The shipped code
-does **not** currently match that: [`server/metrics.ts`](./server/metrics.ts)
-falls back to a checked-in `BASELINE_CANDIDATES` benchmark matrix (four
-placeholder models, four task profiles) whenever the metrics file is absent or
-unparsable, and the unit suite asserts that fallback. The client renders an
-explicit `No benchmark candidate data available.` empty state only when the
-candidate list is genuinely empty.
+Platform #18 requires "no hardcoded metrics — empty until empirical receipts
+exist". [`server/metrics.ts`](./server/metrics.ts) now honors that contract:
 
-So the present contract is:
-
-- `~/.paseo/uppidi-fleet-metrics.json` present ⇒ those receipts are served
-  verbatim (candidates, task profiles, trial totals, privacy notice).
-- File absent ⇒ **seeded baseline data**, not an empty state. Treat the matrix
-  as illustrative/placeholder until the empty-by-default change lands; the
-  gap is tracked in [§10.7](#107-role-models-metrics-and-runners-are-mock--coming-soon).
+- The watchdog tick (`runWatchdogAudit`) calls `appendRollupReceipt`, which rolls
+  every metrics-bearing live agent into one minimized receipt per
+  provider/model — turns completed, median context utilization, cache hit ratio,
+  cost, error count, median turn duration — and appends them (capped at 500,
+  oldest evicted) to `~/.paseo/uppidi-fleet-metrics.json`. The write is gated by
+  the `metrics_rollup` watchdog cooldown and skipped when no agent carries
+  metrics. Privacy per platform#18: counts, ratios, and durations only — no
+  transcripts, prompts, or code.
+- The file stores both the raw `receipts` and the derived `candidates`
+  (`CandidateModelMetrics`-compatible, additive rollup fields). `loadFleetMetrics`
+  re-derives candidates from the stored receipts on read.
+- `~/.paseo/uppidi-fleet-metrics.json` present with receipts ⇒ the empirical
+  matrix is served and the Cockpit badge reads
+  `N empirical trials across M models`.
+- File absent, empty, or unparsable ⇒ an **explicit empty state**
+  (`dataSource: "empty"`, empty candidate list) with the badge
+  `no empirical data yet`. The checked-in `BASELINE_CANDIDATES` is retained only
+  as an exported fixture for tests/back-compat; it is never served.
 
 ## 13.5 Front Desk singleton & rotation protocol
 

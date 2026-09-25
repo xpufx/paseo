@@ -917,8 +917,37 @@ export const CandidateModelMetricsSchema = z.object({
   medianWallMs: z.number().default(0),
   recommendedRoles: z.array(z.string()).default([]),
   profiles: z.array(TaskProfileMetricsSchema).default([]),
+  // Additive empirical-rollup fields (#560/#373). Absent on the retired
+  // baseline matrix; populated when a candidate is derived from live receipts.
+  medianContextUtilizationPct: z.number().optional(),
+  cacheHitRatioPct: z.number().optional(),
+  costUsd: z.number().optional(),
+  errorCount: z.number().optional(),
+  turnsCompleted: z.number().optional(),
+  agentCount: z.number().optional(),
+  receiptCount: z.number().optional(),
+  lastReceiptAt: z.string().optional(),
 });
 export type CandidateModelMetrics = z.infer<typeof CandidateModelMetricsSchema>;
+
+/**
+ * One minimized, per-provider/model rollup receipt (#560 / platform#18). Counts,
+ * ratios, and durations only — never transcripts, prompts, or code. Produced on
+ * the watchdog tick and appended to `~/.paseo/uppidi-fleet-metrics.json`.
+ */
+export const RollupReceiptSchema = z.object({
+  ts: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  turnsCompleted: z.number().default(0),
+  agentCount: z.number().default(0),
+  medianContextUtilizationPct: z.number().default(0),
+  cacheHitRatioPct: z.number().default(0),
+  costUsd: z.number().default(0),
+  errorCount: z.number().default(0),
+  medianTurnDurationMs: z.number().default(0),
+});
+export type RollupReceipt = z.infer<typeof RollupReceiptSchema>;
 
 export const UppidiFleetMetricsInputSchema = z.object({
   taskProfile: z.string().optional(),
@@ -933,6 +962,14 @@ export const UppidiFleetMetricsOutputSchema = z.object({
   totalEvaluatedTrials: z.number().default(0),
   privacyNotice: z.string().default(""),
   updatedAt: z.string().optional(),
+  /**
+   * Provenance of the served matrix (#560): `empirical` when derived from live
+   * rollup receipts, `empty` when no receipts exist yet. The retired baseline
+   * matrix is never served, so this is always one of these two.
+   */
+  dataSource: z.enum(["empirical", "empty"]).default("empty"),
+  /** Count of distinct models in the served matrix (badge payload). */
+  modelCount: z.number().default(0),
   error: z.string().optional(),
 });
 export type UppidiFleetMetricsOutput = z.infer<typeof UppidiFleetMetricsOutputSchema>;

@@ -53,6 +53,7 @@ import {
   type WatchdogAgent,
   type WatchdogAgentDisk,
 } from "./hook-router.js";
+import { setMetricsFilePathForTest } from "./metrics.js";
 
 describe("hook-router payload and key utilities", () => {
   it("normalizes repo URLs to canonical key format", () => {
@@ -1474,6 +1475,92 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.ok(reloaded.includes("agent-wedged"));
     assert.equal((router as any).busyAttempts.has("wedged-with-orch"), false);
     assert.ok(delivered.some((d) => d.msg.includes("Auto-recovered wedged queue for wedged-with-orch")));
+  });
+});
+
+describe("watchdog metrics rollup tick (#560)", () => {
+  let tempDir: string;
+  let metricsFile: string;
+  let router: HookRouter;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-rollup-test-"));
+    metricsFile = join(tempDir, "uppidi-fleet-metrics.json");
+    setMetricsFilePathForTest(metricsFile);
+    router = new HookRouter(null, {
+      queueDir: join(tempDir, "queues"),
+      stateDir: join(tempDir, "state"),
+      port: 0,
+    });
+  });
+
+  afterEach(() => {
+    setMetricsFilePathForTest(null);
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  const metricsAgent = (id: string): WatchdogAgent => ({
+    id,
+    status: "idle",
+    provider: "opencode",
+    model: "deepseek-v4.1-flash",
+    deterministicState: "idle:waiting",
+    metrics: { contextUsedTokens: 40, contextMaxTokens: 100, costUsd: 1 },
+  });
+
+  it("writes a receipt from live metrics-bearing agents on the audit tick", async () => {
+    await router.runWatchdogAudit({
+      agentMap: new Map([["agent-1", metricsAgent("agent-1")]]),
+      orchestratorRecords: [],
+      deliver: async () => true,
+      reloadAgent: async () => ({ ok: true }),
+      metricsRollup: true,
+    });
+
+    // appendRollupReceipt is fire-and-forget; flush the microtask/IO queue.
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(existsSync(metricsFile), true);
+    const persisted = JSON.parse(readFileSync(metricsFile, "utf8"));
+    assert.equal(persisted.receipts.length, 1);
+    assert.equal(persisted.receipts[0].model, "deepseek-v4.1-flash");
+    assert.equal(persisted.receipts[0].turnsCompleted, 1);
+  });
+
+  it("does not write when no agent has metrics, and can be disabled", async () => {
+    await router.runWatchdogAudit({
+      agentMap: new Map([["agent-plain", { id: "agent-plain", status: "idle" }]]),
+      orchestratorRecords: [],
+      deliver: async () => true,
+      reloadAgent: async () => ({ ok: true }),
+      metricsRollup: true,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(existsSync(metricsFile), false);
+
+    await router.runWatchdogAudit({
+      agentMap: new Map([["agent-1", metricsAgent("agent-1")]]),
+      orchestratorRecords: [],
+      deliver: async () => true,
+      reloadAgent: async () => ({ ok: true }),
+      metricsRollup: false,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(existsSync(metricsFile), false);
+  });
+
+  it("gates repeated ticks behind the metrics_rollup cooldown", async () => {
+    const map = new Map([["agent-1", metricsAgent("agent-1")]]);
+    const audit = { agentMap: map, orchestratorRecords: [], deliver: async () => true, reloadAgent: async () => ({ ok: true }), metricsRollup: true };
+    await router.runWatchdogAudit({ ...audit, now: 1_000_000 });
+    await new Promise((r) => setTimeout(r, 50));
+    await router.runWatchdogAudit({ ...audit, now: 1_000_001 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.equal(router.canWatchdogAlert("metrics_rollup", 1_000_001), false);
+    const persisted = JSON.parse(readFileSync(metricsFile, "utf8"));
+    assert.equal(persisted.receipts.length, 1);
   });
 });
 

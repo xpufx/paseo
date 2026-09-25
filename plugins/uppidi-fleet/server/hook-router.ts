@@ -19,6 +19,7 @@ import type {
 } from "../shared/contracts.js";
 import { extractPermissionScope } from "../shared/contracts.js";
 import { getUppidiFleetSettingsStorage } from "./settings.js";
+import { appendRollupReceipt } from "./metrics.js";
 
 export interface RouterConfig {
   host?: string;
@@ -386,6 +387,26 @@ export interface WatchdogAgent {
   title?: string | null;
   name?: string | null;
   status?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  deterministicState?: string | null;
+  lastUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cachedInputTokens?: number;
+    totalCostUsd?: number;
+    contextWindowUsedTokens?: number;
+    contextWindowMaxTokens?: number;
+  } | null;
+  metrics?: {
+    contextUsedTokens?: number;
+    contextMaxTokens?: number;
+    cachedTokens?: number;
+    inputTokens?: number;
+    costUsd?: number;
+    activeTurnStartedAt?: string;
+  } | null;
+  activeTurn?: { startedAt?: string | null } | null;
   lastError?: string | null;
   requiresAttention?: boolean;
   attentionReason?: string | null;
@@ -451,6 +472,12 @@ export interface WatchdogAuditOptions {
    * `true` in production; tests inject `false` when exercising unrelated paths.
    */
   childWakeups?: boolean;
+  /**
+   * Persist per-provider/model rollup receipts on this tick (#560). Defaults to
+   * `true` in production and `false` for injected fixtures, so unit tests never
+   * touch `~/.paseo/uppidi-fleet-metrics.json`.
+   */
+  metricsRollup?: boolean;
 }
 
 export interface WatchdogAuditResult {
@@ -2185,6 +2212,36 @@ export class HookRouter {
             scope: assessment.scope,
             severity: "high",
           });
+        }
+      }
+
+      // Empirical metrics aggregation (#560/#373): on this same tick, roll the
+      // live per-model signals into minimized receipts. Gated by the watchdog
+      // cooldown key `metrics_rollup` so a 60s tick doesn't append every minute;
+      // skipped entirely when no live agent carries metrics.
+      const metricsRollup =
+        opts.metricsRollup ?? (opts.agentMap === undefined && process.env.NODE_ENV !== "test");
+      if (metricsRollup) {
+        const hasMetrics = [...agentMap.values()].some(
+          (agent) =>
+            !agent.archivedAt &&
+            Boolean(agent.model && (agent.metrics || agent.lastUsage)),
+        );
+        if (hasMetrics) {
+          void appendRollupReceipt(now, agentMap.values(), () =>
+            this.canWatchdogAlert("metrics_rollup", now),
+          )
+            .then((res) => {
+              if (res.ok && !res.skipped) {
+                this.watchdogAlerts.set("metrics_rollup", now);
+                this.log(
+                  `[info] metrics rollup: wrote ${res.receiptsWritten} receipt(s), ${res.receiptCount} retained`,
+                );
+              } else if (!res.ok) {
+                this.log(`[warn] metrics rollup: ${res.error}`);
+              }
+            })
+            .catch((err) => this.log(`[warn] metrics rollup: ${err?.message || err}`));
         }
       }
 
