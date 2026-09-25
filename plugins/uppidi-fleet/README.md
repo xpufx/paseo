@@ -517,14 +517,36 @@ event directly.
 
 ### 7.7 Fleet watchdog & auto-recovery
 
-A zero-token background loop (`WATCHDOG_INTERVAL_MS`, default `60000`) audits the
-daemon:
+A zero-token background loop (`WATCHDOG_INTERVAL_MS`, default `60000`) fuses the
+daemon view with persisted `~/.paseo/agents` metadata and the `~/.paseo` daemon
+logs, classifying every live agent against the deterministic anomaly taxonomy:
+
+- `TURN_CONCURRENCY_LOCK` — `error` carrying a turn-concurrency failure.
+- `TURN_CANCELLATION_TIMEOUT` — a recent `cancelAgentRun` force-cancel in the
+  daemon logs for an `error`/`idle` agent.
+- `IDLE_POST_ERROR_AMNESIA` — `idle` with a stalled attention reason or ghost
+  `lastError`, and no live children.
+- `ZOMBIE_HUNG_TURN` — `running` with no activity for more than
+  `1800s` (`runningStaleSeconds`).
+- `STALE_ERROR_GHOSTING` — `idle`/`running` with a lingering disk `lastError`.
+- `PROVIDER_QUOTA_EXHAUSTION` — fatal quota/rate-limit errors; circuit-break.
+
+Eligible findings (everything except quota exhaustion) run the ordered 4-step
+recovery pipeline: `paseo agent stop <id>` → wipe `lastError` from
+`~/.paseo/agents/*/<id>.json` → wipe `requiresAttention`/`attentionReason`/
+`attentionTimestamp` → `paseo send --steer --no-wait <id>` wake pulse. Recovery
+shares the watchdog cooldown, so a persistent finding is not acted on every tick.
+Quota exhaustion never auto-steers; it alerts Front Desk for an operator
+circuit-break.
+
+Additionally:
 
 - **Pending permissions** → `AGENT_PERMISSION_REQUIRED`; alerts Front Desk with
   the adjudication command `paseo permit allow <agent> <requestId>`.
-- **ACP turn locks / attention errors** → `AGENT_ERROR`; an unrecoverable message
-  (quota / rate limit) escalates to Front Desk, otherwise the router runs
-  `paseo agent reload <id>` and reports the auto-recovery.
+- **ACP attention stalls** → `AGENT_ATTENTION_REQUIRED`.
+- **Generic orchestrator errors not owned by the taxonomy** → `AGENT_ERROR`; an
+  unrecoverable message (quota / rate limit) escalates to Front Desk, otherwise
+  the router runs `paseo agent reload <id>` and reports the auto-recovery.
 - **Missing orchestrators** → `ORCHESTRATOR_MISSING`.
 - **Wedged queues** → `QUEUE_WEDGED` once `busyAttempts` reaches
   `WATCHDOG_BUSY_THRESHOLD` (default `10`); the registered orchestrator is

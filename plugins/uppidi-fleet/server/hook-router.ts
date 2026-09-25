@@ -384,12 +384,15 @@ export interface WatchdogAgent {
   lastError?: string | null;
   requiresAttention?: boolean;
   attentionReason?: string | null;
+  lastActivityAt?: string | null;
+  updatedAt?: string | null;
+  labels?: Record<string, string> | null;
   pendingPermissions?: WatchdogPermission[] | null;
   archivedAt?: string | null;
 }
 
 export interface WatchdogAnomaly {
-  type: "AGENT_PERMISSION_REQUIRED" | "AGENT_ATTENTION_REQUIRED" | "AGENT_ERROR" | "ORCHESTRATOR_MISSING" | "QUEUE_WEDGED";
+  type: WatchdogAnomalyType;
   agentId?: string;
   key?: string;
   title?: string | null;
@@ -398,6 +401,12 @@ export interface WatchdogAnomaly {
   permissions?: WatchdogPermission[];
   attempts?: number;
   queueDepth?: number;
+  /** Severity and per-signal details for taxonomy findings (#529). */
+  severity?: WatchdogSeverity;
+  taxonomy?: WatchdogTaxonomyType[];
+  details?: Partial<Record<WatchdogTaxonomyType, string>>;
+  recovered?: boolean;
+  recoveryActions?: string[];
 }
 
 export interface WatchdogAuditOptions {
@@ -407,6 +416,23 @@ export interface WatchdogAuditOptions {
   frontDeskId?: string | null;
   deliver?: (targetAgentId: string, msg: string, options?: { noWait?: boolean; steer?: boolean }) => Promise<boolean>;
   reloadAgent?: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Stop a wedged agent (`paseo agent stop <id>`); injectable for tests. */
+  stopAgent?: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Persisted metadata directory (`~/.paseo/agents`); defaults to the home dir. */
+  agentsDir?: string;
+  /** Daemon log directory scanned for cancellation timeouts; defaults to `~/.paseo`. */
+  daemonLogDir?: string;
+  /** Pre-loaded disk metadata; skipped when `agentMap` is injected without it. */
+  diskMetadata?: Map<string, WatchdogAgentDisk> | null;
+  /** Cancellation-timeout markers keyed by agent id; loaded from logs when omitted. */
+  cancellations?: Map<string, number | null> | null;
+  /** Perform the 4-step active recovery pipeline (default: true). */
+  recover?: boolean;
+  steerMessage?: string;
+  runningStaleSeconds?: number;
+  cancellationRecencySeconds?: number;
+  /** Also treat a plain finished idle agent as stalled (aggressive amnesia detection). */
+  assumePendingWork?: boolean;
 }
 
 export interface WatchdogAuditResult {
@@ -414,6 +440,496 @@ export interface WatchdogAuditResult {
   timestamp: number;
   audited: { orchestrators: number; agents: number; queues: number };
   anomalies: WatchdogAnomaly[];
+}
+
+// ---------------------------------------------------------------------------
+// Fleet agent health taxonomy (#529)
+//
+// Deterministic, zero-token classifiers ported from
+// platform `scripts/agent-health-check`. The pure functions below classify a
+// single fused live/disk/log signal set; `runWatchdogAudit` fuses daemon state
+// with persisted metadata and applies the conservative recovery plan.
+// ---------------------------------------------------------------------------
+
+export const WATCHDOG_TAXONOMY = [
+  "TURN_CONCURRENCY_LOCK",
+  "TURN_CANCELLATION_TIMEOUT",
+  "IDLE_POST_ERROR_AMNESIA",
+  "ZOMBIE_HUNG_TURN",
+  "STALE_ERROR_GHOSTING",
+  "PROVIDER_QUOTA_EXHAUSTION",
+] as const;
+export type WatchdogTaxonomyType = (typeof WATCHDOG_TAXONOMY)[number];
+
+export type WatchdogSeverity = "high" | "medium";
+
+export type WatchdogAnomalyType =
+  | "AGENT_PERMISSION_REQUIRED"
+  | "AGENT_ATTENTION_REQUIRED"
+  | "AGENT_ERROR"
+  | "ORCHESTRATOR_MISSING"
+  | "QUEUE_WEDGED"
+  | WatchdogTaxonomyType;
+
+export const DEFAULT_RUNNING_STALE_SECONDS = 1800;
+export const DEFAULT_CANCELLATION_RECENCY_SECONDS = 86400;
+export const DEFAULT_WATCHDOG_STEER_MESSAGE =
+  "Health check: your previous turn ended without resuming work. " +
+  "Sweep the board for triage and continue dispatching pending work.";
+
+export const CANCELLATION_TIMEOUT_MARKER = "cancelagentrun: acknowledged turn still active after timeout";
+
+const TURN_LOCK_MARKERS = [
+  "foreground turn is already active",
+  "a turn is already active",
+  "concurrent turn",
+  "turn concurrency",
+];
+const QUOTA_MARKERS = [
+  "quota",
+  "rate limit",
+  "rate_limit",
+  "429",
+  "too many requests",
+  "resource exhausted",
+  "insufficient credit",
+  "out of credits",
+  "model unavailable",
+  "usage limit",
+  "upgrade to pro",
+];
+const TRANSIENT_MARKERS = [
+  "fetch failed",
+  "econnreset",
+  "etimedout",
+  "connection refused",
+  "socket hang up",
+  "temporarily unavailable",
+];
+const ATTENTION_STALL_REASONS = ["error", "stalled", "interrupted", "failed"];
+
+export const WATCHDOG_SEVERITIES: Record<WatchdogTaxonomyType, WatchdogSeverity> = {
+  TURN_CONCURRENCY_LOCK: "high",
+  TURN_CANCELLATION_TIMEOUT: "high",
+  ZOMBIE_HUNG_TURN: "high",
+  PROVIDER_QUOTA_EXHAUSTION: "high",
+  STALE_ERROR_GHOSTING: "medium",
+  IDLE_POST_ERROR_AMNESIA: "medium",
+};
+
+const STOP_TRIGGERS: ReadonlySet<WatchdogTaxonomyType> = new Set([
+  "TURN_CONCURRENCY_LOCK",
+  "TURN_CANCELLATION_TIMEOUT",
+  "ZOMBIE_HUNG_TURN",
+]);
+const STEER_TRIGGERS: ReadonlySet<WatchdogTaxonomyType> = new Set([
+  "TURN_CONCURRENCY_LOCK",
+  "TURN_CANCELLATION_TIMEOUT",
+  "ZOMBIE_HUNG_TURN",
+  "IDLE_POST_ERROR_AMNESIA",
+]);
+
+export function hasMarker(text: unknown, markers: readonly string[]): boolean {
+  const lowered = String(text ?? "").toLowerCase();
+  return markers.some((marker) => lowered.includes(marker));
+}
+
+export function parseIsoTimestamp(value: unknown): number | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/** Taxonomy 1: errored lifecycle carrying a turn-concurrency failure. */
+export function detectTurnConcurrencyLock(liveStatus: unknown, lastError: unknown): boolean {
+  if (String(liveStatus ?? "").toLowerCase() !== "error") return false;
+  return hasMarker(lastError, TURN_LOCK_MARKERS);
+}
+
+/**
+ * Taxonomy 2: an acknowledged turn was force-canceled after the timeout.
+ * The log marker is historical, so it only counts while the lifecycle is not a
+ * fresh healthy run (error still wedged, or idle never resumed) and only within
+ * the recency window.
+ */
+export function detectCancellationTimeout(
+  agentId: string,
+  cancellations: Map<string, number | null> | null | undefined,
+  liveStatus: unknown,
+  nowEpochMs?: number,
+  recencySeconds?: number,
+): boolean {
+  if (!["error", "idle"].includes(String(liveStatus ?? "").toLowerCase())) return false;
+  if (!cancellations || !cancellations.has(agentId)) return false;
+  if (nowEpochMs === undefined || recencySeconds === undefined) return true;
+  const canceledAt = cancellations.get(agentId);
+  if (canceledAt === null || canceledAt === undefined) return true;
+  return (nowEpochMs - canceledAt) / 1000 <= recencySeconds;
+}
+
+/** Taxonomy 5: healthy/idle lifecycle still carrying a disk lastError. */
+export function detectStaleErrorGhosting(liveStatus: unknown, lastError: unknown): boolean {
+  if (!["idle", "running"].includes(String(liveStatus ?? "").toLowerCase())) return false;
+  return Boolean(String(lastError ?? "").trim());
+}
+
+/** Taxonomy 6: fatal provider/quota error (not a recoverable transient). */
+export function detectProviderQuotaExhaustion(lastError: unknown): boolean {
+  const text = String(lastError ?? "").toLowerCase();
+  if (!text || hasMarker(text, TRANSIENT_MARKERS)) return false;
+  return hasMarker(text, QUOTA_MARKERS);
+}
+
+/**
+ * Taxonomy 3: idle with a stall signal, no active workers, and pending work.
+ * A plain `attentionReason="finished"` is normal completion, so it is not
+ * flagged on its own; `assumePendingWork` is the explicit opt-in that also
+ * treats a finished idle agent as stalled.
+ */
+export function detectIdlePostErrorAmnesia(
+  liveStatus: unknown,
+  lastError: unknown,
+  requiresAttention: unknown,
+  attentionReason: unknown,
+  activeWorkers: number,
+  assumePendingWork = false,
+): boolean {
+  if (String(liveStatus ?? "").toLowerCase() !== "idle") return false;
+  if (activeWorkers > 0) return false;
+  const reason = String(attentionReason ?? "").toLowerCase();
+  const stalled =
+    ATTENTION_STALL_REASONS.includes(reason) || Boolean(String(lastError ?? "").trim());
+  if (stalled) return true;
+  return Boolean(assumePendingWork && requiresAttention);
+}
+
+/** Taxonomy 4: running lifecycle with no activity inside the stale window. */
+export function detectZombieHungTurn(
+  liveStatus: unknown,
+  lastActivityAt: unknown,
+  now: number,
+  staleSeconds: number,
+): boolean {
+  if (String(liveStatus ?? "").toLowerCase() !== "running") return false;
+  const activity = parseIsoTimestamp(lastActivityAt);
+  if (activity === null) return false;
+  return (now - activity) / 1000 >= staleSeconds;
+}
+
+/** Persisted agent metadata from `~/.paseo/agents` subdirectories (fusion input). */
+export interface WatchdogAgentDisk {
+  path?: string;
+  lastStatus?: string | null;
+  lastError?: string | null;
+  requiresAttention?: boolean;
+  attentionReason?: string | null;
+  attentionTimestamp?: string | null;
+  lastActivityAt?: string | null;
+  updatedAt?: string | null;
+  archivedAt?: string | null;
+  labels?: Record<string, string> | null;
+}
+
+export function defaultAgentsDir(): string {
+  const home = process.env.HOME ?? os.homedir();
+  return join(home, ".paseo", "agents");
+}
+
+/** Map agent id -> persisted metadata path under the agents directory subfolders. */
+export function discoverAgentMetadataFiles(agentsDir: string): Map<string, string> {
+  const files = new Map<string, string>();
+  if (!agentsDir || !existsSync(agentsDir)) return files;
+  try {
+    for (const dirent of readdirSync(agentsDir, { withFileTypes: true })) {
+      if (!dirent.isDirectory()) continue;
+      const fullDir = join(agentsDir, dirent.name);
+      let names: string[];
+      try {
+        names = readdirSync(fullDir);
+      } catch {
+        continue;
+      }
+      for (const name of names) {
+        if (!name.endsWith(".json")) continue;
+        const id = name.slice(0, -".json".length);
+        if (!files.has(id)) files.set(id, join(fullDir, name));
+      }
+    }
+  } catch {
+    // best-effort: an unreadable directory yields no metadata
+  }
+  return files;
+}
+
+export function loadAgentDiskMetadata(agentsDir: string): Map<string, WatchdogAgentDisk> {
+  const result = new Map<string, WatchdogAgentDisk>();
+  const files = discoverAgentMetadataFiles(agentsDir);
+  for (const [id, path] of files) {
+    try {
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      if (!parsed || typeof parsed !== "object") continue;
+      result.set(id, {
+        path,
+        lastStatus: parsed.lastStatus ?? parsed.status ?? null,
+        lastError: parsed.lastError ?? null,
+        requiresAttention: Boolean(parsed.requiresAttention),
+        attentionReason: parsed.attentionReason ?? null,
+        attentionTimestamp: parsed.attentionTimestamp ?? null,
+        lastActivityAt: parsed.lastActivityAt ?? parsed.updatedAt ?? null,
+        updatedAt: parsed.updatedAt ?? null,
+        labels: parsed.labels && typeof parsed.labels === "object" ? parsed.labels : null,
+        archivedAt: parsed.archivedAt ?? null,
+      });
+    } catch {
+      // ignore corrupt metadata files
+    }
+  }
+  return result;
+}
+
+/**
+ * Atomically remove metadata keys from an agent's persisted JSON file. Missing
+ * files and no-op writes return false.
+ */
+export function clearAgentDiskFields(path: string | null | undefined, keys: readonly string[]): boolean {
+  if (!path || !existsSync(path)) return false;
+  try {
+    const state = JSON.parse(readFileSync(path, "utf8"));
+    if (!state || typeof state !== "object") return false;
+    let changed = false;
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(state, key)) {
+        delete state[key];
+        changed = true;
+      }
+    }
+    if (!changed) return false;
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Daemon log paths to scan for cancellation timeouts, de-duplicated. */
+export function defaultDaemonLogPaths(logDir: string): string[] {
+  const candidates = [join(logDir, "daemon.log")];
+  try {
+    for (const name of readdirSync(logDir)) {
+      if (name.endsWith(".log")) candidates.push(join(logDir, name));
+    }
+  } catch {
+    // ignore unreadable log directories
+  }
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const path of candidates) {
+    if (seen.has(path)) continue;
+    seen.add(path);
+    if (existsSync(path)) ordered.push(path);
+  }
+  return ordered;
+}
+
+/**
+ * Return agent id -> newest force-cancel epoch-ms found in the daemon logs.
+ * A marker with no parseable timestamp maps to `null`.
+ */
+export function scanCancellationTimeouts(
+  logPaths: readonly string[],
+  marker: string = CANCELLATION_TIMEOUT_MARKER,
+): Map<string, number | null> {
+  const latest = new Map<string, number | null>();
+  const needle = marker.toLowerCase();
+  for (const path of logPaths) {
+    let content: string;
+    try {
+      content = readFileSync(path, "utf8");
+    } catch {
+      continue;
+    }
+    for (const line of content.split("\n")) {
+      if (!line.toLowerCase().includes(needle)) continue;
+      let agentId: string | null = null;
+      let timestamp: number | null = null;
+      try {
+        const payload = JSON.parse(line);
+        if (payload && typeof payload === "object") {
+          agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+          if (typeof payload.time === "number") timestamp = payload.time;
+        }
+      } catch {
+        // fall back to a regex extraction for non-JSON log lines
+      }
+      if (!agentId) {
+        const match = /"agentId"\s*:\s*"([0-9a-fA-F-]{8,})"/.exec(line);
+        agentId = match?.[1] ?? null;
+      }
+      if (!agentId) continue;
+      const previous = latest.get(agentId);
+      if (!latest.has(agentId) || (timestamp !== null && (previous ?? 0) < timestamp)) {
+        latest.set(agentId, timestamp);
+      }
+    }
+  }
+  return latest;
+}
+
+export interface WatchdogAssessment {
+  agentId: string;
+  name: string | null;
+  liveStatus: string;
+  taxonomy: WatchdogTaxonomyType[];
+  severities: Partial<Record<WatchdogTaxonomyType, WatchdogSeverity>>;
+  details: Partial<Record<WatchdogTaxonomyType, string>>;
+  archived: boolean;
+  lastError: string;
+  requiresAttention: boolean;
+  attentionReason: string | null;
+  lastActivityAt: string | null;
+  diskPath: string | null;
+  healthy: boolean;
+}
+
+/** Fuse live, disk and log signals into a single deterministic assessment. */
+export function assessAgentHealth(
+  agentId: string,
+  live: WatchdogAgent | null | undefined,
+  disk: WatchdogAgentDisk | null | undefined,
+  now: number,
+  options: {
+    cancellations?: Map<string, number | null> | null;
+    cancellationRecencySeconds?: number;
+    activeWorkers?: number;
+    assumePendingWork?: boolean;
+    runningStaleSeconds?: number;
+  } = {},
+): WatchdogAssessment {
+  const liveStatus = String(live?.status ?? disk?.lastStatus ?? "").toLowerCase();
+  const lastError = live?.lastError ?? disk?.lastError ?? "";
+  const requiresAttention = Boolean(live?.requiresAttention ?? disk?.requiresAttention);
+  const attentionReason = live?.attentionReason ?? disk?.attentionReason ?? null;
+  const lastActivityAt = disk?.lastActivityAt ?? live?.lastActivityAt ?? disk?.updatedAt ?? live?.updatedAt ?? null;
+  const archived = Boolean(live?.archivedAt ?? disk?.archivedAt);
+  const activeWorkers = options.activeWorkers ?? 0;
+  const staleSeconds = options.runningStaleSeconds ?? DEFAULT_RUNNING_STALE_SECONDS;
+  const recencySeconds = options.cancellationRecencySeconds ?? DEFAULT_CANCELLATION_RECENCY_SECONDS;
+
+  // An ACP attention error with no disk error is the legacy spelling of a turn
+  // lock; keep recovering it even though the status is not literally "error".
+  const turnLock =
+    detectTurnConcurrencyLock(liveStatus, lastError) ||
+    (!String(lastError ?? "").trim() && requiresAttention && attentionReason === "error");
+
+  const checks: Record<WatchdogTaxonomyType, boolean> = {
+    TURN_CONCURRENCY_LOCK: turnLock,
+    TURN_CANCELLATION_TIMEOUT: detectCancellationTimeout(
+      agentId,
+      options.cancellations,
+      liveStatus,
+      now,
+      recencySeconds,
+    ),
+    IDLE_POST_ERROR_AMNESIA: detectIdlePostErrorAmnesia(
+      liveStatus,
+      lastError,
+      requiresAttention,
+      attentionReason,
+      activeWorkers,
+      options.assumePendingWork ?? false,
+    ),
+    ZOMBIE_HUNG_TURN: detectZombieHungTurn(liveStatus, lastActivityAt, now, staleSeconds),
+    STALE_ERROR_GHOSTING: detectStaleErrorGhosting(liveStatus, lastError),
+    PROVIDER_QUOTA_EXHAUSTION: detectProviderQuotaExhaustion(lastError),
+  };
+
+  const taxonomy = archived ? [] : WATCHDOG_TAXONOMY.filter((name) => checks[name]);
+  const severities: Partial<Record<WatchdogTaxonomyType, WatchdogSeverity>> = {};
+  const details: Partial<Record<WatchdogTaxonomyType, string>> = {};
+  for (const name of taxonomy) {
+    severities[name] = WATCHDOG_SEVERITIES[name];
+    const detail =
+      name === "TURN_CANCELLATION_TIMEOUT"
+        ? "acknowledged turn still active after timeout"
+        : name === "IDLE_POST_ERROR_AMNESIA"
+          ? attentionReason ?? undefined
+          : name === "ZOMBIE_HUNG_TURN"
+            ? lastActivityAt ?? undefined
+            : String(lastError || "").trim() || undefined;
+    if (detail) details[name] = detail;
+  }
+
+  return {
+    agentId,
+    name: live?.name ?? live?.title ?? null,
+    liveStatus,
+    taxonomy,
+    severities,
+    details,
+    archived,
+    lastError: String(lastError ?? ""),
+    requiresAttention,
+    attentionReason,
+    lastActivityAt,
+    diskPath: disk?.path ?? null,
+    healthy: taxonomy.length === 0,
+  };
+}
+
+export interface WatchdogRecoveryPlan {
+  stop: boolean;
+  clearError: boolean;
+  clearAttention: boolean;
+  steer: boolean;
+  steerMessage: string;
+  blockedReason: string | null;
+}
+
+/**
+ * Map detected taxonomy to an ordered, conservative recovery plan.
+ * Provider/quota exhaustion is a circuit-breaker condition: the agent is left
+ * untouched for an operator because steering a dead/quota-blocked turn only
+ * burns more of an exhausted budget.
+ */
+export function planWatchdogRecovery(
+  taxonomy: readonly WatchdogTaxonomyType[],
+  steerMessage: string = DEFAULT_WATCHDOG_STEER_MESSAGE,
+): WatchdogRecoveryPlan {
+  const set = new Set(taxonomy);
+  const stop = [...set].some((type) => STOP_TRIGGERS.has(type));
+  const steer = [...set].some((type) => STEER_TRIGGERS.has(type)) && !set.has("PROVIDER_QUOTA_EXHAUSTION");
+  return {
+    stop,
+    clearError: set.has("STALE_ERROR_GHOSTING") || stop,
+    clearAttention: set.has("IDLE_POST_ERROR_AMNESIA"),
+    steer,
+    steerMessage,
+    blockedReason:
+      set.has("PROVIDER_QUOTA_EXHAUSTION") && !stop
+        ? "provider/quota exhaustion requires operator circuit-break"
+        : null,
+  };
+}
+
+export const WATCHDOG_ATTENTION_CLEAR_KEYS = ["requiresAttention", "attentionReason", "attentionTimestamp"] as const;
+
+/** Count live running children declaring `agentId` as their parent. */
+export function countActiveWorkers(
+  agentMap: Map<string, WatchdogAgent>,
+  agentId: string,
+  diskMetadata?: Map<string, WatchdogAgentDisk> | null,
+): number {
+  let count = 0;
+  for (const [id, agent] of agentMap) {
+    if (id === agentId) continue;
+    const status = String(agent.status ?? "").toLowerCase();
+    if (status !== "running" && status !== "working") continue;
+    const labels = agent.labels ?? diskMetadata?.get(id)?.labels ?? null;
+    if (labels?.["paseo.parent-agent-id"] === agentId) count += 1;
+  }
+  return count;
 }
 
 export interface PruneResult {
@@ -1300,21 +1816,99 @@ export class HookRouter {
     });
   }
 
+  public stopAgent(id: string): Promise<{ ok: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      execFile("paseo", ["agent", "stop", id], { timeout: 10000 }, (err) => {
+        if (err) resolve({ ok: false, error: err.message });
+        else resolve({ ok: true });
+      });
+    });
+  }
+
+  /**
+   * Execute the ordered, conservative 4-step recovery pipeline for one
+   * assessment: stop -> wipe lastError -> wipe attention flags -> steer wake
+   * pulse. Returns the list of actions actually attempted and whether the
+   * pipeline reached the wake pulse.
+   */
+  private async recoverWatchdogAgent(
+    assessment: WatchdogAssessment,
+    stopFn: (id: string) => Promise<{ ok: boolean; error?: string }>,
+    steerFn: (id: string, msg: string) => Promise<boolean>,
+    steerMessage: string,
+  ): Promise<{ actions: string[]; steered: boolean; blocked: boolean }> {
+    const plan = planWatchdogRecovery(assessment.taxonomy, steerMessage);
+    if (plan.blockedReason) {
+      this.log(`[warn] watchdog: ${plan.blockedReason} for ${assessment.agentId.slice(0, 7)}`);
+      return { actions: [], steered: false, blocked: true };
+    }
+
+    const actions: string[] = [];
+    if (plan.stop) {
+      const res = await stopFn(assessment.agentId);
+      actions.push(`stop:${res.ok ? "ok" : "failed"}`);
+      this.log(`[info] watchdog: stop ${assessment.agentId.slice(0, 7)} -> ${res.ok ? "ok" : res.error}`);
+    }
+    if (plan.clearError) {
+      const ok = clearAgentDiskFields(assessment.diskPath, ["lastError"]);
+      actions.push(`clear_error:${ok ? "ok" : "noop"}`);
+    }
+    if (plan.clearAttention) {
+      const ok = clearAgentDiskFields(assessment.diskPath, WATCHDOG_ATTENTION_CLEAR_KEYS);
+      actions.push(`clear_attention:${ok ? "ok" : "noop"}`);
+    }
+    if (plan.steer) {
+      const ok = await steerFn(assessment.agentId, plan.steerMessage);
+      actions.push(`steer:${ok ? "ok" : "failed"}`);
+      this.log(`[info] watchdog: steer wake pulse ${assessment.agentId.slice(0, 7)} -> ${ok ? "ok" : "failed"}`);
+      return { actions, steered: ok, blocked: false };
+    }
+    return { actions, steered: false, blocked: false };
+  }
+
   /**
    * Zero-token fleet audit: intercepts stuck permission requests, attempts
    * auto-recovery of ACP turn locks, and detects missing/stalled orchestrators
    * and wedged queues. Alerts are throttled per key by the watchdog cooldown.
+   *
+   * The anomaly taxonomy (#529) fuses daemon state with persisted
+   * `~/.paseo/agents` metadata and the daemon log stream, then applies the
+   * conservative 4-step recovery pipeline for eligible findings.
    */
   public async runWatchdogAudit(opts: WatchdogAuditOptions = {}): Promise<WatchdogAuditResult> {
     const now = opts.now ?? Date.now();
     const reloadFn = opts.reloadAgent ?? ((id: string) => this.reloadAgent(id));
+    const stopFn = opts.stopAgent ?? ((id: string) => this.stopAgent(id));
     const deliverFn = opts.deliver ?? ((id: string, msg: string, o?: any) => this.deliverMessage(id, msg, o));
+    const steerFn = (id: string, msg: string) => deliverFn(id, msg, { noWait: true, steer: true });
+    const recover = opts.recover ?? true;
+    const steerMessage = opts.steerMessage ?? DEFAULT_WATCHDOG_STEER_MESSAGE;
     const anomalies: WatchdogAnomaly[] = [];
 
     let agentMap = opts.agentMap ?? null;
     if (!agentMap) {
       agentMap = await this.fetchAgentMap();
     }
+
+    // Fuse persisted metadata and daemon logs. Injected test fixtures skip the
+    // filesystem unless the caller points at an explicit directory, which keeps
+    // unit tests hermetic while production always reads the real state.
+    const readDisk = opts.agentMap === undefined || opts.agentsDir !== undefined;
+    const readLogs = opts.agentMap === undefined || opts.daemonLogDir !== undefined;
+    const diskMetadata =
+      opts.diskMetadata !== undefined
+        ? opts.diskMetadata
+        : readDisk
+          ? loadAgentDiskMetadata(opts.agentsDir ?? defaultAgentsDir())
+          : null;
+    const cancellations =
+      opts.cancellations !== undefined
+        ? opts.cancellations
+        : readLogs
+          ? scanCancellationTimeouts(
+              defaultDaemonLogPaths(opts.daemonLogDir ?? join(process.env.HOME ?? os.homedir(), ".paseo")),
+            )
+          : null;
 
     const frontDeskId = opts.frontDeskId ?? this.readFrontDesk()?.agentId ?? null;
     const orchRecords = opts.orchestratorRecords ?? this.listOrchestratorRecords();
@@ -1359,6 +1953,62 @@ export class HookRouter {
         }
       }
 
+      // Taxonomy classification over every live agent (#529). Agents handled
+      // here are skipped by the legacy orchestrator-error pass below to avoid
+      // contradictory double recovery.
+      const taxonomyHandled = new Set<string>();
+      for (const agent of agentMap.values()) {
+        if (agent.archivedAt) continue;
+        const assessment = assessAgentHealth(agent.id, agent, diskMetadata?.get(agent.id), now, {
+          cancellations,
+          cancellationRecencySeconds: opts.cancellationRecencySeconds,
+          activeWorkers: countActiveWorkers(agentMap, agent.id, diskMetadata),
+          assumePendingWork: opts.assumePendingWork,
+          runningStaleSeconds: opts.runningStaleSeconds,
+        });
+        if (assessment.healthy) continue;
+        taxonomyHandled.add(agent.id);
+
+        // Recovery and alerts share the watchdog cooldown so a persistently
+        // wedged agent is not stop/steered on every audit tick.
+        const actionKey = `taxonomy:${assessment.agentId}:${assessment.taxonomy.join(",")}`;
+        const eligible = this.canWatchdogAlert(actionKey, now);
+        if (eligible) this.watchdogAlerts.set(actionKey, now);
+
+        const recovery =
+          recover && eligible
+            ? await this.recoverWatchdogAgent(assessment, stopFn, steerFn, steerMessage)
+            : { actions: [], steered: false, blocked: false };
+
+        const recoveryActions = recovery.actions.length > 0 ? recovery.actions : undefined;
+        for (const type of assessment.taxonomy) {
+          anomalies.push({
+            type,
+            agentId: assessment.agentId,
+            title: assessment.name,
+            severity: assessment.severities[type],
+            taxonomy: assessment.taxonomy,
+            details: assessment.details,
+            error: type === "PROVIDER_QUOTA_EXHAUSTION" ? assessment.lastError : undefined,
+            recovered: recovery.steered,
+            recoveryActions,
+          });
+        }
+
+        if (!frontDeskId || !eligible) continue;
+        const label = assessment.name || assessment.agentId.slice(0, 7);
+        if (assessment.taxonomy.includes("PROVIDER_QUOTA_EXHAUSTION")) {
+          const alert = `[Fleet Watchdog] Agent ${label} (${assessment.agentId.slice(0, 7)}) hit provider/quota exhaustion: "${assessment.lastError}". Circuit-break: no auto-steer; operator required.`;
+          void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+        } else if (recovery.steered) {
+          const alert = `[Fleet Watchdog] Auto-recovered agent ${label} (${assessment.agentId.slice(0, 7)}) [${assessment.taxonomy.join(", ")}] via ${recovery.actions.join(" -> ")}.`;
+          void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+        } else {
+          const alert = `[Fleet Watchdog] Agent ${label} (${assessment.agentId.slice(0, 7)}) unhealthy [${assessment.taxonomy.join(", ")}]. Operator attention may be required.`;
+          void deliverFn(frontDeskId, alert, { noWait: true, steer: true });
+        }
+      }
+
       for (const record of orchRecords) {
         const { key, agentId } = record;
         if (!agentId) continue;
@@ -1375,6 +2025,7 @@ export class HookRouter {
         }
 
         if (agent.status === "error" || (agent.requiresAttention && agent.attentionReason === "error")) {
+          if (taxonomyHandled.has(agentId)) continue;
           const rawErr = agent.lastError ?? "";
           const errMsg = rawErr || "unknown error";
           anomalies.push({ type: "AGENT_ERROR", key, agentId, error: errMsg });

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
@@ -34,8 +34,21 @@ import {
   bufferKey,
   FORGEJO_DIGEST_PREFIX,
   envelopeAgentId,
+  detectTurnConcurrencyLock,
+  detectCancellationTimeout,
+  detectIdlePostErrorAmnesia,
+  detectZombieHungTurn,
+  detectStaleErrorGhosting,
+  detectProviderQuotaExhaustion,
+  assessAgentHealth,
+  planWatchdogRecovery,
+  clearAgentDiskFields,
+  loadAgentDiskMetadata,
+  scanCancellationTimeouts,
+  countActiveWorkers,
   type CoalesceEvent,
   type WatchdogAgent,
+  type WatchdogAgentDisk,
 } from "./hook-router.js";
 
 describe("hook-router payload and key utilities", () => {
@@ -1199,6 +1212,7 @@ describe("hook-router fleet watchdog audit (#458)", () => {
   let router: HookRouter;
   let delivered: Array<{ id: string; msg: string }>;
   let reloaded: string[];
+  let stopped: string[];
   let fakeDeliver: (id: string, msg: string) => Promise<boolean>;
   let fakeReload: (id: string) => Promise<{ ok: boolean; error?: string }>;
   const frontDeskId = "fd-watchdog-agent";
@@ -1211,6 +1225,7 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     router.writeFrontDesk(frontDeskId, "test");
     delivered = [];
     reloaded = [];
+    stopped = [];
     fakeDeliver = async (id, msg) => {
       delivered.push({ id, msg });
       return true;
@@ -1255,7 +1270,7 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.ok(delivered.some((d) => d.id === frontDeskId && d.msg.includes("was not found on daemon")));
   });
 
-  it("auto-recovers a foreground turn lock and notifies Front Desk", async () => {
+  it("recovers a foreground turn lock via the 4-step pipeline and notifies Front Desk", async () => {
     const map = new Map<string, WatchdogAgent>([
       ["agent-1", { id: "agent-1", status: "error", lastError: "A foreground turn is already active" }],
     ]);
@@ -1264,13 +1279,18 @@ describe("hook-router fleet watchdog audit (#458)", () => {
       agentMap: map,
       deliver: fakeDeliver,
       reloadAgent: fakeReload,
+      stopAgent: async (id) => {
+        stopped.push(id);
+        return { ok: true };
+      },
     });
-    assert.ok(audit.anomalies.some((a) => a.type === "AGENT_ERROR"));
-    assert.ok(reloaded.includes("agent-1"));
+    assert.ok(audit.anomalies.some((a) => a.type === "TURN_CONCURRENCY_LOCK"));
+    assert.deepEqual(stopped, ["agent-1"]);
+    assert.equal(reloaded.length, 0, "turn locks are recovered by the pipeline, not reload");
     assert.ok(delivered.some((d) => d.id === frontDeskId && d.msg.includes("Auto-recovered")));
   });
 
-  it("auto-recovers an ACP attention error with no lastError", async () => {
+  it("recovers an ACP attention error with no lastError via the pipeline", async () => {
     const map = new Map<string, WatchdogAgent>([
       ["agent-1", { id: "agent-1", status: "running", requiresAttention: true, attentionReason: "error", lastError: null }],
     ]);
@@ -1279,15 +1299,19 @@ describe("hook-router fleet watchdog audit (#458)", () => {
       agentMap: map,
       deliver: fakeDeliver,
       reloadAgent: fakeReload,
+      stopAgent: async (id) => {
+        stopped.push(id);
+        return { ok: true };
+      },
     });
-    assert.ok(audit.anomalies.some((a) => a.type === "AGENT_ERROR"));
-    assert.ok(reloaded.includes("agent-1"));
+    assert.ok(audit.anomalies.some((a) => a.type === "TURN_CONCURRENCY_LOCK"));
+    assert.deepEqual(stopped, ["agent-1"]);
     assert.ok(delivered.some((d) => d.msg.includes("Auto-recovered")));
   });
 
-  it("escalates when auto-reload fails", async () => {
+  it("escalates when auto-reload fails for a generic error", async () => {
     const map = new Map<string, WatchdogAgent>([
-      ["agent-1", { id: "agent-1", status: "error", lastError: "A foreground turn is already active" }],
+      ["agent-1", { id: "agent-1", status: "error", lastError: "fatal boom" }],
     ]);
     await router.runWatchdogAudit({
       orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
@@ -1677,5 +1701,289 @@ describe("hook-router HTTP handoff, prune, and board sweep routes (#458)", () =>
       if (prevScript !== undefined) process.env.FORGEJO_ISSUES_CHECK = prevScript;
       else delete process.env.FORGEJO_ISSUES_CHECK;
     }
+  });
+});
+
+describe("fleet agent health taxonomy classifier (#529)", () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+
+  it("classifies a turn concurrency lock only for errored lifecycles", () => {
+    assert.equal(detectTurnConcurrencyLock("error", "A foreground turn is already active"), true);
+    assert.equal(detectTurnConcurrencyLock("error", "concurrent turn detected"), true);
+    assert.equal(detectTurnConcurrencyLock("idle", "A foreground turn is already active"), false);
+    assert.equal(detectTurnConcurrencyLock("error", "spawn ENOENT"), false);
+  });
+
+  it("classifies cancellation timeouts with a recency window", () => {
+    const cancellations = new Map<string, number | null>([["agent-1", now - 60_000]]);
+    assert.equal(detectCancellationTimeout("agent-1", cancellations, "idle", now, 86400), true);
+    assert.equal(detectCancellationTimeout("agent-1", cancellations, "running", now, 86400), false);
+    assert.equal(detectCancellationTimeout("agent-recovered", cancellations, "idle", now, 86400), false);
+    assert.equal(detectCancellationTimeout("agent-1", cancellations, "idle", now, 30), false);
+    assert.equal(detectCancellationTimeout("agent-1", new Map([["agent-1", null]]), "error", now, 30), true);
+  });
+
+  it("classifies idle post-error amnesia conservatively", () => {
+    // Ghost lastError or a stalled attention reason on a workerless idle agent.
+    assert.equal(detectIdlePostErrorAmnesia("idle", "boom", false, null, 0), true);
+    assert.equal(detectIdlePostErrorAmnesia("idle", "", true, "stalled", 0), true);
+    assert.equal(detectIdlePostErrorAmnesia("idle", "", true, "finished", 0), false);
+    assert.equal(detectIdlePostErrorAmnesia("idle", "boom", false, null, 2), false);
+    assert.equal(detectIdlePostErrorAmnesia("running", "boom", false, null, 0), false);
+    // Explicit opt-in treats a plain finished/attention idle agent as stalled.
+    assert.equal(detectIdlePostErrorAmnesia("idle", "", true, "finished", 0, true), true);
+  });
+
+  it("classifies zombie hung turns past the stale window", () => {
+    const stale = new Date(now - 1900 * 1000).toISOString();
+    const fresh = new Date(now - 60 * 1000).toISOString();
+    assert.equal(detectZombieHungTurn("running", stale, now, 1800), true);
+    assert.equal(detectZombieHungTurn("running", fresh, now, 1800), false);
+    assert.equal(detectZombieHungTurn("idle", stale, now, 1800), false);
+    assert.equal(detectZombieHungTurn("running", null, now, 1800), false);
+  });
+
+  it("classifies stale error ghosting for healthy lifecycles only", () => {
+    assert.equal(detectStaleErrorGhosting("idle", "boom"), true);
+    assert.equal(detectStaleErrorGhosting("running", "boom"), true);
+    assert.equal(detectStaleErrorGhosting("idle", "   "), false);
+    assert.equal(detectStaleErrorGhosting("error", "boom"), false);
+  });
+
+  it("classifies provider quota exhaustion but not recoverable transients", () => {
+    assert.equal(detectProviderQuotaExhaustion("You've hit your usage limit"), true);
+    assert.equal(detectProviderQuotaExhaustion("Rate limit exceeded (429): Quota exhausted"), true);
+    assert.equal(detectProviderQuotaExhaustion("model unavailable"), true);
+    assert.equal(detectProviderQuotaExhaustion("fetch failed: ECONNRESET"), false);
+    assert.equal(detectProviderQuotaExhaustion("spawn ENOENT"), false);
+    assert.equal(detectProviderQuotaExhaustion(""), false);
+  });
+
+  it("fuses live and disk signals into an ordered assessment", () => {
+    const assessment = assessAgentHealth(
+      "agent-1",
+      { id: "agent-1", status: "error", lastError: "foreground turn is already active" },
+      { lastError: "foreground turn is already active", lastStatus: "error" },
+      now,
+    );
+    assert.deepEqual(assessment.taxonomy, ["TURN_CONCURRENCY_LOCK"]);
+    assert.equal(assessment.severities.TURN_CONCURRENCY_LOCK, "high");
+    assert.equal(assessment.healthy, false);
+
+    const archived = assessAgentHealth(
+      "agent-2",
+      { id: "agent-2", status: "error", lastError: "boom", archivedAt: "2026-01-01T00:00:00Z" },
+      null,
+      now,
+    );
+    assert.deepEqual(archived.taxonomy, []);
+    assert.equal(archived.healthy, true);
+  });
+
+  it("counts only live running/parented workers as active children", () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["parent", { id: "parent", status: "idle" }],
+      ["child-a", { id: "child-a", status: "running", labels: { "paseo.parent-agent-id": "parent" } }],
+      ["child-b", { id: "child-b", status: "running", labels: { "paseo.parent-agent-id": "other" } }],
+    ]);
+    assert.equal(countActiveWorkers(map, "parent"), 1);
+    assert.equal(countActiveWorkers(map, "other"), 1);
+  });
+
+  it("plans conservative recovery and blocks auto-steer on quota exhaustion", () => {
+    const zombie = planWatchdogRecovery(["ZOMBIE_HUNG_TURN", "STALE_ERROR_GHOSTING"]);
+    assert.equal(zombie.stop, true);
+    assert.equal(zombie.clearError, true);
+    assert.equal(zombie.steer, true);
+    assert.equal(zombie.blockedReason, null);
+
+    const amnesia = planWatchdogRecovery(["IDLE_POST_ERROR_AMNESIA"]);
+    assert.equal(amnesia.stop, false);
+    assert.equal(amnesia.clearAttention, true);
+    assert.equal(amnesia.steer, true);
+
+    const quota = planWatchdogRecovery(["PROVIDER_QUOTA_EXHAUSTION"]);
+    assert.equal(quota.stop, false);
+    assert.equal(quota.steer, false);
+    assert.match(quota.blockedReason ?? "", /circuit-break/);
+  });
+
+  it("atomically wipes metadata keys and tolerates missing files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-health-disk-"));
+    try {
+      const file = join(dir, "agent.json");
+      writeFileSync(
+        file,
+        JSON.stringify({ id: "agent-1", lastError: "boom", requiresAttention: true, attentionReason: "error", attentionTimestamp: "x", keep: 1 }),
+      );
+      assert.equal(clearAgentDiskFields(file, ["lastError"]), true);
+      const afterError = JSON.parse(readFileSync(file, "utf8"));
+      assert.equal("lastError" in afterError, false);
+      assert.equal(afterError.keep, 1);
+      assert.equal(
+        clearAgentDiskFields(file, ["requiresAttention", "attentionReason", "attentionTimestamp"]),
+        true,
+      );
+      const afterAttention = JSON.parse(readFileSync(file, "utf8"));
+      assert.equal("requiresAttention" in afterAttention, false);
+      assert.equal("attentionReason" in afterAttention, false);
+      assert.equal("attentionTimestamp" in afterAttention, false);
+      assert.equal(clearAgentDiskFields(file, ["lastError"]), false);
+      assert.equal(clearAgentDiskFields(join(dir, "missing.json"), ["lastError"]), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads persisted metadata from the agents directory subfolders", () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-health-metadata-"));
+    try {
+      const sub = join(dir, "agent-1");
+      mkdirSync(sub, { recursive: true });
+      writeFileSync(
+        join(sub, "agent-1.json"),
+        JSON.stringify({ id: "agent-1", lastStatus: "idle", lastError: "ghost", updatedAt: "2026-01-01T00:00:00Z" }),
+      );
+      const map = loadAgentDiskMetadata(dir);
+      const disk = map.get("agent-1") as WatchdogAgentDisk;
+      assert.equal(disk.lastStatus, "idle");
+      assert.equal(disk.lastError, "ghost");
+      assert.equal(disk.lastActivityAt, "2026-01-01T00:00:00Z");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("scans daemon logs for the newest cancellation-timeout marker", () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-health-logs-"));
+    try {
+      const log = join(dir, "daemon.log");
+      writeFileSync(
+        log,
+        `${JSON.stringify({ time: 1000, agentId: "agent-aaaaaaaa", msg: "cancelAgentRun: acknowledged turn still active after timeout" })}\n` +
+        `${JSON.stringify({ time: 2000, agentId: "agent-aaaaaaaa", msg: "cancelAgentRun: acknowledged turn still active after timeout" })}\n` +
+        `plain line cancelAgentRun: acknowledged turn still active after timeout "agentId":"bbbbbbbb-1111-2222-3333-444444444444"\n`,
+      );
+      const map = scanCancellationTimeouts([log]);
+      assert.equal(map.get("agent-aaaaaaaa"), 2000);
+      assert.equal(map.has("bbbbbbbb-1111-2222-3333-444444444444"), true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("hook-router taxonomy recovery pipeline (#529)", () => {
+  let tempDir: string;
+  let agentsDir: string;
+  let delivered: Array<{ id: string; msg: string; steer?: boolean }>;
+  let stopped: string[];
+  let router: HookRouter;
+  const frontDeskId = "fd-health-agent";
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-health-watchdog-"));
+    agentsDir = join(tempDir, "agents");
+    router = new HookRouter(null, { queueDir: join(tempDir, "queues"), stateDir: join(tempDir, "state"), port: 0 });
+    router.writeFrontDesk(frontDeskId, "test");
+    delivered = [];
+    stopped = [];
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  const writeMetadata = (id: string, data: Record<string, unknown>) => {
+    const sub = join(agentsDir, id);
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, `${id}.json`), JSON.stringify(data, null, 2));
+  };
+
+  it("runs the stop -> clear -> steer pipeline for a zombie hung turn", async () => {
+    const stale = new Date(Date.now() - 3600 * 1000).toISOString();
+    writeMetadata("agent-zombie", { id: "agent-zombie", lastStatus: "running", lastError: "hung", lastActivityAt: stale });
+    const fakeDeliver = async (id: string, msg: string, o?: { steer?: boolean }) => {
+      delivered.push({ id, msg, steer: o?.steer });
+      return true;
+    };
+    const map = new Map<string, WatchdogAgent>([["agent-zombie", { id: "agent-zombie", status: "running" }]]);
+
+    const audit = await router.runWatchdogAudit({
+      agentMap: map,
+      agentsDir,
+      diskMetadata: undefined,
+      cancellations: new Map(),
+      deliver: fakeDeliver,
+      stopAgent: async (id) => {
+        stopped.push(id);
+        return { ok: true };
+      },
+    });
+
+    assert.ok(audit.anomalies.some((a) => a.type === "ZOMBIE_HUNG_TURN" && a.agentId === "agent-zombie"));
+    assert.deepEqual(stopped, ["agent-zombie"]);
+    // lastError was wiped from disk by step 2.
+    const persisted = JSON.parse(readFileSync(join(agentsDir, "agent-zombie", "agent-zombie.json"), "utf8"));
+    assert.equal("lastError" in persisted, false);
+    // Step 4 steers the wake pulse at the agent itself.
+    assert.ok(delivered.some((d) => d.id === "agent-zombie" && d.steer === true && /Health check/.test(d.msg)));
+    assert.ok(
+      delivered.some((d) => d.id === frontDeskId && /Auto-recovered agent/.test(d.msg) && /ZOMBIE_HUNG_TURN/.test(d.msg)),
+    );
+  });
+
+  it("never auto-steers on provider quota exhaustion and alerts instead", async () => {
+    writeMetadata("agent-quota", { id: "agent-quota", lastStatus: "idle", lastError: "You've hit your usage limit" });
+    const fakeDeliver = async (id: string, msg: string, o?: { steer?: boolean }) => {
+      delivered.push({ id, msg, steer: o?.steer });
+      return true;
+    };
+    const map = new Map<string, WatchdogAgent>([
+      ["agent-quota", { id: "agent-quota", status: "idle", lastError: "You've hit your usage limit" }],
+    ]);
+
+    const audit = await router.runWatchdogAudit({
+      agentMap: map,
+      agentsDir,
+      cancellations: new Map(),
+      deliver: fakeDeliver,
+      stopAgent: async (id) => {
+        stopped.push(id);
+        return { ok: true };
+      },
+      frontDeskId,
+    });
+
+    assert.ok(audit.anomalies.some((a) => a.type === "PROVIDER_QUOTA_EXHAUSTION"));
+    assert.deepEqual(stopped, [], "quota exhaustion must not stop the agent");
+    assert.equal(delivered.some((d) => d.id === "agent-quota"), false, "quota exhaustion must not steer the agent");
+    assert.ok(delivered.some((d) => d.id === frontDeskId && /quota exhaustion/.test(d.msg)));
+  });
+
+  it("throttles taxonomy alerts within the watchdog cooldown", async () => {
+    writeMetadata("agent-ghost", { id: "agent-ghost", lastStatus: "idle", lastError: "ghost" });
+    const fakeDeliver = async (id: string, msg: string) => {
+      delivered.push({ id, msg });
+      return true;
+    };
+    const map = new Map<string, WatchdogAgent>([["agent-ghost", { id: "agent-ghost", status: "idle" }]]);
+
+    const runOnce = () =>
+      router.runWatchdogAudit({
+        agentMap: map,
+        agentsDir,
+        cancellations: new Map(),
+        deliver: fakeDeliver,
+        stopAgent: async () => ({ ok: true }),
+        frontDeskId,
+      });
+    await runOnce();
+    const first = delivered.length;
+    assert.ok(first > 0);
+    await runOnce();
+    assert.equal(delivered.length, first, "no duplicate taxonomy alerts within cooldown");
   });
 });
