@@ -18,6 +18,7 @@ import {
   setWorkspaceProjectMapForTest,
   applyParentProjectInheritance,
   resolveSpawnMode,
+  resolveAutoAccept,
   findScopeMatchingPermission,
   autoAllowScopedPermission,
   setExecFileAsyncForTest,
@@ -376,6 +377,18 @@ describe("subagent lifecycle projection & structured block detail (#537)", () =>
       "bypass",
     );
     assert.equal(resolveSpawnMode("antigravity-acp", { mode: "plan" }), "plan");
+  });
+
+  it("resolves auto_accept per provider with capability override (#574)", () => {
+    // opencode's unattendedness is a feature toggle, not a mode.
+    assert.equal(resolveSpawnMode("opencode"), undefined);
+    assert.equal(resolveAutoAccept("opencode"), true);
+    // antigravity keeps its yolo mode path and does not use auto_accept.
+    assert.equal(resolveAutoAccept("antigravity-acp"), false);
+    assert.equal(resolveAutoAccept("codex"), false);
+    // Explicit override wins in both directions.
+    assert.equal(resolveAutoAccept("opencode", { autoAccept: false }), false);
+    assert.equal(resolveAutoAccept("antigravity-acp", { autoAccept: true }), true);
   });
 
   it("matches only pending permissions whose scope falls under a declared prefix", () => {

@@ -1027,6 +1027,11 @@ export interface SpawnCapabilities {
   mode?: string;
   /** Providers that accept `mode`; defaults to `["antigravity-acp"]`. */
   modeProviders?: string[];
+  /**
+   * Explicit override for the provider `auto_accept` feature toggle (#574).
+   * When omitted, providers in `DEFAULT_AUTO_ACCEPT_PROVIDERS` default to `true`.
+   */
+  autoAccept?: boolean;
   /** Directory scope prefixes the child is expected to use. */
   allowPaths?: string[];
   /** Auto-allow the first scope-matching pending permission (default: true when allowPaths is set). */
@@ -1036,6 +1041,8 @@ export interface SpawnCapabilities {
 export interface SpawnCapabilityResult {
   /** Whether a requested spawn mode was actually forwarded to the provider. */
   modeApplied?: boolean;
+  /** Whether `auto_accept: true` was forwarded to the provider at creation (#574). */
+  autoAcceptApplied?: boolean;
   /** Result of the best-effort post-spawn auto-allow. */
   autoAllow?: { allowed: boolean; permissionId?: string; scope?: string; reason?: string };
 }
@@ -1054,6 +1061,14 @@ export interface RawPendingPermissionLike {
 /** Default providers that accept an explicit spawn `mode`. */
 export const DEFAULT_SPAWN_MODE_PROVIDERS = ["antigravity-acp"];
 
+/**
+ * Providers whose unattendedness is carried by the `auto_accept` feature toggle
+ * rather than a mode (#574). opencode approves tool permissions automatically
+ * when `featureValues.auto_accept` is `true`; setting it at creation gives
+ * workers parity with antigravity's `yolo` default.
+ */
+export const DEFAULT_AUTO_ACCEPT_PROVIDERS = ["opencode"];
+
 const AUTO_ALLOW_POLL_MS_DEFAULT = 500;
 const AUTO_ALLOW_TIMEOUT_MS_DEFAULT = 15_000;
 
@@ -1070,6 +1085,21 @@ export function resolveSpawnMode(
   const requested = capabilities?.mode ?? (provider === "antigravity-acp" ? "yolo" : undefined);
   if (!requested || !modeProviders.includes(provider)) return undefined;
   return requested;
+}
+
+/**
+ * Resolves whether the provider's `auto_accept` feature toggle should be set at
+ * spawn (#574). Defaults to `true` for `DEFAULT_AUTO_ACCEPT_PROVIDERS`; an
+ * explicit `capabilities.autoAccept` overrides in either direction. Antigravity
+ * carries unattendedness via `mode: "yolo"` (see {@link resolveSpawnMode}) and is
+ * not in the default list, so its path is untouched.
+ */
+export function resolveAutoAccept(
+  provider: string,
+  capabilities?: SpawnCapabilities,
+): boolean {
+  if (capabilities?.autoAccept !== undefined) return capabilities.autoAccept;
+  return DEFAULT_AUTO_ACCEPT_PROVIDERS.includes(provider);
 }
 
 /**
@@ -1447,6 +1477,7 @@ export async function spawnPaseoAgent(
   }
 
   const spawnMode = resolveSpawnMode(targetProvider, options.capabilities);
+  const autoAccept = resolveAutoAccept(targetProvider, options.capabilities);
   const allowPaths = options.capabilities?.allowPaths ?? [];
   const shouldAutoAllow = options.capabilities?.autoAllow ?? allowPaths.length > 0;
   const applyAutoAllow = async (id: string): Promise<SpawnCapabilityResult> => {
@@ -1467,6 +1498,16 @@ export async function spawnPaseoAgent(
         labels: options.labels,
         role: options.category,
       };
+      // The SDK transports provider settings through `config`; a slash-less
+      // provider cannot be expressed there, so those spawns fall through to CLI.
+      const sdkProvider = targetModelName
+        ? `${targetProvider}/${targetModelName}`
+        : targetProvider;
+      const sdkConfig: Record<string, any> = { provider: sdkProvider };
+      if (options.cwd) sdkConfig.cwd = options.cwd;
+      if (spawnMode) sdkConfig.modeId = spawnMode;
+      if (autoAccept) sdkConfig.featureValues = { auto_accept: true };
+      createPayload.config = sdkConfig;
       if (options.workspaceId) {
         createPayload.workspaceId = options.workspaceId;
         createPayload.workspace = options.workspaceId;
@@ -1478,7 +1519,13 @@ export async function spawnPaseoAgent(
       const created = await (context.paseo.agents as any).create(createPayload);
       const id = created?.id || created?.agent?.id;
       if (id) {
-        return { ok: true, agentId: id, modeApplied: Boolean(spawnMode), ...(await applyAutoAllow(id)) };
+        return {
+          ok: true,
+          agentId: id,
+          modeApplied: Boolean(spawnMode),
+          autoAcceptApplied: autoAccept,
+          ...(await applyAutoAllow(id)),
+        };
       }
     } catch (err: any) {
       console.warn("[uppidi-fleet:agents] context.paseo.agents.create failed, falling back to CLI:", err?.message || err);
@@ -1486,6 +1533,10 @@ export async function spawnPaseoAgent(
   }
 
   // 2. Fall back to CLI `paseo run -d ...`
+  // `paseo run` exposes no feature/auto_accept flag, so auto_accept cannot be
+  // set on this path (#574) — the SDK create payload is the only pre-grant
+  // surface. Spawns lacking a `provider/model` pair (SDK requires the slash
+  // form) therefore cannot receive the toggle.
   try {
     const args = ["run", "-d", "--title", options.title];
     if (targetProvider) {
@@ -1526,7 +1577,13 @@ export async function spawnPaseoAgent(
     }
 
     const resolvedId = agentId || `spawned-${Date.now()}`;
-    return { ok: true, agentId: resolvedId, modeApplied: Boolean(spawnMode), ...(await applyAutoAllow(resolvedId)) };
+    return {
+      ok: true,
+      agentId: resolvedId,
+      modeApplied: Boolean(spawnMode),
+      autoAcceptApplied: false,
+      ...(await applyAutoAllow(resolvedId)),
+    };
   } catch (err: any) {
     return { ok: false, error: err?.message || String(err) };
   }

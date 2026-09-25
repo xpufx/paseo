@@ -971,9 +971,9 @@ mandate — see [§6](#6-skills-how-the-fleet-thinks) for the example skills thi
 references. The spawn also registers the agent with the router
 (`writeOrchestrator` + `enrollRepo`) so webhooks route to it.
 
-`spawnPaseoAgent` also accepts an optional `capabilities` grant (spawn `mode`
-plus `allowPaths` auto-allow seeds) and emits reactive lifecycle wakeups back to
-the parent — both covered in
+`spawnPaseoAgent` also accepts an optional `capabilities` grant (spawn `mode`,
+`autoAccept` feature toggle, plus `allowPaths` auto-allow seeds) and emits
+reactive lifecycle wakeups back to the parent — both covered in
 [§13.6](#136-subagent-lifecycle-contract-reactive-wakeups--capability-grants).
 
 **Two-tier spawn authority (front desk spawns orchestrators only).** The fleet
@@ -1161,13 +1161,23 @@ re-notifies immediately. Each pulse also raises a `CHILD_WAKEUP` anomaly with
 **Capability grants at spawn.** `spawnPaseoAgent` accepts an optional
 `capabilities` grant. Where the daemon CLI/SDK supports it, `mode` is forwarded
 to declared `modeProviders` (default `["antigravity-acp"]` → `yolo`); other
-providers ignore it. `allowPaths` seeds a bounded, best-effort auto-allow:
+providers ignore it. Unattendedness for providers whose toggle is a *feature*
+rather than a mode is set at creation too (#574): `autoAccept` defaults to
+`true` for `DEFAULT_AUTO_ACCEPT_PROVIDERS` (`["opencode"]`), forwarded as
+`config.featureValues.auto_accept` in the SDK create payload, and an explicit
+`capabilities.autoAccept` overrides in either direction. antigravity keeps its
+`yolo` mode path unchanged. The SDK path is the only pre-grant surface: the
+`paseo run -d` CLI fallback exposes no feature/auto_accept flag, so spawns that
+fall back to it (e.g. a slash-less provider the SDK cannot express) do not get
+the toggle. `allowPaths` seeds a bounded, best-effort auto-allow:
 after spawn the plugin polls `pendingPermissions` (SDK `ref()`, falling back to
 `paseo permit ls --json`) and allows **exactly one** request whose scope falls
 under a declared prefix, logging the outcome. This is a plugin-surface shim —
 **the daemon has no pre-grant/permission-inheritance surface today**, so
 capability inheritance is best-effort, not enforced (daemon-side gap tracked in
 [#537](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/537)). Cross-ref:
+[#574](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/574) for the
+opencode auto_accept spawn default, and
 [§13.1](#131-daemon-workspace-scoping--orchestrator-spawning) for the spawn
 target contract this builds on.
 

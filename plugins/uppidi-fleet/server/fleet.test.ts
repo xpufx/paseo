@@ -740,6 +740,71 @@ describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
     assert.equal(createdPayload.mode, undefined);
   });
 
+  it("forwards auto_accept in the SDK create payload for opencode workers (#574)", async () => {
+    const payloads: any[] = [];
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async (opts: any) => {
+            payloads.push(opts);
+            return { agent: { id: `agent-${payloads.length}`, status: "running" } };
+          },
+        },
+      },
+    };
+
+    const opencodeRes = await spawnPaseoAgent(
+      {
+        title: "Worker opencode",
+        prompt: "Coding agent",
+        category: "worker",
+        model: "opencode/ollama-cloud/deepseek-v4.1-flash",
+      },
+      mockContext
+    );
+
+    assert.equal(opencodeRes.ok, true);
+    assert.equal(payloads[0].provider, "opencode");
+    assert.equal(
+      payloads[0].config.provider,
+      "opencode/ollama-cloud/deepseek-v4.1-flash"
+    );
+    assert.deepEqual(payloads[0].config.featureValues, { auto_accept: true });
+    assert.equal(opencodeRes.autoAcceptApplied, true);
+
+    // antigravity keeps its yolo mode path and must not receive auto_accept.
+    const antigravityRes = await spawnPaseoAgent(
+      {
+        title: "Worker antigravity",
+        prompt: "Coding agent",
+        category: "worker",
+        model: "antigravity-acp/gemini-3.8-flash-low",
+      },
+      mockContext
+    );
+
+    assert.equal(antigravityRes.ok, true);
+    assert.equal(payloads[1].config.modeId, "yolo");
+    assert.equal(payloads[1].config.featureValues, undefined);
+    assert.equal(antigravityRes.autoAcceptApplied, false);
+
+    // Explicit capability override is honored.
+    const overrideRes = await spawnPaseoAgent(
+      {
+        title: "Worker opencode opt-out",
+        prompt: "Coding agent",
+        category: "worker",
+        model: "opencode/ollama-cloud/deepseek-v4.1-flash",
+        capabilities: { autoAccept: false },
+      },
+      mockContext
+    );
+
+    assert.equal(overrideRes.ok, true);
+    assert.equal(payloads[2].config.featureValues, undefined);
+    assert.equal(overrideRes.autoAcceptApplied, false);
+  });
+
   it("spawnPaseoAgent invokes CLI fallback with --provider and appropriate args (#426)", async () => {
     let capturedCmd = "";
     let capturedArgs: readonly string[] = [];
@@ -801,6 +866,27 @@ describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
       assert.equal(capturedArgs[capturedArgs.indexOf("--provider") + 1], "custom-provider");
       assert.equal(capturedArgs.includes("--model"), false);
       assert.equal(capturedArgs.includes("--mode"), false);
+
+      // 4. opencode CLI fallback: no mode, and `paseo run` has no
+      // auto_accept/feature flag, so the toggle cannot be applied here (#574).
+      const resOpencode = await spawnPaseoAgent(
+        {
+          title: "Worker opencode CLI",
+          prompt: "Coding agent",
+          category: "worker",
+          model: "opencode/ollama-cloud/deepseek-v4.1-flash",
+        },
+        {} as any
+      );
+
+      assert.equal(resOpencode.ok, true);
+      assert.equal(capturedArgs[capturedArgs.indexOf("--provider") + 1], "opencode");
+      assert.equal(capturedArgs.includes("--mode"), false);
+      assert.equal(
+        capturedArgs.some((a) => a === "--feature" || a.startsWith("auto_accept")),
+        false
+      );
+      assert.equal(resOpencode.autoAcceptApplied, false);
     } finally {
       setExecFileAsyncForTest(null);
     }
