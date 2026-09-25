@@ -309,9 +309,8 @@ const settingsSchema = z.object({
   socketPath: z
     .string()
     .trim()
-    .min(1, "Enter the 2fadod socket path")
-    .default("/tmp/2fado.sock")
-    .describe("2fadod socket"),
+    .default("")
+    .describe("2fadod socket (blank = plugin storage default)"),
   notificationTarget: z
     .enum(notificationTargets)
     .default("both")

@@ -1314,7 +1314,7 @@ function SettingsTab() {
         <CompanionControls socketPath={socketPath} />
         <FormRow
           label="Socket path"
-          description="Unix socket 2fadod listens on. Saved changes are probed automatically."
+          description="Unix socket 2fadod listens on. Blank uses plugin storage. Saved changes are probed automatically."
         >
           <TextInput
             value={draft.socketPath}

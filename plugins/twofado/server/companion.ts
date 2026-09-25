@@ -185,12 +185,17 @@ async function loadModule<T>(name: string, options: CompanionControllerOptions):
   return (await import(pathToFileURL(script).href)) as T;
 }
 
-function defaultSocketPath(env: NodeJS.ProcessEnv): string {
+function defaultSocketPath(env: NodeJS.ProcessEnv, options: CompanionControllerOptions = {}): string {
   const configured = env.TWOFADO_SOCKET?.trim();
   if (configured) return configured;
+  if (options.binDir) return join(dirname(options.binDir), "run", "2fado.sock");
   const runtimeDir = env.XDG_RUNTIME_DIR?.trim();
   if (runtimeDir) return join(runtimeDir, "2fado", "2fado.sock");
   return "/tmp/2fado.sock";
+}
+
+function pickSocketPath(input: string | undefined, env: NodeJS.ProcessEnv, options: CompanionControllerOptions): string {
+  return input?.trim() || defaultSocketPath(env, options);
 }
 
 /**
@@ -231,12 +236,12 @@ export function createCompanionController(
         return {
           state: "offline",
           managed: "none",
-          socketPath: input?.socketPath ?? defaultSocketPath(options.env ?? process.env),
+          socketPath: pickSocketPath(input?.socketPath, options.env ?? process.env, options),
         };
       }
     },
     async start(input) {
-      const socketPath = input?.socketPath ?? defaultSocketPath(options.env ?? process.env);
+      const socketPath = pickSocketPath(input?.socketPath, options.env ?? process.env, options);
       try {
         const sup = await getSupervisor();
         return await sup.start({ socketPath: input?.socketPath });
@@ -259,7 +264,7 @@ export function createCompanionController(
       }
     },
     async restart(input) {
-      const socketPath = input?.socketPath ?? defaultSocketPath(options.env ?? process.env);
+      const socketPath = pickSocketPath(input?.socketPath, options.env ?? process.env, options);
       try {
         const sup = await getSupervisor();
         return await sup.restart({ socketPath: input?.socketPath });
