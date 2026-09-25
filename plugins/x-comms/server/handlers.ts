@@ -269,6 +269,30 @@ export interface ConversationSendInput {
   fromAgentName?: string | null;
   /** Stable across the initial attempt and every outbox retry. */
   messageId?: string;
+  /**
+   * Ask for a notice back on this sender once the message reaches the target.
+   * Defaults to true; the notice is itself queued, so it waits rather than
+   * steering the sender's turn.
+   */
+  notifyOnFinish?: boolean;
+}
+
+/**
+ * How the message was handled: sent now, held for a busy target, held in the
+ * outbox after a transport failure, or refused.
+ */
+export type SendDelivery = "dispatched" | "queued" | "outbox" | "dropped";
+
+export interface ConversationSendResult {
+  daemon: string;
+  agentId: string;
+  ok: boolean;
+  error: string | null;
+  delivery: SendDelivery;
+  /** Items already waiting for this target after the call (0 when dispatched). */
+  queueDepth: number;
+  /** When a queued item gives up, or null when it was sent/refused outright. */
+  expiresAt: string | null;
 }
 
 /**
@@ -336,18 +360,35 @@ async function deliverConversationMessage(
   }
 }
 
-export async function handleConversationSend(input: ConversationSendInput, context?: PluginHandlerContext) {
+export async function handleConversationSend(
+  input: ConversationSendInput,
+  context?: PluginHandlerContext,
+): Promise<ConversationSendResult> {
   rememberPaseo(context?.paseo);
   // Generate once at the edge. The normalized input is also what gets held in
-  // the outbox, so an ambiguous failure cannot turn a retry into a new daemon
-  // message.
+  // the outbox or the defer queue, so an ambiguous failure cannot turn a retry
+  // into a new daemon message.
   const message: ConversationSendInput & { messageId: string } = {
     ...input,
     messageId: input.messageId ?? randomUUID(),
   };
+  const paseo = context?.paseo ?? paseoRef;
+  const target = { daemon: message.daemon, agentId: message.agentId };
+
+  // The busy gate. A send starts a turn, and Paseo's daemon sends with
+  // replaceRunning: true, so dispatching into a running target cuts its turn
+  // short. Defer instead (#598) — the target picks the message up at the start
+  // of its next turn and nothing is interrupted in either direction.
+  if (await busyGate().isBusy(target)) {
+    return deferForBusyTarget(message, target);
+  }
+
   try {
-    await deliverConversationMessage(message, context?.paseo ?? paseoRef);
+    await deliverConversationMessage(message, paseo);
   } catch (cause) {
+    // Transport failure, not a busy target: the outbox owns that case, with its
+    // own backoff and its own (shorter) expiry. See the module comment in
+    // defer-queue.ts for why the two queues are not the same thing.
     const error = cause instanceof Error ? cause.message : String(cause);
     const entry = await withOutboxLock(() => {
       const state = readOutbox();
@@ -365,14 +406,70 @@ export async function handleConversationSend(input: ConversationSendInput, conte
       agentId: message.agentId,
       ok: false,
       error: `undelivered; held in the outbox for retry until ${entry.expiresAt}: ${error}`,
+      delivery: "outbox",
+      queueDepth: 0,
+      expiresAt: entry.expiresAt,
     };
   }
+  noteTargetDispatched(target);
   recordOutboundSend({
     daemon: message.daemon,
     agentId: message.agentId,
     localAgentId: message.fromAgentId ?? null,
   });
-  return { daemon: message.daemon, agentId: message.agentId, ok: true, error: null };
+  if (message.notifyOnFinish !== false) {
+    queueDeliveryNotice(message, target, new Date().toISOString());
+  }
+  return {
+    daemon: message.daemon,
+    agentId: message.agentId,
+    ok: true,
+    error: null,
+    delivery: "dispatched",
+    queueDepth: 0,
+    expiresAt: null,
+  };
+}
+
+/** Hold a message whose target is mid-turn and report the queue position. */
+function deferForBusyTarget(
+  message: ConversationSendInput & { messageId: string },
+  target: { daemon: string; agentId: string },
+): ConversationSendResult {
+  const queued = enqueueDefer({ ...message, kind: "message" }, { nowMs: Date.now() });
+  for (const evicted of queued.evicted) {
+    log.warn(`defer: queue full for '${evicted.daemon}/${evicted.agentId}', evicted ${evicted.id}`);
+    void notifyDeferDrop(evicted, "evicted");
+  }
+  if (!queued.entry) {
+    log.error(`defer: refused ${message.messageId} for '${target.daemon}/${target.agentId}': ${queued.error}`);
+    return {
+      daemon: message.daemon,
+      agentId: message.agentId,
+      ok: false,
+      error: queued.error,
+      delivery: "dropped",
+      queueDepth: queued.depth,
+      expiresAt: null,
+    };
+  }
+  log.info(
+    `defer: '${target.daemon}/${target.agentId}' is busy, queued ${queued.entry.id} at position ${queued.depth} until ${queued.entry.expiresAt}`,
+  );
+  recordOutboundSend({
+    daemon: message.daemon,
+    agentId: message.agentId,
+    localAgentId: message.fromAgentId ?? null,
+  });
+  return {
+    daemon: message.daemon,
+    agentId: message.agentId,
+    ok: true,
+    error: null,
+    delivery: "queued",
+    queueDepth: queued.depth,
+    expiresAt: queued.entry.expiresAt,
+  };
 }
 
 
@@ -420,6 +517,29 @@ import {
   type OutboxEntry,
 } from "./outbox";
 import { OUTBOX_NOTICE_KIND, OUTBOX_NOTICE_VERSION } from "../shared/outbox.ts";
+import {
+  DEFER_DRAIN_INTERVAL_MS,
+  DEFER_MAX_TARGETS_PER_PASS,
+  DEFER_NOTICE_KIND,
+  DEFER_NOTICE_VERSION,
+  LOCAL_DAEMON,
+  claimNextDefer,
+  completeDeferItem,
+  deferDepth,
+  deferDropReason,
+  deferQueueDir,
+  deliveryNoticeText,
+  enqueueDefer,
+  expiredDeferEntries,
+  listStaleClaims,
+  listWaiting,
+  pendingDeferTargets,
+  releaseDeferItem,
+  removeDeferItem,
+  type DeferEntry,
+  type DeferTarget,
+} from "./defer-queue.ts";
+import { BusyGate, readLifecycleStatus } from "./busy.ts";
 import { stateDir, migrateFromRoot } from "./registry";
 
 const UI_PREFS_FILE = join(stateDir(), "plugin.json");
@@ -1186,6 +1306,343 @@ export const outboxWorker = createPeriodicTask({
 export function stopOutboxWorker(): void {
   outboxWorker.stop();
 }
+// Defer queue: hold sends to a busy target instead of preempting its turn
+// (#598). The queue storage and its bounds live in defer-queue.ts; this is the
+// wiring: the busy gate, the drain, and the notices.
+
+let busyGateRef: BusyGate | null = null;
+
+/**
+ * Short on purpose. This probe sits in front of every send, and a late verdict
+ * is better than a stale one — a caller blocked 20s to learn "busy" has already
+ * moved on to something else.
+ */
+const BUSY_PROBE_TIMEOUT_MS = 5000;
+
+async function runBusyProbe(args: string[]): Promise<unknown> {
+  const r = await withTimeout(
+    safeSpawn("paseo", args, { timeoutMs: BUSY_PROBE_TIMEOUT_MS }),
+    BUSY_PROBE_TIMEOUT_MS,
+    "busy probe",
+  );
+  if (r.code !== 0) throw new Error((r.stderr || `exit ${r.code}`).trim().slice(0, 200));
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    throw new Error("non-JSON busy probe output");
+  }
+}
+
+/**
+ * Read the target's lifecycle. A local agent comes from the SDK snapshot (and
+ * from the turn hooks, which need no probe at all); a peer comes from
+ * `paseo inspect --host`, the only route to another daemon's agent state —
+ * there is no cross-daemon turn subscription to wait on.
+ */
+async function probeTargetLifecycle(target: DeferTarget): Promise<string | null> {
+  if (target.daemon === LOCAL_DAEMON) {
+    const paseo = paseoRef;
+    if (!paseo) return null;
+    try {
+      const refreshed = await paseo.agents.ref(target.agentId).refresh();
+      return readLifecycleStatus(refreshed?.agent);
+    } catch {
+      return null;
+    }
+  }
+  const sendDaemon = daemonNameForServerId(target.daemon) ?? target.daemon;
+  const entry = readRegistry(currentRegistryPath()).daemons.find((d) => d.name === sendDaemon);
+  if (!entry) return null;
+  try {
+    return readLifecycleStatus(await runBusyProbe(["inspect", target.agentId, "--host", entry.value, "--json"]));
+  } catch {
+    return null;
+  }
+}
+
+function busyGate(): BusyGate {
+  if (!busyGateRef) busyGateRef = new BusyGate({ probe: probeTargetLifecycle });
+  return busyGateRef;
+}
+
+export function noteLocalTurnStarted(agentId: string): void {
+  busyGate().noteLocalTurnStarted(agentId);
+}
+
+function noteTargetDispatched(target: DeferTarget): void {
+  busyGate().noteDispatched(target);
+}
+
+/**
+ * Tell a sender that a message aimed at it will not be delivered. Appended to
+ * the sender's timeline rather than sent, so the sender reads it on a turn it
+ * starts itself and is never interrupted to learn about it.
+ */
+async function notifyDeferDrop(
+  entry: DeferEntry,
+  cause: "expired" | "evicted" | "unknown",
+): Promise<void> {
+  const paseo = paseoRef;
+  const reason = deferDropReason(entry, cause);
+  if (!entry.fromAgentId || !paseo) {
+    log.warn(
+      `defer: drop notice for ${entry.id} not appended (${entry.fromAgentId ? "no paseo handle" : "no local sender agent"}): ${reason}`,
+    );
+    return;
+  }
+  try {
+    await paseo.agents.ref(entry.fromAgentId).timeline.append({
+      type: "plugin",
+      id: `x-comms-defer-${cause}-${entry.id}`,
+      kind: DEFER_NOTICE_KIND,
+      version: DEFER_NOTICE_VERSION,
+      data: {
+        daemon: entry.daemon,
+        agentId: entry.agentId,
+        messageId: entry.messageId,
+        cause,
+        reason,
+        waitedMs: Math.max(0, Date.now() - Date.parse(entry.createdAt)),
+      },
+    });
+  } catch (err) {
+    log.error(`defer: drop notice for ${entry.id} failed: ${cause0(err)}`);
+  }
+}
+
+function cause0(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+/**
+ * Queue the `notifyOnFinish` notice back to the sender.
+ *
+ * The notice is addressed to a LOCAL agent — an x-comms sender is always an
+ * agent on this daemon — and it goes through the same queue, so a sender that is
+ * itself mid-turn has its notice held rather than steered. Paseo's own
+ * notify-on-finish path steers the caller's turn; doing that here would
+ * reintroduce the preemption this queue exists to remove, in the other
+ * direction.
+ */
+export function queueDeliveryNotice(
+  message: {
+    daemon: string;
+    agentId: string;
+    messageId: string;
+    fromAgentId?: string | null;
+    fromAgentName?: string | null;
+  },
+  target: DeferTarget,
+  landedAt: string,
+): void {
+  const senderId = message.fromAgentId ?? null;
+  if (!senderId) return;
+  if (!paseoRef) {
+    log.warn(`defer: delivery notice for ${message.messageId} not queued (no paseo handle)`);
+    return;
+  }
+  const queued = enqueueDefer(
+    {
+      kind: "notice",
+      daemon: LOCAL_DAEMON,
+      agentId: senderId,
+      fromAgentId: null,
+      fromAgentName: message.fromAgentName ?? null,
+      prompt: deliveryNoticeText(
+        {
+          id: message.messageId,
+          kind: "message",
+          daemon: target.daemon,
+          agentId: target.agentId,
+          fromAgentId: null,
+          fromAgentName: null,
+          prompt: "",
+          messageId: message.messageId,
+          stamped: true,
+          notifyOnFinish: false,
+          createdAt: landedAt,
+          expiresAt: landedAt,
+        },
+        landedAt,
+      ),
+      messageId: randomUUID(),
+      notifyOnFinish: false,
+      reportsOnEntryId: message.messageId,
+    },
+    { nowMs: Date.now() },
+  );
+  if (!queued.entry) {
+    log.error(`defer: delivery notice for ${message.messageId} refused: ${queued.error}`);
+  }
+}
+
+/**
+ * Deliver a queued item. A notice is a local send. A message goes out over the
+ * route its original send would have taken, except when the text is already
+ * stamped by the MCP server's path — that text must be sent verbatim, because
+ * re-stamping would move `sentAt` and invalidate the signature from #594.
+ */
+async function deliverDeferEntry(entry: DeferEntry): Promise<void> {
+  if (entry.kind === "notice") {
+    const paseo = paseoRef;
+    if (!paseo) throw new Error("no local paseo handle for a delivery notice");
+    await paseo.agents.ref(entry.agentId).send(entry.prompt, { messageId: entry.messageId });
+    return;
+  }
+  if (entry.stamped) {
+    // `paseo send --host`, the same shell-out the MCP path uses, so the
+    // pre-stamped bytes reach the target unchanged.
+    const registry = readRegistry(currentRegistryPath());
+    const sendDaemon = daemonNameForServerId(entry.daemon) ?? entry.daemon;
+    const host = registry.daemons.find((d) => d.name === sendDaemon)?.value;
+    if (!host) throw new Error(`unknown daemon '${sendDaemon}' — pairing is required`);
+    const r = await withTimeout(
+      safeSpawn(
+        "paseo",
+        ["send", entry.agentId, "--host", host, "--message-id", entry.messageId, "--json", "--no-wait", entry.prompt],
+        { timeoutMs: 20000 },
+      ),
+      20000,
+      "defer deliver",
+    );
+    if (r.code !== 0) throw new Error((r.stderr || `exit ${r.code}`).trim().slice(0, 200));
+    return;
+  }
+  await deliverConversationMessage({
+    daemon: entry.daemon,
+    agentId: entry.agentId,
+    prompt: entry.prompt,
+    fromAgentId: entry.fromAgentId,
+    fromAgentName: entry.fromAgentName,
+    messageId: entry.messageId,
+  });
+}
+
+export interface DeferDrainSummary {
+  delivered: number;
+  failed: number;
+  expired: number;
+  /** Claims left in flight by a dead process; reported, never re-dispatched. */
+  unknown: number;
+  skipped: number;
+}
+
+export interface DeferDrainOptions {
+  nowMs?: number;
+  /** Drain only this target (a local agent just went idle). */
+  target?: DeferTarget;
+  /** Reusable for tests; defaults to the real queue directory. */
+  dir?: string;
+  /** Injected so a drain can be exercised without a daemon. */
+  deliver?: (entry: DeferEntry) => Promise<void>;
+  notify?: (entry: DeferEntry, cause: "expired" | "evicted" | "unknown") => void;
+}
+
+/**
+ * One drain pass.
+ *
+ * At most ONE item per target per pass. A delivery starts the target's turn, so
+ * handing it a second message in the same pass would preempt the first — the
+ * exact behaviour the queue exists to prevent. Throughput is therefore one
+ * message per observed turn, which is what the target's own pace implies.
+ *
+ * The `.json` to `.sending` rename inside claimNextDefer happens BEFORE the
+ * send, so a crash in the middle of a delivery leaves a claim a later pass
+ * reports as unknown rather than redelivering.
+ */
+export async function drainDeferQueue(options: DeferDrainOptions = {}): Promise<DeferDrainSummary> {
+  const dir = options.dir ?? deferQueueDir();
+  const nowMs = options.nowMs ?? Date.now();
+  const deliver = options.deliver ?? deliverDeferEntry;
+  const notify = options.notify ?? notifyDeferDrop;
+  const summary: DeferDrainSummary = { delivered: 0, failed: 0, expired: 0, unknown: 0, skipped: 0 };
+
+  // A claim still present here belongs to a process that died mid-send. The
+  // target may already have the message, so report the ambiguity rather than
+  // replaying it.
+  for (const entry of listStaleClaims(dir)) {
+    summary.unknown += 1;
+    removeDeferItem(dir, entry.id);
+    notify(entry, "unknown");
+  }
+
+  for (const entry of expiredDeferEntries(listWaiting(dir), nowMs)) {
+    summary.expired += 1;
+    removeDeferItem(dir, entry.id);
+    notify(entry, "expired");
+  }
+
+  const targets = pendingDeferTargets(dir)
+    .filter(
+      (target) =>
+        !options.target ||
+        (target.daemon === options.target.daemon && target.agentId === options.target.agentId),
+    )
+    .slice(0, DEFER_MAX_TARGETS_PER_PASS);
+  for (const target of targets) {
+    if (await busyGate().isBusy(target)) {
+      summary.skipped += deferDepth(dir, target);
+      continue;
+    }
+    const entry = claimNextDefer(dir, target, nowMs);
+    if (!entry) continue;
+    try {
+      await deliver(entry);
+    } catch (cause) {
+      summary.failed += 1;
+      log.error(
+        `defer: delivery of ${entry.id} to '${entry.daemon}/${entry.agentId}' failed, still queued: ${cause0(cause)}`,
+      );
+      releaseDeferItem(dir, entry.id);
+      continue;
+    }
+    completeDeferItem(dir, entry.id);
+    summary.delivered += 1;
+    noteTargetDispatched(target);
+    if (entry.kind !== "message") continue;
+    recordOutboundSend({
+      daemon: entry.daemon,
+      agentId: entry.agentId,
+      localAgentId: entry.fromAgentId,
+    });
+    if (entry.notifyOnFinish && entry.fromAgentId) {
+      queueDeliveryNotice(entry, target, new Date().toISOString());
+    }
+  }
+  if (summary.delivered || summary.expired || summary.unknown) {
+    log.info(
+      `defer: delivered ${summary.delivered}, failed ${summary.failed}, expired ${summary.expired}, unknown ${summary.unknown}, still waiting ${summary.skipped} (dir: ${dir})`,
+    );
+  }
+  return summary;
+}
+
+/**
+ * A local agent just went idle: drain whatever was waiting for it, so a local
+ * target's backlog clears at turn speed instead of at the poll interval.
+ */
+export function onLocalTurnEnded(agentId: string): void {
+  busyGate().noteLocalTurnEnded(agentId);
+  void drainDeferQueue({ target: { daemon: LOCAL_DAEMON, agentId } }).catch((cause) => {
+    log.error(`defer: drain for '${agentId}' failed: ${cause0(cause)}`);
+  });
+}
+
+export const deferWorker = createPeriodicTask({
+  intervalMs: DEFER_DRAIN_INTERVAL_MS,
+  runImmediately: true,
+  task: async () => {
+    await drainDeferQueue();
+  },
+  onError: (cause) => {
+    log.error(`defer: periodic drain failed: ${cause0(cause)}`);
+  },
+});
+
+export function stopDeferWorker(): void {
+  deferWorker.stop();
+}
+
 
 // Runs when this module has fully evaluated. Placed last so every
 // module-level const above (stores, registries) exists before the first

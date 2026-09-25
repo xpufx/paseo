@@ -106,7 +106,7 @@ required.
 | `x_comms_remove_daemon` | Forget a registered daemon |
 | `x_comms_list_agents` | List agents on a daemon |
 | `x_comms_inspect` | Inspect an agent on a daemon |
-| `x_comms_send` | Send a message/task to an agent on a daemon (starts it if idle) |
+| `x_comms_send` | Send a message/task to an agent on a daemon. Starts a turn if the target is idle; **queues** it if the target is mid-turn (`delivery`, `queueDepth`, `expiresAt`). Optional `notifyOnFinish` (default `true`) queues a notice back to you when it lands |
 | `x_comms_logs` | View an agent's activity/timeline on a daemon |
 | `x_comms_wait` | Block until an agent on a daemon is idle; returns `permission` the moment it stalls on a prompt |
 | `x_comms_list_permissions` | List pending permission requests on a daemon |
@@ -191,11 +191,14 @@ Deliberate limits, so the guarantee is not oversold:
 
 ## Behavior notes
 
-- **Send is preemptive.** A message to a busy agent replaces its current run
-  (paseo's `replaceRunning: true` in `startAgentRun`, see
-  `packages/server/src/server/agent/agent-prompt.ts`) on both sides. If a
-  target may be busy, wait until it is idle before messaging it, or expect the
-  preemption.
+- **Send never interrupts a running turn.** This used to be preemptive: a
+  message to a busy agent replaced its current run (paseo's
+  `replaceRunning: true` in `startAgentRun`, see
+  `packages/server/src/server/agent/agent-prompt.ts`). Now a send to a
+  mid-turn target is **queued** and delivered when that target is next observed
+  idle. You no longer need `x_comms_wait` first to avoid preemption; wait only
+  when you actually want a result. See "Delivery contract" below for exactly
+  what "queued" does and does not promise.
 - **Permission loop.** An agent may block on a permission prompt; `send`
   returns `permission`, `wait` surfaces it, `list_permissions` shows details,
   and `allow_permission`/`deny_permission` answer. The loop:
@@ -344,3 +347,85 @@ npm test          # hermetic: fake paseo CLI + temp registry, no live daemons
 ## License
 
 MIT
+
+## Delivery contract
+
+> **Decision: a queued send is best-effort within a bounded window. It is NOT
+> guaranteed to land before the target's next turn ends.** Read this before
+> relying on `delivery: "queued"`. This is a deliberate product call, and the
+> one thing here most worth revisiting — see "Why best-effort" and "If you want
+> a stronger guarantee".
+
+### What the sender is told
+
+Every send returns exactly one of these. There is no silent case.
+
+| `delivery`  | Meaning | `ok` |
+|-------------|---------|------|
+| `dispatched` | The target was observed idle and the message was sent. It starts a turn. | `true` |
+| `queued`     | The target is mid-turn. The message is held. `queueDepth` is its position (1 = next up) and `expiresAt` is when it gives up. | `true` |
+| `outbox`     | The send failed at the transport level and is in the outbox for retry (`error` has the reason). Unrelated to a busy target. | `false` |
+| `dropped`    | A bound was hit and this message was refused (see below). `error` says which. | `false` |
+
+**`ok: true` with `delivery: "queued"` does not mean delivered.** It means
+accepted for deferred delivery. If you need confirmation, either read the
+target's timeline or set `notifyOnFinish` and wait for the notice.
+
+### Why best-effort, not guaranteed
+
+A guarantee ("your message lands before the target's next turn ends") would
+require knowing when a *remote* agent's next turn ends. Nothing in the protocol
+provides that:
+
+- There is no cross-daemon turn subscription. A busy check for a peer is a
+  `paseo inspect --host` probe — a sample, not a stream.
+- Even locally, `agent.turn_ended` tells you a turn ended; it cannot promise one
+  is coming. An agent can stay mid-turn indefinitely, and a target that never
+  goes idle has no turn for a message to land "before" the end of.
+- The only ways to make it deterministic are to preempt (the behaviour this
+  queue exists to remove) or to build a cross-daemon turn-completion protocol
+  that does not exist.
+
+So the honest contract is: *deferred, bounded, and never silent.*
+
+### The bounds
+
+| Bound | Value | Why that value |
+|-------|-------|----------------|
+| Depth, per target | **8** | A target consumes one message per turn, so the useful backlog is what still fits before it is stale. 8 is a few round trips of a two-agent exchange — enough that a bursty sender loses nothing it plausibly still wants, small enough that a backlog is one screenful. **Overflow evicts the oldest waiting message** for that target (a superseded leading message is the one the later ones made redundant) and tells its sender. |
+| Depth, fleet-wide | **200** | Guards a fan-out across many targets. Every existing message is already somebody's outstanding obligation, so at the ceiling a **new** message is refused outright rather than evicting one. The caller gets `delivery: "dropped"` and can retry. |
+| Expiry | **30 minutes** | A turn can legitimately run long, so the outbox's 10-minute *undeliverable* window would kill work that is clearly still wanted. 24 hours is the opposite failure: after a night, a message about yesterday's state is noise. On expiry the message is dropped and the sender is told why. |
+
+The 30-minute expiry is intentionally **not** the outbox's configurable
+`outboxExpirySeconds` (default 10 min). Different failure: the outbox holds what
+could not be *transmitted*, this holds what could not be *accepted yet*.
+
+### Nothing is ever dropped silently
+
+Every non-delivery path tells the sender, and none of them interrupts it:
+
+- **Expired / evicted / refused** — an `x-comms-delivery-notice` item is appended
+  to the sender's timeline. Appending does not start a turn, so the sender reads
+  it on a turn it starts itself.
+- **Delivered** — with `notifyOnFinish` (default `true`), a notice is queued back
+  to the sender when the message lands. The notice goes through **the same
+  queue**, so a busy sender has it held until its own idle moment. Paseo's own
+  notify-on-finish path *steers* the caller's turn; doing that here would
+  reintroduce this feature's bug in the other direction. Neither side ever
+  interrupts the other.
+
+### Crash behaviour
+
+A queued message is claimed by renaming its file `.json` → `.sending` *before*
+the send. If the process dies mid-send, the claim survives, and the next pass
+reports the message to the sender as **"outcome unknown"** and drops it rather
+than replaying it — the target may already have it. A stable `messageId` means
+Paseo's daemon would dedupe a replay, but a crash is not a place to rely on a
+second line of defence. Failed (not crashed) deliveries hand the claim back and
+retry on a later pass.
+
+### If you want a stronger guarantee
+
+Do not rely on the queue for it. Use the tool built for it: `x_comms_wait` until
+the target reports `idle`, then send. That is synchronous and unambiguous, at the
+cost of blocking your turn. The queue exists so you do not have to.

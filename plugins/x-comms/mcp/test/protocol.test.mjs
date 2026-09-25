@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -969,6 +969,184 @@ test("redaction: a throwing extension hook cannot write a raw offer to the serve
     assert.match(log, /#offer=\[REDACTED\]/, "the offer in the log line must be masked");
     assert.ok(!log.includes(OFFER_THROW_PAYLOAD), "raw offer payload leaked into the server log");
     assertNoRawOffer(log, "extension log");
+  } finally {
+    await client.close();
+  }
+});
+
+// Deferral for a busy target (#598).
+//
+// The preemption being fixed: paseo sends with replaceRunning: true, so a send
+// into a running agent replaced its turn. These assert the send does not go out
+// at all while the target is mid-turn, that the queued copy is the stamped bytes
+// (envelope + signature intact), and that the notice back to the sender is itself
+// queued rather than steered into the sender's own turn.
+function pendingDir(remotesFile) {
+  return join(dirname(remotesFile), "pending");
+}
+function readPending(remotesFile) {
+  const dir = pendingDir(remotesFile);
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => n.endsWith(".json"))
+    .map((n) => JSON.parse(readFileSync(join(dir, n), "utf8")));
+}
+
+test("a busy target is not preempted: the send is queued, not dispatched", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "running" }, remotesFile);
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    assert.notEqual(res.isError, true, "queueing is not an error");
+    const data = JSON.parse(textOf(res));
+    assert.equal(data.delivery, "queued", "must not dispatch into a running turn");
+    assert.equal(data.queueDepth, 1);
+    assert.ok(data.expiresAt, "the caller is told when the queued copy gives up");
+    assert.match(data.reason, /mid-turn/);
+    // The decisive assertion: the fake CLI's `send` would have echoed ok:true.
+    // Nothing was sent, so there is no delivery payload at all.
+    assert.equal(data.ok, undefined);
+  } finally {
+    await client.close();
+  }
+});
+
+test("the queued copy is the exact stamped bytes, signature and all", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient(
+    { FAKE_PASEO_STATUS: "running", PASEO_X_COMMS_MESH_KEY: tempMeshKey() },
+    remotesFile,
+  );
+  try {
+    await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    const pending = readPending(remotesFile);
+    assert.equal(pending.length, 1);
+    const entry = pending[0];
+    assert.equal(entry.stamped, true, "stamping happens before the queue, so the bytes are final");
+    assert.match(entry.prompt, /^<x-comms-message>/, "carries the envelope");
+    assert.match(entry.prompt, /hi$/, "carries the prose");
+    assert.equal(metaOf(entry.prompt).xComms.auth.alg, "ed25519", "the signature survives the wait (#594)");
+  } finally {
+    await client.close();
+  }
+});
+
+test("an idle target is dispatched immediately, unchanged", async () => {
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "idle" }, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    const data = JSON.parse(textOf(res));
+    assert.equal(data.ok, true, "the idle path is exactly what it was before the gate");
+    assert.equal(data.sawNoWait, true);
+    assert.match(data.promptHead, /<x-comms-message>/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("notifyOnFinish queues a notice for the sender instead of preempting it", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "idle" }, remotesFile);
+  try {
+    await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    const pending = readPending(remotesFile);
+    assert.equal(pending.length, 1, "exactly one notice queued, and it is not a second message");
+    const notice = pending[0];
+    assert.equal(notice.kind, "notice");
+    assert.equal(notice.daemon, "local", "addressed to the local sender");
+    assert.equal(notice.agentId, "agent-test-1", "PASEO_AGENT_ID, not anything the tool args claimed");
+    assert.match(notice.prompt, /delivery notice/);
+    assert.match(notice.prompt, /nothing was interrupted/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("notifyOnFinish: false queues nothing back to the sender", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "idle" }, remotesFile);
+  try {
+    await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi", notifyOnFinish: false },
+    });
+    assert.deepEqual(readPending(remotesFile), []);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a busy target's queue is capped per target, evicting the oldest", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "running" }, remotesFile);
+  try {
+    for (let i = 0; i < 9; i++) {
+      await client.callTool({
+        name: `${PREFIX}send`,
+        arguments: { daemon: "hsi", agentId: "agent-9", prompt: `m${i}` },
+      });
+    }
+    const pending = readPending(remotesFile);
+    assert.equal(pending.length, 8, "the cap holds, no unbounded growth");
+    const prompts = pending.map((entry) => entry.prompt.split("\n\n")[1]);
+    assert.ok(!prompts.includes("m0"), "the oldest waiting message is the one evicted");
+    assert.ok(prompts.includes("m8"), "the newest is kept");
+  } finally {
+    await client.close();
+  }
+});
+
+test("the plugin server and this server agree on the queue's bounds and shape", async () => {
+  // server/defer-queue.ts is normative; this copy exists only because the
+  // standalone MCP server cannot import the plugin's TypeScript.
+  const source = readFileSync(join(HERE, "..", "..", "server", "defer-queue.ts"), "utf8");
+  for (const [name, value] of [
+    ["DEFER_MAX_DEPTH_PER_TARGET", 8],
+    ["DEFER_MAX_TOTAL", 200],
+    ["DEFER_MAX_TARGETS_PER_PASS", 3],
+  ]) {
+    assert.match(source, new RegExp(`${name} = ${value}\\b`), `${name} must stay ${value}`);
+  }
+  const mcp = readFileSync(SERVER, "utf8");
+  assert.match(mcp, /const DEFER_MAX_DEPTH_PER_TARGET = 8;/);
+  assert.match(mcp, /const DEFER_MAX_TOTAL = 200;/);
+  assert.match(mcp, /const DEFER_MAX_TARGETS_PER_PASS = 3;/);
+  assert.match(source, /export const DEFER_EXPIRY_MS = 30 \* 60 \* 1000;/);
+  assert.match(mcp, /const DEFER_EXPIRY_MS = 30 \* 60 \* 1000;/);
+  // The claim is a rename on both sides; that is the whole no-replay guard.
+  assert.match(source, /renameSync\(waitingPath\(dir, next\.id\), sendingPath\(dir, next\.id\)\)/);
+  assert.match(mcp, /renameSync\(deferWaitingPath\(next\.id\), deferSendingPath\(next\.id\)\)/);
+});
+
+test("the queued-send instructions tell the model not to pre-wait for safety", async () => {
+  const { client } = await startClient({}, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const instructions = client.getInstructions();
+    assert.match(instructions, /NEVER interrupts a running turn/);
+    assert.match(instructions, /delivery=queued/);
+    assert.match(
+      instructions,
+      /no longer required/,
+      "the old 'x_comms_send is preemptive, wait first' guidance is what caused the bug",
+    );
+    assert.ok(!/x_comms_send is preemptive/.test(instructions));
   } finally {
     await client.close();
   }

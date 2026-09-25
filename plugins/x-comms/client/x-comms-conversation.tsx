@@ -172,7 +172,7 @@ export function CrossDaemonConversation({
     refetchOnWindowFocus: false,
   });
 
-  const [lastSent, setLastSent] = useState<{ at: string; to: string } | null>(null);
+  const [lastSent, setLastSent] = useState<{ at: string; to: string; queued?: boolean; depth?: number } | null>(null);
   const [sentTick, setSentTick] = useState(0);
   const send = useMutation({
     mutationFn: async () => {
@@ -194,7 +194,10 @@ export function CrossDaemonConversation({
           messageId,
           getClient: getPaseoClient,
         });
-        return { ok: true, error: null };
+        // The configured-host route borrows a client and sends directly, so it
+        // is not gated by the defer queue. Reported as dispatched, which is what
+        // it is — queueing that path is not in this change.
+        return { ok: true, error: null, delivery: "dispatched" as const, queueDepth: 0, expiresAt: null };
       }
       // Existing registry/MCP relay and direct-peer route stays exactly here.
       return callSend({
@@ -222,7 +225,15 @@ export function CrossDaemonConversation({
         byAgent.set(target.conversationId, [...list, msg]);
         sentCache.set(agentId, byAgent);
         setSentTick((x) => x + 1);
-        setLastSent({ at: new Date().toLocaleTimeString(), to: `${target.counterparty.agentName ?? target.counterparty.agentId} @ ${peerLabelForCounterparty(target.counterparty)}` });
+        setLastSent({
+          at: new Date().toLocaleTimeString(),
+          to: `${target.counterparty.agentName ?? target.counterparty.agentId} @ ${peerLabelForCounterparty(target.counterparty)}`,
+          // A send to a mid-turn target is held, not delivered. Saying "sent"
+          // for a message that is sitting in a queue is the exact
+          // overstatement this gate exists to remove (#598).
+          queued: data.delivery === "queued",
+          depth: data.queueDepth,
+        });
         setDraftCached("");
         void queryClient.invalidateQueries({ queryKey: ["x-comms-conversations", agentId] });
         void queryClient.invalidateQueries({ queryKey: ["x-comms-threads", agentId] });
@@ -460,8 +471,16 @@ export function CrossDaemonConversation({
       />
       {send.isSuccess && send.data?.ok ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
-          <Text style={{ color: theme.colors.statusSuccess, fontSize: 12, flexShrink: 1 }}>
-            ✓ Sent to {lastSent?.to ?? target?.counterparty.agentName ?? target?.counterparty.agentId} at {lastSent?.at ?? ""}
+          <Text
+            style={{
+              color: lastSent?.queued ? theme.colors.statusWarning : theme.colors.statusSuccess,
+              fontSize: 12,
+              flexShrink: 1,
+            }}
+          >
+            {lastSent?.queued
+              ? `⏳ Queued for ${lastSent.to} at position ${lastSent.depth ?? 1} — that agent is mid-turn, so this waits instead of interrupting it`
+              : `✓ Sent to ${lastSent?.to ?? target?.counterparty.agentName ?? target?.counterparty.agentId} at ${lastSent?.at ?? ""}`}
           </Text>
           <InlineButton
             label="Dismiss"

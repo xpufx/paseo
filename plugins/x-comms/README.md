@@ -96,6 +96,53 @@ A held message expires after **10 minutes** by default (configurable in the sett
 
 **Idempotency:** every send receives one stable `messageId`, passed to Paseo's native daemon/client send API and retained in a held outbox entry. A retry therefore presents the same key to the target daemon, which suppresses a duplicate before it reaches the agent.
 
+### Defer queue: sends to a busy target are queued, not preempted
+
+Paseo's daemon sends with `replaceRunning: true`, so an x-comms send into a
+running agent **replaced its turn**. The only thing that spared a busy target
+was the target voluntarily calling `x_comms_wait` first — agent cooperation as
+the sole guard. It is now enforced.
+
+Before any send, the target's run status is read. A mid-turn target gets the
+message **queued** instead:
+
+* **Local targets** — the plugin subscribes to `agent.turn_started` /
+  `agent.turn_ended` (`index.server.ts`), so a local agent's turn state is known
+  without a round trip. An agent the hooks have not seen falls back to an SDK
+  snapshot read.
+* **Remote targets** — no cross-daemon turn subscription exists, so a peer's
+  status comes from `paseo inspect --host`. It is a sample, and a probe that
+  fails **dispatches** rather than silently swallowing the message.
+* After a successful send the target is recorded busy, so a second send in the
+  same burst is queued instead of replacing the turn the first send just started.
+
+`idle` is the only non-busy state. `error` and `closed` are treated as *not*
+busy on purpose: they have no running turn to replace, and treating them as busy
+would pin a queue against an agent that has already crashed, with no turn ever
+coming to drain it.
+
+**Bounds** (never unbounded growth): **8 deep per target** — overflow evicts the
+oldest waiting message and tells its sender; **200 across all targets** — at the
+ceiling a *new* message is refused (`delivery: "dropped"`) rather than evicting
+someone else's obligation; **30-minute expiry**, after which the message is
+dropped and its sender told why. Every non-delivery path notifies the sender by
+appending to its timeline, which does not start a turn.
+
+**`notifyOnFinish`** (default `true`) queues a notice back to the sender when the
+message lands. The notice goes through the **same queue**, so a busy sender has
+it held rather than steered — Paseo's own notify-on-finish path steers the
+caller's turn, which would reintroduce this bug in the other direction. Neither
+side ever interrupts the other.
+
+**Delivery contract: best-effort within a bounded window, *not* guaranteed to land
+before the target's next turn ends.** There is no cross-daemon turn-end signal to
+build such a guarantee on, and the alternatives are preemption or a protocol that
+does not exist. Every send reports `dispatched | queued | outbox | dropped`, and
+nothing is ever dropped silently. **This is a deliberate product decision and the
+thing most worth revisiting** — the full contract, the reasoning, and what to use
+if you need a real guarantee are in
+[mcp/README.md#delivery-contract](mcp/README.md#delivery-contract).
+
 ## Repository layout
 
 ```
@@ -118,6 +165,8 @@ A held message expires after **10 minutes** by default (configurable in the sett
 │   ├── registry.ts           # Daemon registry + health
 │   ├── settings.ts           # Plugin settings storage
 │   ├── presence.ts           # Presence announce/retract/list
+│   ├── defer-queue.ts        # Bounded per-target queue for busy targets (+ bounds, claim/notice rules)
+│   ├── busy.ts               # Lifecycle classification + verdict cache over turn events and probes
 │   ├── mesh-identity.ts      # Daemon ed25519 signing key + envelope sign/verify
 │   ├── mesh-keys.ts          # Pinned peer verify keys (substitution-resistant)
 │   ├── injection.ts          # MCP + recipient-instruction injection for agents

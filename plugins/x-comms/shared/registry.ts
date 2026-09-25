@@ -348,6 +348,12 @@ export const identitySyncRpc = defineRpc({
   }),
 });
 
+/**
+ * A conversation send is never delivered by preempting the target's turn. A
+ * target that is mid-turn gets the message queued instead, and the caller is
+ * told which of the four happened so a "sent" in the UI is never a message that
+ * is actually sitting in a queue. See the delivery contract in README.md.
+ */
 export const conversationSendRpc = defineRpc({
   name: "conversation.send",
   input: z.object({
@@ -357,12 +363,20 @@ export const conversationSendRpc = defineRpc({
     fromAgentId: z.string().nullable().optional(),
     fromAgentName: z.string().nullable().optional(),
     messageId: z.string().min(1).max(128).optional(),
+    // Optional so a client still validates against a daemon that has not yet
+    // been reloaded with the field; absent means notify (the daemon's own
+    // agent-scoped default).
+    notifyOnFinish: z.boolean().optional(),
   }),
   output: z.object({
     daemon: z.string(),
     agentId: z.string(),
     ok: z.boolean(),
     error: z.string().nullable(),
+    // Optional for the same rolling-upgrade reason as the input.
+    delivery: z.enum(["dispatched", "queued", "outbox", "dropped"]).optional(),
+    queueDepth: z.number().int().nonnegative().optional(),
+    expiresAt: z.string().nullable().optional(),
   }),
 });
 

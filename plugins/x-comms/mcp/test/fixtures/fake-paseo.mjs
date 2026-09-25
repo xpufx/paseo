@@ -5,6 +5,8 @@
 // Test controls via env:
 //   FAKE_PASEO_DELAY_MS  respond after a delay (tests cancellation / exit discipline)
 //   FAKE_PASEO_FAIL      exit 1 with this message on stderr (tests error paths)
+//   FAKE_PASEO_STATUS    agent lifecycle reported by inspect/ls (default "idle").
+//                        Set to "running" to make the busy gate hold a send.
 import { setTimeout as sleep } from "node:timers/promises";
 
 const args = process.argv.slice(2);
@@ -20,6 +22,9 @@ const sub = args[0];
 const host = argAfter("--host");
 const messageId = argAfter("--message-id");
 const prompt = args[args.length - 1];
+// `paseo inspect --json` answers `Status`, `paseo ls --json` answers `status`;
+// both are covered so the gate's casing handling is exercised on the real path.
+const status = process.env.FAKE_PASEO_STATUS || "idle";
 
 function respond(data) {
   if (delay > 0) {
@@ -44,10 +49,10 @@ switch (sub) {
     respond({ serverId: "srv_fake", hostname: "fakehost" });
     break;
   case "inspect":
-    respond({ Id: args[1], Name: "fake-agent", sawHost: host });
+    respond({ Id: args[1], Name: "fake-agent", Status: status, sawHost: host });
     break;
   case "ls":
-    respond([{ id: "agent-1", shortId: "agent-1", name: "fake-agent", status: "idle", sawHost: host }]);
+    respond([{ id: "agent-1", shortId: "agent-1", name: "fake-agent", status, sawHost: host }]);
     break;
   case "send":
     respond({ ok: true, to: args[1], sawHost: host, sawMessageId: messageId, sawNoWait: args.includes("--no-wait"), promptHead: prompt });
