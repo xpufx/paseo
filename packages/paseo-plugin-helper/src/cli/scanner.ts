@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { AUDIT_RULES } from "./rules.js";
-import type { AuditIssue, AuditOptions, AuditReport } from "./types.js";
+import type { AuditExemption, AuditIssue, AuditOptions, AuditReport } from "./types.js";
+import { readPluginConformanceExemptions } from "./conformance-exemptions.js";
 
 const DEFAULT_IGNORED_DIRS = new Set([
   "node_modules",
@@ -104,6 +105,12 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
   const files = findFiles(resolvedTarget, ignoredCustom);
   const issues: AuditIssue[] = [];
 
+  // Per-rule opt-outs declared by the plugin itself, resolved before the file
+  // loop so every rule check can consult them.
+  const { exemptions, unknownExemptions } = readPluginConformanceExemptions(resolvedTarget);
+  const isExempt = (ruleId: string): boolean => exemptions.has(ruleId);
+  const exemptReason = (ruleId: string): string | undefined => exemptions.get(ruleId);
+
   const pushIssue = (
     ruleId: keyof typeof AUDIT_RULES,
     file: string,
@@ -111,6 +118,7 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
     snippet: string,
     severityOverride?: AuditIssue["severity"],
   ) => {
+    if (isExempt(ruleId)) return;
     const rule = AUDIT_RULES[ruleId];
     issues.push({
       ruleId: rule.id,
@@ -223,7 +231,7 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
     }
 
     // Rule 2: no-raw-file-persistence
-    if (!inTest && !inBuildOrTool) {
+    if (!inTest && !inBuildOrTool && !isExempt("no-raw-file-persistence")) {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const isFsWrite =
@@ -445,14 +453,16 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
       relPath.split(path.sep).includes("client") ||
       /\.client\.(tsx?|jsx?|mjs|cjs)$/.test(relPath);
 
-    // Rule: no-bare-react-native-ui
+    // Rules: no-bare-react-native-ui, and the two bespoke-UI companions it
+    // shares a scan with. Each is checked against its own exemption, so
+    // exempting one never silently exempts the others.
     if (isClientFile && !inTest && !inBuildOrTool) {
       const importRe = /import\s+(?!type\b)([^;]*?)\s+from\s+["']react-native["']/g;
       let match: RegExpExecArray | null;
       while ((match = importRe.exec(content)) !== null) {
         const clause = match[1];
         const valueClause = clause.replace(/type\s+(ScrollView|Switch|TextInput|Button)\b/g, "");
-        if (/\b(ScrollView|Switch|TextInput|Button)\b/.test(valueClause)) {
+        if (/\b(ScrollView|Switch|TextInput|Button)\b/.test(valueClause) && !isExempt("no-bare-react-native-ui")) {
           const before = content.slice(0, match.index);
           const lineNum = before.split("\n").length;
           const snippetLine = lines[lineNum - 1]?.trim() || match[0].split("\n")[0].trim();
@@ -481,6 +491,7 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
         ];
         for (const [ruleId, pattern] of rawUiRules) {
           if (!pattern.test(valueClause)) continue;
+          if (isExempt(ruleId)) continue;
           const rule = AUDIT_RULES[ruleId];
           issues.push({
             ruleId: rule.id,
@@ -588,6 +599,23 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
     );
   }
 
+  // An exemption naming a rule that does not exist is a manifest bug, not a
+  // finding the plugin can be exempted from: surface it so a typo cannot make
+  // an audit look clean.
+  for (const unknown of unknownExemptions) {
+    const rule = AUDIT_RULES["unknown-conformance-exemption"];
+    issues.push({
+      ruleId: rule.id,
+      severity: rule.severity,
+      file: "paseo-plugin.json",
+      line: 1,
+      column: 0,
+      message: `${rule.description} (declared: "${unknown}")`,
+      codeSnippet: `"${unknown}"`,
+      replacement: rule.replacement,
+    });
+  }
+
   const summary = {
     errorCount: issues.filter((i) => i.severity === "error").length,
     warnCount: issues.filter((i) => i.severity === "warn").length,
@@ -603,6 +631,8 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
     targetDir: resolvedTarget,
     scannedFiles: files.length,
     issues,
+    exemptions: [...exemptions].map(([ruleId, reason]) => ({ ruleId, reason })),
+    unknownExemptions,
     summary,
     passed,
   };

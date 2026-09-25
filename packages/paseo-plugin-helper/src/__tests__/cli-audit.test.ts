@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { readPluginConformanceExemptions } from "../cli/conformance-exemptions.js";
 import { auditProject, doctorProject } from "../cli/scanner.js";
 import { formatReportPretty, formatReportJson } from "../cli/formatter.js";
 import { runCli } from "../cli/index.js";
@@ -382,5 +383,80 @@ export const Example = () => <View><Text>Example</Text><Button label="OK" /></Vi
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("conformance exemptions", () => {
+  function scaffold(manifest: Record<string, unknown>, clientSource?: string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-exempt-test-"));
+    fs.writeFileSync(path.join(root, "paseo-plugin.json"), JSON.stringify(manifest));
+    if (clientSource !== undefined) {
+      fs.mkdirSync(path.join(root, "client"), { recursive: true });
+      fs.writeFileSync(path.join(root, "client", "view.tsx"), clientSource);
+    }
+    return root;
+  }
+
+  const BASE = { id: "x", requirements: { paseo: ">=0.9.0" } };
+  const SCROLLVIEW_CLIENT =
+    'import { ScrollView, Pressable, View } from "react-native";\nexport const V = () => <ScrollView><Pressable><View /></Pressable></ScrollView>;\n';
+
+  it("honours a declared per-rule exemption and leaves other rules firing", () => {
+    const dir = scaffold(
+      { ...BASE, conformance: { exempt: { "no-bare-react-native-ui": "built to a different standard on purpose" } } },
+      SCROLLVIEW_CLIENT,
+    );
+    const report = auditProject(dir);
+
+    expect(report.issues.filter((i) => i.ruleId === "no-bare-react-native-ui")).toEqual([]);
+    expect(
+      report.issues.filter((i) => i.ruleId === "no-bespoke-react-native-interactions"),
+    ).not.toEqual([]);
+    expect(report.exemptions).toEqual([
+      { ruleId: "no-bare-react-native-ui", reason: "built to a different standard on purpose" },
+    ]);
+    expect(report.passed).toBe(true);
+  });
+
+  it("prints the exemption so a clean audit is never silently indistinguishable", () => {
+    const dir = scaffold(
+      { ...BASE, conformance: { exempt: { "no-bare-react-native-ui": "on purpose" } } },
+      SCROLLVIEW_CLIENT,
+    );
+    const output = formatReportPretty(auditProject(dir));
+    expect(output).toContain("[EXEMPT ] no-bare-react-native-ui");
+    expect(output).toContain("on purpose");
+  });
+
+  it("refuses an exemption with no reason", () => {
+    const dir = scaffold({ ...BASE, conformance: { exempt: { "no-bare-react-native-ui": "   " } } });
+    expect(readPluginConformanceExemptions(dir).exemptions.size).toBe(0);
+  });
+
+  it("reports an exemption naming a rule that does not exist", () => {
+    const dir = scaffold({ ...BASE, conformance: { exempt: { "no-such-rule": "typo" } } });
+    const report = auditProject(dir);
+    expect(report.unknownExemptions).toEqual(["no-such-rule"]);
+    // Its own rule id, not a borrowed one: filtering audit output by rule id has
+    // to mean something.
+    const finding = report.issues.find((i) => i.ruleId === "unknown-conformance-exemption");
+    expect(finding).toBeDefined();
+    expect(finding?.severity).toBe("error");
+    expect(finding?.message).toContain("no-such-rule");
+    expect(report.issues.filter((i) => i.ruleId === "v8-missing-requirements")).toEqual([]);
+    expect(report.passed).toBe(false);
+  });
+
+  it("cannot be used to exempt the whole audit away", () => {
+    const dir = scaffold({ ...BASE, conformance: { exempt: { "*": "everything" } } }, SCROLLVIEW_CLIENT);
+    const report = auditProject(dir);
+    expect(report.exemptions).toEqual([]);
+    expect(report.unknownExemptions).toEqual(["*"]);
+    expect(report.issues.some((i) => i.ruleId === "no-bare-react-native-ui")).toBe(true);
+  });
+
+  it("gives a plugin with no manifest no exemptions", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-exempt-none-"));
+    expect(readPluginConformanceExemptions(root).exemptions.size).toBe(0);
   });
 });

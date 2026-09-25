@@ -15,6 +15,14 @@ interface AuditReport {
     targetDir: string;
     scannedFiles: number;
     issues: AuditIssue[];
+    /**
+     * Rules the target's `paseo-plugin.json` declared as deliberately not
+     * applicable, with the reason it gave. Reported rather than silently dropped
+     * so an exemption is always visible in the audit output.
+     */
+    exemptions: AuditExemption[];
+    /** Exemptions naming a rule that does not exist. Always an audit finding. */
+    unknownExemptions: string[];
     summary: {
         errorCount: number;
         warnCount: number;
@@ -22,6 +30,21 @@ interface AuditReport {
         suggestionCount: number;
     };
     passed: boolean;
+}
+/**
+ * A plugin's declared opt-out from a specific rule, read from
+ * `paseo-plugin.json`:
+ *
+ * ```json
+ * { "conformance": { "exempt": { "no-bare-react-native-ui": "why" } } }
+ * ```
+ *
+ * The exemption is per rule, never per plugin, and requires a reason, so a
+ * plugin cannot switch the whole audit off.
+ */
+interface AuditExemption {
+    ruleId: string;
+    reason: string;
 }
 interface AuditOptions {
     cwd?: string;
@@ -75,4 +98,4 @@ declare function formatAdoptResult(result: AdoptResult): string;
 
 declare function runCli(argv?: string[]): number;
 
-export { AUDIT_RULES, type AdoptOptions, type AdoptResult, type AuditIssue, type AuditOptions, type AuditReport, type AuditRule, type AuditSeverity, UI_CONFORMANCE_RULES, adoptProject, auditAllPlugins, auditPluginConformance, auditProject, doctorProject, findPluginDirectories, formatAdoptResult, formatReportJson, formatReportPretty, runCli };
+export { AUDIT_RULES, type AdoptOptions, type AdoptResult, type AuditExemption, type AuditIssue, type AuditOptions, type AuditReport, type AuditRule, type AuditSeverity, UI_CONFORMANCE_RULES, adoptProject, auditAllPlugins, auditPluginConformance, auditProject, doctorProject, findPluginDirectories, formatAdoptResult, formatReportJson, formatReportPretty, runCli };

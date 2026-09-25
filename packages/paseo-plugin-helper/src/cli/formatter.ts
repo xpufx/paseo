@@ -1,4 +1,5 @@
 import type { AuditReport } from "./types.js";
+import { formatExemption } from "./conformance-exemptions.js";
 
 export function formatReportPretty(report: AuditReport): string {
   const lines: string[] = [];
@@ -6,8 +7,20 @@ export function formatReportPretty(report: AuditReport): string {
   lines.push(`Auditing Paseo plugin at ${report.targetDir}...`);
   lines.push("");
 
+  // Exemptions are printed before the verdict so a clean audit that was
+  // reached by opting out of a rule is never silently indistinguishable from
+  // one that had nothing to exempt.
+  for (const exemption of report.exemptions) {
+    lines.push(formatExemption(exemption));
+  }
+  if (report.exemptions.length > 0) lines.push("");
+
   if (report.issues.length === 0) {
-    lines.push(`[PASS] Clean audit. All ${report.scannedFiles} files follow paseo-plugin-helper patterns.`);
+    lines.push(
+      report.exemptions.length > 0
+        ? `[PASS] Clean audit with ${report.exemptions.length} declared exemption(s). All ${report.scannedFiles} files follow paseo-plugin-helper patterns.`
+        : `[PASS] Clean audit. All ${report.scannedFiles} files follow paseo-plugin-helper patterns.`,
+    );
     return lines.join("\n");
   }
 
