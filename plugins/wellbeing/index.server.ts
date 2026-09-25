@@ -91,11 +91,13 @@ export default function contribute(server: PluginServerContext) {
     tracker.recordActivity("permission_resolved");
   });
 
-  // Periodic heartbeat / fatigue check every 60s
+  // Periodic heartbeat / fatigue check every 60s.
+  // Read-only evaluation: it must NOT record presence, otherwise it refreshes
+  // lastActivityTs every minute and the idle timeout never elapses (#562).
   const timer = setInterval(() => {
     const status = tracker.getStatus();
     if (status.phase === "extended-stretch" && tracker.getSettings().notifyVia2fado) {
-      const { fatigueAlertTriggered } = tracker.recordActivity("client_surface");
+      const { fatigueAlertTriggered } = tracker.evaluateFatigue();
       if (fatigueAlertTriggered) {
         void tracker.send2fadoNotice(
           `⚠️ Operator Wellbeing: Continuous high-intensity session reached ${status.activeStretchMinutes}m. Consider taking a break or enabling Bed Mode.`,

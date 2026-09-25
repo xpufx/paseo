@@ -181,21 +181,7 @@ export class PresenceTracker {
       this.state.longestStretchSeconds = activeSeconds;
     }
 
-    let fatigueAlertTriggered = false;
-    const isSnoozed = this.state.snoozedUntilTs !== null && now < this.state.snoozedUntilTs;
-
-    if (activeMinutes >= this.settings.maxSessionContinuousMinutes && !isSnoozed) {
-      const cooldownMs = this.settings.fatigueAlertCooldownMinutes * 60000;
-      const canAlert =
-        this.state.lastFatigueAlertTs === null ||
-        now - this.state.lastFatigueAlertTs >= cooldownMs;
-
-      if (canAlert) {
-        this.state.lastFatigueAlertTs = now;
-        this.state.fatigueAlertCount += 1;
-        fatigueAlertTriggered = true;
-      }
-    }
+    const fatigueAlertTriggered = this.maybeTriggerFatigueAlert(activeMinutes, now);
 
     this.saveState();
     return {
@@ -203,6 +189,47 @@ export class PresenceTracker {
       fatigueAlertTriggered,
       source,
     };
+  }
+
+  /**
+   * Read-only fatigue evaluation for background/heartbeat callers. Computes the
+   * current active stretch from existing state without recording presence: it
+   * never touches `lastActivityTs`, usage/streak counters, or any state other
+   * than the fatigue-alert cooldown (`lastFatigueAlertTs`, `fatigueAlertCount`).
+   */
+  public evaluateFatigue(now = Date.now()): {
+    activeStretchMinutes: number;
+    fatigueAlertTriggered: boolean;
+  } {
+    const activeMinutes = this.getActiveStretchMinutes(now);
+    const fatigueAlertTriggered = this.maybeTriggerFatigueAlert(activeMinutes, now);
+    if (fatigueAlertTriggered) {
+      this.saveState();
+    }
+    return {
+      activeStretchMinutes: Math.round(activeMinutes),
+      fatigueAlertTriggered,
+    };
+  }
+
+  private maybeTriggerFatigueAlert(activeMinutes: number, now: number): boolean {
+    const isSnoozed = this.state.snoozedUntilTs !== null && now < this.state.snoozedUntilTs;
+    if (activeMinutes < this.settings.maxSessionContinuousMinutes || isSnoozed) {
+      return false;
+    }
+
+    const cooldownMs = this.settings.fatigueAlertCooldownMinutes * 60000;
+    const canAlert =
+      this.state.lastFatigueAlertTs === null ||
+      now - this.state.lastFatigueAlertTs >= cooldownMs;
+
+    if (!canAlert) {
+      return false;
+    }
+
+    this.state.lastFatigueAlertTs = now;
+    this.state.fatigueAlertCount += 1;
+    return true;
   }
 
   public snooze(minutes: number, now = Date.now()): { ok: boolean; snoozedUntil: string } {

@@ -395,7 +395,7 @@ from, surfaced as `lastActivitySource`:
 
 | Source | Emitted by | Trigger |
 | --- | --- | --- |
-| `client_surface` | Client | Initial heartbeat when the surface opens; a **30 s** interval heartbeat while `document.visibilityState === "visible"`; the daemon's 60 s fatigue heartbeat. |
+| `client_surface` | Client | Initial heartbeat when the surface opens; a **30 s** interval heartbeat while `document.visibilityState === "visible"`. The daemon's 60 s fatigue heartbeat no longer emits this (it calls read-only `evaluateFatigue()` — see gap [T3](#9-identified-gaps--todos)). |
 | `client_interaction` | Client | `pointerdown`, `keydown`, and `focus` window events (throttled to one pulse per **15 s**). |
 | `interactive_turn` | Server | `agent.turn_ended` where the timeline contains a `user_message` whose `clientMessageId` is absent or does **not** start with `cron_` (i.e. a real human prompt, not a scheduled one). |
 | `permission_resolved` | Server | `agent.permission_resolved` — the operator acted on a permission prompt. |
@@ -407,7 +407,9 @@ triggers a status refetch so the UI stays current.
 
 ### 5.5 Fatigue circuit breaker
 
-Evaluated inside `recordActivity` after the streak/usage update:
+Evaluated via the private `maybeTriggerFatigueAlert` helper, called both inside
+`recordActivity` after the streak/usage update and from the read-only
+`evaluateFatigue()` heartbeat path (which advances only the cooldown bookkeeping):
 
 ```
 isSnoozed = snoozedUntilTs !== null && now < snoozedUntilTs
@@ -453,14 +455,17 @@ There are three notification sites:
 2. **First fatigue breach** — dispatched from the `record_activity` handler when
    `recordActivity` returns `fatigueAlertTriggered: true`.
 3. **Daemon heartbeat** — every **60 s** (`setInterval`), if the current phase is
-   `extended-stretch` and `notifyVia2fado` is on, the daemon calls
-   `recordActivity("client_surface")` and, if that call produced an alert, sends the
+   `extended-stretch` and `notifyVia2fado` is on, the daemon calls the read-only
+   `PresenceTracker.evaluateFatigue()` and, if that call produced an alert, sends the
    same fatigue notice. The heartbeat is cleared on plugin teardown.
 
 > The heartbeat exists to catch the case where no further client pulses arrive
-> while the operator remains fatigued. However, because it *records
-> `client_surface` activity*, it also keeps `lastActivityTs` fresh and can extend
-> the streak. See gap [T3](#9-identified-gaps--todos).
+> while the operator remains fatigued. `evaluateFatigue()` is **read-only**: it
+> recomputes the active stretch from existing state and only advances the
+> fatigue-alert cooldown, so it never refreshes `lastActivityTs`, accrues
+> `dailyUsageSeconds`, or extends the streak. This means a genuinely idle operator
+> reaches `idle` after `idleTimeoutMinutes` even with the ticker running.
+> See gap [T3](#9-identified-gaps--todos) (resolved).
 
 ### 5.7 Persistence & migration
 
@@ -723,12 +728,13 @@ work. Each is annotated with the file it would touch.
   `"auto"`; `settings.update` only seeds it when it is already `null`. Add a
   tri-state option or a `wellbeing.clear_bed_mode_override` RPC.
   *(`shared/contracts.ts`, `server/presence.ts`.)*
-- [ ] **T3 — 60 s heartbeat feeds `client_surface` activity, potentially
-  masking genuine idle.** The fatigue heartbeat calls
-  `tracker.recordActivity("client_surface")`, which refreshes `lastActivityTs` and
-  keeps the streak alive even if the human has walked away with the window still
-  visible. This can both defeat `idle-standby` and keep `extended-stretch`
-  perpetual. Decouple the "check" from the "record". *(`index.server.ts`.)*
+- [x] **T3 — 60 s heartbeat feeds `client_surface` activity, potentially
+  masking genuine idle.** **Resolved (#562).** The fatigue heartbeat now calls the
+  read-only `PresenceTracker.evaluateFatigue()`, which recomputes the active stretch
+  without refreshing `lastActivityTs` or accruing `dailyUsageSeconds`. `recordActivity`
+  is reserved for genuine activity sources (`client_surface` RPC, `interactive_turn`,
+  `permission_resolved`), so genuine idle now elapses and `extended-stretch`
+  terminates as expected. *(`index.server.ts`, `server/presence.ts`.)*
 - [ ] **T4 — `dailyUsageSeconds` undercounts.** Usage only accrues on the
   interval between consecutive pulses, and each interval is clamped to
   `idleTimeoutMinutes`. Time after the last pulse, and full idle gaps (which are
@@ -793,6 +799,9 @@ The test suite is executed with `node:test` via `tsx` and asserts:
 - Streak tracking and source attribution.
 - Break recording and streak reset after idle-timeout gaps.
 - Fatigue-threshold triggering and snooze suppression.
+- Background `evaluateFatigue()` checks leave `lastActivityTs`, usage, and streak
+  state untouched, and `extended-stretch` still transitions to `idle` after the
+  idle timeout while the 60 s ticker runs (`#562`).
 - Manual Bed Mode toggling and fleet directives (including the `priority/0-SOS`
   escalation text).
 - Legacy `~/.config/paseo` → canonical `~/.paseo` state migration (`#446`).

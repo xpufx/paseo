@@ -156,6 +156,61 @@ describe("PresenceTracker", () => {
       if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }
   });
+  it("background fatigue checks do not refresh lastActivityTs or accrue usage (#562)", () => {
+    const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-5.json`);
+    try {
+      const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
+      const base = 1790000000000;
+
+      tracker.recordActivity("client_interaction", base);
+      const initial = tracker.getStatus(base);
+      assert.equal(initial.dailyUsageMinutes, 0);
+
+      // Simulate the 60s daemon heartbeat for 10 minutes with no human activity.
+      for (let m = 1; m <= 10; m++) {
+        tracker.evaluateFatigue(base + m * 60000);
+      }
+
+      const status = tracker.getStatus(base + 10 * 60000);
+      assert.equal(status.lastActivityAt, initial.lastActivityAt);
+      assert.equal(status.lastActivitySource, "client_interaction");
+      assert.equal(status.dailyUsageMinutes, 0);
+      assert.equal(tracker.getIdleMinutes(base + 10 * 60000), 10);
+    } finally {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    }
+  });
+
+  it("leaves extended-stretch and returns to idle despite the 60s ticker (#562)", () => {
+    const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-6.json`);
+    try {
+      const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
+      const base = 1790000000000;
+
+      tracker.recordActivity("client_interaction", base);
+      for (let m = 10; m <= 180; m += 10) {
+        tracker.recordActivity("client_interaction", base + m * 60000);
+      }
+
+      let status = tracker.getStatus(base + 180 * 60000);
+      assert.equal(status.phase, "extended-stretch");
+      assert.equal(status.activeStretchMinutes, 180);
+
+      // Heartbeat keeps ticking every minute, but records no presence activity.
+      for (let m = 181; m <= 196; m++) {
+        tracker.evaluateFatigue(base + m * 60000);
+      }
+
+      status = tracker.getStatus(base + 196 * 60000);
+      assert.equal(status.phase, "idle");
+      assert.equal(status.fleetPosture, "idle-standby");
+      assert.equal(status.activeStretchMinutes, 0);
+      assert.equal(tracker.getIdleMinutes(base + 196 * 60000), 16);
+    } finally {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    }
+  });
+
     it("migrates legacy state from ~/.config/paseo to canonical storage dir (#446)", () => {
     const tmpDir = path.join(os.tmpdir(), "wellbeing-migrate-" + String(Date.now()));
     const legacyDir = path.join(tmpDir, ".config", "paseo");
