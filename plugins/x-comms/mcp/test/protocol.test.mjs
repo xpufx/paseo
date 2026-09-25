@@ -76,6 +76,37 @@ async function startClient(extraEnv = {}, remotesFile = tempRemotes()) {
   return { client, transport, remotesFile };
 }
 
+// Same, but with the server's stderr captured instead of inherited, for the
+// assertions on what the server writes to its own log.
+async function startClientCapturingStderr(extraEnv = {}, remotesFile = tempRemotes()) {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [SERVER],
+    env: baseEnv({ PASEO_X_COMMS_REMOTES: remotesFile, ...extraEnv }),
+    stderr: "pipe",
+  });
+  const chunks = [];
+  transport.stderr?.on("data", (chunk) => chunks.push(chunk.toString()));
+  const client = new Client({ name: "paseo-x-comms-test", version: "1.0.0" });
+  await client.connect(transport);
+  return { client, transport, stderrText: () => chunks.join("") };
+}
+
+async function waitFor(predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(20);
+  }
+  assert.fail("timed out waiting for the server to emit the expected output");
+}
+
+// No offer payload of any length may survive redaction. The helper masks the
+// whole base64 tail, so a partial match would be a regression, not a near miss.
+function assertNoRawOffer(text, label) {
+  assert.ok(!/#offer=[A-Za-z0-9\-_+/=]/.test(text), `${label} leaked a raw offer tail: ${text}`);
+}
+
 function textOf(callResult) {
   assert.ok(callResult.content?.[0], "expected text content in result");
   return callResult.content[0].text;
@@ -695,6 +726,78 @@ test("self-message: a different agent is allowed (same-daemon locality is #9)", 
     });
     assert.equal(res.isError, undefined, "a different agent must not be treated as self");
     assert.equal(JSON.parse(textOf(res)).to, "agent-other");
+  } finally {
+    await client.close();
+  }
+});
+
+// redaction: nothing that can carry a pairing offer may reach the agent
+// unredacted, on any path out of this server (#597).
+
+// Distinctive middle of the base64 tail baked into the offer-* fixtures below.
+const OFFER_BLOCK_PAYLOAD = "InNydl9vZmZlckJsb2Nr";
+const OFFER_THROW_PAYLOAD = "InNydl9vZmZlcnRocm93";
+
+test("redaction: a failing transport surfaces a redacted offer, never the raw token", async () => {
+  const { client } = await startClient(
+    { FAKE_PASEO_FAIL: `relay handshake failed for host ${RELAY_URL}` },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
+    for (const call of [
+      { name: `${PREFIX}list_agents`, arguments: { daemon: "hsi" } },
+      { name: `${PREFIX}send`, arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" } },
+    ]) {
+      const res = await client.callTool(call);
+      assert.equal(res.isError, true, `${call.name} must surface the transport failure`);
+      const text = textOf(res);
+      assert.match(text, /relay handshake failed/, `${call.name} must keep the actionable reason`);
+      assert.match(text, /#offer=\[REDACTED\]/, `${call.name} must mask the offer`);
+      assert.ok(!text.includes(B64_OFFER), `${call.name} leaked the raw offer payload`);
+      assertNoRawOffer(text, call.name);
+    }
+  } finally {
+    await client.close();
+  }
+});
+
+test("redaction: an extension block reason quoting the offer is masked", async () => {
+  const { client } = await extEnv("offer-block", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    assert.equal(res.isError, true);
+    const text = textOf(res);
+    assert.match(text, /fixture refused host/, "the reason itself must still be surfaced");
+    assert.match(text, /#offer=\[REDACTED\]/);
+    assert.ok(!text.includes(OFFER_BLOCK_PAYLOAD), "raw offer payload leaked via the block reason");
+    assertNoRawOffer(text, "extension block reason");
+  } finally {
+    await client.close();
+  }
+});
+
+test("redaction: a throwing extension hook cannot write a raw offer to the server log", async () => {
+  const { client, stderrText } = await startClientCapturingStderr(
+    { PASEO_X_COMMS_EXTENSIONS: extensionDir("offer-throw") },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
+    // The hook is isolated and the call still succeeds, so the only place the
+    // offer could surface is the extension log line.
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    assert.equal(res.isError, undefined, "a throwing hook must stay isolated");
+
+    await waitFor(() => stderrText().includes("fixture hook failure"));
+    const log = stderrText();
+    assert.match(log, /#offer=\[REDACTED\]/, "the offer in the log line must be masked");
+    assert.ok(!log.includes(OFFER_THROW_PAYLOAD), "raw offer payload leaked into the server log");
+    assertNoRawOffer(log, "extension log");
   } finally {
     await client.close();
   }

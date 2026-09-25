@@ -13,6 +13,7 @@
   },
   "files": [
     "paseo-x-comms.mjs",
+    "redact.mjs",
     "README.md",
     "LICENSE"
   ],

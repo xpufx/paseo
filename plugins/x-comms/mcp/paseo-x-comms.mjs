@@ -30,6 +30,7 @@ import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { redactSecrets } from "./redact.mjs";
 
 const VERSION = "0.3.0";
 import { z } from "zod";
@@ -168,7 +169,12 @@ function runPaseo(args, { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
             reject(new Error(`paseo ${args[0]} timed out after ${timeoutMs}ms`));
             return;
           }
-          reject(new Error((stderr || err.message || "").trim().split("\n")[0] || String(err)));
+          // `paseo` quotes the `--host` value back on a failed relay
+          // handshake, and for a relay daemon that value is the full pairing
+          // offer — a daemon control token. It must not reach the agent as a
+          // tool error (#597).
+          const detail = (stderr || err.message || "").trim().split("\n")[0] || String(err);
+          reject(new Error(redactSecrets(detail)));
           return;
         }
         try {
@@ -368,8 +374,10 @@ const API_VERSION = 1;
 
 const extensionHooks = { onSend: [], onReceive: [], onToolCall: [] };
 
+// Chokepoint for every extension log line, so a hook's or a load failure's
+// error text cannot smuggle a pairing offer into the server log either.
 function extensionLog(message) {
-  process.stderr.write(`[paseo-x-comms:extensions] ${message}\n`);
+  process.stderr.write(`[paseo-x-comms:extensions] ${redactSecrets(message)}\n`);
 }
 
 function describeError(cause) {
@@ -410,7 +418,7 @@ async function runFilter(hookName, payload, context) {
 
 async function filterOrThrow(hookName, payload, context) {
   const outcome = await runFilter(hookName, payload, context);
-  if (outcome.blocked) throw new Error(`x-comms extension blocked ${context.tool}: ${outcome.reason}`);
+  if (outcome.blocked) throw new Error(redactSecrets(`x-comms extension blocked ${context.tool}: ${outcome.reason}`));
   return outcome.value;
 }
 

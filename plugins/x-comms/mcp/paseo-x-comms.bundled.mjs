@@ -36486,6 +36486,72 @@ import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+
+// mcp/redact.mjs
+var DEFAULT_SENSITIVE_KEYS = [
+  "password",
+  "passwd",
+  "secret",
+  "token",
+  "apikey",
+  "api_key",
+  "access_token",
+  "refresh_token",
+  "privatekey",
+  "private_key",
+  "authorization",
+  "auth",
+  "credential",
+  "credentials",
+  "cert",
+  "certificate"
+];
+function isSensitiveKey(key, customKeys = []) {
+  const normalized = key.toLowerCase().replace(/[-_]/g, "");
+  return [...DEFAULT_SENSITIVE_KEYS, ...customKeys].some(
+    (k) => normalized.includes(k.replace(/[-_]/g, ""))
+  );
+}
+function maskString(val, mask = "[REDACTED]") {
+  if (val.length <= 8) return mask;
+  const placeholder = mask === "[REDACTED]" ? "..." : mask;
+  return `${val.slice(0, 3)}${placeholder}${val.slice(-3)}`;
+}
+function redactSecrets(target, options = {}) {
+  const mask = options.mask ?? "[REDACTED]";
+  const customKeys = options.customSensitiveKeys ?? [];
+  if (target === null || target === void 0) return target;
+  if (typeof target === "string") {
+    let result2 = target.replace(/(Bearer\s+)[A-Za-z0-9\-._~+/]+=*/gi, `$1${mask}`);
+    result2 = result2.replace(/(https?:\/\/[^:]+:)[^@]+(@)/gi, `$1${mask}$2`);
+    result2 = result2.replace(
+      /(https?:\/\/app\.paseo\.sh\/#offer=)[A-Za-z0-9\-_.~+/]+=*/gi,
+      `$1${mask}`
+    );
+    return result2;
+  }
+  if (Array.isArray(target)) {
+    return target.map((item) => redactSecrets(item, options));
+  }
+  if (typeof target === "object") {
+    const clone2 = {};
+    for (const [key, value] of Object.entries(target)) {
+      if (isSensitiveKey(key, customKeys)) {
+        clone2[key] = typeof value === "string" ? maskString(value, mask) : mask;
+      } else if (typeof value === "object" && value !== null) {
+        clone2[key] = redactSecrets(value, options);
+      } else if (typeof value === "string") {
+        clone2[key] = redactSecrets(value, options);
+      } else {
+        clone2[key] = value;
+      }
+    }
+    return clone2;
+  }
+  return target;
+}
+
+// mcp/paseo-x-comms.mjs
 var VERSION = "0.3.0";
 var REMOTES_DIR = join(homedir(), ".paseo", "paseo-x-comms");
 var REMOTES_FILE = process.env.PASEO_X_COMMS_REMOTES || join(REMOTES_DIR, "registry.json");
@@ -36578,7 +36644,8 @@ function runPaseo(args, { timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
             reject(new Error(`paseo ${args[0]} timed out after ${timeoutMs}ms`));
             return;
           }
-          reject(new Error((stderr || err.message || "").trim().split("\n")[0] || String(err)));
+          const detail = (stderr || err.message || "").trim().split("\n")[0] || String(err);
+          reject(new Error(redactSecrets(detail)));
           return;
         }
         try {
@@ -36724,7 +36791,7 @@ function result(data) {
 var API_VERSION = 1;
 var extensionHooks = { onSend: [], onReceive: [], onToolCall: [] };
 function extensionLog(message) {
-  process.stderr.write(`[paseo-x-comms:extensions] ${message}
+  process.stderr.write(`[paseo-x-comms:extensions] ${redactSecrets(message)}
 `);
 }
 function describeError(cause) {
@@ -36760,7 +36827,7 @@ async function runFilter(hookName, payload, context) {
 }
 async function filterOrThrow(hookName, payload, context) {
   const outcome = await runFilter(hookName, payload, context);
-  if (outcome.blocked) throw new Error(`x-comms extension blocked ${context.tool}: ${outcome.reason}`);
+  if (outcome.blocked) throw new Error(redactSecrets(`x-comms extension blocked ${context.tool}: ${outcome.reason}`));
   return outcome.value;
 }
 function extensionApi(filename) {
