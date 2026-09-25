@@ -28,7 +28,7 @@
     "daemon",
     "x-comms"
   ],
-  "license": "Apache-2.0",
+  "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.4.3"

@@ -286,4 +286,4 @@ npm test          # hermetic: fake paseo CLI + temp registry, no live daemons
 
 ## License
 
-Apache-2.0.
+MIT
