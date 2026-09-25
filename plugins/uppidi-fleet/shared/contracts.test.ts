@@ -723,8 +723,8 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
     assert.equal(extractPermissionScope({ input: { path: "/tmp/work" } }), "/tmp/work");
     assert.equal(extractPermissionScope({ input: { paths: ["/a", "/b"] } }), "/a, /b");
     assert.equal(
-      extractPermissionScope({ description: "Scope: /home/xpufx/code/paseo/*" }),
-      "/home/xpufx/code/paseo/*",
+      extractPermissionScope({ description: "Scope: /home/user/code/paseo/*" }),
+      "/home/user/code/paseo/*",
     );
     assert.equal(extractPermissionScope({ description: "no scope here" }), "no scope here");
     assert.equal(extractPermissionScope({}), undefined);

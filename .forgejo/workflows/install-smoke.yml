@@ -111,18 +111,36 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # Issue #569: the forbidden-pattern list lives in xpufx-org/platform
+      # (bin/pii-patterns.txt + bin/pii-preflight.sh), never in this publishable
+      # tree — embedding the patterns here would leak the exact internal
+      # hostnames/users/paths the gate exists to protect. Cross-repo checkout
+      # follows the org idiom already used by platform's sync-labels caller.
+      - name: Check out platform PII preflight tool
+        uses: actions/checkout@v4
+        with:
+          repository: xpufx-org/platform
+          ref: main
+          token: ${{ secrets.PLATFORM_READ_TOKEN || github.token }}
+          path: .platform-tools
+
       - name: Hygiene — publish surface has no private strings or missing READMEs
         run: |
           set -euo pipefail
-          # plugin-release SKILL.md §1/§2. No allowlist, and `dist` is scanned
-          # too: built artifacts ship in the mirror, so a stale dist is a leak
-          # even when src is clean. Nothing internal may reach the public tree.
-          hits="$(git grep -n -E 'oktay|aager|mrs\.aager\.de|pufaysokt|oktaya|/home/xpufx' -- 'plugins/*' 'packages/*' ':!*node_modules*' || true)"
-          if [ -n "$hits" ]; then
-            printf '%s\n' "$hits"
-            echo "::error::private strings on the publish surface — see .agents/skills/plugin-release/SKILL.md §1"
+          # plugin-release SKILL.md §1/§2. The scan is delegated to the platform
+          # tool so no pattern literal is committed here. `dist` is scanned too:
+          # built artifacts ship in the mirror, so a stale dist is a leak even
+          # when src is clean. A missing tool must fail closed, never silently
+          # skip the security gate (#569).
+          if [ ! -x .platform-tools/bin/pii-preflight.sh ]; then
+            echo "::error::platform PII preflight tool unavailable at .platform-tools/bin/pii-preflight.sh — the hygiene gate cannot run; refusing to pass open (see #569)"
             exit 1
           fi
+          .platform-tools/bin/pii-preflight.sh --tree HEAD \
+            --path 'plugins/*' --path 'packages/*' --allowlist '*node_modules*' || {
+              echo "::error::private strings on the publish surface — see .agents/skills/plugin-release/SKILL.md §1"
+              exit 1
+            }
           missing=0
           for p in plugins/*/; do
             [ -f "${p}README.md" ] || { echo "::error::missing README: ${p}"; missing=1; }

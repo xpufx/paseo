@@ -325,7 +325,7 @@ describe("subagent lifecycle projection & structured block detail (#537)", () =>
             id: "perm-req-537",
             name: "external_directory",
             title: "access external dir",
-            description: "Scope: /home/xpufx/code/paseo/*",
+            description: "Scope: /home/user/code/paseo/*",
           },
         ],
       },
@@ -335,9 +335,9 @@ describe("subagent lifecycle projection & structured block detail (#537)", () =>
 
     assert.equal(agent.deterministicState, "permission-prompt");
     assert.equal(agent.lifecycleState, "waiting_for_input");
-    assert.equal(agent.stateDetail, "access external dir (/home/xpufx/code/paseo/*)");
+    assert.equal(agent.stateDetail, "access external dir (/home/user/code/paseo/*)");
     assert.equal(agent.blockDetail?.requiredPermissionId, "perm-req-537");
-    assert.equal(agent.blockDetail?.scope, "/home/xpufx/code/paseo/*");
+    assert.equal(agent.blockDetail?.scope, "/home/user/code/paseo/*");
     assert.equal(agent.blockDetail?.command, "paseo permit allow agent-lifecycle-537 perm-req-537");
   });
 

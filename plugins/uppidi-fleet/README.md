@@ -1097,7 +1097,7 @@ agent also carries `blockDetail`:
 ```json
 {
   "requiredPermissionId": "per_0d5f…",
-  "scope": "/home/xpufx/code/paseo/*",
+  "scope": "/home/user/code/paseo/*",
   "action": "access external dir",
   "command": "paseo permit allow <agentId> <requiredPermissionId>"
 }

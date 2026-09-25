@@ -8,7 +8,7 @@ import type { PillItemType } from "./pill-labels";
 
 vi.mock("@getpaseo/plugin/client", () => ({
   useWorkspace: (_id: string, sel: (w: unknown) => unknown) =>
-    sel({ directory: "/home/xpufx/.paseo/worktrees/2h0dw6vb/money-lion" }),
+    sel({ directory: "/home/user/.paseo/worktrees/2h0dw6vb/money-lion" }),
   useAgent: (_id: string, sel: (a: unknown) => unknown) => sel(agent),
   useRpc: () => async () => ({}),
 }));
