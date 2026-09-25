@@ -818,11 +818,12 @@ these gaps yourself.
 
 ### 10.6 The Front Desk hand-off endpoint exists
 
-- `POST /handoff` (aliased as `POST /frontdesk-handoff`) implements the rotation
-  protocol: it seeds `latest-handoff.md`, projects the `Front Desk` role label,
-  retires the previous agent, persists `frontdesk.json`, and notifies
-  orchestrators. `GET /handoff` reports the active registration and snapshot
-  summary, matching the live Front Desk skill.
+- `POST /frontdesk-handoff` (legacy alias `POST /handoff`) implements the
+  rotation protocol: it seeds `latest-handoff.md`, projects the `Front Desk`
+  role label, retires the previous agent, persists `frontdesk.json`, and
+  notifies orchestrators. `GET /frontdesk-handoff` (`/handoff`) reports the
+  active registration and snapshot summary, matching the live Front Desk
+  skill. Full rotation contract: [§13.5](#135-front-desk-singleton--rotation-protocol).
 
 ### 10.7 Role models, metrics, and runners are mock / coming-soon
 
@@ -835,7 +836,9 @@ these gaps yourself.
   fleet yet.
 - **Action:** override role models from the Cockpit or
   `~/.paseo/uppidi-fleet-role-models.json`; treat metrics and runners as
-  mock/coming-soon stubs.
+  mock/coming-soon stubs. Metrics specifically still serves a seeded baseline
+  matrix when the metrics file is absent — the empty-by-default contract is
+  not yet implemented ([§13.4](#134-fleet-metrics-baseline-not-empty)).
 
 ### 10.8 Adoption checklist
 
@@ -922,7 +925,140 @@ node packages/paseo-plugin-helper/bin/paseo-plugin-helper.js audit plugins/uppid
 See [`docs/remote-repos.md`](./docs/remote-repos.md) for the design notes on
 supporting repositories without persistent local clones.
 
+## 13.1 Daemon workspace scoping & orchestrator spawning
+
+Two CLI contract details matter whenever a fleet component (or you, by hand)
+spawns a long-lived agent for a specific repository.
+
+**`paseo run -d` needs an explicit target.** A detached daemon-mode agent does
+not magically bind itself to a repository: pass `--workspace <workspaceId>` to
+run inside an existing Paseo workspace, or `--cwd <path>` as the fallback. If
+neither is given, the daemon inherits the *caller's* working directory — which
+is usually the wrong repo. Source of truth:
+[`server/agents.ts`](./server/agents.ts) (`spawnPaseoAgent`): the SDK path
+(`context.paseo.agents.create`) forwards `workspaceId` as `workspaceId` +
+`workspace`, and the CLI fallback appends `--workspace <id>` when known, `--cwd`
+otherwise. Workspace resolution (`resolveRepoWorkspace`) prefers, in order:
+
+1. `paseo workspace ls --json` — the **keys are `workspaceId`, not `id`**
+   (older builds also tolerate `id`; do not rely on it). Repos are matched by
+   `project`, workspace `name`, or the repo basename, preferring
+   `isolation === "local"` over ephemeral worktrees.
+2. an existing agent whose `cwd` matches the repo,
+3. a bare `~/code/<repoBasename>` path if it exists.
+
+**Orchestrator spawn prompt-init contract.** `handleUppidiAddOrchestrator`
+spawns with title `Orchestrator · <repo>` and a default prompt pointing the new
+agent at its SKILL.md and the board CLI conventions:
+
+```text
+You are the project orchestrator for <repo>.
+Follow the orchestrator skill at <home>/code/platform/skills/orchestrator/SKILL.md.
+Coordinate tasks, supervise worker agents, and manage pull requests and issues
+for this repository using the forge CLI (fgjx) and Paseo conventions.
+```
+
+If you pass a custom `prompt`, keep the same contract: name the repo, point at
+the skill file (`fgjx`-flavoured Skills assume `fgjx`/`teax` over `tea`; the
+zero-dependency variant assumes neither), and state the coordinate/supervise
+mandate — see [§6](#6-skills-how-the-fleet-thinks) for the example skills this
+references. The spawn also registers the agent with the router
+(`writeOrchestrator` + `enrollRepo`) so webhooks route to it.
+
+## 13.2 Test state isolation
+
+Tests that touch hook-router state, Front Desk/orchestrator registrations, or
+the fleet manager **must run against an isolated state dir**, not the live one:
+
+```sh
+HOOK_STATE_DIR=/tmp/test-hook-state npm test --workspace=plugins/uppidi-fleet
+```
+
+Why: the router resolves its state dir as
+`options.stateDir ?? HOOK_STATE_DIR ?? ~/.paseo/forgejo-hook/orchestrators`
+([`server/hook-router.ts`](./server/hook-router.ts)), and the fleet handlers
+resolve persisted state via `getPersistedStateDir()` with the same
+`HOOK_STATE_DIR` override (falling back to a per-pid tmpdir only when
+`NODE_ENV=test`). A test that registers a mock Front Desk or orchestrator
+(`agent-created-1`, synthetic UUIDs, …) **writes real JSON registration files**
+(`frontdesk.json`, `orchestrators/<key>.json`). Without the override those land
+in the live `~/.paseo/forgejo-hook/` tree and hijack real webhook routing until
+pruned by hand. The shipped suite already sets
+`HOOK_STATE_DIR=$TMPDIR/paseo-fleet-test-<pid>` when unset — keep that pattern
+in any new test that imports these modules. Test runs also skip router-config
+enrollment persistence unless `FORGE_HOOK_CONFIG` is set.
+
+## 13.3 Watchdog cross-reference & the `finished` exclusion
+
+The watchdog taxonomy, alert formats, cooldowns, and the recovery pipeline are
+documented in the runbook — see [§7.7](#77-fleet-watchdog--auto-recovery) — and
+are not repeated here.
+
+One classifier detail has evolved since it was first specced and is worth
+calling out next to `detectIdlePostErrorAmnesia`
+([`server/hook-router.ts`](./server/hook-router.ts)): a plain
+`attentionReason: "finished"` on an idle agent is **normal completion and is
+excluded**. `IDLE_POST_ERROR_AMNESIA` fires only when the agent is `idle` with
+zero active children *and* a real stall signal: an attention reason of
+`error` / `stalled` / `interrupted` / `failed`, or a ghost `lastError`. There
+is one explicit opt-in beyond that: passing `assumePendingWork: true` to the
+audit options additionally treats a finished idle agent with
+`requiresAttention` set as stalled ("aggressive amnesia detection"). The
+production loop does not set it; tests inject it. Do not "fix" a finished-idle
+orchestrator by removing this exclusion — it exists precisely to stop
+false-positive spam on idle orchestrators.
+
+## 13.4 Fleet metrics: baseline, not empty
+
+The Platform #18 audit expectation was "no hardcoded metrics — empty until
+`~/.paseo/uppidi-fleet-metrics.json` has empirical receipts". The shipped code
+does **not** currently match that: [`server/metrics.ts`](./server/metrics.ts)
+falls back to a checked-in `BASELINE_CANDIDATES` benchmark matrix (four
+placeholder models, four task profiles) whenever the metrics file is absent or
+unparsable, and the unit suite asserts that fallback. The client renders an
+explicit `No benchmark candidate data available.` empty state only when the
+candidate list is genuinely empty.
+
+So the present contract is:
+
+- `~/.paseo/uppidi-fleet-metrics.json` present ⇒ those receipts are served
+  verbatim (candidates, task profiles, trial totals, privacy notice).
+- File absent ⇒ **seeded baseline data**, not an empty state. Treat the matrix
+  as illustrative/placeholder until the empty-by-default change lands; the
+  gap is tracked in [§10.7](#107-role-models-metrics-and-runners-are-mock--coming-soon).
+
+## 13.5 Front Desk singleton & rotation protocol
+
+**Front Desk is a singleton per daemon.** All Front Desk-directed traffic is
+read from a single `frontdesk.json` registration (resolved through the
+fallback chain in [§7.7.3](#773-recipient-routing--delivery)), so registering a
+second Front Desk replaces — not joins — the recipient of every watchdog
+alert, board-sweep notice, and frontdesk queue drain. Keep at most one active
+agent in the role; the Cockpit's Replace control and the rotation protocol
+below both retire the incumbent for you.
+
+**Rotation endpoint: `POST /frontdesk-handoff`** (the legacy short alias
+`POST /handoff` is also routed; `GET /frontdesk-handoff` / `GET /handoff`
+report the active registration plus a snapshot summary). Body:
+`{"agentId": "<new-front-desk-id>", "handoffText": "..."}` — or `handoffFile`
+(pointing at a file) instead of `handoffText`. Behavior
+(`doFrontDeskHandoff` in [`server/hook-router.ts`](./server/hook-router.ts)):
+
+1. Seed the handoff snapshot: `handoffText`/`handoffFile` is written to
+   `~/.paseo/forgejo-hook/latest-handoff.md` (atomic write; the file lives
+   next to `frontdesk.json`). With no snapshot supplied, the existing file is
+   reused; with no snapshot available, the request is rejected (400).
+2. Rename the new agent to `Front Desk` with role label `front-desk`.
+3. **Retire the previous agent**: it is renamed `Front Desk (retired)` with
+   role `retired-front-desk`.
+4. Persist `frontdesk.json` (`by: "frontdesk-handoff"`) and drain the
+   `frontdesk` queue.
+5. Steer an onboarding message to the new agent (handoff path + snapshot
+   excerpt) and notify every registered orchestrator with the handover notice
+   and the escalation route (`paseo send --no-wait <id> <msg>`).
+
 ---
+
 
 ## 14. License
 
