@@ -22,6 +22,7 @@ export const SUPPORTED_TARGETS = {
   "linux-arm64": { os: "linux", arch: "arm64" },
   "darwin-x64": { os: "darwin", arch: "amd64" },
   "darwin-arm64": { os: "darwin", arch: "arm64" },
+  "win32-x64": { os: "windows", arch: "amd64", exe: true },
 };
 
 export function detectPlatform() {
@@ -70,9 +71,11 @@ export function parseChecksumManifest(manifestText, filename) {
 
 export async function installCompanion(options = {}) {
   const target = detectPlatform();
-  const version = options.version || process.env.TWOFADO_VERSION || "0.1.0-dev";
+  const exeSuffix = target.exe || target.os === "windows" ? ".exe" : "";
+  const version = options.version || process.env.TWOFADO_VERSION || "0.1.3";
+  const binName = `2fado${exeSuffix}`;
   const binDir = resolve(options.binDir || process.env.TWOFADO_BIN_DIR || join(ROOT_DIR, "bin"));
-  const binPath = join(binDir, "2fado");
+  const binPath = join(binDir, binName);
   const force = Boolean(options.force || process.env.TWOFADO_FORCE_INSTALL === "1");
 
   // Check if binary already exists and is executable
@@ -90,66 +93,69 @@ export async function installCompanion(options = {}) {
 
   mkdirSync(binDir, { recursive: true });
 
-  const archiveName = `2fado-${version}-${target.os}-${target.arch}.tar.gz`;
+  const assetName = `2fado-${version}-${target.os}-${target.arch}${exeSuffix}`;
   const baseUrl = options.baseUrl || process.env.TWOFADO_RELEASE_BASE_URL ||
     `https://github.com/xpufx/2fado/releases/download/v${version}`;
 
   console.log(`[2fado-install] Target: ${target.os}/${target.arch} (version: ${version})`);
-  console.log(`[2fado-install] Downloading archive: ${archiveName}...`);
+  console.log(`[2fado-install] Downloading binary: ${assetName}...`);
 
-  let archiveBuffer;
+  let binBuffer;
   let checksumManifest;
 
   // Attempt download or fallback to local dist/ if present (e.g. dev build)
-  const localDistArchive = join(ROOT_DIR, "dist", archiveName);
+  // Legacy .tar.gz archives are still accepted when the bare asset is absent.
+  const localDistBin = join(ROOT_DIR, "dist", assetName);
+  const localDistArchive = join(ROOT_DIR, "dist", `${assetName}.tar.gz`);
   const localDistSums = join(ROOT_DIR, "dist", "SHA256SUMS");
 
-  if (existsSync(localDistArchive) && existsSync(localDistSums)) {
-    console.log(`[2fado-install] Found local build in dist/, using local archive`);
-    archiveBuffer = readFileSync(localDistArchive);
+  if (existsSync(localDistBin) && existsSync(localDistSums)) {
+    console.log(`[2fado-install] Found local build in dist/, using local binary`);
+    binBuffer = readFileSync(localDistBin);
+    checksumManifest = readFileSync(localDistSums, "utf8");
+  } else if (existsSync(localDistArchive) && existsSync(localDistSums)) {
+    console.log(`[2fado-install] Found local legacy archive in dist/, using local archive`);
+    binBuffer = readFileSync(localDistArchive);
     checksumManifest = readFileSync(localDistSums, "utf8");
   } else {
-    const archiveUrl = `${baseUrl}/${archiveName}`;
+    const binUrl = `${baseUrl}/${assetName}`;
     const sumsUrl = `${baseUrl}/SHA256SUMS`;
 
     console.log(`[2fado-install] Fetching checksums from ${sumsUrl}...`);
     const sumsBuffer = await fetchBuffer(sumsUrl);
     checksumManifest = sumsBuffer.toString("utf8");
 
-    console.log(`[2fado-install] Fetching archive from ${archiveUrl}...`);
-    archiveBuffer = await fetchBuffer(archiveUrl);
+    console.log(`[2fado-install] Fetching binary from ${binUrl}...`);
+    try {
+      binBuffer = await fetchBuffer(binUrl);
+    } catch (err) {
+      const legacyName = `${assetName}.tar.gz`;
+      console.log(`[2fado-install] Bare binary not found, trying legacy archive ${legacyName}...`);
+      binBuffer = await fetchBuffer(`${baseUrl}/${legacyName}`);
+    }
   }
 
-  const expectedHash = parseChecksumManifest(checksumManifest, archiveName);
+  const expectedHash = parseChecksumManifest(checksumManifest, assetName);
   console.log(`[2fado-install] Verifying SHA256 checksum (${expectedHash})...`);
-  verifySha256(archiveBuffer, expectedHash);
+  verifySha256(binBuffer, expectedHash);
   console.log(`[2fado-install] Checksum verified OK.`);
 
-  // Write temporary tarball and extract
-  const tempArchive = join(binDir, `.tmp-${archiveName}`);
   const fs = await import("node:fs/promises");
-  await fs.writeFile(tempArchive, archiveBuffer);
-
-  try {
-    console.log(`[2fado-install] Unpacking archive into ${binDir}...`);
-    const tarResult = spawnSync("tar", ["-xzf", tempArchive, "-C", binDir], { stdio: "inherit" });
-    if (tarResult.status !== 0) {
-      throw new Error(`tar extraction failed with exit code ${tarResult.status}`);
-    }
-  } finally {
-    rmSync(tempArchive, { force: true });
+  if (binBuffer.length > 0 && binBuffer[0] === 0x1f && binBuffer[1] === 0x8b) {
+    throw new Error("Downloaded asset is a gzip archive; this installer expects bare binaries. Re-run make dist from a version with bare-binary assets.");
   }
 
+  await fs.writeFile(binPath, binBuffer);
+
   if (!existsSync(binPath)) {
-    // If the archive placed it as 2fado-${target.os}-${target.arch}, rename to 2fado
-    const suffixedBin = join(binDir, `2fado-${target.os}-${target.arch}`);
+    const suffixedBin = join(binDir, `2fado-${target.os}-${target.arch}${exeSuffix}`);
     if (existsSync(suffixedBin)) {
       const fsSync = await import("node:fs");
       fsSync.renameSync(suffixedBin, binPath);
     }
   }
 
-  chmodSync(binPath, 0o755);
+  if (process.platform !== "win32") chmodSync(binPath, 0o755);
   console.log(`[2fado-install] Successfully installed 2fado binary at ${binPath}`);
   return { binPath, status: "installed", version };
 }
