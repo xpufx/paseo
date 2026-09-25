@@ -25,7 +25,13 @@ const SELF_PLUGIN_IDS = ["twofado", "paseo-twofado", "paseo-twofado-plugin"];
  * surface it actually calls.
  */
 interface SupervisorModule {
-  DaemonSupervisor: new (options?: { rootDir?: string; socketPath?: string }) => SupervisorInstance;
+  DaemonSupervisor: new (options?: {
+    rootDir?: string;
+    binDir?: string;
+    stateDir?: string;
+    userConfigPath?: string;
+    socketPath?: string;
+  }) => SupervisorInstance;
 }
 
 interface SupervisorInstance {
