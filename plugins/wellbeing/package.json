@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npx tsx --test server/presence.test.ts client/entry.test.ts && vitest run client/surface.test.tsx"
+    "test": "npm run typecheck && node --import ./test/register-ts-hooks.mjs --test server/presence.test.ts client/entry.test.ts && vitest run client/surface.test.tsx"
   },
   "devDependencies": {
     "@getpaseo/plugin": "^0.9.0",

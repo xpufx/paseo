@@ -6,7 +6,7 @@
   "description": "Monitor installed Paseo plugins for git-source updates, with per-subdirectory status, source links, and one-click pulls.",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && npx tsx --test shared/updates.test.ts server/updates.test.ts client/orphans.test.ts",
+    "test": "npm run typecheck && node --import ./test/register-ts-hooks.mjs --test shared/updates.test.ts server/updates.test.ts client/orphans.test.ts",
     "test:vitest": "npm run typecheck && vitest run --config vitest.config.ts"
   },
   "devDependencies": {
