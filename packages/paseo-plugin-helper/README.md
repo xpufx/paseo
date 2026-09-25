@@ -31,7 +31,7 @@
 - **Zero-Dependency MCP Client**: Built-in stdio client (`McpClient`) with stderr ring buffering, non-JSON stdout line filtering, cross-platform process tree cleanup, and fallback ping readiness checks.
 - **Agent MCP Config Writer**: `upsertMcpServer` and `removeMcpServer` safely register plugin or Gateway MCP servers into Claude Desktop, Claude Code, OpenCode, Cursor, and Gemini configs with JSONC parsing, atomic writes, deep-equality idempotency, and automated backups.
 - **React Query RPC Bridge**: `useRpcQuery` & `useRpcMutation` with automatic caching, refetching, and input hashing.
-- **Plugin Query & Lifecycle Helpers**: `listPlugins`, `getPluginInfo`, `isPluginRunning`, and `isPluginInstalled` inspect active daemon state and cross-plugin availability with status filtering and built-in TTL caching.
+- **Plugin Registry & Presence**: `listPlugins(context)` and `isPluginInstalled(context, id)` detect and enumerate other plugins through the sanctioned daemon channel (a `context.paseo.plugins` SDK surface when present, else the daemon's `paseo plugin ls --json` RPC). Absence tolerates to `[]`/`false` — never throws — so optional surfaces can be gated on a companion plugin. The legacy full-metadata helpers (`listPlugins()` / `getPluginInfo` / `isPluginRunning`) remain for plugin-manager use.
 - **End-to-End Settings System**: Type-safe settings flow from Zod schema (`defineSettingsContract`) to atomic daemon storage (`registerSettingsRpc`) and optimistic React Native UI state (`usePluginSettings`).
 - **Daemon State & File Storage**: Atomic, temporary-swap file storage (`PluginStorage`) preventing corruption during power cuts or crashes.
 - **Security & Redaction**: Deep secret masking for Bearer tokens, API keys, and connection credentials (`redactSecrets`).
@@ -293,6 +293,44 @@ export const contributePlugin: PluginContribution = (plugin) => {
   return () => {};
 };
 ```
+
+---
+
+## Plugin Registry & Presence (`listPlugins(context)`, `isPluginInstalled(context, id)`)
+
+Detect and enumerate other installed plugins through the **sanctioned daemon channel** — never by
+touching host-private files. Use this to enable/disable a surface, or to offer an
+"if you had plugin X you could also…" affordance, and tolerate absence gracefully.
+
+```ts
+import { listPlugins, isPluginInstalled } from "paseo-plugin-helper/server";
+
+export default function contribute(server) {
+  server.handle(myContract, async (input, context) => {
+    // Usable = present + enabled + running. Absence -> false, never throws.
+    const xComms = await isPluginInstalled(context, "x-comms");
+
+    // Everything the daemon reports, normalized.
+    const presence = await listPlugins(context); // [{ id, status, enabled }, ...]
+
+    return { xComms, presence };
+  });
+}
+```
+
+- **Resolution order**: a `context.paseo.plugins.list()` SDK surface when the host exposes one,
+  otherwise the daemon's existing `paseo plugin ls --json` query.
+- **Tolerant by contract**: no context, missing SDK surface, unreachable daemon, or a malformed
+  payload all resolve to `[]` / `false` — a missing companion plugin never breaks the caller.
+- **Full-metadata variants** (`listPlugins()` / `getPluginInfo` / `isPluginEnabled` /
+  `isPluginRunning`) remain for plugin-manager use where `path`/`source`/`commit` matter; they use
+  the CLI with a `~/.paseo/config.json` fallback.
+
+> [!WARNING]
+> **Anti-patterns** — do not detect plugins by scanning `~/.paseo/plugins/`, reading/parsing
+> `sources.json`, or probing plugin data directories. Those are host-private, drift across daemon
+> versions, and answer "is a directory present" rather than "is the plugin usable". The audit CLI
+> flags this (rule `no-filesystem-plugin-probing`).
 
 ---
 

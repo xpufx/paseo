@@ -304,13 +304,54 @@ upsertMcpServer({
 
 ---
 
-## 12. Plugin Query & Lifecycle Helpers: `listPlugins`, `isPluginRunning`, `getPluginInfo`
+## 12. Plugin Registry & Presence: `listPlugins`, `isPluginInstalled`, `isPluginRunning`
 
 Provides cross-plugin awareness and lifecycle discovery without fragile filesystem probes.
 
-Queries Paseo's live plugin list via `paseo plugin ls --json` with fallback to `~/.paseo/config.json`. Includes built-in TTL caching (default 5 seconds) to prevent command churn during frequent polling.
+### 12a. Presence API (context-aware) — recommended
 
-### Usage
+Pass the handler/hook `context` and get normalized presence records. This resolves through the
+sanctioned daemon channel: a `context.paseo.plugins.list()` SDK surface when the host exposes one,
+otherwise the daemon's existing `paseo plugin ls --json` query. **Absence tolerates to `[]` / `false`
+and never throws**, so a plugin can gate optional surfaces on a companion without risking its own
+handler.
+
+```ts
+import { listPlugins, isPluginInstalled } from "paseo-plugin-helper/server";
+
+// Inside an RPC handler or lifecycle hook you already receive `context`.
+server.handle(someContract, async (input, context) => {
+  // Usable = present, enabled, and running.
+  const xComms = await isPluginInstalled(context, "x-comms");
+  if (xComms) {
+    // "if you had x-comms you could also..." affordance
+  }
+
+  // Enumerate everything the daemon knows about.
+  const presence = await listPlugins(context); // [{ id, status, enabled }, ...]
+  return { xComms };
+});
+```
+
+`isPluginInstalled(context, id)` is fail-closed: only `enabled && status === "running"` is `true`.
+Absent, disabled, failed, and unknown all resolve to `false`.
+
+> [!WARNING]
+> **Anti-patterns** — do not detect plugins by:
+> - scanning `~/.paseo/plugins/` or any plugin directory,
+> - reading or parsing `sources.json` / the plugins map in `~/.paseo/config.json`,
+> - checking whether a plugin's data directory exists.
+>
+> Those paths are host-private, change shape between daemon versions, and answer "is a directory
+> there" rather than "is the plugin usable". Use `listPlugins(context)` / `isPluginInstalled(context, id)`.
+> The audit CLI flags filesystem plugin probing (rule `no-filesystem-plugin-probing`).
+
+### 12b. Full-metadata API (no context)
+
+The context-free forms keep the legacy behaviour: full `PaseoPluginInfo[]` metadata via
+`paseo plugin ls --json`, with a `~/.paseo/config.json` fallback when the CLI is unavailable. Use
+these when you need `path`/`source`/`remote`/`commit` (e.g. a plugin-manager), not for presence gating.
+
 ```ts
 import {
   listPlugins,
@@ -321,19 +362,19 @@ import {
   clearPluginCache,
 } from "paseo-plugin-helper/server";
 
-// 1. Check if a dependency or companion plugin is running
+// Check if a dependency or companion plugin is running (no context)
 const mcpRunning = await isPluginRunning("mcp-tools");
 if (mcpRunning) {
   // Safe to read shared PluginStorage state or call cross-plugin RPC
 }
 
-// 2. Check if installed (e.g. to dim a toggle in settings when missing)
+// Check if installed at all (e.g. to dim a toggle in settings when missing)
 const mcpInstalled = await isPluginInstalled("mcp-tools");
 
-// 3. List plugins with optional status filter ("all" | "enabled" | "disabled" | "running" | "failed")
+// List plugins with optional status filter ("all" | "enabled" | "disabled" | "running" | "failed")
 const runningPlugins = await listPlugins({ filter: "running" });
 
-// 4. Inspect full plugin metadata
+// Inspect full plugin metadata
 const info = await getPluginInfo("top");
 // {
 //   id: "top",
@@ -344,7 +385,7 @@ const info = await getPluginInfo("top");
 //   error?: string
 // }
 
-// 5. Force refresh cache immediately
+// Force refresh cache immediately
 clearPluginCache();
 // or pass forceRefresh option:
 const fresh = await listPlugins({ forceRefresh: true });

@@ -604,14 +604,45 @@ interface ListPluginsOptions {
     /** If true, bypasses the in-memory cache and queries the daemon fresh. */
     forceRefresh?: boolean;
 }
+/** Normalized presence record returned to plugin code by `listPlugins(context)`. */
+interface PluginPresence {
+    id: string;
+    status: string;
+    enabled: boolean;
+}
 /**
- * Clears the in-memory plugin list cache.
+ * Minimal structural view of the daemon plugin surface a plugin may reach
+ * through `context.paseo`. Current SDK `PaseoApi` exposes no plugins actions,
+ * so this stays optional and duck-typed; when absent the helper falls back to
+ * the daemon's existing `paseo plugin ls --json` query.
+ */
+interface PaseoPluginsSurface {
+    list(): Promise<unknown>;
+}
+/**
+ * Handler/hook context shape plugin server code passes to the presence API.
+ * `paseo` stays `unknown` so the real `PluginHandlerContext` (whose `paseo` is
+ * the SDK `PaseoApi`) is assignable even though current SDK builds expose no
+ * plugins actions; the surface is duck-typed at call time.
+ */
+interface PluginRegistryContext {
+    paseo?: unknown;
+}
+interface PluginQueryOptions {
+    cacheTtlMs?: number;
+    forceRefresh?: boolean;
+}
+/**
+ * Clears the in-memory plugin list and presence caches.
  */
 declare function clearPluginCache(): void;
 /**
- * Lists plugins from the Paseo daemon, with optional filtering and TTL caching.
- * Primary mechanism uses 'paseo plugin ls --json', with fallback to ~/.paseo/config.json.
+ * Lists plugins. Called with a plugin/handler `context`, returns normalized
+ * presence records `{ id, status, enabled }` resolved through the daemon (see
+ * `listPluginPresence`); absence tolerates to `[]`. Called without a context,
+ * returns the legacy full `PaseoPluginInfo[]` metadata list.
  */
+declare function listPlugins(context: PluginRegistryContext | null | undefined, options?: PluginQueryOptions): Promise<PluginPresence[]>;
 declare function listPlugins(options?: ListPluginsOptions): Promise<PaseoPluginInfo[]>;
 /**
  * Retrieves metadata for a specific plugin by ID.
@@ -623,11 +654,17 @@ declare function getPluginInfo(pluginId: string, options?: {
 }): Promise<PaseoPluginInfo | null>;
 /**
  * Checks whether a plugin is installed in Paseo.
+ *
+ * Two forms:
+ * - `isPluginInstalled(pluginId, options?)` — legacy metadata query: true when
+ *   the plugin appears in the full plugin list at all.
+ * - `isPluginInstalled(context, id, options?)` — presence query: true only when
+ *   the plugin is usable (present, enabled, and status "running"). Anything else
+ *   — absent, disabled, failed, unknown — resolves to false. A missing daemon
+ *   surface tolerates to false, never throws.
  */
-declare function isPluginInstalled(pluginId: string, options?: {
-    cacheTtlMs?: number;
-    forceRefresh?: boolean;
-}): Promise<boolean>;
+declare function isPluginInstalled(pluginId: string, options?: PluginQueryOptions): Promise<boolean>;
+declare function isPluginInstalled(context: PluginRegistryContext | null | undefined, id: string, options?: PluginQueryOptions): Promise<boolean>;
 /**
  * Checks whether a plugin is installed and marked as enabled in Paseo.
  */
@@ -847,4 +884,4 @@ declare class WorkspaceBeacon {
 }
 declare function createWorkspaceBeacon(options?: WorkspaceBeaconOptions): WorkspaceBeacon;
 
-export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isDevelopmentEnv, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, isProductionEnv, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolveDefaultMinLevel, resolveMinLevelFromEnv, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type GuardedRpcHandler, type HandleableServerContext, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, type PaseoPluginInfo, type PaseoPluginsSurface, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginPresence, type PluginQueryOptions, type PluginRegistryContext, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type UpsertMcpServerOptions, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, guardRpcHandler, isDevelopmentEnv, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, isProductionEnv, listPlugins, normalizeBeaconColor, parseJsonc, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, removeMcpServer, resolveBeaconLabelName, resolveDefaultMinLevel, resolveMinLevelFromEnv, resolvePluginVersion, safeExec, safeSpawn, stampVersion, stripJsonComments, tryParseJsonc, upsertMcpServer };

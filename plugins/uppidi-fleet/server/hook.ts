@@ -20,6 +20,7 @@ import {
   loadRouterConfig,
 } from "./hook-router.js";
 import { getUppidiFleetSettingsStorage } from "./settings.js";
+import { isPluginInstalled } from "paseo-plugin-helper/server";
 
 const FALLBACK_HOOK_URL = "http://127.0.0.1:8099";
 
@@ -78,19 +79,34 @@ export function resolveHookUrl(provided?: string): string {
 
 export async function handleHookStatus(
   input: { hookUrl?: string },
-  _context?: PluginHandlerContext,
+  context?: PluginHandlerContext,
 ): Promise<HookStatusOutput> {
+  const capabilities = { xCommsInstalled: await resolveXCommsInstalled(context) };
   const url = `${resolveHookUrl(input.hookUrl)}/status`;
   try {
     const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(4000) });
     if (!res.ok) {
-      return { ok: false, totalQueued: 0, repoCount: 0, paused: [], error: `HTTP ${res.status}: ${res.statusText}` };
+      return { ok: false, totalQueued: 0, repoCount: 0, paused: [], capabilities, error: `HTTP ${res.status}: ${res.statusText}` };
     }
     const data = (await res.json()) as HookStatusOutput;
-    return { ...data, ok: true, paused: data.paused ?? [], totalQueued: data.totalQueued ?? 0, repoCount: data.repoCount ?? 0 };
+    return { ...data, ok: true, paused: data.paused ?? [], totalQueued: data.totalQueued ?? 0, repoCount: data.repoCount ?? 0, capabilities };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, totalQueued: 0, repoCount: 0, paused: [], error: `Unreachable: ${msg}` };
+    return { ok: false, totalQueued: 0, repoCount: 0, paused: [], capabilities, error: `Unreachable: ${msg}` };
+  }
+}
+
+/**
+ * Seed consumer for the helper plugin-registry presence API (#572): notes
+ * whether x-comms is usable, resolved per call from the daemon. Absence — no
+ * context, no daemon surface, unreachable daemon — tolerates to false and never
+ * throws, so hook status stays answerable even when x-comms is missing.
+ */
+async function resolveXCommsInstalled(context?: PluginHandlerContext): Promise<boolean> {
+  try {
+    return await isPluginInstalled(context, "x-comms");
+  } catch {
+    return false;
   }
 }
 

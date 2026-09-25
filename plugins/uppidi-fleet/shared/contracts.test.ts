@@ -93,6 +93,17 @@ describe("uppidi-fleet shared contracts", () => {
     assert.equal(uppidiHookStatusContract.name, "uppidi-fleet.hook-status");
   });
 
+  it("defaults hook-status capabilities to x-comms absent (#572)", () => {
+    const minimal = HookStatusOutputSchema.parse({ ok: true });
+    assert.deepEqual(minimal.capabilities, { xCommsInstalled: false });
+
+    const present = HookStatusOutputSchema.parse({
+      ok: true,
+      capabilities: { xCommsInstalled: true },
+    });
+    assert.equal(present.capabilities.xCommsInstalled, true);
+  });
+
   it("validates HookInfoOutputSchema defaults and the hook.info contract (#545)", () => {
     assert.equal(uppidiHookInfoContract.name, "uppidi-fleet.hook.info");
 

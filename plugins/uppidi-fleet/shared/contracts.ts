@@ -101,6 +101,13 @@ export const HookStatusOutputSchema = z.object({
   paused: z.array(z.string()).default([]),
   totalQueued: z.number().default(0),
   repoCount: z.number().default(0),
+  // Cross-plugin presence, resolved per call from the daemon (never file
+  // probes). Absence of the daemon surface resolves to false.
+  capabilities: z
+    .object({
+      xCommsInstalled: z.boolean().default(false),
+    })
+    .default({ xCommsInstalled: false }),
   error: z.string().optional(),
 });
 export type HookStatusOutput = z.infer<typeof HookStatusOutputSchema>;

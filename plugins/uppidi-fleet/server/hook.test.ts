@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   resolveHookUrl,
+  handleHookStatus,
   handleHookServiceStatus,
   handleHookInfo,
   handleHookServiceAction,
@@ -285,6 +286,55 @@ describe("uppidi-fleet hook server handlers", () => {
 
     await handleHookServiceAction({ action: "stop" });
   });
+  it("reports x-comms presence via the helper plugin registry, tolerating absence (#572)", async () => {
+    // No context: presence falls through to the daemon query and must surface a
+    // boolean without throwing, whatever the host daemon reports.
+    const status = await handleHookStatus({ hookUrl: "http://127.0.0.1:1" });
+    assert.equal(status.ok, false);
+    assert.equal(typeof status.capabilities.xCommsInstalled, "boolean");
+  });
+
+  it("tolerates an unusable presence surface (absence -> false, never throws) (#572)", async () => {
+    const context = {
+      paseo: {
+        plugins: {
+          list: async () => {
+            throw new Error("daemon unreachable");
+          },
+        },
+      },
+    } as unknown as Parameters<typeof handleHookStatus>[1];
+
+    const status = await handleHookStatus({ hookUrl: "http://127.0.0.1:1" }, context);
+    assert.equal(status.capabilities.xCommsInstalled, false);
+  });
+
+  it("reports x-comms installed when the daemon surface says it is running (#572)", async () => {
+    const context = {
+      paseo: {
+        plugins: {
+          list: async () => [{ id: "x-comms", status: "running", enabled: true }],
+        },
+      },
+    } as unknown as Parameters<typeof handleHookStatus>[1];
+
+    const status = await handleHookStatus({ hookUrl: "http://127.0.0.1:1" }, context);
+    assert.equal(status.capabilities.xCommsInstalled, true);
+  });
+
+  it("treats a disabled x-comms as not installed (#572)", async () => {
+    const context = {
+      paseo: {
+        plugins: {
+          list: async () => [{ id: "x-comms", status: "disabled", enabled: false }],
+        },
+      },
+    } as unknown as Parameters<typeof handleHookStatus>[1];
+
+    const status = await handleHookStatus({ hookUrl: "http://127.0.0.1:1" }, context);
+    assert.equal(status.capabilities.xCommsInstalled, false);
+  });
+
   it("persists hook configuration into plugin settings and migrates legacy config (#444)", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "uppidi-settings-test-"));
     try {
