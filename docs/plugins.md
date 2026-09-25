@@ -21,7 +21,8 @@
    - [Creation & Before Hooks (`server.before`)](#creation--before-hooks-serverbefore)
 7. [UI Subsystem Map (`docs/plugin/ui/`)](#7-ui-subsystem-map)
 8. [Testing & Conformance](#8-testing--conformance)
-9. [Reference Links & Upstream Documents](#9-reference-links--upstream-documents)
+9. [Hook Router Discovery & Front Desk Registration](#9-hook-router-discovery--front-desk-registration)
+10. [Reference Links & Upstream Documents](#10-reference-links--upstream-documents)
 
 ---
 
@@ -239,7 +240,90 @@ The complete documentation suite for building UI surfaces, components, forms, pi
 
 ---
 
-## 9. Reference Links & Upstream Documents
+## 9. Hook Router Discovery & Front Desk Registration
+
+The bundled Forgejo webhook router ([`plugins/uppidi-forge/server/hook-router.ts`](../plugins/uppidi-forge/server/hook-router.ts)) is a plain Node `http` server started by the plugin's daemon subprocess. Agents interacting with the Forgejo fleet must be able to find it and register themselves with it. Full router architecture, queueing, and security notes live in [`plugins/uppidi-forge/README.md` §7](../plugins/uppidi-forge/README.md#7-the-webhook-router-backend-daemon); this section covers only **self-discovery and registration** for agents.
+
+> [!IMPORTANT]
+> **Do not assume loopback.** The router binds to whatever `hookHost` is configured, which is frequently a LAN interface, not `127.0.0.1`. Always resolve the bind address first (below). `127.0.0.1:<port>` works **only if** the router is actually bound to loopback (`hookHost` = `127.0.0.1`, or a wildcard bind covering loopback); otherwise curl fails with connection refused.
+
+### 9.1 Self-locating the router
+
+Resolve the listen address in this precedence order (mirrors [`hook-router.ts` config resolution](../plugins/uppidi-forge/server/hook-router.ts)):
+
+1. **Plugin settings** (primary source): read `hookHost` / `hookPort` from
+   `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json`.
+   > The plugin runtime ID is `uppidi-fleet` (declared in `paseo-plugin.json`), so the data directory is `uppidi-fleet` even though the source tree directory is `uppidi-forge`.
+2. **Legacy config file** (fallback): `~/.config/uppidi-fleet/router-config.json`.
+3. **Hard-coded defaults** (last resort): port `8099` on the daemon host's LAN IP / wildcard interface. Environment overrides (`FORGE_HOOK_HOST`, `FORGE_HOOK_PORT` / `HOOK_PORT`) are read by the plugin subprocess at startup.
+
+Confirm liveness by probing the router (both endpoints are unauthenticated):
+
+```sh
+curl -fsS "http://<hook-host>:<port>/health"   # → {"ok":true,"status":"healthy",...,"port":8099}
+curl -fsS "http://<hook-host>:<port>/status"   # front desk record, paused queues, totals
+```
+
+If `/health` times out on your first guess, do not retry against loopback blindly — re-read the settings file or ask the operator which interface the router binds.
+
+### 9.2 Offline registry discovery
+
+Registry state files double as an offline way to learn who is registered, without contacting the router:
+
+- **Front Desk agent ID**: `~/.paseo/forgejo-hook/frontdesk.json` (`{"version":1,"agentId":"<uuid>",...}`).
+- **Repo orchestrator registrations**: one JSON file per repo key under `~/.paseo/forgejo-hook/orchestrators/`, where the filename is the repo key with `/` and `.` mapped to `_` (e.g. `forge.mrs.uppidi.com_xpufx-org_paseo.json` for repo key `forge.mrs.uppidi.com/xpufx-org/paseo`).
+
+These files are written atomically by the router on every registration; a stale mtime means the record may be outdated — prefer the live HTTP endpoints when the router is reachable.
+
+### 9.3 "You are not the frontdesk" — what to do
+
+When an agent is told *"you are not the frontdesk"* (typically after answering operator chatter routed to the Front Desk queue), the correct reaction is **never to answer operator chatter directly**. Instead, identify your role and register with the router accordingly:
+
+| Your role | Action |
+| :--- | :--- |
+| **Front Desk** agent (operator liaison) | Register yourself: `POST /frontdesk` with your own `agentId`. This writes `frontdesk.json`, notifies all registered orchestrators, and starts routing frontdesk-directed events to you. |
+| **Repo orchestrator** | Register your repo: `POST /orchestrator` with `{repo, agentId}`. This writes `orchestrators/<repo-key>.json` and drains that repo's queue. |
+| **Coding worker** (neither of the above) | Do **not** register or answer operator chatter. Route operator-facing matters through your orchestrator; the orchestrator owns board interaction. |
+
+Router endpoints (all unauthenticated, JSON; `GET /frontdesk` reads, `POST /frontdesk` registers):
+
+```sh
+# Register as the Front Desk (replaces any previous registration; orchestrators are notified)
+curl -fsS -X POST "http://<hook-host>:<port>/frontdesk" \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"<YOUR_AGENT_ID>"}'
+
+# Read the currently registered Front Desk
+curl -fsS "http://<hook-host>:<port>/frontdesk"
+
+# Self-register as a repo orchestrator
+curl -fsS -X POST "http://<hook-host>:<port>/orchestrator" \
+  -H 'Content-Type: application/json' \
+  -d '{"repo":"<forge-host>/<owner>/<repo>","agentId":"<YOUR_AGENT_ID>"}'
+
+# List registered orchestrators
+curl -fsS "http://<hook-host>:<port>/orchestrators"
+
+# Front Desk handoff (rotation; seeds handoff file, retires previous agent)
+curl -fsS -X POST "http://<hook-host>:<port>/frontdesk-handoff" \
+  -H 'Content-Type: application/json' \
+  -d '{"agentId":"<NEW_FRONT_DESK_ID>","handoffText":"# Handoff\n\nOperator context."}'
+```
+
+`<hook-host>` is hostname-neutral on purpose: substitute the address you resolved in [§9.1](#91-self-locating-the-router). Concrete example — on this fleet's current deployment the router binds the daemon host's LAN interface, so `10.20.30.24:8099` answers while `127.0.0.1:8099` does **not**:
+
+```sh
+curl -fsS http://10.20.30.24:8099/frontdesk   # loopback fails on this host unless hookHost is 127.0.0.1
+```
+
+### 9.3.1 Related but separate: webhook provisioning
+
+- `setup-forgejo.sh` in the **platform** repo (`~/code/platform/scripts/setup-forgejo.sh`, separate repository) provisions native Forgejo webhooks via `WEBHOOK_HOST` / `WEBHOOK_PORT` env vars pointing at the router — related ingress path, separate lifecycle and repo.
+- Platform ticket [#135 (forge.mrs)](https://forge.mrs.uppidi.com/xpufx-org/platform/issues/135) tracks webhook URL normalization and is awaiting an operator decision; it affects how webhook URLs are stored/matched, not how agents discover the router.
+
+---
+
+## 10. Reference Links & Upstream Documents
 
 ### In this Repository (`xpufx/paseo`)
 - [`packages/paseo-plugin-helper/`](../packages/paseo-plugin-helper/README.md) — Shared helper library source and docs.
