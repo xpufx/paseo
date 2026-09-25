@@ -41,6 +41,9 @@ dist/
 !packages/paseo-plugin-helper/dist/
 plugins/*/dist/
 
+# Self-installed companion binaries (acquired in-process from releases)
+plugins/*/bin/
+
 # Local agent guidance (per-machine, never committed)
 packages/paseo-plugin-helper/AGENTS.md
 .agents/

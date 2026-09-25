@@ -56,13 +56,18 @@ export class DaemonSupervisor {
   }
 
   resolveBinary(custom) {
-    if (custom && existsSync(custom)) return custom;
-    if (existsSync(this.defaultBinPath)) return this.defaultBinPath;
-    // Check local testrun
-    const devBin = join(this.rootDir, "bin", "2fado");
-    if (existsSync(devBin)) return devBin;
-    return "2fado"; // Rely on PATH
+  if (custom && existsSync(custom)) return custom;
+  const exeSuffix = process.platform === "win32" ? ".exe" : "";
+  const binName = `2fado${exeSuffix}`;
+  if (process.env.TWOFADO_BIN_DIR) {
+    const envBin = join(process.env.TWOFADO_BIN_DIR, binName);
+    if (existsSync(envBin)) return envBin;
   }
+  if (existsSync(this.defaultBinPath)) return this.defaultBinPath;
+  const exeBin = join(this.rootDir, "bin", binName);
+  if (exeBin !== this.defaultBinPath && existsSync(exeBin)) return exeBin;
+  return null;
+}
 
   async probeSocket(socketPath, timeoutMs = 1500) {
     return new Promise((resolve) => {
@@ -161,7 +166,30 @@ export class DaemonSupervisor {
       };
     }
 
-    const bin = this.resolveBinary(options.binPath);
+    let bin = this.resolveBinary(options.binPath);
+    if (!bin) {
+      this.appendLog("system", "companion binary not found; installing in-process...");
+      try {
+        const installer = await import("./install-companion.mjs");
+        const emit = (msg) => this.appendLog("stdout", String(msg).replace(/^\[2fado-install\] /, ""));
+        const result = await installer.installCompanion({
+          version: process.env.TWOFADO_VERSION,
+          binDir: join(this.rootDir, "bin"),
+          log: emit,
+        });
+        this.appendLog("system", `install finished: ${result.binPath} (${result.status})`);
+        bin = this.resolveBinary(options.binPath);
+      } catch (err) {
+        const msg = `companion install failed: ${err.message}; run daemonInstall to retry`;
+        this.appendLog("stderr", msg);
+        return { success: false, socketPath: sockPath, error: msg, needsInstall: true };
+      }
+    }
+    if (!bin) {
+      const msg = "2fado companion binary not installed; run daemonInstall first";
+      this.appendLog("stderr", msg);
+      return { success: false, socketPath: sockPath, error: msg, needsInstall: true };
+    }
     this.appendLog("system", `Spawning 2fado daemon (${bin})...`);
 
     const env = {
@@ -176,6 +204,13 @@ export class DaemonSupervisor {
       this.child = spawn(bin, ["daemon"], {
         env,
         stdio: ["ignore", "pipe", "pipe"],
+      });
+      this.child.on("error", (err) => {
+        this.appendLog("stderr", `Failed to spawn daemon: ${err.message}`);
+        this.spawnError = err;
+        this.child = null;
+        this.childPid = null;
+        this.startedAt = null;
       });
     } catch (err) {
       this.appendLog("stderr", `Failed to spawn daemon: ${err.message}`);
@@ -216,6 +251,11 @@ export class DaemonSupervisor {
         };
       }
       if (!this.child) {
+        if (this.spawnError) {
+          const err = this.spawnError;
+          this.spawnError = null;
+          return { success: false, socketPath: sockPath, error: `spawn failed: ${err.message}` };
+        }
         break;
       }
     }
