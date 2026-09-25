@@ -24,6 +24,7 @@ import {
   StatusDot,
   Tabs,
   TextInput,
+  Toggle,
   copyToClipboard,
   usePluginSettings,
   usePluginTheme,
@@ -1074,6 +1075,7 @@ function CompanionControls({ socketPath }: { socketPath: string | undefined }) {
   const logs = useRpc(daemonLogs);
   const [busy, setBusy] = useState<"start" | "stop" | "restart" | "install" | null>(null);
   const [showLogs, setShowLogs] = useState(false);
+  const [forceInstall, setForceInstall] = useState(false);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: COMPANION_KEY });
 
@@ -1165,7 +1167,13 @@ function CompanionControls({ socketPath }: { socketPath: string | undefined }) {
             icon="Download"
             disabled={busy !== null}
             loading={busy === "install"}
-            onPress={() => void run("install", () => install({}))}
+            onPress={() => void run("install", () => install(forceInstall ? { force: true } : {}))}
+          />
+          <Toggle
+            value={forceInstall}
+            onValueChange={setForceInstall}
+            label="Force"
+            disabled={busy !== null}
           />
           <Button
             label={showLogs ? "Hide logs" : "View logs"}
