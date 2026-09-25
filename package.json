@@ -19,7 +19,8 @@
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "check:declared-tooling": "node --test scripts/declared-tooling.test.mjs",
+    "test": "npm run check:declared-tooling && npm run test --workspaces --if-present",
     "test:npm-acquisition": "node scripts/npm-acquisition-smoke.mjs",
     "doctor:live": "node scripts/doctor-live.mjs"
   },
