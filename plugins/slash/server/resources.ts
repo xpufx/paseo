@@ -1,23 +1,23 @@
-import { PluginStorage, createPluginLogger } from "paseo-plugin-helper/server";
+import { createPluginLogger } from "paseo-plugin-helper/server";
 import {
   KNOWN_OPEN_TARGETS,
   SEED_COMMANDS,
+  mergeOperationBindings,
   interpolateTemplate,
-  slashSettingsContract,
   type CommandBundle,
+  type RpcOperationBinding,
   type SlashCommand,
   type SlashSettings,
 } from "../shared/resources";
 import { PLUGIN_VERSION as SLASH_PLUGIN_VERSION } from "../shared/version";
 import { orchestrateHandover } from "./orchestrate";
+import { DEFAULT_SLASH_SETTINGS, getSlashSettingsStorage } from "./settings";
 
 export const log = createPluginLogger("slash", { version: SLASH_PLUGIN_VERSION });
 
-const DEFAULTS: SlashSettings = { prefix: "slash-", commands: SEED_COMMANDS };
+const DEFAULTS: SlashSettings = DEFAULT_SLASH_SETTINGS;
 
-const settingsStorage = new PluginStorage<SlashSettings>("slash", "settings.json", {
-  schema: slashSettingsContract.schema,
-});
+const settingsStorage = getSlashSettingsStorage();
 
 async function readSettings(): Promise<SlashSettings> {
   const data = await settingsStorage.readAsync();
@@ -52,27 +52,38 @@ export function handleListCatalog(): { commands: SlashCommand[] } {
   return { commands: SEED_COMMANDS };
 }
 
-export function handleListOperations(): { rpc: string[]; open: string[] } {
-  return { rpc: allowedOperations(), open: [...KNOWN_OPEN_TARGETS] };
+export async function handleListOperations(): Promise<{ rpc: string[]; open: string[] }> {
+  return { rpc: await allowedOperations(), open: [...KNOWN_OPEN_TARGETS] };
 }
 
 export interface OperationContext {
   agentId?: string;
 }
 
-type OperationHandler = (params: Record<string, unknown>, context: OperationContext) => unknown;
+/** A primitive is a built-in code handler; operation bindings are the data that name it. */
+type OperationPrimitive = (
+  params: Record<string, unknown>,
+  context: OperationContext,
+  target?: string,
+) => unknown;
 
-const SAFE_OPERATIONS: Record<string, OperationHandler> = {
+const PRIMITIVES: Record<string, OperationPrimitive> = {
   "slash.ping": () => ({ ok: true, version: SLASH_PLUGIN_VERSION }),
   "slash.echo": (params) => ({ echo: params }),
-  "slash.orchestrate": (_params, context) => {
+  "slash.orchestrate": (_params, context, target) => {
     if (!context.agentId) throw new Error("orchestrate requires a caller agent id");
-    return orchestrateHandover(context.agentId);
+    return orchestrateHandover(context.agentId, target);
   },
 };
 
-export function allowedOperations(): string[] {
-  return Object.keys(SAFE_OPERATIONS);
+/** Bindings = seed defaults merged with the user's settings additions/overrides. */
+async function resolveOperationBindings(): Promise<RpcOperationBinding[]> {
+  const settings = await readSettings();
+  return mergeOperationBindings(settings.operationBindings);
+}
+
+export async function allowedOperations(): Promise<string[]> {
+  return (await resolveOperationBindings()).map((binding) => binding.name);
 }
 
 export async function runOperation(
@@ -80,11 +91,15 @@ export async function runOperation(
   params: Record<string, unknown>,
   context: OperationContext = {},
 ): Promise<unknown> {
-  const handler = SAFE_OPERATIONS[operation];
-  if (!handler) {
+  const binding = (await resolveOperationBindings()).find((entry) => entry.name === operation);
+  if (!binding) {
     throw new Error(`rpc operation not allowlisted: ${operation}`);
   }
-  return handler(params, context);
+  const primitive = PRIMITIVES[binding.primitive];
+  if (!primitive) {
+    throw new Error(`rpc operation binding "${operation}" references unknown primitive: ${binding.primitive}`);
+  }
+  return primitive({ ...binding.params, ...params }, context, binding.target);
 }
 
 export async function handleRunCommand(input: { name: string; args: string; agentId?: string }) {

@@ -432,9 +432,31 @@ export function SlashConsole() {
 
         <Collapsible
           title="Advanced"
-          subtitle="Bundle import/export and reset"
+          subtitle="Hook endpoint, bundle import/export and reset"
           icon="Wrench"
         >
+          <FormRow
+            label="Hook URL"
+            description="Base URL for rpc operations targeting the forgejo hook. Empty uses PASEO_FORGEJO_HOOK_URL, then http://127.0.0.1:8099."
+          >
+            <TextInput
+              value={settings.hookUrl ?? ""}
+              placeholder="http://10.20.30.24:8099"
+              mono
+              onChangeText={(hookUrl) => updateSettings({ hookUrl })}
+            />
+          </FormRow>
+          <FormRow
+            label="Hook secret file"
+            description="Path to the file holding the hook bearer secret. The secret value is never stored in settings."
+          >
+            <TextInput
+              value={settings.hookSecretFile ?? ""}
+              placeholder="~/.paseo/forgejo-hook.secret"
+              mono
+              onChangeText={(hookSecretFile) => updateSettings({ hookSecretFile })}
+            />
+          </FormRow>
           <FormRow label="Bundle JSON" description="Paste an exported bundle to import (validated server-side)">
             <TextInput
               value={bundleJson}

@@ -1,16 +1,45 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getSlashSettingsStorage } from "./settings";
 
 export const DEFAULT_HOOK_URL = "http://127.0.0.1:8099";
 
 const HOOK_TIMEOUT_MS = 10_000;
 
-function resolveHookUrl(): string {
+function readHookSettings(): { hookUrl: string; hookSecretFile: string } {
+  try {
+    const settings = getSlashSettingsStorage().read();
+    return {
+      hookUrl: (settings.hookUrl ?? "").trim(),
+      hookSecretFile: (settings.hookSecretFile ?? "").trim(),
+    };
+  } catch {
+    return { hookUrl: "", hookSecretFile: "" };
+  }
+}
+
+/**
+ * Resolves the hook endpoint: an explicit binding target wins, then the slash
+ * plugin's configured `hookUrl`, then `PASEO_FORGEJO_HOOK_URL`, then the loopback
+ * default (issue #544).
+ */
+function resolveHookUrl(target?: string): string {
+  const bindingTarget = target?.trim();
+  if (bindingTarget) return bindingTarget;
+  const fromSettings = readHookSettings().hookUrl;
+  if (fromSettings) return fromSettings;
   return process.env.PASEO_FORGEJO_HOOK_URL?.trim() || DEFAULT_HOOK_URL;
 }
 
+/**
+ * Resolves the secret file path: configured `hookSecretFile`, then
+ * `PASEO_FORGEJO_HOOK_SECRET_FILE`, then the conventional path. The secret value
+ * itself is never persisted in settings.
+ */
 function resolveSecretFile(): string {
+  const fromSettings = readHookSettings().hookSecretFile;
+  if (fromSettings) return fromSettings;
   const override = process.env.PASEO_FORGEJO_HOOK_SECRET_FILE?.trim();
   if (override) return override;
   return join(process.env.HOME || homedir(), ".paseo", "forgejo-hook.secret");
@@ -42,13 +71,14 @@ function errorReason(status: number, statusText: string, payload: unknown): stri
  * Deterministic orchestrator handover: POSTs the caller's agent id to the
  * forgejo hook control endpoint. Fails closed on missing secret, an
  * unreachable hook, or a non-2xx rejection; the secret is never surfaced.
+ * `target` lets a settings-defined operation binding point at another endpoint.
  */
-export async function orchestrateHandover(agentId: string): Promise<unknown> {
+export async function orchestrateHandover(agentId: string, target?: string): Promise<unknown> {
   const id = agentId?.trim();
   if (!id) throw new Error("orchestrate requires a caller agent id");
 
   const secret = readSecret();
-  const url = `${resolveHookUrl().replace(/\/+$/, "")}/orchestrate`;
+  const url = `${resolveHookUrl(target).replace(/\/+$/, "")}/orchestrate`;
 
   let response: Response;
   try {

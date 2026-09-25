@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   KNOWN_OPEN_TARGETS,
   SEED_COMMANDS,
+  SEED_OPERATION_BINDINGS,
   SlashSettingsSchema,
   actionSummary,
   draftFromCommand,
   emptyCommandDraft,
+  mergeOperationBindings,
   missingCatalogCommands,
   operationsListRpc,
   removeCommandByName,
@@ -141,6 +143,53 @@ describe("operation catalog validation", () => {
   it("stays silent when no catalog is supplied", () => {
     expect(validateCommandDraft(draft({ name: "ping", title: "Ping", verb: "rpc", operation: "slash.nope" })).command).toBeDefined();
     expect(validateCommandDraft(draft({ name: "go", title: "Go", verb: "open", target: "not-a-surface" })).warnings).toEqual({});
+  });
+});
+
+describe("mergeOperationBindings", () => {
+  it("returns the seed bindings when no custom bindings are supplied", () => {
+    expect(mergeOperationBindings(undefined).map((b) => b.name)).toEqual(
+      SEED_OPERATION_BINDINGS.map((b) => b.name),
+    );
+    expect(mergeOperationBindings([])).toEqual(SEED_OPERATION_BINDINGS);
+  });
+
+  it("adds custom bindings without dropping the seeds", () => {
+    const merged = mergeOperationBindings([
+      { name: "fleet.orch", primitive: "slash.orchestrate", params: {}, target: "http://10.20.30.24:8099" },
+    ]);
+    expect(merged.map((b) => b.name)).toContain("fleet.orch");
+    expect(merged.map((b) => b.name)).toContain("slash.orchestrate");
+  });
+
+  it("lets a custom binding override a seed with the same name", () => {
+    const merged = mergeOperationBindings([
+      { name: "slash.orchestrate", primitive: "slash.orchestrate", params: {}, target: "http://elsewhere:9" },
+    ]);
+    const orchestrate = merged.filter((b) => b.name === "slash.orchestrate");
+    expect(orchestrate).toHaveLength(1);
+    expect(orchestrate[0]?.target).toBe("http://elsewhere:9");
+  });
+});
+
+describe("SlashSettingsSchema operation/hook fields", () => {
+  it("defaults bindings to empty and hook fields to empty strings", () => {
+    const parsed = SlashSettingsSchema.parse({ commands: [] });
+    expect(parsed.operationBindings).toEqual([]);
+    expect(parsed.hookUrl).toBe("");
+    expect(parsed.hookSecretFile).toBe("");
+  });
+
+  it("validates binding shape", () => {
+    expect(
+      SlashSettingsSchema.parse({
+        commands: [],
+        operationBindings: [{ name: "a", primitive: "slash.ping", params: { x: 1 }, target: "http://h:1" }],
+      }).operationBindings,
+    ).toHaveLength(1);
+    expect(
+      SlashSettingsSchema.safeParse({ commands: [], operationBindings: [{ name: "a" }] }).success,
+    ).toBe(false);
   });
 });
 

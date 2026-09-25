@@ -3,15 +3,15 @@ import { KNOWN_OPEN_TARGETS, operationsListRpc } from "../shared/resources";
 import { allowedOperations, handleListOperations } from "./resources";
 
 describe("handleListOperations", () => {
-  it("returns the allowlisted rpc operations and the curated open targets", () => {
-    const result = handleListOperations();
-    expect(result.rpc).toEqual(allowedOperations());
+  it("returns the allowlisted rpc operations and the curated open targets", async () => {
+    const result = await handleListOperations();
+    expect(result.rpc).toEqual(await allowedOperations());
     expect(result.open).toEqual(KNOWN_OPEN_TARGETS);
     expect(operationsListRpc.output.parse(result)).toEqual(result);
   });
 
-  it("returns copies so callers cannot mutate the shared lists", () => {
-    const result = handleListOperations();
+  it("returns copies so callers cannot mutate the shared lists", async () => {
+    const result = await handleListOperations();
     expect(result.open).not.toBe(KNOWN_OPEN_TARGETS);
   });
 });

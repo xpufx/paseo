@@ -53,9 +53,28 @@ export const SlashCommandSchema = z.object({
 });
 export type SlashCommand = z.infer<typeof SlashCommandSchema>;
 
+// Operation bindings are data: a user-visible rpc operation name bound to one of
+// the plugin's built-in primitive handlers, plus optional params and an optional
+// endpoint target. Adding an rpc command that targets a different endpoint needs
+// no code change (issue #544).
+export const RpcOperationBindingSchema = z.object({
+  name: z.string().min(1).max(200),
+  primitive: z.string().min(1).max(200),
+  params: z.record(z.string(), z.unknown()).default({}),
+  target: z.string().max(2000).optional(),
+});
+export type RpcOperationBinding = z.infer<typeof RpcOperationBindingSchema>;
+
 export const SlashSettingsSchema = z.object({
   prefix: z.string().max(32).default("slash-"),
   commands: z.array(SlashCommandSchema).default([]),
+  // Custom bindings layered over SEED_OPERATION_BINDINGS; a binding with the same
+  // name as a seed overrides it, so seeds stay resolvable without an explicit copy.
+  operationBindings: z.array(RpcOperationBindingSchema).default([]),
+  // Endpoint-style values live in settings; secrets are only ever read from files
+  // or env, never stored here.
+  hookUrl: z.string().max(2000).default(""),
+  hookSecretFile: z.string().max(2000).default(""),
 });
 export type SlashSettings = z.infer<typeof SlashSettingsSchema>;
 
@@ -114,6 +133,26 @@ export const SEED_COMMANDS: SlashCommand[] = [
     action: { verb: "rpc", operation: "slash.orchestrate", params: {} },
   },
 ];
+
+// Built-in primitive handlers are code; these are the seed bindings (data) that
+// name them. `slash.orchestrate` stays bound here for backward compatibility with
+// existing settings documents that already reference it.
+export const SEED_OPERATION_BINDINGS: RpcOperationBinding[] = [
+  { name: "slash.ping", primitive: "slash.ping", params: {} },
+  { name: "slash.echo", primitive: "slash.echo", params: {} },
+  { name: "slash.orchestrate", primitive: "slash.orchestrate", params: {} },
+];
+
+/** Merges custom bindings over the seed defaults; a custom name wins outright. */
+export function mergeOperationBindings(
+  custom: readonly RpcOperationBinding[] | undefined,
+): RpcOperationBinding[] {
+  const merged = new Map(SEED_OPERATION_BINDINGS.map((binding) => [binding.name, binding]));
+  for (const binding of custom ?? []) {
+    merged.set(binding.name, binding);
+  }
+  return [...merged.values()];
+}
 
 export type SlashVerb = SlashAction["verb"];
 
