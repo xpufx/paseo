@@ -53,6 +53,8 @@ interface InstallModule {
 export interface CompanionControllerOptions {
   /** Explicit plugin root used in tests; skips filesystem discovery. */
   rootDir?: string;
+  /** Managed binary dir (plugin storage); preferred for install and resolve. */
+  binDir?: string;
   env?: NodeJS.ProcessEnv;
   home?: string;
 }
@@ -212,6 +214,7 @@ export function createCompanionController(
     resolvedRoot = script ? dirname(dirname(script)) : null;
     supervisor = new module.DaemonSupervisor({
       rootDir: resolvedRoot ?? undefined,
+      binDir: options.binDir,
       socketPath: options.env?.TWOFADO_SOCKET,
     });
     log.info("companion supervisor initialized", { rootDir: resolvedRoot });
@@ -276,7 +279,7 @@ export function createCompanionController(
     async install(input) {
       try {
         const module = await loadModule<InstallModule>(INSTALL_SCRIPT, options);
-        const result = await module.installCompanion({ force: input?.force });
+        const result = await module.installCompanion({ force: input?.force, binDir: options.binDir });
         return { success: true, ...result };
       } catch (err) {
         log.warn("companion install failed", { error: err });

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { PluginStorage, createPluginLogger, registerSettingsRpc } from "paseo-plugin-helper/server";
 import {
@@ -60,7 +61,9 @@ export default function contribute(server: PluginServerContext) {
     schema: approvalSettings.schema,
   });
   migrateLegacySettingsFile(storage);
-  const companion = createCompanionController();
+  const companion = createCompanionController({
+    binDir: join(storage.pluginDir, "bin"),
+  });
 
   const maybeAutoStart = (autoStart: boolean, socketPath: string) => {
     if (!autoStart) {
