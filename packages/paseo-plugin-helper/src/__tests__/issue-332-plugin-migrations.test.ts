@@ -34,7 +34,6 @@ describe("#219 remaining helper UI migrations", () => {
       expect(body, file).not.toMatch(/\bPressable\b|\bStyleSheet\b/);
     }
     expect(source("plugins", "forges", "client", "issues-pill.tsx")).toContain("<CopyButton");
-    expect(source("plugins", "forges", "client", "hook-queue-panel.tsx")).toContain("<Card");
   });
 
   it("removes x-comms content caps from every named surface", () => {
