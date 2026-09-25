@@ -118,7 +118,7 @@ required.
 `send` prepends a structured sender-meta envelope:
 
 ```
-<x-comms-message>{"xComms":{"version":6,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…"}}</x-comms-message>
+<x-comms-message>{"xComms":{"version":6,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…","auth":{…}}}</x-comms-message>
 ```
 
 - `sender`: agentId, agentName, host, daemonServerId, cwd: who is talking and
@@ -129,6 +129,8 @@ required.
 - `messageId`: stable delivery key passed to Paseo's native send path. Reuse it
   only for a retry of the same logical message; the target daemon deduplicates it.
 - `sentAt`: ISO timestamp.
+- `auth`: the sending daemon's signature — see [Envelope
+  authentication](#envelope-authentication).
 - The prompt text itself stays prose: the meta is for machines, the prompt is
   for humans.
 
@@ -139,6 +141,53 @@ support for v5 `[x-comms]`, so the format can evolve without breaking older read
 For best results, run the same version on each daemon: the envelope format,
 tool names, and parameters evolve between releases, so a mismatched pair still
 works, but the older side answers in its older format.
+
+### Envelope authentication
+
+Everything above the `auth` field is plain text inside an agent's turn, so on its
+own it proves nothing: **any agent that can write to a timeline can hand-write
+the `<x-comms-message>` tag and claim any `sender.agentId`.** `auth` is what makes
+the claim checkable.
+
+```
+"auth": { "v": 1, "alg": "ed25519", "keyId": "xck1:<fingerprint>", "sig": "<base64url>" }
+```
+
+- **What is signed.** A canonical, field-ordered payload: `version`, `type`, every
+  `sender.*` and `target.*` field, `messageId`, and `sentAt`. `direction` is
+  excluded (every sender stamps `"outgoing"`; readers derive it themselves) and
+  so is the prose body — this authenticates *who sent this*, not *what they said*.
+  Editing any attribution field invalidates the signature.
+- **Who signs.** Each daemon holds an ed25519 keypair, generated on first use and
+  stored `0600` in `~/.paseo/paseo-x-comms/mesh-key.json`. `keyId` is the
+  fingerprint of the signing public key.
+- **Who checks.** The receiving daemon fetches the peer's public key over the
+  **existing** authenticated peer link (relay E2EE, with the handshake serverId
+  checked against the pairing offer) and **pins** it. A later key with a
+  different `keyId` for an already pinned peer is refused, not adopted.
+- **What a receiver does with an unsigned or unverifiable envelope.** Nothing
+  good: it is dropped, so it never becomes a conversation, an unread count, or a
+  peer identity that other agents are told to reply to. The x-comms UI marks such
+  a message as unsigned.
+- **You cannot forge your own sender.** Inside an agent session, `x_comms_send`
+  takes the sender identity from the daemon-injected `PASEO_AGENT_ID` and
+  **ignores any `fromAgentId` you pass**. `fromAgentId` is honored only for the
+  plugin server's own subprocess, which runs without that variable and needs it to
+  send on a local agent's behalf.
+
+Deliberate limits, so the guarantee is not oversold:
+
+- A **direct `host:port` peer has no authenticated identity**, so its envelopes
+  cannot be verified and are never attributed. Use a pairing offer for any peer you
+  intend to trust.
+- Key distribution rides the same channel as presence, and a presence handler has
+  no link context, so **pairing remains the trust root** (see
+  `docs/mesh.md`, "Known gap"). The signature prevents an agent on a paired mesh
+  from impersonating anyone; it does not defeat an attacker who controls a
+  direct link.
+- `auth` is **optional in the schema**: an unsigned or unrecognized auth block
+  still parses, it is simply never trusted. Version skew degrades to
+  "unattributable", never to a lost message.
 
 ## Behavior notes
 
@@ -221,6 +270,13 @@ pairing offers (serverId, daemon public keys, relay endpoints): it is
 (see the example); do not paste offers into agent contexts and do not share
 the file.
 
+`~/.paseo/paseo-x-comms/mesh-key.json` is this daemon's x-comms **private**
+signing key (see [Envelope authentication](#envelope-authentication)). It is
+written `0600`, never travels, and is not something to paste into an agent
+context. Losing it only means this daemon's envelopes stop verifying under its
+previous `keyId`; peers pin, so rotate by re-pairing rather than by editing the
+file.
+
 ## Configuration
 
 | Env var | Default | Purpose |
@@ -229,6 +285,7 @@ the file.
 | `PASEO_X_COMMS_PASEO` | `paseo` | paseo binary |
 | `PASEO_X_COMMS_TIMEOUT_MS` | `120000` | per paseo call timeout |
 | `PASEO_X_COMMS_EXTENSIONS` | `~/.paseo/paseo-x-comms/extensions` | extension dir (trusted, unsandboxed) |
+| `PASEO_X_COMMS_MESH_KEY` | `~/.paseo/paseo-x-comms/mesh-key.json` | daemon signing key for `xComms.auth` |
 
 ## Registering with clients
 

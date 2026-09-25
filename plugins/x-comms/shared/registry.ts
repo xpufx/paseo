@@ -280,6 +280,23 @@ export const presenceListRpc = defineRpc({
   }),
 });
 
+/**
+ * Publish this daemon's x-comms verify key. Peers call it over the
+ * authenticated link (peer-channel.ts) to learn which key must validate the
+ * envelopes we stamp, so a claimed `sender` is checkable rather than asserted
+ * (xpufx-org/paseo#594). The caller overwrites `serverId` with the link's own
+ * verified identity, so this value is informational to the peer.
+ */
+export const meshKeyGetRpc = defineRpc({
+  name: "mesh.key",
+  input: z.object({}),
+  output: z.object({
+    serverId: z.string().nullable(),
+    keyId: z.string(),
+    publicKeyPem: z.string(),
+  }),
+});
+
 export const daemonDumpRpc = defineRpc({
   name: "daemon.dump",
   input: z.object({ daemon: z.string() }),

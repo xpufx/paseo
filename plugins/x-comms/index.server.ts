@@ -18,6 +18,7 @@ import {
   handlePresenceAnnounce,
   handlePresenceRetract,
   handlePresenceList,
+  handleMeshKeyGet,
   injectionEnabled,
   onLocalAgentCreated,
   onLocalAgentArchived,
@@ -46,6 +47,7 @@ import {
   presenceAnnounceRpc,
   presenceRetractRpc,
   presenceListRpc,
+  meshKeyGetRpc,
   peerStatusRpc,
 } from "./shared/registry";
 
@@ -68,6 +70,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(presenceAnnounceRpc, handlePresenceAnnounce);
   server.handle(presenceRetractRpc, handlePresenceRetract);
   server.handle(presenceListRpc, handlePresenceList);
+  server.handle(meshKeyGetRpc, handleMeshKeyGet);
   server.handle(peerStatusRpc, handlePeerStatus);
   server.on("agent.created", ({ agent }, context) => {
     rememberPaseo(context.paseo);

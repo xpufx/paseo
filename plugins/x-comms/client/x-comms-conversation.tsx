@@ -377,13 +377,30 @@ export function CrossDaemonConversation({
                     ? theme.colors.statusDanger
                     : theme.colors.accent;
 
-                const markerColor = isIncoming
-                  ? theme.colors.foregroundMuted
-                  : isUserSent
-                    ? theme.colors.statusDanger
-                    : theme.colors.accent;
+                // An unsigned *inbound* envelope means the claimed sender is an
+                // unverified assertion, not a peer identity (#594). The client
+                // cannot check the signature; the plugin server can, and drops
+                // unverified envelopes from attributed threads. Say it here so
+                // the badge never implies trust it does not have. Outgoing
+                // messages are exempt: the Desktop client stamps those itself
+                // and has no key, so `authed === false` there is expected.
+                const unverified = isIncoming && m.authed === false;
 
-                const markerText = isIncoming ? "[INCOMING · ✉]" : isUserSent ? "[USER-SENT · ✉]" : "[OUTGOING · ✉]";
+                const markerColor = unverified
+                  ? theme.colors.statusWarning
+                  : isIncoming
+                    ? theme.colors.foregroundMuted
+                    : isUserSent
+                      ? theme.colors.statusDanger
+                      : theme.colors.accent;
+
+                const markerText = unverified
+                  ? "[INCOMING · UNVERIFIED SENDER · ✉]"
+                  : isIncoming
+                    ? "[INCOMING · ✉]"
+                    : isUserSent
+                      ? "[USER-SENT · ✉]"
+                      : "[OUTGOING · ✉]";
                 const senderTitle = isIncoming ? (m.senderName ?? "Peer") : "You";
 
                 return (

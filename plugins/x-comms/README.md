@@ -80,11 +80,11 @@ Every `x_comms_send` prepends an envelope block:
 <x-comms-message>{"xComms":{"version":6,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…","direction":"outgoing"}}</x-comms-message>
 ```
 
-`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt`. Desktop discovers configured hosts only from Paseo's mounted host runtime and sends to the selected `(serverId, agentId)` with a fresh client; it never pairs hosts or creates agents. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
+`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt` + `auth` (the sending daemon's signature over those fields — see [mcp/README.md#envelope-authentication](mcp/README.md#envelope-authentication)). Without a valid `auth` the claimed sender is an unverified claim and the plugin refuses to attribute it (#594). Desktop discovers configured hosts only from Paseo's mounted host runtime and sends to the selected `(serverId, agentId)` with a fresh client; it never pairs hosts or creates agents. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
 
 #### Recipient skill (envelope handling)
 
-Injecting the tools alone leaves a delivery indistinguishable from chat, so the recipient answers the prose and never attributes the sender (#379). The plugin therefore injects **standing recipient instructions** at the same `agent.create` gate as the tools (`server/recipient-instructions.ts`): detect a `<x-comms-message>` (v6) or `[x-comms]` (v5) turn, parse `sender`/`target`/`messageId`/`direction`, attribute the peer sender, and reply through `x_comms_send` to `sender.agentId` on `sender.daemonServerId`. The same contract ships as a skill at [`skills/recipient-envelope/SKILL.md`](skills/recipient-envelope/SKILL.md) for manual installation into `.agents/skills/`. Both are covered by the `server/recipient-instructions.test.ts` suite.
+Injecting the tools alone leaves a delivery indistinguishable from chat, so the recipient answers the prose and never attributes the sender (#379). The plugin therefore injects **standing recipient instructions** at the same `agent.create` gate as the tools (`server/recipient-instructions.ts`): detect a `<x-comms-message>` (v6) or `[x-comms]` (v5) turn, check that it carries an `auth` signature, parse `sender`/`target`/`messageId`/`direction`, attribute the peer sender, and reply through `x_comms_send` to `sender.agentId` on `sender.daemonServerId`. The same contract ships as a skill at [`skills/recipient-envelope/SKILL.md`](skills/recipient-envelope/SKILL.md) for manual installation into `.agents/skills/`. Both are covered by the `server/recipient-instructions.test.ts` suite.
 
 Tools (via the embedded server) are `x_comms_list_daemons`, `x_comms_add_daemon`, `x_comms_remove_daemon`, `x_comms_list_agents`, `x_comms_inspect`, `x_comms_send`, `x_comms_logs`, `x_comms_wait`, `x_comms_list_permissions`, `x_comms_allow_permission`, `x_comms_deny_permission` — see [mcp/README.md#tools](mcp/README.md#tools) for the reference. The plugin's conversation/panel UI wraps `send`/`logs`/`wait`/permissions for interactive use.
 
@@ -118,6 +118,8 @@ A held message expires after **10 minutes** by default (configurable in the sett
 │   ├── registry.ts           # Daemon registry + health
 │   ├── settings.ts           # Plugin settings storage
 │   ├── presence.ts           # Presence announce/retract/list
+│   ├── mesh-identity.ts      # Daemon ed25519 signing key + envelope sign/verify
+│   ├── mesh-keys.ts          # Pinned peer verify keys (substitution-resistant)
 │   ├── injection.ts          # MCP + recipient-instruction injection for agents
 │   ├── recipient-instructions.ts # Standing envelope-handling instructions
 │   ├── snapshot.ts / conversations-snapshot.ts
@@ -127,7 +129,7 @@ A held message expires after **10 minutes** by default (configurable in the sett
 ├── skills/
 │   └── recipient-envelope/SKILL.md # Distributable form of the recipient instructions
 ├── shared/
-│   ├── envelope.ts           # Wire envelope schema (<x-comms-message> parsing, v5 fallback)
+│   ├── envelope.ts           # Wire envelope schema (<x-comms-message> parsing, v5 fallback), auth schema + canonical signed payload
 │   ├── registry.ts           # RPC definitions (zod)
 │   └── conversations-snapshot.ts
 ├── mcp/

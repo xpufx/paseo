@@ -101,7 +101,18 @@ function CrossDaemonMessage({ theme, agentId, item }: PluginTimelineItemProps<z.
   );
   const { direction, userSent } = cardSignal(item.data.envelope, agentId);
   const incoming = direction === "incoming";
-  const signalColor = userSent ? theme.colors.statusDanger : theme.colors.foregroundMuted;
+  // An incoming envelope with no auth block means the claimed sender is
+  // unverified: any agent that can write to a timeline can type the tag (#594).
+  // The plugin server is the authority and refuses to attribute these; the card
+  // just stops implying the sender was checked. Scoped to incoming because the
+  // Desktop client stamps envelopes itself and cannot sign them — flagging our
+  // own outgoing messages would be noise, not a warning.
+  const unverified = incoming && item.data.envelope.xComms.auth === undefined;
+  const signalColor = unverified
+    ? theme.colors.statusWarning
+    : userSent
+      ? theme.colors.statusDanger
+      : theme.colors.foregroundMuted;
   return (
     <View style={{ paddingVertical: 4 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 2 }}>
@@ -111,7 +122,8 @@ function CrossDaemonMessage({ theme, agentId, item }: PluginTimelineItemProps<z.
           color={signalColor}
         />
         <Text style={{ color: signalColor, fontSize: 12, fontWeight: "600" as const }}>
-          x-comms · {incoming ? "Incoming" : "Outgoing"} · {label}
+          x-comms · {incoming ? "Incoming" : "Outgoing"}
+          {unverified ? " · unsigned sender" : ""} · {label}
         </Text>
       </View>
       {item.data.body.length > 0 ? (

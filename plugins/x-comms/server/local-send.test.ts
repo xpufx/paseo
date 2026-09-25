@@ -1,6 +1,17 @@
-import { describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ENVELOPE_OPEN, ENVELOPE_CLOSE, META_PREFIX, parseEnvelope } from "../shared/envelope.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  ENVELOPE_OPEN,
+  ENVELOPE_CLOSE,
+  META_PREFIX,
+  parseEnvelope,
+  verifyEnvelopeAuth,
+  type EnvelopeAuthVerifier,
+} from "../shared/envelope.ts";
+import { meshPublicKey, meshSigner, resetMeshKeyCache, verifierFor } from "./mesh-identity.ts";
 import {
   assertNotSelfMessage,
   buildSenderEnvelope,
@@ -11,6 +22,30 @@ import {
 } from "./local-send.ts";
 
 const SENT_AT = "2026-09-19T12:00:00.000Z";
+
+// The signer reads the daemon key from the x-comms state dir, so give each test
+// its own home: otherwise every test would share one key and "signed by this
+// daemon" would prove nothing.
+let testHome: string;
+let testPrevHome: string | undefined;
+
+beforeEach(() => {
+  testHome = mkdtempSync(join(tmpdir(), "xcomms-home-"));
+  testPrevHome = process.env.HOME;
+  process.env.HOME = testHome;
+  resetMeshKeyCache();
+});
+
+afterEach(() => {
+  if (testPrevHome === undefined) delete process.env.HOME;
+  else process.env.HOME = testPrevHome;
+  rmSync(testHome, { recursive: true, force: true });
+  resetMeshKeyCache();
+});
+
+function peerVerifier(): EnvelopeAuthVerifier {
+  return verifierFor([{ serverId: "srv_self", ...meshPublicKey() }]);
+}
 
 function envelopeObject(stamped: string): Record<string, unknown> {
   const parsed = parseEnvelope(stamped);
@@ -77,6 +112,67 @@ describe("native local send envelope", () => {
     const env = envelopeObject(stamped) as { xComms: { sender: Record<string, unknown> } };
     assert.equal(env.xComms.sender.agentId, null);
     assert.equal(env.xComms.sender.daemonServerId, null);
+  });
+});
+
+describe("native local send envelope authentication", () => {
+  function sign(stamped: string) {
+    const parsed = parseEnvelope(stamped);
+    assert.ok(parsed, "fixture must be a parseable envelope");
+    return parsed;
+  }
+
+  it("verifies a signed envelope against the sender daemon's pinned key", () => {
+    const stamped = buildSenderEnvelope({
+      sender: {
+        agentId: "agent-a",
+        agentName: "Agent A",
+        host: "host-a",
+        daemonServerId: "srv_self",
+        cwd: "/work/a",
+      },
+      target: { daemon: "peer", agentId: "agent-b" },
+      messageId: "msg-native-1",
+      sentAt: SENT_AT,
+      signer: meshSigner(),
+    });
+    const envelope = sign(stamped).envelope;
+    assert.equal(envelope.xComms.auth?.alg, "ed25519");
+    assert.equal(verifyEnvelopeAuth(envelope, peerVerifier()), "verified");
+  });
+
+  it("reports no auth when the producer had no signer", () => {
+    const stamped = buildSenderEnvelope({
+      sender: { agentId: "agent-a", agentName: null, host: "h", daemonServerId: "srv_self", cwd: null },
+      target: { daemon: "peer", agentId: "agent-b" },
+      sentAt: SENT_AT,
+    });
+    assert.equal(verifyEnvelopeAuth(sign(stamped).envelope, peerVerifier()), "missing");
+  });
+
+  it("does not let a rewritten sender survive the signature", () => {
+    const stamped = buildSenderEnvelope({
+      sender: { agentId: "agent-a", agentName: null, host: "h", daemonServerId: "srv_self", cwd: null },
+      target: { daemon: "peer", agentId: "agent-b" },
+      sentAt: SENT_AT,
+      signer: meshSigner(),
+    });
+    const forged = sign(stamped.replace('"agentId":"agent-a"', '"agentId":"agent-victim"'));
+    assert.equal(forged.envelope.xComms.sender.agentId, "agent-victim");
+    assert.equal(verifyEnvelopeAuth(forged.envelope, peerVerifier()), "invalid");
+  });
+
+  it("signs before the body is appended, so the body stays unsigned prose", () => {
+    const stamped = `${buildSenderEnvelope({
+      sender: { agentId: "agent-a", agentName: null, host: "h", daemonServerId: "srv_self", cwd: null },
+      target: { daemon: "peer", agentId: "agent-b" },
+      sentAt: SENT_AT,
+      signer: meshSigner(),
+    })}\n\nthe body`;
+    const parsed = parseEnvelope(stamped);
+    assert.ok(parsed);
+    assert.equal(parsed.body, "the body");
+    assert.equal(verifyEnvelopeAuth(parsed.envelope, peerVerifier()), "verified");
   });
 });
 

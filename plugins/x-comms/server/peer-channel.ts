@@ -80,6 +80,67 @@ export function resolvePeerTarget(name: string, endpoint: string): PeerTarget {
   throw new Error(`cannot dial '${name}': unsupported endpoint form for presence RPC`);
 }
 
+/**
+ * True when the link can prove who is on the other end. Relay offers carry the
+ * peer's E2EE key and an expected serverId, and the handshake is checked
+ * against it; a direct `host:port` target has neither, so anything learned over
+ * such a link (including an x-comms verify key) is unattributable.
+ */
+export function isLinkAuthenticated(target: PeerTarget): boolean {
+  return target.e2eePublicKeyB64 !== null && target.expectedServerId !== null;
+}
+
+export interface PeerMeshKey {
+  serverId: string;
+  keyId: string;
+  publicKeyPem: string;
+}
+
+/** Must match `meshKeyGetRpc.name`; a mismatch fails key fetches silently. */
+export const MESH_KEY_METHOD = "mesh.key";
+
+/** Seam so the identity checks can be exercised without a live peer link. */
+export type PeerRpcInvoker = (
+  target: PeerTarget,
+  method: string,
+  input: unknown,
+) => Promise<{ peerServerId: string | null; result: unknown }>;
+
+/**
+ * The peer's answer to `mesh.key`. `serverId` is taken from the link, never from
+ * the response body: a peer that names a different serverId in its own payload
+ * must not be able to steer the pin.
+ */
+function parsePeerMeshKey(raw: unknown, serverId: string): PeerMeshKey | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as { keyId?: unknown; publicKeyPem?: unknown };
+  if (typeof o.keyId !== "string" || !o.keyId) return null;
+  if (typeof o.publicKeyPem !== "string" || !o.publicKeyPem) return null;
+  return { serverId, keyId: o.keyId, publicKeyPem: o.publicKeyPem };
+}
+
+/**
+ * Fetch a peer's x-comms verify key over the authenticated link and return it
+ * only when the handshake proved the peer's serverId. Returns null for a direct
+ * link: an unauthenticated channel must not be able to hand over a key that
+ * would then vouch for forged envelopes from that peer.
+ */
+export async function fetchPeerMeshKey(
+  target: PeerTarget,
+  invoke: PeerRpcInvoker = invokePeerRpc,
+): Promise<PeerMeshKey | null> {
+  if (!isLinkAuthenticated(target)) return null;
+  const { peerServerId, result } = await invoke(target, MESH_KEY_METHOD, {});
+  if (!peerServerId || peerServerId !== target.expectedServerId) {
+    throw new Error(
+      `peer identity mismatch for '${target.name}': mesh key came from ${peerServerId ?? "an unnamed peer"}`,
+    );
+  }
+  const key = parsePeerMeshKey(result, peerServerId);
+  if (!key) throw new Error(`peer '${target.name}' returned an unusable x-comms mesh key`);
+  return key;
+}
+
 let cachedLocalServerId: string | null = null;
 
 /**
@@ -113,15 +174,15 @@ export async function localServerId(): Promise<string> {
 
 /**
  * Invoke a plugin RPC on a peer over its authenticated channel and return the
- * link-verified serverId of the far end. The handshake identity is checked
- * against the expected id when the endpoint carries one (relay offers do);
- * a mismatch aborts before any payload is sent.
+ * link-verified serverId of the far end together with the handler's result. The
+ * handshake identity is checked against the expected id when the endpoint
+ * carries one (relay offers do); a mismatch aborts before any payload is sent.
  */
 export async function invokePeerRpc(
   target: PeerTarget,
   method: string,
   input: unknown,
-): Promise<{ peerServerId: string | null }> {
+): Promise<{ peerServerId: string | null; result: unknown }> {
   const client = new DaemonClient({
     url: target.url,
     clientId: randomUUID(),
@@ -137,12 +198,12 @@ export async function invokePeerRpc(
     if (target.expectedServerId && peerServerId && peerServerId !== target.expectedServerId) {
       throw new Error(`peer identity mismatch for '${target.name}': link reports ${peerServerId}`);
     }
-    await withTimeout(
+    const result = await withTimeout(
       client.invokePluginRpc("x-comms", method, input),
       CONNECT_TIMEOUT_MS,
       `peer rpc ${method} ${target.name}`,
     );
-    return { peerServerId };
+    return { peerServerId, result };
   } finally {
     await client.close().catch((cause: unknown) => {
       log.error(`peer close failed for '${target.name}': ${cause instanceof Error ? cause.message : String(cause)}`);
