@@ -13,6 +13,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { parseArgs, pluginIds, manifestFor, readiness, resolvePublishPlan, stagePackages } from "./publish-npm.mjs";
+import { hasBareHelperSpecifier } from "./lib/plugin-helper-layout.mjs";
 
 let pass = 0;
 let fail = 0;
@@ -48,6 +49,11 @@ check("--from-dirs parsed", parseArgs(["--publish", "--from-dirs"]).fromDirs ===
 check("--dry-run parsed", parseArgs(["--publish", "--dry-run"]).dryRun === true);
 check("--allow-dirty parsed", parseArgs(["--stage", "--allow-dirty"]).allowDirty === true);
 check("--quiet parsed", parseArgs(["--stage", "--quiet"]).quiet === true);
+check("helper guard detects import specifiers", hasBareHelperSpecifier('import { Card } from "paseo-plugin-helper/client";'));
+check(
+  "helper guard ignores literal specifiers",
+  !hasBareHelperSpecifier('expect(message).toContain("paseo-plugin-helper/client")'),
+);
 check("--stage + --publish rejected", throws(() => parseArgs(["--stage", "--publish"])));
 check("--publish + --clean-stage rejected", throws(() => parseArgs(["--publish", "--clean-stage"])));
 

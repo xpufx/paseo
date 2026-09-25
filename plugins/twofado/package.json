@@ -2,7 +2,7 @@
   "name": "@xpufx/paseo-twofado",
   "private": false,
   "license": "MIT",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "scripts": {
     "companion:install": "node scripts/install-companion.mjs",

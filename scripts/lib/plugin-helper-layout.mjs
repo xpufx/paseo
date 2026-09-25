@@ -43,6 +43,7 @@ export function destDir(pluginRoot, srcTree) {
 
 const BARE_SPEC_RE =
   /(from\s+|import\s*\(\s*|export\s+[^"']*from\s+)(["'])paseo-plugin-helper\/([a-z-]+)\2/g;
+const BARE_SPEC_CHECK_RE = new RegExp(BARE_SPEC_RE.source);
 
 // Publish rewrite: bare `paseo-plugin-helper/<tree>` -> the committed vendored
 // relative copy. `fileAbs` is the source file (absolute) and `pluginRoot` the
@@ -64,5 +65,5 @@ export function rewriteBareSpecifiers(src, fileAbs, pluginRoot) {
 // True when a source file still carries a bare helper specifier (anything the
 // publish rewrite must have removed). Used by the mirror as a post-rewrite guard.
 export function hasBareHelperSpecifier(src) {
-  return /(["'])paseo-plugin-helper(\/|\1)/.test(src);
+  return BARE_SPEC_CHECK_RE.test(src);
 }
