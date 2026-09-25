@@ -143,6 +143,8 @@ export function Button({
           {iconPosition === "left" && renderIcon()}
           {label ? (
             <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
               style={[
                 styles.text,
                 {
@@ -176,9 +178,16 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
+    // Labels are caller-supplied and unbounded (issue titles, branch names,
+    // sort labels). Yoga defaults `flexShrink` to 0, so an unconstrained
+    // button claims its full label width and overflows narrow viewports.
+    flexShrink: 1,
+    maxWidth: "100%",
   },
   text: {
     fontWeight: "600",
     textAlign: "center",
+    // The label must be allowed to compress for `numberOfLines` to engage.
+    flexShrink: 1,
   },
 });
