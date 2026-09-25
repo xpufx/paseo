@@ -29,7 +29,7 @@ import { DataTable } from "../client/components/DataTable.js";
 
 /** Long enough to exceed any phone viewport, and shaped like real fleet data. */
 const LONG_LABEL =
-  "/home/xpufx/.paseo/worktrees/2h0dw6vb/fix-621-fleet-mobile-overlap";
+  "/home/dev-user/.paseo/worktrees/9f3c1a7b/fix-fleet-mobile-layout-guard";
 
 const typography = resolveTypography({ compact: false, platform: "web" }, "comfortable");
 

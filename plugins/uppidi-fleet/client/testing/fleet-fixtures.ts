@@ -11,7 +11,7 @@
 
 /** A real-length absolute worktree path, the longest chip the fleet renders. */
 export const WIDE_WORKTREE =
-  "/home/xpufx/.paseo/worktrees/2h0dw6vb/fix-621-fleet-mobile-overlap";
+  "/home/dev-user/.paseo/worktrees/9f3c1a7b/fix-fleet-mobile-layout-guard";
 
 const frontDeskAgent = {
   id: "agent-abcdef0123456789",
