@@ -34,6 +34,8 @@ import {
   HookServiceConfigInputSchema,
   HookServiceConfigOutputSchema,
   uppidiHookConfigureContract,
+  HookInfoOutputSchema,
+  uppidiHookInfoContract,
   uppidiCreateFrontDeskContract,
   uppidiReplaceFrontDeskContract,
   uppidiAddOrchestratorContract,
@@ -89,6 +91,35 @@ describe("uppidi-fleet shared contracts", () => {
   it("has valid contract definitions", () => {
     assert.equal(uppidiIssuesContract.name, "uppidi-fleet.issues");
     assert.equal(uppidiHookStatusContract.name, "uppidi-fleet.hook-status");
+  });
+
+  it("validates HookInfoOutputSchema defaults and the hook.info contract (#545)", () => {
+    assert.equal(uppidiHookInfoContract.name, "uppidi-fleet.hook.info");
+
+    const empty = HookInfoOutputSchema.parse({ ok: true });
+    assert.equal(empty.running, false);
+    assert.equal(empty.hookHost, null);
+    assert.equal(empty.hookPort, null);
+    assert.equal(empty.url, null);
+    assert.equal(empty.frontDeskAgentId, null);
+    assert.deepEqual(empty.registeredRepoKeys, []);
+    assert.equal(empty.registeredRepoCount, 0);
+
+    const running = HookInfoOutputSchema.parse({
+      ok: true,
+      running: true,
+      hookHost: "10.20.30.24",
+      hookPort: 8099,
+      url: "http://10.20.30.24:8099",
+      isListening: true,
+      frontDeskAgentId: "fd-1",
+      registeredRepoKeys: ["forge.mrs.uppidi.com/xpufx-org/paseo"],
+      registeredRepoCount: 1,
+      uptime: 42,
+    });
+    assert.equal(running.running, true);
+    assert.equal(running.frontDeskAgentId, "fd-1");
+    assert.equal(running.registeredRepoCount, 1);
   });
 
   it("validates deterministic agent state taxonomy strictly", () => {

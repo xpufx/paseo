@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 import {
   resolveHookUrl,
   handleHookServiceStatus,
+  handleHookInfo,
   handleHookServiceAction,
   handleHookConfigure,
   handleHookLogTail,
 } from "./hook.js";
 import {
+  HookRouter,
   setActiveHookRouter,
   getActiveHookRouter,
   clearHookLogs,
@@ -17,19 +19,30 @@ import {
   migrateLegacyConfigIfNeeded,
   getLegacyRouterConfig,
 } from "./settings.js";
-import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { writeFileSync, mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 describe("uppidi-fleet hook server handlers", () => {
   let prevHookPort: string | undefined;
   let prevNodeEnv: string | undefined;
+  let prevHookStateDir: string | undefined;
+  let prevHookQueueDir: string | undefined;
+  let stateDir: string;
 
   beforeEach(() => {
     prevHookPort = process.env.HOOK_PORT;
     prevNodeEnv = process.env.NODE_ENV;
+    prevHookStateDir = process.env.HOOK_STATE_DIR;
+    prevHookQueueDir = process.env.HOOK_QUEUE_DIR;
     process.env.HOOK_PORT = "0";
     process.env.NODE_ENV = "test";
+    stateDir = mkdtempSync(join(tmpdir(), "uppidi-fleet-hook-state-"));
+    // Mirror production: frontdesk.json sits one level above the state dir.
+    process.env.HOOK_STATE_DIR = join(stateDir, "orchestrators");
+    process.env.HOOK_QUEUE_DIR = join(stateDir, "queues");
+    mkdirSync(process.env.HOOK_STATE_DIR, { recursive: true });
+    mkdirSync(process.env.HOOK_QUEUE_DIR, { recursive: true });
     clearHookLogs();
   });
 
@@ -49,6 +62,17 @@ describe("uppidi-fleet hook server handlers", () => {
     } else {
       delete process.env.NODE_ENV;
     }
+    if (prevHookStateDir !== undefined) {
+      process.env.HOOK_STATE_DIR = prevHookStateDir;
+    } else {
+      delete process.env.HOOK_STATE_DIR;
+    }
+    if (prevHookQueueDir !== undefined) {
+      process.env.HOOK_QUEUE_DIR = prevHookQueueDir;
+    } else {
+      delete process.env.HOOK_QUEUE_DIR;
+    }
+    rmSync(stateDir, { recursive: true, force: true });
     clearHookLogs();
   });
 
@@ -100,6 +124,77 @@ describe("uppidi-fleet hook server handlers", () => {
     const status = await handleHookServiceStatus();
     assert.equal(status.host, "0.0.0.0");
     assert.equal(resolveHookUrl(), `http://127.0.0.1:${status.port}`);
+
+    await handleHookServiceAction({ action: "stop" });
+  });
+
+  it("reports null-safe hook.info when the router has not started (#545)", async () => {
+    assert.equal(getActiveHookRouter(), null);
+
+    const info = await handleHookInfo();
+    assert.equal(info.ok, true);
+    assert.equal(info.running, false);
+    assert.equal(info.hookHost, null);
+    assert.equal(info.hookPort, null);
+    assert.equal(info.url, null);
+    assert.equal(info.isListening, false);
+    assert.equal(info.frontDeskAgentId, null);
+    assert.deepEqual(info.registeredRepoKeys, []);
+    assert.equal(info.registeredRepoCount, 0);
+    assert.equal(info.uptime, 0);
+  });
+
+  it("resolves live hook.info from the running router without reading settings (#545)", async () => {
+    await handleHookServiceAction({ action: "start" });
+    const router = getActiveHookRouter();
+    assert.ok(router, "active router must exist after start");
+
+    const status = await handleHookServiceStatus();
+    const info = await handleHookInfo();
+
+    assert.equal(info.ok, true);
+    assert.equal(info.running, true);
+    assert.equal(info.isListening, true);
+    assert.equal(info.hookHost, router.configuredHost);
+    assert.equal(info.hookPort, router.configuredPort);
+    assert.equal(info.url, `http://${router.configuredHost}:${router.configuredPort}`);
+    assert.equal(info.uptime, router.getUptime());
+    // The bound port is dynamic in tests; configured port remains the stable value.
+    assert.equal(status.configuredHost, info.hookHost);
+    assert.equal(status.configuredPort, info.hookPort);
+
+    await handleHookServiceAction({ action: "stop" });
+  });
+
+  it("resolves the front desk and enrolled repos via the live chain (#545)", async () => {
+    await handleHookServiceAction({ action: "start" });
+    const router = getActiveHookRouter();
+    assert.ok(router, "active router must exist after start");
+
+    router.writeFrontDesk("fd-live-1", "frontdesk");
+    router.enrollRepo("forge.mrs.uppidi.com/xpufx-org/paseo");
+    router.enrollRepo("forge.mrs.uppidi.com/xpufx-org/platform");
+
+    const info = await handleHookInfo();
+    assert.equal(info.frontDeskAgentId, "fd-live-1");
+    assert.deepEqual(
+      [...info.registeredRepoKeys].sort(),
+      ["forge.mrs.uppidi.com/xpufx-org/paseo", "forge.mrs.uppidi.com/xpufx-org/platform"],
+    );
+    assert.equal(info.registeredRepoCount, 2);
+
+    await handleHookServiceAction({ action: "stop" });
+  });
+
+  it("maps wildcard-bound router hosts to loopback in hook.info (#545)", async () => {
+    await handleHookServiceAction({ action: "start" });
+    const configured = await handleHookConfigure({ host: "0.0.0.0", port: 0, restart: true });
+    assert.equal(configured.ok, true);
+
+    const info = await handleHookInfo();
+    assert.equal(info.hookHost, "0.0.0.0");
+    assert.equal(info.url, "http://127.0.0.1:0");
+    assert.equal(info.isListening, true);
 
     await handleHookServiceAction({ action: "stop" });
   });

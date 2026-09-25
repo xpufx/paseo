@@ -2,6 +2,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   uppidiIssuesContract,
   uppidiHookStatusContract,
+  uppidiHookInfoContract,
   uppidiHookQueuesContract,
   uppidiHookPauseContract,
   uppidiHookResumeContract,
@@ -27,6 +28,7 @@ import {
 import { handleUppidiIssues } from "./server/issues.js";
 import {
   handleHookStatus,
+  handleHookInfo,
   handleHookQueues,
   handleHookPause,
   handleHookResume,
@@ -57,6 +59,7 @@ import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 export default function contribute(server: PluginServerContext) {
   server.handle(uppidiIssuesContract, handleUppidiIssues);
   server.handle(uppidiHookStatusContract, handleHookStatus);
+  server.handle(uppidiHookInfoContract, handleHookInfo);
   server.handle(uppidiHookQueuesContract, handleHookQueues);
   server.handle(uppidiHookPauseContract, handleHookPause);
   server.handle(uppidiHookResumeContract, handleHookResume);

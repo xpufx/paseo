@@ -308,6 +308,30 @@ describe("hook-router HTTP server endpoints", () => {
     assert.ok(Array.isArray(body.queues));
   });
 
+  it("responds to GET /info with host/port/url/frontdesk/uptime (#545)", async () => {
+    const res = await fetch(`http://127.0.0.1:${router.port}/info`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.host, router.configuredHost);
+    assert.equal(body.port, router.configuredPort);
+    assert.equal(body.url, `http://${router.configuredHost}:${router.configuredPort}`);
+    assert.equal(body.frontDeskAgentId, null);
+    assert.equal(typeof body.uptime, "number");
+    assert.equal(body.isListening, true);
+  });
+
+  it("reports the registered front desk on GET /info (#545)", async () => {
+    await fetch(`http://127.0.0.1:${router.port}/frontdesk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: "info-fd-1" }),
+    });
+
+    const res = await fetch(`http://127.0.0.1:${router.port}/info`);
+    const body = await res.json();
+    assert.equal(body.frontDeskAgentId, "info-fd-1");
+  });
+
   it("handles ping event on POST /forgejo", async () => {
     const res = await fetch(`http://127.0.0.1:${router.port}/forgejo`, {
       method: "POST",

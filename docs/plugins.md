@@ -247,33 +247,55 @@ The bundled Forgejo webhook router ([`plugins/uppidi-forge/server/hook-router.ts
 > [!IMPORTANT]
 > **Do not assume loopback.** The router binds to whatever `hookHost` is configured, which is frequently a LAN interface, not `127.0.0.1`. Always resolve the bind address first (below). `127.0.0.1:<port>` works **only if** the router is actually bound to loopback (`hookHost` = `127.0.0.1`, or a wildcard bind covering loopback); otherwise curl fails with connection refused.
 
-### 9.1 Self-locating the router
+### 9.1 Locating the router — ask the daemon, don't read state
 
-Resolve the listen address in this precedence order (mirrors [`hook-router.ts` config resolution](../plugins/uppidi-forge/server/hook-router.ts)):
+**Primary (agents): ask the daemon via RPC.** The `uppidi-fleet` plugin resolves the router address **in-process** from the live router singleton — no filesystem reads:
 
-1. **Plugin settings** (primary source): read `hookHost` / `hookPort` from
-   `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json`.
-   > The plugin runtime ID is `uppidi-fleet` (declared in `paseo-plugin.json`), so the data directory is `uppidi-fleet` even though the source tree directory is `uppidi-forge`.
-2. **Legacy config file** (fallback): `~/.config/uppidi-fleet/router-config.json`.
-3. **Hard-coded defaults** (last resort): port `8099` on the daemon host's LAN IP / wildcard interface. Environment overrides (`FORGE_HOOK_HOST`, `FORGE_HOOK_PORT` / `HOOK_PORT`) are read by the plugin subprocess at startup.
+- `uppidi-fleet.hook.info` — the authoritative answer to *"where is the router and who is the front desk"*. Returns:
 
-Confirm liveness by probing the router (both endpoints are unauthenticated):
+  ```jsonc
+  {
+    "ok": true,
+    "running": true,
+    "hookHost": "10.20.30.24",   // configured bind host (wildcard → "0.0.0.0")
+    "hookPort": 8099,            // configured port
+    "url": "http://10.20.30.24:8099",
+    "isListening": true,
+    "frontDeskAgentId": "<uuid-or-null>",
+    "registeredRepoKeys": ["forge.mrs.uppidi.com/xpufx-org/paseo"],
+    "registeredRepoCount": 1,
+    "uptime": 3600
+  }
+  ```
+
+  When the router has not been started it is null-safe: `running:false`, `url:null`, `frontDeskAgentId:null`, empty repo list.
+- `uppidi-fleet.hook-status` — same in-process source; reports the live front desk record, paused queues, and totals. Use it when you also want queue state.
+
+Agents with MCP access should call one of these. Neither handler parses `settings.json` or `router-config.json`.
+
+**HTTP fallback (agents without the plugin's MCP).** Once you know the deployment address (one-time, human-provided at onboarding — see the note below), probe the router directly:
 
 ```sh
+curl -fsS "http://<hook-host>:<port>/info"     # host, port, url, frontDeskAgentId, uptime, isListening
 curl -fsS "http://<hook-host>:<port>/health"   # → {"ok":true,"status":"healthy",...,"port":8099}
 curl -fsS "http://<hook-host>:<port>/status"   # front desk record, paused queues, totals
 ```
 
-If `/health` times out on your first guess, do not retry against loopback blindly — re-read the settings file or ask the operator which interface the router binds.
+`GET /info` is the JSON equivalent of the `hook.info` RPC (same in-process resolver). `GET /health` remains the liveness probe; `GET /status` gives the fuller queue overview.
 
-### 9.2 Offline registry discovery
+If `/health` times out on your first guess, do not retry against loopback blindly — **ask the operator** which interface the router binds, or call `uppidi-fleet.hook.info` and use the returned `url`.
 
-Registry state files double as an offline way to learn who is registered, without contacting the router:
+> [!NOTE]
+> **Operators/debugging only — agents must not parse these files.** The router's bind address *does* originate from `hookHost` / `hookPort` in `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` (migrated from the legacy `~/.config/uppidi-fleet/router-config.json`). These are **writable runtime state**, not a discovery API: reading them races with live reconfiguration, and an agent that can write them can silently redirect the router. The plugin runtime ID is `uppidi-fleet` (declared in `paseo-plugin.json`), so the data directory is `uppidi-fleet` even though the source tree directory is `uppidi-forge`. Environment overrides (`FORGE_HOOK_HOST`, `FORGE_HOOK_PORT` / `HOOK_PORT`) are read by the plugin subprocess at startup. Use the RPC/`GET /info` path instead.
+
+### 9.2 Offline registry files (operator-readable state)
+
+The router persists registration records under `~/.paseo/forgejo-hook/`:
 
 - **Front Desk agent ID**: `~/.paseo/forgejo-hook/frontdesk.json` (`{"version":1,"agentId":"<uuid>",...}`).
 - **Repo orchestrator registrations**: one JSON file per repo key under `~/.paseo/forgejo-hook/orchestrators/`, where the filename is the repo key with `/` and `.` mapped to `_` (e.g. `forge.mrs.uppidi.com_xpufx-org_paseo.json` for repo key `forge.mrs.uppidi.com/xpufx-org/paseo`).
 
-These files are written atomically by the router on every registration; a stale mtime means the record may be outdated — prefer the live HTTP endpoints when the router is reachable.
+These are **operator-readable state files, not an agent discovery mechanism**. They are written atomically by the router on every registration, but a stale mtime means the record may be outdated, and like `settings.json` they are writable. Agents must resolve the live front desk via `uppidi-fleet.hook.info` (or `GET /info` / `GET /frontdesk`) instead of reading these files; they exist so operators can audit registration state without contacting the router.
 
 ### 9.3 "You are not the frontdesk" — what to do
 
@@ -310,7 +332,7 @@ curl -fsS -X POST "http://<hook-host>:<port>/frontdesk-handoff" \
   -d '{"agentId":"<NEW_FRONT_DESK_ID>","handoffText":"# Handoff\n\nOperator context."}'
 ```
 
-`<hook-host>` is hostname-neutral on purpose: substitute the address you resolved in [§9.1](#91-self-locating-the-router). Concrete example — on this fleet's current deployment the router binds the daemon host's LAN interface, so `10.20.30.24:8099` answers while `127.0.0.1:8099` does **not**:
+`<hook-host>` is hostname-neutral on purpose: substitute the address you resolved via `uppidi-fleet.hook.info` (or `GET /info`) in [§9.1](#91-locating-the-router--ask-the-daemon-dont-read-state). Concrete example — on this fleet's current deployment the router binds the daemon host's LAN interface, so `10.20.30.24:8099` answers while `127.0.0.1:8099` does **not**:
 
 ```sh
 curl -fsS http://10.20.30.24:8099/frontdesk   # loopback fails on this host unless hookHost is 127.0.0.1

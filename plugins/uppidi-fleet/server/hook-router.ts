@@ -15,6 +15,7 @@ import type {
   HookLogTailOutput,
   HookServiceConfigInput,
   HookServiceConfigOutput,
+  HookInfoOutput,
 } from "../shared/contracts.js";
 import { extractPermissionScope } from "../shared/contracts.js";
 import { getUppidiFleetSettingsStorage } from "./settings.js";
@@ -1667,6 +1668,22 @@ export class HookRouter {
     };
   }
 
+  public getInfo(): HookInfoOutput {
+    const registeredRepoKeys = this.getEnrolledRepos();
+    return {
+      ok: true,
+      running: true,
+      hookHost: this.configuredHost,
+      hookPort: this.configuredPort,
+      url: formatHookInfoUrl(this.configuredHost, this.configuredPort),
+      isListening: this.isListening(),
+      frontDeskAgentId: this.readFrontDesk()?.agentId ?? null,
+      registeredRepoKeys,
+      registeredRepoCount: registeredRepoKeys.length,
+      uptime: this.getUptime(),
+    };
+  }
+
   private log(message: string): void {
     appendHookLog(message);
   }
@@ -3049,6 +3066,20 @@ export class HookRouter {
         return;
       }
 
+      if (req.method === "GET" && pathname === "/info") {
+        const info = this.getInfo();
+        this.sendJson(res, 200, {
+          host: info.hookHost,
+          port: info.hookPort,
+          url: info.url,
+          frontDeskAgentId: info.frontDeskAgentId,
+          uptime: info.uptime,
+          isListening: info.isListening,
+          registeredRepoKeys: info.registeredRepoKeys,
+        });
+        return;
+      }
+
       if (req.method === "GET" && pathname === "/queues") {
         this.sendJson(res, 200, this.getQueuesOverview());
         return;
@@ -3333,6 +3364,35 @@ export function getOrCreateHookRouter(
     activeRouter = new HookRouter(server, options);
   }
   return activeRouter;
+}
+
+function formatHookInfoUrl(host: string, port: number): string {
+  const hostname = host === "0.0.0.0" || host === "::" || !host ? "127.0.0.1" : host;
+  return `http://${hostname}:${port}`;
+}
+
+/**
+ * Resolves hook router discovery info from the live singleton only (#545).
+ * Never reads plugin-data settings or legacy config from disk. Null-safe when
+ * the router has not been started.
+ */
+export function getHookRouterInfo(): HookInfoOutput {
+  const router = getActiveHookRouter();
+  if (!router) {
+    return {
+      ok: true,
+      running: false,
+      hookHost: null,
+      hookPort: null,
+      url: null,
+      isListening: false,
+      frontDeskAgentId: null,
+      registeredRepoKeys: [],
+      registeredRepoCount: 0,
+      uptime: 0,
+    };
+  }
+  return router.getInfo();
 }
 
 export function getHookServiceStatus(): HookServiceStatusOutput {

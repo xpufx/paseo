@@ -8,6 +8,7 @@ import {
   type HookLogTailOutput,
   type HookServiceConfigInput,
   type HookServiceConfigOutput,
+  type HookInfoOutput,
 } from "../shared/contracts.js";
 import {
   getHookServiceStatus,
@@ -15,6 +16,7 @@ import {
   getHookLogTail,
   configureHookService,
   getActiveHookRouter,
+  getHookRouterInfo,
   loadRouterConfig,
 } from "./hook-router.js";
 import { getUppidiFleetSettingsStorage } from "./settings.js";
@@ -172,6 +174,10 @@ export async function handleHookDrain(
 
 export async function handleHookServiceStatus(): Promise<HookServiceStatusOutput> {
   return getHookServiceStatus();
+}
+
+export async function handleHookInfo(): Promise<HookInfoOutput> {
+  return getHookRouterInfo();
 }
 
 export async function handleHookServiceAction(input: {

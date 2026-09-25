@@ -112,6 +112,33 @@ export const uppidiHookStatusContract = defineContract({
   output: HookStatusOutputSchema,
 });
 
+/**
+ * Resolved-in-process hook router discovery (#545). Unlike `hook-status`, this
+ * is answered from the live `HookRouter` singleton only — no settings/config
+ * file reads — so agents never parse writable state to find the daemon.
+ */
+export const HookInfoOutputSchema = z.object({
+  ok: z.boolean(),
+  running: z.boolean().default(false),
+  hookHost: z.string().nullable().default(null),
+  hookPort: z.number().nullable().default(null),
+  url: z.string().nullable().default(null),
+  isListening: z.boolean().default(false),
+  frontDeskAgentId: z.string().nullable().default(null),
+  registeredRepoKeys: z.array(z.string()).default([]),
+  registeredRepoCount: z.number().default(0),
+  uptime: z.number().default(0),
+  error: z.string().optional(),
+});
+export type HookInfoOutput = z.infer<typeof HookInfoOutputSchema>;
+
+export const uppidiHookInfoContract = defineContract({
+  name: "uppidi-fleet.hook.info",
+  description: "Resolve the live hook router endpoint and registered front desk in-process",
+  input: z.object({}),
+  output: HookInfoOutputSchema,
+});
+
 export const HookQueuesOutputSchema = z.object({
   ok: z.boolean(),
   service: z.string().optional(),
