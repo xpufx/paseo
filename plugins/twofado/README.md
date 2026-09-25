@@ -1,7 +1,5 @@
 # twofado
 
-
-
 Approval-gate UI and notifications for the **2fado** privileged-command daemon, for
 [Paseo](https://github.com/getpaseo/paseo).
 
@@ -9,6 +7,12 @@ Surfaces pending risky command requests from `2fadod` and lets a human
 approve, deny, or acknowledge them without leaving Paseo. The plugin also
 registers a sidebar item, a workspace header button, and a command-center
 entry so the queue is one tap away.
+
+## Screenshots
+
+| Paseo Desktop | Telegram approval |
+| :---: | :---: |
+| <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/twofado/screenshots/2fado-main-desktop.png"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/twofado/screenshots/2fado-main-desktop.png" alt="2fado approvals in Paseo Desktop" width="100%" /></a> | <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/twofado/screenshots/2fado-telegram-approval.jpg"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/twofado/screenshots/2fado-telegram-approval.jpg" alt="2fado npm publish approval in Telegram" width="100%" /></a> |
 
 > **⚠️ WIP — use at your own risk.** Not release-ready; APIs and behavior may change without notice.
 
