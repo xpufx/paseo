@@ -22,7 +22,8 @@ const MAX_LOG_LINES = 150;
 export class DaemonSupervisor {
   constructor(options = {}) {
     this.rootDir = options.rootDir || ROOT_DIR;
-    this.defaultBinPath = join(this.rootDir, "bin", "2fado");
+    this.binDir = options.binDir || join(this.rootDir, "bin");
+    this.defaultBinPath = join(this.binDir, "2fado");
     this.configuredSocket = options.socketPath || process.env.TWOFADO_SOCKET;
     this.child = null;
     this.childPid = null;
@@ -56,18 +57,19 @@ export class DaemonSupervisor {
   }
 
   resolveBinary(custom) {
-  if (custom && existsSync(custom)) return custom;
-  const exeSuffix = process.platform === "win32" ? ".exe" : "";
-  const binName = `2fado${exeSuffix}`;
-  if (process.env.TWOFADO_BIN_DIR) {
-    const envBin = join(process.env.TWOFADO_BIN_DIR, binName);
-    if (existsSync(envBin)) return envBin;
+    if (custom && existsSync(custom)) return custom;
+    const exeSuffix = process.platform === "win32" ? ".exe" : "";
+    const binName = `2fado${exeSuffix}`;
+    const managedBin = join(this.binDir, binName);
+    if (existsSync(managedBin)) return managedBin;
+    if (process.env.TWOFADO_BIN_DIR) {
+      const envBin = join(process.env.TWOFADO_BIN_DIR, binName);
+      if (existsSync(envBin)) return envBin;
+    }
+    const checkoutBin = join(this.rootDir, "bin", binName);
+    if (checkoutBin !== managedBin && existsSync(checkoutBin)) return checkoutBin;
+    return null;
   }
-  if (existsSync(this.defaultBinPath)) return this.defaultBinPath;
-  const exeBin = join(this.rootDir, "bin", binName);
-  if (exeBin !== this.defaultBinPath && existsSync(exeBin)) return exeBin;
-  return null;
-}
 
   async probeSocket(socketPath, timeoutMs = 1500) {
     return new Promise((resolve) => {
@@ -174,7 +176,7 @@ export class DaemonSupervisor {
         const emit = (msg) => this.appendLog("stdout", String(msg).replace(/^\[2fado-install\] /, ""));
         const result = await installer.installCompanion({
           version: process.env.TWOFADO_VERSION,
-          binDir: join(this.rootDir, "bin"),
+          binDir: this.binDir,
           log: emit,
         });
         this.appendLog("system", `install finished: ${result.binPath} (${result.status})`);
