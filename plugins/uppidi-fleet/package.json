@@ -9,8 +9,8 @@
     "typecheck": "tsc --noEmit",
     "stamp": "node -e \"import('../../packages/paseo-plugin-helper/src/server/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "test": "npm run typecheck && npm run test:node && npm run test:tsx",
-    "test:node": "NODE_ENV=test node --import ./test/register-ts-hooks.mjs --test shared/contracts.test.ts shared/sort-filter.test.ts server/hook.test.ts server/fleet.test.ts server/agents.test.ts server/metrics.test.ts server/hook-router.test.ts server/runners.test.ts",
-    "test:tsx": "NODE_ENV=test tsx --test client/entry.test.ts client/mobile-layout.test.ts"
+    "test:node": "NODE_ENV=test node --import ./test/register-ts-hooks.mjs --test shared/contracts.test.ts shared/sort-filter.test.ts server/hook.test.ts server/fleet.test.ts server/agents.test.ts server/metrics.test.ts server/hook-router.test.ts server/runners.test.ts client/fleet-state-filter-row.test.ts client/issue-metrics-bar.test.ts client/metrics-bar-parity.test.ts client/role-model-picker.test.ts",
+    "test:tsx": "NODE_ENV=test tsx --test client/entry.test.ts client/mobile-layout.test.ts client/tree-zebra.test.tsx"
   },
   "devDependencies": {
     "@getpaseo/plugin": "^0.9.0",

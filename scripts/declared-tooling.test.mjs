@@ -84,6 +84,32 @@ const TOOL_PROVIDERS = {
 /** Runners that fetch a package at run time, so whatever they name is undeclared by construction. */
 const DOWNLOAD_RUNNERS = { npx: "npx", bunx: "bunx", pnpx: "pnpx" };
 
+/**
+ * Test-framework import specifiers -> the package that must declare them. This is
+ * the same defect as TOOL_PROVIDERS, reached from the other direction: a test
+ * file that imports a runner its own package never declared resolves that runner
+ * from a *neighbouring* workspace's hoisted node_modules, and then fails with a
+ * framework-internal error rather than a missing dependency.
+ *
+ * #702's seven orphans were all `import { describe, it, expect } from "vitest"`
+ * in uppidi-fleet and x-comms, neither of which declares vitest. Wiring them
+ * into a script would not have helped: the unreachable-tests guard proves a file
+ * is named by a runner, not that the runner can execute it. That guard and this
+ * one are complementary, and neither substitutes for the other.
+ */
+const FRAMEWORK_IMPORTS = {
+  vitest: "vitest",
+  "vitest/config": "vitest",
+  "vitest/node": "vitest",
+  "@vitest/runner": "vitest",
+  jest: "jest",
+  "@jest/globals": "jest",
+  mocha: "mocha",
+  ava: "ava",
+};
+
+const TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
 function findManifests(dir, acc = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue;
@@ -96,6 +122,30 @@ function findManifests(dir, acc = []) {
     }
   }
   return acc;
+}
+
+/** Tracked test files, walked exactly as findManifests walks so both see the same tree. */
+function findTestFiles(dir, acc = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isSymbolicLink()) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (IGNORED_DIRS.has(entry.name)) continue;
+      findTestFiles(full, acc);
+    } else if (entry.isFile() && TEST_FILE.test(entry.name)) {
+      acc.push(full);
+    }
+  }
+  return acc;
+}
+
+/** Bare import specifiers in a test file: `from "x"`, bare `import "x"`, and `require("x")`. */
+function importSpecifiers(source) {
+  const specs = new Set();
+  for (const [, spec] of source.matchAll(/(?:^|\n)\s*import\s+(?:type\s+)?[^'"]*?from\s*["']([^"']+)["']/g)) specs.add(spec);
+  for (const [, spec] of source.matchAll(/(?:^|\n)\s*import\s*["']([^"']+)["']/g)) specs.add(spec);
+  for (const [, spec] of source.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)) specs.add(spec);
+  return specs;
 }
 
 /**
@@ -226,4 +276,44 @@ test("every npm run target a script invokes exists in the same package", () => {
       );
   });
   assert.deepEqual(offenders, [], "a script must not delegate to a sibling script that does not exist");
+});
+
+test("test-file discovery is not vacuous: the walk finds the suites it is meant to check", () => {
+  const found = findTestFiles(REPO_ROOT);
+  assert.ok(found.length > 50, `expected many test files, found ${found.length}`);
+  // A walk that silently matched nothing would turn the next test into a pass.
+  const names = found.map((f) => relative(REPO_ROOT, f).split(sep).join("/"));
+  assert.ok(
+    names.includes("plugins/uppidi-fleet/server/agents.test.ts"),
+    "a known suite went missing from the walk",
+  );
+});
+
+test("no test file imports a test framework its own package does not declare", () => {
+  // Longest matching manifest dir wins, so a test under a nested package (x-comms/mcp)
+  // is judged against that package and not its parent.
+  const byDir = [...manifests].sort((a, b) => b.dir.length - a.dir.length);
+  const owningManifest = (relPath) =>
+    byDir.find((m) => relPath === m.dir || relPath.startsWith(`${m.dir}/`));
+
+  const offenders = findTestFiles(REPO_ROOT).flatMap((full) => {
+    const rel = relative(REPO_ROOT, full).split(sep).join("/");
+    const owner = owningManifest(rel);
+    if (!owner) return [];
+    return [...importSpecifiers(readFileSync(full, "utf8"))]
+      .filter((spec) => spec in FRAMEWORK_IMPORTS)
+      .filter((spec) => !owner.declared.has(FRAMEWORK_IMPORTS[spec]))
+      .map(
+        (spec) =>
+          `${rel} imports "${spec}" but ${owner.path} does not declare ${FRAMEWORK_IMPORTS[spec]}`,
+      );
+  });
+  assert.deepEqual(
+    offenders,
+    [],
+    "a test file must not resolve a test framework from another workspace's hoisted " +
+      "node_modules: the runner either throws a framework-internal error or needs a " +
+      "global that the declaring package never set up (#702). Add the framework to " +
+      "devDependencies, or use node:test, which the packages in this repo already do.",
+  );
 });
