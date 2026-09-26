@@ -861,22 +861,119 @@ export const uppidiSetRoleModelContract = defineContract({
   output: UppidiSetRoleModelOutputSchema,
 });
 
-// CI Runner List and Status (Issue #366)
+// CI Runner List and Status (Issue #366; re-sourced to the Forgejo API in #632)
+export const UppidiRunnerScopeSchema = z.enum(["repo", "org", "user"]);
+export type UppidiRunnerScope = z.infer<typeof UppidiRunnerScopeSchema>;
+
+/**
+ * A CI runner exactly as the Forgejo runners API reports it. Forgejo's
+ * `ActionRunner` carries no last-seen timestamp and no job attribution, so
+ * this contract deliberately has no `lastSeen` / `lastJob` field: an absent
+ * field cannot be filled in with a plausible-looking string (#632).
+ */
 export const UppidiRunnerSchema = z.object({
+  /** Forgejo runner uuid, or the numeric runner id when no uuid is returned. */
   id: z.string(),
   name: z.string(),
+  /** Runner status verbatim from the API (`active`, `idle`, `offline`, …). */
   status: z.string(),
+  /**
+   * Derived server-side: true only when the API positively reports the runner
+   * as `active` or `idle`. An absent or unrecognised status is never capacity.
+   */
+  available: z.boolean().default(false),
+  /** Which Forgejo runner scope this runner was read from. */
+  scope: UppidiRunnerScopeSchema,
   labels: z.array(z.string()).default([]),
-  lastSeen: z.string().optional(),
-  lastJob: z.string().optional(),
+  description: z.string().optional(),
+  version: z.string().optional(),
+  ephemeral: z.boolean().optional(),
 });
 export type UppidiRunner = z.infer<typeof UppidiRunnerSchema>;
 
-export const UppidiRunnersOutputSchema = z.object({
+/**
+ * A container running on this workstation. Deliberately a separate shape from
+ * `UppidiRunner`: a developer's local container is not CI capacity and must
+ * never be counted as such.
+ */
+export const UppidiLocalRunnerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Raw container state, e.g. `running`. */
+  status: z.string(),
+  image: z.string().optional(),
+  /** Only set when the container runtime reports a creation time. */
+  createdAt: z.string().optional(),
+});
+export type UppidiLocalRunner = z.infer<typeof UppidiLocalRunnerSchema>;
+
+/** Per-query provenance, including every failure, so a red panel is diagnosable. */
+export const RunnerSourceSchema = z.object({
+  /** `repo` / `org` / `user` for Forgejo scopes, `local` for podman. */
+  key: z.string(),
+  kind: z.enum(["forgejo-runners", "local-containers"]),
+  /** API path or command that was queried, for display. */
+  endpoint: z.string().optional(),
   ok: z.boolean(),
+  /** Present only for an HTTP-level rejection; absent for a transport failure. */
+  failure: z.enum(["unreachable", "http"]).optional(),
+  httpStatus: z.number().optional(),
+  runnerCount: z.number().optional(),
+  error: z.string().optional(),
+});
+export type UppidiRunnerSource = z.infer<typeof RunnerSourceSchema>;
+
+/**
+ * Aggregate reachability of the runner query. None of these values implies
+ * runners exist:
+ *   - `ok`         — the API answered and reported at least one runner
+ *   - `empty`      — the API answered authoritatively: there are no runners
+ *   - `unreachable`— the API could not be reached; capacity is unknown
+ *   - `forbidden`  — the API rejected the token; capacity is unknown
+ */
+export const UppidiFleetStatusSchema = z.enum(["ok", "empty", "unreachable", "forbidden"]);
+export type UppidiFleetStatus = z.infer<typeof UppidiFleetStatusSchema>;
+
+export interface RunnerStatusConfig {
+  badgeVariant: "success" | "info" | "warning" | "danger" | "neutral";
+  available: boolean;
+}
+
+/**
+ * Presentation and capacity for a Forgejo runner status string. The colour is
+ * left to the caller's theme (`getStatusColor`) so there is one source of truth
+ * for it.
+ *
+ * Availability is positive-only: only a status the API positively reports as
+ * `active` or `idle` counts as CI capacity. Anything else — `offline`, blank,
+ * or a value this build has not seen — resolves to unavailable, so an
+ * unresolvable status can never inflate the capacity number (#632).
+ */
+export function getRunnerStatusConfig(status?: string | null): RunnerStatusConfig {
+  switch ((status ?? "").trim().toLowerCase()) {
+    case "active":
+      return { badgeVariant: "success", available: true };
+    case "idle":
+      return { badgeVariant: "info", available: true };
+    case "offline":
+      return { badgeVariant: "danger", available: false };
+    default:
+      return { badgeVariant: "neutral", available: false };
+  }
+}
+
+export const UppidiRunnersOutputSchema = z.object({
+  /** True only when the Forgejo API answered, including an authoritative empty fleet. */
+  ok: z.boolean(),
+  fleetStatus: UppidiFleetStatusSchema.default("unreachable"),
+  /** Forgejo-registered CI runners only. Zero is a valid, meaningful state. */
   runners: z.array(UppidiRunnerSchema).default([]),
   totalCount: z.number().default(0),
+  /** Real CI capacity: runners the API reports as `active` or `idle`. */
   onlineCount: z.number().default(0),
+  sources: z.array(RunnerSourceSchema).default([]),
+  /** Containers on this host, reported separately and never counted as capacity. */
+  localRunners: z.array(UppidiLocalRunnerSchema).default([]),
   error: z.string().optional(),
 });
 export type UppidiRunnersOutput = z.infer<typeof UppidiRunnersOutputSchema>;

@@ -958,7 +958,7 @@ describe("uppidi-fleet client entry contract", () => {
         ],
         [
           "runner missing labels",
-          { [contracts.uppidiRunnersContract.name]: { runners: [{ id: "r", name: "R", status: "online" }], totalCount: 1, onlineCount: 1 } },
+          { [contracts.uppidiRunnersContract.name]: { runners: [{ id: "r", name: "R", status: "idle", scope: "user" }], totalCount: 1, onlineCount: 1 } },
         ],
         [
           "queue missing messages",

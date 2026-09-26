@@ -831,21 +831,39 @@ these gaps yourself.
   active registration and snapshot summary, matching the live Front Desk
   skill. Full rotation contract: [§13.5](#135-front-desk-singleton--rotation-protocol).
 
-### 10.7 Role models, metrics, and runners are mock / coming-soon
+### 10.7 Role models and metrics status; runners are Forgejo-sourced
 
 - The bundled **role-model** defaults are mock / coming-soon
-  ([`server/role-models.ts`](./server/role-models.ts)) and runner discovery
-  ([`server/runners.ts`](./server/runners.ts)) shells `podman ps` / `tea whoami`
-  and contains a hardcoded runner id.
-- **Fleet metrics are now empirical** ([`server/metrics.ts`](./server/metrics.ts)):
+  ([`server/role-models.ts`](./server/role-models.ts)).
+- **Runner discovery reads the Forgejo API**
+  ([`server/runners.ts`](./server/runners.ts)), not the local container
+  runtime. It queries every scope a repository's Actions jobs can draw from —
+  `/api/v1/repos/{owner}/{repo}/actions/runners`,
+  `/api/v1/orgs/{org}/actions/runners`, and `/api/v1/user/actions/runners` —
+  using the same token the issue reader uses
+  ([`server/forgejo-api.ts`](./server/forgejo-api.ts)). The panel reports
+  `fleetStatus` explicitly: `ok` (the API returned runners), `empty` (the API
+  authoritatively reports none), `unreachable` (the API could not be reached),
+  or `forbidden` (the token was rejected). An unreachable or rejected query
+  renders as *capacity unknown*; no placeholder runner is substituted, and a
+  fleet with zero runners renders as zero rather than as one.
+  Forgejo's `ActionRunner` carries no last-seen timestamp and no job
+  attribution, so the runner contract has no `lastSeen`/`lastJob` field to fill
+  with a plausible-looking guess.
+- **Local containers are reported separately.** `podman ps` output is shown in
+  its own group, labelled as *not CI capacity*, and is excluded from
+  `totalCount` and `onlineCount`.
+- **Fleet metrics are empirical** ([`server/metrics.ts`](./server/metrics.ts)):
   the watchdog tick rolls live per-agent signals into minimized receipts in
   `~/.paseo/uppidi-fleet-metrics.json`, and the matrix serves only those
   receipts. The checked-in `BASELINE_CANDIDATES` matrix is retired as served
   data — it remains exported for tests/back-compat, but a missing/empty file
   yields an explicit empty state ("no empirical data yet"), never placeholders.
 - **Action:** override role models from the Cockpit or
-  `~/.paseo/uppidi-fleet-role-models.json`; treat runners as mock/coming-soon.
-  Metrics need no seeding — they populate as agents run ([§13.4](#134-fleet-metrics-empirical-receipts-empty-until-earned)).
+  `~/.paseo/uppidi-fleet-role-models.json`; the runner panel needs a token that
+  can read at least one runner scope, and a fleet with no registered runners
+  shows as `empty` until one is registered. Metrics need no seeding — they
+  populate as agents run ([§13.4](#134-fleet-metrics-empirical-receipts-empty-until-earned)).
 
 ### 10.8 Adoption checklist
 

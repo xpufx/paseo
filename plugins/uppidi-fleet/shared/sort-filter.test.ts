@@ -157,14 +157,49 @@ describe("Uppidi Fleet sort & filter predicates", () => {
   });
 
   const runners: UppidiRunner[] = [
-    { id: "1", name: "runner-online", status: "online", labels: ["ubuntu"] },
-    { id: "2", name: "runner-offline", status: "offline", labels: ["docker"] },
+    { id: "1", name: "runner-idle", status: "idle", available: true, scope: "user", labels: ["ubuntu"] },
+    { id: "2", name: "runner-offline", status: "offline", available: false, scope: "user", labels: ["docker"] },
+    { id: "3", name: "runner-unknown", status: "unknown", available: false, scope: "org", labels: [] },
   ];
 
   it("filters and sorts runners", () => {
-    assert.equal(filterRunners(runners, "all", "").length, 2);
-    assert.equal(filterRunners(runners, "online", "").length, 1);
-    assert.equal(filterRunners(runners, "offline", "").length, 1);
+    assert.equal(filterRunners(runners, "all", "").length, 3);
+    assert.equal(filterRunners(runners, "available", "").length, 1);
+    // A runner whose status the API could not resolve is not capacity (#632).
+    assert.equal(filterRunners(runners, "unavailable", "").length, 2);
+    assert.equal(filterRunners(runners, "all", "docker").length, 1);
+    assert.equal(filterRunners(runners, "all", "offline").length, 1);
+
+    // Both directions are asserted from an input whose order is the opposite
+    // of the expected result, so a comparator that never swaps cannot pass.
+    // The descending case is the load-bearing one: a multiplier applied to only
+    // one side of the subtraction (`a - (b * mul)`) agrees with `(a - b) * mul`
+    // at mul = 1 and diverges at mul = -1, so an ascending-only assertion
+    // cannot see it.
+    const byAvailabilityAsc = sortRunners(runners, "available", "asc");
+    assert.equal(
+      byAvailabilityAsc[0]?.available,
+      false,
+      "ascending must lead with the unavailable runners"
+    );
+    assert.equal(
+      byAvailabilityAsc[2]?.available,
+      true,
+      "ascending must trail with the available runner"
+    );
+
+    const reversed = [...runners].reverse();
+    const byAvailabilityDesc = sortRunners(reversed, "available", "desc");
+    assert.equal(
+      byAvailabilityDesc[0]?.available,
+      true,
+      "descending must lead with the available runner, not reverse the order"
+    );
+    assert.equal(
+      byAvailabilityDesc[2]?.available,
+      false,
+      "descending must trail with the unavailable runners"
+    );
   });
 
   const candidates: CandidateModelMetrics[] = [

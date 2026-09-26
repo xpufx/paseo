@@ -562,9 +562,14 @@ export function countPermissionAgents(agents: UppidiAgent[]): number {
 
 // --- CI Runners ---
 
-export type RunnerPreset = "all" | "online" | "offline";
+/**
+ * `available` is the capacity bucket; `unavailable` is the complement, so a
+ * runner whose status the API could not resolve lands there rather than being
+ * quietly counted as capacity (#632).
+ */
+export type RunnerPreset = "all" | "available" | "unavailable";
 
-export type RunnerSortField = "name" | "status" | "lastSeen";
+export type RunnerSortField = "name" | "status" | "available";
 
 export function filterRunners(
   runners: UppidiRunner[],
@@ -576,11 +581,11 @@ export function filterRunners(
     if (!r) return false;
     let matchesPreset = true;
     switch (preset) {
-      case "online":
-        matchesPreset = r.status === "online";
+      case "available":
+        matchesPreset = r.available === true;
         break;
-      case "offline":
-        matchesPreset = r.status === "offline";
+      case "unavailable":
+        matchesPreset = r.available !== true;
         break;
       case "all":
       default:
@@ -594,8 +599,8 @@ export function filterRunners(
     const searchTarget = [
       r.id,
       r.name,
+      r.status,
       (Array.isArray(r.labels) ? r.labels : []).join(" "),
-      r.lastJob ?? "",
     ]
       .join(" ")
       .toLowerCase();
@@ -619,8 +624,8 @@ export function sortRunners(
         return String(a.name ?? "").localeCompare(String(b.name ?? "")) * mul;
       case "status":
         return String(a.status ?? "").localeCompare(String(b.status ?? "")) * mul;
-      case "lastSeen":
-        return String(a.lastSeen ?? "").localeCompare(String(b.lastSeen ?? "")) * mul;
+      case "available":
+        return (Number(a.available === true) - Number(b.available === true)) * mul;
       default:
         return 0;
     }
