@@ -155,11 +155,22 @@ is reported as *"token lacks write scope"* rather than silently failing.
 
 ## 3. Install the plugin
 
-From a local checkout (the reliable path in this monorepo):
+Install from npm (Paseo 0.9+):
+
+```sh
+paseo plugin add npm:@xpufx/paseo-uppidi-fleet
+```
+
+Or install directly from the Git repository:
 
 ```sh
 paseo plugin add xpufx/paseo --path plugins/uppidi-fleet
 ```
+
+> [!NOTE]
+> The npm package is `@xpufx/paseo-uppidi-fleet`; the plugin still installs and
+> displays as **`uppidi-fleet`**, which is the `id` in its
+> `paseo-plugin.json`. Pre-0.9 Paseos install from the repository path instead.
 
 After install, the plugin appears as a sidebar item and a workspace panel named
 **Uppidi Fleet**, plus a settings screen. The server entry
