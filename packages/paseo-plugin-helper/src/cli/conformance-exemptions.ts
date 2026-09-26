@@ -11,15 +11,12 @@ export interface ResolvedExemptions {
 }
 
 /**
- * Reads the optional `conformance.exempt` block from a plugin's
- * `paseo-plugin.json`:
+ * Reads the optional `exempt` block from a plugin's sibling `conformance.json`:
  *
  * ```json
  * {
- *   "conformance": {
- *     "exempt": {
- *       "no-bare-react-native-ui": "why this plugin does not apply"
- *     }
+ *   "exempt": {
+ *     "no-bare-react-native-ui": "why this plugin does not apply"
  *   }
  * }
  * ```
@@ -30,19 +27,25 @@ export interface ResolvedExemptions {
  * sentence rather than a blanket switch. An entry naming a rule that does not
  * exist is reported so a typo cannot make an audit look clean.
  *
- * A malformed or missing manifest yields no exemptions; it is the daemon's
- * complaint, not the audit's.
+ * This lives in its own file rather than in `paseo-plugin.json` because the
+ * host's manifest schema is `z.object({...}).strict()` (paseo
+ * `packages/server/src/server/plugins/manifest.ts`) and rejects unknown
+ * top-level keys. A `conformance` block in the manifest makes the plugin
+ * uninstallable, so the escape hatch could never be exercised. Keep this file
+ * out of the manifest.
+ *
+ * A malformed or missing file yields no exemptions.
  */
 export function readPluginConformanceExemptions(pluginDir: string): ResolvedExemptions {
   const exemptions = new Map<string, string>();
   const unknownExemptions: string[] = [];
 
   try {
-    const manifestPath = path.join(pluginDir, "paseo-plugin.json");
+    const manifestPath = path.join(pluginDir, "conformance.json");
     if (!fs.existsSync(manifestPath)) return { exemptions, unknownExemptions };
 
     const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
-    const declared = manifest?.conformance?.exempt;
+    const declared = manifest?.exempt;
     if (!declared || typeof declared !== "object" || Array.isArray(declared)) {
       return { exemptions, unknownExemptions };
     }

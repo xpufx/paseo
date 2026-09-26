@@ -49,4 +49,11 @@ export default function contribute(server: PluginServerContext) {
   server.handle(addOrchestratorContract, handleAddOrchestrator);
   server.handle(replaceOrchestratorContract, handleReplaceOrchestrator);
   server.handle(muteRepoContract, handleMuteRepo);
+
+  // The host throws "Plugin contribution must return a cleanup function" when a
+  // server contribution returns undefined (packages/server/src/server/plugins/
+  // plugin-process.ts). `PluginServerContext.handle` returns void and exposes no
+  // unregister, so there is nothing to tear down; returning a no-op satisfies the
+  // contract the same way the plugin scaffold does.
+  return () => {};
 }
