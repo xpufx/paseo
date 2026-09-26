@@ -792,12 +792,10 @@ interface ModalBodyProps {
     header?: ReactNode;
     headerStyle?: StyleProp<ViewStyle>;
     /**
-     * Host dialog size preset. "default" (default) is fully fluid inside the
-     * host-allocated dialog. "large" opts into the helper's documented wide
-     * extent on desktop so data-dense modals/surfaces get room, and is ignored on
-     * mobile (the bottom sheet is already full-bleed) and inside composer
-     * popovers (the host owns that narrow viewport). Use this instead of adding a
-     * per-plugin width/minWidth literal; the host still owns the final size.
+     * Advisory density hint. It carries no width floor: the host `Modal` has no
+     * size prop, so a content-side `minWidth` would override the host dialog
+     * allocation and clip inside narrow docks (paseo#641). Use `maxContentWidth`
+     * for a readable dense column. Ignored on compact/mobile surfaces.
      */
     size?: ModalBodySize;
     /**
@@ -892,7 +890,7 @@ declare const ModalBodyScrollOwnerContext: React__default.Context<ModalBodyScrol
  * Requires the host <Modal.Content scrollable={false}> so no outer sheet
  * scroller drags the header along.
  */
-declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, headerMode, size, maxContentWidth, scrollMode, debugTag, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
+declare function ModalBody({ children, style, contentContainerStyle, header, headerStyle, headerMode, maxContentWidth, scrollMode, debugTag, extraBottomInset, refreshing, onRefresh, stickToEnd, scrollRef, }: ModalBodyProps): React__default.JSX.Element;
 
 interface ModalContentProps extends Omit<ModalBodyProps, "scrollMode"> {
     children: ReactNode;

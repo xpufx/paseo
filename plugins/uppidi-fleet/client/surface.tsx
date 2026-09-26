@@ -1687,7 +1687,15 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               <ModalContent size="large">
                 <Stack gap="xs">
                   <Row justify="space-between" align="center" wrap gap="xs">
-                    <Text style={{ color: colors.accent, ...typography.caption, fontWeight: "600" }}>
+                    <Text
+                      style={{
+                        color: colors.accent,
+                        ...typography.caption,
+                        fontWeight: "600",
+                        minWidth: 0,
+                        flexShrink: 1,
+                      }}
+                    >
                       {selected.repo} #{selected.number}
                     </Text>
                     <Row wrap gap="xs">
@@ -1699,7 +1707,16 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     </Row>
                   </Row>
 
-                  <Text style={{ color: colors.foreground, ...typography.heading, fontSize: 16, fontWeight: "700" }}>
+                  <Text
+                    style={{
+                      color: colors.foreground,
+                      ...typography.heading,
+                      fontSize: 16,
+                      fontWeight: "700",
+                      minWidth: 0,
+                      flexShrink: 1,
+                    }}
+                  >
                     {selected.title}
                   </Text>
 
