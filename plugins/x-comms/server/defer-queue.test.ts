@@ -1,8 +1,10 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { spawn } from "node:child_process";
 import {
   DEFER_EXPIRY_MS,
   DEFER_MAX_DEPTH_PER_TARGET,
@@ -28,6 +30,11 @@ import {
 const T0 = Date.parse("2026-09-25T12:00:00.000Z");
 const BUSY: { daemon: string; agentId: string } = { daemon: "hsi", agentId: "agent-remote" };
 const IDLE: { daemon: string; agentId: string } = { daemon: "hsi", agentId: "agent-idle" };
+
+// Child claimers import defer-queue.ts directly, so they need the same resolve
+// hooks this process was started with.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const registerHooks = pathToFileURL(join(HERE, "..", "mcp", "test", "register-ts-hooks.mjs")).href;
 
 let dir: string;
 
@@ -198,6 +205,70 @@ describe("defer queue: a crash mid-send is not replayed", () => {
     assert.equal(first?.prompt, "one");
     const second = claimNextDefer(dir, BUSY, T0 + 1);
     assert.equal(second, null, "the rename is the claim; exactly one drainer wins it");
+  });
+
+  it("lets exactly one of N separate processes claim a waiting item", async () => {
+    // The sequential case above cannot catch a claim that is only atomic within
+    // one process. The plugin server and the injected MCP server are separate
+    // processes draining the same directory, so the guarantee is exercised for
+    // real: N children, released together by a barrier file, all claim the same
+    // target. One winner means the target is sent one message, not N.
+    send("one");
+    const RACE = 6;
+    const barrierDir = mkdtempSync(join(tmpdir(), "x-comms-defer-race-"));
+    const goFile = join(barrierDir, "GO");
+    const child = join(barrierDir, "claimer.mjs");
+    writeFileSync(
+      child,
+      [
+        'import { existsSync, writeFileSync } from "node:fs";',
+        'import { claimNextDefer } from "import-target";',
+        "const [dir, ready, go, daemon, agentId, nowMs] = process.argv.slice(2);",
+        'writeFileSync(ready, "1");',
+        "const nap = new Int32Array(new SharedArrayBuffer(4));",
+        "while (!existsSync(go)) Atomics.wait(nap, 0, 0, 1);",
+        "const entry = claimNextDefer(dir, { daemon, agentId }, Number(nowMs));",
+        "process.stdout.write(JSON.stringify(entry ? entry.prompt : null));",
+        "",
+      ].join("\n").replace("import-target", pathToFileURL(join(HERE, "defer-queue.ts")).href),
+      "utf8",
+    );
+
+    try {
+      const readyFiles = Array.from({ length: RACE }, (_, i) => join(barrierDir, `ready-${i}`));
+      const running = readyFiles.map(
+        (readyFile, i) =>
+          new Promise<string>((resolve, reject) => {
+            const proc = spawn(
+              process.execPath,
+              ["--import", registerHooks, child, dir, readyFile, goFile, BUSY.daemon, BUSY.agentId, String(T0 + 1)],
+              { stdio: ["ignore", "pipe", "pipe"] },
+            );
+            let out = "";
+            let err = "";
+            proc.stdout.on("data", (chunk) => { out += chunk; });
+            proc.stderr.on("data", (chunk) => { err += chunk; });
+            proc.on("error", reject);
+            proc.on("close", () => (err ? reject(new Error(`claimer ${i} failed: ${err}`)) : resolve(out)));
+          }),
+      );
+
+      // Release only once every child is loaded and parked on the barrier, so
+      // this is a genuine race rather than a fast process winning a slow one.
+      const deadline = Date.now() + 20_000;
+      while (readyFiles.some((f) => !existsSync(f))) {
+        if (Date.now() > deadline) throw new Error("claimers never became ready");
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      writeFileSync(goFile, "1");
+
+      const winners = (await Promise.all(running)).filter((out) => JSON.parse(out) !== null);
+      assert.equal(winners.length, 1, `expected exactly one winner, got ${winners.length}`);
+      assert.equal(JSON.parse(winners[0]), "one");
+      assert.equal(listWaiting(dir).length, 0, "the item left the waiting set once");
+    } finally {
+      rmSync(barrierDir, { recursive: true, force: true });
+    }
   });
 
   it("surfaces an abandoned claim as unknown rather than resending it", () => {

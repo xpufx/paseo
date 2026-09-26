@@ -49,19 +49,8 @@ export async function listConfiguredHostAgents(
   }));
 }
 
-/**
- * Native configured-host send. This deliberately gets exactly one freshly
- * borrowed target handle and sends to that selected agent only—never a peer
- * registry route and never a broadcast.
- */
-export async function sendConfiguredHostAgent(args: {
-  serverId: string;
-  agentId: string;
-  message: string;
-  messageId: string;
-  getClient: (serverId: string) => PaseoApi;
-}): Promise<void> {
-  await args.getClient(args.serverId).agents.ref(args.agentId).send(args.message, {
-    messageId: args.messageId,
-  });
-}
+// Sending to a configured host is `sendConfiguredHostViaGate` in
+// conversation-send.ts, which goes through the defer gate like every other route.
+// The borrowed client here is for *listing* agents only: it was also used to send
+// directly, which preempted a mid-turn target and then reported `dispatched`
+// (#611). Nothing on this surface borrows a client to send any more.

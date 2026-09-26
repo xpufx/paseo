@@ -19,6 +19,8 @@ import {
   readRegistry,
   mutateRegistry,
   deriveHostFromValue,
+  findDaemonByRef,
+  type RegistryDaemon,
 } from "./registry";
 import { serverPath } from "./server-status";
 import { readRelayStatus } from "./relay-status";
@@ -275,6 +277,18 @@ export interface ConversationSendInput {
    * steering the sender's turn.
    */
   notifyOnFinish?: boolean;
+  /**
+   * `prompt` already carries its envelope and signature, and is delivered
+   * verbatim — never re-stamped, which would move `sentAt` and invalidate the
+   * #594 signature.
+   *
+   * Only the Desktop configured-host route sets this. It stamps its own envelope
+   * because it has no mesh key, and it is a local trusted caller: it could
+   * already put arbitrary bytes in front of a configured host before this
+   * existed, so this widens no capability. The agent-facing MCP route omits it
+   * and keeps having the server stamp, which is what makes that path signed.
+   */
+  stamped?: boolean;
 }
 
 /**
@@ -328,15 +342,56 @@ async function tryDeliverLocalNative(
 }
 
 /**
+ * Send text that already carries its envelope, verbatim, over
+ * `paseo send --host`.
+ *
+ * Re-stamping is never an option here: it would move `sentAt` and invalidate the
+ * signature from #594. The Desktop client stamps its own envelope (it has no
+ * mesh key) and hands over finished bytes, so this is the only route that can
+ * deliver them intact.
+ *
+ * Both the dispatch-now path and the drain use this, so a message takes the same
+ * route whether it went out immediately or waited for the target's turn. The
+ * alternative — the borrowed-client route for an immediate send, this one for a
+ * queued one — would mean the same conversation taking two delivery mechanisms
+ * depending on whether the target happened to be busy.
+ */
+async function sendPreStampedViaHost(input: {
+  daemon: string;
+  agentId: string;
+  prompt: string;
+  messageId: string;
+}): Promise<void> {
+  const entry = targetRegistryEntry(input.daemon);
+  if (!entry) throw new Error(`unknown daemon '${input.daemon}' — pairing is required`);
+  const r = await withTimeout(
+    safeSpawn(
+      "paseo",
+      ["send", input.agentId, "--host", entry.value, "--message-id", input.messageId, "--json", "--no-wait", input.prompt],
+      { timeoutMs: 20000 },
+    ),
+    20000,
+    "send pre-stamped",
+  );
+  if (r.code !== 0) throw new Error((r.stderr || `exit ${r.code}`).trim().slice(0, 200));
+}
+
+/**
  * Deliver a conversation message. Local targets go out natively via the host
  * PaseoApi; remote targets go through the bundled MCP server, which stamps the
  * envelope and shells out to `paseo send --host` (no host-targeted SDK call
  * exists). Rejects on failure; callers record the send or hold it in the outbox.
  */
 async function deliverConversationMessage(
-  input: ConversationSendInput,
+  input: ConversationSendInput & { messageId: string },
   paseo: PaseoApi | null = paseoRef,
 ): Promise<void> {
+  // Checked before the local-native route, which would re-stamp. `stamped` means
+  // these bytes are final, so no route below may rewrite them.
+  if (input.stamped) {
+    await sendPreStampedViaHost(input);
+    return;
+  }
   if (await tryDeliverLocalNative(input, paseo)) return;
   let sendDaemon = daemonNameForServerId(input.daemon) ?? input.daemon;
   // Fallback: if daemon is a serverId (srv_…) and not in registry, scan registry values' offer serverId
@@ -601,6 +656,29 @@ export function daemonNameForServerId(serverId: string | null): string | null {
     if (id === serverId) return name;
   }
   return null;
+}
+
+/**
+ * The registry entry a send target names, or null when it names nothing known.
+ *
+ * `readRegistry` merges Paseo's configured hosts alongside the manual registry,
+ * so a configured host is reachable here. Matching is by name or serverId (see
+ * `findDaemonByRef`); the identity map is consulted first because that is how a
+ * peer's serverId is matched to its registered alias.
+ *
+ * This is the single lookup the gate and the drain both use. They must agree:
+ * if the drain could resolve a target the gate could not, the gate would have
+ * dispatched a busy target, and if the gate could resolve a target the drain
+ * could not, a queued message would sit until it expired.
+ */
+function targetRegistryEntry(ref: string): RegistryDaemon | null {
+  const daemons = readRegistry(currentRegistryPath()).daemons;
+  const aliased = daemonNameForServerId(ref);
+  if (aliased) {
+    const byName = findDaemonByRef(daemons, aliased);
+    if (byName) return byName;
+  }
+  return findDaemonByRef(daemons, ref) ?? null;
 }
 
 async function fetchPeerServerInfo(value: string): Promise<{ serverId: string; hostname: string | null } | null> {
@@ -1350,8 +1428,7 @@ async function probeTargetLifecycle(target: DeferTarget): Promise<string | null>
       return null;
     }
   }
-  const sendDaemon = daemonNameForServerId(target.daemon) ?? target.daemon;
-  const entry = readRegistry(currentRegistryPath()).daemons.find((d) => d.name === sendDaemon);
+  const entry = targetRegistryEntry(target.daemon);
   if (!entry) return null;
   try {
     return readLifecycleStatus(await runBusyProbe(["inspect", target.agentId, "--host", entry.value, "--json"]));
@@ -1490,22 +1567,8 @@ async function deliverDeferEntry(entry: DeferEntry): Promise<void> {
     return;
   }
   if (entry.stamped) {
-    // `paseo send --host`, the same shell-out the MCP path uses, so the
-    // pre-stamped bytes reach the target unchanged.
-    const registry = readRegistry(currentRegistryPath());
-    const sendDaemon = daemonNameForServerId(entry.daemon) ?? entry.daemon;
-    const host = registry.daemons.find((d) => d.name === sendDaemon)?.value;
-    if (!host) throw new Error(`unknown daemon '${sendDaemon}' — pairing is required`);
-    const r = await withTimeout(
-      safeSpawn(
-        "paseo",
-        ["send", entry.agentId, "--host", host, "--message-id", entry.messageId, "--json", "--no-wait", entry.prompt],
-        { timeoutMs: 20000 },
-      ),
-      20000,
-      "defer deliver",
-    );
-    if (r.code !== 0) throw new Error((r.stderr || `exit ${r.code}`).trim().slice(0, 200));
+    // `paseo send --host`, so the pre-stamped bytes reach the target unchanged.
+    await sendPreStampedViaHost(entry);
     return;
   }
   await deliverConversationMessage({

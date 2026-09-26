@@ -6,10 +6,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Clipboard, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
 import { Button, InlineButton, ModalContent, TextInput } from "./vendor/paseo-plugin-helper/index";
-import { buildXCommsEnvelope } from "../shared/envelope";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
-import { listConfiguredHostAgents, sendConfiguredHostAgent } from "./configured-hosts";
+import { listConfiguredHostAgents } from "./configured-hosts";
+import { describeDelivery, sendConfiguredHostViaGate } from "./conversation-send";
 import { formatCounterparty, formatPeerDisplay, splitCounterparty, useCounterpartyLabel, usePeerDisplay, type CounterpartyRef } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 
@@ -172,32 +172,26 @@ export function CrossDaemonConversation({
     refetchOnWindowFocus: false,
   });
 
-  const [lastSent, setLastSent] = useState<{ at: string; to: string; queued?: boolean; depth?: number } | null>(null);
+  const [lastSent, setLastSent] = useState<{ at: string; to: string } | null>(null);
   const [sentTick, setSentTick] = useState(0);
   const send = useMutation({
     mutationFn: async () => {
       if (!target) throw new Error("Choose a target before sending.");
       const messageId = newMessageId();
       if (target.configuredHostServerId) {
-        // Acquire immediately before send. A configured host can disconnect or
-        // release an earlier borrowed API while this surface remains mounted.
-        const stamped = `${buildXCommsEnvelope({
-          sender: { agentId, agentName: "User", host: "paseo-client", daemonServerId: null, cwd: null },
-          target: { daemon: target.configuredHostServerId, agentId: target.counterparty.agentId },
-          messageId,
-          sentAt: new Date().toISOString(),
-        })}\n\n${draft}`;
-        await sendConfiguredHostAgent({
+        // Same gated entry point as the registry/relay route, so a configured host
+        // that is mid-turn gets this message queued rather than preempted (#611).
+        // It reports queued | dispatched | outbox | dropped like every other route.
+        return sendConfiguredHostViaGate({
           serverId: target.configuredHostServerId,
           agentId: target.counterparty.agentId ?? "",
-          message: stamped,
+          body: draft,
+          fromAgentId: agentId,
+          fromAgentName: "User",
           messageId,
-          getClient: getPaseoClient,
+          sentAt: new Date().toISOString(),
+          callSend,
         });
-        // The configured-host route borrows a client and sends directly, so it
-        // is not gated by the defer queue. Reported as dispatched, which is what
-        // it is — queueing that path is not in this change.
-        return { ok: true, error: null, delivery: "dispatched" as const, queueDepth: 0, expiresAt: null };
       }
       // Existing registry/MCP relay and direct-peer route stays exactly here.
       return callSend({
@@ -228,11 +222,6 @@ export function CrossDaemonConversation({
         setLastSent({
           at: new Date().toLocaleTimeString(),
           to: `${target.counterparty.agentName ?? target.counterparty.agentId} @ ${peerLabelForCounterparty(target.counterparty)}`,
-          // A send to a mid-turn target is held, not delivered. Saying "sent"
-          // for a message that is sitting in a queue is the exact
-          // overstatement this gate exists to remove (#598).
-          queued: data.delivery === "queued",
-          depth: data.queueDepth,
         });
         setDraftCached("");
         void queryClient.invalidateQueries({ queryKey: ["x-comms-conversations", agentId] });
@@ -469,18 +458,22 @@ export function CrossDaemonConversation({
         onPress={() => send.mutate()}
         style={{ alignSelf: "flex-start", minHeight: 44 }}
       />
-      {send.isSuccess && send.data?.ok ? (
+      {send.isSuccess && send.data?.ok ? (() => {
+        const outcome = describeDelivery(send.data);
+        if (!outcome) return null;
+        const to = lastSent?.to ?? target?.counterparty.agentName ?? target?.counterparty.agentId;
+        return (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
           <Text
             style={{
-              color: lastSent?.queued ? theme.colors.statusWarning : theme.colors.statusSuccess,
+              color: outcome.tone === "warning" ? theme.colors.statusWarning : theme.colors.statusSuccess,
               fontSize: 12,
               flexShrink: 1,
             }}
           >
-            {lastSent?.queued
-              ? `⏳ Queued for ${lastSent.to} at position ${lastSent.depth ?? 1} — that agent is mid-turn, so this waits instead of interrupting it`
-              : `✓ Sent to ${lastSent?.to ?? target?.counterparty.agentName ?? target?.counterparty.agentId} at ${lastSent?.at ?? ""}`}
+            {outcome.tone === "warning"
+              ? `${outcome.text} (for ${to})`
+              : `✓ Sent to ${to} at ${lastSent?.at ?? ""}`}
           </Text>
           <InlineButton
             label="Dismiss"
@@ -490,10 +483,14 @@ export function CrossDaemonConversation({
             }}
           />
         </View>
-      ) : null}
+        );
+      })() : null}
       {send.error ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
-          <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>{String(send.error)}</Text>
+          {/* A thrown send never reached the queue or the target, so it must not
+              read as possibly-delivered. The gate is not bypassed to avoid this:
+              an unavailable plugin server fails the send loudly (#611). */}
+          <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>Not sent — {String(send.error)}</Text>
           <InlineButton
             label="⧉"
             accessibilityLabel="Copy error"
@@ -504,7 +501,9 @@ export function CrossDaemonConversation({
       ) : null}
       {send.data && !send.data.ok ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: 6 }}>
-          <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>{send.data.error}</Text>
+          <Text style={{ color: theme.colors.statusDanger, fontSize: 12, flexShrink: 1 }}>
+            Not delivered — {send.data.error}
+          </Text>
           <InlineButton
             label="⧉"
             accessibilityLabel="Copy error"

@@ -25,6 +25,14 @@ export interface OutboxMessageInput {
   fromAgentId?: string | null;
   fromAgentName?: string | null;
   messageId: string;
+  /**
+   * `prompt` already carries its envelope, and a retry must deliver it verbatim.
+   *
+   * Without this a held pre-stamped message is re-stamped on the retry and ships
+   * two envelopes. Optional so entries written before it existed still read as
+   * unstamped and keep being stamped at delivery, which is what they were doing.
+   */
+  stamped?: boolean;
 }
 
 export interface OutboxEntry {
@@ -41,6 +49,7 @@ export interface OutboxEntry {
   lastAttemptAt: string | null;
   lastError: string | null;
   nextAttemptAt: string;
+  stamped?: boolean;
 }
 
 export interface OutboxState {
@@ -96,6 +105,7 @@ export function holdMessage(
     lastAttemptAt: attempts > 0 ? new Date(nowMs).toISOString() : null,
     lastError: error,
     nextAttemptAt: new Date(nowMs + outboxBackoffMs(attempts)).toISOString(),
+    ...(input.stamped ? { stamped: true } : {}),
   };
   state.entries.push(entry);
   return entry;

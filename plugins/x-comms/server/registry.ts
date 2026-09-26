@@ -36,6 +36,21 @@ export function currentHostsPath(): string {
   return join(homedir(), ".paseo", "hosts.json");
 }
 
+/**
+ * Find the daemon a send target refers to, by registry name or by serverId.
+ *
+ * Name first, so every caller that already resolved by name behaves exactly as
+ * before. The serverId pass is what makes a *configured host* addressable: the
+ * Desktop surface addresses a host by the `serverId` Paseo's host runtime hands
+ * it, and a host is free to carry a label, so its registry name is not its
+ * serverId. Resolving those by name alone misses, and every miss downstream
+ * degrades to "cannot tell" — which the busy gate reads as "not busy" and
+ * dispatches, re-opening the preemption this lookup exists to prevent.
+ */
+export function findDaemonByRef(daemons: readonly RegistryDaemon[], ref: string): RegistryDaemon | undefined {
+  return daemons.find((d) => d.name === ref) ?? daemons.find((d) => !!d.serverId && d.serverId === ref);
+}
+
 export function parseConfiguredHosts(content: string): {
   ok: boolean;
   hosts: RegistryDaemon[];
