@@ -9,7 +9,6 @@ import {
 } from "paseo-plugin-helper/client";
 import {
   ISSUES_PILL_ID,
-  ForgePill,
   ForgeIssuesModal,
   ForgeIssuesPanel,
 } from "./client/issues-pill.js";
@@ -74,7 +73,6 @@ export default function contribute(client: PluginClientContext) {
     icon: "GitPullRequest",
     resolveLabel: (ctx) => forgeLabel.resolve(ctx),
     refreshIntervalMs: 5000,
-    renderPill: (props) => <ForgePill {...props} />,
     renderModal: (props) => <ForgeIssuesModal {...props} />,
   });
 

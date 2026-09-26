@@ -2,34 +2,28 @@ import React, {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useState,
   useSyncExternalStore,
   type ComponentType,
   type ReactNode,
 } from "react";
-import { StyleSheet, Text, useWindowDimensions, View } from "react-native";
+import { StyleSheet, useWindowDimensions, View } from "react-native";
 import {
   getClientHost,
   type ComposerPillRegistrar,
-  type ComposerPillRegistration,
-  type ComposerPillRegistrationHandle,
   type HostLayout,
   type HostPillProps,
   type HostTheme,
   type PluginCleanup,
 } from "./host";
+import type {
+  PluginButtonContentProps,
+  PluginButtonIconProps,
+  PluginButtonRegistration,
+} from "@getpaseo/plugin/client";
 import { PluginThemeProvider } from "./theme/provider";
-import { useResponsive } from "./theme/useResponsive";
 import type { VisualFlair } from "./theme/flair";
 import { ModalBodyScrollOwnerContext } from "./layout/ModalBody";
 import { reportSuppressed } from "../../../shared/vendor/paseo-plugin-helper/suppressed";
-
-export interface RenderPillProps<TPayload = any> extends HostPillProps {
-  isOpen: boolean;
-  open: (payload?: TPayload) => void;
-  close: () => void;
-  toggle: (payload?: TPayload) => void;
-}
 
 export interface RenderModalProps<TPayload = any> extends HostPillProps {
   close: () => void;
@@ -68,8 +62,6 @@ export type PillIconResolver = (
 export function resolvePillModalScrollable(hostScroll?: boolean): boolean {
   return hostScroll === true;
 }
-
-let probeSequence = 0;
 
 const NOOP_SUBSCRIBE = (): (() => void) => () => {};
 
@@ -118,48 +110,25 @@ export interface RegisterComposerPillOptions<TPayload = any> {
   flair?: Partial<VisualFlair>;
 
   /**
-   * Optional custom badge text shown inside the default pill (e.g. "LIVE", "3").
-   */
-  badgeText?: string;
-
-  /**
-   * Optional compact badge text shown inside the default pill in compact mode. Defaults to `badgeText`.
-   */
-  compactBadgeText?: string;
-
-  /**
-   * Optional callback to resolve default payload when the outer host pill is clicked.
-   * Receives agentId and workspaceId.
-   */
-  resolveDefaultPayload?: (context: { agentId: string; workspaceId: string }) => TPayload | undefined;
-
-  /**
-   * Custom pill body renderer if you want to replace the default pill layout.
-   * Receives `isOpen`, `open`, `close`, and `toggle` along with standard pill props.\
-   */
-  renderPill?: (props: RenderPillProps<TPayload>) => ReactNode;
-
-  /**
-   * Resolves the live pill label (and optionally icon) on button-shaped hosts (Paseo 0.8+), where the
-   * pill body is host-rendered from a static `label` and `icon` string and `renderPill`
-   * never mounts. Called once at registration and then every
-   * `refreshIntervalMs`. Keep it cheap and synchronous when possible; async
-   * resolvers are awaited. Returning `undefined` leaves the current label/icon.
+   * Resolves the live pill label (and optionally icon). The host renders the
+   * pill body itself, so this is the only channel for live pill text. Called
+   * once at registration and then every `refreshIntervalMs`. Keep it cheap and
+   * synchronous when possible; async resolvers are awaited. Returning
+   * `undefined` leaves the current label/icon.
    * Can return a plain string (label) or an object `{ label?: string; icon?: string }`.
    * Cycle modes can advance rotation state on each call.
    */
   resolveLabel?: PillLabelResolver;
 
   /**
-   * Optional standalone resolver for the button icon on button-shaped hosts (Paseo 0.8+).
-   * Evaluated alongside `resolveLabel` on each tick.
+   * Optional standalone resolver for the pill icon. Evaluated alongside
+   * `resolveLabel` on each tick.
    */
   resolveIcon?: PillIconResolver;
 
   /**
-   * Poll interval for `resolveLabel` on button-shaped hosts. Defaults to 5000ms
+   * Poll interval for `resolveLabel`. Defaults to 5000ms
    * when `resolveLabel` or `resolveIcon` is set. Set to 0 to resolve once at registration.
-   * Ignored on legacy hosts (their `renderPill` re-renders via React state).
    */
   refreshIntervalMs?: number;
 
@@ -178,31 +147,28 @@ export interface RegisterComposerPillOptions<TPayload = any> {
   popoverWidth?: number;
 
   /**
-   * Renders the content inside the controlled modal.
-   * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
-   * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
-   * popover rendering this same content at the host surface width (expect a
-   * narrow column, not a wide modal); keep content vertically stacked and
-   * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
-   * popovers, so live pill text comes from `resolveLabel` instead.
+   * Renders the content inside the pill's surface.
+   * The host owns the surface: with the default `"popover"` presentation it
+   * anchors this output to the pill at the host surface width (expect a
+   * narrow column, not a wide modal; keep content vertically stacked and
+   * reflowing), and with `"centered"` it renders it from the pill's icon.
+   * Live pill text therefore comes from `resolveLabel`, not from this renderer.
    *
-   * The wrapper renders exactly one host `<Modal.Content>` around this output
-   * on the modal paths (legacy + centered). Never render another
-   * `<Modal.Content>` here — use `HostModalSection` from
+   * Never render a host `<Modal.Content>` here — use `HostModalSection` from
    * `paseo-plugin-helper/ui` for fluid content. (`HostModalContent` is only
    * for plugins that open their OWN host `<Modal>`.)
    */
   renderModal?: (props: RenderModalProps<TPayload>) => ReactNode;
 
   /**
-   * Host-owned scroll for the pill modal paths (#219).
-   * - `false` (default, legacy): the wrapper renders
+   * Host-owned scroll for the centered modal path (#219).
+   * - `false` (default): the wrapper renders
    *   `<Modal.Content scrollable={false}>` (bounded dialog) and
    *   `ModalBody`-based content owns the one scroller.
    * - `true`: the wrapper renders `<Modal.Content scrollable={true}>` so the
    *   host scrolls, and `renderModal` must provide fluid content with NO
    *   nested `<Modal.Content>` or scroller (`HostModalSection`).
-   * Exactly one `<Modal.Content>` is rendered in both modes. The 0.8 popover
+   * Exactly one `<Modal.Content>` is rendered in both modes. The popover
    * path is unaffected (plain host-owned container either way).
    */
   hostScroll?: boolean;
@@ -228,9 +194,9 @@ export interface RegisterComposerPillOptions<TPayload = any> {
   presentation?: "popover" | "centered";
 
   /**
-   * Called when a pill cannot be registered on the current host (for example
-   * a host API mismatch). Reporting instead of throwing keeps the rest of the
-   * plugin client alive; render the message in your own panel to make it visible.
+   * Called when a pill cannot be registered on the current host. Reporting
+   * instead of throwing keeps the rest of the plugin client alive; render the
+   * message in your own panel to make it visible.
    */
   onError?: (info: { agentId: string; workspaceId: string; error: Error }) => void;
 }
@@ -238,32 +204,27 @@ export interface RegisterComposerPillOptions<TPayload = any> {
 /**
  * Registers an agent-scoped composer pill and modal lifecycle.
  * Manages agent subscription events, unmount cleanup, and pill-to-modal activation.
- *
- * Works against both host generations: legacy `{Component, onPress}` pills
- * (Paseo 0.7 and beta apps) and `button`-descriptor pills (Paseo 0.8+), detected
- * once per call with a throwaway probe registration that is removed immediately.
  */
 export function registerComposerPill<TPayload = any>(
   client: ComposerPillRegistrar,
   options: RegisterComposerPillOptions<TPayload>,
 ): PluginCleanup {
   const { Icon, Modal } = getClientHost();
-  const openers = new Map<string, (payload?: TPayload) => void>();
   const pills = new Map<
     string,
     {
       dispose: () => void;
       workspaceId: string;
-      registration?: ComposerPillRegistrationHandle;
+      registration?: PluginButtonRegistration;
     }
   >();
   const pushedDescriptors = new WeakMap<object, { label?: string; icon?: string }>();
-  // A button-shaped pill can only be resolved while the host actually renders
-  // it. The host mounts the pill's custom icon component for every visible
-  // composer pill, and that mount is the plugin's only visibility signal: its
-  // mount/unmount brackets the pill's on-screen lifetime. Polling every
-  // registered agent regardless of that signal ran one ticker per agent in the
-  // install, which stampedes the daemon on a host with many agents.
+  // A pill can only be resolved while the host actually renders it. The host
+  // mounts the pill's custom icon component for every visible composer pill, and
+  // that mount is the plugin's only visibility signal: its mount/unmount
+  // brackets the pill's on-screen lifetime. Polling every registered agent
+  // regardless of that signal ran one ticker per agent in the install, which
+  // stampedes the daemon on a host with many agents.
   const visiblePillMounts = new Map<string, number>();
   // Agent ids whose anchored popover is currently mounted. While a popover is
   // open the host re-renders the whole composer on every agent-stream message;
@@ -280,7 +241,6 @@ export function registerComposerPill<TPayload = any>(
   const centeredOpenAgents = new Set<string>();
   const centeredListenersByAgent = new Map<string, Set<() => void>>();
   let sharedLabelTimer: ReturnType<typeof setInterval> | null = null;
-  let detectedShape: "button" | "legacy" | null = null;
   let disposed = false;
 
   function defaultPillIcon(): string {
@@ -385,22 +345,8 @@ export function registerComposerPill<TPayload = any>(
    * `registration.update({ icon })`, so the probe component never gets
    * replaced by a plain string and the mount signal survives every icon swap.
    */
-  function makePillIcon(agentId: string): ComponentType<{
-    size?: number;
-    color?: string;
-    theme?: HostTheme;
-    layout?: HostLayout;
-    host?: { id: string; label: string };
-    workspaceId?: string;
-  }> {
-    return function PillVisibilityIcon(props: {
-      size?: number;
-      color?: string;
-      theme?: HostTheme;
-      layout?: HostLayout;
-      host?: { id: string; label: string };
-      workspaceId?: string;
-    }) {
+  function makePillIcon(agentId: string): ComponentType<PluginButtonIconProps> {
+    return function PillVisibilityIcon(props: PluginButtonIconProps) {
       const subscribe = useMemo(() => subscribePillIcon(agentId), [agentId]);
       const name = useSyncExternalStore(
         subscribe,
@@ -426,7 +372,7 @@ export function registerComposerPill<TPayload = any>(
 
       const icon = <Icon name={name} size={props.size ?? 14} color={props.color ?? ""} />;
       const { theme, layout } = props;
-      if (!centered || !options.renderModal || !theme || !layout) return icon;
+      if (!centered || !options.renderModal) return icon;
 
       const modalIconElement = React.isValidElement(options.modalIcon) ? (
         options.modalIcon
@@ -485,7 +431,7 @@ export function registerComposerPill<TPayload = any>(
                       >
                         {options.renderModal({
                           agentId,
-                          workspaceId: props.workspaceId ?? "",
+                          workspaceId: props.workspaceId,
                           theme,
                           layout,
                           host: props.host ?? { id: "", label: "" },
@@ -503,7 +449,7 @@ export function registerComposerPill<TPayload = any>(
     };
   }
 
-  // 0.8 popover scroll ownership: Paseo's MenuSurface/FloatingScrollView or
+  // Popover scroll ownership: Paseo's MenuSurface/FloatingScrollView or
   // BottomSheetScrollView already owns the viewport. Keep this wrapper plain,
   // unconstrained, and mark the subtree so ModalBody does not add a second
   // ScrollView. Fixed heights or overflow clipping here cut off mobile content.
@@ -563,98 +509,7 @@ export function registerComposerPill<TPayload = any>(
     );
   }
 
-  function PillHost(props: HostPillProps) {
-    const [open, setOpen] = useState(false);
-    const [payload, setPayload] = useState<TPayload | undefined>(undefined);
-
-    useEffect(() => {
-      openers.set(props.agentId, (incomingPayload?: TPayload) => {
-        setPayload(incomingPayload);
-        setOpen(true);
-      });
-      return () => {
-        openers.delete(props.agentId);
-      };
-    }, [props.agentId]);
-
-    const effectiveModalTitle = options.modalTitle ?? options.title;
-
-    const modalIconElement = useMemo(() => {
-      if (React.isValidElement(options.modalIcon)) {
-        return options.modalIcon;
-      }
-      const iconName =
-        typeof options.modalIcon === "string" ? options.modalIcon : options.icon;
-      if (iconName) {
-        return <Icon name={iconName} size={16} color={props.theme.colors.foreground} />;
-      }
-      return undefined;
-    }, [options.modalIcon, options.icon, props.theme.colors.foreground]);
-
-    const renderPillProps: RenderPillProps<TPayload> = {
-      ...props,
-      isOpen: open,
-      open: (customPayload?: TPayload) => {
-        setPayload(customPayload);
-        setOpen(true);
-      },
-      close: () => setOpen(false),
-      toggle: (customPayload?: TPayload) => {
-        setPayload(customPayload);
-        setOpen((prev) => !prev);
-      },
-    };
-
-    return (
-      <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
-        {options.renderPill ? (
-          options.renderPill(renderPillProps)
-        ) : (
-          <DefaultPillBody
-            title={options.title}
-            compactTitle={options.compactTitle}
-            icon={options.icon}
-            compactIcon={options.compactIcon}
-            badgeText={options.badgeText}
-            compactBadgeText={options.compactBadgeText}
-            theme={props.theme}
-          />
-        )}
-
-        <Modal
-          title={effectiveModalTitle}
-          icon={modalIconElement}
-          open={open}
-          onOpenChange={(nextOpen) => {
-            setOpen(nextOpen);
-            if (!nextOpen) {
-              setPayload(undefined);
-            }
-          }}
-        >
-          <Modal.Content scrollable={resolvePillModalScrollable(options.hostScroll)}>
-            {open ? (
-              <PluginThemeProvider theme={props.theme} layout={props.layout} flair={options.flair}>
-                <ModalBodyScrollOwnerContext.Provider
-                  value={resolvePillModalScrollable(options.hostScroll) ? "host" : "required"}
-                >
-                  {options.renderModal?.({
-                    ...props,
-                    close: () => setOpen(false),
-                    payload,
-                  })}
-                </ModalBodyScrollOwnerContext.Provider>
-              </PluginThemeProvider>
-            ) : null}
-          </Modal.Content>
-
-        </Modal>
-      </PluginThemeProvider>
-    );
-  }
-
-  function toCleanup(registration: ComposerPillRegistration): PluginCleanup {
-    if (typeof registration === "function") return registration;
+  function toCleanup(registration: PluginButtonRegistration): PluginCleanup {
     return () => registration.remove();
   }
 
@@ -676,9 +531,8 @@ export function registerComposerPill<TPayload = any>(
   function resolveAndPushLabel(
     agentId: string,
     workspaceId: string,
-    registration: ComposerPillRegistration,
+    registration: PluginButtonRegistration,
   ): void {
-    if (typeof registration === "function") return;
     if (!options.resolveLabel && !options.resolveIcon) return;
     const ctx = { agentId, workspaceId };
     Promise.all([
@@ -728,83 +582,41 @@ export function registerComposerPill<TPayload = any>(
       });
   }
 
-  function detectShape(agentId: string, workspaceId: string): "button" | "legacy" {
-    probeSequence += 1;
-    const probeId = `php-probe-${probeSequence}`;
-    try {
-      const registration = client.addComposerPill({
-        id: probeId,
-        workspaceId,
-        agentId,
-        button: {
-          title: "probe",
-          icon: "Activity",
-          behavior: {
-            kind: "action",
-            onPress() {},
-          },
-        },
-      });
-      toCleanup(registration)();
-      return "button";
-    } catch {
-      return "legacy";
-    }
-  }
-
   function addPill(agentId: string, workspaceId: string) {
     if (disposed || pills.has(agentId)) return;
     try {
-      if (!detectedShape) {
-        detectedShape = detectShape(agentId, workspaceId);
-      }
-      if (detectedShape === "button") {
-        const registration = client.addComposerPill({
-          id: options.id,
-          workspaceId,
-          agentId,
-          button: {
-            title: options.title,
-            // The probe is the visibility signal and the live-icon renderer.
-            icon: makePillIcon(agentId),
-            label: options.title,
-            behavior: options.onPress
-              ? { kind: "action", onPress: () => void options.onPress?.() }
-              : options.presentation === "centered"
-                ? {
-                    kind: "action",
-                    onPress: () => setCenteredOpen(agentId, !centeredOpenAgents.has(agentId)),
-                  }
-                : {
-                    kind: "popover",
-                    Content: PillPopoverContent as ComponentType<any>,
-                  },
-          },
-        });
-        const handle = typeof registration === "function" ? undefined : registration;
-        pills.set(agentId, { dispose: toCleanup(registration), workspaceId, registration: handle });
-        // Resolve once so the label is correct even before the probe mounts;
-        // ongoing polling is owned by the shared, visibility-gated timer.
-        if ((options.resolveLabel || options.resolveIcon) && handle) {
-          resolveAndPushLabel(agentId, workspaceId, handle);
-        }
-        return;
-      }
-      const cleanup = client.addComposerPill({
+      const registration = client.addComposerPill({
         id: options.id,
-        title: options.title,
         workspaceId,
         agentId,
-        Component: PillHost,
-        onPress() {
-          const opener = openers.get(agentId);
-          if (opener) {
-            const defaultPayload = options.resolveDefaultPayload?.({ agentId, workspaceId });
-            opener(defaultPayload);
-          }
+        button: {
+          title: options.title,
+          // The icon is both the visibility signal and the live-icon renderer.
+          icon: makePillIcon(agentId),
+          label: options.title,
+          behavior: options.onPress
+            ? { kind: "action", onPress: () => void options.onPress?.() }
+            : options.presentation === "centered"
+              ? {
+                  kind: "action",
+                  onPress: () => setCenteredOpen(agentId, !centeredOpenAgents.has(agentId)),
+                }
+              : {
+                  kind: "popover",
+                  Content: PillPopoverContent as ComponentType<PluginButtonContentProps>,
+                },
         },
       });
-      pills.set(agentId, { dispose: toCleanup(cleanup), workspaceId });
+      pills.set(agentId, {
+        dispose: toCleanup(registration),
+        workspaceId,
+        registration,
+      });
+      // Resolve once so the label is correct even before the icon mounts;
+      // ongoing polling is owned by the shared, visibility-gated timer.
+      if (options.resolveLabel || options.resolveIcon) {
+        resolveAndPushLabel(agentId, workspaceId, registration);
+      }
     } catch (error) {
       reportError(agentId, workspaceId, error);
     }
@@ -817,7 +629,6 @@ export function registerComposerPill<TPayload = any>(
     visiblePillMounts.delete(agentId);
     iconValueByAgent.delete(agentId);
     iconListenersByAgent.delete(agentId);
-    openers.delete(agentId);
     syncSharedLabelTimer();
   }
 
@@ -859,76 +670,11 @@ export function registerComposerPill<TPayload = any>(
     visiblePillMounts.clear();
     iconValueByAgent.clear();
     iconListenersByAgent.clear();
-    openers.clear();
   };
-}
-
-interface DefaultPillBodyProps {
-  title: string;
-  compactTitle?: string;
-  icon?: string;
-  compactIcon?: string;
-  badgeText?: string;
-  compactBadgeText?: string;
-  theme: HostPillProps["theme"];
-}
-
-function DefaultPillBody({
-  title,
-  compactTitle,
-  icon,
-  compactIcon,
-  badgeText,
-  compactBadgeText,
-  theme,
-}: DefaultPillBodyProps) {
-  const { Icon } = getClientHost();
-  const { isCompact } = useResponsive();
-
-  const effectiveTitle = isCompact && compactTitle ? compactTitle : title;
-  const effectiveIcon = isCompact && compactIcon ? compactIcon : icon;
-  const effectiveBadge =
-    isCompact && compactBadgeText !== undefined ? compactBadgeText : badgeText;
-
-  return (
-    <View style={styles.pillContainer}>
-      {effectiveIcon && <Icon name={effectiveIcon} size={13} color={theme.colors.foreground} />}
-      {effectiveTitle ? (
-        <Text style={[styles.title, { color: theme.colors.foreground }]}>{effectiveTitle}</Text>
-      ) : null}
-      {effectiveBadge && (
-        <View style={[styles.badge, { backgroundColor: theme.colors.surface1 }]}>
-          <Text style={[styles.badgeText, { color: theme.colors.foregroundMuted }]}>
-            {effectiveBadge}
-          </Text>
-        </View>
-      )}
-    </View>
-  );
 }
 
 const styles = StyleSheet.create({
   popoverContainer: {
     width: "100%",
-  },
-  pillContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  title: {
-    fontSize: 12,
-    fontWeight: "500",
-  },
-  badge: {
-    borderRadius: 999,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: "600",
   },
 });

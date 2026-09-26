@@ -1,5 +1,4 @@
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
   AboutSection,
   ActionBar,
@@ -14,32 +13,15 @@ import {
   usePluginTheme,
   type ComposerPillRegistrar,
   type RenderModalProps,
-  type RenderPillProps,
 } from "./vendor/paseo-plugin-helper/index";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Text } from "react-native";
 import { CrossDaemonConversation } from "./x-comms-conversation";
 import { uiPrefsGetRpc, uiPrefsSetRpc } from "../shared/registry";
 
-// Raw Text is retained only for the composer pill label and the muted
-// reload-needed caption. Every tab, layout, settings row, toggle, status and
-// empty state goes through a paseo-plugin-helper primitive.
-function CrossDaemonPill(props: RenderPillProps) {
-  const { theme } = props;
-  const style = useMemo(
-    () => ({ color: theme.colors.accent, flexShrink: 1, fontSize: 10 }),
-    [theme],
-  );
-  return (
-    <>
-      <Icon name="PhoneOutgoing" size={9} color={theme.colors.accent} />
-      <Text numberOfLines={1} style={style}>
-        X-comms
-      </Text>
-    </>
-  );
-}
-
+// Raw Text is retained only for the muted reload-needed caption. Every tab,
+// layout, settings row, toggle, status and empty state goes through a
+// paseo-plugin-helper primitive.
 function XCommsSettings() {
   const callGet = useRpc(uiPrefsGetRpc);
   const callSet = useRpc(uiPrefsSetRpc);
@@ -173,7 +155,7 @@ function XCommsModalContent({ theme, agentId }: { theme: RenderModalProps["theme
 /**
  * One composer pill per agent. Lifecycle (agent subscription, pill mount and
  * unmount, modal open state, theme) is managed by registerComposerPill; this
- * module only supplies the pill body and modal content.
+ * module only supplies the modal content.
  */
 export function contributeClient(client: ComposerPillRegistrar) {
   return registerComposerPill(client, {
@@ -182,7 +164,6 @@ export function contributeClient(client: ComposerPillRegistrar) {
     icon: "PhoneOutgoing",
     modalTitle: "X-comms",
     presentation: "centered",
-    renderPill: (props) => <CrossDaemonPill {...props} />,
     renderModal: (props) => <XCommsModalContent theme={props.theme} agentId={props.agentId} />,
   });
 }

@@ -17,8 +17,10 @@ export interface CustomPillBodyProps {
 }
 
 /**
- * Standard pill body renderer for a custom metric pill in the composer trackbar.
- * Automatically adapts to responsive compact/mobile modes and shows threshold status.
+ * Standard pill body renderer for a custom metric pill. The host renders the
+ * composer pill body itself, so reach for this from a pill's own surface
+ * (`renderModal`) rather than from the trackbar; it adapts to responsive
+ * compact/mobile modes and shows threshold status.
  */
 export function CustomPillBody({ state }: CustomPillBodyProps) {
   const { Icon } = getClientHost();
@@ -145,7 +147,6 @@ export function registerCustomPills(
       flair: options.flair,
       resolveLabel: () =>
         pill.displayValue ? `${pill.title} ${pill.displayValue}` : pill.title,
-      renderPill: () => <CustomPillBody state={pill} />,
       renderModal: () => {
         const [refreshing, setRefreshing] = useState(false);
         const [currentOutput, setCurrentOutput] = useState<string | undefined>(

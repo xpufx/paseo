@@ -1,7 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
 import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers, registerSidebarSurface, type ComposerPillRegistrar } from "./client/vendor/paseo-plugin-helper/index";
+import { initClientHelpers, registerSidebarSurface } from "./client/vendor/paseo-plugin-helper/index";
 import { MainSurface } from "./client/main";
 import { crossDaemonTransformer, crossDaemonRenderer, outboxNoticeRenderer } from "./client/x-comms-timeline";
 import { crossDaemonToolCallTransformer, crossDaemonToolCallRenderer } from "./client/x-comms-tool-call";
@@ -67,8 +67,7 @@ export default function contribute(client: PluginClientContext) {
       },
       (err) => console.warn("[x-comms] Failed to list agents for header buttons:", err),
     );
-  // Paseo 0.8 client is button-only; registerComposerPill probes the host shape at runtime.
-  const disposePill = contributeClient(client as unknown as ComposerPillRegistrar);
+  const disposePill = contributeClient(client);
   return () => {
     unsubscribeAgents();
     for (const remove of headerButtons.values()) remove();
