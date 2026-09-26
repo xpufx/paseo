@@ -4,25 +4,32 @@
 #
 # Order (mirrors .agents/skills/plugin-release/SKILL.md):
 #   1. hygiene     — no private strings / missing READMEs on the publish surface
-#   2. vendor gate — materialize any dev link (the only permitted write), then
-#                    assert the committed copies are drift-free. The check must
-#                    observe the committed state, not a tree a prior step in the
-#                    same gate rewrote (#630).
-#   3. staged tree — mirror-github.mjs --dry-run prepares the exact scoped tree
+#   2. staged tree — mirror-github.mjs --dry-run prepares the exact scoped tree
 #                    (all 8 plugins + helper) and commits it to a temp LOCAL bare
 #                    remote; no GitHub push happens here
-#   4. install     — `paseo plugin add file://<staged> --ref <commit>` for every
+#   3. install     — `paseo plugin add file://<staged> --ref <commit>` for every
 #                    plugin dir, asserting status=running
-#   5. mirror push — only on an explicit `workflow_dispatch` with `mirror: true`,
-#                    after 3+4 pass, push the same scoped tree to the public
+#   4. mirror push — only on an explicit `workflow_dispatch` with `mirror: true`,
+#                    after 2+3 pass, push the same scoped tree to the public
 #                    GitHub mirror with secrets.FJ_GITHUB_MIRROR_TOKEN (Forgejo
 #                    reserves the `GITHUB_` secret prefix). Never on a
 #                    plain push: the gate verifies every push, the mirror moves
 #                    on demand.
 #
+# The vendored-copy gate (materialize any dev link — the only permitted write —
+# then assert the committed copies and the tracked helper dist/ are drift-free,
+# #630/#682) used to be step 2 here. It depends on no Paseo version: no CLI, no
+# daemon, no install of Paseo. Sitting inside a 0.8/0.9 matrix it ran twice per
+# PR and paid for a helper build twice (#685), and this job is not a required
+# check, so the gate was advisory. It moved to test-suites.yml (#686), which is
+# required and runs on push to main: once instead of twice, enforced instead of
+# advisory. Nothing in this job needs node_modules, so this job has no dependency
+# install step.
+#
 # `helper` (packages/paseo-plugin-helper) is a workspace package, not a plugins/
 # directory, so it is part of the staged mirror target set (it must survive the
-# mirror prune) but is validated by the vendor gate, not by `paseo plugin add`.
+# mirror prune) but is never installed by `paseo plugin add`; its vendored
+# copies and tracked dist are checked by the gate in test-suites.yml (#686).
 #
 # Runner conventions (runs-on label, registry image) are copied from
 # xpufx/aur-automation/.forgejo/workflows/*.
@@ -174,49 +181,6 @@ jobs:
           done
           [ "$badlink" -eq 0 ] || exit 1
           echo "hygiene clean"
-
-      # `vendor-sync.mjs --check` builds packages/paseo-plugin-helper to prove
-      # the committed dist/ is what src/ produces (#682), and a build it cannot
-      # run is a red gate rather than a skipped one. The gate therefore needs
-      # the toolchain: `npm ci`, not `npm install`, because the lockfile is the
-      # reproducibility statement for both the tests and the helper's own build.
-      # `npm ci`, not `npm install` — same reason test-suites.yml uses it.
-      - name: Install dependencies from the lockfile
-        run: |
-          set -euo pipefail
-          npm ci
-
-      - name: Unit-test the vendor gate
-        run: node scripts/vendor-sync.test.mjs
-
-      - name: Gate — vendored copy trees are publishable
-        run: |
-          set -euo pipefail
-          # Dev imports the bare paseo-plugin-helper specifier (resolved to the
-          # helper src via the workspace link + tsconfig paths); the vendored
-          # copies are the publish artifact the mirror stages and this gate
-          # installs. A legacy working-tree dev symlink is not publishable, so
-          # materialize it first (a no-op on a clean checkout). That step is the
-          # ONLY write this gate may perform: it must never refresh an
-          # already-materialized tree, or the --check below would be verifying
-          # the tree it had just rewritten and would report green whatever was
-          # committed (#630). The gate must never smoke or publish a
-          # linked/partial tree — such a tree installs as a broken plugin (#146).
-          node scripts/vendor-sync.mjs --materialize-links
-          # Back the claim that the step above wrote nothing it shouldn't: if it
-          # rewrote a committed copy, --check is now verifying its own output.
-          if ! git diff --quiet -- plugins; then
-            git --no-pager diff --stat -- plugins
-            echo "::error::materialize step rewrote committed vendored copies — the --check below would verify the tree it just wrote"
-            exit 1
-          fi
-          node scripts/vendor-sync.mjs --check
-          linked="$(git ls-files -s | awk '$1==120000 && $4 ~ /\/vendor\/paseo-plugin-helper\// {print $4}')"
-          if [ -n "$linked" ]; then
-            printf '%s\n' "$linked"
-            echo "::error::committed symlink under a vendored helper path is not installable"
-            exit 1
-          fi
 
       - name: Prepare staged mirror tree (dry-run of the scoped publish set)
         id: stage

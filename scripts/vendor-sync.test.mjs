@@ -1,13 +1,13 @@
 /**
- * Deterministic tests for the install-smoke vendored-copy gate.
+ * Deterministic tests for the CI vendored-copy gate.
  *
  * The gate this file protects used to be a no-op: it ran the full write pass
  * and then `--check`, so `--check` only ever saw the tree the write pass had
  * just produced. A gate like that cannot be made red, which is the whole defect
  * (#630). These cases work on throwaway copies of the real plugin trees, induce
  * the actual defect (a hand-edited committed vendored copy), and assert the
- * shipped command sequence fails — plus assert install-smoke.yml still uses that
- * sequence, so the ordering cannot regress silently.
+ * shipped command sequence fails — plus assert CI still runs that sequence, so
+ * the ordering cannot regress silently.
  *
  * The same reasoning covers the tracked helper `dist/` (#682): it is a publish
  * artifact nothing verified, and #675 shipped a build that predated its own
@@ -15,6 +15,12 @@
  * no rebuild — and assert `--check` fails on it, names the file, and leaves the
  * stale bytes exactly where they were. A check that rebuilt `dist/` in place
  * would report green here, because it would be verifying its own output.
+ *
+ * Which workflow runs the gate is deliberately not pinned here. It lived in
+ * install-smoke.yml, inside a 0.8/0.9 matrix, so a pure repo check that depends
+ * on no Paseo version ran twice per PR (#686); it now runs once in
+ * test-suites.yml, a required check. What must stay true is the part that
+ * matters: CI runs the sequence, exactly once, and not from a matrix.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -118,7 +124,7 @@ function induceDrift(dir) {
   fs.writeFileSync(file, before.replace(SAMPLE_EDIT[0], SAMPLE_EDIT[1]));
 }
 
-/** The command sequence install-smoke.yml's vendor gate must be running. */
+/** The command sequence CI's vendor gate must be running. */
 const GATE_SEQUENCE = [
   ["--materialize-links"],
   ["--check"],
@@ -363,16 +369,104 @@ check("a helper build that cannot run fails the check loudly instead of passing"
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-check("install-smoke.yml gates on the gated sequence, not a write pass", () => {
-  const yml = fs.readFileSync(path.join(ROOT, ".forgejo/workflows/install-smoke.yml"), "utf-8");
-  const step = yml.slice(yml.indexOf("Gate — vendored copy trees are publishable"));
-  assert.ok(step.length > 0, "the vendor gate step is gone from install-smoke.yml");
-  const body = step.slice(0, step.indexOf("\n      - name:", 1));
-  const invocations = [...body.matchAll(/node scripts\/vendor-sync\.mjs([^\n]*)/g)].map((m) => m[1].trim());
-  assert.deepEqual(invocations, GATE_SEQUENCE.map((a) => a.join(" ")),
-    "the vendor gate must run --materialize-links then --check, nothing else");
-  assert.match(body, /git diff --quiet -- plugins/,
+// ---------------------------------------------------------------------------
+// #686 — the gate is CI's, not one workflow's: assert it runs, not where
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_DIRS = [".forgejo/workflows", ".github/workflows"];
+
+/**
+ * Every CI workflow as runnable lines. Comment lines are dropped, so a gate
+ * cannot be "found" in prose — the parse below sees the same text a runner
+ * would, and a workflow that only mentions `vendor-sync.mjs` in a comment does
+ * not count as running it.
+ */
+function ciWorkflows() {
+  const workflows = [];
+  for (const dir of WORKFLOW_DIRS) {
+    const full = path.join(ROOT, dir);
+    if (!fs.existsSync(full)) continue;
+    for (const name of fs.readdirSync(full).sort()) {
+      if (!name.endsWith(".yml") && !name.endsWith(".yaml")) continue;
+      workflows.push({
+        file: `${dir}/${name}`,
+        lines: fs
+          .readFileSync(path.join(full, name), "utf-8")
+          .split("\n")
+          .filter((line) => !line.trim().startsWith("#")),
+      });
+    }
+  }
+  return workflows;
+}
+
+/**
+ * The YAML step containing `index`: from its `- name:` to the next step at the
+ * same indent.
+ */
+function stepAround(lines, index) {
+  let from = index;
+  while (from > 0 && !/^\s*-\s+\S/.test(lines[from])) from -= 1;
+  const indent = lines[from].match(/^(\s*)/)[0];
+  let to = from + 1;
+  while (to < lines.length && !new RegExp(`^${indent}- `).test(lines[to])) to += 1;
+  return lines.slice(from, to).join("\n");
+}
+
+/** The job containing `index`: its job key up to the next one. */
+function jobAround(lines, index) {
+  let from = index;
+  while (from > 0 && !/^\s{2}\S/.test(lines[from])) from -= 1;
+  let to = from + 1;
+  while (to < lines.length && !/^\s{2}\S/.test(lines[to])) to += 1;
+  return lines.slice(from, to).join("\n");
+}
+
+check("CI runs the vendor gate once, as --materialize-links then --check, outside a matrix", () => {
+  const workflows = ciWorkflows();
+  const gate = [];
+  const selfTest = [];
+  for (const { file, lines } of workflows) {
+    lines.forEach((line, index) => {
+      // Matched anywhere on a runnable line, so `run: node scripts/…` and a
+      // line inside a `run: |` block count the same: what matters is that a
+      // runner executes the command, not how the step spells it.
+      if (/node scripts\/vendor-sync\.test\.mjs\s*$/.test(line)) selfTest.push({ file, lines, index });
+      const match = line.match(/node scripts\/vendor-sync\.mjs([^\n]*)/);
+      if (match) gate.push({ file, lines, index, args: match[1].trim() });
+    });
+  }
+
+  // Once, and only the two modes that can fail: a write pass here would make
+  // --check verify the tree it had just written (#630), and a second workflow
+  // running the gate is the duplication #686 removed coming back.
+  assert.deepEqual(
+    gate.map((g) => g.args),
+    GATE_SEQUENCE.map((a) => a.join(" ")),
+    `CI must run the vendor gate exactly once, as ${GATE_SEQUENCE.map((a) => a.join(" ")).join(" then ")} and nothing else; found ${JSON.stringify(gate.map((g) => `${g.file}: ${g.args}`))}`
+  );
+
+  // The gate's own tests move with it, or the wiring above is the only thing
+  // left checking that --check can go red at all.
+  assert.ok(
+    selfTest.some((t) => t.file === gate[0].file),
+    `no workflow runs scripts/vendor-sync.test.mjs alongside the gate (${gate[0].file})`
+  );
+
+  const step = stepAround(gate[0].lines, gate[0].index);
+  assert.match(step, /git diff --quiet -- plugins/,
     "the gate must assert the materialize step left the committed copies untouched");
+  assert.match(step, /git ls-files -s/,
+    "the gate must still reject a committed symlink under a vendored helper path (#146)");
+
+  // The reason the gate moved: it depends on no Paseo version, so a matrix
+  // multiplies it per lane — twice per PR while it sat in install-smoke.yml
+  // (#686), and the helper build inside --check with it (#685).
+  assert.doesNotMatch(
+    jobAround(gate[0].lines, gate[0].index),
+    /^\s*matrix:/m,
+    "the vendor gate must not sit in a matrix job: it is a pure repo check, so a matrix only runs it once per Paseo version"
+  );
 });
 
 process.exit(fail > 0 ? 1 : 0);
