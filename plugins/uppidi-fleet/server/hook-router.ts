@@ -593,24 +593,82 @@ export function detectTurnConcurrencyLock(liveStatus: unknown, lastError: unknow
 }
 
 /**
+ * Convert an epoch-ms number, epoch-second number, ISO-8601 string, or Date to epoch-ms.
+ */
+export function coerceEpochMs(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return value < 100_000_000_000 ? Math.round(value * 1000) : Math.round(value);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    if (Number.isFinite(num)) {
+      return num < 100_000_000_000 ? Math.round(num * 1000) : Math.round(num);
+    }
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isFinite(time) ? time : null;
+  }
+  return null;
+}
+
+/**
  * Taxonomy 2: an acknowledged turn was force-canceled after the timeout.
  * The log marker is historical, so it only counts while the lifecycle is not a
  * fresh healthy run (error still wedged, or idle never resumed) and only within
- * the recency window.
+ * the recency upper bound. Recovery is idempotent: a given
+ * (agent, cancellation-timestamp) pair yields at most one recovery action.
+ *
+ * An agent that is idle, has no lastError, and has had activity since the
+ * cancellation is treated as recovered, not wedged.
  */
 export function detectCancellationTimeout(
   agentId: string,
-  cancellations: Map<string, number | null> | null | undefined,
+  cancellations: ReadonlyMap<string, number | string | null> | null | undefined,
   liveStatus: unknown,
   nowEpochMs?: number,
   recencySeconds?: number,
+  lastError?: unknown,
+  lastActivityAt?: unknown,
+  lastHandledCancellationAt?: unknown,
 ): boolean {
-  if (!["error", "idle"].includes(String(liveStatus ?? "").toLowerCase())) return false;
+  const status = String(liveStatus ?? "").toLowerCase();
+  if (status !== "error" && status !== "idle") return false;
   if (!cancellations || !cancellations.has(agentId)) return false;
-  if (nowEpochMs === undefined || recencySeconds === undefined) return true;
-  const canceledAt = cancellations.get(agentId);
-  if (canceledAt === null || canceledAt === undefined) return true;
-  return (nowEpochMs - canceledAt) / 1000 <= recencySeconds;
+
+  const rawCanceledAt = cancellations.get(agentId);
+  const canceledAt = rawCanceledAt != null ? coerceEpochMs(rawCanceledAt) : null;
+
+  if (recencySeconds !== undefined && nowEpochMs !== undefined && canceledAt !== null) {
+    if ((nowEpochMs - canceledAt) / 1000 > recencySeconds) {
+      return false;
+    }
+  }
+
+  if (lastHandledCancellationAt != null) {
+    const handledMs = coerceEpochMs(lastHandledCancellationAt);
+    if (handledMs != null && (canceledAt == null || handledMs >= canceledAt)) {
+      return false;
+    }
+  }
+
+  const hasError = Boolean(String(lastError ?? "").trim());
+  if (status === "idle" && !hasError) {
+    if (lastActivityAt != null && canceledAt != null) {
+      const activityMs = coerceEpochMs(lastActivityAt);
+      if (activityMs != null && activityMs > canceledAt) {
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 /** Taxonomy 5: healthy/idle lifecycle still carrying a disk lastError. */
@@ -783,6 +841,8 @@ export interface WatchdogAgentDisk {
   attentionReason?: string | null;
   attentionTimestamp?: string | null;
   lastActivityAt?: string | null;
+  lastHandledCancellationAt?: number | string | null;
+  cancellationHandledAt?: number | string | null;
   updatedAt?: string | null;
   archivedAt?: string | null;
   labels?: Record<string, string> | null;
@@ -834,6 +894,7 @@ export function loadAgentDiskMetadata(agentsDir: string): Map<string, WatchdogAg
         attentionReason: parsed.attentionReason ?? null,
         attentionTimestamp: parsed.attentionTimestamp ?? null,
         lastActivityAt: parsed.lastActivityAt ?? parsed.updatedAt ?? null,
+        lastHandledCancellationAt: parsed.lastHandledCancellationAt ?? parsed.cancellationHandledAt ?? null,
         updatedAt: parsed.updatedAt ?? null,
         labels: parsed.labels && typeof parsed.labels === "object" ? parsed.labels : null,
         archivedAt: parsed.archivedAt ?? null,
@@ -862,6 +923,35 @@ export function clearAgentDiskFields(path: string | null | undefined, keys: read
       }
     }
     if (!changed) return false;
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+    renameSync(tmp, path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Atomically merge keys into persisted agent metadata. Missing or corrupt
+ * files return false; no-op writes return true.
+ */
+export function setAgentDiskFields(
+  path: string | null | undefined,
+  fields: Record<string, unknown>,
+): boolean {
+  if (!path || !existsSync(path)) return false;
+  try {
+    const state = JSON.parse(readFileSync(path, "utf8"));
+    if (!state || typeof state !== "object" || Array.isArray(state)) return false;
+    let changed = false;
+    for (const [key, value] of Object.entries(fields)) {
+      if (state[key] !== value) {
+        state[key] = value;
+        changed = true;
+      }
+    }
+    if (!changed) return true;
     const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
     renameSync(tmp, path);
@@ -947,6 +1037,8 @@ export interface WatchdogAssessment {
   requiresAttention: boolean;
   attentionReason: string | null;
   lastActivityAt: string | null;
+  lastHandledCancellationAt?: number | string | null;
+  cancellationTime?: number | null;
   diskPath: string | null;
   healthy: boolean;
 }
@@ -970,6 +1062,7 @@ export function assessAgentHealth(
   const requiresAttention = Boolean(live?.requiresAttention ?? disk?.requiresAttention);
   const attentionReason = live?.attentionReason ?? disk?.attentionReason ?? null;
   const lastActivityAt = disk?.lastActivityAt ?? live?.lastActivityAt ?? disk?.updatedAt ?? live?.updatedAt ?? null;
+  const lastHandledCancellationAt = disk?.lastHandledCancellationAt ?? disk?.cancellationHandledAt ?? null;
   const archived = Boolean(live?.archivedAt ?? disk?.archivedAt);
   const activeWorkers = options.activeWorkers ?? 0;
   const staleSeconds = options.runningStaleSeconds ?? DEFAULT_RUNNING_STALE_SECONDS;
@@ -981,15 +1074,26 @@ export function assessAgentHealth(
     detectTurnConcurrencyLock(liveStatus, lastError) ||
     (!String(lastError ?? "").trim() && requiresAttention && attentionReason === "error");
 
+  const cancellationTimeout = detectCancellationTimeout(
+    agentId,
+    options.cancellations,
+    liveStatus,
+    now,
+    recencySeconds,
+    lastError,
+    lastActivityAt,
+    lastHandledCancellationAt,
+  );
+
+  const rawCancellation = options.cancellations?.get(agentId);
+  let cancellationTime: number | null = rawCancellation != null ? coerceEpochMs(rawCancellation) : null;
+  if (cancellationTime == null && cancellationTimeout) {
+    cancellationTime = now;
+  }
+
   const checks: Record<WatchdogTaxonomyType, boolean> = {
     TURN_CONCURRENCY_LOCK: turnLock,
-    TURN_CANCELLATION_TIMEOUT: detectCancellationTimeout(
-      agentId,
-      options.cancellations,
-      liveStatus,
-      now,
-      recencySeconds,
-    ),
+    TURN_CANCELLATION_TIMEOUT: cancellationTimeout,
     IDLE_POST_ERROR_AMNESIA: detectIdlePostErrorAmnesia(
       liveStatus,
       lastError,
@@ -1031,6 +1135,8 @@ export function assessAgentHealth(
     requiresAttention,
     attentionReason,
     lastActivityAt,
+    lastHandledCancellationAt,
+    cancellationTime,
     diskPath: disk?.path ?? null,
     healthy: taxonomy.length === 0,
   };
@@ -1040,6 +1146,7 @@ export interface WatchdogRecoveryPlan {
   stop: boolean;
   clearError: boolean;
   clearAttention: boolean;
+  recordCancellationHandled: boolean;
   steer: boolean;
   steerMessage: string;
   blockedReason: string | null;
@@ -1062,6 +1169,7 @@ export function planWatchdogRecovery(
     stop,
     clearError: set.has("STALE_ERROR_GHOSTING") || stop,
     clearAttention: set.has("IDLE_POST_ERROR_AMNESIA"),
+    recordCancellationHandled: set.has("TURN_CANCELLATION_TIMEOUT"),
     steer,
     steerMessage,
     blockedReason:
@@ -2030,6 +2138,13 @@ export class HookRouter {
     if (plan.clearAttention) {
       const ok = clearAgentDiskFields(assessment.diskPath, WATCHDOG_ATTENTION_CLEAR_KEYS);
       actions.push(`clear_attention:${ok ? "ok" : "noop"}`);
+    }
+    if (plan.recordCancellationHandled) {
+      const cancellationTime = assessment.cancellationTime ?? Date.now();
+      const ok = setAgentDiskFields(assessment.diskPath, {
+        lastHandledCancellationAt: cancellationTime,
+      });
+      actions.push(`record_cancellation_handled:${ok ? "ok" : "noop"}`);
     }
     if (plan.steer) {
       const ok = await steerFn(assessment.agentId, plan.steerMessage);

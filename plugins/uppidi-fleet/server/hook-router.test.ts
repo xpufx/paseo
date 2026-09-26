@@ -43,8 +43,10 @@ import {
   assessAgentHealth,
   planWatchdogRecovery,
   clearAgentDiskFields,
+  setAgentDiskFields,
   loadAgentDiskMetadata,
   scanCancellationTimeouts,
+  coerceEpochMs,
   countActiveWorkers,
   assessChildWakeup,
   formatChildWakeupMessage,
@@ -2010,13 +2012,65 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     assert.equal(detectTurnConcurrencyLock("error", "spawn ENOENT"), false);
   });
 
-  it("classifies cancellation timeouts with a recency window", () => {
+  it("classifies cancellation timeouts with a recency window and timestamp shapes", () => {
     const cancellations = new Map<string, number | null>([["agent-1", now - 60_000]]);
     assert.equal(detectCancellationTimeout("agent-1", cancellations, "idle", now, 86400), true);
     assert.equal(detectCancellationTimeout("agent-1", cancellations, "running", now, 86400), false);
     assert.equal(detectCancellationTimeout("agent-recovered", cancellations, "idle", now, 86400), false);
     assert.equal(detectCancellationTimeout("agent-1", cancellations, "idle", now, 30), false);
     assert.equal(detectCancellationTimeout("agent-1", new Map([["agent-1", null]]), "error", now, 30), true);
+
+    // Healthy idle with activity since cancellation does not flag.
+    assert.equal(
+      detectCancellationTimeout("agent-1", cancellations, "idle", now, 86400, "", now - 30_000),
+      false,
+    );
+    // Idle with unhandled wedged error still flags.
+    assert.equal(
+      detectCancellationTimeout("agent-1", cancellations, "idle", now, 86400, "crash", now - 30_000),
+      true,
+    );
+    // Idle without activity since cancellation still flags (idle never resumed).
+    assert.equal(
+      detectCancellationTimeout("agent-1", cancellations, "idle", now, 86400, "", now - 120_000),
+      true,
+    );
+    // Handled marker matching or exceeding cancellation timestamp suppresses flag.
+    assert.equal(
+      detectCancellationTimeout("agent-1", cancellations, "idle", now, 86400, "", null, now - 60_000),
+      false,
+    );
+    assert.equal(
+      detectCancellationTimeout("agent-1", cancellations, "error", now, 86400, "err", null, now - 60_000),
+      false,
+    );
+    // Newer cancellation after a handled one is still flagged.
+    assert.equal(
+      detectCancellationTimeout("agent-1", new Map([["agent-1", now - 10_000]]), "error", now, 86400, "err", null, now - 60_000),
+      true,
+    );
+
+    // Tolerates various timestamp shapes: ISO-8601 string, epoch-s, epoch-ms
+    const isoMap = new Map([["agent-iso", new Date(now - 60_000).toISOString()]]);
+    assert.equal(detectCancellationTimeout("agent-iso", isoMap, "idle", now, 86400, "", new Date(now - 30_000).toISOString()), false);
+    assert.equal(detectCancellationTimeout("agent-iso", isoMap, "idle", now, 86400, "", null, new Date(now - 60_000).toISOString()), false);
+
+    const epochSecMap = new Map([["agent-sec", Math.floor((now - 60_000) / 1000)]]);
+    assert.equal(detectCancellationTimeout("agent-sec", epochSecMap, "idle", now, 86400, "", Math.floor((now - 30_000) / 1000)), false);
+  });
+
+  it("coerces epoch timestamps from ms, seconds, ISO strings, and dates", () => {
+    assert.equal(coerceEpochMs(1700000000000), 1700000000000);
+    assert.equal(coerceEpochMs(1700000000), 1700000000000);
+    assert.equal(coerceEpochMs("1700000000"), 1700000000000);
+    assert.equal(coerceEpochMs("1700000000000"), 1700000000000);
+    assert.equal(coerceEpochMs("2026-01-01T00:00:00.000Z"), Date.parse("2026-01-01T00:00:00.000Z"));
+    assert.equal(coerceEpochMs(new Date("2026-01-01T00:00:00.000Z")), Date.parse("2026-01-01T00:00:00.000Z"));
+    assert.equal(coerceEpochMs(null), null);
+    assert.equal(coerceEpochMs(undefined), null);
+    assert.equal(coerceEpochMs("invalid"), null);
+    assert.equal(coerceEpochMs(""), null);
+    assert.equal(coerceEpochMs(NaN), null);
   });
 
   it("classifies idle post-error amnesia conservatively", () => {
@@ -2131,6 +2185,36 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     }
   });
 
+  it("atomically merges metadata keys and tolerates missing or corrupt files", () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-health-disk-set-"));
+    try {
+      const file = join(dir, "agent.json");
+      writeFileSync(file, JSON.stringify({ id: "agent-1", status: "idle", keep: 42 }));
+      assert.equal(
+        setAgentDiskFields(file, { lastHandledCancellationAt: 1790000000000, extra: "yes" }),
+        true,
+      );
+      const after = JSON.parse(readFileSync(file, "utf8"));
+      assert.equal(after.id, "agent-1");
+      assert.equal(after.keep, 42);
+      assert.equal(after.lastHandledCancellationAt, 1790000000000);
+      assert.equal(after.extra, "yes");
+
+      // No-op update returns true without error
+      assert.equal(setAgentDiskFields(file, { extra: "yes" }), true);
+
+      // Missing file returns false
+      assert.equal(setAgentDiskFields(join(dir, "nonexistent.json"), { foo: "bar" }), false);
+
+      // Corrupted file returns false
+      const corrupt = join(dir, "corrupt.json");
+      writeFileSync(corrupt, "{ invalid-json");
+      assert.equal(setAgentDiskFields(corrupt, { foo: "bar" }), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("loads persisted metadata from the agents directory subfolders", () => {
     const dir = mkdtempSync(join(tmpdir(), "paseo-health-metadata-"));
     try {
@@ -2138,13 +2222,20 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
       mkdirSync(sub, { recursive: true });
       writeFileSync(
         join(sub, "agent-1.json"),
-        JSON.stringify({ id: "agent-1", lastStatus: "idle", lastError: "ghost", updatedAt: "2026-01-01T00:00:00Z" }),
+        JSON.stringify({
+          id: "agent-1",
+          lastStatus: "idle",
+          lastError: "ghost",
+          updatedAt: "2026-01-01T00:00:00Z",
+          lastHandledCancellationAt: 1790000000000,
+        }),
       );
       const map = loadAgentDiskMetadata(dir);
       const disk = map.get("agent-1") as WatchdogAgentDisk;
       assert.equal(disk.lastStatus, "idle");
       assert.equal(disk.lastError, "ghost");
       assert.equal(disk.lastActivityAt, "2026-01-01T00:00:00Z");
+      assert.equal(disk.lastHandledCancellationAt, 1790000000000);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -2281,5 +2372,155 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
     assert.ok(first > 0);
     await runOnce();
     assert.equal(delivered.length, first, "no duplicate taxonomy alerts within cooldown");
+  });
+
+  it("healthy idle agent with recent cancellation is not steered", async () => {
+    const cancelTime = Date.now() - 30 * 60 * 1000;
+    const activityTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    writeMetadata("orch-healthy", {
+      id: "orch-healthy",
+      lastStatus: "idle",
+      lastError: "",
+      lastActivityAt: activityTime,
+    });
+    const fakeDeliver = async (id: string, msg: string, o?: { steer?: boolean }) => {
+      delivered.push({ id, msg, steer: o?.steer });
+      return true;
+    };
+    const map = new Map<string, WatchdogAgent>([
+      ["orch-healthy", { id: "orch-healthy", status: "idle" }],
+    ]);
+
+    const audit = await router.runWatchdogAudit({
+      agentMap: map,
+      agentsDir,
+      cancellations: new Map([["orch-healthy", cancelTime]]),
+      deliver: fakeDeliver,
+      stopAgent: async () => ({ ok: true }),
+      frontDeskId,
+      cancellationRecencySeconds: 86400,
+    });
+
+    assert.equal(audit.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT"), false);
+    assert.equal(delivered.some((d) => d.id === "orch-healthy"), false, "healthy agent must not be steered");
+  });
+
+  it("recovers a genuinely wedged agent and persists lastHandledCancellationAt", async () => {
+    const cancelTime = Date.now() - 30 * 60 * 1000;
+    const staleActivity = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    writeMetadata("wedged-1", {
+      id: "wedged-1",
+      lastStatus: "idle",
+      lastError: "",
+      lastActivityAt: staleActivity,
+    });
+    const fakeDeliver = async (id: string, msg: string, o?: { steer?: boolean }) => {
+      delivered.push({ id, msg, steer: o?.steer });
+      return true;
+    };
+    const map = new Map<string, WatchdogAgent>([
+      ["wedged-1", { id: "wedged-1", status: "idle" }],
+    ]);
+
+    const audit = await router.runWatchdogAudit({
+      agentMap: map,
+      agentsDir,
+      cancellations: new Map([["wedged-1", cancelTime]]),
+      deliver: fakeDeliver,
+      stopAgent: async () => ({ ok: true }),
+      frontDeskId,
+      cancellationRecencySeconds: 86400,
+    });
+
+    assert.ok(audit.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT" && a.agentId === "wedged-1"));
+    assert.ok(delivered.some((d) => d.id === "wedged-1" && d.steer === true));
+    const persisted = JSON.parse(readFileSync(join(agentsDir, "wedged-1", "wedged-1.json"), "utf8"));
+    assert.equal(persisted.lastHandledCancellationAt, cancelTime);
+  });
+
+  it("second watchdog pass after successful recovery produces NO re-steer (idempotency)", async () => {
+    const cancelTime = Date.now() - 30 * 60 * 1000;
+    const staleActivity = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    writeMetadata("orch-loop", {
+      id: "orch-loop",
+      lastStatus: "idle",
+      lastError: "",
+      lastActivityAt: staleActivity,
+    });
+    const fakeDeliver = async (id: string, msg: string, o?: { steer?: boolean }) => {
+      delivered.push({ id, msg, steer: o?.steer });
+      return true;
+    };
+    const map = new Map<string, WatchdogAgent>([
+      ["orch-loop", { id: "orch-loop", status: "idle" }],
+    ]);
+    const cancellations = new Map([["orch-loop", cancelTime]]);
+
+    // Pass 1: wedged agent is identified and recovered
+    const audit1 = await router.runWatchdogAudit({
+      agentMap: map,
+      agentsDir,
+      cancellations,
+      deliver: fakeDeliver,
+      stopAgent: async () => ({ ok: true }),
+      frontDeskId,
+      cancellationRecencySeconds: 86400,
+    });
+    assert.ok(audit1.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT"));
+    assert.ok(delivered.some((d) => d.id === "orch-loop"));
+
+    // Verify handled marker was saved to disk
+    const persisted1 = JSON.parse(readFileSync(join(agentsDir, "orch-loop", "orch-loop.json"), "utf8"));
+    assert.equal(persisted1.lastHandledCancellationAt, cancelTime);
+
+    // Pass 2: simulate subsequent watchdog pass (use fresh router / empty cooldowns)
+    const router2 = new HookRouter(null, { queueDir: join(tempDir, "queues2"), stateDir: join(tempDir, "state2"), port: 0 });
+    const delivered2: Array<{ id: string; msg: string; steer?: boolean }> = [];
+    const audit2 = await router2.runWatchdogAudit({
+      agentMap: map,
+      agentsDir,
+      cancellations,
+      deliver: async (id, msg, o) => {
+        delivered2.push({ id, msg, steer: o?.steer });
+        return true;
+      },
+      stopAgent: async () => ({ ok: true }),
+      frontDeskId,
+      cancellationRecencySeconds: 86400,
+    });
+
+    assert.equal(audit2.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT"), false);
+    assert.equal(delivered2.some((d) => d.id === "orch-loop"), false, "second watchdog pass must not steer");
+  });
+
+  it("marker persists across separate invocations", async () => {
+    const cancelTime = Date.now() - 45 * 60 * 1000;
+    // Pre-populate disk file with handled marker from prior invocation
+    writeMetadata("persisted-agent", {
+      id: "persisted-agent",
+      lastStatus: "idle",
+      lastError: "",
+      lastHandledCancellationAt: cancelTime,
+    });
+    const fakeDeliver = async (id: string, msg: string, o?: { steer?: boolean }) => {
+      delivered.push({ id, msg, steer: o?.steer });
+      return true;
+    };
+    const map = new Map<string, WatchdogAgent>([
+      ["persisted-agent", { id: "persisted-agent", status: "idle" }],
+    ]);
+
+    const audit = await router.runWatchdogAudit({
+      agentMap: map,
+      agentsDir,
+      cancellations: new Map([["persisted-agent", cancelTime]]),
+      deliver: fakeDeliver,
+      stopAgent: async () => ({ ok: true }),
+      frontDeskId,
+      cancellationRecencySeconds: 86400,
+    });
+
+    assert.equal(audit.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT"), false);
+    assert.equal(delivered.some((d) => d.id === "persisted-agent"), false, "persisted marker suppresses steer");
   });
 });
