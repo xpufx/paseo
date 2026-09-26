@@ -337,6 +337,22 @@ messaging (`send`), listening (`logs`, `wait`), answering (`allow_permission`,
 operate resources on other daemons: no schedules, terminals, workspaces, or
 agent creation.
 
+### Pairing offers are never disclosed
+
+`x_comms_list_daemons --detailed` returns each daemon's target so a caller can
+see *where* a daemon is. For a **relay** daemon that target embeds its pairing
+offer after `#offer=`, and the offer is a control token: it authenticates a dial
+to that peer. Handing it back in a tool result would let any agent that can call
+the tool obtain a token for a peer it was never given — including one an operator
+added by hand, whose offer was never in that agent's context to begin with.
+
+So the offer token is replaced with `[REDACTED]` and the surrounding URL is kept.
+Direct `tcp://host:port` targets carry no token and are returned in full.
+
+Redaction keys on `#offer=` rather than on the `app.paseo.sh` host, because a
+pairing URL is accepted on any https host and a self-hosted relay must not be the
+exemption that leaks.
+
 ## Development
 
 ```sh
