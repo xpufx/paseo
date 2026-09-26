@@ -561,7 +561,7 @@ export async function handleDaemonProbe(input: { value: string }) {
 
 
 import { PluginStorage } from "./vendor/paseo-plugin-helper/index";
-import { resolveFeatureFlags, resolveInjectionEnabled, resolveOutboxExpiryMs, resolvePresenceEnabled, applyFeaturePrefsUpdate } from "./settings.ts";
+import { resolveFeatureFlags, resolveInjectionEnabled, resolveOutboxExpiryMs, resolvePresenceEnabled, resolveDaemonEnabled, applyFeaturePrefsUpdate } from "./settings.ts";
 import {
   OUTBOX_POLL_INTERVAL_MS,
   holdMessage,
@@ -676,9 +676,29 @@ function targetRegistryEntry(ref: string): RegistryDaemon | null {
   const aliased = daemonNameForServerId(ref);
   if (aliased) {
     const byName = findDaemonByRef(daemons, aliased);
-    if (byName) return byName;
+    if (byName) return chatEnabledDaemon(byName);
   }
   return findDaemonByRef(daemons, ref) ?? null;
+}
+
+/**
+ * A daemon the user has not switched off in settings, or null.
+ *
+ * `resolveDaemonEnabled` existed from the start but nothing called it, so the
+ * per-daemon toggle in the settings surface persisted, round-tripped through
+ * its RPC and changed nothing: every chat target still resolved. The control
+ * was asserting something false.
+ *
+ * Matching is by registry *name*, which is the key settings-prototype.tsx
+ * persists under. A caller arriving by serverId is folded to its registered
+ * alias by `targetRegistryEntry` before this runs, so both spellings of the
+ * same daemon are filtered consistently — otherwise switching a daemon off would
+ * work when addressed by name and silently do nothing when addressed by id.
+ */
+function chatEnabledDaemon(daemon: RegistryDaemon): RegistryDaemon | null {
+  if (resolveDaemonEnabled(readUiPrefs(), daemon.name)) return daemon;
+  log.info(`chat: target '${daemon.name}' is disabled in settings; not treating it as reachable`);
+  return null;
 }
 
 async function fetchPeerServerInfo(value: string): Promise<{ serverId: string; hostname: string | null } | null> {
@@ -1025,6 +1045,10 @@ function validPeerTargets(): PeerTarget[] {
   const targets: PeerTarget[] = [];
   for (const daemon of readRegistry(currentRegistryPath()).daemons) {
     if (!daemon.valid) continue;
+    // Same opt-out as the send path, so a daemon switched off in settings is not
+    // dialled for presence either. Applied here rather than at the call site
+    // because this is the only presence entry point.
+    if (!resolveDaemonEnabled(readUiPrefs(), daemon.name)) continue;
     try {
       targets.push(resolvePeerTarget(daemon.name, daemon.value));
     } catch (cause) {
