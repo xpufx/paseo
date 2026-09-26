@@ -32,6 +32,7 @@ import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { createPrivateKey, createPublicKey, randomUUID, sign as cryptoSign } from "node:crypto";
 import { redactSecrets } from "./redact.mjs";
+import { redactDaemonTarget } from "./daemon-target.mjs";
 
 const VERSION = "0.3.0";
 import { z } from "zod";
@@ -392,7 +393,7 @@ const TOOL_SCHEMAS = {
       .boolean()
       .optional()
       .describe(
-        "If true, returns detailed metadata objects including daemon name, host target, serverId, status, and source.",
+        "If true, returns detailed metadata objects including daemon name, host target, serverId, status, and source. For a relay daemon the target is returned with its pairing offer token replaced by [REDACTED] — the offer authenticates a dial to that peer, so it is not disclosed here. Direct tcp:// targets are returned in full.",
       ),
   },
   addDaemon: {
@@ -994,7 +995,9 @@ function registerTools(server) {
         const isManual = manual[name] !== undefined;
         return {
           name,
-          target,
+          // Redacted; serverId is still derived from the raw value so identity
+          // resolution is unaffected by the redaction.
+          target: redactDaemonTarget(target),
           status: "online",
           serverId: deriveHostFromOffer(target),
           source: isManual ? "registry" : "configured-host",
