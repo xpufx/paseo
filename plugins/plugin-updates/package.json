@@ -6,6 +6,7 @@
   "description": "Monitor installed Paseo plugins for git-source updates, with per-subdirectory status, source links, and one-click pulls.",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "test": "npm run typecheck && node --import ./test/register-ts-hooks.mjs --test shared/updates.test.ts server/updates.test.ts client/orphans.test.ts"
   },
   "devDependencies": {
