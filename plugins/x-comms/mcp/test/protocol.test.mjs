@@ -828,8 +828,12 @@ test("extensions: registerTool adds a tool to the same server", async () => {
 
 // preflight + self-message
 
-test("preflight: unknown daemon names the string and asks for pairing", async () => {
-  const { client } = await startClient({}, tempRemotes({ hsi: RELAY_URL }));
+// A registry-name miss is not a pairing requirement (#672). This test used to
+// assert /pairing is required/, which contradicted the accepted `--host` forms:
+// validateDaemonHost takes a relay offer *or* a direct host, so the real cause
+// is "no entry under that name" and both registration routes are valid fixes.
+test("preflight: unknown daemon names the string and the real cause, never 'pairing is required'", async () => {
+  const { client } = await startClient({}, tempRemotes({ hsi: RELAY_URL, dev: DIRECT_HOST }));
   try {
     for (const call of [
       { name: `${PREFIX}send`, arguments: { daemon: "ghost", agentId: "agent-9", prompt: "hi" } },
@@ -837,9 +841,35 @@ test("preflight: unknown daemon names the string and asks for pairing", async ()
     ]) {
       const res = await client.callTool(call);
       assert.equal(res.isError, true, `${call.name} should fail on an unknown daemon`);
-      assert.match(textOf(res), /unknown daemon 'ghost'/);
-      assert.match(textOf(res), /pairing is required/i);
+      const text = textOf(res);
+      assert.match(text, /unknown daemon 'ghost'/);
+      assert.match(text, /no registry entry for that name/);
+      // Both non-pairing and pairing routes are offered; neither is mandatory.
+      assert.match(text, /x_comms_add_daemon/);
+      assert.match(text, /direct host/i);
+      assert.match(text, /relay pairing offer/i);
+      assert.doesNotMatch(text, /pairing is required/i);
     }
+  } finally {
+    await client.close();
+  }
+});
+
+// The hint must be accurate for a registry that holds only *direct* hosts — the
+// case a "pairing is required" message describes worst, since the caller has
+// already done the non-pairing registration and still gets told to pair.
+test("preflight: the unknown-daemon hint holds for a direct-only registry", async () => {
+  const { client } = await startClient({}, tempRemotes({ dev: DIRECT_HOST }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}list_agents`,
+      arguments: { daemon: "typo" },
+    });
+    assert.equal(res.isError, true);
+    const text = textOf(res);
+    assert.match(text, /unknown daemon 'typo'/);
+    assert.match(text, /no registry entry for that name/);
+    assert.doesNotMatch(text, /pairing is required/i);
   } finally {
     await client.close();
   }

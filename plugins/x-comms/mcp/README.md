@@ -205,8 +205,10 @@ Deliberate limits, so the guarantee is not oversold:
   `send` → `wait` → on `permission`: `list_permissions` + allow/deny →
   `wait` … → `idle`.
 - **Preflight.** A target alias is resolved before dispatch: an unknown alias
-  fails with the exact string and a `pairing is required` hint, not a generic
-  failure.
+  fails with the exact string and a "no registry entry for that name" hint —
+  naming both registration routes (`x_comms_add_daemon` for a direct host, a
+  pairing offer for a relay) — not a generic failure. It does not claim pairing
+  is required, because a direct `--host` needs no offer.
 - **Self-message.** Sending to your own agent (`agentId` equals the sender)
   fails with the fixed `x-comms self-message` label. Same-daemon routing for a
   *different* agent is the locality rule (#9), which is still open.
