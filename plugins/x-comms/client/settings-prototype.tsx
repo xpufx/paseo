@@ -12,6 +12,7 @@ import {
   KeyValue,
   KeyValueGroup,
   ModalBody,
+  Row,
   SectionHeader,
   StatusDot,
   TextInput,
@@ -215,11 +216,14 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
       <SectionHeader title="Daemons" count={daemonCount} />
       {read.isPending ? (
         <Card>
-          <Card.Header title="Loading…" subtitle="Reading the daemon registry." />
+          <Card.Header title="Loading…" subtitle="Reading configured hosts and manual externals." />
         </Card>
       ) : null}
       {!read.isPending && read.data && !read.data.exists ? (
-        <EmptyState title="No registry file yet." description="Add your first daemon below." />
+        <EmptyState
+          title="No manual external daemons"
+          description="The registry file is optional. Daemons configured in Paseo appear above on their own; add an entry here only for a foreign daemon Paseo does not know about."
+        />
       ) : null}
       {read.data && !read.data.validJson ? (
         <Card variant="elevated">
@@ -247,7 +251,19 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
             <Card.Header
               title={formatPeerDisplay(daemon.name, daemon.serverId)}
               subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
-              badge={enabled ? <ReachabilityBadge health={h} /> : <Badge label="disabled" variant="neutral" dot />}
+              badge={
+                <Row gap="xs" align="center">
+                  {/* Pillar (b) of #639: a daemon that only exists because it is
+                      written in the manual registry file is a foreign, manually
+                      added external — not a peer this mesh discovered. The badge
+                      says so, and it is the honest counterpart to the per-daemon
+                      toggle, which remains the way to opt one out of chat. */}
+                  {daemon.source === "registry" ? (
+                    <Badge label="manual external" variant="warning" />
+                  ) : null}
+                  {enabled ? <ReachabilityBadge health={h} /> : <Badge label="disabled" variant="neutral" dot />}
+                </Row>
+              }
             />
             <KeyValue
               label="Host value"
@@ -303,9 +319,12 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
       })}
       <ErrorRow label="Remove failed" message={remove.error?.message} />
 
-      <SectionHeader title="Add daemon" />
+      <SectionHeader title="Add foreign daemon" />
       <Card variant="elevated">
-        <FormRow label="Name" description="The daemon's real name; derived automatically for relay links.">
+        <FormRow
+          label="Name"
+          description="The foreign daemon's real name; derived automatically for relay links."
+        >
           <TextInput value={newName} onChangeText={setNewName} autoCapitalize="none" autoCorrect={false} />
         </FormRow>
         <FormRow label="Host value" description={HOST_FORM_HINT}>
@@ -322,7 +341,7 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
         <ErrorRow label="Add failed" message={add.error?.message} />
         <ActionBar align="flex-start">
           <Button
-            label="Add daemon"
+            label="Add foreign daemon"
             variant="primary"
             loading={add.isPending}
             disabled={!canAdd || add.isPending}
