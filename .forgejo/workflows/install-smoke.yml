@@ -290,6 +290,14 @@ jobs:
       - name: Start headless daemon and wait for health
         run: |
           set -euo pipefail
+          # The runner uses `network: host`, so a daemon orphaned by an earlier
+          # job can still hold 6767. This step would then fail with EADDRINUSE,
+          # or — worse — the health check would connect to that stale daemon,
+          # which runs in a different directory context and cannot see this
+          # run's staged tree ("file:///tmp/.../mirror.git does not appear to be
+          # a git repository"). Reclaim the port before starting.
+          fuser -k 6767/tcp 2>/dev/null || true
+          sleep 1
           # Paseo 0.8 accepts launch-time daemon options and returns as soon as
           # it has handed the daemon off. In 0.9 those options are persistent
           # daemon configuration; `daemon start` then waits for readiness.

@@ -69,7 +69,15 @@ jobs:
             printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # Full history: the helper-identity gate attributes the resolved
+      # paseo-plugin-helper revision with `git log -1 -- <stamped sha>`. A
+      # depth-1 clone does not contain that commit, so the gate cannot
+      # attribute and reports `unknown` — which is a failure by design. Full
+      # history makes this environment match a full local checkout instead of
+      # differing from it in a way that only CI sees.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # `npm ci`, not `npm install`: the lockfile is the reproducibility
       # statement, and a suite that installs fresh ranges is not the suite that
@@ -134,7 +142,15 @@ jobs:
     container:
       image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
     steps:
+      # Full history: the helper-identity gate attributes the resolved
+      # paseo-plugin-helper revision with `git log -1 -- <stamped sha>`. A
+      # depth-1 clone does not contain that commit, so the gate cannot
+      # attribute and reports `unknown` — which is a failure by design. Full
+      # history makes this environment match a full local checkout instead of
+      # differing from it in a way that only CI sees.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install dependencies from the lockfile
         run: |
