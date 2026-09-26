@@ -15,8 +15,17 @@
  * real fleet's cardinality and nesting.
  *
  * Paths carry a sanitised home prefix (`/home/dev-user`) at a realistic length.
- * Real daemon paths contain the operator's home directory, which the PII
- * preflight rejects outright; the prefix is replaced, the length is not.
+ * Real daemon paths contain the operator's own home directory, so the prefix is
+ * the only part that gets replaced -- the length is not, because the length is
+ * the part this guard actually measures.
+ *
+ * The prefix has to be one of the generic placeholders in
+ * scripts/lib/fixture-home-paths.mjs, and `npm test` checks that it is. Paste a
+ * real worktree path in here and the fixture guard fails naming this file and
+ * this line, before the commit rather than in a red job on main. The PII
+ * preflight cannot be relied on for this: it only knows the handful of names
+ * somebody remembered to put in its pattern list, which is the other half of the
+ * reason these fixtures need a gate of their own (#627).
  */
 
 /** Real-length absolute worktree path, the longest chip the fleet renders. */
