@@ -12,8 +12,9 @@ analyze. Handle it the same way every time.
 > This skill is the distributable form of the standing instructions the
 > x-comms plugin injects into newborn agents at the `agent.create` hook
 > (`server/recipient-instructions.ts`, mirrored here for manual installation
-> into `.agents/skills/`). Keep the two in sync — the unit suite pins the
-> load-bearing phrases in both.
+> into `.agents/skills/`). Keep the two in sync — `instruction-surfaces.test.ts`
+> pins the load-bearing rules in this file, in those instructions, and in the
+> MCP server's own `instructions` string, so drift fails loudly.
 
 ## 1. Detect
 
@@ -82,8 +83,14 @@ x_comms_send(daemon = sender.daemonServerId, agentId = sender.agentId, prompt = 
 - Register the sender's daemon first (`x_comms_add_daemon`) when it is unknown.
 - Keep the reply loop open: on completion, error, or permission block, notify
   the sender the same way. When blocked, include the permission details.
-- Before messaging a potentially busy agent, `x_comms_wait`. On a permission
-  stall: `x_comms_list_permissions` → `x_comms_allow_permission` /
+- **Never pre-wait.** `x_comms_send` never interrupts a running turn: a
+  mid-turn target has the message queued (8 deep per target, 30-minute window)
+  and reads it at the start of its next turn. Calling `x_comms_wait` first to
+  "avoid preemption" blocks *your* turn and cannot change delivery — nothing is
+  interrupted either way.
+- Use `x_comms_wait` when you need a **result**, not as a pre-wait guard. It
+  returns `idle` | `permission` | `timeout`. On a permission stall:
+  `x_comms_list_permissions` → `x_comms_allow_permission` /
   `x_comms_deny_permission` → `x_comms_wait` again.
 
 ## 6. Never

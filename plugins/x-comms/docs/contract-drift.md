@@ -16,42 +16,53 @@ The two contracts: [`contract-plugin.md`](contract-plugin.md),
 
 ---
 
-## A. The one that matters most
+## A. The one that mattered most
 
-### A1 · The two instruction surfaces give opposite advice on the same rule
+### A1 · The two instruction surfaces gave opposite advice on the same rule — resolved in #709
 
 | | |
 |---|---|
-| **Surface 1** | `mcp/paseo-x-comms.mjs:471` — the MCP `instructions` field: *"x_comms_send NEVER interrupts a running turn. If the target is mid-turn the message is queued (8 deep per target, 30 minute window) and delivered when the target goes idle. … **Do not call x_comms_wait first to avoid preemption — that is no longer required.** x_comms_wait is still the right tool when you need to WAIT for a result."* |
-| **Surface 2** | `server/recipient-instructions.ts:33` — the standing instructions folded into `config.systemPrompt`: *"**Before messaging a potentially busy agent use x_comms_wait;** on a permission stall use x_comms_list_permissions then x_comms_allow_permission/x_comms_deny_permission, then wait again."* |
-| **Surface 3** | `skills/recipient-envelope/SKILL.md:85` — repeats surface 2 verbatim. |
-| **Asymmetry** | **Documented-and-current vs documented-and-stale, in the same bundle, about the same feature.** |
+| **Surface 1** | `mcp/paseo-x-comms.mjs:471` — the MCP `instructions` field: *"x_comms_send NEVER interrupts a running turn. If the target is mid-turn the message is queued (8 deep per target, 30 minute window) and delivered when the target goes idle. … **Do not call x_comms_wait first to avoid preemption — that is no longer required.** x_comms_wait is still the right tool when you need to WAIT for a result."* Unchanged by #709: it was already correct, and it says so in as many words. |
+| **Surface 2** | `server/recipient-instructions.ts:33` — the standing instructions folded into `config.systemPrompt`. Was: *"**Before messaging a potentially busy agent use x_comms_wait;** on a permission stall use x_comms_list_permissions then x_comms_allow_permission/x_comms_deny_permission, then wait again."* Now states the queue rule and keeps the permission loop. |
+| **Surface 3** | `skills/recipient-envelope/SKILL.md` §5 — repeated surface 2 verbatim. Now: *"**Never pre-wait.** … Calling `x_comms_wait` first to 'avoid preemption' blocks *your* turn and cannot change delivery"* and `x_comms_wait` as the tool for needing a *result*. |
+| **Status** | **Documented-and-current on all three. The contradiction was explicit, not implicit** — surface 1 named the retired advice verbatim, so nothing had to be decided about which behaviour is canonical. |
 
 Which one reaches an agent: **surface 2.** The `instructions` field is the only
-place the never-interrupt rule is stated correctly, and neither injection
+place the never-interrupt rule was ever stated correctly, and neither injection
 transport has a slot for it — `McpStdioInjectionConfig` and its siblings are
 `{ type, command|url, args?, headers?, env?, alwaysLoad? }` and
 `AgentCreateInjectionConfig` is `{ mcpServers?, [key: string]: unknown }`
 (`packages/paseo-plugin-helper/src/server/mcp-injection.ts:1-31`). The plugin
-cannot forward it, so the text that lands in the system prompt is the stale one.
+cannot forward it, so the text that landed in the system prompt was the stale
+one. That is why a correct string in the bundle could not rescue a wrong one in
+the prompt.
 
-Why the stale advice is not merely redundant: `x_comms_wait` **blocks the caller's
-own turn** until the target is idle. An agent that follows surface 2 synchronises
-on every outbound message instead of queueing, so it converts a non-blocking
-bounded queue back into a blocking wait — and it does so for *every* peer, not
-only the busy one, because it cannot tell in advance.
+Why the retired advice was not merely redundant: `x_comms_wait` **blocks the
+caller's own turn** until the target is idle. An agent that followed surface 2
+synchronised on every outbound message instead of queueing, so it converted a
+non-blocking bounded queue back into a blocking wait — and it did so for *every*
+peer, not only the busy one, because it cannot tell in advance.
 
-The preemption-avoidance rationale in surface 2 is not wrong, it is **obsolete**:
-the gate makes preemption impossible without any agent cooperation. The rest of
-surface 2's reply guidance (`x_comms_send` to `sender.agentId` on
+The preemption-avoidance rationale was not wrong, it was **obsolete**: the gate
+makes preemption impossible without any agent cooperation. The rest of surface
+2's reply guidance (`x_comms_send` to `sender.agentId` on
 `sender.daemonServerId`, `x_comms_add_daemon` when the sender's daemon is
-unknown, never emit the envelope into chat) is current and correct.
+unknown, never emit the envelope into chat) was current and correct, and is.
 
-**Obligation.** Rewrite the REPLY paragraph of `RECIPIENT_INSTRUCTIONS` and
-§5 of the SKILL to state the queue rule and keep `x_comms_wait` as the
-blocking-wait tool rather than the pre-emption guard. The
-`recipient-instructions.test.ts` suite pins several load-bearing phrases in that
-paragraph but not this one, so a fix needs a new assertion, not just an edit.
+**Resolution.** The REPLY paragraph of `RECIPIENT_INSTRUCTIONS` and §5 of the
+SKILL now state the queue rule — never interrupts, 8 deep per target, 30-minute
+window — and keep `x_comms_wait` as the blocking-wait tool rather than a
+preemption guard, with the permission loop intact on both.
+
+The reason this survived a merge is the part worth keeping: **the consistency
+contract was asserted in prose and enforced nowhere.** Both files claimed a
+suite "pins the load-bearing phrases in both", and
+`recipient-instructions.test.ts` pins phrases in `RECIPIENT_INSTRUCTIONS` alone
+— it never opened the skill, so the two could not have been compared even in
+principle. `instruction-surfaces.test.ts` (plugin root) now reads all three
+surfaces off disk and pins the shared rule, the queue bounds against the
+`defer-queue.ts` constants, and the retired phrasings as forbidden on every one
+of them.
 
 ---
 
@@ -128,4 +139,8 @@ code, not assumed.
   relay is not the exemption that leaks) matches `mcp/daemon-target.mjs`.
 * The recipient-instructions content tests pin the load-bearing phrases, and
   `index.server.test.ts` pins the wiring — so the "the injection is live"
-  claim is asserted, not just asserted-about.
+  claim is asserted, not just asserted-about. Phrase pinning alone was *not*
+  enough to keep the surfaces in agreement: it was scoped to
+  `RECIPIENT_INSTRUCTIONS` in isolation, so A1 could ship. The cross-surface
+  version lives in `instruction-surfaces.test.ts`, which opens the skill and the
+  MCP string too.

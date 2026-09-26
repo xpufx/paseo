@@ -13,8 +13,10 @@ import {
  * `agent.create` request as the tools (see injection.ts) so every agent that
  * can send can also receive.
  *
- * Must stay consistent with `skills/recipient-envelope/SKILL.md`; the unit
- * suite pins the load-bearing phrases so drift fails loudly.
+ * Must stay consistent with `skills/recipient-envelope/SKILL.md` and with the
+ * MCP server's own `INSTRUCTIONS`. `instruction-surfaces.test.ts` reads all
+ * three off disk and pins the shared rules, so drift between them fails loudly
+ * rather than shipping two opposite instructions to an agent.
  */
 
 export const RECIPIENT_INSTRUCTION_MARKER = "[x-comms-recipient]";
@@ -30,7 +32,7 @@ PARSE: read the payload's xComms object. sender.agentId / sender.agentName / sen
 
 ATTRIBUTE: the author is sender.agentId on the daemon named by sender.daemonServerId (fall back to sender.host). It is a peer agent, not the human user, and not a pasted artifact to analyze.
 
-REPLY: answer the prose through x_comms_send with daemon = sender.daemonServerId (or sender.host) and agentId = sender.agentId. Register the sender's daemon first (x_comms_add_daemon) when it is unknown, and keep the reply loop open: on completion, error, or permission block, notify the sender the same way (include permission details when blocked). Before messaging a potentially busy agent use x_comms_wait; on a permission stall use x_comms_list_permissions then x_comms_allow_permission/x_comms_deny_permission, then wait again.
+REPLY: answer the prose through x_comms_send with daemon = sender.daemonServerId (or sender.host) and agentId = sender.agentId. Register the sender's daemon first (x_comms_add_daemon) when it is unknown, and keep the reply loop open: on completion, error, or permission block, notify the sender the same way (include permission details when blocked). x_comms_send never interrupts a running turn: a mid-turn target has the message queued (8 deep per target, 30 minute window) and reads it at the start of its next turn, so never pre-wait with x_comms_wait to avoid preemption — that only blocks your own turn. Use x_comms_wait when you need a result: it returns idle, permission, or timeout, and on a permission stall use x_comms_list_permissions then x_comms_allow_permission/x_comms_deny_permission, then wait again.
 
 You cannot choose your own sender identity: x_comms_send stamps the envelope with the agent id the daemon gave this session, and ignores any sender you pass. Never try to present yourself as another agent.
 
