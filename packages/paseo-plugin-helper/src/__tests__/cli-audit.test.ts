@@ -387,9 +387,19 @@ export const Example = () => <View><Text>Example</Text><Button label="OK" /></Vi
 });
 
 describe("conformance exemptions", () => {
-  function scaffold(manifest: Record<string, unknown>, clientSource?: string): string {
+  // Exemptions live in a sibling conformance.json, never in the manifest: the
+  // host manifest schema is strict and a `conformance` key makes a plugin
+  // uninstallable (xpufx-org/paseo#629).
+  function scaffold(
+    manifest: Record<string, unknown>,
+    clientSource?: string,
+    exempt?: Record<string, string>,
+  ): string {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-exempt-test-"));
     fs.writeFileSync(path.join(root, "paseo-plugin.json"), JSON.stringify(manifest));
+    if (exempt) {
+      fs.writeFileSync(path.join(root, "conformance.json"), JSON.stringify({ exempt }));
+    }
     if (clientSource !== undefined) {
       fs.mkdirSync(path.join(root, "client"), { recursive: true });
       fs.writeFileSync(path.join(root, "client", "view.tsx"), clientSource);
@@ -402,10 +412,9 @@ describe("conformance exemptions", () => {
     'import { ScrollView, Pressable, View } from "react-native";\nexport const V = () => <ScrollView><Pressable><View /></Pressable></ScrollView>;\n';
 
   it("honours a declared per-rule exemption and leaves other rules firing", () => {
-    const dir = scaffold(
-      { ...BASE, conformance: { exempt: { "no-bare-react-native-ui": "built to a different standard on purpose" } } },
-      SCROLLVIEW_CLIENT,
-    );
+    const dir = scaffold(BASE, SCROLLVIEW_CLIENT, {
+      "no-bare-react-native-ui": "built to a different standard on purpose",
+    });
     const report = auditProject(dir);
 
     expect(report.issues.filter((i) => i.ruleId === "no-bare-react-native-ui")).toEqual([]);
@@ -419,22 +428,19 @@ describe("conformance exemptions", () => {
   });
 
   it("prints the exemption so a clean audit is never silently indistinguishable", () => {
-    const dir = scaffold(
-      { ...BASE, conformance: { exempt: { "no-bare-react-native-ui": "on purpose" } } },
-      SCROLLVIEW_CLIENT,
-    );
+    const dir = scaffold(BASE, SCROLLVIEW_CLIENT, { "no-bare-react-native-ui": "on purpose" });
     const output = formatReportPretty(auditProject(dir));
     expect(output).toContain("[EXEMPT ] no-bare-react-native-ui");
     expect(output).toContain("on purpose");
   });
 
   it("refuses an exemption with no reason", () => {
-    const dir = scaffold({ ...BASE, conformance: { exempt: { "no-bare-react-native-ui": "   " } } });
+    const dir = scaffold(BASE, undefined, { "no-bare-react-native-ui": "   " });
     expect(readPluginConformanceExemptions(dir).exemptions.size).toBe(0);
   });
 
   it("reports an exemption naming a rule that does not exist", () => {
-    const dir = scaffold({ ...BASE, conformance: { exempt: { "no-such-rule": "typo" } } });
+    const dir = scaffold(BASE, undefined, { "no-such-rule": "typo" });
     const report = auditProject(dir);
     expect(report.unknownExemptions).toEqual(["no-such-rule"]);
     // Its own rule id, not a borrowed one: filtering audit output by rule id has
@@ -448,7 +454,7 @@ describe("conformance exemptions", () => {
   });
 
   it("cannot be used to exempt the whole audit away", () => {
-    const dir = scaffold({ ...BASE, conformance: { exempt: { "*": "everything" } } }, SCROLLVIEW_CLIENT);
+    const dir = scaffold(BASE, SCROLLVIEW_CLIENT, { "*": "everything" });
     const report = auditProject(dir);
     expect(report.exemptions).toEqual([]);
     expect(report.unknownExemptions).toEqual(["*"]);
