@@ -21,10 +21,13 @@ export function notificationSummary(packageName, version) {
 /**
  * npm reads a bare `user/repo` argument as a `github:` shorthand and refuses to
  * fetch git dependencies when they are disabled (EALLOWGIT). Manifest tarballs
- * are repo-relative paths like `demo/pkg.tgz`, so force npm to see a local path.
+ * are stage-relative paths like `demo/pkg.tgz`, so force npm to see a local
+ * path. `baseDir` is the manifest's own directory: the manifest records each
+ * tarball relative to the stage dir, not to the process CWD.
  */
-export function localTarballPath(tarball) {
-  return tarball.startsWith(".") || path.isAbsolute(tarball) ? tarball : `./${tarball}`;
+export function localTarballPath(tarball, baseDir) {
+  const resolved = baseDir ? path.resolve(baseDir, tarball) : tarball;
+  return resolved.startsWith(".") || path.isAbsolute(resolved) ? resolved : `./${resolved}`;
 }
 
 /**
@@ -53,7 +56,7 @@ function notifyStaged({ run, notifyBin, link }, entry) {
 }
 
 /** Stage one tarball; skips and npm errors deliberately return before notify. */
-export function stagePackage(entry, { run = commandResult, npmBin = "npm", notifyBin = "2fado", link, notify = true }) {
+export function stagePackage(entry, { run = commandResult, npmBin = "npm", notifyBin = "2fado", link, notify = true, baseDir }) {
   const stages = JSON.parse(run(npmBin, ["stage", "list", entry.publishAs, "--json"]));
   if (hasStagedVersion(stages, entry.publishAs, entry.version)) {
     console.log(`[npm-stage] skipping ${entry.publishAs}@${entry.version}: already staged; not a fresh stage.`);
@@ -61,7 +64,7 @@ export function stagePackage(entry, { run = commandResult, npmBin = "npm", notif
   }
 
   console.log(`[npm-stage] staging ${entry.publishAs}@${entry.version} from ${entry.tarball}`);
-  run(npmBin, ["stage", "publish", localTarballPath(entry.tarball), "--access", "public"]);
+  run(npmBin, ["stage", "publish", localTarballPath(entry.tarball, baseDir), "--access", "public"]);
   if (notify) notifyStaged({ run, notifyBin, link }, entry);
   return { outcome: "staged" };
 }
@@ -86,11 +89,13 @@ function workflowRunLink(env) {
 
 export function main(argv = process.argv.slice(2), env = process.env) {
   const { manifestPath } = parseArgs(argv);
-  const manifest = JSON.parse(fs.readFileSync(path.resolve(manifestPath), "utf8"));
+  const resolved = path.resolve(manifestPath);
+  const manifest = JSON.parse(fs.readFileSync(resolved, "utf8"));
   return stagePackages(manifest, {
     npmBin: env.NPM_STAGE_NPM_BIN || "npm",
     notifyBin: env.TWOFADO_NOTIFY_BIN || "2fado",
     link: workflowRunLink(env),
+    baseDir: path.dirname(resolved),
   });
 }
 
