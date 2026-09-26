@@ -734,6 +734,26 @@ const SkinContext = React.createContext<Skin | null>(null);
 const WIDE_BREAKPOINT = 900;
 /** Width at which dense rows must drop their secondary fields. */
 const NARROW_BREAKPOINT = 620;
+/** Minimum comfortable finger target, and the dense one a pointer can live with. */
+const MOBILE_TOUCH_TARGET = 44;
+const DESKTOP_TOUCH_TARGET = 28;
+
+/**
+ * Resolves the mobile signal once, from the width the host actually reports.
+ *
+ * #684: `isMobile` and `touchTarget` were read off `layout.platform` alone, so a
+ * phone-shaped *browser window* — `platform: "web"` at 390px — claimed
+ * `isMobile: false` with 28pt targets directly beside `narrow: true` and
+ * `wide: false`. Three signals, two answers. A viewport that narrow is a phone
+ * whatever runtime is drawing it, so the width decides and the platform is an
+ * additional way in rather than the only one: a device the host names
+ * ios/android is mobile whatever width it reports. `touchTarget` falls out of
+ * the same answer so the two cannot drift apart again.
+ */
+function mobileSignals(width: number, platform: SurfaceLayout["platform"]) {
+  const isMobile = width <= NARROW_BREAKPOINT || platform === "ios" || platform === "android";
+  return { isMobile, touchTarget: isMobile ? MOBILE_TOUCH_TARGET : DESKTOP_TOUCH_TARGET };
+}
 
 export function SkinProvider({
   theme,
@@ -753,8 +773,7 @@ export function SkinProvider({
     layout,
     wide: width >= WIDE_BREAKPOINT && !layout.compact,
     narrow: width <= NARROW_BREAKPOINT,
-    isMobile: layout.platform === "ios" || layout.platform === "android",
-    touchTarget: layout.platform === "ios" || layout.platform === "android" ? 44 : 28,
+    ...mobileSignals(width, layout.platform),
     Icon,
     onCopy,
   };
@@ -770,8 +789,7 @@ export function useSkin(): Skin {
     layout: { compact: false, platform: "web", width: 1280 },
     wide: true,
     narrow: false,
-    isMobile: false,
-    touchTarget: 28,
+    ...mobileSignals(1280, "web"),
     Icon: (() => null) as Skin["Icon"],
     onCopy: () => {},
   };

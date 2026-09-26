@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run typecheck && npm run test:node && npm run test:tsx",
     "test:node": "NODE_ENV=test node --import ./test/register-ts-hooks.mjs --test shared/derive.test.ts shared/contracts.test.ts server/agents.test.ts server/tickets.test.ts server/queue.test.ts",
-    "test:tsx": "NODE_ENV=test tsx --test client/entry.test.ts client/render.test.ts"
+    "test:tsx": "NODE_ENV=test tsx --test client/entry.test.ts client/render.test.ts client/mobile-layout.test.ts"
   },
   "devDependencies": {
     "@getpaseo/plugin": "^0.9.0",
@@ -30,6 +30,7 @@
     "index.client.tsx",
     "index.server.ts",
     "client",
+    "!client/testing",
     "server",
     "shared",
     "docs",

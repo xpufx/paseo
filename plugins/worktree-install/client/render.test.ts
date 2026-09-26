@@ -2,8 +2,18 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { fileURLToPath } from "node:url";
+import { installHostStubs, renderInSkin, React } from "./testing/host.js";
+import {
+  AGENTS,
+  DARK_THEME,
+  LIGHT_THEME,
+  NO_OPS,
+  QUEUES,
+  ROUTER,
+  TICKET_BOARD,
+  TICKETS,
+} from "./testing/fixtures.js";
 
 /**
  * Render harness for the three views.
@@ -13,387 +23,29 @@ import { pathToFileURL, fileURLToPath } from "node:url";
  * components with a realistic payload and asserting the testID is in the tree.
  * A row that loses its element fails this file.
  *
- * `react-native` ships Flow syntax `tsx` cannot parse, so it is aliased to a
- * data-URL stub through a resolve hook. Everything else — react,
- * react-test-renderer, the real views — is the real thing.
+ * The host stubs and the payloads live in `./testing/`, shared with
+ * `mobile-layout.test.ts` so both files look at the same surface.
  */
-const require = createRequire(import.meta.url);
-const REACT_URL = pathToFileURL(require.resolve("react")).href;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const RN_STUB = `
-import React from ${JSON.stringify(REACT_URL)};
-function stub(name) {
-  function RNStub(props) { return React.createElement(name, props, props?.children); }
-  Object.defineProperty(RNStub, "name", { value: "RN" + name });
-  return RNStub;
-}
-class AnimatedValue {
-  constructor(v) { this.value = v; }
-  setValue(v) { this.value = v; }
-  interpolate() { return this; }
-}
-const anim = { start: (cb) => cb?.({ finished: true }), stop() {}, reset() {} };
-export const View = stub("View");
-export const Text = stub("Text");
-export const Pressable = stub("Pressable");
-export const ScrollView = stub("ScrollView");
-export const TextInput = stub("TextInput");
-export const Modal = stub("Modal");
-export const ActivityIndicator = stub("ActivityIndicator");
-export const StyleSheet = { create: (s) => s, flatten: (s) => s, hairlineWidth: 1, compose: (a, b) => [a, b], absoluteFill: {} };
-export const Platform = { OS: "web", select: (o) => o.web ?? o.default };
-export const Appearance = { getColorScheme: () => "dark", addChangeListener: () => ({ remove() {} }) };
-export const useColorScheme = () => "dark";
-export const Dimensions = { get: () => ({ width: 1400, height: 900, scale: 1, fontScale: 1 }) };
-export const useWindowDimensions = () => ({ width: 1400, height: 900, scale: 1, fontScale: 1 });
-export const Linking = { openURL: async () => {}, canOpenURL: async () => true };
-export const Animated = {
-  Value: AnimatedValue,
-  View: stub("AnimatedView"),
-  Text: stub("AnimatedText"),
-  loop: (a) => a ?? anim,
-  sequence: () => anim,
-  timing: () => anim,
-  parallel: () => anim,
-};
-`;
-
-const PASEO_RN_STUB = `
-import React from ${JSON.stringify(REACT_URL)};
-export const useToast = () => ({ show() {}, error() {} });
-export const Icon = (props) => React.createElement("mock-icon", { name: props?.name });
-export const Modal = Object.assign(
-  (props) => React.createElement("mock-modal", props, props?.children),
-  { Content: (props) => React.createElement("mock-modal-content", props, props?.children) },
-);
-export const ScrollView = (props) => React.createElement("mock-scroll", props, props?.children);
-export const FlatList = (props) => React.createElement("mock-flatlist", props, props?.children);
-export const TextInput = (props) => React.createElement("mock-textinput", props);
-export const copyText = async () => {};
-export const useRevealedText = (text) => text;
-`;
-
-const STUB_URL = `data:text/javascript,${encodeURIComponent(RN_STUB)}`;
-const PASEO_RN_STUB_URL = `data:text/javascript,${encodeURIComponent(PASEO_RN_STUB)}`;
-
-let reactTestRenderer: {
-  create(element: unknown): { toJSON(): unknown; unmount(): void };
-  act(callback: () => void | Promise<void>): void;
-};
-let React: typeof import("react");
 let FleetView: typeof import("./fleet-view.js").FleetView;
 let QueueView: typeof import("./queue-view.js").QueueView;
 let TicketsView: typeof import("./tickets-view.js").TicketsView;
 let TicketDetail: typeof import("./ticket-detail.js").TicketDetail;
-let SkinProvider: typeof import("./kit.js").SkinProvider;
 let paletteFor: typeof import("./theme.js").paletteFor;
 
 before(async () => {
-  // `react-native` ships Flow syntax `tsx` cannot parse and the host component
-  // entry pulls it in, so both are aliased to stubs. Everything else is real.
-  const nodeModule = await import("node:module");
-  (nodeModule as unknown as {
-    registerHooks(hooks: {
-      resolve(specifier: string, context: unknown, next: (s: string, c: unknown) => unknown): unknown;
-    }): void;
-  }).registerHooks({
-    resolve(specifier, context, next) {
-      if (specifier === "react-native") return { url: STUB_URL, shortCircuit: true };
-      if (specifier === "@getpaseo/plugin/client/react-native") {
-        return { url: PASEO_RN_STUB_URL, shortCircuit: true };
-      }
-      return next(specifier, context);
-    },
-  });
-
-  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-  React = (await import("react")).default;
-  reactTestRenderer = (await import("react-test-renderer")).default as never;
+  installHostStubs();
   ({ FleetView } = await import("./fleet-view.js"));
   ({ QueueView } = await import("./queue-view.js"));
   ({ TicketsView } = await import("./tickets-view.js"));
   ({ TicketDetail } = await import("./ticket-detail.js"));
-  ({ SkinProvider } = await import("./kit.js"));
   ({ paletteFor } = await import("./theme.js"));
 });
 
-// --- Fixtures -------------------------------------------------------------
-// Generic paths on purpose: a real home directory in a committed fixture is a
-// PII leak, not a test detail.
-
-const AGENTS = {
-  ok: true,
-  frontDesk: [
-    {
-      id: "desk-1",
-      shortId: "desk-1",
-      name: "Fleet Front Desk",
-      category: "front-desk" as const,
-      status: "running",
-      model: "space-bunny-free",
-      provider: "opencode-go",
-      worktree: "feat-629-fleet-alternative",
-      project: "example-org/paseo",
-      deterministicState: "working" as const,
-      stateDetail: "#629 (feat-629-alt)",
-      lifecycleState: "running" as const,
-      attributedWork: { issue: 629, slug: "feat-629-alt", repo: "example-org/paseo" },
-      lastActivityAt: new Date(Date.now() - 30_000).toISOString(),
-      updatedAt: new Date(Date.now() - 30_000).toISOString(),
-      labels: { branch: "feat/629-fleet-alternative" },
-      metrics: {
-        contextUsedTokens: 8000,
-        contextMaxTokens: 10000,
-        cachedTokens: 4000,
-        inputTokens: 6000,
-        outputTokens: 900,
-        costUsd: 1.25,
-        activeTurnStartedAt: new Date(Date.now() - 60_000).toISOString(),
-      },
-      usage: { totalCostUsd: 4.5, cachedInputTokens: 12000 },
-      pendingPermissions: [
-        { id: "req-7", title: "write file", tool: "write", input: { path: "/srv/work/paseo/client/kit.tsx" } },
-        { id: "req-8", tool: "bash" },
-      ],
-      requiresAttention: true,
-      attentionReason: "permission" as const,
-      blockDetail: {
-        requiredPermissionId: "req-7",
-        scope: "/srv/work/paseo/client/kit.tsx",
-        action: "write file",
-        command: "paseo permit allow desk-1 req-7",
-      },
-      cwd: "/srv/work/paseo",
-      workspaceId: "ws-1",
-      url: "paseo://agent/desk-1",
-    },
-  ],
-  orchestrators: [
-    {
-      id: "orch-1",
-      shortId: "orch-1",
-      name: "paseo orchestrator",
-      category: "orchestrator" as const,
-      status: "idle",
-      model: "gpt-5.4",
-      provider: "openai",
-      worktree: "main",
-      project: "example-org/paseo",
-      deterministicState: "idle:waiting" as const,
-      lifecycleState: "idle" as const,
-      lastActivityAt: new Date(Date.now() - 5 * 60_000).toISOString(),
-      cwd: "/srv/work/paseo",
-      isMainDirty: true,
-      mainDirtySummary: "3 uncommitted files",
-    },
-  ],
-  workers: [
-    {
-      id: "w-1",
-      shortId: "w-1",
-      name: "worker one",
-      category: "worker" as const,
-      status: "idle",
-      project: "example-org/paseo",
-      parentId: "orch-1",
-      parentName: "paseo orchestrator",
-      parentCategory: "orchestrator" as const,
-      deterministicState: "failed:timeout" as const,
-      lifecycleState: "errored" as const,
-      lastError: "execution timed out",
-      worktree: "feat-629-fleet-alternative",
-      lastActivityAt: new Date(Date.now() - 3 * 3600_000).toISOString(),
-    },
-    {
-      id: "w-2",
-      shortId: "w-2",
-      name: "worker two",
-      category: "worker" as const,
-      status: "error",
-      project: "scratch/local-thing",
-      deterministicState: "attention-required" as const,
-      lifecycleState: "waiting_for_input" as const,
-      requiresAttention: true,
-      attentionReason: "input" as const,
-      lastActivityAt: new Date(Date.now() - 20_000).toISOString(),
-    },
-  ],
-  tree: [],
-  enrolledRepos: ["example-org/paseo"],
-  mutedRepos: [],
-  repoQueuedHooks: { "example-org/paseo": 3 },
-  totalCount: 4,
-  runningCount: 1,
-  idleCount: 2,
-  errorCount: 1,
-} as never;
-
-const TICKETS = [
-  {
-    number: 629,
-    title: "uppidi-fleet alternative design",
-    state: "open",
-    repo: "paseo",
-    status: "In progress" as const,
-    attention: "attention/1-agent" as const,
-    branch: "feat/629-fleet-alternative",
-    comments: 3,
-    labels: ["state/1-wip", "priority/0-SOS"],
-    url: "https://forge.example.com/example-org/paseo/issues/629",
-    updatedAt: new Date(Date.now() - 120_000).toISOString(),
-  },
-  {
-    number: 630,
-    title: "vendor gate can never observe drift",
-    state: "open",
-    repo: "paseo",
-    status: "Review" as const,
-    attention: "attention/2-user" as const,
-    comments: 0,
-    labels: ["state/2-review"],
-    updatedAt: new Date(Date.now() - 7200_000).toISOString(),
-  },
-];
-
-const TICKET_BOARD = {
-  ok: true,
-  repo: "example-org/paseo",
-  tickets: TICKETS,
-  openCount: 2,
-  inFlightCount: 1,
-  reviewCount: 1,
-  needsYouCount: 1,
-} as never;
-
-const ROUTER = {
-  ok: true,
-  service: "forgejo-hook",
-  version: 3,
-  uptime: 3600,
-  url: "http://127.0.0.1:8099",
-  active: true,
-  state: "listening",
-  host: "127.0.0.1",
-  port: 8099,
-  configuredHost: "127.0.0.1",
-  configuredPort: 8099,
-  availableInterfaces: ["10.0.0.5"],
-  frontDeskAgentId: "desk-1",
-  paused: ["example-org/lab"],
-  totalQueued: 5,
-  repoCount: 2,
-  capabilities: { xCommsInstalled: true },
-} as never;
-
-const QUEUES = {
-  ok: true,
-  service: "forgejo-hook",
-  uptime: 3600,
-  paused: ["example-org/lab"],
-  queues: [
-    {
-      key: "example-org/paseo",
-      depth: 3,
-      dropped: 1,
-      paused: false,
-      isBusy: true,
-      busyAttempts: 2,
-      orchestrator: { agentId: "orch-1-abcdef" },
-      messages: [
-        { id: "m1", preview: "issue opened #629" },
-        { id: "m2", preview: "comment added" },
-        { id: "m3", preview: "label changed" },
-        { id: "m4", preview: "never shown, the row caps at three" },
-      ],
-    },
-    { key: "example-org/lab", depth: 0, dropped: 0, paused: true, isBusy: false, busyAttempts: 0, messages: [] },
-  ],
-} as never;
-
-const NO_OPS = {
-  onArchive: () => {},
-  onArchiveBulk: () => {},
-  onCreateFrontDesk: () => {},
-  onReplaceFrontDesk: () => {},
-  onAddOrchestrator: () => {},
-  onReplaceOrchestrator: () => {},
-  onMuteRepo: () => {},
-  onPause: () => {},
-  onResume: () => {},
-  onDrain: () => {},
-  onDispatch: () => {},
-  onRepoScope: () => {},
-};
-
-// --- Harness --------------------------------------------------------------
-
-const DARK_THEME = {
-  colors: {
-    surface0: "#18181b",
-    surface1: "#27272a",
-    surface2: "#3f3f46",
-    border: "#3f3f46",
-    foreground: "#fafafa",
-    foregroundMuted: "#a1a1aa",
-    accent: "#3b82f6",
-    accentForeground: "#ffffff",
-    statusSuccess: "#22c55e",
-    statusWarning: "#eab308",
-    statusDanger: "#ef4444",
-  },
-};
-
-const LIGHT_THEME = {
-  colors: {
-    ...DARK_THEME.colors,
-    surface0: "#ffffff",
-    surface1: "#f4f4f5",
-    surface2: "#e4e4e7",
-    border: "#e4e4e7",
-    foreground: "#09090b",
-    foregroundMuted: "#71717a",
-    accent: "#2563eb",
-  },
-};
-
+/** The shared harness, at the width and theme this file has always used. */
 function render(element: React.ReactElement, theme = DARK_THEME, width = 1400) {
-  let tree: { toJSON(): unknown; unmount(): void } | undefined;
-  // React 19 defers the initial mount until `act` flushes it, so the tree has to
-  // be created inside `act` for `toJSON()` to have anything in it.
-  reactTestRenderer.act(() => {
-    tree = reactTestRenderer.create(
-      React.createElement(SkinProvider, {
-        theme: theme as never,
-        layout: { compact: false, platform: "web", width },
-        onCopy: () => {},
-        children: element,
-      }),
-    );
-  });
-  const ids = new Set<string>();
-  const texts: string[] = [];
-  const walk = (node: unknown) => {
-    if (!node || typeof node !== "object") return;
-    const typed = node as { props?: Record<string, unknown>; children?: unknown };
-    if (typed.props?.testID) ids.add(String(typed.props.testID));
-    if (Array.isArray(typed.children)) {
-      for (const child of typed.children) {
-        if (child && typeof child === "object" && "type" in (child as object)) {
-          const childProps = (child as { props?: Record<string, unknown> }).props;
-          if (typeof childProps?.children === "string") texts.push(childProps.children);
-          walk(child);
-        } else if (typeof child === "string") {
-          texts.push(child);
-        } else {
-          walk(child);
-        }
-      }
-    }
-  };
-  walk(tree!.toJSON());
-  return { ids, texts, unmount: () => tree!.unmount() };
+  return renderInSkin(element, { theme, layout: { compact: false, platform: "web", width } });
 }
 
 const has = (ids: Set<string>, id: string) => ids.has(id);
@@ -469,14 +121,14 @@ describe("fleet view", () => {
     assert.ok(visible.includes("paseo permit allow desk-1 req-7"), "the permit command must be visible");
 
     // B35-B43 the metrics sheet
-    await render(React.createElement(FleetView, {
+    (await render(React.createElement(FleetView, {
       data: AGENTS,
       tickets: TICKETS,
       loading: false,
       repoScope: "all",
       onRepoScope: () => {},
       actions: NO_OPS,
-    })).unmount();
+    }))).unmount();
     assert.ok(has(ids, "front-desk-metrics"), "metrics toggle stays available");
 
     // B57-B66, B68-B76 the agent rows
@@ -779,7 +431,7 @@ describe("tickets view", () => {
   });
 
   it("says when a ticket has no worktree yet", async () => {
-    const { texts, unmount } = render(
+    const { texts, unmount } = await render(
       React.createElement(TicketDetail, {
         ticket: TICKETS[1],
         onClose: () => {},
@@ -898,6 +550,16 @@ describe("narrow surfaces", () => {
  */
 const FORBIDDEN = ["xpufx", "/hom", "e/"].join("");
 
+/** Every client source file, relative to `client/`, for the guard below. */
+function clientSources(dir = __dirname, out: string[] = []): string[] {
+  for (const entry of fs.readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (fs.statSync(full).isDirectory()) clientSources(full, out);
+    else if (/\.tsx?$/.test(entry)) out.push(path.relative(__dirname, full));
+  }
+  return out;
+}
+
 describe("fixtures", () => {
   it("carries no real home directory or user name", () => {
     const payloads = [
@@ -910,8 +572,14 @@ describe("fixtures", () => {
     for (const blob of payloads) {
       assert.ok(!blob.includes(FORBIDDEN), `a fixture payload contains a forbidden path fragment`);
     }
-    // And the source of the fixtures itself.
-    const source = fs.readFileSync(path.resolve(__dirname, "render.test.ts"), "utf8");
-    assert.ok(!source.includes(FORBIDDEN), "the fixture file itself must not contain one");
+    // And every source file that could carry one, the shared fixtures included:
+    // a payload may be assembled in `./testing/fixtures.ts` or a test that
+    // hardcodes a path, so scanning this one file would miss both.
+    const offenders: string[] = [];
+    for (const file of clientSources()) {
+      const source = fs.readFileSync(path.resolve(__dirname, file), "utf8");
+      if (source.includes(FORBIDDEN)) offenders.push(file);
+    }
+    assert.deepEqual(offenders, [], "these files contain a real home directory");
   });
 });
