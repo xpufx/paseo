@@ -1,18 +1,19 @@
-// Dev-only ESM resolution hook for `node --test` (see package.json test script).
+// Dev-only ESM resolution hook for `node --test`, shared by symlink across the
+// plugins whose suites need it (see the package.json test script of each).
 // The plugin sources are TypeScript that tsc and the daemon's esbuild both
-// resolve, but that plain node (type stripping, no transpile) does not. Every
-// first-party import here names a `.ts` file by its compiled `.js` extension
-// (`../shared/contracts.js`, `./hook-router.js`), which node looks for
-// literally and does not find.
-//
-// This covers the seven server/shared suites only. `client/entry.test.ts` is
-// deliberately not run through here: it renders `client/surface.tsx` for real,
-// and node's type stripping does not transform JSX, so that one file still
-// needs a JSX-capable runner (see package.json test script and #609).
+// resolve, but that plain node (type stripping, no transpile) does not. A
+// first-party import here names its target either by its compiled `.js`
+// extension (`../shared/contracts.js`, `../server/presence.js`) or not at all
+// (`./updates`), and node looks for either literally and does not find it;
+// `moduleResolution: Bundler` in tsconfig.json is what makes the extensionless
+// form legal for tsc. Which of a plugin's suites run through this hook, and
+// which need a JSX-capable runner instead, is per-plugin: each package.json test
+// script names both groups.
 //
 // Previously `npm test` shelled out to `npx tsx`, which is declared in no
 // package.json and absent from the lockfile, so it silently downloaded whatever
-// tsx was current on the day of the run.
+// tsx was current on the day of the run. #609 replaced it with node's own type
+// stripping, which leaves no transpiler to get wrong.
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -46,7 +47,8 @@ export async function resolve(specifier, context, next) {
 
     // No ".tsx" probe: node's type stripping does not transform JSX, so handing
     // back a ".tsx" url would only convert an honest ERR_MODULE_NOT_FOUND into a
-    // baffling ERR_UNKNOWN_FILE_EXTENSION. The one JSX test is on tsx instead.
+    // baffling ERR_UNKNOWN_FILE_EXTENSION. A plugin's JSX suites run on tsx or
+    // vitest instead, never through here.
     for (const ext of [".ts"]) {
       const hit = tryFile(new URL(`${stem}${ext}`));
       if (hit) return { url: hit, shortCircuit: true };
