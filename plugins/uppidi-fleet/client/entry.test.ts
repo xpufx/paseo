@@ -855,13 +855,19 @@ describe("uppidi-fleet client entry contract", () => {
         );
       }
 
-      // Work Queue renders filters (metrics bar, then filter/action bar) directly above the Work queue table.
+      // Work Queue renders its filters in a single metrics bar above the Work
+      // queue table (#645). The separate filter/action row that used to sit
+      // between them was removed; its presets moved into the bar.
       const metricsIdx = workQueueSource.indexOf("{/* Dense Metrics Bar");
-      const filterBarIdx = workQueueSource.indexOf("{/* Action Bar & Filter Buttons */}");
       const workQueueTableIdx = workQueueSource.indexOf('title="Work queue"');
       assert.ok(
-        metricsIdx >= 0 && filterBarIdx > metricsIdx && workQueueTableIdx > filterBarIdx,
-        "Work Queue must render dense metrics bar, filter/action bar, then the Work queue table",
+        metricsIdx >= 0 && workQueueTableIdx > metricsIdx,
+        "Work Queue must render the dense metrics bar, then the Work queue table",
+      );
+      assert.equal(
+        workQueueSource.includes("{/* Action Bar & Filter Buttons */}"),
+        false,
+        "the separate filter/action row must stay removed (#645)",
       );
     });
   });
