@@ -11,30 +11,61 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { rewrittenPackingManifest } from "./publish-npm.mjs";
+import { rewrittenPackingManifest, pluginIds, manifestFor } from "./publish-npm.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const PACKAGES = [
-  { id: "demo", manifestId: "paseo-helper-demo", name: "@xpufx/paseo-helper-demo", paseo: ">=0.8.0", runtime: [] },
-  { id: "forges", name: "@xpufx/paseo-forges", paseo: ">=0.8.0", runtime: [] },
-  { id: "mcp-tools", name: "@xpufx/paseo-mcp-tools", paseo: ">=0.8.0", runtime: [] },
-  { id: "plugin-updates", name: "@xpufx/paseo-plugin-updates", paseo: ">=0.8.0", runtime: [] },
-  { id: "slash", name: "@xpufx/paseo-slash", paseo: ">=0.8.0", runtime: [] },
-  { id: "top", name: "@xpufx/paseo-top", paseo: ">=0.9.0", runtime: [] },
-  { id: "twofado", name: "@xpufx/paseo-twofado", paseo: ">=0.8.0", runtime: [] },
-  {
-    id: "x-comms",
-    name: "@xpufx/paseo-x-comms",
-    paseo: ">=0.9.0",
-    runtime: [
-      "@getpaseo/client/internal/daemon-client",
-      "@getpaseo/plugin/server",
-      "@getpaseo/protocol/daemon-endpoints",
-      "@modelcontextprotocol/sdk/server/mcp.js",
-      "zod",
-    ],
-  },
-];
+/**
+ * Per-plugin facts this smoke cannot derive from a manifest.
+ *
+ * `runtime` is the set of bare specifiers the plugin's own server code imports,
+ * which must resolve from the *installed* package rather than the monorepo. It
+ * is asserted per plugin because a missing entry is invisible until an
+ * install-time resolution fails on a user's machine.
+ */
+const RUNTIME_OVERRIDES = {
+  "x-comms": [
+    "@getpaseo/client/internal/daemon-client",
+    "@getpaseo/plugin/server",
+    "@getpaseo/protocol/daemon-endpoints",
+    "@modelcontextprotocol/sdk/server/mcp.js",
+    "zod",
+  ],
+};
+
+/**
+ * Every publishable plugin, derived rather than listed (#623).
+ *
+ * This was a hand-maintained array of eight entries while `pluginIds()` derives
+ * eleven, so `uppidi-fleet`, `wellbeing` and `worktree-install` were published
+ * but never packed here. `uppidi-fleet` is precisely where the #621 leak hid:
+ * `client/testing/` (33KB) would have shipped inside the tarball, and nothing in
+ * CI assembled that tarball to notice.
+ *
+ * A hardcoded list fails the same way a hardcoded count does — a new publishable
+ * plugin is silently uncovered until someone notices by hand. Deriving from the
+ * same source `publish-npm` stages means the two cannot disagree about what
+ * exists.
+ */
+function publishablePackages() {
+  return pluginIds().map((id) => {
+    const manifest = manifestFor(id);
+    // `requirements.paseo`, NOT a top-level `paseo`: most manifests have no
+    // top-level field at all, so reading it silently yielded the ">=0.8.0"
+    // default for every plugin and the floor assertion below passed by comparing
+    // a default against itself.
+    const meta = JSON.parse(fs.readFileSync(path.join(manifest.dir, "paseo-plugin.json"), "utf8"));
+    const paseo = meta.requirements?.paseo;
+    return {
+      id,
+      manifestId: manifest.pluginId,
+      name: manifest.publishAs,
+      paseo: typeof paseo === "string" ? paseo : ">=0.8.0",
+      runtime: RUNTIME_OVERRIDES[id] ?? [],
+    };
+  });
+}
+
+const PACKAGES = publishablePackages();
 
 function fail(message) {
   throw new Error(`[npm-acquisition] ${message}`);
