@@ -2497,6 +2497,27 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     setCollapsedOrchestrators(nextCollapsedOrch);
   };
 
+  /**
+   * The four agent states as header filters that carry their own counts.
+   *
+   * These were a separate row of filter buttons sitting directly under a header
+   * that already showed the same four numbers as badges: one piece of
+   * information stated twice, with the only control in the row that had no
+   * counts. The counts and the controls are now one control (#645).
+   */
+  const FLEET_STATE_FILTERS = useMemo(
+    () =>
+      [
+        { id: "all" as const, label: "Total", count: totalCount, variant: "neutral" as const },
+        { id: "working" as const, label: "Running", count: runningCount, dot: true, variant: "success" as const },
+        // "Idle / Sleeping", not the header badge's "Idle": merging the two controls must not
+        // narrow what the filter is understood to match.
+        { id: "idle" as const, label: "Idle / Sleeping", count: idleCount, variant: "neutral" as const },
+        { id: "failed" as const, label: "Failed", count: errorCount, dot: true, variant: "danger" as const },
+      ],
+    [totalCount, runningCount, idleCount, errorCount],
+  );
+
   return (
     <Stack gap={6}>
       {/* Header & Metric Badges */}
@@ -2520,15 +2541,57 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
             >
               Fleet Lineage Tree
             </Text>
-            <Badge label={`${totalCount} Total`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-            <Badge label={`${runningCount} Running`} variant="success" size="sm" dot textStyle={{ fontSize: 10 }} />
-            <Badge label={`${idleCount} Idle`} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-            {errorCount > 0 && (
-              <Badge label={`${errorCount} Failed`} variant="danger" size="sm" dot textStyle={{ fontSize: 10 }} />
-            )}
+            {/*
+             The counts were badges and the same four states were a separate row
+             of filter buttons directly below — one piece of information stated
+             twice, with the action in the row that had no counts. Same shape as
+             the work-queue metrics bar in #645: the header now carries the
+             filters, so the row underneath goes.
+            */}
+            {FLEET_STATE_FILTERS.map(({ id, label, count, dot, variant }) => {
+              if (count === 0 && id === "failed") return null;
+              const selected = stateFilter === id;
+              return (
+                <InteractiveRow
+                  key={id}
+                  onPress={() => setStateFilter(id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filter ${label}`}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                    paddingHorizontal: 6,
+                    paddingVertical: 2,
+                    borderRadius: 4,
+                    backgroundColor: selected
+                      ? (colors.surface2 ?? "rgba(255,255,255,0.08)")
+                      : "transparent",
+                  }}
+                >
+                  <Badge
+                    label={`${count} ${label}`}
+                    variant={selected ? "info" : variant}
+                    size="sm"
+                    dot={dot}
+                    textStyle={{ fontSize: 10 }}
+                  />
+                </InteractiveRow>
+              );
+            })}
           </Row>
         </Stack>
-        <Row gap="xs" align="center">
+        <Row gap="xs" align="center" wrap>
+          {allProjects.length > 0 && (
+            <Button
+              label={allProjectsCollapsed ? "Expand All" : "Collapse All"}
+              icon={allProjectsCollapsed ? "ChevronDown" : "ChevronRight"}
+              size="sm"
+              variant="ghost"
+              onPress={toggleAllProjects}
+              style={{ paddingVertical: 2, minHeight: 24 }}
+            />
+          )}
           <Button
             label={`Archive Closed/Failed${eligibleBulkCount > 0 ? ` (${eligibleBulkCount})` : ""}`}
             icon="Archive"
@@ -2539,43 +2602,14 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
             onPress={handleBulkArchive}
             style={{ paddingVertical: 2, minHeight: 24 }}
           />
-        </Row>
-      </Row>
-
-      {/* Filter and Search Bar */}
-      <Row justify="space-between" align="center" wrap gap="xs">
-        <Row wrap gap="xs" align="center">
-          {[
-            { id: "all", label: "All States" },
-            { id: "working", label: "Working" },
-            { id: "idle", label: "Idle / Sleeping" },
-            { id: "failed", label: "Failed" },
-          ].map((f) => (
-            <Button
-              key={f.id}
-              label={f.label}
-              size="sm"
-              variant={stateFilter === f.id ? "primary" : "secondary"}
-              onPress={() => setStateFilter(f.id)}
+          <View style={{ minWidth: 160, maxWidth: 280 }}>
+            <SearchInput
+              placeholder="Search agents, projects, worktrees, #issues..."
+              value={query}
+              onChangeText={setQuery}
             />
-          ))}
-          {allProjects.length > 0 && (
-            <Button
-              label={allProjectsCollapsed ? "Expand All" : "Collapse All"}
-              icon={allProjectsCollapsed ? "ChevronDown" : "ChevronRight"}
-              size="sm"
-              variant="ghost"
-              onPress={toggleAllProjects}
-            />
-          )}
+          </View>
         </Row>
-        <View style={{ minWidth: 200, flex: 1, maxWidth: 360 }}>
-          <SearchInput
-            placeholder="Search agents, projects, worktrees, #issues..."
-            value={query}
-            onChangeText={setQuery}
-          />
-        </View>
       </Row>
 
       {/* 1. Fleet Front Desk Hero (Elevated at Top of All) — singleton (#470) */}
