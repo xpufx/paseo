@@ -113,6 +113,9 @@ message **queued** instead:
 * **Remote targets** — no cross-daemon turn subscription exists, so a peer's
   status comes from `paseo inspect --host`. It is a sample, and a probe that
   fails **dispatches** rather than silently swallowing the message.
+* **Configured hosts** — reached by `serverId` rather than by registry name, and
+  resolved against Paseo's configured hosts, so a labelled host is probed rather
+  than silently treated as unknown. Same gate, same bounds.
 * After a successful send the target is recorded busy, so a second send in the
   same burst is queued instead of replacing the turn the first send just started.
 
@@ -138,9 +141,11 @@ side ever interrupts the other.
 before the target's next turn ends.** There is no cross-daemon turn-end signal to
 build such a guarantee on, and the alternatives are preemption or a protocol that
 does not exist. Every send reports `dispatched | queued | outbox | dropped`, and
-nothing is ever dropped silently. **This is a deliberate product decision and the
-thing most worth revisiting** — the full contract, the reasoning, and what to use
-if you need a real guarantee are in
+nothing is ever dropped silently. **Every route is covered** — the MCP/relay path
+and the Desktop configured-host path alike (#611); the Desktop surface used to
+send directly and preempt, and no longer does. **This is a deliberate product
+decision and the thing most worth revisiting** — the full contract, the reasoning,
+and what to use if you need a real guarantee are in
 [mcp/README.md#delivery-contract](mcp/README.md#delivery-contract).
 
 ## Repository layout

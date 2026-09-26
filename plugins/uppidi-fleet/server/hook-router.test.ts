@@ -1881,6 +1881,41 @@ describe("hook-router HTTP handoff, prune, and board sweep routes (#458)", () =>
     } catch {}
   });
 
+  /**
+   * `POST /orchestrators/prune` calls `pruneOrchestrators()` with no arguments,
+   * so the route resolves its agent roster from a live daemon (`fetchAgentMap` ->
+   * `paseo ls --json`) and has no `agentMap` injection seam the way the
+   * in-process test at "deletes orchestrator records for agents that no longer
+   * exist on the daemon" does. A stand-in `paseo` on PATH pins the roster so the
+   * route is asserted against a known agent list rather than against whatever
+   * daemon the developer happens to be running — the assertion passed locally for
+   * years only because a live daemon answered.
+   *
+   * Scoped to the one test that needs it on purpose: the Front Desk routes read
+   * the same CLI through `getActiveAgentIds()`, and their tests rely on the
+   * daemon-unreachable path, where an empty active set means "notify every
+   * orchestrator". A file-wide stub would quietly change what those assert.
+   */
+  async function withStubbedPaseoAgents<T>(agents: { id: string; status: string }[], fn: () => Promise<T>): Promise<T> {
+    const binDir = mkdtempSync(join(tmpdir(), "paseo-stub-cli-"));
+    const prevPath = process.env.PATH;
+    try {
+      writeFileSync(
+        join(binDir, "paseo"),
+        `#!/bin/sh\nif [ "$1" = "ls" ] && [ "$2" = "--json" ]; then\n  printf '%s' '${JSON.stringify(agents)}'\n  exit 0\nfi\nexit 127\n`,
+        { mode: 0o755 },
+      );
+      process.env.PATH = `${binDir}:${prevPath ?? ""}`;
+      return await fn();
+    } finally {
+      if (prevPath === undefined) delete process.env.PATH;
+      else process.env.PATH = prevPath;
+      try {
+        rmSync(binDir, { recursive: true, force: true });
+      } catch {}
+    }
+  }
+
   it("seeds and reports handoff via GET/POST /handoff", async () => {
     const getInitial = await fetch(`http://127.0.0.1:${router.port}/handoff`);
     assert.equal(getInitial.status, 200);
@@ -1904,11 +1939,17 @@ describe("hook-router HTTP handoff, prune, and board sweep routes (#458)", () =>
 
   it("prunes stale orchestrators via POST /orchestrators/prune", async () => {
     router.writeOrchestrator("repo-stale", "agent-does-not-exist");
-    const res = await fetch(`http://127.0.0.1:${router.port}/orchestrators/prune`, { method: "POST" });
+    router.writeOrchestrator("repo-live", "agent-live");
+    const res = await withStubbedPaseoAgents([{ id: "agent-live", status: "running" }], () =>
+      fetch(`http://127.0.0.1:${router.port}/orchestrators/prune`, { method: "POST" }),
+    );
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.ok, true);
-    assert.equal(typeof body.prunedCount, "number");
+    assert.equal(body.prunedCount, 1);
+    assert.equal(body.pruned[0].key, "repo-stale");
+    assert.equal(router.readOrchestrator("repo-live")?.agentId, "agent-live");
+    assert.equal(router.readOrchestrator("repo-stale"), null);
   });
 
   it("runs a board sweep via POST /board-sweep over explicit repos", async () => {

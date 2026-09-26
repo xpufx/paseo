@@ -337,6 +337,22 @@ messaging (`send`), listening (`logs`, `wait`), answering (`allow_permission`,
 operate resources on other daemons: no schedules, terminals, workspaces, or
 agent creation.
 
+### Pairing offers are never disclosed
+
+`x_comms_list_daemons --detailed` returns each daemon's target so a caller can
+see *where* a daemon is. For a **relay** daemon that target embeds its pairing
+offer after `#offer=`, and the offer is a control token: it authenticates a dial
+to that peer. Handing it back in a tool result would let any agent that can call
+the tool obtain a token for a peer it was never given — including one an operator
+added by hand, whose offer was never in that agent's context to begin with.
+
+So the offer token is replaced with `[REDACTED]` and the surrounding URL is kept.
+Direct `tcp://host:port` targets carry no token and are returned in full.
+
+Redaction keys on `#offer=` rather than on the `app.paseo.sh` host, because a
+pairing URL is accepted on any https host and a self-hosted relay must not be the
+exemption that leaks.
+
 ## Development
 
 ```sh
@@ -356,6 +372,28 @@ MIT
 > one thing here most worth revisiting — see "Why best-effort" and "If you want
 > a stronger guarantee".
 
+### Which routes this covers
+
+**All of them, with no route exception.** Every x-comms send on this daemon goes
+through one gated entry point and gets one of the four results below:
+
+- an agent's `x_comms_send` (MCP/relay, direct peer, or `paseo send --host`)
+- the plugin server's `conversation.send` — the registry/relay path **and** the
+  Desktop configured-host path, which address a target by `serverId` rather than
+  by registry name but are gated identically
+
+The Desktop surface is not an exception. It used to be one: it borrowed a
+`PaseoApi` and sent directly, which preempted a mid-turn target and then reported
+`dispatched` unconditionally. That was disclosed inline in the client rather than
+papered over, and is now closed (#611). A message typed into the Desktop
+conversation to a busy agent waits, exactly as the same message sent by an agent
+would.
+
+The gate is a property of the *send*, not of the caller, so it holds for a
+human-driven send and an agent-driven one alike. If you find a route that reports
+`dispatched` for a target you believe is mid-turn, that is a bug in that route,
+not a documented exception.
+
 ### What the sender is told
 
 Every send returns exactly one of these. There is no silent case.
@@ -370,6 +408,28 @@ Every send returns exactly one of these. There is no silent case.
 **`ok: true` with `delivery: "queued"` does not mean delivered.** It means
 accepted for deferred delivery. If you need confirmation, either read the
 target's timeline or set `notifyOnFinish` and wait for the notice.
+
+### When the gate itself is unavailable
+
+A target whose lifecycle **cannot be read** is treated as idle and the message is
+dispatched (see "Why best-effort, not guaranteed" — failing closed would turn
+"cannot tell" into "silently swallow the message"). That fail-open is deliberate
+and unchanged.
+
+A queue that **cannot accept** the message is different, and never falls through
+to a preempting send:
+
+- **At a bound** (8 per target, 200 fleet-wide): the new message is refused with
+  `delivery: "dropped"`, or an older one is evicted, and the sender is told. The
+  message is not delivered late instead.
+- **The plugin server is unreachable** (only reachable from a Desktop send, which
+  has no other route to a configured host): the send **fails visibly** and
+  nothing is sent. The Desktop surface shows *Not sent* and the underlying error.
+  It does **not** fall back to a direct preempting send — that is the exact
+  behaviour this contract exists to prevent, and reintroducing it as a fallback
+  would make the guarantee conditional on the server being up, which is worse than
+  a visible failure. The trade is deliberate: a configured-host send needs the
+  plugin server, the same as every other gated send.
 
 ### Why best-effort, not guaranteed
 

@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import {
   HELPER_ROOT,
   evaluateHelperIdentity,
+  helperContentDigest,
   isAncestorOrEqual,
   readHelperVersion,
   resolveServedFrom,
@@ -362,4 +363,86 @@ test("a helper older than the plugin's stamp is reported", () => {
       );
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// #649 — the content digest is authoritative, and no VCS operation can break it
+// ---------------------------------------------------------------------------
+
+test("a recorded HELPER_REVISION digest is the authoritative helper check", () => {
+  // Every checkout-served plugin must carry a digest, or the gate falls back to
+  // the git lookup that a squash-merge can invalidate.
+  const missing = PLUGIN_DIRS.filter((name) => {
+    const identity = evaluateHelperIdentity(path.join(REPO_ROOT, "plugins", name), REPO_ROOT);
+    if (identity.servedFrom !== "checkout" && identity.servedFrom !== "mixed") return false;
+    return !identity.declared?.revision;
+  });
+  assert.deepEqual(
+    missing,
+    [],
+    `these checkout-served plugins record no HELPER_REVISION digest: ${missing.join(", ")} — run node scripts/stamp-helper-revision.mjs <plugin>`,
+  );
+});
+
+test("a digest that matches the served helper passes even when the stamp sha is unresolvable", () => {
+  // The exact #651 CI failure. `525c597e` was #643's pre-squash branch head; it
+  // landed as `08277a55`, so `git log 525c597e` fails in every clean clone with
+  // `fatal: bad object` and the gate reported `unknown` — in CI only, because any
+  // machine still holding the branch worktree resolved it. With a digest the
+  // question no longer involves git at all.
+  withScratchPlugin(
+    "helper-resolution-orphaned-sha-",
+    (pluginDir) => {
+      fs.writeFileSync(
+        path.join(pluginDir, "shared", "helper-version.ts"),
+        `export const HELPER_VERSION = ${JSON.stringify(HELPER_VERSION)};\nexport const HELPER_SERVED_FROM = "checkout";\nexport const HELPER_REVISION = ${JSON.stringify(helperContentDigest(REPO_ROOT))};\n`,
+      );
+      fs.writeFileSync(
+        path.join(pluginDir, "shared", "version.ts"),
+        'export const PLUGIN_VERSION = "0.0.0+525c597e";\n',
+      );
+    },
+    (identity) => {
+      assert.equal(identity.servedFrom, "checkout");
+      assert.equal(
+        identity.status,
+        "ok",
+        `an orphaned stamp sha must not fail a plugin whose helper digest matches: ${identity.reasons.join("; ")}`,
+      );
+    },
+  );
+});
+
+test("a digest that disagrees with the served helper is reported stale", () => {
+  // The other direction, and the one that matters: a matching digest must not
+  // become a way to pass no matter what. Any real difference in the helper tree
+  // moves the digest.
+  withScratchPlugin(
+    "helper-resolution-wrong-digest-",
+    (pluginDir) => {
+      fs.writeFileSync(
+        path.join(pluginDir, "shared", "helper-version.ts"),
+        `export const HELPER_VERSION = ${JSON.stringify(HELPER_VERSION)};\nexport const HELPER_SERVED_FROM = "checkout";\nexport const HELPER_REVISION = "sha256:deadbeef0000";\n`,
+      );
+      fs.writeFileSync(
+        path.join(pluginDir, "shared", "version.ts"),
+        'export const PLUGIN_VERSION = "0.0.0+0000000";\n',
+      );
+    },
+    (identity) => {
+      assert.equal(identity.status, "stale");
+      assert.ok(
+        identity.reasons.some((r) => r.includes("sha256:deadbeef0000")),
+        `expected the recorded digest to be named in the reason, got: ${identity.reasons.join("; ")}`,
+      );
+    },
+  );
+});
+
+test("the helper content digest is stable and changes with content, not with git", () => {
+  const first = helperContentDigest(REPO_ROOT);
+  assert.match(first, /^sha256:[0-9a-f]{12}$/);
+  // Recomputing must be deterministic: sorted paths, so directory iteration
+  // order cannot leak into the result.
+  assert.equal(helperContentDigest(REPO_ROOT), first);
 });

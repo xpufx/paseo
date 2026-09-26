@@ -122,6 +122,22 @@ const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
   { id: "verify", label: "Verify" },
 ];
 
+/**
+ * Presets shown in the metrics bar that it did not already cover (#645).
+ * "all", "needs-you" and "triage-review" have had their own metric chips since
+ * the bar was introduced; these three only existed on the separate filter row.
+ */
+const EXTRA_METRIC_PRESETS: Array<{
+  id: IssuePreset;
+  label: string;
+  icon: string;
+  tone: "statusWarning" | "statusSuccess" | "statusDanger" | "accent";
+}> = [
+  { id: "needs-attention", label: "Needs attention", icon: "AlertCircle", tone: "statusWarning" },
+  { id: "in-progress", label: "In progress", icon: "Loader", tone: "accent" },
+  { id: "verify", label: "Verify", icon: "CheckCircle2", tone: "statusSuccess" },
+];
+
 const tabs = [
   { id: "tree", label: "Agents & Fleet", shortLabel: "Fleet", icon: "FolderTree" },
   { id: "dashboard", label: "Work Queue", shortLabel: "Queue", icon: "LayoutDashboard" },
@@ -771,14 +787,66 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const totalQueued = hookStatus?.totalQueued ?? 0;
   const queuesList = toList(hookQueues?.queues);
 
+  /**
+   * Models the daemon reports, as Select options (#635).
+   *
+   * Deduplicated and sorted so the list does not reshuffle between polls, and
+   * guarded with toList() per the partial-payload contract (#510) — a stale
+   * payload can carry roles with no availableModels at all.
+   */
+  const roleModelOptions = useMemo<SelectOption[]>(() => {
+    const seen = new Set<string>();
+    const options: SelectOption[] = [];
+    for (const model of toList(roleModelsData?.availableModels)) {
+      const name = String(model ?? "").trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      options.push({ label: name, value: name });
+    }
+    return options.sort((a, b) => a.label.localeCompare(b.label));
+  }, [roleModelsData?.availableModels]);
+
   const visibleQueues = useMemo(() => {
     const filtered = filterQueues(queuesList, queuePreset, queueQuery);
     return sortQueues(filtered, queueSortField, queueSortDir);
   }, [queuesList, queuePreset, queueQuery, queueSortField, queueSortDir]);
 
+  /**
+   * Per-preset issue counts (#645).
+   *
+   * Previously inlined in the filter button row that this change removed. It
+   * lives here now because the metrics bar renders every preset, and a second
+   * copy of these predicates is how the two rows started disagreeing.
+   */
+  const presetCounts = useMemo(() => {
+    const all = rawIssues;
+    return {
+      all: all.length,
+      "needs-you": all.filter((i) => i.attention === "attention/2-user").length,
+      "needs-attention": all.filter(
+        (i) =>
+          i.attention.startsWith("attention/0-") ||
+          i.attention.startsWith("attention/1-") ||
+          i.attention.startsWith("attention/2-")
+      ).length,
+      // toList(), not i.labels directly: the partial-payload contract (#510) allows
+      // an issue with no labels, and the previous inline copy only survived that
+      // because `status === "Review"` short-circuited the `||` before labels was
+      // touched. Sorting by an unrelated field reached the unguarded access.
+      "triage-review": all.filter(
+        (i) =>
+          i.status === "Review" ||
+          toList(i.labels).some((l) => l.includes("state/0-triage") || l.includes("state/2-review"))
+      ).length,
+      "in-progress": all.filter(
+        (i) => i.status === "In progress" || toList(i.labels).some((l) => l.includes("state/1-wip"))
+      ).length,
+      verify: all.filter((i) => toList(i.labels).some((l) => l.includes("state/3-verify"))).length,
+    } satisfies Record<IssuePreset, number>;
+  }, [rawIssues]);
+
   const allAgents = useMemo(() => {
-    return [
-      ...toList(agentsData?.frontDesk),
+    return [      ...toList(agentsData?.frontDesk),
       ...toList(agentsData?.orchestrators),
       ...toList(agentsData?.workers),
     ];
@@ -1174,6 +1242,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             onToggle={(exp) => setRoleModelsExpanded(exp)}
           >
             <Card variant="flat">
+                {/* Built once per render rather than per role: every role
+                    offers the same daemon model list, and rebuilding it inside
+                    the map made the list look role-specific. */}
+                {roleModelOptions.length === 0 && (
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                    No models reported by the daemon.
+                  </Text>
+                )}
               <Stack gap="sm">
                 <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                   Configure primary model and fallback tiers for each agent role type:
@@ -1202,18 +1278,28 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                           </Text>
                         )}
                       </Stack>
-                      <Button
-                        label="Switch model"
-                        size="sm"
-                        variant="ghost"
-                        onPress={() => {
-                          const available = toList(roleModelsData?.availableModels);
-                          if (available.length > 0) {
-                            const nextIdx = (available.indexOf(cfg.primaryModel) + 1) % available.length;
-                            const nextModel = available[nextIdx];
-                            void handleRoleModelChange(roleKey, nextModel);
+                      {/* Explicit model selection (#635). This was a
+                          "Switch model" button that computed
+                          (available.indexOf(primary) + 1) % available.length —
+                          it cycled to whatever came next and never said what
+                          that was, so the control was a click-and-pray. A
+                          Select names the current model, lists the real
+                          choices, and makes the no-op case visible: with one
+                          model available there is nothing to switch to, which
+                          the old button silently did nothing about. */}
+                      <Select
+                        value={cfg.primaryModel}
+                        label={`${roleKey} model`}
+                        options={roleModelOptions}
+                        onValueChange={(model) => {
+                          if (model !== cfg.primaryModel) {
+                            void handleRoleModelChange(roleKey, model);
                           }
                         }}
+                        disabled={roleModelOptions.length < 2}
+                        placeholder="Select a model"
+                        size="sm"
+                        style={{ minWidth: 180 }}
                       />
                     </Row>
                   </Card>
@@ -1644,58 +1730,50 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 {issuesData?.reviewCount ?? 0}
               </Text>
             </InteractiveRow>
-          </Row>
 
-          {/* Action Bar & Filter Buttons */}
-          <ActionBar align="space-between" style={{ paddingVertical: 2 }}>
-            <Row wrap gap="xs" align="center">
-              {issuePresetFilters.map(({ id, label }) => {
-                let count = 0;
-                if (id === "all") count = rawIssues.length;
-                else if (id === "needs-you") {
-                  count = rawIssues.filter((i) => i.attention === "attention/2-user").length;
-                } else if (id === "needs-attention") {
-                  count = rawIssues.filter(
-                    (i) =>
-                      i.attention.startsWith("attention/0-") ||
-                      i.attention.startsWith("attention/1-") ||
-                      i.attention.startsWith("attention/2-")
-                  ).length;
-                } else if (id === "triage-review") {
-                  count = rawIssues.filter(
-                    (i) =>
-                      i.status === "Review" ||
-                      i.labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"))
-                  ).length;
-                } else if (id === "in-progress") {
-                  count = rawIssues.filter(
-                    (i) =>
-                      i.status === "In progress" ||
-                      i.labels.some((l) => l.includes("state/1-wip"))
-                  ).length;
-                } else if (id === "verify") {
-                  count = rawIssues.filter((i) => i.labels.some((l) => l.includes("state/3-verify"))).length;
-                }
-                return (
-                  <Button
-                    key={id}
-                    label={`${label} (${count})`}
-                    size="sm"
-                    variant={filter === id ? "primary" : "ghost"}
-                    style={{
-                      paddingHorizontal: 6,
-                      paddingVertical: 2,
-                      minHeight: 22,
-                    }}
-                    onPress={() => setFilter(id)}
-                  />
-                );
-              })}
-            </Row>
+            {/* The presets this bar did not previously cover (#645). The filter
+                row below carried all six; three had no metric here, so removing
+                it would have made them reachable only by scrolling back. */}
+            <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+
+            {EXTRA_METRIC_PRESETS.map(({ id, label, icon, tone }) => (
+              <InteractiveRow
+                key={id}
+                onPress={() => setFilter(id)}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 4,
+                  backgroundColor:
+                    filter === id ? (colors.surface2 ?? "rgba(255,255,255,0.08)") : "transparent",
+                }}
+                pressedOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel={`Filter ${label}`}
+              >
+                <Icon
+                  name={icon}
+                  size={13}
+                  color={presetCounts[id] > 0 ? (colors[tone] ?? colors.accent) : colors.foregroundMuted}
+                />
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                  {label}:
+                </Text>
+                <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 12 }}>
+                  {presetCounts[id]}
+                </Text>
+              </InteractiveRow>
+            ))}
+
+            <View style={{ flex: 1 }} />
+
             <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 10 }}>
               {selectedRepo === "all" ? "All Repositories" : `Repo: ${selectedRepo}`}
             </Text>
-          </ActionBar>
+          </Row>
 
           {/* Work Queue (Full Width) (#425) */}
           <Card variant="elevated" style={{ width: "100%" }}>

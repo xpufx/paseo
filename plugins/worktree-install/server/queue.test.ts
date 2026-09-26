@@ -1,5 +1,8 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readQueues, readRouterStatus, resolveRouterUrl } from "./queue.js";
 
 const realFetch = globalThis.fetch;
@@ -7,6 +10,10 @@ const realEnv = process.env.FORGE_HOOK_URL;
 
 /** Serve a fixed JSON body for `/status`, `/health`, and `/queues`. */
 function stubRouter(routes: Record<string, unknown | "down">) {
+  // Pin the endpoint so these tests do not resolve the developer's real
+  // ~/.config/uppidi-fleet/router-config.json. The URL is asserted directly in
+  // its own test; every other assertion is about the projection, not the host.
+  process.env.FORGE_HOOK_CONFIG = "/nonexistent/router-config.json";
   const calls: string[] = [];
   globalThis.fetch = (async (url: string) => {
     const path = new URL(String(url)).pathname;
@@ -26,15 +33,84 @@ afterEach(() => {
   else process.env.FORGE_HOOK_URL = realEnv;
 });
 
+afterEach(() => {
+  delete process.env.FORGE_HOOK_CONFIG;
+});
+
 describe("router url resolution", () => {
-  it("prefers an explicit override, then the env var, then loopback", () => {
+  it("reads the hook server address from the router config, not just loopback", () => {
+    // The bug this fixes: the daemon is persisted at a LAN address, and falling
+    // straight through to 127.0.0.1 made the surfaces report "cannot see the
+    // router" on every machine that is not running it locally.
+    delete process.env.FORGE_HOOK_URL;
+    const dir = mkdtempSync(join(tmpdir(), "router-config-"));
+    const file = join(dir, "router-config.json");
+    writeFileSync(file, JSON.stringify({ host: "10.20.30.24", port: 8099 }));
+    process.env.FORGE_HOOK_CONFIG = file;
+    try {
+      assert.equal(resolveRouterUrl(), "http://10.20.30.24:8099");
+    } finally {
+      delete process.env.FORGE_HOOK_CONFIG;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("maps a wildcard bind to loopback rather than dialling 0.0.0.0", () => {
+    delete process.env.FORGE_HOOK_URL;
+    const dir = mkdtempSync(join(tmpdir(), "router-config-"));
+    const file = join(dir, "router-config.json");
+    writeFileSync(file, JSON.stringify({ host: "0.0.0.0", port: 8099 }));
+    process.env.FORGE_HOOK_CONFIG = file;
+    try {
+      assert.equal(resolveRouterUrl(), "http://127.0.0.1:8099");
+    } finally {
+      delete process.env.FORGE_HOOK_CONFIG;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to loopback when the config is unreadable, and not to a hang", () => {
+    delete process.env.FORGE_HOOK_URL;
+    process.env.FORGE_HOOK_CONFIG = "/nonexistent/router-config.json";
+    try {
+      assert.equal(resolveRouterUrl(), "http://127.0.0.1:8099");
+    } finally {
+      delete process.env.FORGE_HOOK_CONFIG;
+    }
+  });
+
+  it("still prefers an explicit override over the config", () => {
+    const dir = mkdtempSync(join(tmpdir(), "router-config-"));
+    const file = join(dir, "router-config.json");
+    writeFileSync(file, JSON.stringify({ host: "10.20.30.24", port: 8099 }));
+    process.env.FORGE_HOOK_CONFIG = file;
+    try {
+      assert.equal(resolveRouterUrl("http://explicit:1234/"), "http://explicit:1234");
+    } finally {
+      delete process.env.FORGE_HOOK_CONFIG;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("prefers an explicit override, then the env var", () => {
     delete process.env.FORGE_HOOK_URL;
     assert.equal(resolveRouterUrl("http://router.internal:9000/"), "http://router.internal:9000");
     process.env.FORGE_HOOK_URL = "http://env-host:1234//";
     assert.equal(resolveRouterUrl(), "http://env-host:1234");
     assert.equal(resolveRouterUrl("http://explicit:1"), "http://explicit:1");
+  });
+
+  it("falls back to loopback only when no config exists", () => {
+    // Pinned to a missing config path: left unset, this test read whatever
+    // ~/.config/uppidi-fleet/router-config.json happened to contain on the
+    // developer's machine, which is exactly why it looked green before.
     delete process.env.FORGE_HOOK_URL;
-    assert.equal(resolveRouterUrl(), "http://127.0.0.1:8099");
+    process.env.FORGE_HOOK_CONFIG = "/nonexistent/router-config.json";
+    try {
+      assert.equal(resolveRouterUrl(), "http://127.0.0.1:8099");
+    } finally {
+      delete process.env.FORGE_HOOK_CONFIG;
+    }
   });
 });
 

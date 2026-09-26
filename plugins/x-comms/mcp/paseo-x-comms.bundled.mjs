@@ -36551,6 +36551,15 @@ function redactSecrets(target, options = {}) {
   return target;
 }
 
+// mcp/daemon-target.mjs
+var REDACTED_OFFER = "[REDACTED]";
+function redactDaemonTarget(value) {
+  const raw = String(value ?? "");
+  const idx = raw.indexOf("#offer=");
+  if (idx === -1) return raw;
+  return `${raw.slice(0, idx)}#offer=${REDACTED_OFFER}`;
+}
+
 // mcp/paseo-x-comms.mjs
 var VERSION = "0.3.0";
 var REMOTES_DIR = join(homedir(), ".paseo", "paseo-x-comms");
@@ -36810,7 +36819,7 @@ async function senderMetaBlock(signal, target = {}, sender = {}, messageId = nul
 var TOOL_SCHEMAS = {
   listDaemons: {
     detailed: external_exports.boolean().optional().describe(
-      "If true, returns detailed metadata objects including daemon name, host target, serverId, status, and source."
+      "If true, returns detailed metadata objects including daemon name, host target, serverId, status, and source. For a relay daemon the target is returned with its pairing offer token replaced by [REDACTED] \u2014 the offer authenticates a dial to that peer, so it is not disclosed here. Direct tcp:// targets are returned in full."
     )
   },
   addDaemon: {
@@ -37264,7 +37273,9 @@ function registerTools(server2) {
         const isManual = manual[name] !== void 0;
         return {
           name,
-          target,
+          // Redacted; serverId is still derived from the raw value so identity
+          // resolution is unaffected by the redaction.
+          target: redactDaemonTarget(target),
           status: "online",
           serverId: deriveHostFromOffer(target),
           source: isManual ? "registry" : "configured-host"

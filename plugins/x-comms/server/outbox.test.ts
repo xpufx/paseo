@@ -190,4 +190,34 @@ describe("outbox delivery", () => {
     assert.equal(result.notifyFailed.length, 1);
     assert.equal(state.entries.length, 0);
   });
+
+  it("carries a pre-stamped prompt through a retry, so it is never stamped twice", async () => {
+    // The Desktop configured-host route hands over bytes that already carry an
+    // envelope. A held copy retried without that flag takes the stamping route and
+    // ships two envelopes, so the flag has to survive being written to disk.
+    const state = emptyOutboxState();
+    const held = holdMessage(state, { ...MESSAGE, prompt: "<x-comms-message>{…}</x-comms-message>\n\nhello", stamped: true }, {
+      nowMs: T0,
+      error: "host unreachable",
+    });
+    assert.equal(held.stamped, true);
+
+    // Round-tripped through JSON, as the outbox file does between passes.
+    const reloaded = emptyOutboxState();
+    reloaded.entries.push(...JSON.parse(JSON.stringify(state.entries)));
+    const seen: OutboxEntry[] = [];
+    await runOutboxPass(
+      reloaded,
+      { deliver: async (entry) => { seen.push(entry); }, notify: async () => {} },
+      { nowMs: T0 + OUTBOX_BACKOFF_BASE_MS },
+    );
+    assert.equal(seen[0]?.stamped, true, "a retry must still know the bytes are final");
+    assert.match(seen[0]!.prompt, /^<x-comms-message>/, "delivered verbatim, not re-stamped");
+  });
+
+  it("leaves an unstamped message unstamped, so the daemon keeps stamping it", () => {
+    const state = emptyOutboxState();
+    const held = holdMessage(state, MESSAGE, { nowMs: T0, error: "peer unreachable" });
+    assert.equal(held.stamped, undefined);
+  });
 });

@@ -353,6 +353,10 @@ export const identitySyncRpc = defineRpc({
  * target that is mid-turn gets the message queued instead, and the caller is
  * told which of the four happened so a "sent" in the UI is never a message that
  * is actually sitting in a queue. See the delivery contract in README.md.
+ *
+ * This is the single gated send entry point. The Desktop surface, the registry
+ * relay, and a configured host all come through here, so the four-state result
+ * means the same thing on every route.
  */
 export const conversationSendRpc = defineRpc({
   name: "conversation.send",
@@ -367,6 +371,12 @@ export const conversationSendRpc = defineRpc({
     // been reloaded with the field; absent means notify (the daemon's own
     // agent-scoped default).
     notifyOnFinish: z.boolean().optional(),
+    // The prompt already carries its envelope and is delivered verbatim. The
+    // Desktop configured-host route sets this: it stamps its own envelope
+    // because it holds no mesh key. The daemon never re-stamps, which would move
+    // `sentAt` and invalidate the signature. Optional for the same
+    // rolling-upgrade reason as the field above; absent means "stamp it here".
+    stamped: z.boolean().optional(),
   }),
   output: z.object({
     daemon: z.string(),

@@ -1,5 +1,6 @@
 /** Deterministic unit tests for the npm-native stage → 2fado notify path. */
-import { hasStagedVersion, localTarballPath, notificationSummary, preflightNotifyDaemon, stagePackage, stagePackages } from "./npm-stage-native.mjs";
+import path from "node:path";
+import { hasStagedVersion, isPublishedVersion, localTarballPath, notificationSummary, preflightNotifyDaemon, stagePackage, stagePackages } from "./npm-stage-native.mjs";
 
 let pass = 0;
 let fail = 0;
@@ -8,6 +9,8 @@ const check = (name, condition) => {
   else { fail += 1; console.error(`  FAIL ${name}`); }
 };
 const entry = { publishAs: "@xpufx/paseo-demo", version: "1.2.3", tarball: "publish-stage/demo/demo.tgz" };
+/** The shape publish-npm.mjs actually writes: tarball relative to the stage dir. */
+const stageEntry = { publishAs: "@xpufx/paseo-demo", version: "1.2.3", tarball: "demo/demo.tgz" };
 
 /** Silence the expected warnings these cases emit. */
 const quiet = (fn) => {
@@ -58,8 +61,9 @@ const quiet = (fn) => {
   };
   const result = stagePackage(entry, { run, link: "https://forge.example/runs/42" });
   check("success reports staged", result.outcome === "staged");
-  check("success publishes to npm stage", JSON.stringify(calls[1]) === JSON.stringify(["npm", ["stage", "publish", `./${entry.tarball}`, "--access", "public"]]));
-  check("success emits one 2fado notify", JSON.stringify(calls[2]) === JSON.stringify(["2fado", ["notify", "--link", "https://forge.example/runs/42", "--summary", notificationSummary(entry.publishAs, entry.version)]]));
+  check("success probes the registry before staging", calls[1][0] === "npm" && calls[1][1][0] === "view");
+  check("success publishes to npm stage", JSON.stringify(calls[2]) === JSON.stringify(["npm", ["stage", "publish", `./${entry.tarball}`, "--access", "public"]]));
+  check("success emits one 2fado notify", JSON.stringify(calls[3]) === JSON.stringify(["2fado", ["notify", "--link", "https://forge.example/runs/42", "--summary", notificationSummary(entry.publishAs, entry.version)]]));
 }
 
 {
@@ -99,7 +103,7 @@ const quiet = (fn) => {
     });
   } catch { threw = true; }
   check("failed stage propagates failure", threw);
-  check("failed stage does not notify", calls.length === 2 && calls.every(([command]) => command === "npm"));
+  check("failed stage does not notify", calls.length === 3 && calls.every(([command]) => command === "npm"));
 }
 
 {
@@ -107,7 +111,46 @@ const quiet = (fn) => {
   check("dot-prefixed tarball is preserved", localTarballPath("./demo/pkg.tgz") === "./demo/pkg.tgz");
   check("parent-relative tarball is preserved", localTarballPath("../shared/pkg.tgz") === "../shared/pkg.tgz");
   check("absolute tarball is preserved", localTarballPath("/tmp/stage/pkg.tgz") === "/tmp/stage/pkg.tgz");
+  check("stage-relative tarball resolves under the manifest dir", localTarballPath("demo/pkg.tgz", "/w/publish-stage") === "/w/publish-stage/demo/pkg.tgz");
 }
+
+{
+  // The manifest publish-npm.mjs writes records tarballs relative to the stage
+  // dir, so a baseDir must reach npm or every stage dies on ENOENT.
+  const calls = [];
+  const run = (command, args) => { calls.push([command, args]); return args[1] === "list" ? "[]" : ""; };
+  const result = stagePackage(stageEntry, { run, link: "https://forge.example/runs/42", baseDir: "/w/publish-stage" });
+  check("stage-relative manifest entry stages", result.outcome === "staged");
+  check("stage-relative manifest entry publishes an absolute tarball", calls[2][1][2] === path.join("/w/publish-stage", stageEntry.tarball));
+}
+
+{
+  const calls = [];
+  const run = (command, args) => {
+    calls.push([command, args]);
+    if (args[1] === "list") return "[]";
+    if (args[0] === "view") return JSON.stringify(["0.1.0", entry.version]);
+    return "";
+  };
+  const result = stagePackage(entry, { run, link: "https://forge.example/runs/42" });
+  check("already-published version is skipped", result.outcome === "skipped");
+  check("already-published version is not staged", !calls.some(([command, args]) => command === "npm" && args[1] === "publish"));
+}
+
+{
+  const calls = [];
+  const run = (command, args) => {
+    calls.push([command, args]);
+    if (args[1] === "list") return "[]";
+    if (args[0] === "view") throw new Error("npm error code E404 not in this registry");
+    return "";
+  };
+  const result = stagePackage(entry, { run, link: "https://forge.example/runs/42" });
+  check("unpublished package still stages", result.outcome === "staged");
+  check("unpublished package stages its tarball", calls.some(([command, args]) => command === "npm" && args[1] === "publish"));
+}
+
+check("published matching is exact", isPublishedVersion(["1.2.3"], "1.2.4") === false);
 
 check("duplicate matching is exact", hasStagedVersion([{ packageName: entry.publishAs, version: "1.2.4" }], entry.publishAs, entry.version) === false);
 console.log(`\n${pass} passed, ${fail} failed`);
