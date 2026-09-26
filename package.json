@@ -22,7 +22,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "check:declared-tooling": "node --test scripts/declared-tooling.test.mjs",
     "check:helper-resolution": "node --test scripts/helper-resolution.test.mjs",
-    "test": "npm run check:declared-tooling && npm run check:helper-resolution && npm run test --workspaces --if-present",
+    "check:npm-acquisition-coverage": "node --test scripts/npm-acquisition-coverage.test.mjs",
+    "test": "npm run check:declared-tooling && npm run check:helper-resolution && npm run check:npm-acquisition-coverage && npm run test --workspaces --if-present",
     "test:npm-acquisition": "node scripts/npm-acquisition-smoke.mjs",
     "doctor:live": "node scripts/doctor-live.mjs"
   },
