@@ -112,13 +112,25 @@ export function Button({
 
   const attentionMode = resolveButtonAttentionMode(attention);
 
+  // Accessibility touch targets are met with `hitSlop`, which expands the
+  // tappable area without moving a single neighbouring pixel. They are NOT met
+  // by inflating the painted box: a `minHeight` floor forced `size="sm"` to
+  // render 40px tall on mobile against a ~26px recipe, because the floor was
+  // computed from the touch target rather than from the size (#647).
+  //
+  // The slop has to be derived from this button's own height, not a fixed 32 —
+  // a 32px baseline silently under-serves every smaller recipe, so `sm` got
+  // both a too-tall box and too little slop.
+  const contentHeight = Math.round(fontSize * 1.2) + py * 2;
+  const hitSlopSide = Math.max(0, (touchTargetMin - contentHeight) / 2);
+
   const pressable = (
     <Pressable
       onPress={onPress}
       disabled={disabled || loading}
       accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel || label}
-      hitSlop={Math.max(0, (touchTargetMin - 32) / 2)}
+      hitSlop={hitSlopSide}
       style={({ pressed }) => [
         styles.base,
         {
@@ -128,7 +140,6 @@ export function Button({
           borderRadius: radius,
           paddingVertical: py,
           paddingHorizontal: px,
-          minHeight: Math.max(30, touchTargetMin - 4),
           opacity: disabled ? 0.45 : 1,
         },
         style,
