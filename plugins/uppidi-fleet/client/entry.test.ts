@@ -861,8 +861,8 @@ describe("uppidi-fleet client entry contract", () => {
       // have and must not grow (its components are frozen).
       assert.match(
         workQueueSource,
-        /key: "forge"[\s\S]*?icon="ExternalLink"[\s\S]*?Linking\.openURL\(issue\.url/,
-        "Work Queue rows must render a Forge link that opens issue.url",
+        /key: "forge"[\s\S]*?icon=\{<UppidiBrandMark[\s\S]*?Linking\.openURL\(issue\.url/,
+        "Work Queue rows must render a Forgejo-marked link that opens issue.url",
       );
 
       // Work Queue renders its filters in a single metrics bar above the Work
