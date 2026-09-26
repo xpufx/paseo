@@ -26,7 +26,8 @@
     "check:npm-acquisition-coverage": "node --test scripts/npm-acquisition-coverage.test.mjs",
     "check:reload-notify": "node scripts/reload-notify.test.mjs",
     "check:unreachable-tests": "node --test scripts/unreachable-tests.test.mjs",
-    "test": "npm run check:fixture-home-paths && npm run check:declared-tooling && npm run check:helper-resolution && npm run check:npm-acquisition-coverage && npm run check:reload-notify && npm run check:unreachable-tests && npm run test --workspaces --if-present",
+    "check:fleet-matrix": "node --test scripts/fleet-determinism-matrix.test.mjs && node scripts/fleet-determinism-matrix.mjs --check",
+    "test": "npm run check:fixture-home-paths && npm run check:declared-tooling && npm run check:helper-resolution && npm run check:npm-acquisition-coverage && npm run check:reload-notify && npm run check:unreachable-tests && npm run check:fleet-matrix && npm run test --workspaces --if-present",
     "test:npm-acquisition": "node scripts/npm-acquisition-smoke.mjs",
     "doctor:live": "node scripts/doctor-live.mjs"
   },
