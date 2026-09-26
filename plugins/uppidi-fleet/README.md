@@ -14,6 +14,14 @@ boards, and router health — in one place.
 > components and occasional intervention by humans. All features may not work
 > 100% reliably.
 
+| Uppidi Fleet Cockpit |
+| :---: |
+| <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-wide.jpg"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-wide.jpg" alt="Uppidi Fleet Cockpit — the full surface: agent tree, board, queues and router health" width="100%" /></a> |
+
+| Agents & Fleet | Work Queue | Settings |
+| :---: | :---: | :---: |
+| <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-agents-fleet.jpg"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-agents-fleet.jpg" alt="Agents & Fleet — the hierarchical agent tree with deterministic state badges" width="100%" /></a> | <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-work-queue.jpg"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-work-queue.jpg" alt="Work Queue — open issues, Fleet Needs Attention board and filter presets" width="100%" /></a> | <a href="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-settings.jpg"><img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/uppidi-fleet/screenshots/uppidi-fleet-settings.jpg" alt="Settings — hook service control, listen host and port" width="100%" /></a> |
+
 This README is written for a **third party** who has never used the system and
 wants to stand one up for their own forge, repositories, models, and team
 rules. It explains the architecture, how the skills work and how to rewrite
@@ -155,11 +163,22 @@ is reported as *"token lacks write scope"* rather than silently failing.
 
 ## 3. Install the plugin
 
-From a local checkout (the reliable path in this monorepo):
+Install from npm (Paseo 0.9+):
+
+```sh
+paseo plugin add npm:@xpufx/paseo-uppidi-fleet
+```
+
+Or install directly from the Git repository:
 
 ```sh
 paseo plugin add xpufx/paseo --path plugins/uppidi-fleet
 ```
+
+> [!NOTE]
+> The npm package is `@xpufx/paseo-uppidi-fleet`; the plugin still installs and
+> displays as **`uppidi-fleet`**, which is the `id` in its
+> `paseo-plugin.json`. Pre-0.9 Paseos install from the repository path instead.
 
 After install, the plugin appears as a sidebar item and a workspace panel named
 **Uppidi Fleet**, plus a settings screen. The server entry

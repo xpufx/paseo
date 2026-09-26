@@ -32,7 +32,12 @@
     "client",
     "!client/testing",
     "server",
-    "shared"
+    "shared",
+    "docs",
+    "!**/*.test.ts",
+    "!**/*.test.tsx",
+    "!**/*.test.mjs",
+    "!**/.DS_Store"
   ],
   "repository": {
     "type": "git",
