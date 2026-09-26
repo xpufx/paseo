@@ -8,6 +8,7 @@ import {
   DEFER_MAX_DEPTH_PER_TARGET,
 } from "./server/defer-queue.ts";
 import { RECIPIENT_INSTRUCTIONS } from "./server/recipient-instructions.ts";
+import { EnvelopeSchema } from "./shared/envelope.ts";
 
 /**
  * The x-comms guidance that reaches an agent, on all three surfaces, in one
@@ -61,6 +62,25 @@ import { RECIPIENT_INSTRUCTIONS } from "./server/recipient-instructions.ts";
  * that inverts the rule, which is the opposite of what a contract test is for.
  * What is pinned is the rule: each surface names it, none of them contradicts
  * it, and no surface may carry the retired advice.
+ *
+ * ## The second class: field names, checked against the schema
+ *
+ * #709 is a surface disagreeing with another surface. #713 is worse and is not
+ * caught by any surface-to-surface comparison: the MCP instructions told the
+ * reader to reply with `daemon=sender.daemon`, and `sender` has no `daemon` —
+ * `daemon` is on `target`, and the remote daemon is identified by
+ * `sender.daemonServerId`. Every other surface said `daemonServerId`, so a
+ * three-way diff would have passed; the two correct surfaces and the one broken
+ * one "agree to disagree" only if the comparator is the schema. The reader
+ * following the broken one reads `undefined`, and `x_comms_send`'s `daemon` is a
+ * required `z.string()`, so the reply fails tool validation before it reaches a
+ * handler. Nothing retries it, and the MCP surface — unlike the other two — gave
+ * no second daemon value to try: they add `(or sender.host)`, it added nothing.
+ *
+ * So the last block below pins what a prose rule cannot: every `sender.x` /
+ * `target.y` any surface names must be a field `EnvelopeSchema` defines. It is
+ * the generalisation of the bug rather than the bug — a rename, a typo, or a
+ * field copied off the wrong block all fail identically, on every surface.
  *
  * The MCP surface is read out of the source module rather than by starting a
  * server, for the same reason `protocol.test.mjs` reads `defer-queue.ts` off
@@ -180,16 +200,12 @@ describe("the surfaces cover the same ground, not just the same rule", () => {
   // another, so the cheap generalisation of that read is pinned here: the load-
   // bearing reply facts every surface states, each asserted on all of them. A
   // surface that stops saying one is no longer mirroring the others.
-  // The registration step is absent from the MCP surface, which says "Register
-  // the sender's daemon first" without naming `x_comms_add_daemon`. That is an
-  // omission in the tersest of the three surfaces rather than a contradiction,
-  // so it is not asserted here: this suite exists to pin the shared rule, and a
-  // fact only two surfaces carry would turn it into a wish list.
   const LOAD_BEARING = [
     { name: "x_comms_send", re: /x_comms_send/ },
     { name: "x_comms_list_permissions", re: /(?:x_comms_)?list_permissions/ },
     { name: "x_comms_allow_permission", re: /(?:x_comms_)?allow_permission/ },
     { name: "x_comms_deny_permission", re: /(?:x_comms_)?deny_permission/ },
+    { name: "x_comms_add_daemon", re: /(?:x_comms_)?add_daemon/ },
     { name: "sender.agentId", re: /sender\.agentId/ },
   ] as const;
 
@@ -204,6 +220,64 @@ describe("the surfaces cover the same ground, not just the same rule", () => {
           );
         });
       }
+    });
+  }
+});
+
+/**
+ * The two envelope blocks, keyed as the instruction text names them.
+ *
+ * The schemas are read off `EnvelopeSchema` rather than restated as field-name
+ * lists. A hand-copied list is the same class of bug: it would agree with the
+ * schema for exactly as long as nobody renamed a field, and the rename is the
+ * one change this guard exists to survive. Two surfaces already said
+ * `sender.daemonServerId` while the MCP surface said `sender.daemon` — a field
+ * that has never existed on the `sender` block, where `daemon` lives on `target`
+ * and `daemonServerId` is the only thing identifying the remote daemon at all.
+ * An agent following that instruction reads `undefined` and hands it to a
+ * required `z.string()`, so the reply dies in tool validation (#713).
+ */
+const ENVELOPE_BLOCKS = {
+  sender: EnvelopeSchema.shape.xComms.shape.sender,
+  target: EnvelopeSchema.shape.xComms.shape.target,
+} as const;
+
+/**
+ * A `sender.x` / `target.y` reference in prose. The dot is required, so the
+ * MCP surface's "signature over the envelope's sender/target/messageId/sentAt
+ * fields" — naming the two blocks as a pair, with no field — is not a reference
+ * and is not checked.
+ */
+const ENVELOPE_FIELD_REF = /\b(sender|target)\.([A-Za-z_][A-Za-z0-9_]*)/g;
+
+describe("instruction text names envelope fields the schema actually defines (#713)", () => {
+  for (const surface of SURFACES) {
+    describe(surface.name, () => {
+      it("references no field the envelope schema lacks", () => {
+        const refs = [...surface.text.matchAll(ENVELOPE_FIELD_REF)].map(([, block, field]) => ({
+          block,
+          field,
+        }));
+        // A rename of the blocks, or a broken extraction, would empty this list
+        // and turn the check below into a permanent pass. Fail on the vacuous
+        // case instead of trusting it.
+        assert.notEqual(
+          refs.length,
+          0,
+          `${surface.name} has no sender.*/target.* references left, so this check is vacuous — ` +
+            "the instruction text or the extraction changed shape, not just wording",
+        );
+
+        for (const { block, field } of refs) {
+          const defined = Object.keys(ENVELOPE_BLOCKS[block as keyof typeof ENVELOPE_BLOCKS].shape);
+          assert.ok(
+            defined.includes(field),
+            `${surface.name} instructs the reader to read ${block}.${field}, which EnvelopeSchema ` +
+              `does not define — xComms.${block} has: ${defined.join(", ")}. The schema is the ` +
+              "contract; fix the instruction text, not the schema (#713).",
+          );
+        }
+      });
     });
   }
 });
