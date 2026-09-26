@@ -45,10 +45,12 @@ export async function resolve(specifier, context, next) {
     if (!/\.[cm]?js$/i.test(specifier) && /\.[a-z]+$/i.test(specifier)) throw err;
     const stem = resolved.href.replace(/\.[cm]?js$/i, "");
 
-    // No ".tsx" probe: node's type stripping does not transform JSX, so handing
-    // back a ".tsx" url would only convert an honest ERR_MODULE_NOT_FOUND into a
-    // baffling ERR_UNKNOWN_FILE_EXTENSION. A plugin's JSX suites run on tsx or
-    // vitest instead, never through here.
+    // No ".tsx" probe: node's type stripping does not transform JSX, so a
+    // ".tsx" candidate could not load here even when the file exists. Probing
+    // one converts an honest ERR_MODULE_NOT_FOUND into a baffling
+    // ERR_UNKNOWN_FILE_EXTENSION that blames a file which does exist. This
+    // plugin's JSX surfaces are asserted by reading their source as text,
+    // never by importing them, so nothing needs the branch.
     for (const ext of [".ts"]) {
       const hit = tryFile(new URL(`${stem}${ext}`));
       if (hit) return { url: hit, shortCircuit: true };
