@@ -145,7 +145,7 @@ const PATH_TAKING_RUNNERS = new Set(["node", "tsx"]);
 const EXEMPT = new Set([
   // Empty. A tracked, test-shaped file that no runner names and never will
   // goes here as `repo/path.test.ts`, one line, no globs — and only once it
-  // exists. The seven #702 orphans are deliberately absent: unreachable is the
+  // exists. The nine #702 orphans are deliberately absent: unreachable is the
   // finding, not an exemption.
 ]);
 
@@ -713,19 +713,24 @@ test("every EXEMPT entry is still a tracked, unreachable suite", () => {
 });
 
 test("every tracked suite is named by a runner, so it can execute", () => {
+  // EXEMPT is load-bearing here and nowhere else: it is the only thing that can
+  // silence a name, and the rot-check above is what keeps that from becoming a
+  // hiding place. `orphans` itself stays unfiltered so the include-depth audit
+  // keeps comparing two equally-unfiltered sets.
+  const unreported = orphans.filter((file) => !EXEMPT.has(file));
   assert.deepEqual(
-    orphans,
+    unreported,
     [],
-    (orphans.length === 0
+    (unreported.length === 0
       ? ""
-      : `${orphans.length} tracked suite(s) are named by no runner invocation, so they have never ` +
+      : `${unreported.length} tracked suite(s) are named by no runner invocation, so they have never ` +
         "executed and cannot:\n" +
-        orphans.map((file) => `  ${file}`).join("\n") +
+        unreported.map((file) => `  ${file}`).join("\n") +
         "\n\n") +
       "Test discovery in this repo is a hand-maintained list of file names, so a new suite is dead " +
       "on arrival until someone adds it to the right script (#702). For each file above, either add " +
-      "it to its package's test script — or, if it should never run, delete it. Making a wired-up " +
-      "suite pass is a separate task from making it run: do not let 'it fails' turn into 'remove it " +
-      "from the list'.",
+      "it to its package's test script — or, if it is genuinely not a runnable suite, name it in " +
+      "EXEMPT. Making a wired-up suite pass is a separate task from making it run: do not let " +
+      "'it fails' turn into 'remove it from the list'.",
   );
 });
