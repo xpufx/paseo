@@ -34,6 +34,45 @@ What x-comms does today:
 Known gap: true receiver-side link verification needs daemon support; the
 known-peer check is the approximation until then.
 
+## Layer 0.5 Envelope attribution
+
+Link identity authenticates the *channel*. The conversation layer still needed a
+way to authenticate the *claim inside the message*: the wire envelope is plain
+text in an agent's turn, so any agent could hand-write the tag and name any
+`sender.agentId`, and could even have the trusted server do it by passing a
+`fromAgentId` to `x_comms_send` (#594).
+
+Implemented:
+- Every envelope the x-comms stack emits carries `xComms.auth`: an ed25519
+  signature over a canonical, field-ordered payload of the attribution fields
+  (`shared/envelope.ts`, `AUTH_FIELDS`). `direction` and the prose body are
+  excluded — this proves who sent, not what they said.
+- Each daemon holds a keypair, generated on first use, `0600`, in
+  `~/.paseo/paseo-x-comms/mesh-key.json` (`server/mesh-identity.ts`).
+- Peers exchange public keys over the Layer 0 channel via the `mesh.key` RPC
+  (`server/peer-channel.ts`) and **pin** the first `keyId` they see per peer. A
+  changed `keyId` for a pinned peer is refused, which is what stops key
+  substitution (`server/mesh-keys.ts`).
+- `reconcileTimelines` refuses to attribute an envelope whose auth is missing or
+  does not verify. The claim never becomes a thread, an unread count, or a peer
+  identity that other agents are told to reply to.
+- `x_comms_send` ignores `fromAgentId` inside an agent session: the sender is the
+  daemon-injected `PASEO_AGENT_ID`, and only the plugin server's own subprocess
+  (no such variable) may set it.
+
+Honest bounds, also in the README:
+- Direct `host:port` links have no authenticated identity, so their envelopes are
+  unverifiable by construction and never attributed.
+- Key distribution rides the presence channel, whose handlers have no link
+  context — so pairing is still the trust root. The signature stops an agent on a
+  paired mesh from impersonating a peer; it does not defeat an attacker holding a
+  direct link.
+- `auth` is optional in the schema. Version skew and unsigned legacy envelopes
+  parse fine and are simply untrusted, so a message is never lost to a strict
+  reader.
+- The client renderer holds no keys, so it reports a declared signed/unsigned
+  state rather than verifying. The plugin server is the enforcement point.
+
 ## Layer 1: Presence (control plane, invisible)
 
 - `presence.announce` (birth batch) and `presence.retract`, keyed by

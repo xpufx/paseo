@@ -9,13 +9,24 @@
 // copies are the *publish* artifact: mirror-github.mjs rewrites the bare
 // specifiers to these relative copies when it stages the scoped tree.
 //
-// Usage: node scripts/vendor-sync.mjs [--check] [--link]
+// Usage: node scripts/vendor-sync.mjs [--check] [--link] [--materialize-links]
+//   (no flag): refresh every vendored copy from the helper src.
 //   --check: exit non-zero if the vendored copies drift from a fresh copy of
 //     the helper src, or if a legacy dev symlink is present (not publishable).
+//     Writes nothing.
+//   --materialize-links: publish prep. Replace a legacy working-tree dev
+//     symlink with a real copy (#146 — a linked/partial tree installs as a
+//     broken plugin) and refresh the trees it covered. Writes *only* when such
+//     a symlink exists; on a clean checkout it is a provable no-op, so it is
+//     the one write a CI gate may run before --check without erasing the
+//     evidence --check is supposed to see (#630).
 //   --link: dev-link preflight (no longer creates symlinks). Verifies the
 //     workspace link + per-plugin tsconfig alias that give live helper edits.
 //     The old relative-vendor symlink is unsupported by Paseo's compiler and
 //     is retired (#146 option C).
+//
+// The three modes are mutually exclusive: a gate that refreshes the committed
+// copies and then "verifies" them can only ever report green.
 // See plugins/top/shared/vendor/paseo-plugin-helper/README.md (Track B, #71).
 
 import fs from "node:fs";
@@ -27,6 +38,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HELPER_SRC = path.join(ROOT, "packages", "paseo-plugin-helper", "src");
 const CHECK = process.argv.includes("--check");
 const LINK = process.argv.includes("--link");
+const MATERIALIZE_LINKS = process.argv.includes("--materialize-links");
 
 // The shared vendor README has no helper-src counterpart, so a legacy --link pass
 // would delete it (and per-plugin copies may differ).
@@ -88,9 +100,10 @@ function devLinkStatus() {
 }
 
 // Publish mode: replace linked dirs with transformed copies, restoring the
-// stashed shared README.
+// stashed shared README. Returns the {pluginRoot, tree} pairs that were
+// actually converted so the caller can scope any follow-up write to them.
 function materializeLinks() {
-  let changed = 0;
+  const materialized = [];
   for (const [plugin, trees] of Object.entries(PLUGINS)) {
     const pluginRoot = path.join(ROOT, "plugins", plugin);
     for (const tree of trees) {
@@ -107,10 +120,10 @@ function materializeLinks() {
           // Non-empty (shouldn't happen) — leave it.
         }
       }
-      changed++;
+      materialized.push({ pluginRoot, tree });
     }
   }
-  return changed;
+  return materialized;
 }
 
 // Rewrite a module specifier from a helper-src file to its vendored location.
@@ -215,13 +228,78 @@ function prune(pluginRoot, tree) {
   return removed;
 }
 
-function main() {
-  if (LINK) {
-    if (CHECK) {
-      console.error("error: --link and --check are mutually exclusive");
-      process.exit(2);
+// Copy+prune every vendored tree from the helper src. Shared by the write mode
+// and by --materialize-links, which only reaches it once it has converted a
+// symlink and therefore owes the affected trees a real copy.
+function refreshCopies() {
+  let changed = 0;
+  for (const [plugin, trees] of Object.entries(PLUGINS)) {
+    const pluginRoot = path.join(ROOT, "plugins", plugin);
+    for (const tree of trees) {
+      changed += copyTree(pluginRoot, tree);
+      changed += prune(pluginRoot, tree);
     }
+  }
+  return changed;
+}
+
+// Stamp pinned version into each plugin's vendor README. `write` is false for
+// --check, where the rewrite is only counted as drift.
+function stampReadmeVersions(write) {
+  const helperVersion = JSON.parse(
+    fs.readFileSync(path.join(ROOT, "packages", "paseo-plugin-helper", "package.json"), "utf-8")
+  ).version;
+  let changed = 0;
+  for (const plugin of Object.keys(PLUGINS)) {
+    const readmePath = path.join(destDir(path.join(ROOT, "plugins", plugin), "shared"), "README.md");
+    if (!fs.existsSync(readmePath)) continue;
+    const readme = fs.readFileSync(readmePath, "utf-8");
+    const updated = readme.replace(
+      /Pinned helper version: \S+/,
+      `Pinned helper version: ${helperVersion}`
+    );
+    if (updated === readme) continue;
+    if (write) fs.writeFileSync(readmePath, updated);
+    changed++;
+  }
+  return changed;
+}
+
+// The only write a CI gate may run before --check. A legacy working-tree dev
+// symlink is not publishable (#146), so it must be materialized — but doing
+// that must never also refresh an already-materialized tree, or the --check
+// that follows would be verifying the tree this step just rewrote and would
+// report green regardless of what was committed (#630).
+function materializeLinksOnly() {
+  const materialized = materializeLinks();
+  if (materialized.length === 0) {
+    console.log("no legacy dev symlink under a vendored helper path — nothing to materialize");
+    return;
+  }
+  refreshCopies();
+  stampReadmeVersions(true);
+  for (const { pluginRoot, tree } of materialized) {
+    console.log(`  materialized: ${path.relative(ROOT, destDir(pluginRoot, tree))}`);
+  }
+  console.log(`materialized ${materialized.length} legacy dev symlink(s) into publishable copies`);
+}
+
+function main() {
+  const modes = [
+    CHECK && "--check",
+    LINK && "--link",
+    MATERIALIZE_LINKS && "--materialize-links",
+  ].filter(Boolean);
+  if (modes.length > 1) {
+    console.error(`error: ${modes.join(" and ")} are mutually exclusive`);
+    process.exit(2);
+  }
+  if (LINK) {
     devLinkStatus();
+    return;
+  }
+  if (MATERIALIZE_LINKS) {
+    materializeLinksOnly();
     return;
   }
   syncOnce();
@@ -234,67 +312,39 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 
 function syncOnce() {
-let dirty = 0;
-for (const [plugin, trees] of Object.entries(PLUGINS)) {
-  const pluginRoot = path.join(ROOT, "plugins", plugin);
-  for (const tree of trees) {
-    const dest = destDir(pluginRoot, tree);
-    // A legacy relative-vendor symlink (pre-#176) is not copy drift: report it
-    // with a distinct marker so it is never mistaken for stale copies. It is
-    // not publishable and plain vendor-sync materializes it below.
-    if (isLink(dest)) {
-      console.log(`  linked: ${path.relative(ROOT, dest)} (legacy dev symlink — not publishable; run node scripts/vendor-sync.mjs to materialize)`);
-      dirty++;
-      continue;
-    }
-    // A leftover README stash without a link is still real drift.
-    if (fs.existsSync(readmeBackupPath(dest))) {
-      console.log(`  drift: ${path.relative(ROOT, dest)} (leftover README stash — run node scripts/vendor-sync.mjs)`);
-      dirty++;
-      continue;
-    }
-    if (CHECK) {
-      dirty += copyTree(pluginRoot, tree);
-      dirty += prune(pluginRoot, tree);
-      continue;
-    }
-    dirty += copyTree(pluginRoot, tree);
-    dirty += prune(pluginRoot, tree);
-  }
-}
-if (!CHECK) {
-  dirty += materializeLinks();
+  let dirty = 0;
   for (const [plugin, trees] of Object.entries(PLUGINS)) {
     const pluginRoot = path.join(ROOT, "plugins", plugin);
     for (const tree of trees) {
+      const dest = destDir(pluginRoot, tree);
+      // A legacy relative-vendor symlink (pre-#176) is not copy drift: report it
+      // with a distinct marker so it is never mistaken for stale copies. It is
+      // not publishable and plain vendor-sync materializes it below.
+      if (isLink(dest)) {
+        console.log(`  linked: ${path.relative(ROOT, dest)} (legacy dev symlink — not publishable; run node scripts/vendor-sync.mjs to materialize)`);
+        dirty++;
+        continue;
+      }
+      // A leftover README stash without a link is still real drift.
+      if (fs.existsSync(readmeBackupPath(dest))) {
+        console.log(`  drift: ${path.relative(ROOT, dest)} (leftover README stash — run node scripts/vendor-sync.mjs)`);
+        dirty++;
+        continue;
+      }
       dirty += copyTree(pluginRoot, tree);
       dirty += prune(pluginRoot, tree);
     }
   }
-}
-
-// Stamp pinned version into each plugin's vendor README.
-const helperVersion = JSON.parse(
-  fs.readFileSync(path.join(ROOT, "packages", "paseo-plugin-helper", "package.json"), "utf-8")
-).version;
-for (const plugin of Object.keys(PLUGINS)) {
-  const readmePath = path.join(destDir(path.join(ROOT, "plugins", plugin), "shared"), "README.md");
-if (fs.existsSync(readmePath)) {
-  const readme = fs.readFileSync(readmePath, "utf-8");
-  const updated = readme.replace(
-    /Pinned helper version: \S+/,
-    `Pinned helper version: ${helperVersion}`
-  );
-  if (updated !== readme) {
-      if (!CHECK) fs.writeFileSync(readmePath, updated);
-      dirty++;
-    }
+  if (!CHECK) {
+    materializeLinks();
+    dirty += refreshCopies();
   }
-}
 
-if (CHECK && dirty > 0) {
-  console.log(`vendor trees drifted (${dirty} file(s)) — run node scripts/vendor-sync.mjs`);
-  process.exit(1);
-}
-console.log(dirty === 0 ? "vendor trees in sync" : `vendor trees updated (${dirty} file(s))`);
+  dirty += stampReadmeVersions(!CHECK);
+
+  if (CHECK && dirty > 0) {
+    console.log(`vendor trees drifted (${dirty} file(s)) — run node scripts/vendor-sync.mjs`);
+    process.exit(1);
+  }
+  console.log(dirty === 0 ? "vendor trees in sync" : `vendor trees updated (${dirty} file(s))`);
 }

@@ -112,6 +112,9 @@ export function Badge({
     >
       {renderIcon()}
       <Text
+        accessibilityLabel={label}
+        numberOfLines={1}
+        ellipsizeMode="tail"
         style={[
           styles.text,
           {
@@ -128,6 +131,7 @@ export function Badge({
             text={label}
             query={highlightQuery}
             fuzzyFallback={highlightFuzzyFallback}
+            numberOfLines={1}
           />
         ) : (
           label
@@ -144,9 +148,17 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
     borderWidth: 1,
     gap: 4,
+    // A badge carries operator-supplied strings (ids, paths, refs, model names)
+    // of unbounded length. Yoga defaults `flexShrink` to 0, so without this the
+    // chip insists on its full text width and pushes its row past the viewport
+    // instead of truncating.
+    flexShrink: 1,
+    maxWidth: "100%",
   },
   text: {
     fontWeight: "600",
+    // Truncation only engages if the label itself is allowed to compress.
+    flexShrink: 1,
   },
   dot: {
     width: 6,

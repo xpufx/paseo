@@ -4,7 +4,10 @@
 #
 # Order (mirrors .agents/skills/plugin-release/SKILL.md):
 #   1. hygiene     — no private strings / missing READMEs on the publish surface
-#   2. vendor gate — materialize any dev link, then vendor-sync --check is clean
+#   2. vendor gate — materialize any dev link (the only permitted write), then
+#                    assert the committed copies are drift-free. The check must
+#                    observe the committed state, not a tree a prior step in the
+#                    same gate rewrote (#630).
 #   3. staged tree — mirror-github.mjs --dry-run prepares the exact scoped tree
 #                    (all 8 plugins + helper) and commits it to a temp LOCAL bare
 #                    remote; no GitHub push happens here
@@ -172,18 +175,30 @@ jobs:
           [ "$badlink" -eq 0 ] || exit 1
           echo "hygiene clean"
 
+      - name: Unit-test the vendor gate
+        run: node scripts/vendor-sync.test.mjs
+
       - name: Gate — vendored copy trees are publishable
         run: |
           set -euo pipefail
           # Dev imports the bare paseo-plugin-helper specifier (resolved to the
           # helper src via the workspace link + tsconfig paths); the vendored
           # copies are the publish artifact the mirror stages and this gate
-          # installs. Materialize any legacy working-tree dev symlink first (a
-          # no-op on a clean checkout), then assert no copy drift and no
-          # committed symlink under a vendored helper path. The gate must never
-          # smoke or publish a linked/partial tree — such a tree installs as a
-          # broken plugin (#146).
-          node scripts/vendor-sync.mjs
+          # installs. A legacy working-tree dev symlink is not publishable, so
+          # materialize it first (a no-op on a clean checkout). That step is the
+          # ONLY write this gate may perform: it must never refresh an
+          # already-materialized tree, or the --check below would be verifying
+          # the tree it had just rewritten and would report green whatever was
+          # committed (#630). The gate must never smoke or publish a
+          # linked/partial tree — such a tree installs as a broken plugin (#146).
+          node scripts/vendor-sync.mjs --materialize-links
+          # Back the claim that the step above wrote nothing it shouldn't: if it
+          # rewrote a committed copy, --check is now verifying its own output.
+          if ! git diff --quiet -- plugins; then
+            git --no-pager diff --stat -- plugins
+            echo "::error::materialize step rewrote committed vendored copies — the --check below would verify the tree it just wrote"
+            exit 1
+          fi
           node scripts/vendor-sync.mjs --check
           linked="$(git ls-files -s | awk '$1==120000 && $4 ~ /\/vendor\/paseo-plugin-helper\// {print $4}')"
           if [ -n "$linked" ]; then

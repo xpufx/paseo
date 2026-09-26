@@ -104,7 +104,11 @@ export function DataTable<T>({
                 : styles.alignLeft,
             ]}
           >
-            <Text style={[styles.headerText, { color: colors.foregroundMuted }]}>
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[styles.headerText, { color: colors.foregroundMuted }]}
+            >
               {col.header}
             </Text>
           </View>
@@ -162,6 +166,11 @@ const styles = StyleSheet.create({
   },
   cell: {
     justifyContent: "center",
+    // Yoga defaults `flexShrink` to 0, so without this a cell whose content
+    // carries a long string (a title, a path) refuses to give up width and
+    // squeezes its sibling columns instead of truncating.
+    flexShrink: 1,
+    maxWidth: "100%",
   },
   alignLeft: {
     alignItems: "flex-start",
@@ -177,6 +186,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textTransform: "uppercase",
     letterSpacing: 0.5,
+    flexShrink: 1,
   },
   compactContainer: {
     gap: 8,
@@ -190,11 +200,17 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    gap: 8,
   },
   compactHeader: {
     fontSize: 12,
+    flexShrink: 1,
   },
   compactValue: {
     alignItems: "flex-end",
+    // The value side carries the actual data, so it takes the compressible
+    // slot and the fixed label beside it keeps its intrinsic width.
+    flexShrink: 1,
+    maxWidth: "100%",
   },
 });

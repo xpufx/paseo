@@ -18,10 +18,14 @@ import {
   handlePresenceAnnounce,
   handlePresenceRetract,
   handlePresenceList,
+  handleMeshKeyGet,
   injectionEnabled,
   onLocalAgentCreated,
   onLocalAgentArchived,
+  onLocalTurnEnded,
+  noteLocalTurnStarted,
   rememberPaseo,
+  stopDeferWorker,
   stopOutboxWorker,
 } from "./server/handlers";
 import { startConfiguredHostsWatcher } from "./server/registry";
@@ -46,6 +50,7 @@ import {
   presenceAnnounceRpc,
   presenceRetractRpc,
   presenceListRpc,
+  meshKeyGetRpc,
   peerStatusRpc,
 } from "./shared/registry";
 
@@ -68,6 +73,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(presenceAnnounceRpc, handlePresenceAnnounce);
   server.handle(presenceRetractRpc, handlePresenceRetract);
   server.handle(presenceListRpc, handlePresenceList);
+  server.handle(meshKeyGetRpc, handleMeshKeyGet);
   server.handle(peerStatusRpc, handlePeerStatus);
   server.on("agent.created", ({ agent }, context) => {
     rememberPaseo(context.paseo);
@@ -77,11 +83,26 @@ export default function contribute(server: PluginServerContext) {
     rememberPaseo(context.paseo);
     void onLocalAgentArchived(agent).catch(() => {});
   });
+  // Run status, not just create/archive (#598). Without these a send to an
+  // agent that is mid-turn preempts it, because the daemon sends with
+  // replaceRunning: true; the only thing that spared a busy target was the
+  // target voluntarily calling x_comms_wait first.
+  const offTurnStarted = server.on("agent.turn_started", ({ agent }, context) => {
+    rememberPaseo(context.paseo);
+    noteLocalTurnStarted(agent.id);
+  });
+  const offTurnEnded = server.on("agent.turn_ended", ({ agent }, context) => {
+    rememberPaseo(context.paseo);
+    onLocalTurnEnded(agent.id);
+  });
   const removeInjection = maybeRegisterInjection(toInjectionServer(server), { enabled: injectionEnabled() });
   const stopHostsWatcher = startConfiguredHostsWatcher();
   return () => {
+    offTurnStarted();
+    offTurnEnded();
     stopHostsWatcher();
     stopOutboxWorker();
+    stopDeferWorker();
     removeInjection();
   };
 }

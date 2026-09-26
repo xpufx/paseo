@@ -80,11 +80,11 @@ Every `x_comms_send` prepends an envelope block:
 <x-comms-message>{"xComms":{"version":6,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…","direction":"outgoing"}}</x-comms-message>
 ```
 
-`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt`. Desktop discovers configured hosts only from Paseo's mounted host runtime and sends to the selected `(serverId, agentId)` with a fresh client; it never pairs hosts or creates agents. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
+`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt` + `auth` (the sending daemon's signature over those fields — see [mcp/README.md#envelope-authentication](mcp/README.md#envelope-authentication)). Without a valid `auth` the claimed sender is an unverified claim and the plugin refuses to attribute it (#594). Desktop discovers configured hosts only from Paseo's mounted host runtime and sends to the selected `(serverId, agentId)` with a fresh client; it never pairs hosts or creates agents. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
 
 #### Recipient skill (envelope handling)
 
-Injecting the tools alone leaves a delivery indistinguishable from chat, so the recipient answers the prose and never attributes the sender (#379). The plugin therefore injects **standing recipient instructions** at the same `agent.create` gate as the tools (`server/recipient-instructions.ts`): detect a `<x-comms-message>` (v6) or `[x-comms]` (v5) turn, parse `sender`/`target`/`messageId`/`direction`, attribute the peer sender, and reply through `x_comms_send` to `sender.agentId` on `sender.daemonServerId`. The same contract ships as a skill at [`skills/recipient-envelope/SKILL.md`](skills/recipient-envelope/SKILL.md) for manual installation into `.agents/skills/`. Both are covered by the `server/recipient-instructions.test.ts` suite.
+Injecting the tools alone leaves a delivery indistinguishable from chat, so the recipient answers the prose and never attributes the sender (#379). The plugin therefore injects **standing recipient instructions** at the same `agent.create` gate as the tools (`server/recipient-instructions.ts`): detect a `<x-comms-message>` (v6) or `[x-comms]` (v5) turn, check that it carries an `auth` signature, parse `sender`/`target`/`messageId`/`direction`, attribute the peer sender, and reply through `x_comms_send` to `sender.agentId` on `sender.daemonServerId`. The same contract ships as a skill at [`skills/recipient-envelope/SKILL.md`](skills/recipient-envelope/SKILL.md) for manual installation into `.agents/skills/`. Both are covered by the `server/recipient-instructions.test.ts` suite.
 
 Tools (via the embedded server) are `x_comms_list_daemons`, `x_comms_add_daemon`, `x_comms_remove_daemon`, `x_comms_list_agents`, `x_comms_inspect`, `x_comms_send`, `x_comms_logs`, `x_comms_wait`, `x_comms_list_permissions`, `x_comms_allow_permission`, `x_comms_deny_permission` — see [mcp/README.md#tools](mcp/README.md#tools) for the reference. The plugin's conversation/panel UI wraps `send`/`logs`/`wait`/permissions for interactive use.
 
@@ -95,6 +95,53 @@ The plugin server keeps an **outbox** (the plugin state dir's `outbox.json`) for
 A held message expires after **10 minutes** by default (configurable in the settings surface, `outboxExpirySeconds`, clamped to 10s–24h). On expiry the sender is notified by appending an `x-comms-outbox-notice` timeline item with the reason; the message is then dropped.
 
 **Idempotency:** every send receives one stable `messageId`, passed to Paseo's native daemon/client send API and retained in a held outbox entry. A retry therefore presents the same key to the target daemon, which suppresses a duplicate before it reaches the agent.
+
+### Defer queue: sends to a busy target are queued, not preempted
+
+Paseo's daemon sends with `replaceRunning: true`, so an x-comms send into a
+running agent **replaced its turn**. The only thing that spared a busy target
+was the target voluntarily calling `x_comms_wait` first — agent cooperation as
+the sole guard. It is now enforced.
+
+Before any send, the target's run status is read. A mid-turn target gets the
+message **queued** instead:
+
+* **Local targets** — the plugin subscribes to `agent.turn_started` /
+  `agent.turn_ended` (`index.server.ts`), so a local agent's turn state is known
+  without a round trip. An agent the hooks have not seen falls back to an SDK
+  snapshot read.
+* **Remote targets** — no cross-daemon turn subscription exists, so a peer's
+  status comes from `paseo inspect --host`. It is a sample, and a probe that
+  fails **dispatches** rather than silently swallowing the message.
+* After a successful send the target is recorded busy, so a second send in the
+  same burst is queued instead of replacing the turn the first send just started.
+
+`idle` is the only non-busy state. `error` and `closed` are treated as *not*
+busy on purpose: they have no running turn to replace, and treating them as busy
+would pin a queue against an agent that has already crashed, with no turn ever
+coming to drain it.
+
+**Bounds** (never unbounded growth): **8 deep per target** — overflow evicts the
+oldest waiting message and tells its sender; **200 across all targets** — at the
+ceiling a *new* message is refused (`delivery: "dropped"`) rather than evicting
+someone else's obligation; **30-minute expiry**, after which the message is
+dropped and its sender told why. Every non-delivery path notifies the sender by
+appending to its timeline, which does not start a turn.
+
+**`notifyOnFinish`** (default `true`) queues a notice back to the sender when the
+message lands. The notice goes through the **same queue**, so a busy sender has
+it held rather than steered — Paseo's own notify-on-finish path steers the
+caller's turn, which would reintroduce this bug in the other direction. Neither
+side ever interrupts the other.
+
+**Delivery contract: best-effort within a bounded window, *not* guaranteed to land
+before the target's next turn ends.** There is no cross-daemon turn-end signal to
+build such a guarantee on, and the alternatives are preemption or a protocol that
+does not exist. Every send reports `dispatched | queued | outbox | dropped`, and
+nothing is ever dropped silently. **This is a deliberate product decision and the
+thing most worth revisiting** — the full contract, the reasoning, and what to use
+if you need a real guarantee are in
+[mcp/README.md#delivery-contract](mcp/README.md#delivery-contract).
 
 ## Repository layout
 
@@ -118,6 +165,10 @@ A held message expires after **10 minutes** by default (configurable in the sett
 │   ├── registry.ts           # Daemon registry + health
 │   ├── settings.ts           # Plugin settings storage
 │   ├── presence.ts           # Presence announce/retract/list
+│   ├── defer-queue.ts        # Bounded per-target queue for busy targets (+ bounds, claim/notice rules)
+│   ├── busy.ts               # Lifecycle classification + verdict cache over turn events and probes
+│   ├── mesh-identity.ts      # Daemon ed25519 signing key + envelope sign/verify
+│   ├── mesh-keys.ts          # Pinned peer verify keys (substitution-resistant)
 │   ├── injection.ts          # MCP + recipient-instruction injection for agents
 │   ├── recipient-instructions.ts # Standing envelope-handling instructions
 │   ├── snapshot.ts / conversations-snapshot.ts
@@ -127,7 +178,7 @@ A held message expires after **10 minutes** by default (configurable in the sett
 ├── skills/
 │   └── recipient-envelope/SKILL.md # Distributable form of the recipient instructions
 ├── shared/
-│   ├── envelope.ts           # Wire envelope schema (<x-comms-message> parsing, v5 fallback)
+│   ├── envelope.ts           # Wire envelope schema (<x-comms-message> parsing, v5 fallback), auth schema + canonical signed payload
 │   ├── registry.ts           # RPC definitions (zod)
 │   └── conversations-snapshot.ts
 ├── mcp/
@@ -160,4 +211,4 @@ No live daemons, no real `~/.paseo/paseo-x-comms/registry.json` touched in tests
 
 ## License
 
-Apache-2.0.
+MIT

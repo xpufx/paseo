@@ -12,7 +12,7 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { parseArgs, pluginIds, manifestFor, readiness, resolvePublishPlan, stagePackages } from "./publish-npm.mjs";
+import { parseArgs, pluginIds, manifestFor, readiness, resolvePublishPlan, stagePackages, syncNestedManifestVersions } from "./publish-npm.mjs";
 import { hasBareHelperSpecifier } from "./lib/plugin-helper-layout.mjs";
 
 let pass = 0;
@@ -168,8 +168,98 @@ withTempStage((dir) => {
 withTempStage((dir) => {
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ packages: [] }));
   const plan = resolvePublishPlan([demo], { outDir: dir, fromDirs: true });
-  check("--from-dirs uses the plugin dir", plan[0].dir === path.resolve(demo.dir));
-  check("--from-dirs has no tarball target", plan[0].target === undefined);
+check("--from-dirs uses the plugin dir", plan[0].dir === path.resolve(demo.dir));
+check("--from-dirs has no tarball target", plan[0].target === undefined);
+});
+
+// --- syncNestedManifestVersions: nested copies of the plugin's own name follow the root (#604) ---
+function withPackingTree(run) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "publish-npm-sync-"));
+  try {
+    return run(dir);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function seedPackingTree(dir, { name = "@xpufx/paseo-x-comms", rootVersion = "0.3.2", nestedVersion = "0.3.0" } = {}) {
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name, version: rootVersion }, null, 2));
+  fs.mkdirSync(path.join(dir, "mcp"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "mcp", "package.json"), JSON.stringify({ name, version: nestedVersion, license: "MIT" }, null, 2));
+  fs.mkdirSync(path.join(dir, "vendor", "other"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "vendor", "other", "package.json"),
+    JSON.stringify({ name: "@someone/else", version: "9.9.9" }, null, 2),
+  );
+}
+
+const readNestedVersion = (dir) => JSON.parse(fs.readFileSync(path.join(dir, "mcp", "package.json"), "utf8"));
+
+withPackingTree((dir) => {
+  seedPackingTree(dir);
+  const synced = syncNestedManifestVersions(dir, { name: "@xpufx/paseo-x-comms", version: "0.3.2" });
+  check("stale nested manifest is reported as synced", JSON.stringify(synced) === JSON.stringify([path.join("mcp", "package.json")]));
+  check("nested manifest adopts the root version", readNestedVersion(dir).version === "0.3.2");
+  check(
+    "unrelated nested manifest is untouched",
+    JSON.parse(fs.readFileSync(path.join(dir, "vendor", "other", "package.json"), "utf8")).version === "9.9.9",
+  );
+  check(
+    "sync preserves the nested manifest's other fields",
+    readNestedVersion(dir).license === "MIT" && readNestedVersion(dir).name === "@xpufx/paseo-x-comms",
+  );
+  check(
+    "an already-synced tree reports no changes",
+    syncNestedManifestVersions(dir, { name: "@xpufx/paseo-x-comms", version: "0.3.2" }).length === 0,
+  );
+});
+
+withPackingTree((dir) => {
+  seedPackingTree(dir, { nestedVersion: "0.3.2" });
+  check(
+    "a synced tree needs no rewrite",
+    syncNestedManifestVersions(dir, { name: "@xpufx/paseo-x-comms", version: "0.3.2" }).length === 0,
+  );
+  check("a synced tree keeps its nested version", readNestedVersion(dir).version === "0.3.2");
+});
+
+withPackingTree((dir) => {
+  seedPackingTree(dir);
+  check(
+    "an unnamed root is a no-op rather than a crash",
+    syncNestedManifestVersions(dir, { name: undefined, version: "0.3.2" }).length === 0,
+  );
+  check("a no-op leaves the nested version stale", readNestedVersion(dir).version === "0.3.0");
+});
+
+// --- the real x-comms tree is what the guard protects ---
+// Read-only: this must not point the mutating sync at the source tree.
+const xComms = manifestFor("x-comms");
+check(
+  "x-comms nested manifest agrees with the root in the committed tree (#604)",
+  JSON.parse(fs.readFileSync(path.join(xComms.dir, "mcp", "package.json"), "utf8")).version === xComms.version,
+);
+
+// --- stagePackages actually syncs: the wiring, not just the helper (#604) ---
+// Asserting on syncNestedManifestVersions alone would leave the call site
+// unverified, so a refactor could drop it and every test would still pass while
+// the tarball quietly shipped a stale nested version again.
+withPackingTree((dir) => {
+  seedPackingTree(dir);
+  for (const file of ["paseo-plugin.json", "README.md", "LICENSE"]) fs.writeFileSync(path.join(dir, file), "x");
+  const desynced = { id: "x-comms", dir, pkg: { name: "@xpufx/paseo-x-comms", version: "0.3.2" }, version: "0.3.2" };
+  let packedNested;
+  withTempStage((outDir) => {
+    stagePackages([desynced], {
+      outDir,
+      pack: (m) => {
+        packedNested = JSON.parse(fs.readFileSync(path.join(m.dir, "mcp", "package.json"), "utf8"));
+        return { filename: "out.tgz", shasum: "s", integrity: "i", size: 0, unpackedSize: 0, files: [] };
+      },
+    });
+  });
+  check("stage hands npm pack a synced nested manifest", packedNested?.version === "0.3.2");
+  check("stage leaves the source tree untouched", readNestedVersion(dir).version === "0.3.0");
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

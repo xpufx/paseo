@@ -7,6 +7,7 @@
   "scripts": {
     "companion:install": "node scripts/install-companion.mjs",
     "typecheck": "tsc --noEmit",
+    "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "test": "vitest run"
   },
   "devDependencies": {

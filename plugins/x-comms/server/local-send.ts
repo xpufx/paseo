@@ -1,6 +1,7 @@
 import { hostname } from "node:os";
 import type { PaseoApi } from "@getpaseo/client";
 import { localServerId } from "./peer-channel";
+import { meshSigner } from "./mesh-identity.ts";
 
 /**
  * Native send for targets that live on THIS daemon.
@@ -17,7 +18,13 @@ import { localServerId } from "./peer-channel";
  * in shared/envelope.ts reads both.
  */
 
-import { ENVELOPE_OPEN, ENVELOPE_CLOSE, META_PREFIX } from "../shared/envelope.ts";
+import {
+  ENVELOPE_OPEN,
+  ENVELOPE_CLOSE,
+  META_PREFIX,
+  canonicalAuthPayload,
+  type EnvelopeAuthSigner,
+} from "../shared/envelope.ts";
 
 export { ENVELOPE_OPEN, ENVELOPE_CLOSE };
 export const ENVELOPE_PREFIX = META_PREFIX;
@@ -55,36 +62,43 @@ export interface LocalSendInput {
 }
 
 /**
- * Build the `<x-comms-message>{\u2026}</x-comms-message>` envelope exactly as the MCP server's
+ * Build the `<x-comms-message>{…}</x-comms-message>` envelope exactly as the MCP server's
  * version-6 stamp does. Pure so the contract is testable without a daemon.
+ *
+ * `signer` comes from the daemon's own mesh key and is what makes the `sender`
+ * block checkable by the receiver (#594). Callers on the trusted send path always
+ * pass it; the parameter is optional only so the wire shape stays testable.
  */
 export function buildSenderEnvelope(args: {
   sender: SenderIdentity;
   target: { daemon: string | null; agentId: string | null };
   messageId?: string;
   sentAt: string;
+  signer?: EnvelopeAuthSigner;
 }): string {
-  const envelope = {
-    xComms: {
-      version: 6,
-      type: "x-comms.message",
-      direction: "outgoing",
-      sender: {
-        agentId: args.sender.agentId,
-        agentName: args.sender.agentName,
-        host: args.sender.host,
-        daemonServerId: args.sender.daemonServerId,
-        cwd: args.sender.cwd,
-      },
-      target: {
-        daemon: args.target.daemon ?? null,
-        agentId: args.target.agentId ?? null,
-      },
-      ...(args.messageId ? { messageId: args.messageId } : {}),
-      sentAt: args.sentAt,
+  const xComms = {
+    version: 6,
+    type: "x-comms.message",
+    direction: "outgoing" as const,
+    sender: {
+      agentId: args.sender.agentId,
+      agentName: args.sender.agentName,
+      host: args.sender.host,
+      daemonServerId: args.sender.daemonServerId,
+      cwd: args.sender.cwd,
     },
+    target: {
+      daemon: args.target.daemon ?? null,
+      agentId: args.target.agentId ?? null,
+    },
+    ...(args.messageId ? { messageId: args.messageId } : {}),
+    sentAt: args.sentAt,
   };
-  return `${ENVELOPE_OPEN}${JSON.stringify(envelope)}${ENVELOPE_CLOSE}`;
+  // Sign over the pre-auth object; `auth` is never part of its own signature.
+  const auth = args.signer ? args.signer(canonicalAuthPayload({ xComms })) : undefined;
+  return `${ENVELOPE_OPEN}${JSON.stringify({
+    xComms: { ...xComms, ...(auth ? { auth } : {}) },
+  })}${ENVELOPE_CLOSE}`;
 }
 
 /** True when a resolved target serverId is this daemon's own serverId. */
@@ -155,6 +169,7 @@ export async function sendLocalNative(paseo: PaseoApi, input: LocalSendInput): P
     target: { daemon: input.targetDaemon, agentId: input.agentId },
     messageId: input.messageId,
     sentAt: new Date().toISOString(),
+    signer: meshSigner(),
   })}\n\n${input.prompt}`;
   await paseo.agents.ref(input.agentId).send(stamped, { messageId: input.messageId });
 }

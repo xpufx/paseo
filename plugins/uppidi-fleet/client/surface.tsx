@@ -59,11 +59,15 @@ import {
   type AttentionLabel,
   type RoleModelConfig,
   type UppidiRunner,
+  type UppidiFleetStatus,
+  type UppidiLocalRunner,
+  type UppidiRunnerSource,
   type CandidateModelMetrics,
   type TaskProfileMetrics,
   getPendingPermissionAction,
   getPermissionAdjudicationCommand,
   getAgentAttentionReason,
+  getRunnerStatusConfig,
 } from "../shared/contracts.js";
 import {
   filterIssues,
@@ -141,6 +145,112 @@ function statusVariant(status: UppidiIssue["status"]): "neutral" | "warning" | "
     default:
       return "neutral";
   }
+}
+
+const FLEET_STATUS_NOTICE: Record<
+  Exclude<UppidiFleetStatus, "ok">,
+  { message: string; variant: "warning" | "danger" }
+> = {
+  empty: {
+    message: "Forgejo reports no registered runners — CI capacity is zero.",
+    variant: "warning",
+  },
+  unreachable: {
+    message: "Forgejo runner API unreachable — CI capacity is unknown.",
+    variant: "danger",
+  },
+  forbidden: {
+    message: "Forgejo rejected the API token — CI capacity is unknown.",
+    variant: "danger",
+  },
+};
+
+/**
+ * States the reachability of the runner query. `empty` is an authoritative API
+ * answer; `unreachable` / `forbidden` mean the panel does not know, and no
+ * placeholder runner is drawn in their place (#632).
+ */
+function FleetStatusNotice({
+  fleetStatus,
+  error,
+}: {
+  fleetStatus?: UppidiFleetStatus;
+  error?: string;
+}) {
+  const { colors, typography, getStatusColor } = usePluginTheme();
+  if (!fleetStatus || fleetStatus === "ok") return null;
+  const notice = FLEET_STATUS_NOTICE[fleetStatus];
+  return (
+    <View style={{ gap: 2 }}>
+      <Row align="center" gap="xs">
+        <StatusDot variant={notice.variant} />
+        <Text style={{ color: getStatusColor(notice.variant), ...typography.caption }}>
+          {notice.message}
+        </Text>
+      </Row>
+      {error ? (
+        <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+          {error}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+/** Per-query provenance, so a red or partial fleet can be diagnosed from the panel. */
+function RunnerSourceList({ sources }: { sources: UppidiRunnerSource[] }) {
+  const { colors, typography } = usePluginTheme();
+  if (sources.length === 0) return null;
+  return (
+    <View style={{ gap: 2 }}>
+      {sources.map((source) => (
+        <Text
+          key={`${source.kind}:${source.key}`}
+          style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}
+        >
+          {source.endpoint ?? source.key}: {source.ok ? `${source.runnerCount ?? 0} runners` : (source.error ?? "unavailable")}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+/**
+ * Local container runners, kept out of the CI list and out of the capacity
+ * count (#632). A developer's workstation container is not fleet capacity, so
+ * the group is labelled as such wherever it renders.
+ */
+function LocalRunnerGroup({
+  runners,
+  sourceError,
+}: {
+  runners: UppidiLocalRunner[];
+  sourceError?: string;
+}) {
+  const { colors, typography } = usePluginTheme();
+  return (
+    <View style={{ gap: "xxs", marginTop: 4 }}>
+      <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+        {`Local containers on this host (not CI capacity): ${runners.length}`}
+      </Text>
+      {sourceError ? (
+        <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+          {`Local container source unavailable: ${sourceError}`}
+        </Text>
+      ) : null}
+      {runners.map((runner) => (
+        <Row key={runner.id} align="center" gap="xs" wrap>
+          <Badge label={runner.status} variant="neutral" size="sm" />
+          <Text style={{ color: colors.foreground, ...typography.caption }}>{runner.name}</Text>
+          {runner.image ? (
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+              {runner.image}
+            </Text>
+          ) : null}
+        </Row>
+      ))}
+    </View>
+  );
 }
 
 export function UppidiBrandMark({ size = 20, color }: { size?: number; color?: string }) {
@@ -1113,15 +1223,16 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
-          {/* Collapsible Section: CI Runners (#366, #376) */}
+          {/* Collapsible Section: CI Runners (#366, #376; Forgejo-sourced #632) */}
           <Collapsible
-            title={`CI Runner Fleet (${visibleRunners.length}/${runnersData?.totalCount ?? 0} runners \u00b7 ${runnersData?.onlineCount ?? 0} online)`}
+            title={`CI Runner Fleet (${visibleRunners.length}/${runnersData?.totalCount ?? 0} runners · ${runnersData?.onlineCount ?? 0} available)`}
             icon="Server"
             isExpanded={runnersExpanded}
             onToggle={(exp) => setRunnersExpanded(exp)}
           >
             <Card variant="flat">
               <Stack gap="sm">
+                <FleetStatusNotice fleetStatus={runnersData?.fleetStatus} error={runnersData?.error} />
                 <Row justify="space-between" align="center" wrap gap="xs">
                   <Row gap="xs" wrap align="center">
                     <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Preset:</Text>
@@ -1132,24 +1243,24 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                       onPress={() => setRunnerPreset("all")}
                     />
                     <Button
-                      label="Online"
+                      label="Available"
                       size="sm"
-                      variant={runnerPreset === "online" ? "primary" : "ghost"}
-                      onPress={() => setRunnerPreset("online")}
+                      variant={runnerPreset === "available" ? "primary" : "ghost"}
+                      onPress={() => setRunnerPreset("available")}
                     />
                     <Button
-                      label="Offline"
+                      label="Unavailable"
                       size="sm"
-                      variant={runnerPreset === "offline" ? "primary" : "ghost"}
-                      onPress={() => setRunnerPreset("offline")}
+                      variant={runnerPreset === "unavailable" ? "primary" : "ghost"}
+                      onPress={() => setRunnerPreset("unavailable")}
                     />
                   </Row>
                   <Row gap="xs" wrap align="center">
                     <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>Sort:</Text>
-                    {(["name", "status", "lastSeen"] as const).map((field) => (
+                    {(["name", "status", "available"] as const).map((field) => (
                       <Button
                         key={field}
-                        label={`${field === "name" ? "Name" : field === "status" ? "Status" : "Last seen"}${runnerSortField === field ? (runnerSortDir === "asc" ? " ↑" : " ↓") : ""}`}
+                        label={`${field === "name" ? "Name" : field === "status" ? "Status" : "Available"}${runnerSortField === field ? (runnerSortDir === "asc" ? " ↑" : " ↓") : ""}`}
                         size="sm"
                         variant={runnerSortField === field ? "secondary" : "ghost"}
                         onPress={() => {
@@ -1169,40 +1280,49 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                   value={runnerQuery}
                   onChangeText={setRunnerQuery}
                   onClear={() => setRunnerQuery("")}
-                  placeholder="Filter runners by name, labels, or job..."
+                  placeholder="Filter runners by name, status, or labels..."
                 />
                 {visibleRunners.length === 0 ? (
                   <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                    {toList(runnersData?.runners).length === 0 ? "No registered runners found." : "No runners match the selected filter."}
+                    {toList(runnersData?.runners).length === 0 ? "Forgejo reports no registered runners." : "No runners match the selected filter."}
                   </Text>
                 ) : (
-                  visibleRunners.map((r) => (
-                    <Card key={r?.id} variant="elevated">
-                      <Row justify="space-between" align="center" wrap gap="xs">
-                        <Stack gap="xxs">
-                          <Row align="center" gap="xs">
-                            <StatusDot variant={r?.status === "online" ? "success" : "neutral"} />
-                            <Text style={{ color: colors.foreground, ...typography.heading }}>{r?.name}</Text>
-                            <Badge label={r?.status} variant={r?.status === "online" ? "success" : "neutral"} size="sm" />
-                          </Row>
-                          <Row gap="xs" wrap style={{ marginTop: 4 }}>
-                            {toList(r?.labels).map((lbl) => (
-                              <Badge key={lbl} label={lbl} variant="neutral" size="sm" />
-                            ))}
-                          </Row>
-                          {r?.lastJob && (
-                            <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11, marginTop: 4 }}>
-                              Last job: {r.lastJob}
-                            </Text>
-                          )}
-                        </Stack>
-                        <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                          {r.lastSeen || "active"}
-                        </Text>
-                      </Row>
-                    </Card>
-                  ))
+                  visibleRunners.map((r) => {
+                    const statusConfig = getRunnerStatusConfig(r?.status);
+                    return (
+                      <Card key={r?.id} variant="elevated">
+                        <Row justify="space-between" align="center" wrap gap="xs">
+                          <Stack gap="xxs">
+                            <Row align="center" gap="xs">
+                              <StatusDot variant={statusConfig.badgeVariant} />
+                              <Text style={{ color: colors.foreground, ...typography.heading }}>{r?.name}</Text>
+                              <Badge label={r?.status} variant={statusConfig.badgeVariant} size="sm" />
+                              <Badge label={r?.scope} variant="neutral" size="sm" />
+                            </Row>
+                            <Row gap="xs" wrap style={{ marginTop: 4 }}>
+                              {toList(r?.labels).map((lbl) => (
+                                <Badge key={lbl} label={lbl} variant="neutral" size="sm" />
+                              ))}
+                            </Row>
+                            {r?.description && (
+                              <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11, marginTop: 4 }}>
+                                {r.description}
+                              </Text>
+                            )}
+                          </Stack>
+                          <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                            {r?.version ? `v${r.version}` : "version unknown"}
+                          </Text>
+                        </Row>
+                      </Card>
+                    );
+                  })
                 )}
+                <RunnerSourceList sources={toList(runnersData?.sources)} />
+                <LocalRunnerGroup
+                  runners={toList(runnersData?.localRunners)}
+                  sourceError={toList(runnersData?.sources).find((s) => s.kind === "local-containers")?.error}
+                />
               </Stack>
             </Card>
           </Collapsible>

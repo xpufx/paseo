@@ -52,7 +52,14 @@ export function InlineButton({
       ]}
     >
       {typeof icon === "string" ? <Icon name={icon} size={13} color={colors.accent} /> : icon}
-      <Text style={[styles.text, { color: colors.accent }, textStyle]}>{label}</Text>
+      <Text
+        accessibilityLabel={label}
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        style={[styles.text, { color: colors.accent }, textStyle]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -67,9 +74,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
     paddingVertical: 2,
     borderRadius: 4,
+    // Caller-supplied labels are unbounded; without a shrink budget the control
+    // claims its full text width and overflows narrow viewports.
+    flexShrink: 1,
+    maxWidth: "100%",
   },
   text: {
     fontSize: 12,
     fontWeight: "600",
+    // The label must be allowed to compress for `numberOfLines` to engage.
+    flexShrink: 1,
   },
 });

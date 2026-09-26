@@ -25,6 +25,13 @@ export interface ConversationMessage {
   senderName: string | null;
   daemon: string | null;
   userSent?: boolean;
+  /**
+   * Whether the envelope carried a sender signature. The client holds no peer
+   * keys and cannot check it, so this is a declared signal, not a verdict: the
+   * authoritative check is the plugin server's (#594). `false` on an inbound
+   * message means the claimed sender is unverified.
+   */
+  authed?: boolean;
 }
 
 export interface ConversationThread {
@@ -183,6 +190,7 @@ export async function deriveConversationThreads(
         senderName,
         daemon,
         userSent: !isIncoming,
+        authed: env.xComms.auth !== undefined,
       });
       continue;
     }

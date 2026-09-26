@@ -119,6 +119,11 @@ export function InteractiveRow({
       hitSlop={hitSlop}
       style={[
         { cursor: onPress && !disabled ? "pointer" : "auto" },
+        // A pressable wraps arbitrary content (titles, badges, metric readouts)
+        // and must never widen its parent: Yoga defaults `flexShrink` to 0, so
+        // without a shrink budget a long label forces the whole row past the
+        // viewport. Declared before `style` so callers can still override.
+        { flexShrink: 1, maxWidth: "100%" },
         style,
         hoverBackground,
         interactive ? hoverStyle : null,

@@ -4,7 +4,7 @@ import {
   type XCommsConversationsSnapshot,
   type XCommsThreadSnapshot,
 } from "../shared/conversations-snapshot.ts";
-import { parseEnvelope } from "../shared/envelope.ts";
+import { parseEnvelope, verifyEnvelopeAuth, type EnvelopeAuthVerifier } from "../shared/envelope.ts";
 
 /**
  * Conversations snapshot writer (mesh visibility input). Daemon-local view
@@ -124,11 +124,19 @@ export function recordSend(
  * Reconcile inbound envelopes found in local agents' timelines. Only
  * messages newer than the thread's read watermark increment unread, so
  * rescans never double-count.
+ *
+ * `verify` is the trust gate, not a nicety: a timeline is a bag of text that
+ * any agent on this daemon can write to, so an envelope whose signature does not
+ * verify is an unauthenticated assertion about who sent it (xpufx-org/paseo#594)
+ * and is dropped instead of becoming a thread, an unread count, and a peer
+ * identity other agents will reply to. Required, with no permissive default —
+ * a caller that forgets to pass one must not start trusting forgeries.
  */
 export function reconcileTimelines(
   snapshot: XCommsConversationsSnapshot,
   timelines: TimelineOwnerLike[],
   peerAliasFor: (serverId: string) => string | null,
+  verify: EnvelopeAuthVerifier,
   nowIso: string = new Date().toISOString(),
 ): XCommsConversationsSnapshot {
   let threads = [...snapshot.threads];
@@ -170,6 +178,7 @@ export function reconcileTimelines(
       if (!text) continue;
       const parsed = parseEnvelope(text);
       if (!parsed) continue;
+      if (verifyEnvelopeAuth(parsed.envelope, verify) !== "verified") continue;
       const sender = parsed.envelope.xComms.sender;
       if (!sender.agentId || !sender.daemonServerId) continue;
       upsert({

@@ -280,6 +280,23 @@ export const presenceListRpc = defineRpc({
   }),
 });
 
+/**
+ * Publish this daemon's x-comms verify key. Peers call it over the
+ * authenticated link (peer-channel.ts) to learn which key must validate the
+ * envelopes we stamp, so a claimed `sender` is checkable rather than asserted
+ * (xpufx-org/paseo#594). The caller overwrites `serverId` with the link's own
+ * verified identity, so this value is informational to the peer.
+ */
+export const meshKeyGetRpc = defineRpc({
+  name: "mesh.key",
+  input: z.object({}),
+  output: z.object({
+    serverId: z.string().nullable(),
+    keyId: z.string(),
+    publicKeyPem: z.string(),
+  }),
+});
+
 export const daemonDumpRpc = defineRpc({
   name: "daemon.dump",
   input: z.object({ daemon: z.string() }),
@@ -331,6 +348,12 @@ export const identitySyncRpc = defineRpc({
   }),
 });
 
+/**
+ * A conversation send is never delivered by preempting the target's turn. A
+ * target that is mid-turn gets the message queued instead, and the caller is
+ * told which of the four happened so a "sent" in the UI is never a message that
+ * is actually sitting in a queue. See the delivery contract in README.md.
+ */
 export const conversationSendRpc = defineRpc({
   name: "conversation.send",
   input: z.object({
@@ -340,12 +363,20 @@ export const conversationSendRpc = defineRpc({
     fromAgentId: z.string().nullable().optional(),
     fromAgentName: z.string().nullable().optional(),
     messageId: z.string().min(1).max(128).optional(),
+    // Optional so a client still validates against a daemon that has not yet
+    // been reloaded with the field; absent means notify (the daemon's own
+    // agent-scoped default).
+    notifyOnFinish: z.boolean().optional(),
   }),
   output: z.object({
     daemon: z.string(),
     agentId: z.string(),
     ok: z.boolean(),
     error: z.string().nullable(),
+    // Optional for the same rolling-upgrade reason as the input.
+    delivery: z.enum(["dispatched", "queued", "outbox", "dropped"]).optional(),
+    queueDepth: z.number().int().nonnegative().optional(),
+    expiresAt: z.string().nullable().optional(),
   }),
 });
 

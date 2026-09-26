@@ -32,7 +32,11 @@ import {
 } from "./agents.js";
 
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel } from "./role-models.js";
-import { handleUppidiRunners } from "./runners.js";
+// The runners module owns its own exec seam, distinct from the agents one
+// above; stubbing only the agents seam would leave the runner path shelling
+// out to the real container runtime of whichever host runs the suite.
+import { handleUppidiRunners, setExecFileAsyncForTest as setRunnerExecFileAsyncForTest } from "./runners.js";
+import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import { buildProjectGroups } from "../shared/sort-filter.js";
 
 describe("fleet and agents classification", () => {
@@ -380,11 +384,32 @@ describe("role models configuration", () => {
 });
 
 describe("runner fleet status", () => {
-  it("returns known runner list", async () => {
+  it("never invents a runner when the Forgejo API cannot be read (#632)", async () => {
+    // The pre-#632 module appended a hardcoded online runner whenever `tea
+    // whoami` produced a token, so this assertion alone is the regression guard:
+    // an unreadable fleet must be empty, with capacity zero.
+    setFetchForTest(async () => {
+      throw new TypeError("fetch failed");
+    });
+    setRunnerExecFileAsyncForTest(async () => {
+      throw new Error("podman not installed");
+    });
+    setTokenResolverForTest(async () => "test-token");
+
     const res = await handleUppidiRunners({}, {} as any);
-    assert.equal(res.ok, true);
-    assert.ok(res.runners.length > 0);
-    assert.ok(res.onlineCount >= 0);
+    assert.deepEqual(
+      res.runners,
+      [],
+      "an unreadable fleet must render no runner, not a fabricated one"
+    );
+    assert.equal(res.ok, false);
+    assert.equal(res.fleetStatus, "unreachable");
+    assert.equal(res.totalCount, 0);
+    assert.equal(res.onlineCount, 0);
+
+    setFetchForTest(null);
+    setRunnerExecFileAsyncForTest(null);
+    setTokenResolverForTest(null);
   });
 });
 

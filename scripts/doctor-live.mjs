@@ -9,9 +9,14 @@
  * 3. Each plugin's Paseo daemon is running and loaded with current code changes
  * 4. No plugin has a legacy linked (non-installable) vendored helper tree —
  *    warned, never auto-materialized and never reported healthy. Vendored-copy
- *    drift from the helper src is reported as a publish-time warning only: dev
- *    resolves the bare paseo-plugin-helper specifier straight to the helper src
- *    via each plugin's tsconfig paths, so dev never needs a vendor copy step.
+ *    drift from the helper src is reported as a publish-time warning only: a
+ *    locally-loaded plugin resolves the bare paseo-plugin-helper specifier into
+ *    *this checkout* through its tsconfig paths, so the committed vendor tree is
+ *    the publish artifact and not what dev runs.
+ * 5. Each plugin's served paseo-plugin-helper is identified and attributable
+ *    (#633): what it serves, which version the checkout holds, which revision of
+ *    the helper that is, and whether the plugin was stamped against it. A plugin
+ *    that cannot answer those is `stale-helper`, never healthy.
  *
  * Liveness never depends on a fixed log tail. The whole retained plugin log is
  * read; a version tag is attributed to the current process (after the last
@@ -25,8 +30,9 @@
  * helper removals and daemon reloads live in `remediate()`, which is only
  * reached when `--reload`/`--fix` is passed.
  *
- * JSON: each `plugins[]` entry gains `dirty`, `dirtyFiles`, `stampRequired`
- * and `liveSource` ("log-tag" | "process-start" | "-").
+ * JSON: each `plugins[]` entry gains `dirty`, `dirtyFiles`, `stampRequired`,
+ * `liveSource` ("log-tag" | "process-start" | "-") and `helper`
+ * (`servedFrom`, `helperVersion`, `helperRevision`, `helperStatus`, `helperDetail`).
  *
  * Usage:
  *   npm run doctor:live             # Check status and print diagnostic table
@@ -39,6 +45,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { notifyReloadOutcome } from "./reload-notify.mjs";
+import { evaluateHelperIdentity, readPluginStamp } from "./lib/helper-identity.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -166,21 +173,7 @@ function getVersionFilePath(pluginDir) {
 }
 
 function getStampedVersion(pluginDir) {
-  for (const p of [
-    path.join(pluginDir, "shared", "version.ts"),
-    path.join(pluginDir, "version.ts"),
-    path.join(pluginDir, "src", "version.ts"),
-  ]) {
-    if (!fs.existsSync(p)) continue;
-    const content = fs.readFileSync(p, "utf8");
-    const match = content.match(/PLUGIN_VERSION\s*=\s*["']([^"']+)["']/);
-    if (match) {
-      const full = match[1];
-      const sha = full.includes("+") ? full.split("+")[1] : full;
-      return { full, sha, file: p };
-    }
-  }
-  return null;
+  return readPluginStamp(pluginDir);
 }
 
 // Read-only: a plugin's own uncommitted working-tree changes. Generated stamp
@@ -559,6 +552,19 @@ async function diagnose() {
       result.ready = false;
     }
 
+    // #633: which paseo-plugin-helper this daemon is actually serving, and can
+    // it be attributed to a commit. Read from the checkout, never from the
+    // plugin's own claim about itself.
+    const helperIdentity = evaluateHelperIdentity(fullPath, ROOT_DIR);
+    const helperBroken = helperIdentity.status === "stale" || helperIdentity.status === "unknown";
+    if (helperBroken && status !== "vendor-linked") {
+      status = "stale-helper";
+      message = helperIdentity.reasons[0];
+      result.ready = false;
+    } else if (helperIdentity.status === "behind" && status === "ready") {
+      message = `Live; helper ${helperIdentity.resolved.version}@${helperIdentity.resolved.revision} is newer than the stamp`;
+    }
+
     const pluginData = {
       name,
       pluginId,
@@ -573,6 +579,17 @@ async function diagnose() {
       stampedSha: stamped?.sha || "-",
       liveSha: liveInfo?.sha || "-",
       daemonStatus: configured?.status || "none",
+      helper: {
+        servedFrom: helperIdentity.servedFrom,
+        route: helperIdentity.route || "-",
+        declaredVersion: helperIdentity.declared?.version || "-",
+        declaredSource: helperIdentity.declared?.source || "-",
+        version: helperIdentity.resolved.version || "-",
+        revision: helperIdentity.resolved.revision || "-",
+        stampHelperRevision: helperIdentity.stamped?.helperRevision || "-",
+        status: helperIdentity.status,
+        detail: helperIdentity.reasons.join("; ") || "-",
+      },
       detail: message,
     };
 
@@ -741,9 +758,11 @@ function output(result) {
   );
   console.log("─".repeat(82));
 
-  // Plugins Table
+  // Plugins Table. The publish-only vendor pin is deliberately not a column: it
+  // is printed in its own block below. What a column must answer is which helper
+  // the running daemon is serving, which is a different question (#633).
   console.log(
-    `${colors.bold}${"Plugin".padEnd(12)} ${"Status".padEnd(17)} ${"SDK".padEnd(10)} ${"Vendor".padEnd(16)} ${"Code".padEnd(9)} ${"Stamped".padEnd(9)} ${"Live".padEnd(9)} Notes${colors.reset}`
+    `${colors.bold}${"Plugin".padEnd(12)} ${"Status".padEnd(17)} ${"Helper".padEnd(14)} ${"Helper rev".padEnd(10)} ${"SDK".padEnd(10)} ${"Code".padEnd(9)} ${"Stamped".padEnd(9)} ${"Live".padEnd(9)} Notes${colors.reset}`,
   );
   console.log("─".repeat(82));
 
@@ -753,6 +772,9 @@ function output(result) {
     if (p.status === "stale-daemon" || p.status === "stale-stamp" || p.status === "no-stamp") {
       statColor = colors.yellow;
       icon = "▲";
+    } else if (p.status === "stale-helper") {
+      statColor = colors.red;
+      icon = "⚠";
     } else if (p.status === "dirty") {
       statColor = colors.yellow;
       icon = "✎";
@@ -775,17 +797,65 @@ function output(result) {
 
     const nameCol = p.name.padEnd(12);
     const statCol = `${statColor}${icon} ${p.status.toUpperCase()}${colors.reset}`.padEnd(26);
+    const helperCol = `${p.helper.servedFrom}${p.helper.status === "behind" ? "*" : ""}`.padEnd(14);
+    const helperRevCol = p.helper.revision.padEnd(10);
     const sdkCol = (p.sdk + (p.helperDep ? " +npmHelper" : "")).padEnd(10);
-    const vendorCol = (p.vendorPin === "-" ? "-" : `${p.vendorPin}${p.vendorDrift ? "*" : ""}`).padEnd(16);
     const repoCol = p.repoHead.padEnd(9);
     const stampCol = p.stampedSha.padEnd(9);
     const liveCol = p.liveSha.padEnd(9);
     const noteCol = `${colors.gray}${p.detail}${colors.reset}`;
 
-    console.log(`${nameCol} ${statCol} ${sdkCol} ${vendorCol} ${repoCol} ${stampCol} ${liveCol} ${noteCol}`);
+    console.log(
+      `${nameCol} ${statCol} ${helperCol} ${helperRevCol} ${sdkCol} ${repoCol} ${stampCol} ${liveCol} ${noteCol}`,
+    );
   }
 
   console.log("─".repeat(82));
+
+  // #633: the served helper, and whether this daemon can prove which one it is.
+  const staleHelper = result.plugins.filter(
+    (p) => p.helper.status === "stale" || p.helper.status === "unknown",
+  );
+  if (staleHelper.length > 0) {
+    console.log(
+      `${colors.red}✖ These plugins' served paseo-plugin-helper cannot be proven (#633) — a merged helper fix is invisible to them until the checkout moves forward:${colors.reset}`,
+    );
+    for (const p of staleHelper) {
+      console.log(`      plugins/${p.name} — ${p.helper.detail}`);
+      if (p.helper.servedFrom === "mixed") {
+        console.log(
+          `        A known finding the CI gate carries (KNOWN_MIXED_RESOLUTIONS in scripts/helper-resolution.test.mjs); fix it by importing the helper through one form only.`,
+        );
+      }
+      console.log(
+        `        served from ${p.helper.servedFrom}${p.helper.route === "-" ? "" : ` via ${p.helper.route}`}; ` +
+          `this checkout's helper is ${p.helper.version}@${p.helper.revision}; ` +
+          `declared ${p.helper.declaredVersion} (${p.helper.declaredSource})`,
+      );
+    }
+    console.log("");
+    console.log(
+      `      To see what a merged helper fix added after this checkout stopped moving forward:`,
+    );
+    console.log(
+      `      ${colors.cyan}git log ${result.repoHead}..origin/main --oneline -- packages/paseo-plugin-helper${colors.reset}`,
+    );
+    console.log(`      Then update the checkout the plugin was installed from and reload it.`);
+    console.log("");
+  }
+
+  const behindHelper = result.plugins.filter((p) => p.helper.status === "behind");
+  if (behindHelper.length > 0) {
+    console.log(
+      `${colors.cyan}ℹ These plugins are stamped against an older helper than this checkout serves (a re-stamp prompt, not drift):${colors.reset}`,
+    );
+    for (const p of behindHelper) {
+      console.log(
+        `      plugins/${p.name}: stamped against helper ${p.helper.stampHelperRevision}, serving ${p.helper.revision}`,
+      );
+    }
+    console.log("");
+  }
 
   const linkedPlugins = result.plugins.filter((p) => p.vendorLinked);
   if (linkedPlugins.length > 0) {
@@ -835,6 +905,14 @@ function output(result) {
       for (const s of result.nestedHelperShadows) {
         console.log(`  ⚠️  Nested paseo-plugin-helper@${s.version} shadows workspace link in plugins/${s.plugin} (stale types/code): ${colors.cyan}rm -rf plugins/${s.plugin}/node_modules/paseo-plugin-helper && npm install${colors.reset}`);
       }
+    }
+    // A stale served helper is not something --reload can fix: reloading from the
+    // same checkout re-serves the same helper, which is exactly the #622 trap.
+    const staleHelperPlugins = result.plugins.filter((p) => p.status === "stale-helper");
+    if (staleHelperPlugins.length > 0) {
+      console.log(
+        `  ⚠️  Unproven served helper (reload will NOT help — see above): ${staleHelperPlugins.map((p) => p.name).join(", ")}`,
+      );
     }
     const needsReload = result.plugins.filter((p) => p.status === "stale-daemon" || p.status === "stale-stamp");
     if (needsReload.length > 0) {

@@ -201,6 +201,44 @@ function pack(m, { dryRun = false, destination } = {}) {
 const SOURCE_FILE_RE = /\.[cm]?[jt]sx?$/;
 
 /**
+ * Rewrite every nested manifest that claims the plugin's own npm name so it
+ * reports the root version, and return the paths that actually changed.
+ *
+ * A plugin can ship a subdirectory that has a manifest of its own
+ * (plugins/x-comms/mcp), and when that manifest reuses the plugin's package
+ * name the two files describe one npm package. A release bump only ever edits
+ * the root manifest, so the nested copy silently shipped a stale version
+ * (xpufx-org/paseo#604) — and the same blind spot is what let the nested copy
+ * keep a wrong license value for months (#595).
+ *
+ * The root manifest is the source of truth: it is what a release bump edits and
+ * what `manifestFor` reports as the staged version, so the nested copy follows
+ * rather than voting.
+ */
+export function syncNestedManifestVersions(pluginRoot, { name, version }) {
+  if (name === undefined || version === undefined) return [];
+  const synced = [];
+  const stack = [pluginRoot];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const dir = path.join(current, entry.name);
+      const nestedPath = path.join(dir, "package.json");
+      if (fs.existsSync(nestedPath)) {
+        const pkg = JSON.parse(fs.readFileSync(nestedPath, "utf8"));
+        if (pkg.name === name && pkg.version !== version) {
+          fs.writeFileSync(nestedPath, `${JSON.stringify({ ...pkg, version }, null, 2)}\n`, "utf8");
+          synced.push(path.relative(pluginRoot, nestedPath));
+        }
+      }
+      stack.push(dir);
+    }
+  }
+  return synced;
+}
+
+/**
  * Copy a plugin to an isolated packing tree and rewrite its live workspace
  * helper imports to the committed vendored copies. The source tree is never
  * modified: only the exact files handed to `npm pack` are rewritten.
@@ -230,6 +268,10 @@ export function rewrittenPackingManifest(m) {
         if (rewritten !== source) fs.writeFileSync(entryPath, rewritten);
       }
     }
+  }
+  const synced = syncNestedManifestVersions(pluginRoot, { name: m.pkg?.name, version: m.version });
+  if (synced.length > 0) {
+    console.log(`[publish-npm] ${m.id}: nested manifest version synced to ${m.version} (${synced.join(", ")})`);
   }
   return { manifest: { ...m, dir: pluginRoot }, root };
 }

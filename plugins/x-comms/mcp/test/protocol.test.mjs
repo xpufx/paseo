@@ -7,12 +7,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
+import { createPublicKey, generateKeyPairSync, verify as cryptoVerify } from "node:crypto";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 
@@ -74,6 +75,37 @@ async function startClient(extraEnv = {}, remotesFile = tempRemotes()) {
   const client = new Client({ name: "paseo-x-comms-test", version: "1.0.0" });
   await client.connect(transport);
   return { client, transport, remotesFile };
+}
+
+// Same, but with the server's stderr captured instead of inherited, for the
+// assertions on what the server writes to its own log.
+async function startClientCapturingStderr(extraEnv = {}, remotesFile = tempRemotes()) {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [SERVER],
+    env: baseEnv({ PASEO_X_COMMS_REMOTES: remotesFile, ...extraEnv }),
+    stderr: "pipe",
+  });
+  const chunks = [];
+  transport.stderr?.on("data", (chunk) => chunks.push(chunk.toString()));
+  const client = new Client({ name: "paseo-x-comms-test", version: "1.0.0" });
+  await client.connect(transport);
+  return { client, transport, stderrText: () => chunks.join("") };
+}
+
+async function waitFor(predicate, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(20);
+  }
+  assert.fail("timed out waiting for the server to emit the expected output");
+}
+
+// No offer payload of any length may survive redaction. The helper masks the
+// whole base64 tail, so a partial match would be a regression, not a near miss.
+function assertNoRawOffer(text, label) {
+  assert.ok(!/#offer=[A-Za-z0-9\-_+/=]/.test(text), `${label} leaked a raw offer tail: ${text}`);
 }
 
 function textOf(callResult) {
@@ -294,6 +326,156 @@ test("send stamps a structured sender-meta envelope and reaches the remote agent
     assert.equal(meta.xComms.target.daemon, "hsi");
     assert.equal(meta.xComms.messageId, "msg-headless-1");
     assert.ok(!Number.isNaN(Date.parse(meta.xComms.sentAt)), "sentAt must be ISO");
+  } finally {
+    await client.close();
+  }
+});
+
+// Envelope authentication (xpufx-org/paseo#594). A daemon key is written to a
+// temp mesh-key.json so the server has something to sign with; the verifier here
+// re-derives the fingerprint the same way the plugin does.
+function tempMeshKeyPath() {
+  return join(mkdtempSync(join(tmpdir(), "paseo-x-comms-nokey-")), "mesh-key.json");
+}
+
+function tempMeshKey() {
+  const dir = mkdtempSync(join(tmpdir(), "paseo-x-comms-key-"));
+  const pair = generateKeyPairSync("ed25519");
+  const publicKeyPem = pair.publicKey.export({ type: "spki", format: "pem" });
+  const der = createPublicKey(publicKeyPem).export({ type: "spki", format: "der" });
+  const file = join(dir, "mesh-key.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      keyId: `xck1:${Buffer.from(der).toString("base64url")}`,
+      publicKeyPem,
+      privateKeyPem: pair.privateKey.export({ type: "pkcs8", format: "pem" }),
+      createdAt: new Date().toISOString(),
+    }),
+  );
+  return file;
+}
+
+test("an agent cannot name its own sender: fromAgentId is ignored in a session", async () => {
+  const { client, transport } = await startClient({}, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: {
+        daemon: "hsi",
+        agentId: "agent-9",
+        prompt: "hello",
+        fromAgentId: "agent-victim",
+        fromAgentName: "Victim",
+      },
+    });
+    const sent = JSON.parse(textOf(res));
+    const meta = metaOf(sent.promptHead);
+    // PASEO_AGENT_ID is the only identity an agent session may claim; honoring
+    // the argument would let any agent have the trusted server stamp itself as
+    // someone else (#594).
+    assert.equal(meta.xComms.sender.agentId, "agent-test-1");
+    assert.equal(meta.xComms.sender.agentName, "fake-agent");
+  } finally {
+    await client.close();
+  }
+});
+
+test("the plugin server may still send on a local agent's behalf", async () => {
+  // Same call as an agent makes it, but without PASEO_AGENT_ID: that is how the
+  // plugin server's own subprocess looks, and the panel's agentId must survive.
+  const { client, transport } = await startClient(
+    { PASEO_AGENT_ID: "", PASEO_AGENT_CWD: "" },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: {
+        daemon: "hsi",
+        agentId: "agent-9",
+        prompt: "hello",
+        fromAgentId: "agent-panel",
+        fromAgentName: "Panel Agent",
+      },
+    });
+    const sent = JSON.parse(textOf(res));
+    const meta = metaOf(sent.promptHead);
+    assert.equal(meta.xComms.sender.agentId, "agent-panel");
+    assert.equal(meta.xComms.sender.agentName, "Panel Agent");
+  } finally {
+    await client.close();
+  }
+});
+
+test("a signed envelope verifies against the sending daemon's pinned key", async () => {
+  const keyFile = tempMeshKey();
+  const { client, transport } = await startClient(
+    { PASEO_X_COMMS_MESH_KEY: keyFile },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello", messageId: "msg-signed-1" },
+    });
+    const sent = JSON.parse(textOf(res));
+    const meta = metaOf(sent.promptHead);
+    const auth = meta.xComms.auth;
+    assert.ok(auth, "a daemon with a mesh key must sign the envelope");
+    assert.equal(auth.v, 1);
+    assert.equal(auth.alg, "ed25519");
+
+    const stored = JSON.parse(readFileSync(keyFile, "utf8"));
+    assert.equal(auth.keyId, stored.keyId, "keyId must be the sender's own fingerprint");
+    const payload = [
+      "x-comms/envelope-auth/v1",
+      String(meta.xComms.version),
+      meta.xComms.type,
+      meta.xComms.sender.agentId,
+      meta.xComms.sender.agentName,
+      meta.xComms.sender.host,
+      meta.xComms.sender.daemonServerId,
+      meta.xComms.sender.cwd,
+      meta.xComms.target.daemon,
+      meta.xComms.target.agentId,
+      meta.xComms.messageId,
+      meta.xComms.sentAt,
+    ].join("\n");
+    assert.equal(
+      cryptoVerify(null, Buffer.from(payload, "utf8"), createPublicKey(stored.publicKeyPem), Buffer.from(auth.sig, "base64url")),
+      true,
+      "the signature must cover the canonical attribution payload",
+    );
+
+    // Rewriting the claimed sender must break it: this is the actual forgery.
+    const forged = { ...meta, sender: { ...meta.xComms.sender, agentId: "agent-victim" } };
+    const forgedPayload = payload.replace("agent-test-1", "agent-victim");
+    assert.notEqual(forgedPayload, payload);
+    assert.equal(
+      cryptoVerify(null, Buffer.from(forgedPayload, "utf8"), createPublicKey(stored.publicKeyPem), Buffer.from(auth.sig, "base64url")),
+      false,
+      "a rewritten sender must not verify",
+    );
+  } finally {
+    await client.close();
+  }
+});
+
+test("sends stay unsigned when no mesh key is available", async () => {
+  const { client, transport } = await startClient(
+    { PASEO_X_COMMS_MESH_KEY: tempMeshKeyPath() },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hello" },
+    });
+    const sent = JSON.parse(textOf(res));
+    // Unsigned is a degraded, never-trusted delivery — the send must still work
+    // rather than fail closed, or a standalone install would stop messaging.
+    assert.equal(metaOf(sent.promptHead).xComms.auth, undefined);
   } finally {
     await client.close();
   }
@@ -674,6 +856,26 @@ test("self-message: sending to your own agent is refused with the fixed label", 
     assert.match(textOf(implicit), /x-comms self-message/);
     assert.match(textOf(implicit), /agent-test-1/);
 
+    // An agent session cannot declare a different sender, so a fromAgentId that
+    // names somebody else is ignored rather than believed — both because it
+    // would forge the envelope and because honoring it would let a caller pick
+    // which identity the self-message guard judges (#594).
+    const spoofed = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-a", fromAgentId: "agent-a", prompt: "hi" },
+    });
+    assert.notEqual(spoofed.isError, true, "an agent session's fromAgentId is not its sender");
+  } finally {
+    await client.close();
+  }
+});
+
+test("self-message: the plugin server's fromAgentId is still guarded", async () => {
+  const { client } = await startClient(
+    { PASEO_AGENT_ID: "", PASEO_AGENT_CWD: "" },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
     const explicit = await client.callTool({
       name: `${PREFIX}send`,
       arguments: { daemon: "hsi", agentId: "agent-a", fromAgentId: "agent-a", prompt: "hi" },
@@ -695,6 +897,256 @@ test("self-message: a different agent is allowed (same-daemon locality is #9)", 
     });
     assert.equal(res.isError, undefined, "a different agent must not be treated as self");
     assert.equal(JSON.parse(textOf(res)).to, "agent-other");
+  } finally {
+    await client.close();
+  }
+});
+
+// redaction: nothing that can carry a pairing offer may reach the agent
+// unredacted, on any path out of this server (#597).
+
+// Distinctive middle of the base64 tail baked into the offer-* fixtures below.
+const OFFER_BLOCK_PAYLOAD = "InNydl9vZmZlckJsb2Nr";
+const OFFER_THROW_PAYLOAD = "InNydl9vZmZlcnRocm93";
+
+test("redaction: a failing transport surfaces a redacted offer, never the raw token", async () => {
+  const { client } = await startClient(
+    { FAKE_PASEO_FAIL: `relay handshake failed for host ${RELAY_URL}` },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
+    for (const call of [
+      { name: `${PREFIX}list_agents`, arguments: { daemon: "hsi" } },
+      { name: `${PREFIX}send`, arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" } },
+    ]) {
+      const res = await client.callTool(call);
+      assert.equal(res.isError, true, `${call.name} must surface the transport failure`);
+      const text = textOf(res);
+      assert.match(text, /relay handshake failed/, `${call.name} must keep the actionable reason`);
+      assert.match(text, /#offer=\[REDACTED\]/, `${call.name} must mask the offer`);
+      assert.ok(!text.includes(B64_OFFER), `${call.name} leaked the raw offer payload`);
+      assertNoRawOffer(text, call.name);
+    }
+  } finally {
+    await client.close();
+  }
+});
+
+test("redaction: an extension block reason quoting the offer is masked", async () => {
+  const { client } = await extEnv("offer-block", tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    assert.equal(res.isError, true);
+    const text = textOf(res);
+    assert.match(text, /fixture refused host/, "the reason itself must still be surfaced");
+    assert.match(text, /#offer=\[REDACTED\]/);
+    assert.ok(!text.includes(OFFER_BLOCK_PAYLOAD), "raw offer payload leaked via the block reason");
+    assertNoRawOffer(text, "extension block reason");
+  } finally {
+    await client.close();
+  }
+});
+
+test("redaction: a throwing extension hook cannot write a raw offer to the server log", async () => {
+  const { client, stderrText } = await startClientCapturingStderr(
+    { PASEO_X_COMMS_EXTENSIONS: extensionDir("offer-throw") },
+    tempRemotes({ hsi: RELAY_URL }),
+  );
+  try {
+    // The hook is isolated and the call still succeeds, so the only place the
+    // offer could surface is the extension log line.
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    assert.equal(res.isError, undefined, "a throwing hook must stay isolated");
+
+    await waitFor(() => stderrText().includes("fixture hook failure"));
+    const log = stderrText();
+    assert.match(log, /#offer=\[REDACTED\]/, "the offer in the log line must be masked");
+    assert.ok(!log.includes(OFFER_THROW_PAYLOAD), "raw offer payload leaked into the server log");
+    assertNoRawOffer(log, "extension log");
+  } finally {
+    await client.close();
+  }
+});
+
+// Deferral for a busy target (#598).
+//
+// The preemption being fixed: paseo sends with replaceRunning: true, so a send
+// into a running agent replaced its turn. These assert the send does not go out
+// at all while the target is mid-turn, that the queued copy is the stamped bytes
+// (envelope + signature intact), and that the notice back to the sender is itself
+// queued rather than steered into the sender's own turn.
+function pendingDir(remotesFile) {
+  return join(dirname(remotesFile), "pending");
+}
+function readPending(remotesFile) {
+  const dir = pendingDir(remotesFile);
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => n.endsWith(".json"))
+    .map((n) => JSON.parse(readFileSync(join(dir, n), "utf8")));
+}
+
+test("a busy target is not preempted: the send is queued, not dispatched", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "running" }, remotesFile);
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    assert.notEqual(res.isError, true, "queueing is not an error");
+    const data = JSON.parse(textOf(res));
+    assert.equal(data.delivery, "queued", "must not dispatch into a running turn");
+    assert.equal(data.queueDepth, 1);
+    assert.ok(data.expiresAt, "the caller is told when the queued copy gives up");
+    assert.match(data.reason, /mid-turn/);
+    // The decisive assertion: the fake CLI's `send` would have echoed ok:true.
+    // Nothing was sent, so there is no delivery payload at all.
+    assert.equal(data.ok, undefined);
+  } finally {
+    await client.close();
+  }
+});
+
+test("the queued copy is the exact stamped bytes, signature and all", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient(
+    { FAKE_PASEO_STATUS: "running", PASEO_X_COMMS_MESH_KEY: tempMeshKey() },
+    remotesFile,
+  );
+  try {
+    await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    const pending = readPending(remotesFile);
+    assert.equal(pending.length, 1);
+    const entry = pending[0];
+    assert.equal(entry.stamped, true, "stamping happens before the queue, so the bytes are final");
+    assert.match(entry.prompt, /^<x-comms-message>/, "carries the envelope");
+    assert.match(entry.prompt, /hi$/, "carries the prose");
+    assert.equal(metaOf(entry.prompt).xComms.auth.alg, "ed25519", "the signature survives the wait (#594)");
+  } finally {
+    await client.close();
+  }
+});
+
+test("an idle target is dispatched immediately, unchanged", async () => {
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "idle" }, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const res = await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    const data = JSON.parse(textOf(res));
+    assert.equal(data.ok, true, "the idle path is exactly what it was before the gate");
+    assert.equal(data.sawNoWait, true);
+    assert.match(data.promptHead, /<x-comms-message>/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("notifyOnFinish queues a notice for the sender instead of preempting it", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "idle" }, remotesFile);
+  try {
+    await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi" },
+    });
+    const pending = readPending(remotesFile);
+    assert.equal(pending.length, 1, "exactly one notice queued, and it is not a second message");
+    const notice = pending[0];
+    assert.equal(notice.kind, "notice");
+    assert.equal(notice.daemon, "local", "addressed to the local sender");
+    assert.equal(notice.agentId, "agent-test-1", "PASEO_AGENT_ID, not anything the tool args claimed");
+    assert.match(notice.prompt, /delivery notice/);
+    assert.match(notice.prompt, /nothing was interrupted/);
+  } finally {
+    await client.close();
+  }
+});
+
+test("notifyOnFinish: false queues nothing back to the sender", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "idle" }, remotesFile);
+  try {
+    await client.callTool({
+      name: `${PREFIX}send`,
+      arguments: { daemon: "hsi", agentId: "agent-9", prompt: "hi", notifyOnFinish: false },
+    });
+    assert.deepEqual(readPending(remotesFile), []);
+  } finally {
+    await client.close();
+  }
+});
+
+test("a busy target's queue is capped per target, evicting the oldest", async () => {
+  const remotesFile = tempRemotes({ hsi: RELAY_URL });
+  const { client } = await startClient({ FAKE_PASEO_STATUS: "running" }, remotesFile);
+  try {
+    for (let i = 0; i < 9; i++) {
+      await client.callTool({
+        name: `${PREFIX}send`,
+        arguments: { daemon: "hsi", agentId: "agent-9", prompt: `m${i}` },
+      });
+    }
+    const pending = readPending(remotesFile);
+    assert.equal(pending.length, 8, "the cap holds, no unbounded growth");
+    const prompts = pending.map((entry) => entry.prompt.split("\n\n")[1]);
+    assert.ok(!prompts.includes("m0"), "the oldest waiting message is the one evicted");
+    assert.ok(prompts.includes("m8"), "the newest is kept");
+  } finally {
+    await client.close();
+  }
+});
+
+test("the plugin server and this server agree on the queue's bounds and shape", async () => {
+  // server/defer-queue.ts is normative; this copy exists only because the
+  // standalone MCP server cannot import the plugin's TypeScript.
+  const source = readFileSync(join(HERE, "..", "..", "server", "defer-queue.ts"), "utf8");
+  for (const [name, value] of [
+    ["DEFER_MAX_DEPTH_PER_TARGET", 8],
+    ["DEFER_MAX_TOTAL", 200],
+    ["DEFER_MAX_TARGETS_PER_PASS", 3],
+  ]) {
+    assert.match(source, new RegExp(`${name} = ${value}\\b`), `${name} must stay ${value}`);
+  }
+  const mcp = readFileSync(SERVER, "utf8");
+  assert.match(mcp, /const DEFER_MAX_DEPTH_PER_TARGET = 8;/);
+  assert.match(mcp, /const DEFER_MAX_TOTAL = 200;/);
+  assert.match(mcp, /const DEFER_MAX_TARGETS_PER_PASS = 3;/);
+  assert.match(source, /export const DEFER_EXPIRY_MS = 30 \* 60 \* 1000;/);
+  assert.match(mcp, /const DEFER_EXPIRY_MS = 30 \* 60 \* 1000;/);
+  // The claim is a rename on both sides; that is the whole no-replay guard.
+  assert.match(source, /renameSync\(waitingPath\(dir, next\.id\), sendingPath\(dir, next\.id\)\)/);
+  assert.match(mcp, /renameSync\(deferWaitingPath\(next\.id\), deferSendingPath\(next\.id\)\)/);
+});
+
+test("the queued-send instructions tell the model not to pre-wait for safety", async () => {
+  const { client } = await startClient({}, tempRemotes({ hsi: RELAY_URL }));
+  try {
+    const instructions = client.getInstructions();
+    assert.match(instructions, /NEVER interrupts a running turn/);
+    assert.match(instructions, /delivery=queued/);
+    assert.match(
+      instructions,
+      /no longer required/,
+      "the old 'x_comms_send is preemptive, wait first' guidance is what caused the bug",
+    );
+    assert.ok(!/x_comms_send is preemptive/.test(instructions));
   } finally {
     await client.close();
   }

@@ -71,6 +71,12 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
     replacement: "Add \"requirements\": { \"paseo\": \">=0.8.0\" } to paseo-plugin.json (migration guide step 7)",
     docUrl: "https://paseo.sh/docs/plugins/v0.8/migration",
   },
+  "unknown-conformance-exemption": {
+    id: "unknown-conformance-exemption",
+    severity: "error",
+    description: "paseo-plugin.json declares conformance.exempt for a rule that does not exist.",
+    replacement: "Use a rule id from `paseo-plugin-helper audit --list`, or drop the exemption",
+  },
   "v8-root-module": {
     id: "v8-root-module",
     severity: "error",

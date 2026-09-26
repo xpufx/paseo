@@ -1,0 +1,12 @@
+{
+  "id": "worktree-install",
+  "requirements": {
+    "paseo": ">=0.9.0"
+  },
+  "conformance": {
+    "exempt": {
+      "no-bare-react-native-ui": "This plugin exists to prove the shared UI kit is not the only way to build a Paseo surface (xpufx-org/paseo#629). Its layout kit is client/kit.tsx, hand-built on react-native. Importing the helper's own primitives would defeat the plugin's purpose.",
+      "no-bespoke-react-native-interactions": "Same as no-bare-react-native-ui: the Pressable-based interactions in client/kit.tsx are the point of the plugin, not an accident. See xpufx-org/paseo#629."
+    }
+  }
+}
