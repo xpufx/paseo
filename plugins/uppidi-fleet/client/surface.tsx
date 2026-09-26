@@ -1877,7 +1877,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     issue.url ? (
                       <Button
                         label="Open"
-                        icon="ExternalLink"
+                        icon={<UppidiBrandMark size={14} />}
                         variant="ghost"
                         size="sm"
                         accessibilityLabel={`Open #${issue.number} in Forgejo`}
