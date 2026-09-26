@@ -15,6 +15,24 @@ This repo ships two things:
 * **Paseo plugin** (recommended) — UI + embedded MCP server. (This README is for the plugin. See below)
 * **Standalone MCP server** (`mcp/`) — the same server without the paseo plugin. See **[mcp/README.md](mcp/README.md)** for its standalone install, tool reference, and protocol details.
 
+### Features contracts
+
+Two documents record **what each surface actually does now**, derived from the
+code rather than from the design, one per shipped surface:
+
+* **[docs/contract-plugin.md](docs/contract-plugin.md)** — the plugin: 20 server
+  RPCs, 4 `agent.*` daemon events, 2 `agent.create` injection hooks, 9 client
+  surface contributions, and the shared wire substrate (envelope, `auth`, busy
+  gate, defer queue, outbox).
+* **[docs/contract-mcp.md](docs/contract-mcp.md)** — the MCP server: 11 tools and
+  14 further capabilities, each with inputs, outputs, failure modes, and whether
+  it is deterministic or depends on a live peer daemon.
+
+**[docs/contract-drift.md](docs/contract-drift.md)** is the companion ledger of
+places where the prose in this file, in `mcp/README.md`, in `docs/mesh.md`, and
+in the shipped `instructions` strings disagrees with the code — in both
+directions. Where the two conflict, the code is the authority.
+
 ## Plugin
 
 The plugin embeds the MCP server and adds the X-comms UI. Agents get `x_comms_*` tools automatically; humans get surfaces to manage daemons and conversations.
@@ -182,6 +200,11 @@ and what to use if you need a real guarantee are in
 │   └── *.test.ts             # Server unit tests
 ├── skills/
 │   └── recipient-envelope/SKILL.md # Distributable form of the recipient instructions
+├── docs/
+│   ├── contract-plugin.md    # Features contract for this plugin surface
+│   ├── contract-mcp.md       # Features contract for the embedded MCP server
+│   ├── contract-drift.md     # Documented-vs-actual asymmetry ledger
+│   └── mesh.md               # Presence, injection, and visibility layers
 ├── shared/
 │   ├── envelope.ts           # Wire envelope schema (<x-comms-message> parsing, v5 fallback), auth schema + canonical signed payload
 │   ├── registry.ts           # RPC definitions (zod)
