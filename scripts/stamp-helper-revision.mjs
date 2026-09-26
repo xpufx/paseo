@@ -46,8 +46,13 @@ for (const plugin of plugins) {
   // `checkout` or `mixed` despite vendoring. Keying off file presence skipped
   // exactly those five.
   const servedFrom = resolveServedFrom(pluginDir).servedFrom;
-  if (servedFrom === "vendored") {
-    console.log(`[stamp-helper-revision] ${plugin}: served from its own vendored tree — nothing to record`);
+  // "none" is skipped alongside "vendored": a plugin that imports nothing from
+  // the helper has no served copy whose identity could go stale, so there is
+  // nothing to record. worktree-install is the live case — it ships a vendored
+  // tree it never imports from. Declaring "checkout" for it would be false, and
+  // the mismatch test correctly refuses it.
+  if (servedFrom === "vendored" || servedFrom === "none") {
+    console.log(`[stamp-helper-revision] ${plugin}: serves no helper copy from a source that can drift — nothing to record`);
     continue;
   }
   const target = path.join(pluginDir, DECLARATION);
