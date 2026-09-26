@@ -25,6 +25,7 @@ import {
 import { serverPath } from "./server-status";
 import { readRelayStatus } from "./relay-status";
 import { resolveSendRoute, sendLocalNative } from "./local-send";
+import { unknownDaemonMessage } from "./unknown-daemon";
 
 // Startup check: validate whatever is already in the registry as soon as the
 // plugin backend loads, so a corrupt or invalid config is caught early and
@@ -363,7 +364,7 @@ async function sendPreStampedViaHost(input: {
   messageId: string;
 }): Promise<void> {
   const entry = targetRegistryEntry(input.daemon);
-  if (!entry) throw new Error(`unknown daemon '${input.daemon}' — pairing is required`);
+  if (!entry) throw new Error(unknownDaemonMessage(input.daemon));
   const r = await withTimeout(
     safeSpawn(
       "paseo",
@@ -842,7 +843,7 @@ export async function handleDaemonDump(input: { daemon: string }) {
   const daemons = readRegistry(currentRegistryPath()).daemons;
   const entry = daemons.find((d) => d.name === input.daemon);
   if (!entry) {
-    return notReachedResult(input.daemon, `unknown daemon '${input.daemon}' — pairing is required: add it via x_comms_add_daemon or pair the target daemon first`, null, "");
+    return notReachedResult(input.daemon, unknownDaemonMessage(input.daemon), null, "");
   }
   const offer = parseOffer(entry.value);
   const transport = offer ? "relay" : "direct";

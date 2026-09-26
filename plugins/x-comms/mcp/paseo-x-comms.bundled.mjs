@@ -36690,11 +36690,11 @@ function saveManualDaemons(daemons) {
   mkdirSync(dirname(REMOTES_FILE), { recursive: true });
   writeFileSync(REMOTES_FILE, JSON.stringify(daemons, null, 2) + "\n", "utf8");
 }
-var PAIRING_HINT = `pairing is required: run \`paseo daemon pair\` on the target and register the offer, or add a direct host, via x_comms_add_daemon (registry: ${REMOTES_FILE})`;
+var UNKNOWN_DAEMON_HINT = `no registry entry for that name: register a direct host (host:port, tcp://\u2026, unix://\u2026, bare port) via x_comms_add_daemon, or a relay pairing offer from \`paseo daemon pair\`; list the registered names with x_comms_list_daemons (registry: ${REMOTES_FILE})`;
 function hostTargetFor(daemon, daemons) {
   const value = daemons[daemon];
   if (value === void 0) {
-    throw new Error(`unknown daemon '${daemon}' \u2014 ${PAIRING_HINT}`);
+    throw new Error(`unknown daemon '${daemon}' \u2014 ${UNKNOWN_DAEMON_HINT}`);
   }
   const trimmed = String(value).trim();
   if (!trimmed) throw new Error(`daemon '${daemon}' has an empty host value`);

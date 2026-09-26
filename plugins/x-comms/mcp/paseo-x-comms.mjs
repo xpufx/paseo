@@ -220,13 +220,16 @@ function saveManualDaemons(daemons) {
 // through untouched (no wrapping, no legacy formats).
 //
 // The alias is resolved to a host target up front, so an unknown alias fails
-// before any paseo attempt with the exact string and the reason (pairing).
-const PAIRING_HINT = `pairing is required: run \`paseo daemon pair\` on the target and register the offer, or add a direct host, via x_comms_add_daemon (registry: ${REMOTES_FILE})`;
+// before any paseo attempt with the exact string and the reason (no registry
+// entry for that name). Pairing is only one of the ways to create that entry —
+// a direct `--host` needs no offer at all — so the hint names both routes
+// instead of claiming pairing is required (#672).
+const UNKNOWN_DAEMON_HINT = `no registry entry for that name: register a direct host (host:port, tcp://…, unix://…, bare port) via x_comms_add_daemon, or a relay pairing offer from \`paseo daemon pair\`; list the registered names with x_comms_list_daemons (registry: ${REMOTES_FILE})`;
 
 function hostTargetFor(daemon, daemons) {
   const value = daemons[daemon];
   if (value === undefined) {
-    throw new Error(`unknown daemon '${daemon}' — ${PAIRING_HINT}`);
+    throw new Error(`unknown daemon '${daemon}' — ${UNKNOWN_DAEMON_HINT}`);
   }
   const trimmed = String(value).trim();
   if (!trimmed) throw new Error(`daemon '${daemon}' has an empty host value`);
