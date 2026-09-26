@@ -26,6 +26,12 @@ const FOOTER_LINES = 3;
  * The full ticket record. On a wide surface this renders as a second pane
  * beside the list; on a narrow one it is a modal. The content is identical
  * either way — only the container changes.
+ *
+ * It never scrolls itself, and must not. A record is not a viewport root: the
+ * embedded pane is a column of the tickets view, which owns the surface's one
+ * scroller, and the modal body is the host's own `Modal.Content scrollable`. A
+ * scroller in here would be a scroll inside a scroll, the trap that made the
+ * x-comms family unusable on a phone.
  */
 export function TicketDetail({
   ticket,

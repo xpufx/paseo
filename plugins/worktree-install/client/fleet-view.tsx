@@ -42,6 +42,7 @@ import {
   LiveDot,
   Press,
   ScopeChips,
+  Scroller,
   SearchField,
   Stack,
   Stat,
@@ -151,223 +152,225 @@ export function FleetView({
   const filtered = query.trim() !== "" || stateFilter !== "all";
 
   return (
-    <Stack gap={8} testID="fleet-view">
-      {/* Counts. Every number here is also on the row it describes. */}
-      <Cluster gap={2} testID="fleet-stats">
-        <LiveDot tone={data?.runningCount ? "ok" : "muted"} pulse={Boolean(data?.runningCount)} />
-        <Type size={13} weight="700">
-          Fleet
-        </Type>
-        <Stat label="total" value={data?.totalCount ?? 0} testID="stat-total" />
-        <Stat label="running" value={data?.runningCount ?? 0} tone="ok" testID="stat-running" />
-        <Stat label="idle" value={data?.idleCount ?? 0} testID="stat-idle" />
-        {data?.errorCount ? (
-          <Stat label="failed" value={data.errorCount} tone="critical" testID="stat-failed" />
-        ) : null}
-        {summary.total > 0 ? (
-          <Stat label="blocked" value={summary.total} tone="warn" testID="stat-blocked" />
-        ) : null}
-        <View style={{ flex: 1 }} />
-        <Press
-          testID="bulk-archive"
-          onPress={() => actions.onArchiveBulk(bulkCandidates.map((a) => a.id))}
-          disabled={bulkCandidates.length === 0}
-          tone="muted"
-          accessibilityLabel={`Archive ${bulkCandidates.length} terminal agents`}
-        >
-          <Type size={10} weight="600" color={palette.textDim}>
-            archive closed · {bulkCandidates.length}
+    <Scroller testID="fleet-view">
+      <Stack gap={8}>
+          {/* Counts. Every number here is also on the row it describes. */}
+          <Cluster gap={2} testID="fleet-stats">
+          <LiveDot tone={data?.runningCount ? "ok" : "muted"} pulse={Boolean(data?.runningCount)} />
+          <Type size={13} weight="700">
+            Fleet
           </Type>
-        </Press>
-        <Press
-          testID="collapse-all"
-          onPress={toggleAll}
-          disabled={allProjects.length === 0}
-          tone="accent"
-          accessibilityLabel={allCollapsed ? "Expand all projects" : "Collapse all projects"}
-        >
-          <Type size={10} weight="600" color={palette.accent}>
-            {allCollapsed ? "expand all" : "collapse all"}
-          </Type>
-        </Press>
-      </Cluster>
-
-      <Hairline />
-
-      {/* Filters */}
-      <Cluster gap={6} testID="fleet-filters">
-        <Cluster gap={2} wrap={false}>
-          {STATE_FILTERS.map((filter) => (
-            <Press
-              key={filter.id}
-              testID={`state-filter-${filter.id}`}
-              selected={stateFilter === filter.id}
-              onPress={() => setStateFilter(filter.id)}
-              tone="accent"
-              style={{ paddingHorizontal: 6, paddingVertical: 3, borderRadius: 3 }}
-            >
-              <Type size={10} weight={stateFilter === filter.id ? "700" : "500"} color={stateFilter === filter.id ? palette.accent : palette.textDim}>
-                {filter.label}
-              </Type>
-            </Press>
-          ))}
+          <Stat label="total" value={data?.totalCount ?? 0} testID="stat-total" />
+          <Stat label="running" value={data?.runningCount ?? 0} tone="ok" testID="stat-running" />
+          <Stat label="idle" value={data?.idleCount ?? 0} testID="stat-idle" />
+          {data?.errorCount ? (
+            <Stat label="failed" value={data.errorCount} tone="critical" testID="stat-failed" />
+          ) : null}
+          {summary.total > 0 ? (
+            <Stat label="blocked" value={summary.total} tone="warn" testID="stat-blocked" />
+          ) : null}
+          <View style={{ flex: 1 }} />
+          <Press
+            testID="bulk-archive"
+            onPress={() => actions.onArchiveBulk(bulkCandidates.map((a) => a.id))}
+            disabled={bulkCandidates.length === 0}
+            tone="muted"
+            accessibilityLabel={`Archive ${bulkCandidates.length} terminal agents`}
+          >
+            <Type size={10} weight="600" color={palette.textDim}>
+              archive closed · {bulkCandidates.length}
+            </Type>
+          </Press>
+          <Press
+            testID="collapse-all"
+            onPress={toggleAll}
+            disabled={allProjects.length === 0}
+            tone="accent"
+            accessibilityLabel={allCollapsed ? "Expand all projects" : "Collapse all projects"}
+          >
+            <Type size={10} weight="600" color={palette.accent}>
+              {allCollapsed ? "expand all" : "collapse all"}
+            </Type>
+          </Press>
         </Cluster>
-        <SearchField
-          testID="fleet-search"
-          value={query}
-          onChange={setQuery}
-          placeholder="name, id, state, model, worktree, project, #issue"
-        />
-        <ScopeChips testID="fleet-scope" options={repoOptions} value={repoScope} onChange={onRepoScope} />
-      </Cluster>
 
-      {blocked.length > 0 ? (
-        <Banner
-          testID="fleet-blocked"
-          tone="warn"
-          title={`${summary.total} blocked · ${summary.permissions} on a permission · ${summary.awaitingInput} awaiting input`}
-          detail={blocked
-            .slice(0, 4)
-            .map((a) => `${a.name} (${statePresentation(a.deterministicState).label})`)
-            .join(" · ")}
-          actions={
-            <Press
-              testID="fleet-blocked-open"
-              onPress={() => openAgent(blocked[0]!, navigation?.openAgent)}
-              tone="warn"
-              accessibilityLabel={`Open ${blocked[0]!.name}`}
-            >
-              <Type size={9} weight="700" color={palette.warn} upper>
-                open
-              </Type>
-            </Press>
-          }
-        />
-      ) : null}
+        <Hairline />
 
-      {/* Liaison */}
-      <FrontDeskCard
-        node={frontDeskNode}
-        orchestrators={orchestrators}
-        metricsOpen={Boolean(frontDeskNode && expandedMetrics[frontDeskNode.agent.id])}
-        onToggleMetrics={() =>
-          frontDeskNode &&
-          setExpandedMetrics((prev) => ({ ...prev, [frontDeskNode.agent.id]: !prev[frontDeskNode.agent.id] }))
-        }
-        actions={actions}
-        navigation={navigation}
-      />
-
-      {enrolled.length === 0 && detached.length === 0 ? (
-        <Empty
-          testID="fleet-empty"
-          title={loading ? "Reading the roster…" : frontDeskNode ? "No repositories match" : "No agents yet"}
-          detail={
-            loading
-              ? "Asking the daemon for its agent list."
-              : filtered
-                ? `Nothing matches ${stateFilter !== "all" ? `state "${stateFilter}"` : ""}${
-                    query.trim() ? ` and "${query.trim()}"` : ""
-                  }.`
-                : "No Paseo agent sessions are visible to this plugin."
-          }
-          action={
-            filtered ? (
+        {/* Filters */}
+        <Cluster gap={6} testID="fleet-filters">
+          <Cluster gap={2} wrap={false}>
+            {STATE_FILTERS.map((filter) => (
               <Press
-                testID="fleet-clear"
+                key={filter.id}
+                testID={`state-filter-${filter.id}`}
+                selected={stateFilter === filter.id}
+                onPress={() => setStateFilter(filter.id)}
                 tone="accent"
-                onPress={() => {
-                  setQuery("");
-                  setStateFilter("all");
-                }}
-                accessibilityLabel="Clear filters"
+                style={{ paddingHorizontal: 6, paddingVertical: 3, borderRadius: 3 }}
               >
-                <Type size={10} weight="700" color={palette.accent} upper>
-                  clear filters
+                <Type size={10} weight={stateFilter === filter.id ? "700" : "500"} color={stateFilter === filter.id ? palette.accent : palette.textDim}>
+                  {filter.label}
                 </Type>
               </Press>
-            ) : undefined
-          }
-        />
-      ) : (
-        <Stack gap={6} testID="fleet-projects">
-          {enrolled.map((group) => (
-            <ProjectBlock
-              key={`enrolled-${group.projectName}`}
-              group={group}
-              collapsed={Boolean(collapsed[group.projectName]) && !filtered}
-              onToggle={() =>
-                setCollapsed((prev) => ({ ...prev, [group.projectName]: !prev[group.projectName] }))
-              }
-              orchCollapsed={orchCollapsed}
-              onToggleOrch={(id) => setOrchCollapsed((prev) => ({ ...prev, [id]: !prev[id] }))}
-              expandedMetrics={expandedMetrics}
-              onToggleMetrics={(id) => setExpandedMetrics((prev) => ({ ...prev, [id]: !prev[id] }))}
-              actions={actions}
-              navigation={navigation}
-            />
-          ))}
-          {detached.length > 0 ? (
-            <Stack gap={4} testID="fleet-detached">
-              <Cluster gap={5}>
-                <Type size={9} weight="700" color={palette.textFaint} upper>
-                  detached / local · {detached.length}
-                </Type>
-                <View style={{ flex: 1 }}>
-                  <Hairline />
-                </View>
-              </Cluster>
-              {detached.map((group) => (
-                <ProjectBlock
-                  key={`detached-${group.projectName}`}
-                  group={group}
-                  collapsed={Boolean(collapsed[group.projectName]) && !filtered}
-                  onToggle={() =>
-                    setCollapsed((prev) => ({ ...prev, [group.projectName]: !prev[group.projectName] }))
-                  }
-                  orchCollapsed={orchCollapsed}
-                  onToggleOrch={(id) => setOrchCollapsed((prev) => ({ ...prev, [id]: !prev[id] }))}
-                  expandedMetrics={expandedMetrics}
-                  onToggleMetrics={(id) => setExpandedMetrics((prev) => ({ ...prev, [id]: !prev[id] }))}
-                  actions={actions}
-                  navigation={navigation}
-                />
-              ))}
-            </Stack>
-          ) : null}
-        </Stack>
-      )}
-
-      {groups.staleFrontDesk.length > 0 ? (
-        <Stack gap={4} testID="fleet-stale">
-          <Cluster gap={5}>
-            <Type size={9} weight="700" color={palette.textFaint} upper>
-              orphaned liaison sessions · {groups.staleFrontDesk.length}
-            </Type>
-            <View style={{ flex: 1 }}>
-              <Hairline />
-            </View>
+            ))}
           </Cluster>
-          <Type size={10} color={palette.textFaint}>
-            The liaison is a singleton. These duplicates are not registered with the router and can be archived.
-          </Type>
-          {groups.staleFrontDesk.map((node, index) => (
-            <AgentRow
-              key={node.agent.id}
-              node={node}
-              last={index === groups.staleFrontDesk.length - 1}
-              compact
-              metricsOpen={Boolean(expandedMetrics[node.agent.id])}
-              onToggleMetrics={() =>
-                setExpandedMetrics((prev) => ({ ...prev, [node.agent.id]: !prev[node.agent.id] }))
-              }
-              actions={actions}
-              navigation={navigation}
-            />
-          ))}
-        </Stack>
-      ) : null}
-    </Stack>
+          <SearchField
+            testID="fleet-search"
+            value={query}
+            onChange={setQuery}
+            placeholder="name, id, state, model, worktree, project, #issue"
+          />
+          <ScopeChips testID="fleet-scope" options={repoOptions} value={repoScope} onChange={onRepoScope} />
+        </Cluster>
+
+        {blocked.length > 0 ? (
+          <Banner
+            testID="fleet-blocked"
+            tone="warn"
+            title={`${summary.total} blocked · ${summary.permissions} on a permission · ${summary.awaitingInput} awaiting input`}
+            detail={blocked
+              .slice(0, 4)
+              .map((a) => `${a.name} (${statePresentation(a.deterministicState).label})`)
+              .join(" · ")}
+            actions={
+              <Press
+                testID="fleet-blocked-open"
+                onPress={() => openAgent(blocked[0]!, navigation?.openAgent)}
+                tone="warn"
+                accessibilityLabel={`Open ${blocked[0]!.name}`}
+              >
+                <Type size={9} weight="700" color={palette.warn} upper>
+                  open
+                </Type>
+              </Press>
+            }
+          />
+        ) : null}
+
+        {/* Liaison */}
+        <FrontDeskCard
+          node={frontDeskNode}
+          orchestrators={orchestrators}
+          metricsOpen={Boolean(frontDeskNode && expandedMetrics[frontDeskNode.agent.id])}
+          onToggleMetrics={() =>
+            frontDeskNode &&
+            setExpandedMetrics((prev) => ({ ...prev, [frontDeskNode.agent.id]: !prev[frontDeskNode.agent.id] }))
+          }
+          actions={actions}
+          navigation={navigation}
+        />
+
+        {enrolled.length === 0 && detached.length === 0 ? (
+          <Empty
+            testID="fleet-empty"
+            title={loading ? "Reading the roster…" : frontDeskNode ? "No repositories match" : "No agents yet"}
+            detail={
+              loading
+                ? "Asking the daemon for its agent list."
+                : filtered
+                  ? `Nothing matches ${stateFilter !== "all" ? `state "${stateFilter}"` : ""}${
+                      query.trim() ? ` and "${query.trim()}"` : ""
+                    }.`
+                  : "No Paseo agent sessions are visible to this plugin."
+            }
+            action={
+              filtered ? (
+                <Press
+                  testID="fleet-clear"
+                  tone="accent"
+                  onPress={() => {
+                    setQuery("");
+                    setStateFilter("all");
+                  }}
+                  accessibilityLabel="Clear filters"
+                >
+                  <Type size={10} weight="700" color={palette.accent} upper>
+                    clear filters
+                  </Type>
+                </Press>
+              ) : undefined
+            }
+          />
+        ) : (
+          <Stack gap={6} testID="fleet-projects">
+            {enrolled.map((group) => (
+              <ProjectBlock
+                key={`enrolled-${group.projectName}`}
+                group={group}
+                collapsed={Boolean(collapsed[group.projectName]) && !filtered}
+                onToggle={() =>
+                  setCollapsed((prev) => ({ ...prev, [group.projectName]: !prev[group.projectName] }))
+                }
+                orchCollapsed={orchCollapsed}
+                onToggleOrch={(id) => setOrchCollapsed((prev) => ({ ...prev, [id]: !prev[id] }))}
+                expandedMetrics={expandedMetrics}
+                onToggleMetrics={(id) => setExpandedMetrics((prev) => ({ ...prev, [id]: !prev[id] }))}
+                actions={actions}
+                navigation={navigation}
+              />
+            ))}
+            {detached.length > 0 ? (
+              <Stack gap={4} testID="fleet-detached">
+                <Cluster gap={5}>
+                  <Type size={9} weight="700" color={palette.textFaint} upper>
+                    detached / local · {detached.length}
+                  </Type>
+                  <View style={{ flex: 1 }}>
+                    <Hairline />
+                  </View>
+                </Cluster>
+                {detached.map((group) => (
+                  <ProjectBlock
+                    key={`detached-${group.projectName}`}
+                    group={group}
+                    collapsed={Boolean(collapsed[group.projectName]) && !filtered}
+                    onToggle={() =>
+                      setCollapsed((prev) => ({ ...prev, [group.projectName]: !prev[group.projectName] }))
+                    }
+                    orchCollapsed={orchCollapsed}
+                    onToggleOrch={(id) => setOrchCollapsed((prev) => ({ ...prev, [id]: !prev[id] }))}
+                    expandedMetrics={expandedMetrics}
+                    onToggleMetrics={(id) => setExpandedMetrics((prev) => ({ ...prev, [id]: !prev[id] }))}
+                    actions={actions}
+                    navigation={navigation}
+                  />
+                ))}
+              </Stack>
+            ) : null}
+          </Stack>
+        )}
+
+        {groups.staleFrontDesk.length > 0 ? (
+          <Stack gap={4} testID="fleet-stale">
+            <Cluster gap={5}>
+              <Type size={9} weight="700" color={palette.textFaint} upper>
+                orphaned liaison sessions · {groups.staleFrontDesk.length}
+              </Type>
+              <View style={{ flex: 1 }}>
+                <Hairline />
+              </View>
+            </Cluster>
+            <Type size={10} color={palette.textFaint}>
+              The liaison is a singleton. These duplicates are not registered with the router and can be archived.
+            </Type>
+            {groups.staleFrontDesk.map((node, index) => (
+              <AgentRow
+                key={node.agent.id}
+                node={node}
+                last={index === groups.staleFrontDesk.length - 1}
+                compact
+                metricsOpen={Boolean(expandedMetrics[node.agent.id])}
+                onToggleMetrics={() =>
+                  setExpandedMetrics((prev) => ({ ...prev, [node.agent.id]: !prev[node.agent.id] }))
+                }
+                actions={actions}
+                navigation={navigation}
+              />
+            ))}
+          </Stack>
+        ) : null}
+      </Stack>
+    </Scroller>
   );
 }
 

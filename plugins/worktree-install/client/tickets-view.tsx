@@ -21,6 +21,7 @@ import {
   Hairline,
   Press,
   ScopeChips,
+  Scroller,
   SearchField,
   Stack,
   Stat,
@@ -102,166 +103,168 @@ export function TicketsView({
   const showDetailInline = wide && Boolean(current);
 
   return (
-    <Stack gap={8} grow testID="tickets-view">
-      <Cluster gap={2} testID="ticket-stats">
-        <Type size={13} weight="700">
-          Tickets
-        </Type>
-        <Stat
-          testID="ticket-stat-open"
-          label="open"
-          value={data?.openCount ?? 0}
-          tone="muted"
-          onPress={() => setFilter("all")}
-        />
-        <Stat
-          testID="ticket-stat-needs-you"
-          label="needs you"
-          value={data?.needsYouCount ?? 0}
-          tone="warn"
-          onPress={() => setFilter("needs-you")}
-        />
-        <Stat
-          testID="ticket-stat-review"
-          label="review"
-          value={data?.reviewCount ?? 0}
-          tone="accent"
-          onPress={() => setFilter("triage-review")}
-        />
-        <Stat testID="ticket-stat-inflight" label="in flight" value={data?.inFlightCount ?? 0} tone="accent" />
-        <View style={{ flex: 1 }} />
-        <Chip label={`${visible.length} in view`} tone="muted" testID="ticket-visible-count" />
-        <Chip label={repoScope === "all" ? "all repositories" : repoScope} tone="muted" testID="ticket-scope-label" />
-      </Cluster>
-
-      <Hairline />
-
-      <Cluster gap={4} testID="ticket-filters">
-        {TICKET_FILTERS.map((entry) => {
-          const count = ticketCountFor(scoped, entry.id);
-          return (
-            <Press
-              key={entry.id}
-              testID={`ticket-filter-${entry.id}`}
-              selected={filter === entry.id}
-              onPress={() => setFilter(entry.id)}
-              tone="accent"
-              style={{ paddingHorizontal: 6, paddingVertical: 3, borderRadius: 3 }}
-            >
-              <Type
-                size={10}
-                weight={filter === entry.id ? "700" : "500"}
-                color={filter === entry.id ? palette.accent : palette.textDim}
-              >
-                {entry.label} {count}
-              </Type>
-            </Press>
-          );
-        })}
-      </Cluster>
-
-      <Cluster gap={6} testID="ticket-controls">
-        <SearchField
-          testID="ticket-search"
-          value={query}
-          onChange={setQuery}
-          placeholder="title, number, label, branch"
-        />
-        <Cluster gap={2} wrap={false}>
-          {TICKET_SORT_FIELDS.map((field) => (
-            <Press
-              key={field.id}
-              testID={`ticket-sort-${field.id}`}
-              selected={sortField === field.id}
-              onPress={() => flip(field.id)}
-              tone="muted"
-              accessibilityLabel={`Sort by ${field.label}`}
-              style={{ paddingHorizontal: 5, paddingVertical: 3, borderRadius: 3 }}
-            >
-              <Type
-                size={9}
-                weight={sortField === field.id ? "700" : "500"}
-                color={sortField === field.id ? palette.textDim : palette.textFaint}
-              >
-                {field.label}
-                {sortField === field.id ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
-              </Type>
-            </Press>
-          ))}
+    <Scroller testID="tickets-view">
+      <Stack gap={8}>
+          <Cluster gap={2} testID="ticket-stats">
+          <Type size={13} weight="700">
+            Tickets
+          </Type>
+          <Stat
+            testID="ticket-stat-open"
+            label="open"
+            value={data?.openCount ?? 0}
+            tone="muted"
+            onPress={() => setFilter("all")}
+          />
+          <Stat
+            testID="ticket-stat-needs-you"
+            label="needs you"
+            value={data?.needsYouCount ?? 0}
+            tone="warn"
+            onPress={() => setFilter("needs-you")}
+          />
+          <Stat
+            testID="ticket-stat-review"
+            label="review"
+            value={data?.reviewCount ?? 0}
+            tone="accent"
+            onPress={() => setFilter("triage-review")}
+          />
+          <Stat testID="ticket-stat-inflight" label="in flight" value={data?.inFlightCount ?? 0} tone="accent" />
+          <View style={{ flex: 1 }} />
+          <Chip label={`${visible.length} in view`} tone="muted" testID="ticket-visible-count" />
+          <Chip label={repoScope === "all" ? "all repositories" : repoScope} tone="muted" testID="ticket-scope-label" />
         </Cluster>
-        <ScopeChips testID="ticket-scope" options={repoOptions} value={repoScope} onChange={actions.onRepoScope} />
-      </Cluster>
 
-      <Hairline />
+        <Hairline />
 
-      <Cluster gap={0} align="stretch" grow wrap={false} testID="ticket-body">
-        <Stack gap={0} grow={showDetailInline} style={{ minWidth: 0 }}>
-          {visible.length === 0 ? (
-            <Empty
-              testID="ticket-empty"
-              title={loading ? "Reading the board…" : "No tickets match"}
-              detail={
-                loading
-                  ? "Asking the board for open tickets."
-                  : data?.error
-                    ? data.error
-                    : "Change the filter, the search, or the repository scope."
-              }
-              action={
-                !loading && (filter !== "all" || query) ? (
-                  <Press
-                    testID="ticket-clear"
-                    tone="accent"
-                    onPress={() => {
-                      setFilter("all");
-                      setQuery("");
-                    }}
-                    accessibilityLabel="Clear ticket filters"
-                  >
-                    <Type size={10} weight="700" color={palette.accent} upper>
-                      clear filters
-                    </Type>
-                  </Press>
-                ) : undefined
-              }
+        <Cluster gap={4} testID="ticket-filters">
+          {TICKET_FILTERS.map((entry) => {
+            const count = ticketCountFor(scoped, entry.id);
+            return (
+              <Press
+                key={entry.id}
+                testID={`ticket-filter-${entry.id}`}
+                selected={filter === entry.id}
+                onPress={() => setFilter(entry.id)}
+                tone="accent"
+                style={{ paddingHorizontal: 6, paddingVertical: 3, borderRadius: 3 }}
+              >
+                <Type
+                  size={10}
+                  weight={filter === entry.id ? "700" : "500"}
+                  color={filter === entry.id ? palette.accent : palette.textDim}
+                >
+                  {entry.label} {count}
+                </Type>
+              </Press>
+            );
+          })}
+        </Cluster>
+
+        <Cluster gap={6} testID="ticket-controls">
+          <SearchField
+            testID="ticket-search"
+            value={query}
+            onChange={setQuery}
+            placeholder="title, number, label, branch"
+          />
+          <Cluster gap={2} wrap={false}>
+            {TICKET_SORT_FIELDS.map((field) => (
+              <Press
+                key={field.id}
+                testID={`ticket-sort-${field.id}`}
+                selected={sortField === field.id}
+                onPress={() => flip(field.id)}
+                tone="muted"
+                accessibilityLabel={`Sort by ${field.label}`}
+                style={{ paddingHorizontal: 5, paddingVertical: 3, borderRadius: 3 }}
+              >
+                <Type
+                  size={9}
+                  weight={sortField === field.id ? "700" : "500"}
+                  color={sortField === field.id ? palette.textDim : palette.textFaint}
+                >
+                  {field.label}
+                  {sortField === field.id ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                </Type>
+              </Press>
+            ))}
+          </Cluster>
+          <ScopeChips testID="ticket-scope" options={repoOptions} value={repoScope} onChange={actions.onRepoScope} />
+        </Cluster>
+
+        <Hairline />
+
+        <Cluster gap={0} align="stretch" grow wrap={false} testID="ticket-body">
+          <Stack gap={0} grow={showDetailInline} style={{ minWidth: 0 }}>
+            {visible.length === 0 ? (
+              <Empty
+                testID="ticket-empty"
+                title={loading ? "Reading the board…" : "No tickets match"}
+                detail={
+                  loading
+                    ? "Asking the board for open tickets."
+                    : data?.error
+                      ? data.error
+                      : "Change the filter, the search, or the repository scope."
+                }
+                action={
+                  !loading && (filter !== "all" || query) ? (
+                    <Press
+                      testID="ticket-clear"
+                      tone="accent"
+                      onPress={() => {
+                        setFilter("all");
+                        setQuery("");
+                      }}
+                      accessibilityLabel="Clear ticket filters"
+                    >
+                      <Type size={10} weight="700" color={palette.accent} upper>
+                        clear filters
+                      </Type>
+                    </Press>
+                  ) : undefined
+                }
+              />
+            ) : (
+              <Stack gap={0} grow testID="ticket-list">
+                {visible.map((ticket, index) => (
+                  <TicketRow
+                    key={ticket.number}
+                    ticket={ticket}
+                    last={index === visible.length - 1}
+                    selected={ticket.number === selected}
+                    compact={narrow}
+                    onSelect={() => setSelected(ticket.number === selected ? null : ticket.number)}
+                    onDispatch={() => actions.onDispatch(ticket)}
+                  />
+                ))}
+              </Stack>
+            )}
+          </Stack>
+
+          {showDetailInline && current ? (
+            <TicketDetail
+              embedded
+              ticket={current}
+              onClose={() => setSelected(null)}
+              onDispatch={actions.onDispatch}
+              onOpenExternal={(url) => void Linking.openURL(url).catch(() => {})}
             />
-          ) : (
-            <Stack gap={0} grow testID="ticket-list">
-              {visible.map((ticket, index) => (
-                <TicketRow
-                  key={ticket.number}
-                  ticket={ticket}
-                  last={index === visible.length - 1}
-                  selected={ticket.number === selected}
-                  compact={narrow}
-                  onSelect={() => setSelected(ticket.number === selected ? null : ticket.number)}
-                  onDispatch={() => actions.onDispatch(ticket)}
-                />
-              ))}
-            </Stack>
-          )}
-        </Stack>
+          ) : null}
+        </Cluster>
 
-        {showDetailInline && current ? (
+        {!wide && current ? (
           <TicketDetail
-            embedded
             ticket={current}
             onClose={() => setSelected(null)}
             onDispatch={actions.onDispatch}
             onOpenExternal={(url) => void Linking.openURL(url).catch(() => {})}
           />
         ) : null}
-      </Cluster>
-
-      {!wide && current ? (
-        <TicketDetail
-          ticket={current}
-          onClose={() => setSelected(null)}
-          onDispatch={actions.onDispatch}
-          onOpenExternal={(url) => void Linking.openURL(url).catch(() => {})}
-        />
-      ) : null}
-    </Stack>
+      </Stack>
+    </Scroller>
   );
 }
 
