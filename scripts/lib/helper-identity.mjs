@@ -31,6 +31,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
 
 /** Helper package root — the tree a checkout-served resolution reads from. */
@@ -79,6 +80,52 @@ export function helperRevisionAt(repoRoot, sha) {
 /** Short sha of HEAD, or null outside a repository. */
 export function headOf(repoRoot) {
   return readGit(repoRoot, ["rev-parse", "--short", "HEAD"]) || null;
+}
+
+/**
+ * Content digest of the helper tree, as `sha256:<12 hex>`.
+ *
+ * This replaces `git log -1 <stamped sha> -- <helper root>` as the way a
+ * plugin's recorded helper revision is checked. That lookup depended on the
+ * stamped sha still existing in the repository, and a squash-merge deletes the
+ * very commit a stamp recorded: #643's own branch head `525c597e` landed as
+ * `08277a55`, so four plugins carried a sha no clean clone could resolve
+ * (`fatal: bad object`) and the gate failed in CI while passing on any machine
+ * that still had the branch worktree.
+ *
+ * A digest of the files themselves has none of those failure modes. It is
+ * unchanged by squash, rebase, force-push and shallow clones, and it answers
+ * the question actually being asked — *is the helper I am serving the helper I
+ * was built against* — rather than a proxy for it that a VCS operation can
+ * invalidate.
+ *
+ * Sorted relative paths, hashed with their contents, so the result is
+ * independent of directory iteration order.
+ */
+export function helperContentDigest(repoRoot) {
+  const root = path.join(repoRoot, HELPER_ROOT, "src");
+  if (!fs.existsSync(root)) return null;
+  const files = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+      a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    )) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) files.push(full);
+    }
+  };
+  walk(root);
+  if (files.length === 0) return null;
+  const hash = crypto.createHash("sha256");
+  for (const file of files.sort()) {
+    hash.update(path.relative(root, file).split(path.sep).join("/"));
+    hash.update("\0");
+    hash.update(fs.readFileSync(file));
+    hash.update("\0");
+  }
+  return `sha256:${hash.digest("hex").slice(0, 12)}`;
 }
 
 /**
@@ -269,6 +316,9 @@ export function readDeclaredHelper(pluginDir) {
     return {
       version: content.match(/HELPER_VERSION\s*=\s*["']([^"']+)["']/)?.[1] ?? null,
       servedFrom: content.match(/HELPER_SERVED_FROM\s*=\s*["']([^"']+)["']/)?.[1] ?? null,
+      // Content digest of the helper this plugin was stamped against (#649).
+      // Preferred over the checkout sha because no VCS operation can orphan it.
+      revision: content.match(/HELPER_REVISION\s*=\s*["']([^"']+)["']/)?.[1] ?? null,
       source: DECLARATION_FILE,
     };
   } catch {
@@ -315,6 +365,11 @@ export function evaluateHelperIdentity(pluginDir, repoRoot) {
 
   const resolvedVersion = servedFromCheckout ? readHelperVersion(helperRoot) : null;
   const resolvedRevision = servedFromCheckout ? revisionOf(repoRoot, HELPER_ROOT) : null;
+  // The authoritative check is the content digest: `resolvedRevision` is kept for
+  // display only, because it is a `git log` result and can be invalidated by a
+  // squash-merge even when the helper is byte-for-byte the one that was built
+  // against (#649).
+  const resolvedDigest = servedFromCheckout ? helperContentDigest(repoRoot) : null;
   const stampedHelperRevision = stamp?.sha ? helperRevisionAt(repoRoot, stamp.sha) : null;
 
   const reasons = [];
@@ -371,8 +426,19 @@ export function evaluateHelperIdentity(pluginDir, repoRoot) {
       );
     } else if (!stamp.sha) {
       fail(`shared/version.ts carries no "+<sha>" revision: ${stamp.full}`);
+    } else if (declared?.revision) {
+      // Authoritative path (#649): compare the recorded content digest with
+      // the digest of the helper tree actually on disk. No git involved, so a
+      // squash-merge, rebase, force-push or shallow clone cannot invalidate it.
+      if (declared.revision !== resolvedDigest) {
+        fail(
+          `serves helper ${resolvedDigest ?? "unreadable"} but was stamped against ${declared.revision}: the served helper is not the one this plugin was built with`,
+        );
+      }
     } else if (!stampedHelperRevision) {
-      undecidable(`cannot resolve the helper as of the stamped revision ${stamp.sha}`);
+      undecidable(
+        `cannot resolve the helper as of the stamped revision ${stamp.sha}, and no HELPER_REVISION digest is recorded — run \`npm run stamp\` in the plugin`,
+      );
     } else if (resolvedRevision && !isAncestorOrEqual(repoRoot, stampedHelperRevision, resolvedRevision)) {
       fail(
         `serves helper ${resolvedRevision} but was stamped at ${stamp.sha}, whose helper is ${stampedHelperRevision}: the served helper is older than the plugin's own stamp`,
@@ -390,8 +456,10 @@ export function evaluateHelperIdentity(pluginDir, repoRoot) {
     mixedSources: observed.mixedSources,
     vendoredTrees: observed.vendoredTrees,
     declared,
-    resolved: { version: resolvedVersion, revision: resolvedRevision },
-    stamped: stamp ? { full: stamp.full, sha: stamp.sha, helperRevision: stampedHelperRevision } : null,
+    resolved: { version: resolvedVersion, revision: resolvedRevision, digest: resolvedDigest },
+    stamped: stamp
+      ? { full: stamp.full, sha: stamp.sha, helperRevision: stampedHelperRevision, digest: declared?.revision ?? null }
+      : null,
     status,
     reasons,
   };

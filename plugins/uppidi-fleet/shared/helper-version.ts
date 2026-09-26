@@ -18,3 +18,12 @@
 // vendored trees pin in their READMEs, not a scheme invented for this plugin.
 export const HELPER_VERSION = "0.4.0-beta.12";
 export const HELPER_SERVED_FROM = "checkout";
+
+// Content digest of packages/paseo-plugin-helper/src at stamp time (#649).
+// This is the authoritative check that the helper being served is the helper
+// this plugin was built with. The "+<sha>" in shared/version.ts identifies the
+// plugin's checkout, but a squash-merge deletes the very commit it names, so
+// resolving it fails in any clean clone while passing on a machine that still
+// holds the branch worktree. A digest of the files cannot be invalidated that
+// way. Re-stamp with `npm run stamp` in the plugin after a helper change.
+export const HELPER_REVISION = "sha256:3ded165effb8";
