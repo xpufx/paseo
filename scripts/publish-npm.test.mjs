@@ -59,7 +59,32 @@ check("--publish + --clean-stage rejected", throws(() => parseArgs(["--publish",
 
 // --- discovery + readiness ---
 const ids = pluginIds();
-check("discovers the 10 plugins", ids.length === 10 && ids.includes("top") && ids.includes("mcp-tools") && ids.includes("uppidi-fleet") && ids.includes("wellbeing"));
+// Assert the discovered *set*, not a count. A hardcoded number encodes nothing
+// about intent and fails whenever a plugin is legitimately added — which has
+// already happened twice (b3897f08 bumped 9->10 for the same reason).
+// The named plugins below are the ones discovery must never silently drop.
+const EXPECTED_PLUGINS = [
+  "demo",
+  "forges",
+  "mcp-tools",
+  "plugin-updates",
+  "slash",
+  "top",
+  "twofado",
+  "uppidi-fleet",
+  "wellbeing",
+  "worktree-install",
+  "x-comms",
+];
+check(
+  "discovers exactly the expected publishable plugins",
+  JSON.stringify(ids) === JSON.stringify(EXPECTED_PLUGINS),
+  `expected ${EXPECTED_PLUGINS.join(",")} — got ${ids.join(",")}`
+);
+// `uppidi-forge` is a committed symlink alias of `uppidi-fleet`, not a
+// distinct package. Publishing it would ship the same plugin under two names.
+check("excludes the uppidi-forge symlink alias", !ids.includes("uppidi-forge"));
+check("discovers the plugins that matter", ids.includes("top") && ids.includes("mcp-tools") && ids.includes("uppidi-fleet") && ids.includes("wellbeing"));
 const top = manifestFor("top");
 check("top is READY", readiness(top).length === 0);
 check("top publish name is scoped", top.publishAs === "@xpufx/paseo-top");
