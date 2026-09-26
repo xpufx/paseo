@@ -17,9 +17,6 @@
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const EXTENSIONS = [".ts", ".tsx"];
-const INDEXES = ["index.ts", "index.tsx"];
-
 function tryFile(url) {
   try {
     if (fs.statSync(url, { throwIfNoEntry: false })?.isFile()) return url.href;
@@ -48,11 +45,15 @@ export async function resolve(specifier, context, next) {
     if (!/\.[cm]?js$/i.test(specifier) && /\.[a-z]+$/i.test(specifier)) throw err;
     const stem = resolved.href.replace(/\.[cm]?js$/i, "");
 
-    for (const ext of EXTENSIONS) {
+    // No ".tsx" probe: node's type stripping does not transform JSX, so handing
+    // back a ".tsx" url would only convert an honest ERR_MODULE_NOT_FOUND into a
+    // baffling ERR_UNKNOWN_FILE_EXTENSION. A plugin's JSX suites run on tsx or
+    // vitest instead, never through here.
+    for (const ext of [".ts"]) {
       const hit = tryFile(new URL(`${stem}${ext}`));
       if (hit) return { url: hit, shortCircuit: true };
     }
-    for (const index of INDEXES) {
+    for (const index of ["index.ts"]) {
       const hit = tryFile(new URL(`${stem}/${index}`));
       if (hit) return { url: hit, shortCircuit: true };
     }
