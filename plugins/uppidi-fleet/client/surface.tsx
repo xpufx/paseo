@@ -787,6 +787,25 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const totalQueued = hookStatus?.totalQueued ?? 0;
   const queuesList = toList(hookQueues?.queues);
 
+  /**
+   * Models the daemon reports, as Select options (#635).
+   *
+   * Deduplicated and sorted so the list does not reshuffle between polls, and
+   * guarded with toList() per the partial-payload contract (#510) — a stale
+   * payload can carry roles with no availableModels at all.
+   */
+  const roleModelOptions = useMemo<SelectOption[]>(() => {
+    const seen = new Set<string>();
+    const options: SelectOption[] = [];
+    for (const model of toList(roleModelsData?.availableModels)) {
+      const name = String(model ?? "").trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      options.push({ label: name, value: name });
+    }
+    return options.sort((a, b) => a.label.localeCompare(b.label));
+  }, [roleModelsData?.availableModels]);
+
   const visibleQueues = useMemo(() => {
     const filtered = filterQueues(queuesList, queuePreset, queueQuery);
     return sortQueues(filtered, queueSortField, queueSortDir);
@@ -1223,6 +1242,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             onToggle={(exp) => setRoleModelsExpanded(exp)}
           >
             <Card variant="flat">
+                {/* Built once per render rather than per role: every role
+                    offers the same daemon model list, and rebuilding it inside
+                    the map made the list look role-specific. */}
+                {roleModelOptions.length === 0 && (
+                  <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                    No models reported by the daemon.
+                  </Text>
+                )}
               <Stack gap="sm">
                 <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                   Configure primary model and fallback tiers for each agent role type:
@@ -1251,18 +1278,28 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                           </Text>
                         )}
                       </Stack>
-                      <Button
-                        label="Switch model"
-                        size="sm"
-                        variant="ghost"
-                        onPress={() => {
-                          const available = toList(roleModelsData?.availableModels);
-                          if (available.length > 0) {
-                            const nextIdx = (available.indexOf(cfg.primaryModel) + 1) % available.length;
-                            const nextModel = available[nextIdx];
-                            void handleRoleModelChange(roleKey, nextModel);
+                      {/* Explicit model selection (#635). This was a
+                          "Switch model" button that computed
+                          (available.indexOf(primary) + 1) % available.length —
+                          it cycled to whatever came next and never said what
+                          that was, so the control was a click-and-pray. A
+                          Select names the current model, lists the real
+                          choices, and makes the no-op case visible: with one
+                          model available there is nothing to switch to, which
+                          the old button silently did nothing about. */}
+                      <Select
+                        value={cfg.primaryModel}
+                        label={`${roleKey} model`}
+                        options={roleModelOptions}
+                        onValueChange={(model) => {
+                          if (model !== cfg.primaryModel) {
+                            void handleRoleModelChange(roleKey, model);
                           }
                         }}
+                        disabled={roleModelOptions.length < 2}
+                        placeholder="Select a model"
+                        size="sm"
+                        style={{ minWidth: 180 }}
                       />
                     </Row>
                   </Card>
