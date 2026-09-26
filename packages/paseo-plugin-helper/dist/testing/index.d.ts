@@ -1,6 +1,7 @@
 import { ComponentType } from 'react';
-import { H as HostAgentRef, p as ComposerPillContribution, o as HostSurfaceProps, P as PluginCleanup, a as HostAgentUpdate } from '../host-DatQ2QJE.js';
-import { b as CommandCenterItemContribution } from '../command-center-D535JyIo.js';
+import { H as HostAgentRef, o as HostSurfaceProps, P as PluginCleanup, a as HostAgentUpdate } from '../host-Dk97D-ul.js';
+import { PluginComposerPillContribution, PluginButtonRegistration } from '@getpaseo/plugin/client';
+import { b as CommandCenterItemContribution } from '../command-center-D0KI5dgd.js';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.js';
 import 'react-native';
 import 'zod';
@@ -15,14 +16,14 @@ interface MockSettingsScreenContribution {
     Component: ComponentType<HostSurfaceProps>;
 }
 interface MockClientContext {
-    registeredPills: ComposerPillContribution[];
+    registeredPills: PluginComposerPillContribution[];
     registeredSurfaces: Array<{
         id: string;
         Component: ComponentType<HostSurfaceProps>;
     }>;
     registeredSettingsScreens: MockSettingsScreenContribution[];
     registeredCommandCenterItems: CommandCenterItemContribution[];
-    addComposerPill(contribution: ComposerPillContribution): PluginCleanup;
+    addComposerPill(contribution: PluginComposerPillContribution): PluginButtonRegistration;
     openPanel(id: string, options?: unknown): void;
     rpc(contract: {
         name: string;
@@ -65,7 +66,7 @@ interface MockClientContext {
 /**
  * Creates a fully functional mock client context for testing client plugin
  * contributions. Implements the same structural shapes as the real Paseo
- * v0.7 and v0.8 client contexts without importing any SDK module.
+ * client context without importing any SDK module at runtime.
  */
 declare function createMockClientContext(): MockClientContext;
 

@@ -1,12 +1,15 @@
 import type { ComponentType } from "react";
 import type {
   ComposerPillRegistrar,
-  ComposerPillContribution,
   HostAgentRef,
   HostAgentUpdate,
   HostSurfaceProps,
   PluginCleanup,
 } from "../client/host.js";
+import type {
+  PluginButtonRegistration,
+  PluginComposerPillContribution,
+} from "@getpaseo/plugin/client";
 import type { CommandCenterItemContribution } from "../client/command-center.js";
 
 export interface MockAgent extends HostAgentRef {
@@ -21,11 +24,11 @@ export interface MockSettingsScreenContribution {
 }
 
 export interface MockClientContext {
-  registeredPills: ComposerPillContribution[];
+  registeredPills: PluginComposerPillContribution[];
   registeredSurfaces: Array<{ id: string; Component: ComponentType<HostSurfaceProps> }>;
   registeredSettingsScreens: MockSettingsScreenContribution[];
   registeredCommandCenterItems: CommandCenterItemContribution[];
-  addComposerPill(contribution: ComposerPillContribution): PluginCleanup;
+  addComposerPill(contribution: PluginComposerPillContribution): PluginButtonRegistration;
   openPanel(id: string, options?: unknown): void;
   rpc(contract: { name: string }, input: unknown): Promise<unknown>;
   openSurface(id: string): void;
@@ -62,10 +65,10 @@ const noopCleanup: PluginCleanup = () => {};
 /**
  * Creates a fully functional mock client context for testing client plugin
  * contributions. Implements the same structural shapes as the real Paseo
- * v0.7 and v0.8 client contexts without importing any SDK module.
+ * client context without importing any SDK module at runtime.
  */
 export function createMockClientContext(): MockClientContext {
-  const registeredPills: ComposerPillContribution[] = [];
+  const registeredPills: PluginComposerPillContribution[] = [];
   const registeredSurfaces: Array<{ id: string; Component: ComponentType<HostSurfaceProps> }> = [];
   const registeredSettingsScreens: MockSettingsScreenContribution[] = [];
   const registeredCommandCenterItems: CommandCenterItemContribution[] = [];
@@ -78,12 +81,13 @@ export function createMockClientContext(): MockClientContext {
     registeredSettingsScreens,
     registeredCommandCenterItems,
 
-    addComposerPill(contribution: ComposerPillContribution): PluginCleanup {
+    addComposerPill(contribution: PluginComposerPillContribution): PluginButtonRegistration {
       registeredPills.push(contribution);
-      return () => {
+      const remove = () => {
         const index = registeredPills.indexOf(contribution);
         if (index >= 0) registeredPills.splice(index, 1);
       };
+      return { update: () => {}, remove };
     },
 
     openPanel: () => {},

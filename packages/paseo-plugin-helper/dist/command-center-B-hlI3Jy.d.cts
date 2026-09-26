@@ -1,4 +1,4 @@
-import { P as PluginCleanup } from './host-DatQ2QJE.cjs';
+import { P as PluginCleanup } from './host-Dk97D-ul.cjs';
 
 /**
  * Structural registrar interface satisfied by both Paseo v0.7 PluginContext

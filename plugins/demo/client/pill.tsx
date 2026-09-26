@@ -42,7 +42,6 @@ import {
   tabItemRecipe,
   badgeRecipe,
   type RenderModalProps,
-  type RenderPillProps,
   type VisualFlair,
   type AttentionBeaconMode,
   type AttentionBeaconTone,
@@ -68,54 +67,6 @@ import { SharedSuiteCard } from "./suite-settings.js";
 import { PLUGIN_VERSION } from "../shared/version.js";
 
 const EMPTY_PARAMS = {};
-
-function DemoPill({ isOpen }: RenderPillProps) {
-  const { colors, typography } = usePluginTheme();
-  const { isCompact } = useResponsive();
-  const { settings } = usePluginSettings(demoSettingsContract);
-  const { data, isLoading } = useAutoRefreshQuery(getDemoDataRpc, EMPTY_PARAMS, {
-    defaultRate: settings.pollingRate,
-  });
-
-  const cpu = data?.cpuUsagePercent ?? 0;
-  const isAlert = cpu > settings.highCpuThreshold;
-
-  // Raw View/Text composition: the host composer bar has no helper surface for
-  // pill content, so only the compositor row and inline text spans stay local.
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 6 }}>
-      <StatusDot variant={isAlert ? "danger" : "success"} pulse={isAlert} />
-      {isCompact ? (
-        // Mobile / Compact track: ultra-compact layout to prevent truncation!
-        <Text
-          numberOfLines={1}
-          style={[
-            { ...typography.caption, color: colors.foreground, fontWeight: "600", flexShrink: 1 },
-            isOpen && { opacity: 0.85 },
-          ]}
-        >
-          {isLoading ? "..." : `${cpu}%`}
-        </Text>
-      ) : (
-        // Desktop wide track: full descriptive label
-        <Text
-          numberOfLines={1}
-          style={[{ ...typography.caption, flexShrink: 1 }, isOpen && { opacity: 0.85 }]}
-        >
-          <Text style={{ color: colors.accent, fontWeight: "600" }}>
-            {settings.accentPillLabel}
-          </Text>
-          {settings.showCpuUsage && (
-            <>
-              <Text style={{ color: colors.foregroundMuted }}>{" · "}</Text>
-              <Text style={{ color: colors.foreground }}>{isLoading ? "..." : `${cpu}% CPU`}</Text>
-            </>
-          )}
-        </Text>
-      )}
-    </View>
-  );
-}
 
 function DemoModal({ close, workspaceId }: RenderModalProps) {
   const { colors, theme, layout, typography, touchTargetMin } = usePluginTheme();
@@ -1376,7 +1327,6 @@ export function contributeClient(client: ComposerPillRegistrar) {
       density: "comfortable",
       accentColor: "#6366f1",
     },
-    renderPill: (props) => <DemoPill {...props} />,
     renderModal: (props) => <DemoModal {...props} />,
   });
   return () => {

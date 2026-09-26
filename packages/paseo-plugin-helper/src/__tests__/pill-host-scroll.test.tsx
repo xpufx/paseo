@@ -35,15 +35,20 @@ const theme: any = {
 };
 const layout: any = { compact: false, platform: "web" };
 
-describe("registerComposerPill legacy modal wrapper", () => {
+/**
+ * Scroll ownership (#219) is only meaningful where the helper renders a
+ * `<Modal.Content>`, which on the 0.9 host is the centered presentation. The
+ * popover path renders into a plain host-owned container instead.
+ */
+describe("registerComposerPill centered modal wrapper", () => {
   let contentProps: Array<Record<string, unknown>>;
-  let HostComponent: any;
+  let PillIcon: any;
   let pressOpener: (() => void) | undefined;
   let HostContent: (props: Record<string, unknown>) => React.ReactElement;
 
   beforeEach(() => {
     contentProps = [];
-    HostComponent = undefined;
+    PillIcon = undefined;
     pressOpener = undefined;
     HostContent = (props: Record<string, unknown>) => {
       contentProps.push(props);
@@ -59,16 +64,12 @@ describe("registerComposerPill legacy modal wrapper", () => {
     } as any);
   });
 
-  function registerOnLegacyHost(options: Record<string, unknown>) {
+  function registerCenteredPill(options: Record<string, unknown>) {
     const client = {
-      addComposerPill: (contribution: Record<string, unknown>) => {
-        // Button-shaped probe must throw so the registrar takes the legacy path.
-        if ((contribution as any).button) throw new Error("legacy host");
-        if ((contribution as any).Component) HostComponent = (contribution as any).Component;
-        if (typeof (contribution as any).onPress === "function") {
-          pressOpener = (contribution as any).onPress;
-        }
-        return () => {};
+      addComposerPill: (contribution: any) => {
+        PillIcon = contribution.button.icon;
+        pressOpener = contribution.button.behavior.onPress;
+        return { update: () => {}, remove: () => {} };
       },
       paseo: {
         agents: {
@@ -82,6 +83,7 @@ describe("registerComposerPill legacy modal wrapper", () => {
       dispose = registerComposerPill(client, {
         id: "test",
         title: "Test",
+        presentation: "centered",
         renderModal: () => <Text>modal body</Text>,
         ...options,
       } as any);
@@ -93,11 +95,14 @@ describe("registerComposerPill legacy modal wrapper", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    expect(HostComponent).toBeDefined();
+    expect(PillIcon).toBeDefined();
+    act(() => {
+      pressOpener?.();
+    });
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {
       renderer = TestRenderer.create(
-        <HostComponent
+        <PillIcon
           agentId="a1"
           workspaceId="w1"
           theme={theme}
@@ -106,14 +111,11 @@ describe("registerComposerPill legacy modal wrapper", () => {
         />,
       );
     });
-    act(() => {
-      pressOpener?.();
-    });
     return renderer;
   }
 
   it("renders exactly one Modal.Content, non-scrollable by default", async () => {
-    const dispose = registerOnLegacyHost({});
+    const dispose = registerCenteredPill({});
     const renderer = await openPill();
     expect(renderer.root.findAllByType(HostContent)).toHaveLength(1);
     expect(contentProps.at(-1)?.scrollable).toBe(false);
@@ -121,7 +123,7 @@ describe("registerComposerPill legacy modal wrapper", () => {
   });
 
   it("renders exactly one Modal.Content, host-scrollable when opted in", async () => {
-    const dispose = registerOnLegacyHost({ hostScroll: true });
+    const dispose = registerCenteredPill({ hostScroll: true });
     const renderer = await openPill();
     expect(renderer.root.findAllByType(HostContent)).toHaveLength(1);
     expect(contentProps.at(-1)?.scrollable).toBe(true);
@@ -129,53 +131,15 @@ describe("registerComposerPill legacy modal wrapper", () => {
   });
 
   it("hosts fluid section content with exactly one Modal.Content", async () => {
-    const client = {
-      addComposerPill: (contribution: Record<string, unknown>) => {
-        if ((contribution as any).button) throw new Error("legacy host");
-        if ((contribution as any).Component) HostComponent = (contribution as any).Component;
-        if (typeof (contribution as any).onPress === "function") {
-          pressOpener = (contribution as any).onPress;
-        }
-        return () => {};
-      },
-      paseo: {
-        agents: {
-          subscribe: () => () => {},
-          list: async () => ({ entries: [{ agent: { id: "a1", workspaceId: "w1" } }] }),
-        },
-      },
-    } as unknown as ComposerPillRegistrar;
-    let dispose!: () => void;
-    act(() => {
-      dispose = registerComposerPill(client, {
-        id: "test",
-        title: "Test",
-        hostScroll: true,
-        renderModal: () => (
-          <HostModalSection>
-            <Text>section body</Text>
-          </HostModalSection>
-        ),
-      } as any);
+    const dispose = registerCenteredPill({
+      hostScroll: true,
+      renderModal: () => (
+        <HostModalSection>
+          <Text>section body</Text>
+        </HostModalSection>
+      ),
     });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    let renderer!: TestRenderer.ReactTestRenderer;
-    act(() => {
-      renderer = TestRenderer.create(
-        <HostComponent
-          agentId="a1"
-          workspaceId="w1"
-          theme={theme}
-          layout={layout}
-          host={{ id: "h", label: "H" }}
-        />,
-      );
-    });
-    act(() => {
-      pressOpener?.();
-    });
+    const renderer = await openPill();
     expect(renderer.root.findAllByType(HostContent)).toHaveLength(1);
     expect(contentProps.at(-1)?.scrollable).toBe(true);
     expect(renderer.root.findAllByType(HostModalSection)).toHaveLength(1);
@@ -188,7 +152,7 @@ describe("registerComposerPill legacy modal wrapper", () => {
       capturedScrollOwner = useContext(ModalBodyScrollOwnerContext);
       return <Text>scroll consumer</Text>;
     }
-    const dispose = registerOnLegacyHost({
+    const dispose = registerCenteredPill({
       renderModal: () => <ScrollConsumer />,
     });
     await openPill();
@@ -202,7 +166,7 @@ describe("registerComposerPill legacy modal wrapper", () => {
       capturedScrollOwner = useContext(ModalBodyScrollOwnerContext);
       return <Text>scroll consumer</Text>;
     }
-    const dispose = registerOnLegacyHost({
+    const dispose = registerCenteredPill({
       hostScroll: true,
       renderModal: () => <ScrollConsumer />,
     });

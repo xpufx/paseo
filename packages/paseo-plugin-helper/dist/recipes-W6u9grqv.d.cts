@@ -1,7 +1,7 @@
 import { StyleProp, ViewStyle, TextStyle } from 'react-native';
 import { g as PluginTheme, P as PlatformType, R as ResponsiveLayout, T as ThemeColors, S as StatusVariant } from './custom-pills-C98QP7Cg.cjs';
 import React__default, { ReactNode } from 'react';
-import { d as HostLayout } from './host-DatQ2QJE.cjs';
+import { d as HostLayout } from './host-Dk97D-ul.cjs';
 
 type RadiusStyle = "sharp" | "rounded" | "pill";
 type DensityStyle = "compact" | "comfortable" | "spacious";

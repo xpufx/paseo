@@ -30,9 +30,7 @@ import {
   triggerHaptic,
   usePluginSettings,
   usePluginTheme,
-  useResponsive,
   type RenderModalProps,
-  type RenderPillProps,
   type TabItem,
 } from "paseo-plugin-helper/client";
 import { useMcpHealthQuery, useMcpQuery } from "./mcp-query";
@@ -64,25 +62,6 @@ const TABS: TabItem[] = [
   { id: "settings", label: "Settings", shortLabel: "Settings", icon: "Sliders" },
   { id: "about", label: "About", shortLabel: "About", icon: "Info" },
 ];
-
-function McpPillBody(props: RenderPillProps) {
-  const { colors } = usePluginTheme();
-  const { isCompact } = useResponsive();
-  const { data } = useMcpQuery(props.agentId);
-  const n = data?.servers.length ?? 0;
-
-  return (
-    <View
-      accessibilityLabel={`MCP ${n > 0 ? n : ""} ${PLUGIN_ATTRIBUTION}`.trim()}
-      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 6 }}
-    >
-      <StatusDot variant={n > 0 ? "success" : "neutral"} />
-      <Text numberOfLines={1} style={{ fontSize: 11, color: colors.foregroundMuted, flexShrink: 1 }}>
-        {isCompact ? (n > 0 ? `${n}` : "MCP") : n > 0 ? `MCP ${n}` : "MCP"}
-      </Text>
-    </View>
-  );
-}
 
 function McpModalContent({ agentId, close, theme, layout }: RenderModalProps) {
   const { colors } = usePluginTheme();
@@ -890,7 +869,6 @@ export function contributeClient(client: ComposerPillRegistrar) {
       density: "comfortable",
       accentColor: "#6366f1",
     },
-    renderPill: (props) => <McpPillBody {...props} />,
     renderModal: (props) => <McpModalContent {...props} />,
   });
 }

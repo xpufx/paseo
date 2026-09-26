@@ -1,18 +1,19 @@
-import { D as DensityStyle, S as SurfaceStyle, o as BadgeSize, p as ButtonProps, q as SpacingValue, V as VisualFlair } from '../recipes-CXstFtFR.cjs';
-export { A as AttentionBeacon, s as AttentionBeaconMode, u as AttentionBeaconProps, v as AttentionBeaconTone, w as Badge, x as BadgeProps, B as BadgeRecipeOptions, a as BadgeRecipeResult, y as BadgeStyle, z as Button, E as ButtonAttention, b as ButtonRecipeOptions, c as ButtonRecipeResult, F as ButtonSize, G as ButtonVariant, C as CardRecipeOptions, d as CardRecipeResult, H as ElevationLevel, J as ElevationStyle, K as FALLBACK_ACCENT_FOREGROUND, L as HeadingTransform, M as HostFontVariables, N as HostThemeVariables, I as InputRecipeOptions, e as InputRecipeResult, P as PASEO_HOST_CSS_VARIABLES, O as PaseoHostCssVariable, Q as PluginThemeContextValue, R as PluginThemeProvider, U as PluginThemeProviderProps, W as RadiusStyle, X as SpacingKey, T as TabItemRecipeOptions, f as TabItemRecipeResult, g as TabStripRecipeOptions, h as TabStripRecipeResult, i as ThemeInput, Y as TypographyScale, Z as TypographyToken, j as badgeRecipe, k as buttonRecipe, l as cardRecipe, _ as defaultDarkTheme, $ as defaultFlair, a0 as defaultLightTheme, a1 as elevationForPlatform, a2 as getDefaultTheme, m as inputRecipe, a3 as mergeThemeColors, a4 as normalizeBeaconMode, a5 as readHostThemeVariables, a6 as resolveBeaconToneColor, a7 as resolveButtonAttentionMode, a8 as resolveButtonAttentionTone, a9 as resolveElevation, aa as resolveRadius, ab as resolveSpacing, r as resolveThemeColors, ac as resolveTypography, ad as spacing, t as tabItemRecipe, n as tabStripRecipe, ae as useAppearanceScheme, af as usePluginTheme } from '../recipes-CXstFtFR.cjs';
+import { D as DensityStyle, S as SurfaceStyle, o as BadgeSize, p as ButtonProps, q as SpacingValue, V as VisualFlair } from '../recipes-W6u9grqv.cjs';
+export { A as AttentionBeacon, s as AttentionBeaconMode, u as AttentionBeaconProps, v as AttentionBeaconTone, w as Badge, x as BadgeProps, B as BadgeRecipeOptions, a as BadgeRecipeResult, y as BadgeStyle, z as Button, E as ButtonAttention, b as ButtonRecipeOptions, c as ButtonRecipeResult, F as ButtonSize, G as ButtonVariant, C as CardRecipeOptions, d as CardRecipeResult, H as ElevationLevel, J as ElevationStyle, K as FALLBACK_ACCENT_FOREGROUND, L as HeadingTransform, M as HostFontVariables, N as HostThemeVariables, I as InputRecipeOptions, e as InputRecipeResult, P as PASEO_HOST_CSS_VARIABLES, O as PaseoHostCssVariable, Q as PluginThemeContextValue, R as PluginThemeProvider, U as PluginThemeProviderProps, W as RadiusStyle, X as SpacingKey, T as TabItemRecipeOptions, f as TabItemRecipeResult, g as TabStripRecipeOptions, h as TabStripRecipeResult, i as ThemeInput, Y as TypographyScale, Z as TypographyToken, j as badgeRecipe, k as buttonRecipe, l as cardRecipe, _ as defaultDarkTheme, $ as defaultFlair, a0 as defaultLightTheme, a1 as elevationForPlatform, a2 as getDefaultTheme, m as inputRecipe, a3 as mergeThemeColors, a4 as normalizeBeaconMode, a5 as readHostThemeVariables, a6 as resolveBeaconToneColor, a7 as resolveButtonAttentionMode, a8 as resolveButtonAttentionTone, a9 as resolveElevation, aa as resolveRadius, ab as resolveSpacing, r as resolveThemeColors, ac as resolveTypography, ad as spacing, t as tabItemRecipe, n as tabStripRecipe, ae as useAppearanceScheme, af as usePluginTheme } from '../recipes-W6u9grqv.cjs';
 import { S as StatusVariant, T as ThemeColors, P as PlatformType, R as ResponsiveLayout, d as CustomPillState } from '../custom-pills-C98QP7Cg.cjs';
 import React__default, { ReactNode, Ref, ComponentType } from 'react';
 import { StyleProp, ViewStyle, TextStyle, GestureResponderEvent, AccessibilityRole, KeyboardTypeOptions, ImageSourcePropType, ScrollView, ImageStyle } from 'react-native';
 import { M as MetricThresholds, f as TruncatePathOptions, a as ForgeMarkInput, F as ForgeKind } from '../forge-CtVqWZsy.cjs';
 export { R as ResolvedForgeMark, g as forgeKindFromHost, m as isForgeKind, n as normalizeForgeHost, r as resolveForgeMark } from '../forge-CtVqWZsy.cjs';
-import { q as HostPillProps, r as ComposerPillRegistrar, P as PluginCleanup, o as HostSurfaceProps, t as HostAgentPanelProps, u as HostWorkspacePanelProps, h as HostToast, v as HostIconProps } from '../host-DatQ2QJE.cjs';
-export { C as ClientHostDeps, w as ComposerPillButtonContribution, x as ComposerPillButtonDescriptor, y as ComposerPillButtonIcon, p as ComposerPillContribution, z as ComposerPillRegistration, A as ComposerPillRegistrationHandle, B as ComposerPillSdkContribution, H as HostAgentRef, a as HostAgentUpdate, b as HostAgentsApi, c as HostCopyText, D as HostFlatList, E as HostIcon, d as HostLayout, F as HostModal, G as HostModalContentProps, I as HostModalProps, e as HostRpcContract, J as HostScrollView, K as HostTextInput, f as HostTheme, g as HostThemeColors, i as HostUseRpc, j as HostUseToast, k as getClientHost, l as getOptionalClientHost, m as initClientHelpers, n as isClientHostInitialized, s as selectHostScrollView } from '../host-DatQ2QJE.cjs';
-export { C as CommandCenterCapabilities, a as CommandCenterContext, b as CommandCenterItemContribution, c as CommandCenterItemRegistrar, r as registerCommandCenterItem } from '../command-center-CycJXg00.cjs';
+import { p as HostPillProps, q as ComposerPillRegistrar, P as PluginCleanup, o as HostSurfaceProps, r as HostAgentPanelProps, t as HostWorkspacePanelProps, h as HostToast, u as HostIconProps } from '../host-Dk97D-ul.cjs';
+export { C as ClientHostDeps, H as HostAgentRef, a as HostAgentUpdate, b as HostAgentsApi, c as HostCopyText, v as HostFlatList, w as HostIcon, d as HostLayout, x as HostModal, y as HostModalContentProps, z as HostModalProps, e as HostRpcContract, A as HostScrollView, B as HostTextInput, f as HostTheme, g as HostThemeColors, i as HostUseRpc, j as HostUseToast, k as getClientHost, l as getOptionalClientHost, m as initClientHelpers, n as isClientHostInitialized, s as selectHostScrollView } from '../host-Dk97D-ul.cjs';
+export { C as CommandCenterCapabilities, a as CommandCenterContext, b as CommandCenterItemContribution, c as CommandCenterItemRegistrar, r as registerCommandCenterItem } from '../command-center-B-hlI3Jy.cjs';
 export { R as REFRESH_INTERVALS, a as RefreshRate, b as RpcMutationOptions, c as RpcQueryOptions, U as UseAutoRefreshQueryOptions, d as UsePluginSettingsOptions, e as UsePluginSettingsResult, f as UseSharedPluginSettingsOptions, n as normalizeSnapshotScope, s as shallowEqualRecord, g as sharedSnapshotKey, h as shouldEmitSnapshotUpdate, u as useAutoRefreshQuery, i as usePluginSettings, j as useRpcMutation, k as useRpcQuery, l as useSharedPluginSettings, m as useSuiteSettings } from '../shared-settings-CFiLb5XU.cjs';
-export { H as HelperSettingsCardProps, a as HelperSettingsField, b as HelperSettingsFieldKind, c as HelperSettingsFieldOverrides, d as HelperSettingsInputProps, e as HelperSettingsRowBaseProps, f as HelperSettingsScreenContribution, g as HelperSettingsScreenRegistrar, h as HelperSettingsSectionProps, i as HelperSettingsSelectComponent, j as HelperSettingsSelectProps, k as HelperSettingsSwitchProps, l as HelperSettingsUiBundle, R as RegisterHelperSettingsScreenOptions, m as contractSchemaToFields, r as registerHelperSettingsScreen } from '../settings-screen-BWjaoR3s.cjs';
+export { H as HelperSettingsCardProps, a as HelperSettingsField, b as HelperSettingsFieldKind, c as HelperSettingsFieldOverrides, d as HelperSettingsInputProps, e as HelperSettingsRowBaseProps, f as HelperSettingsScreenContribution, g as HelperSettingsScreenRegistrar, h as HelperSettingsSectionProps, i as HelperSettingsSelectComponent, j as HelperSettingsSelectProps, k as HelperSettingsSwitchProps, l as HelperSettingsUiBundle, R as RegisterHelperSettingsScreenOptions, m as contractSchemaToFields, r as registerHelperSettingsScreen } from '../settings-screen-Ds1117n-.cjs';
 import 'zod';
 import '../settings-BNRcFeSP.cjs';
 import '../rpc-D27pph91.cjs';
+import '@getpaseo/plugin/client';
 import '@tanstack/query-core';
 import '@tanstack/react-query';
 
@@ -1011,12 +1012,6 @@ interface GridProps {
  */
 declare function Grid({ children, columns, minColumnWidth, gap, style, testID }: GridProps): React__default.JSX.Element;
 
-interface RenderPillProps<TPayload = any> extends HostPillProps {
-    isOpen: boolean;
-    open: (payload?: TPayload) => void;
-    close: () => void;
-    toggle: (payload?: TPayload) => void;
-}
 interface RenderModalProps<TPayload = any> extends HostPillProps {
     close: () => void;
     payload?: TPayload;
@@ -1076,45 +1071,23 @@ interface RegisterComposerPillOptions<TPayload = any> {
      */
     flair?: Partial<VisualFlair>;
     /**
-     * Optional custom badge text shown inside the default pill (e.g. "LIVE", "3").
-     */
-    badgeText?: string;
-    /**
-     * Optional compact badge text shown inside the default pill in compact mode. Defaults to `badgeText`.
-     */
-    compactBadgeText?: string;
-    /**
-     * Optional callback to resolve default payload when the outer host pill is clicked.
-     * Receives agentId and workspaceId.
-     */
-    resolveDefaultPayload?: (context: {
-        agentId: string;
-        workspaceId: string;
-    }) => TPayload | undefined;
-    /**
-     * Custom pill body renderer if you want to replace the default pill layout.
-     * Receives `isOpen`, `open`, `close`, and `toggle` along with standard pill props.\
-     */
-    renderPill?: (props: RenderPillProps<TPayload>) => ReactNode;
-    /**
-     * Resolves the live pill label (and optionally icon) on button-shaped hosts (Paseo 0.8+), where the
-     * pill body is host-rendered from a static `label` and `icon` string and `renderPill`
-     * never mounts. Called once at registration and then every
-     * `refreshIntervalMs`. Keep it cheap and synchronous when possible; async
-     * resolvers are awaited. Returning `undefined` leaves the current label/icon.
+     * Resolves the live pill label (and optionally icon). The host renders the
+     * pill body itself, so this is the only channel for live pill text. Called
+     * once at registration and then every `refreshIntervalMs`. Keep it cheap and
+     * synchronous when possible; async resolvers are awaited. Returning
+     * `undefined` leaves the current label/icon.
      * Can return a plain string (label) or an object `{ label?: string; icon?: string }`.
      * Cycle modes can advance rotation state on each call.
      */
     resolveLabel?: PillLabelResolver;
     /**
-     * Optional standalone resolver for the button icon on button-shaped hosts (Paseo 0.8+).
-     * Evaluated alongside `resolveLabel` on each tick.
+     * Optional standalone resolver for the pill icon. Evaluated alongside
+     * `resolveLabel` on each tick.
      */
     resolveIcon?: PillIconResolver;
     /**
-     * Poll interval for `resolveLabel` on button-shaped hosts. Defaults to 5000ms
+     * Poll interval for `resolveLabel`. Defaults to 5000ms
      * when `resolveLabel` or `resolveIcon` is set. Set to 0 to resolve once at registration.
-     * Ignored on legacy hosts (their `renderPill` re-renders via React state).
      */
     refreshIntervalMs?: number;
     /**
@@ -1131,30 +1104,27 @@ interface RegisterComposerPillOptions<TPayload = any> {
      */
     popoverWidth?: number;
     /**
-     * Renders the content inside the controlled modal.
-     * Automatically wrapped with PluginThemeProvider and supplied with a `close()` helper and optional payload.
-     * On button-shaped hosts (Paseo 0.8+) the modal is replaced by an anchored
-     * popover rendering this same content at the host surface width (expect a
-     * narrow column, not a wide modal); keep content vertically stacked and
-     * reflowing. `open`/`toggle` from `renderPill` cannot drive host-owned
-     * popovers, so live pill text comes from `resolveLabel` instead.
+     * Renders the content inside the pill's surface.
+     * The host owns the surface: with the default `"popover"` presentation it
+     * anchors this output to the pill at the host surface width (expect a
+     * narrow column, not a wide modal; keep content vertically stacked and
+     * reflowing), and with `"centered"` it renders it from the pill's icon.
+     * Live pill text therefore comes from `resolveLabel`, not from this renderer.
      *
-     * The wrapper renders exactly one host `<Modal.Content>` around this output
-     * on the modal paths (legacy + centered). Never render another
-     * `<Modal.Content>` here — use `HostModalSection` from
+     * Never render a host `<Modal.Content>` here — use `HostModalSection` from
      * `paseo-plugin-helper/ui` for fluid content. (`HostModalContent` is only
      * for plugins that open their OWN host `<Modal>`.)
      */
     renderModal?: (props: RenderModalProps<TPayload>) => ReactNode;
     /**
-     * Host-owned scroll for the pill modal paths (#219).
-     * - `false` (default, legacy): the wrapper renders
+     * Host-owned scroll for the centered modal path (#219).
+     * - `false` (default): the wrapper renders
      *   `<Modal.Content scrollable={false}>` (bounded dialog) and
      *   `ModalBody`-based content owns the one scroller.
      * - `true`: the wrapper renders `<Modal.Content scrollable={true}>` so the
      *   host scrolls, and `renderModal` must provide fluid content with NO
      *   nested `<Modal.Content>` or scroller (`HostModalSection`).
-     * Exactly one `<Modal.Content>` is rendered in both modes. The 0.8 popover
+     * Exactly one `<Modal.Content>` is rendered in both modes. The popover
      * path is unaffected (plain host-owned container either way).
      */
     hostScroll?: boolean;
@@ -1177,9 +1147,9 @@ interface RegisterComposerPillOptions<TPayload = any> {
      */
     presentation?: "popover" | "centered";
     /**
-     * Called when a pill cannot be registered on the current host (for example
-     * a host API mismatch). Reporting instead of throwing keeps the rest of the
-     * plugin client alive; render the message in your own panel to make it visible.
+     * Called when a pill cannot be registered on the current host. Reporting
+     * instead of throwing keeps the rest of the plugin client alive; render the
+     * message in your own panel to make it visible.
      */
     onError?: (info: {
         agentId: string;
@@ -1190,10 +1160,6 @@ interface RegisterComposerPillOptions<TPayload = any> {
 /**
  * Registers an agent-scoped composer pill and modal lifecycle.
  * Manages agent subscription events, unmount cleanup, and pill-to-modal activation.
- *
- * Works against both host generations: legacy `{Component, onPress}` pills
- * (Paseo 0.7 and beta apps) and `button`-descriptor pills (Paseo 0.8+), detected
- * once per call with a throwaway probe registration that is removed immediately.
  */
 declare function registerComposerPill<TPayload = any>(client: ComposerPillRegistrar, options: RegisterComposerPillOptions<TPayload>): PluginCleanup;
 
@@ -1211,7 +1177,30 @@ interface RegisterSidebarSurfaceOptions {
     icon: string;
     Component: ComponentType<HostSurfaceProps>;
     flair?: VisualFlair;
+    /**
+     * Upper bound (px) on the surface's content column, for readability on very
+     * wide viewports. `false` opts out entirely, for surfaces that are genuinely
+     * canvas-shaped — graph visualisers, wide tables, timeline views — where a
+     * centred column would fight the content rather than help it.
+     *
+     * Defaults to {@link DEFAULT_SIDEBAR_MAX_CONTENT_WIDTH} rather than being
+     * per-call opt-in. Ten call sites already pass a `maxContentWidth` to
+     * `ModalBody` and ignore it in ten others, so making the cap opt-in would
+     * reproduce exactly the inconsistency it is meant to remove — a guard that
+     * only fires where someone remembered it.
+     */
+    maxContentWidth?: number | false;
 }
+/**
+ * Default ceiling for a sidebar surface's content column.
+ *
+ * A sidebar surface is a full host page, so on a wide monitor it stretches
+ * edge to edge and line lengths become unreadable. This is a ceiling, not a
+ * target: the column stays fluid below it and is centred above it, exactly as
+ * `ModalBody`'s own `maxContentWidth` behaves. 1280 is a common wide-viewport
+ * breakpoint rather than a number derived from any plugin's content.
+ */
+declare const DEFAULT_SIDEBAR_MAX_CONTENT_WIDTH = 1280;
 /**
  * Registers a sidebar icon and corresponding full-page surface in a single call,
  * automatically injecting `<PluginThemeProvider>` with custom visual flair.
@@ -1314,8 +1303,10 @@ interface CustomPillBodyProps {
     state: CustomPillState;
 }
 /**
- * Standard pill body renderer for a custom metric pill in the composer trackbar.
- * Automatically adapts to responsive compact/mobile modes and shows threshold status.
+ * Standard pill body renderer for a custom metric pill. The host renders the
+ * composer pill body itself, so reach for this from a pill's own surface
+ * (`renderModal`) rather than from the trackbar; it adapts to responsive
+ * compact/mobile modes and shows threshold status.
  */
 declare function CustomPillBody({ state }: CustomPillBodyProps): React__default.JSX.Element;
 interface CustomPillModalContentProps {
@@ -1378,4 +1369,4 @@ interface ForgeIconProps extends ForgeMarkInput {
  */
 declare function ForgeIcon({ host, kind, size, color, style, accessibilityLabel, }: ForgeIconProps): React__default.JSX.Element;
 
-export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, BadgeSize, ButtonProps, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, type ClipboardEnvironment, type ClipboardTier, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, CopyButton, type CopyButtonFeedback, type CopyButtonProps, type CopyButtonSize, type CopyButtonVariant, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, type DataColumn, DataTable, type DataTableProps, DensityStyle, EmptyState, type EmptyStateProps, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, HostIconProps, HostPillProps, HostSurfaceProps, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, InteractiveRow, type InteractiveRowProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, ProgressBar, type ProgressBarProps, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, type RenderPillProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseResponsiveResult, VStack, VisualFlair, type WorkspacePanelRegistrar, alpha, clipboardTierOrder, copyToClipboard, forgeMarkSource, formatCommandLine, getContrastColor, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveCopyButtonFeedback, resolveEffectiveCompact, resolveGridColumns, resolvePadding, resolvePillModalScrollable, responsiveSelect, responsiveValue, triggerHaptic, useResponsive };
+export { type AboutLink, AboutSection, type AboutSectionProps, ActionBar, type ActionBarProps, BadgeSize, ButtonProps, COMPACT_DESKTOP_TOUCH_TARGET, COMPACT_FORM_FACTOR_WIDTH, Card, CardHeader, type CardHeaderProps, type CardProps, type ClipboardEnvironment, type ClipboardTier, CodeBlock, type CodeBlockProps, Collapsible, type CollapsibleProps, CommandBox, type CommandBoxProps, ComposerPillRegistrar, CopyButton, type CopyButtonFeedback, type CopyButtonProps, type CopyButtonSize, type CopyButtonVariant, type CopyToClipboardOptions, CustomPillBody, type CustomPillBodyProps, CustomPillModalContent, type CustomPillModalContentProps, DEFAULT_SIDEBAR_MAX_CONTENT_WIDTH, type DataColumn, DataTable, type DataTableProps, DensityStyle, EmptyState, type EmptyStateProps, ForgeIcon, type ForgeIconProps, ForgeKind, ForgeMarkInput, FormRow, type FormRowProps, Grid, type GridColumnOptions, type GridProps, type HapticFeedbackType, HighlightedText, type HighlightedTextProps, HostAgentPanelProps, HostIconProps, HostPillProps, HostSurfaceProps, HostToast, HostWorkspacePanelProps, Icon, InlineButton, type InlineButtonProps, InteractiveRow, type InteractiveRowProps, KeyValue, KeyValueGroup, type KeyValueGroupProps, type KeyValueProps, type KeyValueTruncateMode, MetricGauge, type MetricGaugeProps, ModalBody, type ModalBodyProps, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type ModalBodySize, ModalContent, type ModalContentProps, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, PluginCleanup, ProgressBar, type ProgressBarProps, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterCustomPillsOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RenderModalProps, Responsive, type ResponsiveProps, type ResponsiveSelectOptions, Row, type RowProps, SearchInput, type SearchInputProps, SectionHeader, type SectionHeaderProps, Select, type SelectOption, type SelectProps, type SidebarSurfaceRegistrar, SpacingValue, Stack, type StackProps, StatusDot, type StatusDotProps, SurfaceStyle, type TabItem, Tabs, type TabsProps, TextInput, type TextInputProps, Toggle, type ToggleProps, type TruncateMode, TruncatedText, type TruncatedTextProps, type UseResponsiveResult, VStack, VisualFlair, type WorkspacePanelRegistrar, alpha, clipboardTierOrder, copyToClipboard, forgeMarkSource, formatCommandLine, getContrastColor, getLuminance, getStatusColor, getTouchTargetMin, getVariantPalette, isMobilePlatform, registerAgentPanel, registerComposerPill, registerCustomPills, registerSidebarSurface, registerWorkspacePanel, resolveCollapsibleChevron, resolveCollapsibleHeaderBackground, resolveCollapsibleSurface, resolveCopyButtonFeedback, resolveEffectiveCompact, resolveGridColumns, resolvePadding, resolvePillModalScrollable, responsiveSelect, responsiveValue, triggerHaptic, useResponsive };

@@ -1,6 +1,6 @@
 import { ReactNode, ComponentType } from 'react';
 import { S as SettingsContract } from './settings-BNRcFeSP.cjs';
-import { o as HostSurfaceProps, P as PluginCleanup } from './host-DatQ2QJE.cjs';
+import { o as HostSurfaceProps, P as PluginCleanup } from './host-Dk97D-ul.cjs';
 
 interface HelperSettingsCardProps {
     children: ReactNode;

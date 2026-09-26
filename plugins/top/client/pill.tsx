@@ -28,15 +28,14 @@ import {
   Badge,
   Icon,
   AboutSection,
-  CustomPillBody,
   CustomPillModalContent,
   useRpcQuery,
   usePluginSettings,
   usePluginTheme,
   getStatusColor,
   triggerHaptic,
+  type HostPillProps,
   type RenderModalProps,
-  type RenderPillProps,
   type KeyValueProps,
   type CardHeaderProps,
   type BadgeProps,
@@ -46,7 +45,6 @@ import {
   formatUptime,
   resolveMetricStatus,
   type MetricThresholds,
-  type CustomPillState,
 } from "paseo-plugin-helper/shared";
 import {
   getSystemResourcesRpc,
@@ -503,9 +501,8 @@ interface PillSegmentProps {
 }
 
 /**
- * The composer pill body is host-pressed: legacy hosts wrap `renderPill` in
- * their own pressable and route the tap through `resolveDefaultPayload`, so the
- * segment must not nest a second interaction handler.
+ * The segment must not nest a second interaction handler: on the host-rendered
+ * pill it sits inside the host's own pressable.
  */
 function PillSegment({
   item,
@@ -566,7 +563,21 @@ function AllInOnePill({
   );
 }
 
-export interface SingleItemPillViewProps extends RenderPillProps<ModalTab> {
+/**
+ * Props the pill body views used to receive from the helper's `renderPill`
+ * option, which the Paseo 0.9 host shape removed: the host renders the pill
+ * body itself, so nothing wires these views any more. The shape is kept
+ * because `pill-render.test.tsx` still regression-tests their mobile layout
+ * (#507) and that coverage is worth more than the dead wiring.
+ */
+interface PillBodyProps extends HostPillProps {
+  isOpen: boolean;
+  open(payload?: ModalTab): void;
+  close(): void;
+  toggle(payload?: ModalTab): void;
+}
+
+export interface SingleItemPillViewProps extends PillBodyProps {
   item: PillItemType;
   defaultTab?: ModalTab;
 }
@@ -651,7 +662,7 @@ export function SingleItemPillView({
   );
 }
 
-function PillView({ isOpen, open, workspaceId, agentId }: RenderPillProps<ModalTab>) {
+function PillView({ isOpen, open, workspaceId, agentId }: PillBodyProps) {
   // No background settings poll here: the hook re-verifies on mount and
   // window focus, and mutations invalidate the shared settings cache.
   // Polling from every mounted pill/modal/surface multiplied daemon reads
@@ -1713,17 +1724,6 @@ function ResourceModal({ theme, workspaceId, agentId, initialTab, payload }: Res
   );
 }
 
-interface LiveCustomPillViewProps {
-  pillId: string;
-  initial: CustomPillState;
-}
-
-function LiveCustomPillView({ pillId, initial }: LiveCustomPillViewProps) {
-  const { data } = useCustomPillsQuery();
-  const liveState = data?.pills.find((p) => p.id === pillId) ?? initial;
-  return <CustomPillBody state={liveState} />;
-}
-
 interface LiveCustomPillModalProps {
   pillId: string;
   initial: CustomPillStateOutput;
@@ -1838,12 +1838,6 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
           modalTitle: "Host System Resources",
           modalIcon: "Activity",
           icon: "Cpu",
-          resolveDefaultPayload: ({ agentId }) => {
-            if (latestSettings.pillMode === "all") {
-              return latestSettings.defaultTab;
-            }
-            return currentCycleTabByAgent.get(agentId) ?? latestSettings.defaultTab;
-          },
           resolveLabel: async (ctx) => {
             const snap = await liveSnapshotFor(ctx);
             const items = enabledItemsForSettings(latestSettings);
@@ -1860,7 +1854,6 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
             };
           },
           refreshIntervalMs: 3000,
-          renderPill: (props) => <PillView {...props} />,
           renderModal: (props) => <ResourceModal {...props} />,
         });
         activePills.set("paseo-top", cleanup);
@@ -2065,16 +2058,8 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
             modalTitle: pillDef.modalTitle,
             icon: pillDef.icon,
             modalIcon: pillDef.icon,
-            resolveDefaultPayload: () => pillDef.defaultTab,
             resolveLabel: singleItemLabelResolver(pillDef.item),
             refreshIntervalMs: 5000,
-            renderPill: (props) => (
-              <SingleItemPillView
-                item={pillDef.item}
-                defaultTab={pillDef.defaultTab}
-                {...props}
-              />
-            ),
             renderModal: (props) => (
               <ResourceModal initialTab={pillDef.defaultTab} {...props} />
             ),
@@ -2167,7 +2152,6 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
               );
             },
             refreshIntervalMs: 5000,
-            renderPill: () => <LiveCustomPillView pillId={pill.id} initial={pill} />,
             renderModal: () => (
               <LiveCustomPillModal pillId={pill.id} initial={pill} />
             ),

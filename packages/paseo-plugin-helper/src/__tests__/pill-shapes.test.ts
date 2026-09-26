@@ -36,41 +36,6 @@ interface StoredPill {
   removed: boolean;
 }
 
-function legacyRegistrar(): { client: ComposerPillRegistrar; pills: StoredPill[] } {
-  const pills: StoredPill[] = [];
-  const subscribers = new Set<(update: any) => void>();
-  const client = {
-    addComposerPill(contribution: any) {
-      if (typeof contribution.Component !== "function") {
-        throw new Error(`Composer pill ${contribution.id} is not a component`);
-      }
-      if (typeof contribution.onPress !== "function") {
-        throw new Error(`Composer pill ${contribution.id} has no callback`);
-      }
-      const stored: StoredPill = { contribution, removed: false };
-      pills.push(stored);
-      return () => {
-        stored.removed = true;
-      };
-    },
-    paseo: {
-      agents: {
-        subscribe: (cb: (update: any) => void) => {
-          subscribers.add(cb);
-          return () => {
-            subscribers.delete(cb);
-          };
-        },
-        list: async () => ({ entries: [] }),
-      },
-    },
-    emit(update: any) {
-      for (const cb of subscribers) cb(update);
-    },
-  } as unknown as ComposerPillRegistrar & { emit(update: any): void };
-  return { client, pills };
-}
-
 function modernRegistrar(): {
   client: ComposerPillRegistrar;
   pills: StoredPill[];
@@ -120,25 +85,71 @@ describe("registerComposerPill host shapes", () => {
     installHostStubs();
   });
 
-  it("uses the legacy Component shape on old hosts", () => {
-    const { client, pills } = legacyRegistrar();
+  it("registers one host-shaped contribution per agent, with no shape probe", () => {
+    // The helper no longer probes the host with a throwaway registration to
+    // choose between pill shapes: Paseo 0.9 is the floor, so `button` is the
+    // only contribution it builds and the first call is the real one (#666).
+    const { client, pills } = modernRegistrar();
     const cleanup = registerComposerPill(client, {
-      id: "legacy-pill",
-      title: "Legacy",
+      id: "single-shape-pill",
+      title: "Single",
       renderModal: () => null,
     });
 
     (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
     expect(pills).toHaveLength(1);
-    expect(typeof pills[0].contribution.Component).toBe("function");
-    expect(typeof pills[0].contribution.onPress).toBe("function");
-    expect(pills[0].contribution).not.toHaveProperty("button");
+    const stored = pills[0];
+    expect(stored.contribution.id).toBe("single-shape-pill");
+    expect(stored.contribution).not.toHaveProperty("Component");
+    expect(stored.contribution).not.toHaveProperty("onPress");
 
     cleanup();
-    expect(pills[0].removed).toBe(true);
+    expect(stored.removed).toBe(true);
+    expect(pills).toHaveLength(0);
   });
 
-  it("uses the button/popover shape on 0.8 hosts", () => {
+  it("never offers the host a legacy Component contribution", () => {
+    // A 0.7-style host rejects a `button` contribution outright. It must be
+    // reported through onError, not silently retried with a shape the helper
+    // no longer supports.
+    const seen: Error[] = [];
+    const client = modernRegistrar().client;
+    (client as any).addComposerPill = (contribution: any) => {
+      if (contribution.Component) throw new Error("legacy host");
+      return { update: () => {}, remove: () => {} };
+    };
+    registerComposerPill(client, {
+      id: "no-legacy-pill",
+      title: "NoLegacy",
+      renderModal: () => null,
+      onError: ({ error }) => {
+        seen.push(error);
+      },
+    });
+
+    (client as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    expect(seen).toHaveLength(0);
+
+    const rejecting = modernRegistrar().client;
+    (rejecting as any).addComposerPill = () => {
+      throw new Error("legacy host");
+    };
+    const failures: Error[] = [];
+    registerComposerPill(rejecting, {
+      id: "rejected-pill",
+      title: "Rejected",
+      renderModal: () => null,
+      onError: ({ error }) => {
+        failures.push(error);
+      },
+    });
+
+    (rejecting as any).emit({ kind: "upsert", agent: { id: "a1", workspaceId: "w1" } });
+    expect(failures).toHaveLength(1);
+    expect(failures[0].message).toBe("legacy host");
+  });
+
+  it("uses the button/popover shape on the 0.9 host", () => {
     const { client, pills } = modernRegistrar();
     const cleanup = registerComposerPill(client, {
       id: "modern-pill",
@@ -167,10 +178,7 @@ describe("registerComposerPill host shapes", () => {
     const seen: Array<{ agentId: string; workspaceId: string; error: Error }> = [];
     const subscribers = new Set<(update: any) => void>();
     const boom: ComposerPillRegistrar = {
-      addComposerPill: (contribution: any) => {
-        if (contribution.id.startsWith("php-probe-")) {
-          return { update: () => {}, remove: () => {} };
-        }
+      addComposerPill: () => {
         throw new Error("boom");
       },
       paseo: {
@@ -435,9 +443,9 @@ describe("registerComposerPill host shapes", () => {
     resolveList({ entries: [{ agent: { id: "a1", workspaceId: "w1" } }] });
     await listPromise;
     await Promise.resolve();
-    expect(pills.filter((p) => !p.contribution.id.startsWith("php-probe-"))).toHaveLength(0);
+    expect(pills).toHaveLength(0);
 
     (client as any).emit({ kind: "upsert", agent: { id: "a2", workspaceId: "w1" } });
-    expect(pills.filter((p) => !p.contribution.id.startsWith("php-probe-"))).toHaveLength(0);
+    expect(pills).toHaveLength(0);
   });
 });

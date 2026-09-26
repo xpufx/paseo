@@ -14,20 +14,23 @@ import type {
   TextInput as RNTextInput,
   TextInputProps,
 } from "react-native";
+import type {
+  PluginButtonRegistration,
+  PluginComposerPillContribution,
+} from "@getpaseo/plugin/client";
 
 /**
  * Structural host types for Paseo client integration.
  *
  * These interfaces describe the shapes `paseo-plugin-helper/client` needs
- * from the Paseo host app. They are intentionally decoupled from any
- * Paseo SDK version: this module (and every client module built on
- * it) contains zero Paseo SDK imports, so a single published helper
- * bundle satisfies both the Paseo v0.7 SDK entry points and the Paseo
- * v0.8 runtime-owned entry points.
+ * from the Paseo host app: the runtime dependencies the plugin injects once
+ * in its client entry — the host theme, the layout, the icon/Modal primitives,
+ * the agents feed — so they can be supplied from any entry point.
  *
- * The plugin author provides the real host implementations once, in the
- * client entry, using whichever specifiers match their installed SDK.
- * See docs/client.md for the per-version import paths.
+ * The composer pill is the exception: the host owns that contribution's shape,
+ * so it is imported from the Paseo SDK rather than restated here. A restated
+ * copy is what let a pre-0.9 `{Component, onPress}` pill through the type
+ * system (#666).
  */
 
 export interface HostThemeColors {
@@ -216,57 +219,8 @@ export interface HostSurfaceProps {
   };
 }
 
-export interface ComposerPillContribution {
-  id: string;
-  title: string;
-  workspaceId: string;
-  agentId: string;
-  Component: ComponentType<HostPillProps>;
-  onPress(): void | Promise<void>;
-}
-
-export type ComposerPillButtonIcon = string | ComponentType<any>;
-
-export interface ComposerPillButtonDescriptor {
-  title: string;
-  icon: ComposerPillButtonIcon;
-  label?: string;
-  visible?: boolean;
-  disabled?: boolean;
-  behavior:
-    | { kind: "action"; onPress(): void | Promise<void> }
-    | { kind: "popover"; Content: ComponentType<any> };
-}
-
-export interface ComposerPillButtonContribution {
-  id: string;
-  workspaceId: string;
-  agentId: string;
-  button: ComposerPillButtonDescriptor;
-}
-
-export interface ComposerPillSdkContribution {
-  id: string;
-  workspaceId: string;
-  agentId: string;
-  button: Record<string, any>;
-  [key: string]: any;
-}
-
-export interface ComposerPillRegistrationHandle {
-  update(patch: Record<string, any>): void;
-  remove(): void;
-}
-
-export type ComposerPillRegistration = PluginCleanup | ComposerPillRegistrationHandle;
-
 export interface ComposerPillRegistrar {
-  addComposerPill(
-    contribution:
-      | ComposerPillContribution
-      | ComposerPillButtonContribution
-      | ComposerPillSdkContribution,
-  ): ComposerPillRegistration;
+  addComposerPill(contribution: PluginComposerPillContribution): PluginButtonRegistration;
   paseo: {
     agents: HostAgentsApi;
   };

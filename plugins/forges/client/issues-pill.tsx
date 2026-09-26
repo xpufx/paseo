@@ -31,7 +31,6 @@ import {
   copyToClipboard,
   getClientHost,
   type RenderModalProps,
-  type RenderPillProps,
 } from "paseo-plugin-helper/client";
 import { hasFuzzyHighlight, normalizeSearchQuery } from "paseo-plugin-helper/shared";
 import {
@@ -123,31 +122,6 @@ function useOpenIssues(workspaceId: string) {
     { refetchInterval: 30000 },
   );
   return { directory, ...query };
-}
-
-export function ForgePill({ workspaceId, isOpen }: RenderPillProps) {
-  const { colors } = usePluginTheme();
-  const { data, isLoading, directory } = useOpenIssues(workspaceId);
-  const activeForge = useActiveForgeIdentity(directory);
-  const forgeHost = activeForge?.host ?? data?.host ?? null;
-  const count = data && !data.error ? (data.openIssueCount ?? data.issues.length) : null;
-  const displayName = useDisplayName(workspaceId, data?.repo);
-  const label = forgePillLabel({ displayName, count, loading: isLoading && !data });
-  return (
-    <View
-      accessibilityLabel={`Forge ${label}`}
-      style={styles.pillContainer}
-    >
-      <ForgeIcon host={forgeHost} size={13} color={colors.foreground} />
-      <Text
-        numberOfLines={1}
-        ellipsizeMode="clip"
-        style={[styles.title, { color: colors.foreground }, isOpen && styles.titleActive]}
-      >
-        {label}
-      </Text>
-    </View>
-  );
 }
 
 /** Trailing-edge debounce: emits `value` only after it stops changing. */
@@ -1792,25 +1766,6 @@ export function ForgeIssuesPanel({ workspaceId }: { workspaceId: string }) {
 }
 
 const styles = {
-  pillContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "nowrap",
-    gap: 6,
-    paddingHorizontal: 6,
-    minWidth: 44,
-    minHeight: 22,
-    overflow: "hidden",
-    flexShrink: 1,
-  },
-  title: {
-    fontSize: 11,
-    fontWeight: "500",
-    flexShrink: 1,
-  },
-  titleActive: {
-    fontWeight: "700",
-  },
   row: {
     flexDirection: "row",
     alignItems: "flex-start",
