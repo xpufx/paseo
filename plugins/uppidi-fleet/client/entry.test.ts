@@ -855,6 +855,16 @@ describe("uppidi-fleet client entry contract", () => {
         );
       }
 
+      // Each Work Queue row opens its issue in Forgejo directly, without going
+      // through the selected-work modal (#641). Uses the helper Button's own
+      // icon prop rather than an icon-only primitive, which the helper does not
+      // have and must not grow (its components are frozen).
+      assert.match(
+        workQueueSource,
+        /key: "forge"[\s\S]*?icon="ExternalLink"[\s\S]*?Linking\.openURL\(issue\.url/,
+        "Work Queue rows must render a Forge link that opens issue.url",
+      );
+
       // Work Queue renders its filters in a single metrics bar above the Work
       // queue table (#645). The separate filter/action row that used to sit
       // between them was removed; its presets moved into the bar.

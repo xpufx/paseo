@@ -1869,6 +1869,22 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     </Text>
                   ),
                 },
+                {
+                  key: "forge",
+                  header: "Forge",
+                  flex: 1,
+                  render: (issue) =>
+                    issue.url ? (
+                      <Button
+                        label="Open"
+                        icon="ExternalLink"
+                        variant="ghost"
+                        size="sm"
+                        accessibilityLabel={`Open #${issue.number} in Forgejo`}
+                        onPress={() => Linking.openURL(issue.url!)}
+                      />
+                    ) : null,
+                },
               ]}
             />
           </Card>
