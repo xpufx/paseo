@@ -586,22 +586,22 @@ process.
 
 ## 6. Asymmetries for this surface
 
-Full ledger in [`contract-drift.md`](contract-drift.md). The four that matter
+Full ledger in [`contract-drift.md`](contract-drift.md). The three that matter
 most:
 
-1. **The two instruction surfaces contradict each other on the same subject.**
-   `INSTRUCTIONS` (line 471) says *"Do not call `x_comms_wait` first to avoid
-   preemption — that is no longer required."* The injected recipient
-   instructions, which are the ones that actually reach an agent, still say
-   *"Before messaging a potentially busy agent use `x_comms_wait`."*
-   `skills/recipient-envelope/SKILL.md` repeats the stale advice. One shipped
-   bundle, two opposite instructions, and the wrong one is the one in the system
-   prompt.
-2. **`x_comms_send`'s description promises a `delivery` value the dispatched
+1. **`x_comms_send`'s description promises a `delivery` value the dispatched
    path never returns** (see [§3.1](#31-what-the-caller-is-told)).
-3. **`x_comms_list_daemons` reports `status: "online"` for every daemon without
+2. **`x_comms_list_daemons` reports `status: "online"` for every daemon without
    probing.** A caller reading that field as liveness gets a confident wrong
    answer for every unreachable peer.
-4. **`x_comms_add_daemon` silently overwrites and does not validate a host form**,
+3. **`x_comms_add_daemon` silently overwrites and does not validate a host form**,
    while the plugin's `daemon.add` refuses duplicates, validates the name
    charset, and refuses to write a file where two names share one host.
+
+The fourth, the two instruction surfaces contradicting each other on the
+never-interrupt rule, was **fixed in #709**: the injected recipient
+instructions and `skills/recipient-envelope/SKILL.md` now state the queue rule
+this surface already stated, and `instruction-surfaces.test.ts` pins all three
+against each other. The remaining risk on this surface is the one the fix cannot
+reach — `instructions` has no field in either injection transport, so a correct
+string here still does not reach an agent's system prompt on its own.
