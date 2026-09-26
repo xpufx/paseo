@@ -8,13 +8,22 @@
  * the actual defect (a hand-edited committed vendored copy), and assert the
  * shipped command sequence fails — plus assert install-smoke.yml still uses that
  * sequence, so the ordering cannot regress silently.
+ *
+ * The same reasoning covers the tracked helper `dist/` (#682): it is a publish
+ * artifact nothing verified, and #675 shipped a build that predated its own
+ * source edit. The cases below induce exactly that — a helper `src/` edit with
+ * no rebuild — and assert `--check` fails on it, names the file, and leaves the
+ * stale bytes exactly where they were. A check that rebuilt `dist/` in place
+ * would report green here, because it would be verifying its own output.
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { compareTrees } from "./lib/helper-dist.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -36,18 +45,63 @@ const check = (name, fn) => {
 const SAMPLE = "plugins/demo/client/vendor/paseo-plugin-helper/components/AttentionBeacon.tsx";
 const SAMPLE_EDIT = ["    borderRadius: 12,", "    borderRadius: 47,"];
 
+// The tracked helper dist/ and the src it must be built from (#682). The edit
+// lands in a formatted return string, so it survives minification into every
+// dist/cli.* artifact rather than being stripped as a comment.
+const HELPER_DIST = "packages/paseo-plugin-helper/dist";
+const HELPER_SRC_SAMPLE = "packages/paseo-plugin-helper/src/cli/conformance-exemptions.ts";
+const HELPER_SRC_EDIT = [
+  "  return `[EXEMPT ] ${exemption.ruleId} — ${exemption.reason}`;",
+  "  return `[EXEMPT ] ${exemption.ruleId} — STALE ${exemption.reason}`;",
+];
+
+/** Content digest of a tree: sorted relative paths, then their bytes. */
+function fingerprint(dir) {
+  const hash = crypto.createHash("sha256");
+  const files = [];
+  const walk = (current) => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const full = path.join(current, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else files.push(full);
+    }
+  };
+  if (fs.existsSync(dir)) walk(dir);
+  for (const file of files.sort()) {
+    hash.update(path.relative(dir, file).split(path.sep).join("/"));
+    hash.update("\0");
+    hash.update(fs.readFileSync(file));
+  }
+  return hash.digest("hex");
+}
+
+/** The #675 failure shape: a helper source edit that dist/ never saw. */
+function induceStaleHelperDist(dir) {
+  const file = path.join(dir, HELPER_SRC_SAMPLE);
+  const before = fs.readFileSync(file, "utf-8");
+  assert.ok(before.includes(HELPER_SRC_EDIT[0]), `fixture lost ${HELPER_SRC_EDIT[0].trim()} — pick another sample`);
+  fs.writeFileSync(file, before.replace(HELPER_SRC_EDIT[0], HELPER_SRC_EDIT[1]));
+}
+
 /** A stand-in checkout: the real trees, minus everything vendor-sync never reads. */
 function makeFixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "vendor-sync-"));
   fs.cpSync(path.join(ROOT, "plugins"), path.join(dir, "plugins"), { recursive: true });
-  for (const rel of [
-    "packages/paseo-plugin-helper/src",
-    "packages/paseo-plugin-helper/package.json",
-    "scripts/vendor-sync.mjs",
-    "scripts/lib",
-  ]) {
+  // The whole helper package, committed dist included. --check proves the
+  // committed dist is what src builds (#682), so a stand-in carrying neither a
+  // dist nor a build config could only ever report "missing", and one carrying
+  // src without tsup would report a build failure. node_modules is symlinked,
+  // not copied: the fixture's build must resolve the same tsup and the same
+  // dependency versions the real checkout would.
+  fs.cpSync(
+    path.join(ROOT, "packages/paseo-plugin-helper"),
+    path.join(dir, "packages/paseo-plugin-helper"),
+    { recursive: true }
+  );
+  for (const rel of ["scripts/vendor-sync.mjs", "scripts/lib"]) {
     fs.cpSync(path.join(ROOT, rel), path.join(dir, rel), { recursive: true });
   }
+  fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"));
   return dir;
 }
 
@@ -179,6 +233,133 @@ check("--materialize-links is rejected alongside --check", () => {
   const r = run(dir, "--materialize-links", "--check");
   assert.equal(r.status, 2, `expected exit 2, got ${r.status}`);
   assert.match(r.stderr, /mutually exclusive/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// #682 — the tracked helper dist/ is the published build, and nothing checked it
+// ---------------------------------------------------------------------------
+//
+// Split by what each case is actually about. `compareTrees` is pure once both
+// trees exist, so every shape question — a differing file, a leftover, a deleted
+// artifact — is settled against synthetic trees for free. Only the wiring
+// (does a real src edit with no rebuild actually turn the gate red, and does the
+// check stay out of the tracked tree) needs a real build, and that is the
+// expensive part, so it runs twice and not ten times.
+
+/** Two throwaway trees, each mapping relative path -> contents. */
+function makeTrees(specs) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "helper-dist-compare-"));
+  for (const [rel, contents] of Object.entries(specs)) {
+    const file = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, contents);
+  }
+  return dir;
+}
+
+check("compareTrees reports a differing file by name, size and first difference", () => {
+  const committed = makeTrees({ "cli.js": "aaaa", "index.js": "same" });
+  const fresh = makeTrees({ "cli.js": "aabb", "index.js": "same" });
+  const report = compareTrees(committed, fresh, "dist");
+  assert.equal(report.length, 1, `expected one divergence, got:\n${report.join("\n")}`);
+  assert.match(report[0], /differs: dist\/cli\.js/);
+  assert.match(report[0], /committed 4 B, fresh 4 B, first difference at byte 2/);
+  fs.rmSync(committed, { recursive: true, force: true });
+  fs.rmSync(fresh, { recursive: true, force: true });
+});
+
+check("compareTrees reports a leftover artifact the build no longer emits", () => {
+  // The shape a file-name-only comparison would miss.
+  const committed = makeTrees({ "index.js": "same", "gone-from-the-build.js": "old" });
+  const fresh = makeTrees({ "index.js": "same" });
+  const report = compareTrees(committed, fresh, "dist");
+  assert.equal(report.length, 1, `expected one divergence, got:\n${report.join("\n")}`);
+  assert.match(report[0], /extra: dist\/gone-from-the-build\.js/);
+  fs.rmSync(committed, { recursive: true, force: true });
+  fs.rmSync(fresh, { recursive: true, force: true });
+});
+
+check("compareTrees reports an artifact the build emits and the tree lacks", () => {
+  const committed = makeTrees({ "index.js": "same" });
+  const fresh = makeTrees({ "index.js": "same", "never-committed.js": "new" });
+  const report = compareTrees(committed, fresh, "dist");
+  assert.equal(report.length, 1, `expected one divergence, got:\n${report.join("\n")}`);
+  assert.match(report[0], /missing: dist\/never-committed\.js/);
+  fs.rmSync(committed, { recursive: true, force: true });
+  fs.rmSync(fresh, { recursive: true, force: true });
+});
+
+check("compareTrees reports nothing for two byte-identical trees", () => {
+  const spec = { "index.js": "same", "client/index.js": "same too" };
+  const committed = makeTrees(spec);
+  const fresh = makeTrees(spec);
+  assert.deepEqual(compareTrees(committed, fresh, "dist"), []);
+  fs.rmSync(committed, { recursive: true, force: true });
+  fs.rmSync(fresh, { recursive: true, force: true });
+});
+
+check("a helper src edit with no rebuild fails --check, naming the file and leaving it stale", () => {
+  // The #675 failure shape, end to end: one build, two assertions. Naming the
+  // file is half the contract — the other half is that the bytes are still
+  // there afterwards. A --check that rebuilt dist/ in place would report green
+  // here, because it would be verifying the tree it had just written (#630, one
+  // level down).
+  const dir = makeFixture();
+  induceStaleHelperDist(dir);
+  const before = fingerprint(path.join(dir, HELPER_DIST));
+  const r = run(dir, "--check");
+  assert.equal(r.status, 1, `expected exit 1, got ${r.status}:\n${r.stdout}${r.stderr}`);
+  assert.match(r.stdout, /helper dist is stale/);
+  assert.ok(
+    r.stdout.includes(`${HELPER_DIST}/cli.js`),
+    `the failure did not name the stale dist file:\n${r.stdout}`
+  );
+  assert.equal(
+    fingerprint(path.join(dir, HELPER_DIST)),
+    before,
+    "--check rebuilt dist/ in place, so it verified the tree it had just written"
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check("a passing --check writes nothing into the committed helper dist", () => {
+  const dir = makeFixture();
+  const before = fingerprint(path.join(dir, HELPER_DIST));
+  assert.equal(run(dir, "--check").status, 0);
+  assert.equal(
+    fingerprint(path.join(dir, HELPER_DIST)),
+    before,
+    "a passing --check left changes in the committed dist"
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check("the write pass builds the dist, so it cannot stamp or copy against a stale build", () => {
+  const dir = makeFixture();
+  induceStaleHelperDist(dir);
+  const before = fingerprint(path.join(dir, HELPER_DIST));
+  const write = run(dir);
+  assert.equal(write.status, 0, write.stdout + write.stderr);
+  assert.match(write.stdout, /building packages\/paseo-plugin-helper\/dist before stamping/);
+  assert.notEqual(fingerprint(path.join(dir, HELPER_DIST)), before, "the write pass did not rebuild the dist");
+  assert.equal(run(dir, "--check").status, 0, "the rebuilt dist does not match the edited src");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+check("a helper build that cannot run fails the check loudly instead of passing", () => {
+  // A gate that cannot build its subject must not be able to report a pass: a
+  // missing toolchain is a red gate, never a skipped one (#569 precedent).
+  const dir = makeFixture();
+  fs.rmSync(path.join(dir, "node_modules"), { force: true });
+  fs.mkdirSync(path.join(dir, "node_modules"));
+  const r = run(dir, "--check");
+  assert.notEqual(r.status, 0, `an unbuildable helper was reported as in sync:\n${r.stdout}${r.stderr}`);
+  assert.match(
+    `${r.stdout}${r.stderr}`,
+    /helper build \(check pass\) (failed|could not start)/,
+    `the build failure was not reported:\n${r.stdout}${r.stderr}`
+  );
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
