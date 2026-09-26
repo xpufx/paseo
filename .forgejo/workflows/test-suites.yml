@@ -1,0 +1,147 @@
+# Pull-request test gate (xpufx-org/paseo#617).
+#
+# Before this workflow, no job in .forgejo/ or .github/ invoked `npm test` or
+# `make check`. The only jobs were install-smoke, npm-stage, mirror-prv,
+# issue-label-triage, and stale-wip-sweep. Every guard added to this repo —
+# bundle-reproducible, redaction-parity, manifest-version-parity,
+# no-bare-bundler, the defer-queue concurrency and outbox tests, the ed25519
+# envelope signing (#594/#596), the pairing-offer redaction (#597), the defer
+# queue's non-preemption guarantee (#598), and declared-tooling (#613) — ran
+# only when a human or an agent happened to run it locally. That is why the
+# undeclared-tooling class recurred three times (#603, #609, #613): each
+# instance was fixed, and nothing ran the guard that would have caught the
+# next one.
+#
+# Triggers on pull_request only, not push to main. The point is pre-merge
+# enforcement; a post-merge run reports the regression after it lands.
+#
+# Two jobs, not one, on purpose. The first live run (job 8952) proved why: every
+# test suite passed and `npm run typecheck` failed at plugins/twofado on a
+# pre-existing react/react-native ScrollView conflict. Bundled into a single job,
+# a known-red gate made the whole thing red even though nothing had regressed.
+# That conflates "something regressed" with "this was already broken", and a
+# permanently-red gate is one people learn to ignore — which is how the
+# undeclared-tooling class got three strikes in the first place.
+#
+# That twofado failure no longer reproduces, so both jobs are now required and
+# the separate-typecheck-job split is kept only for independent reporting. The
+# history stays here because "why two jobs?" is otherwise unanswerable.
+#
+#   test-suites — `npm test` + `make conformance`. Green on every PR run so far.
+#                  The operator can make this required; see the #617 PR body.
+#   typecheck   — `npm run typecheck`. Required.
+#
+# Every gate step is `if: always()` so one red gate does not hide the state of
+# the others; a failing step still fails its job.
+#
+# Both jobs are required as of #617. The split was originally to keep a
+# known-red `plugins/twofado` typecheck from reddening every pull request; that
+# failure no longer reproduces (`tsc --noEmit` is clean on `main`), so the
+# workaround and its stale warning are gone rather than left to mislead.
+name: Test suites
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: test-suites-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-suites:
+    name: Root test suites and plugin UI conformance
+    runs-on: alpine-docker
+    # Same runner label and image as install-smoke.yml / mirror-prv.yml. A fresh
+    # container per run is the point: no reused node_modules, no developer HOME,
+    # and no live daemon — the three ways a suite can pass without proving
+    # anything. The suite is verified green under exactly those conditions.
+    container:
+      image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
+    steps:
+      - name: Report runner diagnostics
+        if: always()
+        run: |
+          runner_host="${XP_RUNNER_HOST:-<unset>}"
+          printf 'Runner OS: %s\nRunner architecture: %s\nRunner host: %s\n' "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/checkout@v4
+
+      # `npm ci`, not `npm install`: the lockfile is the reproducibility
+      # statement, and a suite that installs fresh ranges is not the suite that
+      # was reviewed.
+      - name: Install dependencies from the lockfile
+        run: |
+          set -euo pipefail
+          npm ci
+
+      # Fail closed on a broken install rather than reporting a misleading
+      # suite failure. Never skip a gate silently (#569 precedent).
+      - name: Guard — dependencies are installed
+        id: deps
+        if: always()
+        run: |
+          if [ ! -d node_modules ]; then
+            echo "::error::node_modules is absent — the install step did not complete, so the gates below cannot report a meaningful result"
+            echo "deps_ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "deps_ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Root test suites
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps.outputs.deps_ready }}" != "true" ]; then
+            echo "::error::skipped: dependencies were not installed"
+            exit 1
+          fi
+          npm test
+
+      - name: Plugin UI conformance
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps.outputs.deps_ready }}" != "true" ]; then
+            echo "::error::skipped: dependencies were not installed"
+            exit 1
+          fi
+          make conformance
+
+      - name: Publish gate summary
+        if: always()
+        run: |
+          set -euo pipefail
+          printf 'commit: %s\n' "${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf '\nTest suites and conformance: **required** as of #617.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Typecheck is a separate job so it reports independently of the test gate,
+  # and so either can be re-run without the other. Both are required.
+  #
+  # This job was advisory because `plugins/twofado` was red on `main`
+  # (index.client.tsx:26, TS2322). That no longer reproduces, so the job is
+  # required and the warning below is gone rather than left to mislead the next
+  # person into thinking a known failure is still tolerated.
+  typecheck:
+    name: Typecheck
+    runs-on: alpine-docker
+    container:
+      image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies from the lockfile
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Typecheck
+        run: |
+          set -euo pipefail
+          npm run typecheck

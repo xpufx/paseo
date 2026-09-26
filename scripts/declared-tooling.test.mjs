@@ -16,7 +16,7 @@
  *
  * Deliberately NOT checked: whether a *declared* dependency is exact-pinned.
  * Every `typescript` and `vitest` in this repo is `^`-ranged, so enforcing
- * exact pins would fail on all 21 of them; that is its own change, not this
+ * exact pins would fail on all 18 of them; that is its own change, not this
  * one. What is checked is the weaker and unambiguous half — the tool is
  * declared at all — plus run-time downloads, which are undeclared by
  * definition.

@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { extractMcpServersFromText, parseJsonc } from "./extract";
 import { McpServerSchema } from "../../shared/mcp";
 
@@ -111,17 +114,41 @@ import claudeProbe from "../providers/claude";
 import antigravityProbe from "../providers/antigravity";
 
 describe("Live Local Filesystem Verification", () => {
-  it("extracts real ~/.claude.json on this machine", async () => {
-    const res = await claudeProbe.probe({
-      agentId: "live-test",
-      provider: "claude",
-      cwd: process.cwd(),
-    });
-    console.log(`\n=== REAL CLAUDE CONFIG EXTRACTED: ${res.servers.length} SERVERS ===`);
-    for (const s of res.servers) {
-      console.log(`  - [${s.transport.toUpperCase()}] ${s.name} -> ${s.command || s.url} (hasSecrets: ${s.hasSecrets})`);
+  it("extracts servers from a ~/.claude.json on disk", async () => {
+    // The probe resolves `~/.claude.json` through `os.homedir()`, so point HOME
+    // at a fixture instead of whoever is running the suite. Reading the real
+    // developer config made this the second non-hermetic test in the monorepo
+    // (#617): it passed only because the machine happened to have MCP servers
+    // configured, and would be red in any container.
+    const home = mkdtempSync(join(tmpdir(), "mcp-tools-home-"));
+    const prevHome = process.env.HOME;
+    try {
+      writeFileSync(
+        join(home, ".claude.json"),
+        JSON.stringify({
+          mcpServers: {
+            "fixture-http": { type: "http", url: "https://mcp.example.test/mcp" },
+            "fixture-stdio": { command: "fixture-server", args: ["--stdio"] },
+          },
+        }),
+      );
+      process.env.HOME = home;
+      const res = await claudeProbe.probe({
+        agentId: "live-test",
+        provider: "claude",
+        cwd: home,
+      });
+      console.log(`\n=== CLAUDE CONFIG EXTRACTED: ${res.servers.length} SERVERS ===`);
+      for (const s of res.servers) {
+        console.log(`  - [${s.transport.toUpperCase()}] ${s.name} -> ${s.command || s.url} (hasSecrets: ${s.hasSecrets})`);
+      }
+      expect(res.servers.length).toBeGreaterThan(0);
+      expect(res.servers.map((s) => s.name).sort()).toEqual(["fixture-http", "fixture-stdio"]);
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      rmSync(home, { recursive: true, force: true });
     }
-    expect(res.servers.length).toBeGreaterThan(0);
   });
 
   it("extracts real Antigravity ~/.gemini/config/mcp_config.json on this machine", async () => {
