@@ -10,9 +10,11 @@
 // specifiers to these relative copies when it stages the scoped tree.
 //
 // Usage: node scripts/vendor-sync.mjs [--check] [--link] [--materialize-links]
-//   (no flag): refresh every vendored copy from the helper src.
+//   (no flag): build packages/paseo-plugin-helper/dist, then refresh every
+//     vendored copy from the helper src.
 //   --check: exit non-zero if the vendored copies drift from a fresh copy of
-//     the helper src, or if a legacy dev symlink is present (not publishable).
+//     the helper src, if the committed helper dist/ is not what the helper src
+//     builds, or if a legacy dev symlink is present (not publishable).
 //     Writes nothing.
 //   --materialize-links: publish prep. Replace a legacy working-tree dev
 //     symlink with a real copy (#146 — a linked/partial tree installs as a
@@ -33,6 +35,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { PLUGINS, TREES, destDir } from "./lib/plugin-helper-layout.mjs";
+import { buildHelperDist, checkHelperDist } from "./lib/helper-dist.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HELPER_SRC = path.join(ROOT, "packages", "paseo-plugin-helper", "src");
@@ -312,6 +315,23 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 
 function syncOnce() {
+  // #682. The tracked helper dist/ is the published build, so the write pass
+  // builds it first: a copy or a stamp made here can then never be produced
+  // against a stale one. The check pass builds a throwaway copy instead and
+  // compares — a --check that rebuilt dist/ in place would be verifying its own
+  // output, exactly the defect #630 was filed about.
+  if (CHECK) {
+    const stale = checkHelperDist(ROOT);
+    if (stale.length > 0) {
+      for (const line of stale) console.log(line);
+      console.log("helper dist is stale — run node scripts/vendor-sync.mjs (it builds the dist before stamping)");
+      process.exit(1);
+    }
+    console.log("helper dist in sync with helper src");
+  } else {
+    buildHelperDist(ROOT);
+  }
+
   let dirty = 0;
   for (const [plugin, trees] of Object.entries(PLUGINS)) {
     const pluginRoot = path.join(ROOT, "plugins", plugin);

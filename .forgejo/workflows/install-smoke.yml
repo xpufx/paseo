@@ -175,6 +175,17 @@ jobs:
           [ "$badlink" -eq 0 ] || exit 1
           echo "hygiene clean"
 
+      # `vendor-sync.mjs --check` builds packages/paseo-plugin-helper to prove
+      # the committed dist/ is what src/ produces (#682), and a build it cannot
+      # run is a red gate rather than a skipped one. The gate therefore needs
+      # the toolchain: `npm ci`, not `npm install`, because the lockfile is the
+      # reproducibility statement for both the tests and the helper's own build.
+      # `npm ci`, not `npm install` — same reason test-suites.yml uses it.
+      - name: Install dependencies from the lockfile
+        run: |
+          set -euo pipefail
+          npm ci
+
       - name: Unit-test the vendor gate
         run: node scripts/vendor-sync.test.mjs
 
