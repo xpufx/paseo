@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type {
@@ -14,21 +16,50 @@ const execFileAsync = promisify(execFile);
 /**
  * Read-only client for the Forgejo webhook router.
  *
- * The router itself is a daemon owned by `uppidi-fleet`; this plugin does not
- * embed or reconfigure it. It resolves an endpoint the same way any client
- * would — an explicit override, then `FORGE_HOOK_URL`, then loopback on the
- * conventional port — and degrades to an explicit error rather than pretending
- * the queue is empty when the router is unreachable. That distinction matters:
- * "no work queued" and "cannot see the router" are different facts and the
- * surface renders them differently.
+ * The router is the hook server — a core component, not a separate product with
+ * its own deployment story. It is managed by `uppidi-fleet` and its endpoint is
+ * persisted in `~/.config/uppidi-fleet/router-config.json`, so this client
+ * resolves that config rather than assuming loopback.
+ *
+ * That assumption was the bug: falling straight back to `127.0.0.1:8099` made
+ * the surfaces report "cannot see the router" on any machine where the daemon
+ * is bound to a LAN address, which looks identical to "no work queued" until you
+ * read the error. Precedence, mirroring uppidi-fleet/server/hook-router.ts:
+ * explicit override, then `FORGE_HOOK_URL`, then the router config, then
+ * loopback. A degraded fetch is still surfaced as an explicit error rather than
+ * reported as an empty queue.
  */
 const DEFAULT_URL = "http://127.0.0.1:8099";
+
+/** Mirrors getRouterConfigPath() in uppidi-fleet; kept in sync by contract test. */
+function getRouterConfigPath(): string | null {
+  if (process.env.FORGE_HOOK_CONFIG) return process.env.FORGE_HOOK_CONFIG;
+  const home = process.env.HOME;
+  return home ? join(home, ".config", "uppidi-fleet", "router-config.json") : null;
+}
+
+function urlFromRouterConfig(): string | undefined {
+  const configPath = getRouterConfigPath();
+  if (!configPath) return undefined;
+  try {
+    const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+    if (!parsed || typeof parsed !== "object") return undefined;
+    const rawHost = typeof parsed.host === "string" ? parsed.host.trim() : "";
+    const port = typeof parsed.port === "number" && !Number.isNaN(parsed.port) ? parsed.port : null;
+    if (!port || port <= 0) return undefined;
+    // A wildcard bind is not a usable destination; loopback is.
+    const host = !rawHost || rawHost === "0.0.0.0" || rawHost === "::" ? "127.0.0.1" : rawHost;
+    return `http://${host}:${port}`;
+  } catch {
+    return undefined;
+  }
+}
 
 export function resolveRouterUrl(provided?: string): string {
   if (provided?.trim()) return provided.trim().replace(/\/+$/, "");
   const envUrl = process.env.FORGE_HOOK_URL?.trim();
   if (envUrl) return envUrl.replace(/\/+$/, "");
-  return DEFAULT_URL;
+  return urlFromRouterConfig() ?? DEFAULT_URL;
 }
 
 async function getJson<T>(url: string, timeoutMs: number): Promise<T> {
