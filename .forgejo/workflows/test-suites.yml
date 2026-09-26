@@ -1,4 +1,4 @@
-# Pull-request test gate (xpufx-org/paseo#617).
+# Test gate: pull requests to main, pushes to main (xpufx-org/paseo#617, #680).
 #
 # Before this workflow, no job in .forgejo/ or .github/ invoked `npm test` or
 # `make check`. The only jobs were install-smoke, npm-stage, mirror-prv,
@@ -12,8 +12,12 @@
 # instance was fixed, and nothing ran the guard that would have caught the
 # next one.
 #
-# Triggers on pull_request only, not push to main. The point is pre-merge
-# enforcement; a post-merge run reports the regression after it lands.
+# Triggers on pull_request and on push to main (#680). The push trigger exists
+# because pull_request alone never verified `main` itself: push CI was only
+# install-smoke, npm-stage and mirror-prv, none of which run `npm test`, so a
+# red `main` showed no red badge and every later push reported success while
+# the gate was failing. The push run reports a regression after it lands; it
+# does not prevent one. That enforcement gap is still tracked in #680.
 #
 # Two jobs, not one, on purpose. The first live run (job 8952) proved why: every
 # test suite passed and `npm run typecheck` failed at plugins/twofado on a
@@ -41,6 +45,8 @@
 name: Test suites
 
 on:
+  push:
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
