@@ -72,6 +72,23 @@ what changes is how much the content region can afford to show.
 Both are the same components; the skin hands down `wide`/`narrow` and the views drop
 their secondary fields rather than wrapping into an unreadable column.
 
+### Scroll ownership
+
+One scroll container per surface, and exactly one. A plugin surface is a full host
+page and the host wraps no part of it in a scroller, so each view root is a
+`ScrollView` (`Scroller`, `client/kit.tsx`) that fills the content region and turns
+everything below the fold into a scroll range instead of clipped content.
+
+The pieces that are not viewport roots deliberately own none. A ticket record is
+either a column of the tickets view, which owns the scroller, or the host's own
+`<Modal.Content scrollable>`, which is reached through a portal. A second scroller
+underneath one traps the gesture — the failure that made the x-comms family unusable
+on a phone — and it would leave the content below it unreachable anyway.
+
+`client/mobile-scroll.test.ts` holds that ownership to account at every phone width
+and at the two-pane breakpoint: one container per surface root, none nested, and
+nothing inside one that clips its own content.
+
 ### The three views
 
 - **Fleet** — the agent roster as a repository-grouped tree. Counts rail, state filters,

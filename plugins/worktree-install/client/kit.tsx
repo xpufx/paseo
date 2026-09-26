@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, type ReactNode } from "react";
 import { Animated, Linking, Pressable, Text, View, type ViewStyle } from "react-native";
-import { Icon, TextInput, copyText } from "@getpaseo/plugin/client/react-native";
+import { Icon, ScrollView, TextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import type { PluginTheme } from "@getpaseo/plugin";
 import { agentHref, statePresentation, type SignalTone } from "../shared/derive.js";
 import { paletteFor, type Palette, type Tone } from "./theme.js";
@@ -144,6 +144,45 @@ export function Cluster({
     >
       {children}
     </View>
+  );
+}
+
+// --- Scroll boundary ------------------------------------------------------
+
+/**
+ * The one scroll container of a surface.
+ *
+ * #684: a plugin surface is a full host page and the host does not wrap the
+ * surface body in a scroller, so a `flex: 1` view taller than its pane is
+ * simply clipped. The roster, the queues and the board all grew past the pane
+ * with nothing to reach them by — the half of "disaster on mobile" that #688's
+ * horizontal guard could not see. Each view root is one of these and there is
+ * no other: a second scroller inside one traps the gesture (the x-comms #326
+ * class), so a child that is tall is the parent's problem, not its own.
+ *
+ * The host `ScrollView`, not React Native's, because the host's is the one that
+ * carries sheet gestures and these surfaces mount inside sheets.
+ *
+ * `flex: 1, minHeight: 0` is what binds the scroller to the pane: it fills
+ * exactly what it is given and shrinks inside it, so overflowing content turns
+ * into scroll range instead of content that escapes the surface.
+ *
+ * The content container is deliberately left unstretched. The views hold
+ * `flex: 1, minHeight: 0` panes of their own (`ticket-body`, `ticket-list`),
+ * and a content container of definite height would let those panes shrink and
+ * clip — the #684 defect again, one level down.
+ */
+export function Scroller({ children, testID }: { children: ReactNode; testID?: string }) {
+  return (
+    <ScrollView
+      testID={testID}
+      style={{ flex: 1, minHeight: 0 }}
+      // Every view here has a search field: without this the first tap on a row
+      // spends itself dismissing the keyboard instead of pressing the row.
+      keyboardShouldPersistTaps="handled"
+    >
+      {children}
+    </ScrollView>
   );
 }
 

@@ -66,7 +66,21 @@ export const Modal = Object.assign(
   (props) => React.createElement("mock-modal", props, props?.children),
   { Content: (props) => React.createElement("mock-modal-content", props, props?.children) },
 );
-export const ScrollView = (props) => React.createElement("mock-scroll", props, props?.children);
+// A React Native ScrollView is two boxes, not one: a viewport that clips and
+// scrolls, and a content container sized by what it holds. Modelling both is
+// what lets a test see where a surface's scroll boundary is, and a passthrough
+// cannot: it renders the children as though nothing scrolled them, so a surface
+// with no scroller and a surface with one came out identical. That is how #684's
+// three unreachable surfaces were invisible to a suite that was otherwise
+// looking straight at them.
+export const ScrollView = (props) => {
+  const { contentContainerStyle, children, ...rest } = props ?? {};
+  return React.createElement(
+    "mock-scroll",
+    rest,
+    React.createElement("mock-scroll-content", { style: contentContainerStyle }, children),
+  );
+};
 export const FlatList = (props) => React.createElement("mock-flatlist", props, props?.children);
 export const TextInput = (props) => React.createElement("mock-textinput", props);
 export const copyText = async () => {};
@@ -249,6 +263,64 @@ export async function renderInSkin(
     },
     unmount: () => instance!.unmount(),
   };
+}
+
+/**
+ * A scroll boundary in a rendered tree.
+ *
+ * A surface reaches its content two ways, and both are reported here: a
+ * `ScrollView` the plugin rendered, and the host's own modal body when the
+ * plugin asked for it with `<Modal.Content scrollable>`. The second is
+ * `hostOwned` because it is not the plugin's to count or to own — a modal
+ * renders through a portal, so it is beside a surface's scroller rather than
+ * inside it, and a second plugin scroller under one is the nested-scroll trap
+ * the x-comms #326 work was about.
+ */
+export interface ScrollContainer {
+  /** The node itself, for a test that wants its style. */
+  readonly node: unknown;
+  /** The `testID` on the scroller, when it carries one. */
+  readonly testID?: string;
+  /** True for the host's modal body rather than a plugin `ScrollView`. */
+  readonly hostOwned: boolean;
+  /** Every `testID` inside this scroller, at any depth. */
+  readonly encloses: string[];
+}
+
+/** The element types the host stubs render for the two scroll boundaries. */
+const SCROLL_VIEW_TYPE = "mock-scroll";
+const HOST_SCROLL_VIEW_TYPE = "mock-modal-content";
+
+/** Every scroll container in a rendered tree, outermost first. */
+export function scrollContainers(root: unknown): ScrollContainer[] {
+  const found: ScrollContainer[] = [];
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const typed = node as { type?: unknown; props?: Record<string, unknown>; children?: unknown };
+    const hostOwned = typed.type === HOST_SCROLL_VIEW_TYPE && typed.props?.scrollable === true;
+    if (typed.type === SCROLL_VIEW_TYPE || hostOwned) {
+      const encloses: string[] = [];
+      for (const child of Array.isArray(typed.children) ? typed.children : []) {
+        collectTestIDs(child, encloses);
+      }
+      found.push({
+        node,
+        testID: typeof typed.props?.testID === "string" ? typed.props.testID : undefined,
+        hostOwned,
+        encloses,
+      });
+    }
+    for (const child of Array.isArray(typed.children) ? typed.children : []) walk(child);
+  };
+  walk(root);
+  return found;
+}
+
+function collectTestIDs(node: unknown, out: string[]): void {
+  if (!node || typeof node !== "object") return;
+  const typed = node as { props?: Record<string, unknown>; children?: unknown };
+  if (typeof typed.props?.testID === "string") out.push(typed.props.testID);
+  for (const child of Array.isArray(typed.children) ? typed.children : []) collectTestIDs(child, out);
 }
 
 /**
