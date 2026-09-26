@@ -2508,12 +2508,12 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   const FLEET_STATE_FILTERS = useMemo(
     () =>
       [
-        { id: "all" as const, label: "Total", count: totalCount, variant: "neutral" as const },
-        { id: "working" as const, label: "Running", count: runningCount, dot: true, variant: "success" as const },
+        { id: "all" as const, label: "Total", count: totalCount, icon: "CircleDot" },
+        { id: "working" as const, label: "Running", count: runningCount, icon: "Loader" },
         // "Idle / Sleeping", not the header badge's "Idle": merging the two controls must not
         // narrow what the filter is understood to match.
-        { id: "idle" as const, label: "Idle / Sleeping", count: idleCount, variant: "neutral" as const },
-        { id: "failed" as const, label: "Failed", count: errorCount, dot: true, variant: "danger" as const },
+        { id: "idle" as const, label: "Idle / Sleeping", count: idleCount, icon: "Moon" },
+        { id: "failed" as const, label: "Failed", count: errorCount, icon: "AlertCircle" },
       ],
     [totalCount, runningCount, idleCount, errorCount],
   );
@@ -2541,75 +2541,98 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
             >
               Fleet Lineage Tree
             </Text>
-            {/*
-             The counts were badges and the same four states were a separate row
-             of filter buttons directly below — one piece of information stated
-             twice, with the action in the row that had no counts. Same shape as
-             the work-queue metrics bar in #645: the header now carries the
-             filters, so the row underneath goes.
-            */}
-            {FLEET_STATE_FILTERS.map(({ id, label, count, dot, variant }) => {
-              if (count === 0 && id === "failed") return null;
-              const selected = stateFilter === id;
-              return (
-                <InteractiveRow
-                  key={id}
-                  onPress={() => setStateFilter(id)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Filter ${label}`}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 4,
-                    paddingHorizontal: 6,
-                    paddingVertical: 2,
-                    borderRadius: 4,
-                    backgroundColor: selected
-                      ? (colors.surface2 ?? "rgba(255,255,255,0.08)")
-                      : "transparent",
-                  }}
-                >
-                  <Badge
-                    label={`${count} ${label}`}
-                    variant={selected ? "info" : variant}
-                    size="sm"
-                    dot={dot}
-                    textStyle={{ fontSize: 10 }}
-                  />
-                </InteractiveRow>
-              );
-            })}
           </Row>
         </Stack>
-        <Row gap="xs" align="center" wrap>
-          {allProjects.length > 0 && (
-            <Button
-              label={allProjectsCollapsed ? "Expand All" : "Collapse All"}
-              icon={allProjectsCollapsed ? "ChevronDown" : "ChevronRight"}
-              size="sm"
-              variant="ghost"
-              onPress={toggleAllProjects}
-              style={{ paddingVertical: 2, minHeight: 24 }}
-            />
-          )}
+
+      </Row>
+
+      {/*
+       * The work-queue metrics bar, replicated (#645).
+       *
+       * Deliberately the same container, chip anatomy and metrics as
+       * surface.tsx's "Dense Metrics Bar" — same surface1 fill, 1px border,
+       * radius 6, and the same icon / muted-label / bold-count chip. The
+       * operator rejected an earlier version of this row for not *looking* like
+       * the Queue page, so these values are copied rather than approximated and
+       * a test pins them so the two cannot drift apart again.
+       */}
+      <Row
+        wrap
+        gap="xs"
+        align="center"
+        style={{
+          backgroundColor: colors.surface1 ?? "rgba(255,255,255,0.03)",
+          paddingHorizontal: 6,
+          paddingVertical: 4,
+          borderRadius: 6,
+          borderWidth: 1,
+          borderColor: colors.border ?? "transparent",
+        }}
+      >
+        {FLEET_STATE_FILTERS.map(({ id, label, count, icon }) => {
+          // A permanent "0 Failed" chip is noise; the Queue bar drops its
+          // zero-count criticals the same way.
+          if (count === 0 && id === "failed") return null;
+          const selected = stateFilter === id;
+          return (
+            <React.Fragment key={id}>
+              <InteractiveRow
+                onPress={() => setStateFilter(id)}
+                accessibilityRole="button"
+                accessibilityLabel={`Filter ${label}`}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 5,
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 4,
+                  backgroundColor: selected
+                    ? (colors.surface2 ?? "rgba(255,255,255,0.08)")
+                    : "transparent",
+                }}
+                pressedOpacity={0.7}
+              >
+                <Icon name={icon} size={13} color={colors.foregroundMuted} />
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                  {label}:
+                </Text>
+                <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 12 }}>
+                  {count}
+                </Text>
+              </InteractiveRow>
+              <View style={{ width: 1, height: 14, backgroundColor: colors.border }} />
+            </React.Fragment>
+          );
+        })}
+
+        {allProjects.length > 0 && (
           <Button
-            label={`Archive Closed/Failed${eligibleBulkCount > 0 ? ` (${eligibleBulkCount})` : ""}`}
-            icon="Archive"
-            variant="secondary"
+            label={allProjectsCollapsed ? "Expand All" : "Collapse All"}
+            icon={allProjectsCollapsed ? "ChevronDown" : "ChevronRight"}
             size="sm"
-            disabled={eligibleBulkCount === 0 || isBulkArchiving}
-            loading={isBulkArchiving}
-            onPress={handleBulkArchive}
+            variant="ghost"
+            onPress={toggleAllProjects}
             style={{ paddingVertical: 2, minHeight: 24 }}
           />
-          <View style={{ minWidth: 160, maxWidth: 280 }}>
-            <SearchInput
-              placeholder="Search agents, projects, worktrees, #issues..."
-              value={query}
-              onChangeText={setQuery}
-            />
-          </View>
-        </Row>
+        )}
+        <Button
+          label={`Archive Closed/Failed${eligibleBulkCount > 0 ? ` (${eligibleBulkCount})` : ""}`}
+          icon="Archive"
+          variant="secondary"
+          size="sm"
+          disabled={eligibleBulkCount === 0 || isBulkArchiving}
+          loading={isBulkArchiving}
+          onPress={handleBulkArchive}
+          style={{ paddingVertical: 2, minHeight: 24 }}
+        />
+        <View style={{ flex: 1, minWidth: 160, maxWidth: 280 }}>
+          <SearchInput
+            placeholder="Search agents, projects, worktrees, #issues..."
+            value={query}
+            onChangeText={setQuery}
+          />
+        </View>
       </Row>
 
       {/* 1. Fleet Front Desk Hero (Elevated at Top of All) — singleton (#470) */}
