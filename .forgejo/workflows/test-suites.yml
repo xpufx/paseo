@@ -35,6 +35,13 @@
 #                  The operator can make this required; see the #617 PR body.
 #   typecheck   — `npm run typecheck`. Required.
 #
+# The `test-suites` job also carries the vendored-copy gate: the committed helper
+# copies plugins publish from, plus the tracked helper dist/ against a fresh
+# build (#630, #682). It lives here rather than in install-smoke.yml, whose 0.8/0.9
+# matrix made it run twice per PR while it depends on no Paseo version at all
+# (#686) — and install-smoke is not a required check, so the gate was advisory.
+# Here it is required, and the push trigger above extends it to `main`.
+#
 # Every gate step is `if: always()` so one red gate does not hide the state of
 # the others; a failing step still fails its job.
 #
@@ -125,6 +132,61 @@ jobs:
             exit 1
           fi
           make conformance
+
+      # The vendored-copy gate, moved here from install-smoke.yml (#686). It used
+      # to sit in that job's 0.8/0.9 matrix while depending on no Paseo version —
+      # no CLI, no daemon, no install of Paseo — so it ran twice per PR and paid
+      # for the helper build inside `--check` twice (#685), in a job that is not a
+      # required check. Here it runs once, on a required check that also covers
+      # `main` via the push trigger above.
+      #
+      # `--check` builds packages/paseo-plugin-helper to prove the committed
+      # dist/ is what src/ produces (#682), and a build it cannot run is a red
+      # gate rather than a skipped one — hence the `npm ci` this job already had
+      # for its own suites, and the explicit skip below rather than a green pass.
+      - name: Unit-test the vendor gate
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps.outputs.deps_ready }}" != "true" ]; then
+            echo "::error::skipped: dependencies were not installed — the vendor gate's tests need the helper toolchain"
+            exit 1
+          fi
+          node scripts/vendor-sync.test.mjs
+
+      - name: Gate — vendored copy trees are publishable
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.deps.outputs.deps_ready }}" != "true" ]; then
+            echo "::error::skipped: dependencies were not installed — the vendor gate builds the helper to check dist/"
+            exit 1
+          fi
+          # Dev imports the bare paseo-plugin-helper specifier (resolved to the
+          # helper src via the workspace link + tsconfig paths); the vendored
+          # copies are the publish artifact the mirror stages and the install
+          # smoke installs. A legacy working-tree dev symlink is not publishable,
+          # so materialize it first (a no-op on a clean checkout). That step is
+          # the ONLY write this gate may perform: it must never refresh an
+          # already-materialized tree, or the --check below would be verifying
+          # the tree it had just rewritten and would report green whatever was
+          # committed (#630). Nothing may install or publish a linked/partial
+          # tree — such a tree installs as a broken plugin (#146).
+          node scripts/vendor-sync.mjs --materialize-links
+          # Back the claim that the step above wrote nothing it shouldn't: if it
+          # rewrote a committed copy, --check is now verifying its own output.
+          if ! git diff --quiet -- plugins; then
+            git --no-pager diff --stat -- plugins
+            echo "::error::materialize step rewrote committed vendored copies — the --check below would verify the tree it just wrote"
+            exit 1
+          fi
+          node scripts/vendor-sync.mjs --check
+          linked="$(git ls-files -s | awk '$1==120000 && $4 ~ /\/vendor\/paseo-plugin-helper\// {print $4}')"
+          if [ -n "$linked" ]; then
+            printf '%s\n' "$linked"
+            echo "::error::committed symlink under a vendored helper path is not installable"
+            exit 1
+          fi
 
       - name: Publish gate summary
         if: always()
