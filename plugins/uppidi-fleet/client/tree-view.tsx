@@ -1234,6 +1234,8 @@ export interface DenseAgentRowProps {
   node: UppidiAgentTreeNode;
   depth?: number;
   isLast?: boolean;
+  /** Position among siblings at the same depth; drives zebra striping (#628). */
+  siblingIndex?: number;
   colors: any;
   typography: any;
   navigation?: PluginSurfaceProps["navigation"];
@@ -1250,6 +1252,7 @@ export function DenseAgentRow({
   node,
   depth = 1,
   isLast = false,
+  siblingIndex = 0,
   colors,
   typography,
   navigation,
@@ -1282,9 +1285,16 @@ export function DenseAgentRow({
           paddingHorizontal: 8,
           paddingVertical: 4,
           borderRadius: 4,
+          // Zebra striping (#628). Alternates among siblings at the same depth
+          // so each indentation group reads as its own band. Deliberately very
+          // faint: the indentation already encodes hierarchy, so the stripe is
+          // only there to help the eye track across a wide row. Hover wins, and
+          // alpha() over colors.surface1 keeps it correct in light and dark.
           backgroundColor: isHovered
             ? (alpha?.(colors.accent, 0.05) || colors.surface1 || "rgba(255,255,255,0.04)")
-            : "transparent",
+            : siblingIndex % 2 === 1
+              ? (alpha?.(colors.surface1, 0.5) || "rgba(128,128,128,0.06)")
+              : "transparent",
           overflow: "visible",
         }}
       >
@@ -1444,6 +1454,7 @@ export function DenseAgentRow({
             <DenseAgentRow
               key={child.agent.id}
               node={child}
+                siblingIndex={idx}
               depth={depth + 1}
               isLast={idx === node.children.length - 1}
               colors={colors}
@@ -1982,6 +1993,7 @@ export function ProjectGroupCard({
                           <DenseAgentRow
                             key={child.agent.id}
                             node={child}
+                              siblingIndex={idx}
                             depth={1}
                             isLast={idx === orchNode.children.length - 1}
                             colors={colors}
@@ -2004,6 +2016,7 @@ export function ProjectGroupCard({
                     <DenseAgentRow
                       key={workerNode.agent.id}
                       node={workerNode}
+                        siblingIndex={idx}
                       depth={1}
                       isLast={idx === group.unparentedWorkers.length - 1}
                       colors={colors}
@@ -2727,6 +2740,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
               <DenseAgentRow
                 key={staleNode.agent.id}
                 node={staleNode}
+                  siblingIndex={idx}
                 depth={1}
                 isLast={idx === filteredStaleFrontDeskNodes.length - 1}
                 colors={colors}
