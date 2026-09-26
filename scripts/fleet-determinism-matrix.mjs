@@ -60,12 +60,12 @@ const OUT = path.join(PLUGIN, "docs", "determinism-matrix.md");
 const CHECK = process.argv.includes("--check");
 
 /** Labels. `contested` is a real answer, not a parking lot: see the legend. */
-const DETERMINISTIC = "deterministic";
-const HYBRID = "hybrid";
-const AI = "ai-llm";
-const CONTESTED = "contested";
+export const DETERMINISTIC = "deterministic";
+export const HYBRID = "hybrid";
+export const AI = "ai-llm";
+export const CONTESTED = "contested";
 
-const LABELS = [DETERMINISTIC, HYBRID, AI, CONTESTED];
+export const LABELS = [DETERMINISTIC, HYBRID, AI, CONTESTED];
 
 // ---------------------------------------------------------------------------
 // Inventory: read the tree, do not trust a list
@@ -110,8 +110,11 @@ function isTestFile(rel) {
  * (`function`, `async function`, `const`, `class`, `interface`, `type`) plus
  * re-export braces in both single-line and block form, since
  * `client/index.ts` and `shared/settings.ts` are pure barrels.
+ *
+ * Exported so the test suite can build fixture inventories through the real
+ * parser rather than a hand-rolled approximation of it.
  */
-function parseExports(src) {
+export function parseExports(src) {
   const names = new Set();
   const add = (raw) => {
     const n = raw.trim().replace(/^type\s+/, "").split(/\s+as\s+/).pop().trim();
@@ -387,19 +390,31 @@ const PARTS = [
     ],
     note: "THE ROW THAT IS EASY TO GET WRONG, and it is deterministic. It measures LLM sessions -- token use, cache ratio, turn duration, cost -- and every number is arithmetic over counters the daemon already computed. Nothing here is a model. The privacy posture is explicit too (34-35): no transcripts, prompts or code are stored.",
   },
-  {
-    file: `${PLUGIN}/server/metrics.ts`,
-    part: "BASELINE_CANDIDATES seed table",
-    layer: "server",
-    label: CONTESTED,
-    anchors: { exports: ["BASELINE_CANDIDATES", "DEFAULT_TASK_PROFILES", "METRICS_PRIVACY_NOTICE"] },
-    evidence: [
-      [`metrics.ts:44-281`, "four hand-authored models with pass rates, trial counts and latency figures"],
-      [`metrics.ts:624-628`, "but `loadFleetMetrics` no longer serves it: the baseline is 'retired as served data'"],
-      [`metrics.test.ts:223`, "its one remaining consumer asserts it is *not* served (`assert.notEqual`)"],
-    ],
-    note: "Deterministic as code -- a literal is the most reproducible thing in the repo -- but the numbers are unsourced claims about how models behave, and nothing in the tree measures them. It is a hardcoded fixture that reads like a measurement, which is why it is reported rather than filed under either neighbouring bucket. Worth knowing that it is now dead: the declaration and that one assertion are its only references in the repository, so it survives solely as the fixed side of a regression guard.",
-  },
+  // #702: the `BASELINE_CANDIDATES` row that used to sit here has been moved out
+  // of the matrix at the operator's request. It was the second `contested` row,
+  // and the finding behind it is recorded on #702 rather than deleted:
+  //
+  //   `server/metrics.ts` exports a four-model table of hand-authored pass rates,
+  //   trial counts and latencies that nothing in the tree measures, so it reads
+  //   as evidence while being connected to nothing. `loadFleetMetrics` already
+  //   stopped serving it ("retired as served data"), and its only remaining
+  //   reference in the repository is the `assert.notEqual` at
+  //   `server/metrics.test.ts:223` that pins it as *not* served -- the
+  //   declaration and that one assertion, nothing else. It is dead code shaped
+  //   like a measurement.
+  //
+  // Two things this map deliberately does not do, so the removal is not mistaken
+  // for a silent deletion or for the renderer hiding a row:
+  //
+  //   1. The constant is NOT removed from the plugin. Whether to delete it is a
+  //      separate decision, tracked on #702, and out of scope for a docs change.
+  //   2. The renderer has no exclusion list. The row is gone because its entry
+  //      is gone, which is the only way a generated table can be trusted to have
+  //      lost nothing: a filter would put a row back whenever its file came back.
+  //
+  // `server/metrics.ts` still has a row below for the parts that are settled --
+  // the rollup arithmetic, which is deterministic. The remaining `contested` row
+  // is `server/role-models.ts`, a different question #702 did not cover.
   {
     file: `${PLUGIN}/server/role-models.ts`,
     part: "Role-to-model assignment, persistence, and available-model discovery",
@@ -752,20 +767,28 @@ function resolveEvidence(ref, partFile) {
   return { path: null, start, end };
 }
 
-// Bound in main(); kept module-level so resolveEvidence stays free of plumbing.
+// Bound per validate() call; kept module-level so resolveEvidence stays free of
+// plumbing.
 const INVENTORY = new Map();
 
-function validate(inv) {
+/**
+ * Check a judgement map against an inventory. `parts` is a parameter rather than
+ * the module's own `PARTS` so the test suite can feed it deliberately wrong maps
+ * -- that is the whole point of having negative tests, and a validator that can
+ * only ever be called with its own correct input cannot be tested for catching
+ * anything.
+ */
+export function validate(parts, inv, suiteNotes = SUITE_NOTES) {
   INVENTORY.clear();
   for (const [k, v] of inv) INVENTORY.set(k, v);
 
   const errors = [];
   const seen = new Set();
 
-  for (const part of PARTS) {
+  for (const part of parts) {
     const file = inv.get(part.file);
     if (!file) {
-      errors.push(`${part.file}: in PARTS but not a tracked source file in scope`);
+      errors.push(`${part.file}: declared as a part but not a tracked source file in scope`);
       continue;
     }
     if (part.label && !LABELS.includes(part.label)) {
@@ -812,7 +835,7 @@ function validate(inv) {
     seen.add(part.file);
   }
 
-  for (const [key] of Object.entries(SUITE_NOTES)) {
+  for (const [key] of Object.entries(suiteNotes)) {
     if (!inv.has(`${PLUGIN}/${key}`)) {
       errors.push(`SUITE_NOTES has "${key}", which is not a tracked suite in scope`);
     }
@@ -1086,7 +1109,7 @@ function render(inv) {
 
 function main() {
   const inv = buildInventory();
-  const errors = validate(inv);
+  const errors = validate(PARTS, inv);
   if (errors.length > 0) {
     console.error("fleet-determinism-matrix: judgement does not match the tree:\n");
     for (const e of errors) console.error(`  - ${e}`);
@@ -1125,4 +1148,9 @@ function main() {
   );
 }
 
-main();
+// Only when executed directly. Importing this module must not render the doc or
+// exit the process -- `scripts/fleet-determinism-matrix.test.mjs` imports
+// `validate` and `parseExports` to test them against deliberately wrong input.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}
