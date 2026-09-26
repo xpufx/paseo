@@ -79,7 +79,7 @@ export function QueueView({
 
   return (
     <Stack gap={8} testID="queue-view">
-      <Cluster gap={2} wrap={false} testID="queue-stats">
+      <Cluster gap={2} testID="queue-stats">
         <Type size={13} weight="700">
           Queue
         </Type>

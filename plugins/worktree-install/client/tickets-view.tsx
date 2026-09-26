@@ -103,7 +103,7 @@ export function TicketsView({
 
   return (
     <Stack gap={8} grow testID="tickets-view">
-      <Cluster gap={2} wrap={false} testID="ticket-stats">
+      <Cluster gap={2} testID="ticket-stats">
         <Type size={13} weight="700">
           Tickets
         </Type>
