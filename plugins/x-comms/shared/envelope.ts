@@ -88,7 +88,19 @@ export const AUTH_PAYLOAD_CONTEXT = "x-comms/envelope-auth/v1";
  * binding the body would make the signature depend on whitespace the
  * intermediate delivery path is free to normalize.
  */
-const AUTH_FIELDS = [
+/**
+ * Every field covered by the ed25519 signature, in signing order.
+ *
+ * Exported so a test can pin the set (#619). It was module-private, which is
+ * precisely why nothing asserted it: `grep -rn AUTH_FIELDS` over the plugin's
+ * tests returned nothing, so coverage was incidental — the suite happened to
+ * build envelopes differing in ways that exposed 9 of these 11, and a refactor
+ * dropping an entry would have shipped green.
+ *
+ * Adding a field here widens what is signed, which is the safe direction. The
+ * guard that keeps it honest is in shared/auth-fields.test.ts.
+ */
+export const AUTH_FIELDS = [
   "version",
   "type",
   "sender.agentId",
