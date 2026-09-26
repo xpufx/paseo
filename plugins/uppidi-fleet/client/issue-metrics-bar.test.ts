@@ -1,4 +1,5 @@
-import { describe, it, expect } from "vitest";
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -24,28 +25,40 @@ describe("issue metrics bar (#645)", () => {
       // through the EXTRA_METRIC_PRESETS map, so accept either form.
       const literal = surface.includes(`setFilter("${id}")`);
       const inMap = new RegExp(`id: "${id}"`).test(surface);
-      expect(literal || inMap, `preset "${id}" must remain reachable from the bar`).toBe(true);
+      assert.ok(
+        literal || inMap,
+        `preset "${id}" must remain reachable from the bar`,
+      );
     }
   });
 
   it("no longer renders the separate filter-button row", () => {
-    expect(surface).not.toContain("Action Bar & Filter Buttons");
+    assert.ok(
+      !surface.includes("Action Bar & Filter Buttons"),
+      "the deleted row must not come back",
+    );
     // The row mapped the preset list into buttons; the bar owns them now.
-    expect(surface).not.toMatch(/issuePresetFilters\.map/);
+    assert.ok(
+      !/issuePresetFilters\.map/.test(surface),
+      "the bar must not still map the old preset list",
+    );
   });
 
   it("keeps the repo indicator that shared the removed row", () => {
     // It was not a filter option, but it lived in the deleted row, so it had to
     // be carried over rather than dropped.
-    expect(surface).toContain("All Repositories");
+    assert.ok(surface.includes("All Repositories"), "the repo indicator must survive the merge");
   });
 
   it("counts every preset in one place", () => {
     // Two copies of these predicates is how the bar and the row drifted apart.
     const memo = surface.match(/const presetCounts = useMemo/);
-    expect(memo, "presetCounts memo must exist").not.toBeNull();
+    assert.ok(memo, "presetCounts memo must exist");
     for (const id of PRESETS) {
-      expect(surface, `presetCounts must cover "${id}"`).toMatch(new RegExp(`["']?${id}["']?:`));
+      assert.ok(
+        new RegExp(`["']?${id}["']?:`).test(surface),
+        `presetCounts must cover "${id}"`,
+      );
     }
   });
 });
