@@ -14,6 +14,28 @@ export function hasStagedVersion(stages, packageName, version) {
   return Array.isArray(stages) && stages.some((stage) => stage?.packageName === packageName && stage?.version === version);
 }
 
+/**
+ * Versions already live on the registry can never be staged: npm rejects them
+ * with "You cannot publish over the previously published versions", and the run
+ * aborts before it reaches the packages that are actually new. `npm view` exits
+ * non-zero for a package that has never been published, so a failed lookup means
+ * "not published" rather than an error.
+ */
+export function isPublishedVersion(versions, version) {
+  return Array.isArray(versions) && versions.includes(version);
+}
+
+/** Published versions of a package, or `[]` when it is not on the registry yet. */
+export function publishedVersions(packageName, { run = commandResult, npmBin = "npm" } = {}) {
+  try {
+    const out = run(npmBin, ["view", packageName, "versions", "--json"]);
+    const parsed = JSON.parse(out);
+    return Array.isArray(parsed) ? parsed : [parsed];
+  } catch {
+    return [];
+  }
+}
+
 export function notificationSummary(packageName, version) {
   return `npm staging accepted ${packageName}@${version}; awaiting manual npm stage approve (2FA).`;
 }
@@ -60,6 +82,10 @@ export function stagePackage(entry, { run = commandResult, npmBin = "npm", notif
   const stages = JSON.parse(run(npmBin, ["stage", "list", entry.publishAs, "--json"]));
   if (hasStagedVersion(stages, entry.publishAs, entry.version)) {
     console.log(`[npm-stage] skipping ${entry.publishAs}@${entry.version}: already staged; not a fresh stage.`);
+    return { outcome: "skipped" };
+  }
+  if (isPublishedVersion(publishedVersions(entry.publishAs, { run, npmBin }), entry.version)) {
+    console.log(`[npm-stage] skipping ${entry.publishAs}@${entry.version}: already published; npm cannot restage a live version.`);
     return { outcome: "skipped" };
   }
 
