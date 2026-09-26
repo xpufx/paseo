@@ -134,7 +134,7 @@ describe("ModalBody size contract", () => {
     expect(style.minWidth).toBeUndefined();
   });
 
-  it("applies the documented wide extent for size=large on a desktop dialog", () => {
+  it("applies no width floor for size=large so the host owns the dialog", () => {
     installStubs(false, false);
     const r = render(
       <ModalBody size="large">
@@ -142,7 +142,7 @@ describe("ModalBody size contract", () => {
       </ModalBody>,
     );
     const style = flatten(r.root.findAllByType(View)[0].props.style);
-    expect(style.minWidth).toBe(640);
+    expect(style.minWidth).toBeUndefined();
   });
 
   it("caps and centers the content column when maxContentWidth is set", () => {
@@ -208,7 +208,7 @@ describe("ModalBody size contract", () => {
     expect(capped).toHaveLength(0);
   });
 
-  it("ignores size=large on compact and mobile host surfaces", () => {
+  it("applies no width floor for size=large on compact and mobile surfaces", () => {
     installStubs(true, false);
     const compact = render(
       <ModalBody size="large">

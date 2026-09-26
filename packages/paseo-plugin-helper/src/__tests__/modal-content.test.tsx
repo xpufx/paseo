@@ -86,7 +86,7 @@ describe("ModalContent host allocation", () => {
     expect(r.root.findAllByType(ScrollView)).toHaveLength(0);
   });
 
-  it("forwards the size preset to ModalBody", () => {
+  it("forwards the size preset without forcing a dialog width", () => {
     installStubs(false, false);
     const r = render(
       <ModalContent size="large">
@@ -94,7 +94,7 @@ describe("ModalContent host allocation", () => {
       </ModalContent>,
     );
     const wide = r.root.findAll((node) => flatten(node.props?.style).minWidth === 640);
-    expect(wide.length).toBeGreaterThan(0);
+    expect(wide).toHaveLength(0);
   });
 
   it("allows opt-out via scrollable={false} when plugin owns internal scroller", () => {
