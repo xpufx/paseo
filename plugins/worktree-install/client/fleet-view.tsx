@@ -153,7 +153,7 @@ export function FleetView({
   return (
     <Stack gap={8} testID="fleet-view">
       {/* Counts. Every number here is also on the row it describes. */}
-      <Cluster gap={2} wrap={false} testID="fleet-stats">
+      <Cluster gap={2} testID="fleet-stats">
         <LiveDot tone={data?.runningCount ? "ok" : "muted"} pulse={Boolean(data?.runningCount)} />
         <Type size={13} weight="700">
           Fleet

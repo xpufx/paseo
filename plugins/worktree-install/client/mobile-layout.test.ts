@@ -2,7 +2,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { installHostStubs, readSkin, renderInSkin } from "./testing/host.js";
 import { DARK_THEME, surfaceCases } from "./testing/fixtures.js";
-import { findHorizontalOverflows, type OverflowFinding } from "./testing/flex-measure.js";
+import { findHorizontalOverflows, resolveStyle, type OverflowFinding } from "./testing/flex-measure.js";
 
 /**
  * Mobile layout guard (#684).
@@ -37,22 +37,22 @@ const GLYPH_ESTIMATE_BAND_PX = 6;
 
 /**
  * The measured overflow profile at each phone width, as the largest excess any
- * single container showed, keyed by surface. These are open defects, not an
- * accepted outcome, and they are not fixed here: every one of them is a row that
- * refuses to wrap (`fleet-stats` is a nine-child non-wrapping cluster that
- * demands 499px), and deciding what that row should look like on a phone is a
- * visual call #684 explicitly cannot make without the operator's screen. See
- * the report on the issue.
+ * single container showed, keyed by surface.
  *
- * The table is pinned rather than asserted empty so that the profile is
- * *visible*: a new overflow, a worse one, and a silently fixed one all fail this
- * test. Removing a row is the deliberate, reviewable act of closing a defect.
+ * #687 pinned this table against the defects it found and stopped there, because
+ * deciding what `fleet-stats` should look like on a phone is a visual call the
+ * ticket could not make. The operator has since made it — wrap, and never drop a
+ * stat to make room — and all four rows are now closed. The table is kept, at
+ * zero, rather than deleted: it is still the thing a regression is measured
+ * against, so reintroducing an overflow fails here instead of passing unnoticed.
+ * Re-adding a non-zero value is the deliberate, reviewable act of reopening a
+ * defect.
  */
 const PHONE_OVERFLOW: Record<number, Record<string, number>> = {
-  320: { "fleet-view": 179, "tickets-view": 75, "queue-view": 43, "ticket-detail": 76 },
-  360: { "fleet-view": 139, "tickets-view": 35, "queue-view": 0, "ticket-detail": 36 },
-  390: { "fleet-view": 109, "tickets-view": 0, "queue-view": 0, "ticket-detail": 0 },
-  430: { "fleet-view": 69, "tickets-view": 0, "queue-view": 0, "ticket-detail": 0 },
+  320: { "fleet-view": 0, "tickets-view": 0, "queue-view": 0, "ticket-detail": 0 },
+  360: { "fleet-view": 0, "tickets-view": 0, "queue-view": 0, "ticket-detail": 0 },
+  390: { "fleet-view": 0, "tickets-view": 0, "queue-view": 0, "ticket-detail": 0 },
+  430: { "fleet-view": 0, "tickets-view": 0, "queue-view": 0, "ticket-detail": 0 },
 };
 
 function formatFindings(label: string, findings: OverflowFinding[]): string {
@@ -72,6 +72,54 @@ function worstOverflow(findings: OverflowFinding[]): number {
   return findings
     .filter((f) => f.excess > GLYPH_ESTIMATE_BAND_PX)
     .reduce((worst, f) => Math.max(worst, f.excess), 0);
+}
+
+function childNodes(node: any): any[] {
+  return (Array.isArray(node?.children) ? node.children : []).filter(
+    (c: unknown) => c && typeof c === "object",
+  );
+}
+
+function findByTestID(node: any, testID: string): any {
+  if (!node || typeof node !== "object") return undefined;
+  if (node.props?.testID === testID) return node;
+  for (const child of childNodes(node)) {
+    const found = findByTestID(child, testID);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+function textOf(node: any): string {
+  let out = "";
+  for (const child of Array.isArray(node?.children) ? node.children : []) {
+    if (typeof child === "string" || typeof child === "number") out += String(child);
+    else if (child && typeof child === "object") out += textOf(child);
+  }
+  return out;
+}
+
+/** Every leaf text in the tree, with the `numberOfLines` cap it was given. */
+function collectTextLeaves(
+  node: any,
+  out: { text: string; lines: number | undefined }[] = [],
+): { text: string; lines: number | undefined }[] {
+  if (!node || typeof node !== "object") return out;
+  const isLeaf = node.type === "Text" || typeof node.type !== "string";
+  if (isLeaf) {
+    const text = textOf(node).replace(/\s+/g, " ").trim();
+    if (text) {
+      const style = resolveStyle(node);
+      const prop = node.props?.numberOfLines;
+      out.push({
+        text,
+        lines: typeof prop === "number" ? prop : typeof style.numberOfLines === "number" ? style.numberOfLines : undefined,
+      });
+    }
+    return out;
+  }
+  for (const child of childNodes(node)) collectTextLeaves(child, out);
+  return out;
 }
 
 before(() => {
@@ -173,7 +221,9 @@ describe("worktree-install mobile layout (#684)", () => {
     // The counterpart to the assertion above, for the widths where the surfaces
     // are known to overflow. Pinning the measurement rather than omitting the
     // check means the defect stays tracked: a wider overflow, a new one, or a
-    // fixed one all fail, and the fix is a reviewed edit to the table.
+    // fixed one all fail, and the fix is a reviewed edit to the table. Every
+    // entry is zero now, so in practice this asserts that none of the four
+    // surfaces spills at any phone width.
     for (const width of PHONE_WIDTHS) {
       const expected = PHONE_OVERFLOW[width];
       for (const surface of await surfaceCases()) {
@@ -197,5 +247,87 @@ describe("worktree-install mobile layout (#684)", () => {
         rendered.unmount();
       }
     }
+  });
+
+  it("overflows nothing at all at phone widths, on any surface", async () => {
+    // The strict form of the same claim. The profile test above reduces a
+    // surface to its single worst container, which tolerates any overflow up to
+    // the glyph-estimate band; this asserts there is no finding at all above
+    // that band, so a second, smaller overflow cannot hide behind a fixed one.
+    for (const width of PHONE_WIDTHS) {
+      for (const surface of await surfaceCases()) {
+        const rendered = await renderInSkin(surface.element, {
+          theme: DARK_THEME,
+          layout: { compact: false, platform: "web", width },
+        });
+        for (const id of surface.press ?? []) rendered.press(id);
+        const findings = findHorizontalOverflows(rendered.tree, width).filter(
+          (f) => f.excess > GLYPH_ESTIMATE_BAND_PX,
+        );
+        assert.deepEqual(
+          findings,
+          [],
+          `${surface.id} at ${width}px must not overflow at all. It is at or below the ` +
+            `${GLYPH_ESTIMATE_BAND_PX}px glyph-estimate band, so this is a layout defect and ` +
+            `not measurement noise.\n${formatFindings(`${surface.id} at ${width}px`, findings)}`,
+        );
+        rendered.unmount();
+      }
+    }
+  });
+
+  it("keeps the rows that were measured overflowing able to break", async () => {
+    // The fixes, pinned by mechanism rather than by symptom. The three stats
+    // rows were the only non-wrapping clusters of their size in these files and
+    // each one demanded more than a phone is wide (499px, 343px, 363px); the
+    // ticket-detail overflow was not a row at all but a 99-character note with
+    // no line cap, insisting on a single 395px line. Each of those was closed by
+    // letting it break, and re-adding `wrap={false}` or dropping the cap would
+    // put the defect back — so assert the capability, which fails with a name
+    // pointing at the row, rather than waiting for the width to overflow again.
+    const WRAPPING_ROWS = ["fleet-stats", "queue-stats", "ticket-stats"];
+    for (const surface of await surfaceCases()) {
+      const rendered = await renderInSkin(surface.element, {
+        theme: DARK_THEME,
+        layout: { compact: false, platform: "web", width: 320 },
+      });
+      for (const id of surface.press ?? []) rendered.press(id);
+      for (const testID of WRAPPING_ROWS) {
+        const node = findByTestID(rendered.tree, testID);
+        if (!node) continue;
+        const style = resolveStyle(node);
+        assert.equal(
+          style.flexWrap,
+          "wrap",
+          `${testID} must be a wrapping row. It is the one cluster in its file that ` +
+            `refused to wrap, and a stats row that cannot break overflows at every ` +
+            `phone width. See PHONE_OVERFLOW.`,
+        );
+      }
+      rendered.unmount();
+    }
+
+    // The closing note is capped rather than made to wrap by a container, so the
+    // cap itself is the property. `ticket-detail` renders it in both the modal
+    // and the embedded pane, and neither may hold an uncapped copy.
+    const detail = await surfaceCases().then((all) => all.find((s) => s.id === "ticket-detail")!);
+    const rendered = await renderInSkin(detail.element, {
+      theme: DARK_THEME,
+      layout: { compact: false, platform: "web", width: 320 },
+    });
+    for (const id of detail.press ?? []) rendered.press(id);
+    const notes = collectTextLeaves(rendered.tree).filter((n) =>
+      n.text.startsWith("Dispatching tells the fleet"),
+    );
+    assert.ok(notes.length > 0, "the ticket-detail closing note should still be rendered");
+    for (const note of notes) {
+      assert.ok(
+        typeof note.lines === "number" && note.lines >= 1,
+        "the ticket-detail closing note is a 99-character sentence; without a line cap " +
+          "it insists on one 395px line and spills out of a 320px phone. Give it " +
+          "numberOfLines rather than hiding the overflow.",
+      );
+    }
+    rendered.unmount();
   });
 });

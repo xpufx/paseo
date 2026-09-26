@@ -13,6 +13,16 @@ const STATUS_TONE = {
 } as const;
 
 /**
+ * Line cap on the closing note. It is a 99-character sentence, so as unbounded
+ * text it insists on a single 395px line and spills out of a 320px phone
+ * viewport; a cap is what lets it break. Greedy word wrap puts it on two lines
+ * at 320px and one line at 620px, so the cap is never reached anywhere in the
+ * #684 sweep — no words are lost at any phone width, and the desktop layout
+ * still renders it as the single line it always was.
+ */
+const FOOTER_LINES = 3;
+
+/**
  * The full ticket record. On a wide surface this renders as a second pane
  * beside the list; on a narrow one it is a modal. The content is identical
  * either way — only the container changes.
@@ -123,7 +133,7 @@ export function TicketDetail({
       ) : null}
 
       <Hairline />
-      <Type size={10} color={palette.textFaint}>
+      <Type size={10} color={palette.textFaint} numberOfLines={FOOTER_LINES}>
         Dispatching tells the fleet to take the ticket; the daemon owns the worktree that follows.
       </Type>
     </Stack>
