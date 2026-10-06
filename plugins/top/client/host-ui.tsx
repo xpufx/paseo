@@ -493,6 +493,53 @@ export function HostBadge({
   );
 }
 
+export interface HostVitalProps {
+  children: ReactNode;
+  icon?: string | ReactNode;
+  color: string;
+  /** Chip grows to share the row and caps at `maxWidth` (default 110). */
+  grow?: boolean;
+  maxWidth?: number;
+  style?: StyleProp<ViewStyle>;
+}
+
+/**
+ * Icon + text chip used to pack the timeline card's vitals several per row.
+ *
+ * A chip must never claim the full row: it grows from its content width and
+ * caps out, so a wrapping parent fits as many as the width allows instead of
+ * collapsing to one pill per line (xpufx-org/paseo#1010).
+ */
+export function HostVital({
+  children,
+  icon,
+  color,
+  grow = true,
+  maxWidth = 110,
+  style,
+}: HostVitalProps) {
+  return (
+    <View
+      style={[
+        styles.vital,
+        grow ? { flexGrow: 1, maxWidth, justifyContent: "center" } : null,
+        style,
+      ]}
+    >
+      {icon ? (
+        typeof icon === "string" ? (
+          <Icon name={icon} size={12} color={color} />
+        ) : (
+          icon
+        )
+      ) : null}
+      <Text numberOfLines={1} style={[styles.vitalText, { color }]}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
 export interface HostStatusDotProps {
   variant?: StatusVariant;
   size?: "sm" | "md" | "lg";
@@ -900,6 +947,8 @@ export interface HostCollapsibleProps {
   onToggle?: (expanded: boolean) => void;
   badge?: ReactNode;
   headerRight?: ReactNode;
+  /** Always-visible preview between the header and the expanded content. */
+  summary?: ReactNode;
   icon?: string;
   style?: StyleProp<ViewStyle>;
   headerStyle?: StyleProp<ViewStyle>;
@@ -916,6 +965,7 @@ export function HostCollapsible({
   onToggle,
   badge,
   headerRight,
+  summary,
   icon,
   style,
   headerStyle,
@@ -979,6 +1029,7 @@ export function HostCollapsible({
           color={colors.foregroundMuted}
         />
       </Pressable>
+      {summary ? <View style={styles.collapsibleSummary}>{summary}</View> : null}
       {isExpanded ? (
         <View style={[styles.collapsibleContent, contentStyle]}>{children}</View>
       ) : null}
@@ -1615,6 +1666,14 @@ const styles = {
     maxWidth: "100%",
   },
   badgeText: { fontWeight: "600", flexShrink: 1 },
+  vital: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  vitalText: { fontSize: 11, fontWeight: "500", flexShrink: 1, minWidth: 0 },
   dot: { width: 6, height: 6, borderRadius: 3 },
   statusDot: { borderRadius: 9999 },
   progressContainer: { gap: 4, width: "100%" },
@@ -1696,6 +1755,7 @@ const styles = {
   },
   collapsibleTitle: { fontSize: 13, fontWeight: "600" },
   collapsibleSubtitle: { fontSize: 11 },
+  collapsibleSummary: { paddingHorizontal: 12, paddingBottom: 12 },
   collapsibleContent: { paddingHorizontal: 12, paddingBottom: 12, gap: 8 },
   tabsFrame: {
     width: "100%",

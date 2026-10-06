@@ -10,6 +10,7 @@ import {
   HostRow,
   HostStack,
   HostThemeProvider,
+  HostVital,
   getStatusColor,
 } from "./host-ui";
 import { usePluginSettings } from "paseo-plugin-helper/core";
@@ -33,31 +34,6 @@ import {
 import { formatCompactTokens, type TopAgentSnapshot } from "./pill-labels";
 
 export { TIMELINE_RENDERED_METRICS };
-
-function Vital({
-  icon,
-  color,
-  children,
-}: {
-  icon: string;
-  color: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <HostRow gap={4} align="center">
-      <Icon name={icon} size={12} color={color} />
-      {/*
-       * Color MUST be applied to the label as well as the icon. A <Text> with
-       * no `color` falls back to React Native's default black and disappears on
-       * dark surfaces (xpufx-org/paseo#208). Reusing the icon's `color` keeps
-       * threshold states (e.g. CPU/RAM warning/danger) consistent for both.
-       */}
-      <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: "500", color }}>
-        {children}
-      </Text>
-    </HostRow>
-  );
-}
 
 export function TopTimelineTelemetryCard({
   item,
@@ -232,29 +208,28 @@ export function TopTimelineTelemetryCard({
             />
           </HostRow>
         }
-      >
-        <HostStack gap={6}>
+        summary={
           <HostRow wrap gap={8} align="center">
             {show("cpu_ram") && (
-              <Vital icon="Cpu" color={cpuColor}>
+              <HostVital icon="Cpu" color={cpuColor}>
                 CPU {data.cpuPercent}%
-              </Vital>
+              </HostVital>
             )}
 
             {show("cpu_ram") && (
-              <Vital icon="Database" color={memColor}>
+              <HostVital icon="Database" color={memColor}>
                 RAM {formatBytes(data.memUsedBytes)} ({data.memPercent}%)
-              </Vital>
+              </HostVital>
             )}
 
             {show("load") && (
-              <Vital icon="Activity" color={theme.colors.foreground}>
+              <HostVital icon="Activity" color={theme.colors.foreground}>
                 Load {data.loadAvg1m.toFixed(2)}
-              </Vital>
+              </HostVital>
             )}
 
             {showMcp && (
-              <Vital
+              <HostVital
                 icon="Server"
                 color={
                   data.mcpTotal == null
@@ -265,80 +240,80 @@ export function TopTimelineTelemetryCard({
                 }
               >
                 {data.mcpTotal != null ? `MCP ${data.mcpHealthy ?? 0}/${data.mcpTotal}` : "MCP --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("agent_id") && (
-              <Vital icon="Fingerprint" color={theme.colors.foreground}>
+              <HostVital icon="Fingerprint" color={theme.colors.foreground}>
                 {data.agentId && data.agentId.length > 7
                   ? data.agentId.slice(0, 7)
                   : (data.agentId ?? "--")}
-              </Vital>
+              </HostVital>
             )}
 
             {show("agent") && (
-              <Vital
+              <HostVital
                 icon="Bot"
                 color={data.agentModel ? theme.colors.foreground : theme.colors.foregroundMuted}
               >
                 {data.agentModel ?? "model --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("agent_provider") && (
-              <Vital
+              <HostVital
                 icon="Globe"
                 color={
                   data.agentProvider ? theme.colors.foreground : theme.colors.foregroundMuted
                 }
               >
                 {data.agentProvider ?? "provider --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("agent_title") && (
-              <Vital
+              <HostVital
                 icon="Tag"
                 color={data.agentTitle ? theme.colors.foreground : theme.colors.foregroundMuted}
               >
                 {data.agentTitle ?? "title --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("branch") && (
-              <Vital
+              <HostVital
                 icon="GitBranch"
                 color={data.branch ? theme.colors.foreground : theme.colors.foregroundMuted}
               >
                 {data.branch ?? "branch --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("worktree") && (
-              <Vital
+              <HostVital
                 icon="Folder"
                 color={data.worktree ? theme.colors.foreground : theme.colors.foregroundMuted}
               >
                 {data.worktree ? truncatePath(data.worktree, 20) : "worktree --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("uptime") && (
-              <Vital icon="Clock" color={theme.colors.foreground}>
+              <HostVital icon="Clock" color={theme.colors.foreground}>
                 {data.uptimeSeconds ? formatUptime(data.uptimeSeconds) : "--"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("changes") && (
-              <Vital icon="GitCommitHorizontal" color={theme.colors.foreground}>
+              <HostVital icon="GitCommitHorizontal" color={theme.colors.foreground}>
                 {(data.gitFilesChanged ?? 0) > 0
                   ? `±${data.gitFilesChanged} files +${data.gitInsertions ?? 0}/-${data.gitDeletions ?? 0}`
                   : "No changes"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("tokens") && (
-              <Vital
+              <HostVital
                 icon="Coins"
                 color={
                   totalTokens != null || contextUsedTokens != null
@@ -353,27 +328,29 @@ export function TopTimelineTelemetryCard({
                     : contextUsedTokens != null
                       ? `${formatCompactTokens(contextUsedTokens)} ctx`
                       : "tok --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("tools") && (
-              <Vital icon="Sigma" color={theme.colors.foreground}>
+              <HostVital icon="Sigma" color={theme.colors.foreground}>
                 {data.toolCalls != null
                   ? `${data.toolCalls}${data.toolErrors ? ` (${data.toolErrors} err)` : ""}`
                   : "tools --"}
-              </Vital>
+              </HostVital>
             )}
 
             {show("turns") && (
-              <Vital
+              <HostVital
                 icon="Repeat"
                 color={data.turnCount != null ? theme.colors.foreground : theme.colors.foregroundMuted}
               >
                 {data.turnCount != null ? `${data.turnCount} turns` : "turns --"}
-              </Vital>
+              </HostVital>
             )}
           </HostRow>
-
+        }
+      >
+        <HostStack gap={6}>
           {show("tokens") && hasTokenDetails ? (
             <HostStack gap={8}>
               <HostRow justify="between" align="center">
@@ -441,19 +418,19 @@ export function TopTimelineTelemetryCard({
           <HostStack gap={4}>
             <Text style={sectionTitleStyle(theme.colors)}>Turn Details</Text>
             <HostRow wrap gap={12} align="center">
-              <Vital icon="Cpu" color={theme.colors.foreground}>
+              <HostVital grow={false} icon="Cpu" color={theme.colors.foreground}>
                 {data.agentModel ?? "Unknown model"} ({data.agentProvider ?? "default"})
-              </Vital>
+              </HostVital>
               {data.toolCalls != null && (
-                <Vital icon="Sigma" color={theme.colors.foreground}>
+                <HostVital grow={false} icon="Sigma" color={theme.colors.foreground}>
                   {data.toolCalls} calls
                   {data.toolErrors ? `, ${data.toolErrors} failed` : ""}
-                </Vital>
+                </HostVital>
               )}
               {(data.gitInsertions != null || data.gitDeletions != null) && (
-                <Vital icon="GitCommitHorizontal" color={theme.colors.foreground}>
+                <HostVital grow={false} icon="GitCommitHorizontal" color={theme.colors.foreground}>
                   +{data.gitInsertions ?? 0} -{data.gitDeletions ?? 0}
-                </Vital>
+                </HostVital>
               )}
             </HostRow>
           </HostStack>
