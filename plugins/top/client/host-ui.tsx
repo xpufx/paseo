@@ -969,8 +969,10 @@ export function HostCollapsible({
           ) : null}
           {typeof subtitle !== "string" ? subtitle : null}
         </View>
-        {badge}
-        {headerRight}
+        {badge ? <View style={styles.collapsibleHeaderSlot}>{badge}</View> : null}
+        {headerRight ? (
+          <View style={styles.collapsibleHeaderRight}>{headerRight}</View>
+        ) : null}
         <Icon
           name={isExpanded ? "ChevronDown" : "ChevronRight"}
           size={14}
@@ -1681,7 +1683,17 @@ const styles = {
     padding: 12,
     minHeight: 40,
   },
-  collapsibleTitleColumn: { flex: 1, flexShrink: 1, gap: 1 },
+  collapsibleTitleColumn: { flex: 1, minWidth: 0, flexShrink: 1, gap: 1 },
+  collapsibleHeaderSlot: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 0,
+  },
+  collapsibleHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 0,
+  },
   collapsibleTitle: { fontSize: 13, fontWeight: "600" },
   collapsibleSubtitle: { fontSize: 11 },
   collapsibleContent: { paddingHorizontal: 12, paddingBottom: 12, gap: 8 },
