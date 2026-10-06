@@ -139,7 +139,9 @@ function styleOf(child: unknown): Record<string, unknown> {
   return merged;
 }
 
-function renderCard() {
+function renderCard(
+  layout: { compact: boolean; platform: string } = { compact: false, platform: "web" },
+) {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
     renderer = TestRenderer.create(
@@ -148,7 +150,7 @@ function renderCard() {
         agentId={DATA.agentId}
         host={{ id: "h", label: "Host" }}
         theme={LIGHT as never}
-        layout={{ compact: false, platform: "web" }}
+        layout={layout as never}
         timestamp={new Date("2026-10-06T18:12:16.000Z")}
       />,
     );
@@ -222,5 +224,82 @@ describe("TopTimelineTelemetryCard layout density (#1010)", () => {
     expect(text).toContain("57 turns");
     expect(text).toContain("Tokens & Context");
     expect(text).toContain("Turn Details");
+  });
+});
+
+const COMPACT = { compact: true, platform: "ios" };
+
+/**
+ * Regression for the mobile half of xpufx-org/paseo#1010. On native Yoga the
+ * collapsible header slots are auto-width, so a nested `HostRow` (base
+ * `width: 100%`) resolves its percentage against an indefinite parent and the
+ * title column collapses to zero width. The card then grew a tall blank block
+ * and stranded the outcome/time row mid-card, and the expanded detail spilled
+ * under the composer. These tests drive the real compact render path and pin
+ * the structural fixes: content-sized header rows, a visible summary, and
+ * bottom clearance for the expanded content.
+ */
+describe("TopTimelineTelemetryCard compact layout (#1010 mobile)", () => {
+  it("keeps the collapsed card content-sized with the summary vitals visible", () => {
+    const renderer = renderCard(COMPACT);
+    const text = textOf(renderer.toJSON());
+
+    expect(text).toContain("Turn Failed");
+    expect(text).toContain("CPU 7%");
+    expect(text).toContain("57 turns");
+    expect(text).not.toContain("Tokens & Context");
+
+    // The card container must not grow or reserve a fixed height to fill the
+    // timeline cell; the collapsed card is header + summary only.
+    const [card] = styledNodes(renderer.toJSON());
+    expect(card.style).toBeDefined();
+    expect(card.style.flex).toBeUndefined();
+    expect(card.style.flexGrow).toBeUndefined();
+    expect(card.style.height).toBeUndefined();
+    expect(card.style.minHeight).toBeUndefined();
+  });
+
+  it("opts the header rows out of the full-width default that collapsed them on Yoga", () => {
+    const renderer = renderCard(COMPACT);
+    const nodes = styledNodes(renderer.toJSON());
+
+    // The title row and headerRight row (the two nested HostRows) must not
+    // claim the full header width. On native Yoga that is what resolves to a
+    // zero-width title column and the tall blank region.
+    const inlineHeaderRows = nodes.filter((node) => node.style.width === "auto");
+    expect(inlineHeaderRows.length).toBeGreaterThanOrEqual(2);
+
+    const titleRow = inlineHeaderRows[0];
+    expect(textOf(titleRow.children)).toContain("Turn Failed");
+    const headerRightRow = inlineHeaderRows[1];
+    expect(textOf(headerRightRow.children)).toContain("via top");
+  });
+
+  it("gives the expanded detail bottom clearance so it cannot sit under the composer", () => {
+    const renderer = renderCard(COMPACT);
+    toggle(renderer);
+
+    const nodes = styledNodes(renderer.toJSON());
+    const content = nodes.find(
+      (node) => typeof node.style.paddingBottom === "number" && node.style.paddingBottom >= 32,
+    );
+    expect(content).toBeDefined();
+    // The detail sections still render below the always-visible summary.
+    expect(textOf(renderer.toJSON())).toContain("Tokens & Context");
+  });
+
+  it("uses tighter compact padding than the desktop frame", () => {
+    const compactNodes = styledNodes(renderCard(COMPACT).toJSON());
+    const desktopNodes = styledNodes(renderCard().toJSON());
+
+    const compactPaddings = new Set(
+      compactNodes.map((node) => node.style.paddingHorizontal).filter(Boolean),
+    );
+    const desktopPaddings = new Set(
+      desktopNodes.map((node) => node.style.paddingHorizontal).filter(Boolean),
+    );
+
+    expect(compactPaddings.has(10)).toBe(true);
+    expect(desktopPaddings.has(10)).toBe(false);
   });
 });

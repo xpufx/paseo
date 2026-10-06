@@ -973,6 +973,7 @@ export function HostCollapsible({
   variant = "flat",
 }: HostCollapsibleProps) {
   const { colors } = useHostTheme();
+  const { compact } = useHostLayout();
   const [internalExpanded, setInternalExpanded] = useState(initiallyExpanded);
 
   const isExpanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded;
@@ -1000,6 +1001,7 @@ export function HostCollapsible({
         accessibilityState={{ expanded: isExpanded }}
         style={({ pressed }) => [
           styles.collapsibleHeader,
+          compact ? styles.collapsibleHeaderCompact : null,
           { backgroundColor: pressed ? colors.surface1 : "transparent" },
           headerStyle,
         ]}
@@ -1029,9 +1031,21 @@ export function HostCollapsible({
           color={colors.foregroundMuted}
         />
       </Pressable>
-      {summary ? <View style={styles.collapsibleSummary}>{summary}</View> : null}
+      {summary ? (
+        <View style={[styles.collapsibleSummary, compact ? styles.collapsibleSummaryCompact : null]}>
+          {summary}
+        </View>
+      ) : null}
       {isExpanded ? (
-        <View style={[styles.collapsibleContent, contentStyle]}>{children}</View>
+        <View
+          style={[
+            styles.collapsibleContent,
+            compact ? styles.collapsibleContentCompact : null,
+            contentStyle,
+          ]}
+        >
+          {children}
+        </View>
       ) : null}
     </View>
   );
@@ -1742,6 +1756,13 @@ const styles = {
     padding: 12,
     minHeight: 40,
   },
+  // Compact hosts lose horizontal room first; trim the frame so the header
+  // and summary stay content-sized on narrow/mobile layouts.
+  collapsibleHeaderCompact: { paddingHorizontal: 10, paddingVertical: 8 },
+  collapsibleSummaryCompact: { paddingHorizontal: 10, paddingBottom: 8 },
+  // Bottom clearance keeps expanded detail out from under the composer pills
+  // and the floating scroll controls on compact hosts.
+  collapsibleContentCompact: { paddingHorizontal: 10, paddingBottom: 32, gap: 6 },
   collapsibleTitleColumn: { flex: 1, minWidth: 0, flexShrink: 1, gap: 1 },
   collapsibleHeaderSlot: {
     flexDirection: "row",
