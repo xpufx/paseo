@@ -1,6 +1,5 @@
 {
   "exempt": {
-    "no-bare-react-native-ui": "client/host-ui.tsx's HostModalScroll is the one scroller inside the pill modal body, and it must be a plain react-native ScrollView. The host SDK's ScrollView carries the host's bottom-sheet pan gestures; as the inner scroller of a host modal body (Modal.Content scrollable={false}) it hands the same gesture to two recognizers, the xpufx-org/paseo#219 class the operator hit on the MCP pill (#1043) and the top pill (#1054). Page surfaces (surface.tsx, turn-panel.tsx) still use the host scroller via HostScroll. No host primitive provides a gesture-neutral scroller, so this is the intended exception. Every other raw-UI rule remains enforced.",
     "no-bespoke-react-native-interactions": "client/host-ui.tsx is the local composition that replaces the deleted paseo-plugin-helper/ui adapters for top (xpufx-org/paseo#937, #924). The host SDK exposes no button/toggle/tab pressable primitive, so the presentation layer must compose Pressable over react-native. Every other helper/UI rule is followed; this is the single interaction seam."
   }
 }

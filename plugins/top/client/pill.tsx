@@ -34,7 +34,6 @@ import {
   HostKeyValue,
   HostLayoutProvider,
   HostMetricGauge,
-  HostModalScroll,
   HostModalSection,
   HostProgressBar,
   HostRow,
@@ -359,6 +358,10 @@ function registerTopPill(
 ) {
   return registerComposerPill<ModalTab>(client as ComposerPillRegistrar, {
     popoverWidth: 360,
+    // The host `<Modal.Content scrollable>` is the one scroll owner (#219,
+    // #975, #1054); the plugin body renders fluid content with no nested
+    // scroller so the host owns the mobile gesture.
+    hostScroll: true,
     ...options,
     presentation: options.presentation ?? "centered",
     onError:
@@ -1141,7 +1144,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
       <HostModalSection>
         <View style={styles.modalColumn}>
           <View style={navbarStyle}>{navbar}</View>
-          <HostModalScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+          <View style={styles.modalContent}>
             <HostCard variant="elevated">
               <View style={styles.errorBox}>
                 <Icon name="Ghost" size={24} color={colors.statusDanger} />
@@ -1150,7 +1153,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
                 </Text>
               </View>
             </HostCard>
-          </HostModalScroll>
+          </View>
         </View>
       </HostModalSection>
     );
@@ -1162,7 +1165,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
     <HostModalSection>
       <View style={styles.modalColumn}>
         <View style={navbarStyle}>{navbar}</View>
-        <HostModalScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+        <View style={styles.modalContent}>
           {activeTab === "system" && (
             <>
               {/* Dual Metric Gauges Hero */}
@@ -1753,7 +1756,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
         </Text>
       </View>
     )}
-        </HostModalScroll>
+        </View>
       </View>
     </HostModalSection>
   );
@@ -2297,8 +2300,6 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
 // primitive covers.
 const styles = {
   modalRoot: {
-    flex: 1,
-    minHeight: 0,
     width: "100%",
   },
   pillContainer: {
@@ -2524,19 +2525,13 @@ const styles = {
     paddingVertical: 4,
   },
   modalColumn: {
-    flex: 1,
-    minHeight: 0,
+    width: "100%",
   },
-  modalScroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  modalScrollContent: {
+  modalContent: {
+    width: "100%",
     paddingTop: 6,
   },
   customPillModal: {
-    flex: 1,
-    minHeight: 0,
     width: "100%",
     padding: 12,
   },
