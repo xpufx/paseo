@@ -1,9 +1,18 @@
+// Dual-read: canonical numberless (platform#247) plus legacy numeric spellings.
 export type AttentionLabel =
+  | "attention/orchestrator"
+  | "attention/agent"
+  | "attention/user"
   | "attention/0-orchestrator"
   | "attention/1-agent"
   | "attention/2-user";
 
 export type StateLabel =
+  | "state/triage"
+  | "state/wip"
+  | "state/review"
+  | "state/verify"
+  | "state/done"
   | "state/0-backlog"
   | "state/1-spec"
   | "state/2-wip"

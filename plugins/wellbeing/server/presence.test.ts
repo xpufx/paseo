@@ -146,7 +146,7 @@ describe("PresenceTracker", () => {
       status = tracker.getStatus(base);
       assert.equal(status.fleetPosture, "bed-mode-custodial");
       assert.match(status.fleetDirective, /Bed Mode/);
-      assert.match(status.fleetDirective, /priority\/0-SOS/);
+      assert.match(status.fleetDirective, /priority\/(?:sos|0-SOS)/i);
 
       // Resume
       tracker.toggleBedMode(false, base);

@@ -2,7 +2,12 @@ import { z } from "zod";
 import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 import { DEFAULT_FORGEJO_HOST } from "./repo-identity.js";
 
+// Dual-read: canonical numberless spellings (platform#247) plus the legacy
+// numeric ones during the migration.
 export const AttentionLabelSchema = z.enum([
+  "attention/orchestrator",
+  "attention/agent",
+  "attention/user",
   "attention/0-orchestrator",
   "attention/1-agent",
   "attention/2-user",
@@ -10,6 +15,11 @@ export const AttentionLabelSchema = z.enum([
 export type AttentionLabel = z.infer<typeof AttentionLabelSchema>;
 
 export const StateLabelSchema = z.enum([
+  "state/triage",
+  "state/wip",
+  "state/review",
+  "state/verify",
+  "state/done",
   "state/0-triage",
   "state/1-wip",
   "state/2-review",
@@ -24,7 +34,7 @@ export const UppidiIssueSchema = z.object({
   state: z.string(),
   repo: z.string(),
   status: z.enum(["Backlog", "In progress", "Review", "Done"]),
-  attention: AttentionLabelSchema.default("attention/1-agent"),
+  attention: AttentionLabelSchema.default("attention/agent"),
   branch: z.string().optional(),
   comments: z.number().default(0),
   labels: z.array(z.string()).default([]),

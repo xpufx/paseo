@@ -75,26 +75,38 @@ export async function handleUppidiIssues(
     const labelNames = (raw.labels ?? []).map((l) => l.name);
     const normalizedLabels = labelNames.map((l) => l.trim().toLowerCase());
 
-    // Operator attention is strictly signaled by user attention labels. The
-    // canonical, scoped form is `attention/2-user`; legacy `attention/user`
-    // and `attention:user` spellings normalize to the same operator signal.
+    // Operator attention is strictly signaled by user attention labels. Both the
+    // canonical numberless form (`attention/user`) and the legacy numeric form
+    // (`attention/2-user`) are accepted during the migration (platform#247).
     const hasUserAttention = normalizedLabels.some(
-      (l) => l === "attention/2-user" || l === "attention/user" || l === "attention:user",
+      (l) => l === "attention/user" || l === "attention/2-user" || l === "attention:user",
     );
     const hasOrchestratorAttention = normalizedLabels.some(
-      (l) => l === "attention/0-orchestrator" || l === "attention/orchestrator" || l === "attention:orchestrator",
+      (l) =>
+        l === "attention/orchestrator" ||
+        l === "attention/0-orchestrator" ||
+        l === "attention:orchestrator",
     );
 
-    let attention: AttentionLabel = "attention/1-agent";
-    if (hasUserAttention) attention = "attention/2-user";
-    else if (hasOrchestratorAttention) attention = "attention/0-orchestrator";
+    let attention: AttentionLabel = "attention/agent";
+    if (hasUserAttention) attention = "attention/user";
+    else if (hasOrchestratorAttention) attention = "attention/orchestrator";
 
     let status: "Backlog" | "In progress" | "Review" | "Done" = "Backlog";
-    if (raw.state === "closed" || labelNames.some((l) => l === "state/4-done")) {
+    if (raw.state === "closed" || normalizedLabels.some((l) => l === "state/done" || l === "state/4-done")) {
       status = "Done";
-    } else if (labelNames.some((l) => l === "state/2-review" || l === "state/3-verify" || l.startsWith("review/"))) {
+    } else if (
+      normalizedLabels.some(
+        (l) =>
+          l === "state/review" ||
+          l === "state/2-review" ||
+          l === "state/verify" ||
+          l === "state/3-verify" ||
+          l.startsWith("review/"),
+      )
+    ) {
       status = "Review";
-    } else if (labelNames.some((l) => l === "state/1-wip")) {
+    } else if (normalizedLabels.some((l) => l === "state/wip" || l === "state/1-wip")) {
       status = "In progress";
     }
 
@@ -124,18 +136,26 @@ export async function handleUppidiIssues(
     openCount: openIssues.length,
     inFlightCount: openIssues.filter((i) => i.status === "In progress").length,
     reviewCount: openIssues.filter((i) => i.status === "Review").length,
-    needsYouCount: openIssues.filter((i) => i.attention === "attention/2-user").length,
+    needsYouCount: openIssues.filter((i) => i.attention === "attention/user").length,
   };
 }
 
+// Canonical numberless column labels (platform#247); transitions write these.
 export const STATE_LABELS_FOR_COLUMN: Record<KanbanColumnId, string> = {
-  backlog: "state/0-triage",
-  in_progress: "state/1-wip",
-  review: "state/2-review",
-  done: "state/4-done",
+  backlog: "state/triage",
+  in_progress: "state/wip",
+  review: "state/review",
+  done: "state/done",
 };
 
+// Removal set carries both spellings so a transition clears whichever the board
+// still holds; the target label itself is filtered out by the caller.
 export const ALL_STATE_LABELS = [
+  "state/triage",
+  "state/wip",
+  "state/review",
+  "state/verify",
+  "state/done",
   "state/0-triage",
   "state/1-wip",
   "state/2-review",

@@ -96,8 +96,8 @@ describe("stale WIP sweep (ported from forgejo-issues-check.test.py)", () => {
     const commentBody = calls[0].inputText ?? "";
     assert.ok(commentBody.includes(STALE_WIP_REMINDER_MARKER));
     const labelsCommand = calls[1].command.join(" ");
-    assert.ok(labelsCommand.includes("attention/0-orchestrator"));
-    assert.ok(labelsCommand.includes("state/1-wip"));
+    assert.ok(labelsCommand.includes("attention/orchestrator"));
+    assert.ok(labelsCommand.includes("state/wip"));
     assert.ok(!labelsCommand.includes("kind/feature"));
     assert.ok(!labelsCommand.includes("priority/2-normal"));
   });

@@ -167,6 +167,9 @@ const tabs = [
 ];
 
 const attentionMap: Record<AttentionLabel, string> = {
+  "attention/orchestrator": "Orchestrator",
+  "attention/agent": "Agent",
+  "attention/user": "You",
   "attention/0-orchestrator": "Orchestrator",
   "attention/1-agent": "Agent",
   "attention/2-user": "You",

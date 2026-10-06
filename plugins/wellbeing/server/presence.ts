@@ -348,7 +348,7 @@ export class PresenceTracker {
     const posture = this.getFleetPosture(now);
     switch (posture) {
       case "bed-mode-custodial":
-        return "Operator Status: Bed Mode (Rest/Mobile). Front Desk holds autonomous custody. Fleet maintains composer silence. Escalate ONLY priority/0-SOS to Front Desk.";
+        return "Operator Status: Bed Mode (Rest/Mobile). Front Desk holds autonomous custody. Fleet maintains composer silence. Escalate ONLY priority/sos to Front Desk.";
       case "wind-down":
         return "Operator Status: Circadian Wind-Down. Prefer async batching and issue updates over interactive interruptions. Silence non-blockers.";
       case "extended-stretch":

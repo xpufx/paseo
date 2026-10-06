@@ -30,28 +30,42 @@ const DEFAULT_HOST = "forge.mrs.uppidi.com";
 const PAGE_LIMIT = 100;
 const MAX_PAGES = 20;
 
-/** Labels that must not survive an issue's closure. */
+/** Labels that must not survive an issue's closure. Both numeric (legacy) and
+ * numberless (canonical, platform#247) spellings are checked during migration. */
 export const CLOSED_ACTION_SIGNALS = [
   "attention/1-agent",
+  "attention/agent",
   "attention/0-orchestrator",
+  "attention/orchestrator",
   "attention/2-user",
+  "attention/user",
   "dep/blocked",
   "dep/blocker",
   "priority/0-SOS",
+  "priority/sos",
   "flag/stop-work",
   "format/0-needed",
+  "format/needed",
   "review/0-needed",
+  "review/needed",
   "review/1-changes-requested",
+  "review/changes-requested",
   "spec/0-needed",
+  "spec/needed",
   "linked/0-needs-split",
+  "linked/needs-split",
 ];
 
 /** States that describe unfinished work; wrong on a closed issue. */
 const NON_TERMINAL_STATES = [
   "state/0-triage",
+  "state/triage",
   "state/1-wip",
+  "state/wip",
   "state/2-review",
+  "state/review",
   "state/3-verify",
+  "state/verify",
 ];
 
 export function parseArgs(argv) {
@@ -133,11 +147,15 @@ export function closedStaleLabels(issues) {
   return findings;
 }
 
+/** Orchestrator-ownership spellings, numeric (legacy) and numberless (#1007). */
+const ORCHESTRATOR_LABELS = ["attention/0-orchestrator", "attention/orchestrator"];
+
 /** Default idle window before an `0-orchestrator` issue counts as stuck. */
 export const ORCHESTRATOR_IDLE_MS = 2 * 60 * 60 * 1000;
 
 /**
- * Open issue parked on `attention/0-orchestrator` with no recent activity.
+ * Open issue parked on `attention/0-orchestrator` (or numberless
+ * `attention/orchestrator`) with no recent activity.
  *
  * `0-orchestrator` means "you own it, don't let it sit" — it is a working state,
  * not a resting one. An issue left there past the idle window is invisible: it
@@ -152,7 +170,8 @@ export const ORCHESTRATOR_IDLE_MS = 2 * 60 * 60 * 1000;
 export function orchestratorParked(issues, now = Date.now(), idleMs = ORCHESTRATOR_IDLE_MS) {
   const findings = [];
   for (const issue of issues) {
-    if (!labelNames(issue).includes("attention/0-orchestrator")) continue;
+    const labels = labelNames(issue);
+    if (!labels.some((label) => ORCHESTRATOR_LABELS.includes(label))) continue;
     const updated = Date.parse(issue.updated_at ?? "");
     if (Number.isNaN(updated)) continue;
     const idleMinutes = Math.floor((now - updated) / 60000);
@@ -209,7 +228,7 @@ function main() {
   render("open issues missing attention/* and/or state/*", open, (f) => `missing ${f.missing.join(", ")}`);
   render("closed issues still carrying action signals", closed, (f) => f.stale.join(", "));
   render(
-    "open issues parked on attention/0-orchestrator past the idle window",
+    "open issues parked on attention/orchestrator past the idle window",
     parked,
     (f) => `idle ${f.idleMinutes}m`,
   );

@@ -3060,8 +3060,8 @@ describe("in-router stale-WIP sweep (#920)", () => {
     const labelCall = commandCalls[1];
     const labelCmd = labelCall.command.join(" ");
     assert.ok(labelCmd.includes("issue edit 42"));
-    assert.ok(labelCmd.includes("--add-label attention/0-orchestrator"));
-    assert.ok(labelCmd.includes("--remove-label state/1-wip"));
+    assert.ok(labelCmd.includes("--add-label attention/orchestrator"));
+    assert.ok(labelCmd.includes("--remove-label state/wip"));
   });
 
   it("is idempotent and avoids duplicate comment when reminder marker already exists", async () => {
@@ -3119,8 +3119,8 @@ describe("in-router stale-WIP sweep (#920)", () => {
     assert.equal(commandCalls.length, 1);
     const labelCmd = commandCalls[0].command.join(" ");
     assert.ok(labelCmd.includes("issue edit 42"));
-    assert.ok(labelCmd.includes("--add-label attention/0-orchestrator"));
-    assert.ok(labelCmd.includes("--remove-label state/1-wip"));
+    assert.ok(labelCmd.includes("--add-label attention/orchestrator"));
+    assert.ok(labelCmd.includes("--remove-label state/wip"));
   });
 });
 
@@ -6469,9 +6469,9 @@ describe("hook-router repository onboarding (#847)", () => {
   const CATALOGUE = {
     manifest_version: 1,
     labels: [
-      { name: "priority/0-SOS", color: "#b60205", exclusive: true, description: "SOS" },
-      { name: "priority/1-high", color: "#d93f0b", exclusive: true, description: "High" },
-      { name: "attention/0-orchestrator", color: "#fbca04", exclusive: false, description: "Orchestrator" },
+      { name: "priority/sos", color: "#b60205", exclusive: true, description: "SOS" },
+      { name: "priority/high", color: "#d93f0b", exclusive: true, description: "High" },
+      { name: "attention/orchestrator", color: "#fbca04", exclusive: false, description: "Orchestrator" },
     ],
   };
 
@@ -6569,11 +6569,11 @@ describe("hook-router repository onboarding (#847)", () => {
       assert.equal(labelPosts.length, 3);
       assert.deepEqual(
         labelPosts.map((r) => r.body.name),
-        ["priority/0-SOS", "priority/1-high", "attention/0-orchestrator"],
+        ["priority/sos", "priority/high", "attention/orchestrator"],
       );
       assert.equal(labelPosts[0].url, `https://${HOST}/api/v1/repos/${REPO}/labels`);
       assert.deepEqual(labelPosts[0].body, {
-        name: "priority/0-SOS",
+        name: "priority/sos",
         color: "#b60205",
         description: "SOS",
         exclusive: true,
@@ -6591,8 +6591,8 @@ describe("hook-router repository onboarding (#847)", () => {
       const router = makeRouter();
       seedFetch({
         existingLabels: [
-          { id: 5, name: "priority/1-high", color: "#d93f0b" },
-          { id: 6, name: "attention/0-orchestrator", color: "#fbca04" },
+          { id: 5, name: "priority/high", color: "#d93f0b" },
+          { id: 6, name: "attention/orchestrator", color: "#fbca04" },
         ],
       });
 
@@ -6608,9 +6608,9 @@ describe("hook-router repository onboarding (#847)", () => {
       const router = makeRouter();
       seedFetch({
         existingLabels: [
-          { id: 5, name: "priority/1-high", color: "#000000", exclusive: true, description: "Old" },
-          { id: 6, name: "attention/0-orchestrator", color: "#fbca04", exclusive: false, description: "Orchestrator" },
-          { id: 7, name: "priority/0-SOS", color: "#b60205", exclusive: true, description: "SOS" },
+          { id: 5, name: "priority/high", color: "#000000", exclusive: true, description: "Old" },
+          { id: 6, name: "attention/orchestrator", color: "#fbca04", exclusive: false, description: "Orchestrator" },
+          { id: 7, name: "priority/sos", color: "#b60205", exclusive: true, description: "SOS" },
         ],
       });
 
@@ -6624,7 +6624,7 @@ describe("hook-router repository onboarding (#847)", () => {
       assert.ok(patch, "expected a label PATCH");
       assert.equal(patch!.url, `https://${HOST}/api/v1/repos/${REPO}/labels/5`);
       assert.deepEqual(patch!.body, {
-        name: "priority/1-high",
+        name: "priority/high",
         color: "#d93f0b",
         description: "High",
       });
@@ -6648,7 +6648,7 @@ describe("hook-router repository onboarding (#847)", () => {
     it("paginates the existing label list", async () => {
       const router = makeRouter();
       const page1 = Array.from({ length: 50 }, (_, i) => ({ id: i + 1, name: `l/${i}` }));
-      const page2 = [{ id: 51, name: "attention/0-orchestrator", color: "#fbca04" }];
+      const page2 = [{ id: 51, name: "attention/orchestrator", color: "#fbca04" }];
       installFetch((req) => {
         if (req.url === CATALOGUE_URL) return { data: CATALOGUE };
         if (req.url.endsWith("/labels?limit=50&page=1")) return { data: page1 };

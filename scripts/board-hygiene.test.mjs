@@ -61,5 +61,17 @@ check("ignores 2-user even if stale", orchestratorParked([mkAt(24, ["attention/2
 check("reports idle minutes", orchestratorParked([mkAt(25, ["attention/0-orchestrator"], idle(5))], NOW)[0].idleMinutes >= 299);
 check("skips unparseable updated_at", orchestratorParked([mkAt(26, ["attention/0-orchestrator"], "not-a-date")], NOW).length === 0);
 
+// --- dual-read: numberless taxonomy (platform#247, paseo#1007) ---
+check("passes fully-routed numberless open", openRoutingGaps([mk(30, "x", ["attention/user", "state/verify"])]).length === 0);
+check("flags closed numberless attention/agent", closedStaleLabels([mk(31, "x", ["attention/agent", "state/done"])]).length === 1);
+check("flags closed numberless dep/blocked", closedStaleLabels([mk(32, "x", ["dep/blocked", "state/done"])]).length === 1);
+check("flags closed numberless priority/sos", closedStaleLabels([mk(33, "x", ["priority/sos", "state/done"])]).length === 1);
+check("flags closed numberless review/needed", closedStaleLabels([mk(34, "x", ["review/needed", "state/done"])]).length === 1);
+check("flags closed numberless non-terminal state", closedStaleLabels([mk(35, "x", ["state/verify"])]).length === 1);
+check("passes properly closed numberless", closedStaleLabels([mk(36, "x", ["attention/ignore", "state/done"])]).length === 0);
+check("flags numberless orchestrator idle > 2h", orchestratorParked([mkAt(37, ["attention/orchestrator"], idle(3))], NOW).length === 1);
+check("does not flag numberless orchestrator idle < 2h", orchestratorParked([mkAt(38, ["attention/orchestrator"], idle(1))], NOW).length === 0);
+check("ignores numberless agent even if stale", orchestratorParked([mkAt(39, ["attention/agent"], idle(9))], NOW).length === 0);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -884,27 +884,48 @@ export const TICKET_FILTERS: Array<{ id: TicketFilter; label: string }> = [
   { id: "verify", label: "Verify" },
 ];
 
+// Dual-read label aliases (platform#247): legacy numeric -> canonical numberless.
+const ATTENTION_ALIASES: Record<string, string> = {
+  "attention/0-orchestrator": "attention/orchestrator",
+  "attention/1-agent": "attention/agent",
+  "attention/2-user": "attention/user",
+};
+const STATE_ALIASES: Record<string, string> = {
+  "state/0-triage": "state/triage",
+  "state/1-wip": "state/wip",
+  "state/2-review": "state/review",
+  "state/3-verify": "state/verify",
+  "state/4-done": "state/done",
+};
+const canonicalAttention = (label: string): string => ATTENTION_ALIASES[label] ?? label;
+const canonicalState = (label: string): string => STATE_ALIASES[label] ?? label;
+
 export function ticketCountFor(tickets: Ticket[], filter: TicketFilter): number {
   const list = Array.isArray(tickets) ? tickets : [];
   switch (filter) {
     case "all":
       return list.length;
     case "needs-you":
-      return list.filter((t) => t.attention === "attention/2-user").length;
+      return list.filter((t) => canonicalAttention(t.attention) === "attention/user").length;
     case "needs-attention":
-      return list.filter((t) => t.attention.startsWith("attention/")).length;
+      return list.filter((t) => canonicalAttention(t.attention).startsWith("attention/")).length;
     case "triage-review":
       return list.filter(
         (t) =>
           t.status === "Review" ||
-          t.labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review")),
+          t.labels.some((l) => {
+            const state = canonicalState(String(l));
+            return state === "state/triage" || state === "state/review";
+          }),
       ).length;
     case "in-progress":
       return list.filter(
-        (t) => t.status === "In progress" || t.labels.some((l) => l.includes("state/1-wip")),
+        (t) =>
+          t.status === "In progress" ||
+          t.labels.some((l) => canonicalState(String(l)) === "state/wip"),
       ).length;
     case "verify":
-      return list.filter((t) => t.labels.some((l) => l.includes("state/3-verify"))).length;
+      return list.filter((t) => t.labels.some((l) => canonicalState(String(l)) === "state/verify")).length;
   }
 }
 
@@ -913,18 +934,24 @@ export function ticketMatchesFilter(ticket: Ticket, filter: TicketFilter): boole
     case "all":
       return true;
     case "needs-you":
-      return ticket.attention === "attention/2-user";
+      return canonicalAttention(ticket.attention) === "attention/user";
     case "needs-attention":
-      return ticket.attention.startsWith("attention/");
+      return canonicalAttention(ticket.attention).startsWith("attention/");
     case "triage-review":
       return (
         ticket.status === "Review" ||
-        ticket.labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"))
+        ticket.labels.some((l) => {
+          const state = canonicalState(String(l));
+          return state === "state/triage" || state === "state/review";
+        })
       );
     case "in-progress":
-      return ticket.status === "In progress" || ticket.labels.some((l) => l.includes("state/1-wip"));
+      return (
+        ticket.status === "In progress" ||
+        ticket.labels.some((l) => canonicalState(String(l)) === "state/wip")
+      );
     case "verify":
-      return ticket.labels.some((l) => l.includes("state/3-verify"));
+      return ticket.labels.some((l) => canonicalState(String(l)) === "state/verify");
   }
 }
 
@@ -980,13 +1007,16 @@ export function sortTickets(
 }
 
 export const ATTENTION_OWNER: Record<AttentionLabel, string> = {
+  "attention/orchestrator": "Orchestrator",
+  "attention/agent": "Agent",
+  "attention/user": "You",
   "attention/0-orchestrator": "Orchestrator",
   "attention/1-agent": "Agent",
   "attention/2-user": "You",
 };
 
 export function ownerLabel(attention: AttentionLabel): string {
-  return ATTENTION_OWNER[attention] ?? ATTENTION_OWNER["attention/1-agent"];
+  return ATTENTION_OWNER[attention] ?? ATTENTION_OWNER["attention/agent"];
 }
 
 // --- Queue ----------------------------------------------------------------

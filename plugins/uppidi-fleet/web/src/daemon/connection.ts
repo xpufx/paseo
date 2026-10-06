@@ -294,7 +294,7 @@ export class DaemonConnection {
     return issues.map((entry) => {
       const issue = (entry ?? {}) as Record<string, unknown>;
       const labels = Array.isArray(issue["labels"]) ? issue["labels"].map(String) : [];
-      const status = String(issue["state"] ?? "open") === "closed" ? "Done" : labels.includes("state/1-wip") ? "In progress" : labels.some((label) => label === "state/2-review" || label === "state/3-verify") ? "Review" : "Backlog";
+      const status = String(issue["state"] ?? "open") === "closed" ? "Done" : labels.includes("state/wip") || labels.includes("state/1-wip") ? "In progress" : labels.some((label) => label === "state/review" || label === "state/2-review" || label === "state/verify" || label === "state/3-verify") ? "Review" : "Backlog";
       return {
         number: Number(issue["number"] ?? 0),
         title: String(issue["title"] ?? ""),
@@ -304,7 +304,7 @@ export class DaemonConnection {
         )
           ? (status as CandidateIssue["status"])
           : "Backlog",
-        attention: labels.find((label) => label.startsWith("attention/")) ?? "attention/1-agent",
+        attention: labels.find((label) => label.startsWith("attention/")) ?? "attention/agent",
         branch: typeof issue["headRefName"] === "string" ? issue["headRefName"] : undefined,
         url: typeof issue["url"] === "string" ? issue["url"] : undefined,
         labels,

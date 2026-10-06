@@ -217,6 +217,22 @@ export type IssueSortField =
 
 export type SortDirection = "asc" | "desc";
 
+// Dual-read label aliases (platform#247): legacy numeric -> canonical numberless.
+const ATTENTION_ALIASES: Record<string, string> = {
+  "attention/0-orchestrator": "attention/orchestrator",
+  "attention/1-agent": "attention/agent",
+  "attention/2-user": "attention/user",
+};
+const STATE_ALIASES: Record<string, string> = {
+  "state/0-triage": "state/triage",
+  "state/1-wip": "state/wip",
+  "state/2-review": "state/review",
+  "state/3-verify": "state/verify",
+  "state/4-done": "state/done",
+};
+const canonicalAttention = (label: string): string => ATTENTION_ALIASES[label] ?? label;
+const canonicalState = (label: string): string => STATE_ALIASES[label] ?? label;
+
 export function filterIssues(
   issues: UppidiIssue[],
   preset: IssuePreset,
@@ -227,32 +243,33 @@ export function filterIssues(
     if (!issue) return false;
     // Partial RPC payloads may omit fields the client relies on. Normalize once
     // here so the presets and search below never dereference undefined (#510).
-    const attention = typeof issue.attention === "string" ? issue.attention : "";
+    const attention = canonicalAttention(typeof issue.attention === "string" ? issue.attention : "");
     const labels = Array.isArray(issue.labels) ? issue.labels : [];
+    const states = labels.map((l) => canonicalState(String(l)));
     let matchesPreset = true;
     switch (preset) {
       case "needs-you":
-        matchesPreset = attention === "attention/2-user";
+        matchesPreset = attention === "attention/user";
         break;
       case "needs-attention":
         matchesPreset =
-          attention.startsWith("attention/0-") ||
-          attention.startsWith("attention/1-") ||
-          attention.startsWith("attention/2-");
+          attention === "attention/orchestrator" ||
+          attention === "attention/agent" ||
+          attention === "attention/user";
         break;
       case "triage-review":
         matchesPreset =
           issue.status === "Review" ||
-          labels.some((l) => l.includes("state/0-triage") || l.includes("state/2-review"));
+          states.some((l) => l === "state/triage" || l === "state/review");
         break;
       case "in-progress":
         matchesPreset =
-          (issue.status === "In progress" && !labels.some((l) => l.includes("state/3-verify") || l.includes("state/4-done"))) ||
-          labels.some((l) => l.includes("state/1-wip"));
+          (issue.status === "In progress" && !states.some((l) => l === "state/verify" || l === "state/done")) ||
+          states.some((l) => l === "state/wip");
         break;
       case "verify":
         matchesPreset =
-          labels.some((l) => l.includes("state/3-verify"));
+          states.some((l) => l === "state/verify");
         break;
       case "all":
       default:

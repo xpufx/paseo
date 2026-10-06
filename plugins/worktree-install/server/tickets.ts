@@ -41,32 +41,41 @@ export async function resolveToken(host: string): Promise<string | null> {
   return null;
 }
 
-/** Operator attention, plus the two legacy spellings that mean the same thing. */
+/** Operator attention; accepts canonical numberless and legacy numeric spellings. */
 export function deriveAttention(labelNames: string[]): AttentionLabel {
   const normalized = labelNames.map((l) => l.trim().toLowerCase());
-  if (normalized.some((l) => l === "attention/2-user" || l === "attention/user" || l === "attention:user")) {
-    return "attention/2-user";
+  if (normalized.some((l) => l === "attention/user" || l === "attention/2-user" || l === "attention:user")) {
+    return "attention/user";
   }
   if (
     normalized.some(
-      (l) => l === "attention/0-orchestrator" || l === "attention/orchestrator" || l === "attention:orchestrator",
+      (l) =>
+        l === "attention/orchestrator" ||
+        l === "attention/0-orchestrator" ||
+        l === "attention:orchestrator",
     )
   ) {
-    return "attention/0-orchestrator";
+    return "attention/orchestrator";
   }
-  return "attention/1-agent";
+  return "attention/agent";
 }
 
 export function deriveStatus(state: string, labelNames: string[]): TicketStatus {
   if (state === "closed") return "Done";
+  const normalized = labelNames.map((l) => l.trim().toLowerCase());
   if (
-    labelNames.some(
-      (l) => l === "state/2-review" || l === "state/3-verify" || l.startsWith("review/"),
+    normalized.some(
+      (l) =>
+        l === "state/review" ||
+        l === "state/2-review" ||
+        l === "state/verify" ||
+        l === "state/3-verify" ||
+        l.startsWith("review/"),
     )
   ) {
     return "Review";
   }
-  if (labelNames.some((l) => l === "state/1-wip")) return "In progress";
+  if (normalized.some((l) => l === "state/wip" || l === "state/1-wip")) return "In progress";
   return "Backlog";
 }
 
@@ -148,7 +157,7 @@ export async function readTickets(input: {
       openCount: open.length,
       inFlightCount: open.filter((t) => t.status === "In progress").length,
       reviewCount: open.filter((t) => t.status === "Review").length,
-      needsYouCount: open.filter((t) => t.attention === "attention/2-user").length,
+      needsYouCount: open.filter((t) => t.attention === "attention/user").length,
     };
   } catch (err: unknown) {
     return fail(err instanceof Error ? err.message : String(err));

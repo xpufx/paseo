@@ -108,7 +108,7 @@ describe("issue state transition (#755)", () => {
     setIssueCommandRunnerForTest(null);
   });
 
-  it("transitions an issue to in_progress by adding state/1-wip and removing other state labels", async () => {
+  it("transitions an issue to in_progress by adding state/wip and removing other state labels", async () => {
     const executedCommands: string[][] = [];
     setIssueCommandRunnerForTest(async (args) => {
       executedCommands.push(args);
@@ -122,7 +122,7 @@ describe("issue state transition (#755)", () => {
     });
 
     assert.equal(res.ok, true);
-    assert.equal(res.appliedLabel, "state/1-wip");
+    assert.equal(res.appliedLabel, "state/wip");
     assert.equal(res.targetState, "in_progress");
 
     // Must have reopened and edited labels
@@ -132,12 +132,14 @@ describe("issue state transition (#755)", () => {
 
     const editCmd = executedCommands[1];
     assert.deepEqual(editCmd.slice(0, 3), ["issue", "edit", "755"]);
-    assert.ok(editCmd.includes("--add-label") && editCmd.includes("state/1-wip"));
-    assert.ok(editCmd.includes("--remove-label") && editCmd.includes("state/0-triage"));
-    assert.ok(editCmd.includes("--remove-label") && editCmd.includes("state/4-done"));
+    assert.ok(editCmd.includes("--add-label") && editCmd.includes("state/wip"));
+    assert.ok(editCmd.includes("--remove-label") && editCmd.includes("state/triage"));
+    assert.ok(editCmd.includes("--remove-label") && editCmd.includes("state/done"));
+    // Legacy numeric state labels are still cleared during the migration.
+    assert.ok(editCmd.includes("state/0-triage") && editCmd.includes("state/4-done"));
   });
 
-  it("transitions an issue to done by adding state/4-done and closing the issue", async () => {
+  it("transitions an issue to done by adding state/done and closing the issue", async () => {
     const executedCommands: string[][] = [];
     setIssueCommandRunnerForTest(async (args) => {
       executedCommands.push(args);
@@ -151,14 +153,14 @@ describe("issue state transition (#755)", () => {
     });
 
     assert.equal(res.ok, true);
-    assert.equal(res.appliedLabel, "state/4-done");
+    assert.equal(res.appliedLabel, "state/done");
     assert.equal(res.targetState, "done");
 
     // Must have edited labels and closed
     assert.ok(executedCommands.length >= 2, "must execute edit and close commands");
     const editCmd = executedCommands[0];
     assert.deepEqual(editCmd.slice(0, 3), ["issue", "edit", "755"]);
-    assert.ok(editCmd.includes("--add-label") && editCmd.includes("state/4-done"));
+    assert.ok(editCmd.includes("--add-label") && editCmd.includes("state/done"));
 
     const closeCmd = executedCommands[1];
     assert.deepEqual(closeCmd.slice(0, 3), ["issue", "close", "755"]);

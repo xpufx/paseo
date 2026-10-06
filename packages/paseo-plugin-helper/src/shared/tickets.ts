@@ -5,64 +5,139 @@ import { defineContract } from "./rpc.js";
 // Label taxonomy & definitions (issues #122, #189, #200)
 // ---------------------------------------------------------------------------
 
+// Canonical taxonomy is numberless (platform#247). Readers accept the legacy
+// numeric spellings too (dual-read) while the board migrates; `LEGACY_*` arrays
+// and `LABEL_ALIASES` keep the two spellings interchangeable.
 export const STATE_ORDER = [
+  "state/triage",
+  "state/wip",
+  "state/review",
+  "state/verify",
+  "state/done",
+] as const;
+export type StateLabel = (typeof STATE_ORDER)[number];
+
+export const LEGACY_STATE_ORDER = [
   "state/0-triage",
   "state/1-wip",
   "state/2-review",
   "state/3-verify",
   "state/4-done",
 ] as const;
-export type StateLabel = (typeof STATE_ORDER)[number];
 
 export const PRIORITY_ORDER = [
+  "priority/sos",
+  "priority/high",
+  "priority/normal",
+  "priority/low",
+  "priority/backburner",
+] as const;
+export type PriorityLabel = (typeof PRIORITY_ORDER)[number];
+
+export const LEGACY_PRIORITY_ORDER = [
   "priority/0-SOS",
   "priority/1-high",
   "priority/2-normal",
   "priority/3-low",
   "priority/4-backburner",
 ] as const;
-export type PriorityLabel = (typeof PRIORITY_ORDER)[number];
 
 export const ATTENTION_LABELS = [
+  "attention/orchestrator",
+  "attention/agent",
+  "attention/user",
+  "attention/ignore",
+] as const;
+export type AttentionLabel = (typeof ATTENTION_LABELS)[number];
+
+export const LEGACY_ATTENTION_LABELS = [
   "attention/0-orchestrator",
   "attention/1-agent",
   "attention/2-user",
   "attention/3-ignore",
 ] as const;
-export type AttentionLabel = (typeof ATTENTION_LABELS)[number];
 
 export const SPEC_LABELS = [
+  "spec/needed",
+  "spec/checklist",
+  "spec/approved",
+] as const;
+export type SpecLabel = (typeof SPEC_LABELS)[number];
+
+export const LEGACY_SPEC_LABELS = [
   "spec/0-needed",
   "spec/1-checklist",
   "spec/2-approved",
 ] as const;
-export type SpecLabel = (typeof SPEC_LABELS)[number];
 
-const STATE_SHORT: Record<string, string> = {
-  "state/0-triage": "Triage",
-  "state/1-wip": "WIP",
-  "state/2-review": "Review",
-  "state/3-verify": "Verify",
-  "state/4-done": "Done",
+function aliasPairs(
+  canonical: readonly string[],
+  legacy: readonly string[],
+): Record<string, string> {
+  const map: Record<string, string> = {};
+  canonical.forEach((name, i) => {
+    const legacyName = legacy[i];
+    if (legacyName) map[legacyName] = name;
+  });
+  return map;
+}
+
+/** Legacy numeric label -> canonical numberless label (all scopes). */
+export const LABEL_ALIASES: Record<string, string> = {
+  ...aliasPairs(STATE_ORDER, LEGACY_STATE_ORDER),
+  ...aliasPairs(PRIORITY_ORDER, LEGACY_PRIORITY_ORDER),
+  ...aliasPairs(ATTENTION_LABELS, LEGACY_ATTENTION_LABELS),
+  ...aliasPairs(SPEC_LABELS, LEGACY_SPEC_LABELS),
+  "review/0-needed": "review/needed",
+  "review/1-changes-requested": "review/changes-requested",
+  "review/2-approved": "review/approved",
+  "format/0-needed": "format/needed",
+  "format/1-ok": "format/ok",
+  "size/0-cheap": "size/cheap",
+  "size/1-medium": "size/medium",
+  "size/2-expensive": "size/expensive",
+  "size/3-chunk": "size/chunk",
+  "linked/0-needs-split": "linked/needs-split",
+  "linked/1-peer": "linked/peer",
+  "linked/2-done": "linked/done",
+  "upstream/0-explore": "upstream/explore",
+  "upstream/1-blocked": "upstream/blocked",
+  "upstream/2-aligned": "upstream/aligned",
 };
 
-const PRIORITY_SHORT: Record<string, string> = {
-  "priority/0-SOS": "SOS",
-  "priority/1-high": "High",
-  "priority/2-normal": "Normal",
-  "priority/3-low": "Low",
-  "priority/4-backburner": "Parked",
+/** Canonical numberless spelling of a label; unknown labels pass through. */
+export function canonicalLabel(label: string): string {
+  return LABEL_ALIASES[label] ?? label;
+}
+
+/** True when two spellings name the same scoped label under the alias map. */
+export function sameLabel(a: string, b: string): boolean {
+  return canonicalLabel(a) === canonicalLabel(b);
+}
+
+const CANONICAL_SHORT: Record<string, string> = {
+  "state/triage": "Triage",
+  "state/wip": "WIP",
+  "state/review": "Review",
+  "state/verify": "Verify",
+  "state/done": "Done",
+  "priority/sos": "SOS",
+  "priority/high": "High",
+  "priority/normal": "Normal",
+  "priority/low": "Low",
+  "priority/backburner": "Parked",
 };
 
 /** Compact display alias for a scoped label ("state/1-wip" -> "WIP"). */
 export function shortLabelName(label: string): string {
-  return STATE_SHORT[label] ?? PRIORITY_SHORT[label] ?? label;
+  return CANONICAL_SHORT[canonicalLabel(label)] ?? label;
 }
 
-/** The issue's current `state/*` label, or null when it carries none. */
+/** The issue's current `state/*` label (canonical), or null when it carries none. */
 export function currentStateLabel(labels: string[]): string | null {
   for (const label of labels) {
-    if ((STATE_ORDER as readonly string[]).includes(label)) return label;
+    const canonical = canonicalLabel(label);
+    if ((STATE_ORDER as readonly string[]).includes(canonical)) return canonical;
   }
   return null;
 }
@@ -70,15 +145,16 @@ export function currentStateLabel(labels: string[]): string | null {
 /** The issue's current `priority/*` label, defaulting to normal per spec §4.2. */
 export function currentPriorityLabel(labels: string[]): string {
   for (const label of labels) {
-    if ((PRIORITY_ORDER as readonly string[]).includes(label)) return label;
+    const canonical = canonicalLabel(label);
+    if ((PRIORITY_ORDER as readonly string[]).includes(canonical)) return canonical;
   }
-  return "priority/2-normal";
+  return "priority/normal";
 }
 
 /** Next `state/*` promotion step, or null when already done. */
 export function nextStateLabel(labels: string[]): string | null {
   const current = currentStateLabel(labels);
-  if (!current) return "state/1-wip";
+  if (!current) return "state/wip";
   const idx = (STATE_ORDER as readonly string[]).indexOf(current);
   if (idx < 0 || idx + 1 >= STATE_ORDER.length) return null;
   return STATE_ORDER[idx + 1];
@@ -953,11 +1029,23 @@ const LABEL_DEFS: LabelDefinition[] = [
     exclusive: true,
     description: `Workflow state ${i}`,
   })),
+  ...LEGACY_STATE_ORDER.map((name, i): LabelDefinition => ({
+    name,
+    color: STATE_COLORS[i] ?? "#59636e",
+    exclusive: true,
+    description: `Workflow state ${i} (legacy numeric)`,
+  })),
   ...PRIORITY_ORDER.map((name, i): LabelDefinition => ({
     name,
     color: PRIORITY_COLORS[i] ?? "#59636e",
     exclusive: true,
     description: `Priority ${i}`,
+  })),
+  ...LEGACY_PRIORITY_ORDER.map((name, i): LabelDefinition => ({
+    name,
+    color: PRIORITY_COLORS[i] ?? "#59636e",
+    exclusive: true,
+    description: `Priority ${i} (legacy numeric)`,
   })),
   ...ATTENTION_LABELS.map((name): LabelDefinition => ({
     name,
@@ -965,11 +1053,23 @@ const LABEL_DEFS: LabelDefinition[] = [
     exclusive: true,
     description: "Who acts next",
   })),
+  ...LEGACY_ATTENTION_LABELS.map((name): LabelDefinition => ({
+    name,
+    color: "#8250df",
+    exclusive: true,
+    description: "Who acts next (legacy numeric)",
+  })),
   ...SPEC_LABELS.map((name): LabelDefinition => ({
     name,
     color: "#0e7c6b",
     exclusive: true,
     description: "Spec readiness",
+  })),
+  ...LEGACY_SPEC_LABELS.map((name): LabelDefinition => ({
+    name,
+    color: "#0e7c6b",
+    exclusive: true,
+    description: "Spec readiness (legacy numeric)",
   })),
 ];
 

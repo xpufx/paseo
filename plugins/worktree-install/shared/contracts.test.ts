@@ -50,7 +50,7 @@ describe("contracts", () => {
 
     // A payload with defaulted fields omitted still parses.
     const ticket = TicketSchema.parse({ number: 1, title: "t", state: "open", repo: "org/repo", status: "Backlog" });
-    assert.equal(ticket.attention, "attention/1-agent");
+    assert.equal(ticket.attention, "attention/agent");
     assert.deepEqual(ticket.labels, []);
     assert.equal(ticket.comments, 0);
 

@@ -37,6 +37,9 @@ export function defineContract<TName extends string, TInput extends z.ZodType, T
 }
 
 export const AttentionLabelSchema = z.enum([
+  "attention/orchestrator",
+  "attention/agent",
+  "attention/user",
   "attention/0-orchestrator",
   "attention/1-agent",
   "attention/2-user",
@@ -206,7 +209,7 @@ export const TicketSchema = z.object({
   state: z.string(),
   repo: z.string(),
   status: TicketStatusSchema,
-  attention: AttentionLabelSchema.default("attention/1-agent"),
+  attention: AttentionLabelSchema.default("attention/agent"),
   branch: z.string().optional(),
   comments: z.number().default(0),
   labels: z.array(z.string()).default([]),

@@ -214,6 +214,16 @@ carry `attention/2-user`, or the operator will not see it. When you apply it,
 say in the comment exactly what decision is required and what the options are.
 
 ### 5.2 Registries are the authority; labels are a projection
+
+> [!IMPORTANT]
+> **Taxonomy migration (dual-read, platform#247 / paseo#1007)**: the board is moving to the
+> numberless label taxonomy. Both spellings mean the same thing during the transition —
+> accept either when reading, and prefer the numberless form when writing.
+> `attention/0-orchestrator`=`attention/orchestrator`, `attention/1-agent`=`attention/agent`,
+> `attention/2-user`=`attention/user`, `priority/0-SOS`=`priority/sos`,
+> `state/0-triage`=`state/triage`, `state/1-wip`=`state/wip`, `state/2-review`=`state/review`,
+> `state/3-verify`=`state/verify`, `state/4-done`=`state/done`. Never delete a numeric
+> label that is still referenced by an in-flight ticket.
 | Source | Authority for |
 | --- | --- |
 | Hook Router (`scripts/frontdesk-info`, `GET /frontdesk`) | **Who the Front Desk is.** (backed by `frontdesk.json` on daemon host) |

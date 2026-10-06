@@ -355,8 +355,8 @@ export function isFrontDeskEvent(body: any): boolean {
 }
 
 const SLASH_BYPASS_RE = /(?:^|\s)\/(?:orchestrator|hold|rework|approve|verify|done|close|instruction|agent|sos|stop)\b/i;
-const BYPASS_LABELS = new Set(["priority/0-sos", "flag/stop-work", "attention/frontdesk", "ping/req"]);
-const SOS_STATE_LABELS = new Set(["priority/0-sos", "flag/stop-work"]);
+const BYPASS_LABELS = new Set(["priority/sos", "priority/0-sos", "flag/stop-work", "attention/frontdesk", "ping/req"]);
+const SOS_STATE_LABELS = new Set(["priority/sos", "priority/0-sos", "flag/stop-work"]);
 
 export function isBypassEvent(event: string, body: any): boolean {
   if (!body || typeof body !== "object") return false;
@@ -417,14 +417,14 @@ export function sosStateOf(event: string, body: any): string | null {
 /** Shared Forgejo account every autonomous agent acts as. */
 export const SHARED_AGENT_ACTOR = "xpufx";
 
-/** The exclusive orchestrator attention signal. */
-export const ORCHESTRATOR_ATTENTION_LABEL = "attention/0-orchestrator";
+/** The exclusive orchestrator attention signal (canonical numberless, platform#247). */
+export const ORCHESTRATOR_ATTENTION_LABEL = "attention/orchestrator";
 
 /** `flag/stop-work` is a hard circuit breaker, including for SOS. */
 export const LABEL_TRIAGE_STOP_WORK_LABEL = "flag/stop-work";
 
 /** SOS breaks through completed/ignored terminal states. */
-export const SOS_LABEL = "priority/0-SOS";
+export const SOS_LABEL = "priority/sos";
 
 /**
  * Terminal labels that suppress triage: the ticket is done, deliberately
@@ -433,14 +433,20 @@ export const SOS_LABEL = "priority/0-SOS";
  */
 export const LABEL_TRIAGE_TERMINAL_LABELS: readonly string[] = [
   "flag/wont-do",
+  "state/done",
   "state/4-done",
+  "attention/ignore",
   "attention/3-ignore",
   "attention/2-ignore",
   "confirmed-done",
 ];
 
 /** Terminal acceptance labels that permit closure without reopening. */
-export const CLOSE_GUARD_ACCEPTED_LABELS: readonly string[] = ["state/4-done", "confirmed-done"];
+export const CLOSE_GUARD_ACCEPTED_LABELS: readonly string[] = [
+  "state/done",
+  "state/4-done",
+  "confirmed-done",
+];
 
 /** Default close-guard target actor list. */
 export const DEFAULT_CLOSE_GUARD_TARGET_ACTORS: readonly string[] = ["xpufx"];
@@ -459,7 +465,7 @@ export const CLOSE_GUARD_POLICY_COMMENT = [
 ].join("\n");
 
 /** Labels applied to auto-created CI failure issues (#865). */
-export const CI_FAILURE_LABELS: readonly string[] = ["kind/bug", "priority/1-high", "attention/0-orchestrator"];
+export const CI_FAILURE_LABELS: readonly string[] = ["kind/bug", "priority/high", "attention/orchestrator"];
 
 export interface DirectActionDecision {
   act: boolean;
@@ -468,6 +474,30 @@ export interface DirectActionDecision {
 
 export function normalizeLabelName(raw: unknown): string {
   return String(raw ?? "").trim().toLowerCase();
+}
+
+// Legacy numeric -> canonical numberless, lowercased (platform#247 dual-read).
+const LABEL_ALIASES: Readonly<Record<string, string>> = {
+  "state/0-triage": "state/triage",
+  "state/1-wip": "state/wip",
+  "state/2-review": "state/review",
+  "state/3-verify": "state/verify",
+  "state/4-done": "state/done",
+  "attention/0-orchestrator": "attention/orchestrator",
+  "attention/1-agent": "attention/agent",
+  "attention/2-user": "attention/user",
+  "attention/3-ignore": "attention/ignore",
+  "priority/0-sos": "priority/sos",
+  "priority/1-high": "priority/high",
+  "priority/2-normal": "priority/normal",
+  "priority/3-low": "priority/low",
+  "priority/4-backburner": "priority/backburner",
+};
+
+/** Lowercased canonical spelling; legacy numeric folds into numberless. */
+export function canonicalLabelName(raw: unknown): string {
+  const normalized = normalizeLabelName(raw);
+  return LABEL_ALIASES[normalized] ?? normalized;
 }
 
 /** Label names from an issue/pull_request payload or a fetched issue body. */
@@ -505,17 +535,17 @@ export function labelTriageDecision(input: {
   if (input.isPullRequest) {
     return { act: false, reason: "pull request activity" };
   }
-  const labels = new Set(input.labels.map(normalizeLabelName));
-  if (labels.has(normalizeLabelName(LABEL_TRIAGE_STOP_WORK_LABEL))) {
+  const labels = new Set(input.labels.map(canonicalLabelName));
+  if (labels.has(canonicalLabelName(LABEL_TRIAGE_STOP_WORK_LABEL))) {
     return { act: false, reason: `${LABEL_TRIAGE_STOP_WORK_LABEL} is set` };
   }
-  if (!labels.has(normalizeLabelName(SOS_LABEL))) {
-    const terminal = LABEL_TRIAGE_TERMINAL_LABELS.find((l) => labels.has(normalizeLabelName(l)));
+  if (!labels.has(canonicalLabelName(SOS_LABEL))) {
+    const terminal = LABEL_TRIAGE_TERMINAL_LABELS.find((l) => labels.has(canonicalLabelName(l)));
     if (terminal) {
       return { act: false, reason: `terminal label ${terminal} is set` };
     }
   }
-  if (labels.has(normalizeLabelName(ORCHESTRATOR_ATTENTION_LABEL))) {
+  if (labels.has(canonicalLabelName(ORCHESTRATOR_ATTENTION_LABEL))) {
     return { act: false, reason: "already assigned to orchestrator" };
   }
   return { act: true, reason: "human activity requires orchestrator attention" };
@@ -657,7 +687,7 @@ export const REPO_ONBOARDING_ISSUE_TITLE =
 /** Labels applied to the onboarding issue. */
 export const REPO_ONBOARDING_ISSUE_LABELS: readonly string[] = [
   ORCHESTRATOR_ATTENTION_LABEL,
-  "priority/1-high",
+  "priority/high",
 ];
 
 /** Body of the auto-created onboarding issue. */

@@ -106,10 +106,10 @@ describe("UppidiFleetKanbanBoard (#755)", () => {
       KANBAN_COLUMNS.map((c) => c.id),
       ["backlog", "in_progress", "review", "done"],
     );
-    assert.equal(KANBAN_COLUMNS[0].stateLabel, "state/0-triage");
-    assert.equal(KANBAN_COLUMNS[1].stateLabel, "state/1-wip");
-    assert.equal(KANBAN_COLUMNS[2].stateLabel, "state/2-review");
-    assert.equal(KANBAN_COLUMNS[3].stateLabel, "state/4-done");
+    assert.equal(KANBAN_COLUMNS[0].stateLabel, "state/triage");
+    assert.equal(KANBAN_COLUMNS[1].stateLabel, "state/wip");
+    assert.equal(KANBAN_COLUMNS[2].stateLabel, "state/review");
+    assert.equal(KANBAN_COLUMNS[3].stateLabel, "state/done");
   });
 
   describe("getIssueKanbanColumn mapping", () => {

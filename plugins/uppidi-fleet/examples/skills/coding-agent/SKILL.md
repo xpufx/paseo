@@ -142,6 +142,21 @@ Actual comment text comes first. The agent envelope is appended as a clean, sing
 
 ## 5. Steering Labels & Operational Directives
 
+> [!IMPORTANT]
+> **Taxonomy migration (dual-read, platform#247 / paseo#1007)**: the board is moving to the
+> numberless label taxonomy. Both spellings mean the same thing during the transition —
+> accept either when reading, and prefer the numberless form when writing.
+> `state/0-triage`=`state/triage`, `state/1-wip`=`state/wip`, `state/2-review`=`state/review`,
+> `state/3-verify`=`state/verify`, `state/4-done`=`state/done`,
+> `attention/0-orchestrator`=`attention/orchestrator`, `attention/1-agent`=`attention/agent`,
+> `attention/2-user`=`attention/user`, `priority/0-SOS`=`priority/sos`,
+> `priority/1-high`=`priority/high`, `priority/2-normal`=`priority/normal`,
+> `priority/3-low`=`priority/low`, `priority/4-backburner`=`priority/backburner`,
+> `spec/0-needed`=`spec/needed`, `spec/1-checklist`=`spec/checklist`,
+> `spec/2-approved`=`spec/approved`, `review/0-needed`=`review/needed`,
+> `review/1-changes-requested`=`review/changes-requested`, `review/2-approved`=`review/approved`.
+> Never delete a numeric label that is still referenced by an in-flight ticket.
+
 Labels are how the Orchestrator communicates the **state, bounds, and steering signals** of **your assigned ticket**. They are not a queue for a worker to browse or self-dispatch from — read them only to understand the work you were handed.
 
 - **Precedence Rule (Recent Updates Over Labels)**: On your assigned ticket, if there is a recent update (`updated_at` delta), **recent comments and feedback ALWAYS take precedence over static labels**. Never rely on a static label and move on without inspecting recent activity. **Read the 3 latest comments first** to understand the current state; if that context is inconclusive or references earlier requirements, read a few more comments backwards. If a human or peer agent posted new feedback or instructions after the last agent completion, that feedback governs your execution.

@@ -101,7 +101,9 @@ export function FleetView({
 
   const fullTree = useMemo(() => buildTree(agents), [agents]);
   const registeredFrontDeskId =
-    tickets.find((t) => t.branch && t.attention === "attention/2-user")?.branch ?? null;
+    tickets.find(
+      (t) => t.branch && (t.attention === "attention/user" || t.attention === "attention/2-user"),
+    )?.branch ?? null;
 
   const filteredTree = useMemo(
     () =>

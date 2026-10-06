@@ -16,4 +16,4 @@
 // resolves on any machine holding the branch worktree.
 export const HELPER_VERSION = "0.4.0-beta.12";
 export const HELPER_SERVED_FROM = "checkout";
-export const HELPER_REVISION = "sha256:6202feb14fca";
+export const HELPER_REVISION = "sha256:82cbad538ab3";

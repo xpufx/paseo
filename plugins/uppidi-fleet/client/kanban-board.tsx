@@ -25,28 +25,28 @@ export const KANBAN_COLUMNS: KanbanColumnDef[] = [
   {
     id: "backlog",
     title: "Backlog / Triage",
-    stateLabel: "state/0-triage",
+    stateLabel: "state/triage",
     tone: "neutral",
     description: "Issues awaiting triage or in backlog",
   },
   {
     id: "in_progress",
     title: "In Progress",
-    stateLabel: "state/1-wip",
+    stateLabel: "state/wip",
     tone: "accent",
     description: "Work actively in progress",
   },
   {
     id: "review",
     title: "Review / Verify",
-    stateLabel: "state/2-review",
+    stateLabel: "state/review",
     tone: "warning",
     description: "Work under review or ready to verify",
   },
   {
     id: "done",
     title: "Done",
-    stateLabel: "state/4-done",
+    stateLabel: "state/done",
     tone: "success",
     description: "Work completed and verified",
   },
@@ -59,7 +59,7 @@ export function getIssueKanbanColumn(issue: UppidiIssue): KanbanColumnId {
   if (
     issue.status === "Done" ||
     issue.state === "closed" ||
-    normalized.some((l) => l === "state/4-done" || l.startsWith("state/4"))
+    normalized.some((l) => l === "state/done" || l === "state/4-done" || l.startsWith("state/4"))
   ) {
     return "done";
   }
@@ -67,6 +67,8 @@ export function getIssueKanbanColumn(issue: UppidiIssue): KanbanColumnId {
     issue.status === "Review" ||
     normalized.some(
       (l) =>
+        l === "state/review" ||
+        l === "state/verify" ||
         l === "state/2-review" ||
         l === "state/3-verify" ||
         l.startsWith("state/2") ||
@@ -78,7 +80,7 @@ export function getIssueKanbanColumn(issue: UppidiIssue): KanbanColumnId {
   }
   if (
     issue.status === "In progress" ||
-    normalized.some((l) => l === "state/1-wip" || l.startsWith("state/1"))
+    normalized.some((l) => l === "state/wip" || l === "state/1-wip" || l.startsWith("state/1"))
   ) {
     return "in_progress";
   }
@@ -89,6 +91,9 @@ const ATTENTION_CONFIG: Record<
   AttentionLabel,
   { label: string; variant: "neutral" | "info" | "warning" }
 > = {
+  "attention/orchestrator": { label: "Orchestrator", variant: "info" },
+  "attention/agent": { label: "Agent", variant: "neutral" },
+  "attention/user": { label: "You", variant: "warning" },
   "attention/0-orchestrator": { label: "Orchestrator", variant: "info" },
   "attention/1-agent": { label: "Agent", variant: "neutral" },
   "attention/2-user": { label: "You", variant: "warning" },

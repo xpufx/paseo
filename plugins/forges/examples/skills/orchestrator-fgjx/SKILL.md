@@ -115,6 +115,20 @@ routine webhook or dismiss it because it lacks a conventional command verb.
 
 ## 9. Forgejo labels via `fgjx`
 
+> [!IMPORTANT]
+> **Taxonomy migration (dual-read, platform#247 / paseo#1007)**: the board is moving to the
+> numberless label taxonomy. Both spellings mean the same thing during the transition —
+> accept either when reading, and prefer the numberless form when writing.
+> `state/0-triage`=`state/triage`, `state/1-wip`=`state/wip`, `state/2-review`=`state/review`,
+> `state/3-verify`=`state/verify`, `state/4-done`=`state/done`,
+> `attention/0-orchestrator`=`attention/orchestrator`, `attention/1-agent`=`attention/agent`,
+> `attention/2-user`=`attention/user`, `priority/0-SOS`=`priority/sos`,
+> `priority/1-high`=`priority/high`, `priority/2-normal`=`priority/normal`,
+> `spec/0-needed`=`spec/needed`, `spec/1-checklist`=`spec/checklist`,
+> `spec/2-approved`=`spec/approved`, `review/0-needed`=`review/needed`,
+> `review/2-approved`=`review/approved`. Never delete a numeric label still referenced
+> by an in-flight ticket.
+
 - `fgjx issue edit --add-label` resolves each name to an id and writes it.
   Comma-joined values are split, and an **unknown name fails non-zero** with
   nothing written. Repeating the flag is the most portable form:

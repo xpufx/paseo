@@ -4,16 +4,16 @@ import { deriveAttention, deriveBranch, deriveStatus, normalizeIssue } from "./t
 
 describe("attention ownership", () => {
   it("promotes the operator above the orchestrator", () => {
-    assert.equal(deriveAttention(["attention/2-user", "attention/0-orchestrator"]), "attention/2-user");
-    assert.equal(deriveAttention(["attention/0-orchestrator"]), "attention/0-orchestrator");
-    assert.equal(deriveAttention(["size/0-cheap"]), "attention/1-agent");
-    assert.equal(deriveAttention([]), "attention/1-agent");
+    assert.equal(deriveAttention(["attention/2-user", "attention/0-orchestrator"]), "attention/user");
+    assert.equal(deriveAttention(["attention/0-orchestrator"]), "attention/orchestrator");
+    assert.equal(deriveAttention(["size/0-cheap"]), "attention/agent");
+    assert.equal(deriveAttention([]), "attention/agent");
   });
 
   it("accepts the two legacy spellings of the operator signal", () => {
-    assert.equal(deriveAttention(["attention/user"]), "attention/2-user");
-    assert.equal(deriveAttention(["attention:user"]), "attention/2-user");
-    assert.equal(deriveAttention(["Attention/User"]), "attention/2-user");
+    assert.equal(deriveAttention(["attention/user"]), "attention/user");
+    assert.equal(deriveAttention(["attention:user"]), "attention/user");
+    assert.equal(deriveAttention(["Attention/User"]), "attention/user");
   });
 });
 
@@ -62,7 +62,7 @@ describe("normalizeIssue", () => {
     // The bare repository name is what the row and scope chips show.
     assert.equal(ticket.repo, "repo");
     assert.equal(ticket.status, "In progress");
-    assert.equal(ticket.attention, "attention/2-user");
+    assert.equal(ticket.attention, "attention/user");
     assert.equal(ticket.branch, "feat/629-alt");
     assert.equal(ticket.comments, 4);
     assert.deepEqual(ticket.labels, ["state/1-wip", "attention/2-user"]);
@@ -75,6 +75,6 @@ describe("normalizeIssue", () => {
     assert.deepEqual(ticket.labels, []);
     assert.equal(ticket.comments, 0);
     assert.equal(ticket.branch, undefined);
-    assert.equal(ticket.attention, "attention/1-agent");
+    assert.equal(ticket.attention, "attention/agent");
   });
 });
