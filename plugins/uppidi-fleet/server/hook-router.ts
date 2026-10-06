@@ -528,8 +528,8 @@ export function parseTargetActors(
 }
 
 /**
- * Close guard decision (#847). A targeted actor closing a non-terminal issue
- * is intercepted; terminal acceptance labels allow a legitimate closure.
+ * Close guard decision (#847, #996). A targeted autonomous actor closing an issue
+ * is always intercepted and reopened; terminal acceptance labels do not bypass the guard.
  */
 export function closeGuardDecision(input: {
   actor: string;
@@ -548,12 +548,7 @@ export function closeGuardDecision(input: {
   if (input.isPullRequest) {
     return { act: false, reason: "pull request activity" };
   }
-  const accepted = new Set((input.acceptedLabels ?? CLOSE_GUARD_ACCEPTED_LABELS).map(normalizeLabelName));
-  const match = input.labels.map(normalizeLabelName).find((l) => accepted.has(l));
-  if (match) {
-    return { act: false, reason: `terminal acceptance label ${match} is set` };
-  }
-  return { act: true, reason: "targeted actor closed a non-terminal issue" };
+  return { act: true, reason: "targeted actor closed an issue" };
 }
 
 // ---------------------------------------------------------------------------

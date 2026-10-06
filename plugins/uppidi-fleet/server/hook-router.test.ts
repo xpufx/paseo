@@ -5723,16 +5723,16 @@ describe("hook-router direct-action guards (#847)", () => {
       assert.match(d.reason, /pull request/);
     });
 
-    it("skips terminal acceptance labels", () => {
+    it("does not bypass for terminal acceptance labels (#996)", () => {
       for (const label of CLOSE_GUARD_ACCEPTED_LABELS) {
         const d = closeGuardDecision({ ...target, labels: [label] });
-        assert.equal(d.act, false, `expected ${label} to allow closure`);
-        assert.match(d.reason, /acceptance label/);
+        assert.equal(d.act, true, `expected ${label} to be intercepted`);
+        assert.match(d.reason, /targeted actor closed an issue/);
       }
     });
 
-    it("acts when a target actor closes a non-terminal issue", () => {
-      const d = closeGuardDecision({ ...target, labels: ["kind/bug"] });
+    it("acts when a target actor closes an issue regardless of labels", () => {
+      const d = closeGuardDecision({ ...target, labels: ["kind/bug", "state/4-done", "confirmed-done"] });
       assert.equal(d.act, true);
     });
 
@@ -5741,11 +5741,6 @@ describe("hook-router direct-action guards (#847)", () => {
       assert.equal(d.act, true);
       const skipped = closeGuardDecision({ ...target, actor: "dave", targetActors: ["bob", "carol"] });
       assert.equal(skipped.act, false);
-    });
-
-    it("supports custom accepted labels", () => {
-      const d = closeGuardDecision({ ...target, labels: ["state/3-verify"], acceptedLabels: ["state/3-verify"] });
-      assert.equal(d.act, false);
     });
   });
 
@@ -5890,12 +5885,28 @@ describe("hook-router direct-action guards (#847)", () => {
       assert.equal(requests.length, 0);
     });
 
-    it("allows closure when a terminal acceptance label is present", async () => {
+    it("reopens even when a terminal acceptance label is present (#996)", async () => {
       const router = makeRouter();
-      installFetch(() => ({ data: { number: 7, labels: [{ name: "state/4-done" }] } }));
-      const res = await router.runCloseGuard(issueBody("closed", { actor: "xpufx" }));
-      assert.equal(res.acted, false);
-      assert.equal(requests.filter((r) => r.method === "PATCH").length, 0);
+      installFetch((req) => {
+        if (req.method === "GET") {
+          return {
+            data: {
+              number: 7,
+              title: "Bug",
+              state: "closed",
+              labels: [{ name: "state/4-done" }],
+              html_url: `${REPO_URL}/issues/7`,
+            },
+          };
+        }
+        if (req.method === "PATCH") return { data: { number: 7, state: "open" } };
+        if (req.method === "POST" && req.url.endsWith("/comments")) return { data: { id: 1 } };
+        return { status: 404 };
+      });
+      const res = await router.runCloseGuard(issueBody("closed", { actor: "xpufx", number: 7, state: "closed" }));
+      assert.equal(res.acted, true);
+      assert.equal(res.reopened, true);
+      assert.equal(requests.filter((r) => r.method === "PATCH").length, 1);
     });
 
     it("still reopens when the policy comment fails", async () => {
