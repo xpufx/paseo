@@ -81,7 +81,7 @@ const DATA: TopTimelineTelemetryData = {
   agentProvider: "antigravity",
   agentTitle: "Front Desk",
   branch: "main",
-  worktree: "/home/xpufx/worktrees/front-desk",
+  worktree: "/home/dev-user/worktrees/front-desk",
   uptimeSeconds: 101_000,
   toolCalls: 137,
   toolErrors: 0,
