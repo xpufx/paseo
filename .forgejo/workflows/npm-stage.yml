@@ -122,34 +122,12 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/npm/node_modules/.bin:$PATH"
           echo "Verifying staged packages in the registry staging area..."
-          node <<'NODE_EOF'
-            const fs = require("fs");
-            const { execFileSync } = require("child_process");
-            const manifest = JSON.parse(fs.readFileSync("publish-stage/manifest.json", "utf8"));
-            const packages = Array.isArray(manifest.packages) ? manifest.packages : [];
-            let unverified = 0;
-            for (const p of packages) {
-              try {
-                const out = execFileSync("npm", ["stage", "list", p.publishAs, "--json"], { encoding: "utf8" });
-                const stages = JSON.parse(out);
-                const hasVersion = Array.isArray(stages) && stages.some((s) => s.packageName === p.publishAs && s.version === p.version);
-                if (hasVersion) {
-                  console.log(`[post-stage-verify] OK: ${p.publishAs}@${p.version} found in staging area.`);
-                } else {
-                  console.error(`[post-stage-verify] FAIL: ${p.publishAs}@${p.version} missing from npm stage list!`);
-                  unverified++;
-                }
-              } catch (err) {
-                console.error(`[post-stage-verify] ERROR inspecting stage list for ${p.publishAs}: ${err.message}`);
-                unverified++;
-              }
-            }
-            if (unverified > 0) {
-              console.error(`::error::Post-stage verification failed: ${unverified} package(s) unverified in registry staging area`);
-              process.exit(1);
-            }
-            console.log("[post-stage-verify] All staged packages successfully verified in registry staging area.");
-          NODE_EOF
+          # Reads the per-package staging outcome the stager wrote to
+          # manifest.json. Already-published versions were deliberately skipped
+          # by the stager (npm cannot restage them), so they are live rather than
+          # missing; only versions the stager actually submitted are checked
+          # against `npm stage list` (xpufx-org/paseo#1002).
+          node scripts/npm-stage-native.mjs --verify-manifest=publish-stage/manifest.json
 
       - name: Upload publish-stage/ artifact
         # The Forgejo-maintained fork has the GHES check removed; the upstream

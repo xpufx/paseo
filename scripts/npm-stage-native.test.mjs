@@ -6,6 +6,7 @@ import process from "node:process";
 import {
   approvalGuidance,
   assertApprovable,
+  classifyOutcome,
   formatOutcomeTable,
   hasStagedVersion,
   isNotFoundError,
@@ -20,6 +21,10 @@ import {
   shouldFailBatch,
   stagePackage,
   stagePackages,
+  stagingSummary,
+  verifyMain,
+  verifyStagedPackages,
+  writeStagingOutcomes,
 } from "./npm-stage-native.mjs";
 
 let pass = 0;
@@ -335,6 +340,119 @@ check("real version is not a placeholder", isPlaceholderVersion("1.2.3") === fal
   check("empty batch never fails", shouldFailBatch([]) === false);
   check("all-placeholder batch fails", shouldFailBatch([{ outcome: "placeholder" }]) === true);
   check("a single skip keeps the batch green", shouldFailBatch([{ outcome: "skipped" }]) === false);
+}
+
+{
+  // #1002: an already-published version is live, so verification must not look
+  // for it in the staging area.
+  const { run, calls } = fakeNpm({ stageLists: [[]] });
+  const manifest = {
+    packages: [entry],
+    staging: { packages: [{ publishAs: entry.publishAs, version: entry.version, outcome: "skipped_already_published" }] },
+  };
+  const result = verifyStagedPackages(manifest, { run });
+  check("already-published package verifies as skipped", result.skipped.length === 1 && result.failed.length === 0);
+  check("already-published package never queries the stage list", calls.length === 0);
+  check("all-skipped run has nothing to verify", result.verified.length === 0);
+}
+
+{
+  // Mixed batch: only the staged package is checked against the registry.
+  const staged = { publishAs: "@xpufx/paseo-staged", version: "2.0.0" };
+  const published = { publishAs: "@xpufx/paseo-published", version: "1.0.0" };
+  const { run, calls } = fakeNpm({ stageLists: [[{ packageName: staged.publishAs, version: staged.version, id: "stage-1" }]] });
+  const manifest = {
+    packages: [staged, published],
+    staging: { packages: [
+      { publishAs: staged.publishAs, version: staged.version, outcome: "staged" },
+      { publishAs: published.publishAs, version: published.version, outcome: "skipped_already_published" },
+    ] },
+  };
+  const result = verifyStagedPackages(manifest, { run });
+  check("mixed batch verifies the staged package", result.verified.length === 1 && result.verified[0].publishAs === staged.publishAs);
+  check("mixed batch skips the published package", result.skipped.length === 1 && result.failed.length === 0);
+  check("mixed batch only queries the staged package", calls.length === 1 && calls[0][1][2] === staged.publishAs);
+}
+
+{
+  // A genuinely staged package must still fail if it is absent from the registry.
+  const { run } = fakeNpm({ stageLists: [[]] });
+  const manifest = {
+    packages: [entry],
+    staging: { packages: [{ publishAs: entry.publishAs, version: entry.version, outcome: "staged" }] },
+  };
+  const result = verifyStagedPackages(manifest, { run });
+  check("staged package missing from the registry fails", result.failed.length === 1 && result.verified.length === 0);
+}
+
+{
+  // A staging failure or placeholder is fatal here too, even though the stage
+  // step would already have reded the job.
+  const { run } = fakeNpm({ stageLists: [[]] });
+  const manifest = {
+    packages: [entry],
+    staging: { packages: [{ publishAs: entry.publishAs, version: entry.version, outcome: "failed" }] },
+  };
+  const result = verifyStagedPackages(manifest, { run });
+  check("failed staging outcome fails verification", result.failed.length === 1);
+}
+
+{
+  // No staging record (legacy manifest): verify rather than assume success.
+  const { run } = fakeNpm({ stageLists: [[{ packageName: entry.publishAs, version: entry.version, id: "stage-1" }]] });
+  const result = verifyStagedPackages({ packages: [entry] }, { run });
+  check("manifest without a staging record still verifies", result.verified.length === 1);
+}
+
+{
+  const results = [
+    { outcome: "staged", packageName: entry.publishAs, version: entry.version, detail: "verified in the npm staging area" },
+    { outcome: "skipped", packageName: "@xpufx/live", version: "1.0.0", detail: "already published" },
+    { outcome: "skipped", packageName: "@xpufx/old", version: "1.0.0", detail: "already staged" },
+    { outcome: "placeholder", packageName: "@xpufx/ph", version: "1.0.0", detail: "only placeholder" },
+    { outcome: "failed", packageName: "@xpufx/bad", version: "1.0.0", detail: "boom" },
+  ];
+  const summary = stagingSummary(results, new Date("2026-01-01T00:00:00Z"));
+  check("staging summary classifies each outcome", summary.counts.staged === 1 && summary.counts.skipped_already_published === 1 && summary.counts.skipped_already_staged === 1 && summary.counts.placeholder === 1 && summary.counts.failed === 1);
+  check("staging summary records the completion time", summary.completedAt === "2026-01-01T00:00:00.000Z");
+  check("classifyOutcome maps published skip", classifyOutcome({ outcome: "skipped", detail: "already published" }) === "skipped_already_published");
+  check("classifyOutcome maps already-staged skip", classifyOutcome({ outcome: "skipped", detail: "already staged" }) === "skipped_already_staged");
+}
+
+{
+  // writeStagingOutcomes is additive: the packed package list survives.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "npm-stage-manifest-"));
+  const manifestPath = path.join(tmp, "manifest.json");
+  fs.writeFileSync(manifestPath, JSON.stringify({ stagedAt: "x", gitBranch: "main", packages: [entry] }));
+  const summary = writeStagingOutcomes(manifestPath, [{ outcome: "skipped", packageName: entry.publishAs, version: entry.version, detail: "already published" }]);
+  const written = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  check("staging outcomes are additive to the manifest", written.packages.length === 1 && written.gitBranch === "main");
+  check("staging outcomes are persisted", written.staging?.packages?.[0]?.outcome === "skipped_already_published" && summary.counts.skipped_already_published === 1);
+  fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+{
+  // End-to-end all-skipped: verifyMain exits zero and never invokes npm.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "npm-stage-verify-"));
+  const manifestPath = path.join(tmp, "manifest.json");
+  fs.writeFileSync(manifestPath, JSON.stringify({
+    packages: [entry],
+    staging: { packages: [{ publishAs: entry.publishAs, version: entry.version, outcome: "skipped_already_published" }] },
+  }));
+  const fakeNpmPath = path.join(tmp, "npm");
+  fs.writeFileSync(fakeNpmPath, "#!/bin/sh\necho 'npm must not be called' >&2\nexit 3\n");
+  fs.chmodSync(fakeNpmPath, 0o755);
+  const savedExit = process.exitCode;
+  let exit;
+  try {
+    process.exitCode = 0;
+    quietAll(() => verifyMain([`--verify-manifest=${manifestPath}`], { NPM_STAGE_NPM_BIN: fakeNpmPath }));
+    exit = process.exitCode;
+  } finally {
+    process.exitCode = savedExit;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  check("all-skipped verify exits zero", exit === 0);
 }
 
 {

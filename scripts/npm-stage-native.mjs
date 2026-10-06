@@ -262,6 +262,90 @@ export function shouldFailBatch(results) {
   return counts.failed > 0 || counts.placeholder > 0 || (counts.staged === 0 && counts.skipped === 0);
 }
 
+/**
+ * Stable outcome label recorded in the manifest and consumed by post-stage
+ * verification. "already published" is separated from "already staged" because
+ * only the former is absent from the staging area by design.
+ */
+export function classifyOutcome(result) {
+  if (result?.outcome === "staged") return "staged";
+  if (result?.outcome === "skipped") {
+    return result.detail === "already published" ? "skipped_already_published" : "skipped_already_staged";
+  }
+  if (result?.outcome === "placeholder") return "placeholder";
+  return "failed";
+}
+
+const STAGING_OUTCOMES = ["staged", "skipped_already_published", "skipped_already_staged", "placeholder", "failed"];
+
+/** Per-package staging outcome plus a tally, for `manifest.staging`. */
+export function stagingSummary(results, completedAt = new Date()) {
+  const packages = (Array.isArray(results) ? results : []).map((row) => ({
+    publishAs: row.packageName,
+    version: row.version,
+    outcome: classifyOutcome(row),
+    detail: row.detail,
+  }));
+  const counts = Object.fromEntries(STAGING_OUTCOMES.map((name) => [name, 0]));
+  for (const row of packages) counts[row.outcome] += 1;
+  return { completedAt: completedAt.toISOString(), counts, packages };
+}
+
+/**
+ * Add the staging outcome to the manifest publish-npm.mjs wrote, preserving the
+ * original fields. This is the hand-off to "Post-stage verification": without
+ * it that step cannot tell a deliberately skipped (already live) version from a
+ * staged-but-unverified one (xpufx-org/paseo#1002).
+ */
+export function writeStagingOutcomes(manifestPath, results, completedAt = new Date()) {
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  manifest.staging = stagingSummary(results, completedAt);
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  return manifest.staging;
+}
+
+/**
+ * Post-stage verification. Only versions the stager actually submitted can be
+ * in `npm stage list`; a version that was already published is live and was
+ * deliberately skipped, so it counts as success rather than a missing stage
+ * (xpufx-org/paseo#1002). Genuinely staged versions are still verified, and a
+ * staged version absent from the registry is still a failure.
+ */
+export function verifyStagedPackages(manifest, { run = commandResult, npmBin = "npm" } = {}) {
+  const packages = Array.isArray(manifest?.packages) ? manifest.packages : [];
+  const recorded = new Map(
+    (Array.isArray(manifest?.staging?.packages) ? manifest.staging.packages : [])
+      .map((row) => [`${row.publishAs}@${row.version}`, row.outcome]),
+  );
+  const results = [];
+  for (const pkg of packages) {
+    const outcome = recorded.get(`${pkg.publishAs}@${pkg.version}`);
+    if (outcome === "skipped_already_published") {
+      results.push({ ...pkg, verification: "skipped", detail: "already published; nothing staged to verify" });
+      continue;
+    }
+    if (outcome === "failed" || outcome === "placeholder") {
+      results.push({ ...pkg, verification: "failed", detail: `staging outcome ${outcome}` });
+      continue;
+    }
+    // staged, already staged, or no staging record at all: verify rather than
+    // assume success, so this never weakens the staged-package check.
+    try {
+      const stages = readStages(pkg.publishAs, { run, npmBin });
+      const present = hasStagedVersion(stages, pkg.publishAs, pkg.version);
+      results.push({ ...pkg, verification: present ? "verified" : "missing", detail: present ? "found in npm staging area" : "absent from npm stage list" });
+    } catch (err) {
+      results.push({ ...pkg, verification: "error", detail: err.message });
+    }
+  }
+  return {
+    results,
+    verified: results.filter((row) => row.verification === "verified"),
+    skipped: results.filter((row) => row.verification === "skipped"),
+    failed: results.filter((row) => ["failed", "missing", "error"].includes(row.verification)),
+  };
+}
+
 function reportOutcomes(results, env = process.env) {
   const counts = outcomeCounts(results);
   const table = formatOutcomeTable(results);
@@ -314,6 +398,7 @@ export function main(argv = process.argv.slice(2), env = process.env) {
     env,
   });
   reportOutcomes(results, env);
+  writeStagingOutcomes(resolved, results);
   if (shouldFailBatch(results)) {
     const counts = outcomeCounts(results);
     console.error(`[npm-stage] batch failed: ${counts.failed} failed, ${counts.placeholder} placeholder, ${counts.staged} staged, ${counts.skipped} skipped (${results.length} total).`);
@@ -322,4 +407,29 @@ export function main(argv = process.argv.slice(2), env = process.env) {
   return results;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
+export function verifyMain(argv = process.argv.slice(2), env = process.env) {
+  const manifestArg = argv.find((arg) => arg.startsWith("--verify-manifest="));
+  if (!manifestArg) throw new Error("usage: node scripts/npm-stage-native.mjs --verify-manifest=publish-stage/manifest.json");
+  const resolved = path.resolve(manifestArg.slice("--verify-manifest=".length));
+  const manifest = JSON.parse(fs.readFileSync(resolved, "utf8"));
+  const { results, verified, skipped, failed } = verifyStagedPackages(manifest, {
+    npmBin: env.NPM_STAGE_NPM_BIN || "npm",
+  });
+  for (const row of skipped) console.log(`[post-stage-verify] SKIP: ${row.publishAs}@${row.version} ${row.detail}.`);
+  for (const row of verified) console.log(`[post-stage-verify] OK: ${row.publishAs}@${row.version} found in staging area.`);
+  for (const row of failed) console.error(`[post-stage-verify] FAIL: ${row.publishAs}@${row.version} ${row.detail}!`);
+  if (failed.length > 0) {
+    console.error(`::error::Post-stage verification failed: ${failed.length} package(s) unverified in registry staging area`);
+    process.exitCode = 1;
+  } else if (verified.length === 0) {
+    console.log(`[post-stage-verify] Nothing to verify (${skipped.length} already-published package(s) skipped).`);
+  } else {
+    console.log("[post-stage-verify] All staged packages successfully verified in registry staging area.");
+  }
+  return results;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  if (process.argv.slice(2).some((arg) => arg.startsWith("--verify-manifest="))) verifyMain();
+  else main();
+}
