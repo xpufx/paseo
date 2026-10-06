@@ -24,19 +24,33 @@ import type {
   ThemeColors,
 } from "paseo-plugin-helper/shared";
 import {
+  isToolCallEntry,
   permissionAuditQuery,
+  type AuditRecord,
   type PermissionAuditEntry,
   type PermissionDecision,
   type PermissionQueryFilter,
+  type ToolCallAuditEntry,
+  type ToolCallOutcome,
 } from "./shared.js";
 import {
   filterAuditEntries,
   formatAuditTime,
   summarizeAuditInput,
+  type AuditTypeFilter,
   type DecisionFilter,
 } from "./filter.js";
 
-export type { PermissionAuditEntry, PermissionDecision, PermissionQueryFilter, DecisionFilter };
+export type {
+  AuditRecord,
+  AuditTypeFilter,
+  DecisionFilter,
+  PermissionAuditEntry,
+  PermissionDecision,
+  PermissionQueryFilter,
+  ToolCallAuditEntry,
+  ToolCallOutcome,
+};
 export { permissionAuditQuery, filterAuditEntries, formatAuditTime, summarizeAuditInput };
 export type PermissionAuditVariant = "page" | "compact";
 
@@ -77,6 +91,7 @@ export interface PermissionAuditViewProps {
 }
 
 const DECISION_FILTERS: DecisionFilter[] = ["all", "pending", "allow", "deny"];
+const TYPE_FILTERS: AuditTypeFilter[] = ["all", "permission", "tool_call"];
 
 /**
  * Neutral fallback palette so the view still renders outside a host surface
@@ -339,6 +354,38 @@ function decisionLabel(value: DecisionFilter): string {
   }
 }
 
+function typeLabel(value: AuditTypeFilter): string {
+  switch (value) {
+    case "permission":
+      return "Permissions";
+    case "tool_call":
+      return "Tool calls";
+    default:
+      return "All";
+  }
+}
+
+function outcomePresentation(record: AuditRecord): { label: string; variant: StatusVariant } {
+  if (isToolCallEntry(record)) {
+    switch (record.outcome) {
+      case "success":
+        return { label: "Success", variant: "success" };
+      case "failure":
+        return { label: "Failed", variant: "danger" };
+      default:
+        return { label: "Canceled", variant: "warning" };
+    }
+  }
+  switch (record.decision) {
+    case "pending":
+      return { label: "Pending", variant: "warning" };
+    case "allow":
+      return { label: "Allowed", variant: "success" };
+    default:
+      return { label: "Denied", variant: "danger" };
+  }
+}
+
 /**
  * Permission audit view migrated off the deprecated `client/` + `ui/` layers
  * (paseo#847): the audit table, badges, buttons, search field, and empty state
@@ -384,6 +431,7 @@ function PermissionAuditViewContent({
   const colors = usePermissionAuditColors();
   const [search, setSearch] = useState("");
   const [decision, setDecision] = useState<DecisionFilter>("all");
+  const [type, setType] = useState<AuditTypeFilter>("all");
 
   const serverFilter = useMemo(
     () => (agentId ? { agentId } : {}),
@@ -397,8 +445,8 @@ function PermissionAuditViewContent({
   const entries = useMemo(() => {
     const all = data?.entries ?? [];
     const scoped = agentId ? all.filter((entry) => entry.agentId === agentId) : all;
-    return filterAuditEntries(scoped, decision, search);
-  }, [data, agentId, decision, search]);
+    return filterAuditEntries(scoped, decision, search, type);
+  }, [data, agentId, decision, search, type]);
 
   if (isLoading) {
     return (
@@ -423,9 +471,19 @@ function PermissionAuditViewContent({
       <AuditSearchInput
         value={search}
         onChangeText={setSearch}
-        placeholder="Search tool, agent, or arguments…"
+        placeholder="Search tool, agent, outcome, or arguments…"
         testID="permission-audit-search"
       />
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        {TYPE_FILTERS.map((value) => (
+          <AuditButton
+            key={value}
+            label={typeLabel(value)}
+            variant={type === value ? "primary" : "secondary"}
+            onPress={() => setType(value)}
+          />
+        ))}
+      </View>
       <View style={{ flexDirection: "row", gap: 8 }}>
         {DECISION_FILTERS.map((value) => (
           <AuditButton
@@ -440,10 +498,10 @@ function PermissionAuditViewContent({
   ) : null;
 
   const table = (
-    <AuditTable<PermissionAuditEntry>
+    <AuditTable<AuditRecord>
       data={entries}
       layout={layout}
-      keyExtractor={(item) => item.id}
+      keyExtractor={(item) => `${isToolCallEntry(item) ? "tool_call" : "permission"}:${item.id}`}
       columns={[
         {
           key: "time",
@@ -454,15 +512,16 @@ function PermissionAuditViewContent({
           ),
         },
         {
-          key: "tool",
-          header: "Permission",
+          key: "entry",
+          header: "Entry",
           flex: 3,
           render: (item) => (
             <View style={{ gap: 2 }}>
               <Text style={{ color: colors.foreground, fontWeight: "600" }}>{item.name}</Text>
               <Text style={{ color: colors.foregroundMuted }} numberOfLines={1}>
-                {item.kind} · {item.agentId}
+                {isToolCallEntry(item) ? "tool_call" : item.kind} · {item.agentId}
                 {item.agentModel ? ` · ${item.agentModel}` : ""}
+                {isToolCallEntry(item) && item.turnId ? ` · turn ${item.turnId}` : ""}
               </Text>
               <Text style={{ color: colors.foregroundMuted }} numberOfLines={1}>
                 {summarizeAuditInput(item.input)}
@@ -471,34 +530,20 @@ function PermissionAuditViewContent({
           ),
         },
         {
-          key: "decision",
-          header: "Decision",
+          key: "outcome",
+          header: "Outcome",
           width: 110,
           align: "right",
-          render: (item) => (
-            <AuditBadge
-              label={
-                item.decision === "pending"
-                  ? "Pending"
-                  : item.decision === "allow"
-                    ? "Allowed"
-                    : "Denied"
-              }
-              variant={
-                item.decision === "pending"
-                  ? "warning"
-                  : item.decision === "allow"
-                    ? "success"
-                    : "danger"
-              }
-            />
-          ),
+          render: (item) => {
+            const { label, variant } = outcomePresentation(item);
+            return <AuditBadge label={label} variant={variant} />;
+          },
         },
       ]}
       emptyState={
         <AuditEmptyState
-          title="No permission decisions yet"
-          description="Allowed and denied permission requests will appear here as agents run."
+          title="No audit entries yet"
+          description="Permission decisions and tool calls will appear here as agents run."
         />
       }
     />

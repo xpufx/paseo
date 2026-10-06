@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  AuditRecordSchema,
   PermissionAuditEntrySchema,
   PermissionQueryFilterSchema,
+  ToolCallAuditEntrySchema,
+  auditRecordKey,
+  isPermissionEntry,
+  isToolCallEntry,
   permissionAuditQuery,
   permissionLoggerQuery,
 } from "./shared.js";
@@ -36,6 +41,71 @@ describe("permission audit contracts", () => {
     expect(permissionAuditQuery.name).toBe("permission-audit.query");
     expect(permissionLoggerQuery.name).toBe("permission-logger.query");
     expect(PermissionQueryFilterSchema.parse({}).limit).toBe(100);
+  });
+});
+
+describe("tool-call audit records", () => {
+  const BASE_TOOL_CALL = {
+    recordType: "tool_call",
+    id: "call-1",
+    timestamp: "2026-10-06T10:00:00.000Z",
+    agentId: "agent-1",
+    kind: "tool_call",
+    name: "Bash",
+    input: { command: "ls" },
+    outcome: "success",
+  } as const;
+
+  it("validates tool-call entries and rejects unknown outcomes", () => {
+    const parsed = ToolCallAuditEntrySchema.parse({
+      ...BASE_TOOL_CALL,
+      turnId: "turn-1",
+      sequence: 2,
+      result: { output: "ok" },
+    });
+    expect(parsed.name).toBe("Bash");
+    expect(parsed.outcome).toBe("success");
+    expect(() => ToolCallAuditEntrySchema.parse({ ...BASE_TOOL_CALL, outcome: "maybe" })).toThrow();
+    expect(() => ToolCallAuditEntrySchema.parse({ ...BASE_TOOL_CALL, recordType: "permission" })).toThrow();
+  });
+
+  it("parses both record kinds through the union and discriminates them", () => {
+    const toolCall = AuditRecordSchema.parse(BASE_TOOL_CALL);
+    const permission = AuditRecordSchema.parse({
+      id: "req-1",
+      timestamp: "2026-10-06T10:00:00.000Z",
+      agentId: "agent-1",
+      kind: "tool",
+      name: "Bash",
+      input: null,
+      decision: "allow",
+    });
+    expect(isToolCallEntry(toolCall)).toBe(true);
+    expect(isToolCallEntry(permission)).toBe(false);
+    expect(isPermissionEntry(permission) ? permission.decision : null).toBe("allow");
+  });
+
+  it("keeps permission and tool-call identities distinct", () => {
+    const toolCall = ToolCallAuditEntrySchema.parse(BASE_TOOL_CALL);
+    const permission = PermissionAuditEntrySchema.parse({
+      id: "call-1",
+      timestamp: "2026-10-06T10:00:00.000Z",
+      agentId: "agent-1",
+      kind: "tool",
+      name: "Bash",
+      input: null,
+      decision: "allow",
+    });
+    expect(auditRecordKey(toolCall)).not.toBe(auditRecordKey(permission));
+  });
+
+  it("accepts recordType and outcome query filters", () => {
+    const parsed = PermissionQueryFilterSchema.parse({
+      recordType: "tool_call",
+      outcome: "failure",
+    });
+    expect(parsed.recordType).toBe("tool_call");
+    expect(parsed.outcome).toBe("failure");
   });
 });
 

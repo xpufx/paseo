@@ -1,9 +1,16 @@
 export {
+  AuditRecordSchema,
   PermissionAuditEntrySchema,
   PermissionLogStore,
+  ToolCallAuditEntrySchema,
+  auditRecordKey,
+  isPermissionEntry,
+  isToolCallEntry,
   resolveDefaultLogPath,
   resolvePermissionLogPaths,
+  type AuditRecord,
   type PermissionAuditEntry,
   type PermissionLogStoreOptions,
   type PermissionQueryFilter,
+  type ToolCallAuditEntry,
 } from "permission-audit/server";

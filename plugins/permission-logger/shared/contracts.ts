@@ -1,14 +1,26 @@
 export {
+  AuditRecordSchema,
+  AuditRecordTypeSchema,
   PermissionAuditEntrySchema,
   PermissionDecisionSchema,
   PermissionQueryFilterSchema,
+  ToolCallAuditEntrySchema,
+  ToolCallOutcomeSchema,
+  auditRecordKey,
+  isPermissionEntry,
+  isToolCallEntry,
   permissionAuditQuery,
   permissionLoggerQuery,
   PERMISSION_AUDIT_FILENAME,
   PERMISSION_AUDIT_PLUGIN_ID,
+  TOOL_CALL_RECORD_TYPE,
+  type AuditRecord,
+  type AuditRecordType,
   type PermissionAuditEntry,
   type PermissionDecision,
   type PermissionQueryFilter,
+  type ToolCallAuditEntry,
+  type ToolCallOutcome,
 } from "permission-audit/shared";
 
 export {

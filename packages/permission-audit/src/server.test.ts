@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   createPermissionLogger,
   extractAgentAttribution,
+  isPermissionEntry,
   normalizeDecision,
   PermissionLogStore,
   registerPermissionAuditServer,
@@ -12,7 +13,7 @@ import {
   splitResolveEvent,
   subscribePermissionEvents,
 } from "./server.js";
-import type { PermissionAuditEntry } from "./shared.js";
+import type { PermissionAuditEntry, ToolCallAuditEntry } from "./shared.js";
 
 function entry(overrides: Partial<PermissionAuditEntry> = {}): PermissionAuditEntry {
   return {
@@ -23,6 +24,20 @@ function entry(overrides: Partial<PermissionAuditEntry> = {}): PermissionAuditEn
     name: "bash",
     input: { command: "ls" },
     decision: "allow",
+    ...overrides,
+  };
+}
+
+function toolCallEntry(overrides: Partial<ToolCallAuditEntry> = {}): ToolCallAuditEntry {
+  return {
+    recordType: "tool_call",
+    id: `call-${Math.random().toString(36).slice(2)}`,
+    timestamp: "2026-09-28T10:00:00.000Z",
+    agentId: "agent-1",
+    kind: "tool_call",
+    name: "Bash",
+    input: { command: "ls" },
+    outcome: "success",
     ...overrides,
   };
 }
@@ -77,7 +92,8 @@ describe("PermissionLogStore", () => {
     store.append(entry({ id: "req-x", decision: "allow", timestamp: "2026-09-20T10:00:05.000Z" }));
     expect(store.readAll()).toHaveLength(2);
     expect(store.readLatest()).toHaveLength(1);
-    expect(store.readLatest()[0]?.decision).toBe("allow");
+    const latest = store.readLatest()[0];
+    expect(latest && isPermissionEntry(latest) ? latest.decision : null).toBe("allow");
     expect(store.query({ decision: "pending" }).total).toBe(0);
     expect(store.query({ decision: "allow" }).total).toBe(1);
     expect(store.query({}).total).toBe(1);
@@ -105,6 +121,30 @@ describe("PermissionLogStore", () => {
     scoped.append(entry({ id: "new" }));
     expect(scoped.readAll().map((e) => e.id)).toEqual(["old", "new"]);
     expect(fs.readFileSync(legacyFile, "utf8").trim().split("\n")).toHaveLength(1);
+  });
+
+  it("round-trips tool-call records alongside permissions and survives reload", () => {
+    store.append(
+      toolCallEntry({
+        id: "call-1",
+        name: "Bash",
+        input: { command: "ls" },
+        outcome: "success",
+        sequence: 4,
+      }),
+    );
+    store.append(entry({ id: "req-1", decision: "deny" }));
+
+    expect(store.readLatest()).toHaveLength(2);
+    expect(store.query({ recordType: "tool_call", limit: 100 }).total).toBe(1);
+    expect(store.query({ recordType: "permission", limit: 100 }).total).toBe(1);
+    expect(store.query({ outcome: "success", limit: 100 }).entries[0]?.id).toBe("call-1");
+    expect(store.query({ outcome: "failure", limit: 100 }).total).toBe(0);
+    expect(store.query({ decision: "deny", limit: 100 }).total).toBe(1);
+
+    const reopened = new PermissionLogStore({ filePath: store.filePath });
+    expect(reopened.readLatest().map((e) => e.id).sort()).toEqual(["call-1", "req-1"]);
+    expect(reopened.query({ recordType: "tool_call", limit: 100 }).total).toBe(1);
   });
 });
 

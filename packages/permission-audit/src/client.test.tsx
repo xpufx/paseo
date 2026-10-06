@@ -9,7 +9,7 @@ import {
   PermissionAuditView,
   usePermissionAuditColors,
 } from "./client.js";
-import type { PermissionAuditEntry } from "./shared.js";
+import type { AuditRecord } from "./shared.js";
 import type { PluginTheme } from "paseo-plugin-helper/shared";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -40,7 +40,7 @@ const HOST_THEME: PluginTheme = {
   },
 };
 
-const ENTRIES: PermissionAuditEntry[] = [
+const ENTRIES: AuditRecord[] = [
   {
     id: "r1",
     timestamp: "2026-09-28T10:00:00.000Z",
@@ -58,6 +58,18 @@ const ENTRIES: PermissionAuditEntry[] = [
     name: "read",
     input: { path: "/etc/hosts" },
     decision: "deny",
+  },
+  {
+    recordType: "tool_call",
+    id: "call-1",
+    timestamp: "2026-09-28T10:06:00.000Z",
+    turnId: "turn-9",
+    sequence: 3,
+    agentId: "agent-1",
+    kind: "tool_call",
+    name: "Write",
+    input: { filePath: "/tmp/out.txt" },
+    outcome: "success",
   },
 ];
 
@@ -171,10 +183,20 @@ describe("PermissionAuditView data behavior", () => {
     expect(text).not.toContain("bash");
   });
 
+  it("renders tool calls with an outcome badge alongside permissions", async () => {
+    const renderer = renderView({ variant: "compact" });
+    await settle();
+    const text = textOf(renderer.toJSON());
+    expect(text).toContain("Write");
+    expect(text).toContain("Success");
+    expect(text).toContain("Allowed");
+    expect(text).toContain("Denied");
+  });
+
   it("renders the empty state when no entries match", async () => {
     const renderer = renderView({ variant: "compact", agentId: "no-such-agent" });
     await settle();
     const text = textOf(renderer.toJSON());
-    expect(text).toContain("No permission decisions yet");
+    expect(text).toContain("No audit entries yet");
   });
 });

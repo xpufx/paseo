@@ -1,6 +1,7 @@
-import type { PermissionAuditEntry, PermissionDecision } from "./shared.js";
+import { isToolCallEntry, type AuditRecord, type PermissionDecision } from "./shared.js";
 
 export type DecisionFilter = "all" | PermissionDecision;
+export type AuditTypeFilter = "all" | "permission" | "tool_call";
 
 export function formatAuditTime(iso: string): string {
   const ms = Date.parse(iso);
@@ -20,16 +21,30 @@ export function summarizeAuditInput(input: unknown): string {
 }
 
 export function filterAuditEntries(
-  entries: PermissionAuditEntry[],
+  records: AuditRecord[],
   decision: DecisionFilter,
   search: string,
-): PermissionAuditEntry[] {
+  type: AuditTypeFilter = "all",
+): AuditRecord[] {
   const needle = search.trim().toLowerCase();
-  return entries.filter((entry) => {
-    if (decision !== "all" && entry.decision !== decision) return false;
+  return records.filter((record) => {
+    const toolCall = isToolCallEntry(record);
+    if (type === "permission" && toolCall) return false;
+    if (type === "tool_call" && !toolCall) return false;
+    // Decisions only exist on permission records; a decision filter excludes tool calls.
+    if (decision !== "all" && (toolCall || record.decision !== decision)) return false;
     if (!needle) return true;
-    const haystack =
-      `${entry.name} ${entry.kind} ${entry.agentId} ${entry.agentModel ?? ""} ${summarizeAuditInput(entry.input)}`.toLowerCase();
+    const haystack = [
+      record.name,
+      record.kind,
+      record.agentId,
+      record.agentModel ?? "",
+      summarizeAuditInput(record.input),
+      toolCall ? record.outcome : record.decision,
+      toolCall ? record.turnId ?? "" : "",
+    ]
+      .join(" ")
+      .toLowerCase();
     return haystack.includes(needle);
   });
 }
