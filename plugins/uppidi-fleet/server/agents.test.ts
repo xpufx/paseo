@@ -32,6 +32,7 @@ import {
   buildFrontDeskIntroPrompt,
   handleUppidiFrontDeskActivity,
   handleUppidiFrontDeskPrompt,
+  handleUppidiCreateFrontDesk,
   handleFleetTeardown,
   getPersistedStateDir,
   resolveRegisteredFrontDeskAgentId,
@@ -1082,6 +1083,64 @@ describe("Fleet teardown state cleanup (#774)", () => {
     assert.deepEqual(archivedAgents.sort(), ["agent-fd", "agent-orch", "agent-worker"].sort());
     assert.equal(fs.existsSync(fdFile), false);
     assert.equal(fs.existsSync(repoFile), false);
+  });
+
+  it("engages router.halt() at start of teardown and prevents new agent spawns (#994)", async () => {
+    const router = new HookRouter(null, {
+      stateDir: tmpDir,
+      queueDir: path.join(tmpDir, "queues"),
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    let haltObservedBeforeArchive = false;
+    let archiveCalls = 0;
+
+    const mockContext = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              { id: "agent-1", name: "Worker 1", labels: { role: "worker" }, status: "idle" },
+            ],
+          }),
+          ref: () => ({
+            archive: async () => {
+              archiveCalls++;
+              if (router.isHalted()) {
+                haltObservedBeforeArchive = true;
+              }
+              return { ok: true };
+            },
+          }),
+        },
+      },
+    } as any;
+
+    assert.equal(router.isHalted(), false);
+
+    const res = await handleFleetTeardown(
+      { targets: ["workers"], confirm: true },
+      mockContext
+    );
+
+    assert.equal(res.ok, true);
+    assert.equal(archiveCalls, 1);
+    assert.equal(haltObservedBeforeArchive, true, "router must be halted before archiving agents");
+    assert.equal(router.isHalted(), true, "router remains halted after teardown");
+
+    // Attempting to spawn Front Desk during/after teardown must be rejected
+    const createFdRes = await handleUppidiCreateFrontDesk(
+      { title: "New Front Desk", prompt: "Hello" },
+      mockContext
+    );
+    assert.equal(createFdRes.ok, false);
+    assert.match(createFdRes.error || "", /halt|teardown/i);
+
+    // Attempting to ensure an orchestrator must be rejected
+    const ensureOrchRes = await router.ensureOrchestrator({ repo: "xpufx-org/test-repo" });
+    assert.equal(ensureOrchRes.ok, false);
+    assert.match(ensureOrchRes.error || "", /halted/i);
   });
 });
 

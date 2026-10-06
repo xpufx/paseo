@@ -6784,3 +6784,117 @@ describe("hook-router repository onboarding (#847)", () => {
     });
   });
 });
+
+describe("HookRouter canonical ALL HALT mode (#994)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-halt-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("router.halt() sets isHalted() and engages pause('all')", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    assert.equal(router.isHalted(), false);
+    assert.equal(router.isPaused("any/repo"), false);
+
+    router.halt();
+
+    assert.equal(router.isHalted(), true);
+    assert.equal(router.isPaused("any/repo"), true);
+    assert.equal(router.isAllPaused(), true);
+  });
+
+  it("immediately rejects or skips auto-provisioning when halted", async () => {
+    let spawnAttempts = 0;
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      spawnAgent: async () => {
+        spawnAttempts++;
+        return { id: "test-agent" };
+      },
+    });
+
+    router.halt();
+
+    // 1. ensureOrchestrator
+    const orchRes = await router.ensureOrchestrator({ repo: "xpufx-org/test-repo" });
+    assert.equal(orchRes.ok, false);
+    assert.match(orchRes.error || "", /halted/i);
+    assert.equal(spawnAttempts, 0);
+
+    // 2. ensureUnstaffedEnrolledRepo
+    const unstaffedRes = await router.ensureUnstaffedEnrolledRepo("xpufx-org/test-repo", { reason: "test" });
+    assert.equal(unstaffedRes, null);
+    assert.equal(spawnAttempts, 0);
+  });
+
+  it("pauses webhook queue ingress when halted", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.halt();
+
+    const payload = {
+      repository: { full_name: "xpufx-org/test-repo" },
+      issue: { number: 42, title: "Test issue" },
+      sender: { login: "someone" },
+    };
+
+    const res = await router.ingestWebhook("issues", payload);
+    assert.equal(res.result, "suppressed");
+    assert.equal(router.getQueue("xpufx-org/test-repo").length, 0);
+  });
+
+  it("pauses background loops (watchdog and board sweep) when halted", async () => {
+    let auditRan = false;
+    let sweepRan = false;
+
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      watchdogIntervalMs: 50,
+      boardSweepIntervalMs: 50,
+    });
+
+    // Replace methods before starting loops
+    (router as any).runWatchdogAudit = async () => {
+      auditRan = true;
+      return { ok: true, now: Date.now(), anomalies: [], actions: [] };
+    };
+    (router as any).runBoardSweep = async () => {
+      sweepRan = true;
+      return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
+    };
+
+    router.startBackgroundLoops();
+    router.halt();
+
+    // Wait 120ms to verify timers were cancelled and loops do not execute
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    assert.equal(auditRan, false, "watchdog loop should not run after halt");
+    assert.equal(sweepRan, false, "board sweep loop should not run after halt");
+  });
+
+  it("resumes halt state on router.resume('all')", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.halt();
+    assert.equal(router.isHalted(), true);
+
+    router.resume("all");
+    assert.equal(router.isHalted(), false);
+    assert.equal(router.isAllPaused(), false);
+  });
+});
+

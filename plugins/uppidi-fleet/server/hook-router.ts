@@ -2675,6 +2675,7 @@ export class HookRouter {
   private backoffTimers = new Map<string, NodeJS.Timeout>();
   private unsubscribeLifecycle?: () => void;
   private isClosed = false;
+  private isHaltedState = false;
   private startedAt: number | null = null;
   private pausedRepos = new Set<string>();
   private enrolledRepos = new Set<string>();
@@ -2923,11 +2924,16 @@ export class HookRouter {
     if (!repoKey) {
       throw new Error("Could not derive repository key from payload");
     }
+    const isFd = isFrontDeskEvent(body);
+    const targetKey = isFd ? "frontdesk" : repoKey;
+    if (this.isHaltedState) {
+      this.log(`[info] Webhook ingress suppressed for ${targetKey} (hook router halted)`);
+      return { key: targetKey, result: "suppressed", frontDesk: isFd, bypass: false };
+    }
     const ev = String(event ?? "unknown");
     const issue = issueNumberOf(body);
     const actor = senderFromPayload(body)?.login ?? "unknown";
     const kind = eventKind(ev, body);
-    const isFd = isFrontDeskEvent(body);
     const bypass = isFd || isBypassEvent(ev, body);
     const sosState = sosStateOf(ev, body);
     const commentBody = typeof body?.comment?.body === "string" ? body.comment.body : "";
@@ -3606,6 +3612,7 @@ export class HookRouter {
     repo: string,
     opts: { reason?: string; agentMap?: Map<string, WatchdogAgent> | null } = {},
   ): Promise<EnsureOrchestratorResult | null> {
+    if (this.isHaltedState) return null;
     const canonical = canonicalRepoKey(repo) ?? String(repo ?? "").trim();
     if (!canonical) return null;
     if (this.isRepoPaused(canonical) || this.isPaused(canonical)) return null;
@@ -4451,6 +4458,9 @@ export class HookRouter {
   public async ensureOrchestrator(
     input: EnsureOrchestratorInput,
   ): Promise<EnsureOrchestratorResult> {
+    if (this.isHaltedState) {
+      return { ok: false, error: "Hook router is halted; orchestrator provisioning is disabled", errorCode: "spawn_failed" };
+    }
     const rawRepo = input?.repo;
     if (!rawRepo || typeof rawRepo !== "string" || !rawRepo.trim()) {
       return { ok: false, error: "repo is required" };
@@ -5068,6 +5078,9 @@ export class HookRouter {
    * conservative 4-step recovery pipeline for eligible findings.
    */
   public async runWatchdogAudit(opts: WatchdogAuditOptions = {}): Promise<WatchdogAuditResult> {
+    if (this.isHaltedState) {
+      return { ok: true, now: opts.now ?? Date.now(), anomalies: [], actions: [] };
+    }
     const now = opts.now ?? Date.now();
     const reloadFn = opts.reloadAgent ?? ((id: string) => this.reloadAgent(id));
     const stopFn = opts.stopAgent ?? ((id: string) => this.stopAgent(id));
@@ -6060,6 +6073,9 @@ export class HookRouter {
   }
 
   public async runBoardSweep(repos?: string[], io?: IssuesCheckIo): Promise<BoardSweepResult> {
+    if (this.isHaltedState) {
+      return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
+    }
     const rawTargets = (repos ?? this.getEnrolledRepos()).filter((k) => {
       if (!k || k === "frontdesk") return false;
       const parts = k.split("/").filter(Boolean);
@@ -6169,6 +6185,7 @@ export class HookRouter {
   }
 
   public startBackgroundLoops(): void {
+    if (this.isHaltedState) return;
     if (this.watchdogIntervalMs > 0 && !this.watchdogTimer) {
       this.watchdogTimer = setInterval(() => {
         void this.runWatchdogAudit().catch(() => {});
@@ -6329,6 +6346,7 @@ export class HookRouter {
 
   public resume(key?: string): string[] {
     if (!key || key === "all") {
+      this.isHaltedState = false;
       this.allQueuesPaused = false;
       this.pausedQueues.clear();
       this.log("[info] All queues resumed");
@@ -6359,13 +6377,31 @@ export class HookRouter {
   }
 
   public isPaused(key: string): boolean {
+    if (this.isHaltedState) return true;
     if (key === "all") return this.allQueuesPaused || this.pausedQueues.has(key);
     return this.allQueuesPaused || this.pausedQueues.has(key);
   }
 
   /** True while a global `pause('all')` is in effect (#877). */
   public isAllPaused(): boolean {
-    return this.allQueuesPaused;
+    return this.isHaltedState || this.allQueuesPaused;
+  }
+
+  /**
+   * Canonical ALL HALT method (#994): pauses all queue ingress and processing,
+   * stops background loops (watchdog and board sweep), and suppresses all
+   * auto-provisioning (orchestrators, unstaffed repos, front desk).
+   */
+  public halt(): void {
+    this.isHaltedState = true;
+    this.pause("all");
+    this.stopBackgroundLoops();
+    this.log("[warn] HookRouter canonical ALL HALT engaged: background loops stopped, ingress paused, auto-provisioning disabled");
+  }
+
+  /** Returns true when the canonical ALL HALT state is engaged (#994). */
+  public isHalted(): boolean {
+    return this.isHaltedState;
   }
 
   /**
@@ -7194,6 +7230,7 @@ export class HookRouter {
           }
         : null,
       paused: Array.from(this.pausedQueues),
+      halted: this.isHaltedState,
       totalQueued,
       repoCount: allKeys.size,
       teardown: { at: this.lastTeardownAt, targets: [...this.lastTeardownTargets] },

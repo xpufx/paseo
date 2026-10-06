@@ -1153,6 +1153,13 @@ export async function handleFleetTeardown(
     const errors: string[] = [];
 
     const router = getActiveHookRouter();
+    if (router) {
+      try {
+        router.halt();
+      } catch (err: any) {
+        errors.push(`Failed to engage router halt: ${err?.message || String(err)}`);
+      }
+    }
 
     // Notify remaining registered groups BEFORE archiving/culling (#872).
     // Delivered via the hook-router queue so the payload survives teardown.
@@ -2321,6 +2328,14 @@ export async function handleUppidiCreateFrontDesk(
   context: PluginHandlerContext
 ): Promise<UppidiCreateFrontDeskOutput> {
   try {
+    const router = getActiveHookRouter();
+    if (router?.isHalted()) {
+      return {
+        ok: false,
+        error: "Fleet teardown / halt in progress: Front Desk provisioning is disabled",
+      };
+    }
+
     const title = input.title?.trim() || "Front Desk";
     const prompt = buildFrontDeskIntroPrompt(input.prompt);
 
@@ -2345,7 +2360,6 @@ export async function handleUppidiCreateFrontDesk(
       };
     }
 
-    const router = getActiveHookRouter();
     if (router) {
       router.writeFrontDesk(spawnRes.agentId, "frontdesk");
     } else {
