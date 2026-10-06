@@ -47,27 +47,16 @@ export function isProductionEnv(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
- * True only when `NODE_ENV` is explicitly a development value
- * (`development`/`dev`). Unset, empty, `production`, and anything else
- * (e.g. `test`) all count as quiet, so a shipped plugin defaults to info
- * without any env var set.
- */
-export function isDevelopmentEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-  const nodeEnv = (env.NODE_ENV ?? "").trim().toLowerCase();
-  return nodeEnv === "development" || nodeEnv === "dev";
-}
-
-/**
  * Default rule (documented for operators):
  * explicit `PASEO_PLUGIN_LOG_LEVEL`/`PASEO_LOG_LEVEL`/`PASEO_DEBUG` always wins;
- * otherwise quiet (`info`) — including when no env var is set at all, so a
- * shipped plugin never emits debug logs by default. Debug only when `NODE_ENV`
- * is explicitly a development value (`development`/`dev`).
+ * otherwise `info` in every environment — including `NODE_ENV=development`/`dev`
+ * and when no env var is set at all. Debug requires an explicit level; the
+ * environment name alone never lifts the floor.
  */
 export function resolveDefaultMinLevel(
   env: NodeJS.ProcessEnv = process.env,
 ): LogLevel {
-  return resolveMinLevelFromEnv(env) ?? (isDevelopmentEnv(env) ? "debug" : "info");
+  return resolveMinLevelFromEnv(env) ?? "info";
 }
 
 export interface PluginLoggerOptions {
@@ -90,7 +79,7 @@ export interface PluginLoggerOptions {
 
   /**
    * Minimum log level to print. Defaults to resolveDefaultMinLevel():
-   * info unless NODE_ENV is explicitly development (or an explicit level is set).
+   * info unless an explicit level is set via the environment.
    */
   minLevel?: LogLevel;
 

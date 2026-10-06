@@ -1,7 +1,6 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import {
   createPluginLogger,
-  isDevelopmentEnv,
   isProductionEnv,
   resolveDefaultMinLevel,
   resolveMinLevelFromEnv,
@@ -43,8 +42,9 @@ describe("resolveDefaultMinLevel", () => {
     expect(resolveDefaultMinLevel({ NODE_ENV: "production" } as never)).toBe("info");
   });
 
-  it("enables debug when NODE_ENV is explicitly development", () => {
-    expect(resolveDefaultMinLevel({ NODE_ENV: "development" } as never)).toBe("debug");
+  it("stays info when NODE_ENV is explicitly development", () => {
+    expect(resolveDefaultMinLevel({ NODE_ENV: "development" } as never)).toBe("info");
+    expect(resolveDefaultMinLevel({ NODE_ENV: "dev" } as never)).toBe("info");
   });
 
   it("lets explicit env win in both modes", () => {
@@ -57,14 +57,6 @@ describe("resolveDefaultMinLevel", () => {
     expect(
       resolveDefaultMinLevel({ PASEO_PLUGIN_LOG_LEVEL: "error" } as never),
     ).toBe("error");
-  });
-
-  it("isDevelopmentEnv only treats explicit dev values as development", () => {
-    expect(isDevelopmentEnv({} as never)).toBe(false);
-    expect(isDevelopmentEnv({ NODE_ENV: "production" } as never)).toBe(false);
-    expect(isDevelopmentEnv({ NODE_ENV: "test" } as never)).toBe(false);
-    expect(isDevelopmentEnv({ NODE_ENV: "development" } as never)).toBe(true);
-    expect(isDevelopmentEnv({ NODE_ENV: "dev" } as never)).toBe(true);
   });
 
   it("isProductionEnv only treats production as production", () => {
@@ -108,15 +100,15 @@ describe("createPluginLogger", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("emits debug when NODE_ENV is explicitly development", () => {
+  it("suppresses debug when NODE_ENV is explicitly development", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
     const logger = createPluginLogger("test-plugin", {
       banner: false,
       version: "0.0.0-test",
       minLevel: resolveDefaultMinLevel({ NODE_ENV: "development" } as never),
     });
-    logger.debug("visible-dev");
-    expect(spy).toHaveBeenCalledWith(expect.stringContaining("[DEBUG] visible-dev"));
+    logger.debug("hidden-in-dev");
+    expect(spy).not.toHaveBeenCalled();
   });
 
   it("suppressed() routes caught errors to debug", () => {
