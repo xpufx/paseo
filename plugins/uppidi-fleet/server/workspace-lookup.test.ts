@@ -154,13 +154,13 @@ describe("host home resolution under agent-mux profiles (#973)", () => {
   });
 
   it("prefers REAL_HOME when HOME points into an agent-mux profile", () => {
-    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/test-profile";
     process.env.REAL_HOME = "/home/user";
     assert.equal(resolveHostHome(), "/home/user");
   });
 
   it("derives the host home from the profile prefix when REAL_HOME is absent", () => {
-    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/test-profile";
     delete process.env.REAL_HOME;
     assert.equal(resolveHostHome(), "/home/user");
   });
@@ -175,7 +175,7 @@ describe("host home resolution under agent-mux profiles (#973)", () => {
       JSON.stringify([{ workspaceId: "ws-host", cwd: repoDir, displayName: "main" }]),
     );
 
-    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/test-profile";
     process.env.REAL_HOME = realHome;
     delete process.env.PASEO_DIR;
     delete process.env.PASEO_WORKSPACES_PATH;
@@ -195,7 +195,7 @@ describe("host home resolution under agent-mux profiles (#973)", () => {
     const repoDir = join(realHome, "code", "paseo");
     mkdirSync(repoDir, { recursive: true });
 
-    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/test-profile";
     process.env.REAL_HOME = realHome;
     delete process.env.PASEO_DIR;
     delete process.env.PASEO_WORKSPACES_PATH;
