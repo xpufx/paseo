@@ -60,7 +60,7 @@ export function setExecFileAsyncForTest(fn: ExecFileAsyncFn | null): void {
 export interface RouterConfig {
   host?: string;
   port?: number;
-  mutedRepos?: string[];
+  pausedRepos?: string[];
   enrolledRepos?: string[];
 }
 
@@ -92,12 +92,27 @@ export function loadRouterConfig(): RouterConfig {
     return {
       host: settings.hookHost,
       port: settings.hookPort,
-      mutedRepos: settings.mutedRepos,
+      pausedRepos: mergePausedRepos(settings.pausedRepos, settings.mutedRepos),
       enrolledRepos: settings.enrolledRepos,
     };
   } catch {
     return {};
   }
+}
+
+/**
+ * Unions the current `pausedRepos` with the pre-#984 `mutedRepos` key so an
+ * existing install keeps its circuit-breaker state across the rename.
+ */
+function mergePausedRepos(
+  paused: string[] | undefined,
+  legacyPaused: string[] | undefined,
+): string[] {
+  const out: string[] = [];
+  for (const repo of [...(paused ?? []), ...(legacyPaused ?? [])]) {
+    if (repo && !out.includes(repo)) out.push(repo);
+  }
+  return out;
 }
 
 export function saveRouterConfig(config: RouterConfig): void {
@@ -107,7 +122,12 @@ export function saveRouterConfig(config: RouterConfig): void {
     if (config.host !== undefined) updateData.hookHost = config.host;
     if (config.port !== undefined) updateData.hookPort = config.port;
     if (config.enrolledRepos !== undefined) updateData.enrolledRepos = config.enrolledRepos;
-    if (config.mutedRepos !== undefined) updateData.mutedRepos = config.mutedRepos;
+    if (config.pausedRepos !== undefined) {
+      updateData.pausedRepos = config.pausedRepos;
+      // Clearing the pre-#984 key keeps a stale entry from resurrecting a repo
+      // the operator just unpaused via the merged read above.
+      updateData.mutedRepos = undefined;
+    }
     if (Object.keys(updateData).length > 0) {
       storage.update((prev) => ({ ...prev, ...updateData }));
     }
@@ -2316,7 +2336,7 @@ export class HookRouter {
   private unsubscribeLifecycle?: () => void;
   private isClosed = false;
   private startedAt: number | null = null;
-  private mutedRepos = new Set<string>();
+  private pausedRepos = new Set<string>();
   private enrolledRepos = new Set<string>();
 
   public readonly coalesceBuffers = new Map<string, CoalesceEntry>();
@@ -2413,9 +2433,9 @@ export class HookRouter {
     this.secret = options?.secret ?? process.env.FORGE_HOOK_SECRET;
     this.activePaseo = options?.paseo ?? (server as any)?.paseo ?? null;
 
-    if (persisted.mutedRepos) {
-      for (const r of persisted.mutedRepos) {
-        if (r) this.mutedRepos.add(r);
+    if (persisted.pausedRepos) {
+      for (const r of persisted.pausedRepos) {
+        if (r) this.pausedRepos.add(r);
       }
     }
     if (persisted.enrolledRepos) {
@@ -3106,10 +3126,10 @@ export class HookRouter {
     return result !== "deduped" && result !== "sos-deduped";
   }
 
-  public isRepoMuted(repoKey: string): boolean {
+  public isRepoPaused(repoKey: string): boolean {
     if (!repoKey) return false;
-    if (this.mutedRepos.has(repoKey)) return true;
-    for (const m of this.mutedRepos) {
+    if (this.pausedRepos.has(repoKey)) return true;
+    for (const m of this.pausedRepos) {
       if (m.toLowerCase() === repoKey.toLowerCase()) return true;
       const cleanM = m.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
       const cleanK = repoKey.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
@@ -3120,41 +3140,41 @@ export class HookRouter {
     return false;
   }
 
-  public muteRepo(repoKey: string): string[] {
-    this.mutedRepos.add(repoKey);
+  public pauseRepo(repoKey: string): string[] {
+    this.pausedRepos.add(repoKey);
     this.saveConfigState();
-    this.log(`[info] Repository ${repoKey} muted (circuit breaker engaged)`);
-    return Array.from(this.mutedRepos);
+    this.log(`[info] Repository ${repoKey} paused (circuit breaker engaged)`);
+    return Array.from(this.pausedRepos);
   }
 
-  public unmuteRepo(repoKey: string): string[] {
-    for (const m of Array.from(this.mutedRepos)) {
-      if (m === repoKey || this.isRepoMutedMatch(m, repoKey)) {
-        this.mutedRepos.delete(m);
+  public unpauseRepo(repoKey: string): string[] {
+    for (const m of Array.from(this.pausedRepos)) {
+      if (m === repoKey || this.isRepoPausedMatch(m, repoKey)) {
+        this.pausedRepos.delete(m);
       }
     }
     this.saveConfigState();
-    this.log(`[info] Repository ${repoKey} unmuted; resuming processing`);
+    this.log(`[info] Repository ${repoKey} unpaused; resuming processing`);
     void this.drain(repoKey);
-    return Array.from(this.mutedRepos);
+    return Array.from(this.pausedRepos);
   }
 
-  public toggleRepoMute(repoKey: string, forceMute?: boolean): { isMuted: boolean; mutedRepos: string[] } {
-    const current = this.isRepoMuted(repoKey);
-    const shouldMute = forceMute !== undefined ? forceMute : !current;
-    if (shouldMute) {
-      this.muteRepo(repoKey);
+  public toggleRepoPause(repoKey: string, forcePause?: boolean): { isPaused: boolean; pausedRepos: string[] } {
+    const current = this.isRepoPaused(repoKey);
+    const shouldPause = forcePause !== undefined ? forcePause : !current;
+    if (shouldPause) {
+      this.pauseRepo(repoKey);
     } else {
-      this.unmuteRepo(repoKey);
+      this.unpauseRepo(repoKey);
     }
     return {
-      isMuted: shouldMute,
-      mutedRepos: Array.from(this.mutedRepos),
+      isPaused: shouldPause,
+      pausedRepos: Array.from(this.pausedRepos),
     };
   }
 
-  public getMutedRepos(): string[] {
-    return Array.from(this.mutedRepos);
+  public getPausedRepos(): string[] {
+    return Array.from(this.pausedRepos);
   }
 
   public enrollRepo(repoKey: string): string[] {
@@ -3241,7 +3261,7 @@ export class HookRouter {
   ): Promise<EnsureOrchestratorResult | null> {
     const canonical = canonicalRepoKey(repo) ?? String(repo ?? "").trim();
     if (!canonical) return null;
-    if (this.isRepoMuted(canonical) || this.isPaused(canonical)) return null;
+    if (this.isRepoPaused(canonical) || this.isPaused(canonical)) return null;
     if (!this.isEnrolledRepo(canonical)) return null;
 
     try {
@@ -3258,7 +3278,7 @@ export class HookRouter {
     return await this.ensureOrchestrator({ repo: canonical });
   }
 
-  private isRepoMutedMatch(a: string, b: string): boolean {
+  private isRepoPausedMatch(a: string, b: string): boolean {
     if (a.toLowerCase() === b.toLowerCase()) return true;
     const cleanA = a.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
     const cleanB = b.toLowerCase().replace(/^https?:\/\//, "").replace(/\.git$/, "");
@@ -3267,7 +3287,7 @@ export class HookRouter {
 
   private saveConfigState(): void {
     saveRouterConfig({
-      mutedRepos: Array.from(this.mutedRepos),
+      pausedRepos: Array.from(this.pausedRepos),
       enrolledRepos: Array.from(this.enrolledRepos),
     });
   }
@@ -4829,7 +4849,7 @@ export class HookRouter {
 
     for (const [key, q] of this.queues.entries()) {
       if (key === "frontdesk" || q.length === 0) continue;
-      if (this.isRepoMuted(key) || this.isPaused(key)) continue;
+      if (this.isRepoPaused(key) || this.isPaused(key)) continue;
       const orch = this.readOrchestrator(key);
       if (!orch) {
         anomalies.push({ type: "QUEUE_UNORCHESTRATED", key, queueDepth: q.length });
@@ -5657,10 +5677,10 @@ export class HookRouter {
     this.queues.set(key, list);
     this.persistQueue(key);
     this.log(`[info] Enqueued message ${entry.id} for ${key} (total depth: ${list.length}, sos: ${Boolean(isSos)})`);
-    if (!this.isRepoMuted(key)) {
+    if (!this.isRepoPaused(key)) {
       void this.drain(key);
     } else {
-      this.log(`[info] Drain suppressed for muted repository ${key}`);
+      this.log(`[info] Drain suppressed for paused repository ${key}`);
     }
     return entry;
   }
@@ -5695,7 +5715,7 @@ export class HookRouter {
       this.pausedQueues.clear();
       this.log("[info] All queues resumed");
       for (const k of this.queues.keys()) {
-        if (!this.isRepoMuted(k)) {
+        if (!this.isRepoPaused(k)) {
           void this.drain(k);
         }
       }
@@ -5713,7 +5733,7 @@ export class HookRouter {
       }
       this.pausedQueues.delete(key);
       this.log(`[info] Queue ${key} resumed`);
-      if (!this.isRepoMuted(key)) {
+      if (!this.isRepoPaused(key)) {
         void this.drain(key);
       }
     }
@@ -6163,7 +6183,7 @@ export class HookRouter {
         clearTimeout(timer);
         this.backoffTimers.delete("frontdesk");
       }
-      if (triggerDrain && !this.isRepoMuted("frontdesk") && !this.isPaused("frontdesk")) {
+      if (triggerDrain && !this.isRepoPaused("frontdesk") && !this.isPaused("frontdesk")) {
         void this.drain("frontdesk");
       }
     }
@@ -6179,7 +6199,7 @@ export class HookRouter {
           clearTimeout(timer);
           this.backoffTimers.delete(key);
         }
-        if (triggerDrain && items.length > 0 && !this.isRepoMuted(key) && !this.isPaused(key)) {
+        if (triggerDrain && items.length > 0 && !this.isRepoPaused(key) && !this.isPaused(key)) {
           void this.drain(key);
         }
       }
@@ -6290,15 +6310,15 @@ export class HookRouter {
     if (this.isClosed) return;
     if (!key) {
       for (const k of this.queues.keys()) {
-        if (!this.isRepoMuted(k)) {
+        if (!this.isRepoPaused(k)) {
           void this.drain(k);
         }
       }
       return;
     }
 
-    if (this.isRepoMuted(key)) {
-      this.log(`[info] Drain suppressed for muted repository ${key}`);
+    if (this.isRepoPaused(key)) {
+      this.log(`[info] Drain suppressed for paused repository ${key}`);
       return;
     }
 
@@ -7356,13 +7376,13 @@ export function startHookRouter(
 
 export function getFleetRosterInfo(): {
   enrolledRepos: string[];
-  mutedRepos: string[];
+  pausedRepos: string[];
   repoQueuedHooks: Record<string, number>;
 } {
   const router = getActiveHookRouter();
   const home = resolveHostHome();
   const config = loadRouterConfig();
-  const mutedRepos = router ? router.getMutedRepos() : (config.mutedRepos ?? []);
+  const pausedRepos = router ? router.getPausedRepos() : (config.pausedRepos ?? []);
 
   const enrolledSet = new Set<string>(router ? router.getEnrolledRepos() : (config.enrolledRepos ?? []));
 
@@ -7424,7 +7444,7 @@ export function getFleetRosterInfo(): {
 
   return {
     enrolledRepos: Array.from(enrolledSet),
-    mutedRepos,
+    pausedRepos,
     repoQueuedHooks,
   };
 }

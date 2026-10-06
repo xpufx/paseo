@@ -733,7 +733,7 @@ export interface ProjectAgentGroup {
   runningCount: number;
   totalCount: number;
   isEnrolled?: boolean;
-  isMuted?: boolean;
+  isPaused?: boolean;
   hasOrchestrator?: boolean;
   queuedHooksCount?: number;
   isDetached?: boolean;
@@ -753,7 +753,7 @@ export type ProjectGroupSortField = ProjectSortField;
 
 export interface BuildProjectGroupsOptions {
   enrolledRepos?: string[];
-  mutedRepos?: string[];
+  pausedRepos?: string[];
   repoQueuedHooks?: Record<string, number>;
   /**
    * Agent id of the Front Desk currently registered with the hook daemon
@@ -991,7 +991,7 @@ export function buildProjectGroups(
 
   // If enrolled repos provided, ensure all enrolled repos exist in projectMap (Fleet Roster)
   const enrolledRepos = Array.isArray(options?.enrolledRepos) ? options!.enrolledRepos : [];
-  const mutedRepos = Array.isArray(options?.mutedRepos) ? options!.mutedRepos : [];
+  const pausedRepos = Array.isArray(options?.pausedRepos) ? options!.pausedRepos : [];
   if (enrolledRepos.length > 0) {
     for (const repo of enrolledRepos) {
       const existingKey = Array.from(projectMap.keys()).find((k) => isRepoMatching(k, repo));
@@ -1022,8 +1022,8 @@ export function buildProjectGroups(
     const isDetached = !isEnrolled;
     const hasOrchestrator = data.orchestrators.length > 0;
 
-    const isMuted = Boolean(
-      mutedRepos.some((r) => isRepoMatching(r, projectName))
+    const isPaused = Boolean(
+      pausedRepos.some((r) => isRepoMatching(r, projectName))
     );
 
     let queuedHooksCount = 0;
@@ -1043,7 +1043,7 @@ export function buildProjectGroups(
       runningCount,
       totalCount: data.allAgents.length,
       isEnrolled,
-      isMuted,
+      isPaused,
       hasOrchestrator,
       queuedHooksCount,
       isDetached,

@@ -1074,7 +1074,7 @@ describe("Uppidi Fleet sort & filter predicates", () => {
     });
   });
 
-  describe("enrolled fleet roster, unstaffed state, per-repo mute, and detached workspaces (#426)", () => {
+  describe("enrolled fleet roster, unstaffed state, per-repo pause, and detached workspaces (#426)", () => {
     it("matches repository identifiers robustly with isRepoMatching", () => {
       assert.equal(isRepoMatching("xpufx-org/paseo", "xpufx-org/paseo"), true);
       assert.equal(isRepoMatching("https://forgejo.example/xpufx-org/paseo.git", "xpufx-org/paseo"), true);
@@ -1084,7 +1084,7 @@ describe("Uppidi Fleet sort & filter predicates", () => {
       assert.equal(isRepoMatching("xpufx-org/paseo", "xpufx-org/platform"), false);
     });
 
-    it("synthesizes enrolled unstaffed repos, tracks muted states, and handles queued hooks", () => {
+    it("synthesizes enrolled unstaffed repos, tracks paused states, and handles queued hooks", () => {
       // Tree with only one agent in xpufx-org/paseo
       const activeTree: UppidiAgentTreeNode[] = [
         {
@@ -1104,7 +1104,7 @@ describe("Uppidi Fleet sort & filter predicates", () => {
 
       const options = {
         enrolledRepos: ["xpufx-org/paseo", "xpufx-org/unstaffed-repo"],
-        mutedRepos: ["xpufx-org/paseo"],
+        pausedRepos: ["xpufx-org/paseo"],
         repoQueuedHooks: {
           "xpufx-org/paseo": 4,
           "xpufx-org/unstaffed-repo": 7,
@@ -1116,22 +1116,22 @@ describe("Uppidi Fleet sort & filter predicates", () => {
       // 1. Enrolled groups should contain both repos
       assert.equal(result.enrolledGroups.length, 2);
 
-      // Paseo: enrolled, muted, has orchestrator, 4 queued hooks
+      // Paseo: enrolled, paused, has orchestrator, 4 queued hooks
       const paseoGroup = result.enrolledGroups.find((g) => g.projectName === "xpufx-org/paseo");
       assert.ok(paseoGroup);
       assert.equal(paseoGroup.isEnrolled, true);
-      assert.equal(paseoGroup.isMuted, true);
+      assert.equal(paseoGroup.isPaused, true);
       assert.equal(paseoGroup.hasOrchestrator, true);
       assert.equal(paseoGroup.queuedHooksCount, 4);
       assert.equal(paseoGroup.totalCount, 1);
 
-      // Unstaffed: enrolled, not muted, no orchestrator, 7 queued hooks
+      // Unstaffed: enrolled, not paused, no orchestrator, 7 queued hooks
       const unstaffedGroup = result.enrolledGroups.find(
         (g) => g.projectName === "xpufx-org/unstaffed-repo"
       );
       assert.ok(unstaffedGroup);
       assert.equal(unstaffedGroup.isEnrolled, true);
-      assert.equal(unstaffedGroup.isMuted, false);
+      assert.equal(unstaffedGroup.isPaused, false);
       assert.equal(unstaffedGroup.hasOrchestrator, false);
       assert.equal(unstaffedGroup.queuedHooksCount, 7);
       assert.equal(unstaffedGroup.totalCount, 0);

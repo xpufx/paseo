@@ -68,7 +68,7 @@ describe("uppidi-fleet repos handler (#867)", () => {
     } catch {}
   });
 
-  it("lists repos from Forgejo with enrollment, mute, and queue status", async () => {
+  it("lists repos from Forgejo with enrollment, pause, and queue status", async () => {
     const router = new HookRouter(null, {
       queueDir,
       stateDir,
@@ -77,7 +77,7 @@ describe("uppidi-fleet repos handler (#867)", () => {
     setActiveHookRouter(router);
 
     router.enrollRepo("forge.mrs.uppidi.com/xpufx-org/paseo");
-    router.muteRepo("forge.mrs.uppidi.com/xpufx-org/paseo");
+    router.pauseRepo("forge.mrs.uppidi.com/xpufx-org/paseo");
     router.writeOrchestrator("forge.mrs.uppidi.com/xpufx-org/paseo", "agent-orch-1");
     router.enqueue("forge.mrs.uppidi.com/xpufx-org/paseo", "msg1");
 
@@ -112,7 +112,7 @@ describe("uppidi-fleet repos handler (#867)", () => {
     assert.ok(paseo);
     assert.equal(paseo.key, "forge.mrs.uppidi.com/xpufx-org/paseo");
     assert.equal(paseo.enrolled, true);
-    assert.equal(paseo.muted, true);
+    assert.equal(paseo.paused, true);
     assert.equal(paseo.hasOrchestrator, true);
     assert.equal(paseo.queueDepth, 1);
     assert.equal(paseo.private, false);
@@ -120,7 +120,7 @@ describe("uppidi-fleet repos handler (#867)", () => {
     const fado = res.repos.find((r) => r.name === "2fado");
     assert.ok(fado);
     assert.equal(fado.enrolled, false);
-    assert.equal(fado.muted, false);
+    assert.equal(fado.paused, false);
     assert.equal(fado.hasOrchestrator, false);
     assert.equal(fado.queueDepth, 0);
     assert.equal(fado.private, true);

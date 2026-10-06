@@ -245,7 +245,7 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
         workers: [],
         tree: [],
         enrolledRepos: ["xpufx-org/paseo"],
-        mutedRepos: [],
+        pausedRepos: [],
         repoQueuedHooks: {},
       };
 
@@ -303,7 +303,7 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
         workers: [],
         tree: [],
         enrolledRepos: ["xpufx-org/paseo"],
-        mutedRepos: [],
+        pausedRepos: [],
         repoQueuedHooks: {},
       };
 
@@ -340,7 +340,7 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
         workers: [],
         tree: [],
         enrolledRepos: [],
-        mutedRepos: [],
+        pausedRepos: [],
         repoQueuedHooks: {},
       };
 

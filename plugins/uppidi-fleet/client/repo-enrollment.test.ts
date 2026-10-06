@@ -96,7 +96,7 @@ describe("Repository Enrollment Client Surface (#867)", () => {
         url: "https://forge.mrs.uppidi.com/xpufx-org/paseo",
         private: false,
         enrolled: true,
-        muted: true,
+        paused: true,
         hasOrchestrator: true,
         queueDepth: 5,
       },
@@ -109,7 +109,7 @@ describe("Repository Enrollment Client Surface (#867)", () => {
         url: "https://forge.mrs.uppidi.com/xpufx-org/2fado",
         private: true,
         enrolled: false,
-        muted: false,
+        paused: false,
         hasOrchestrator: false,
         queueDepth: 0,
       },
@@ -120,7 +120,7 @@ describe("Repository Enrollment Client Surface (#867)", () => {
 
     assert.equal(enrolled.length, 1);
     assert.equal(enrolled[0]?.key, "forge.mrs.uppidi.com/xpufx-org/paseo");
-    assert.equal(enrolled[0]?.muted, true);
+    assert.equal(enrolled[0]?.paused, true);
     assert.equal(enrolled[0]?.hasOrchestrator, true);
     assert.equal(enrolled[0]?.queueDepth, 5);
 

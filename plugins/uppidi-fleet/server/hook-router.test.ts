@@ -1216,7 +1216,7 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
   let stateDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "uppidi-fleet-mute-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "uppidi-fleet-pause-test-"));
     queueDir = join(tmpDir, "queues");
     stateDir = join(tmpDir, "state");
   });
@@ -1227,30 +1227,30 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     } catch {}
   });
 
-  it("manages and persists mutedRepos and enrolledRepos in plugin settings", () => {
+  it("manages and persists pausedRepos and enrolledRepos in plugin settings", () => {
     const router = new HookRouter(null, {
       queueDir,
       stateDir,
       port: 0,
     });
 
-    assert.equal(router.isRepoMuted("xpufx-org/paseo"), false);
-    assert.deepEqual(router.getMutedRepos(), []);
+    assert.equal(router.isRepoPaused("xpufx-org/paseo"), false);
+    assert.deepEqual(router.getPausedRepos(), []);
 
-    // Mute repo
-    router.muteRepo("xpufx-org/paseo");
-    assert.equal(router.isRepoMuted("xpufx-org/paseo"), true);
-    assert.deepEqual(router.getMutedRepos(), ["xpufx-org/paseo"]);
+    // Pause repo
+    router.pauseRepo("xpufx-org/paseo");
+    assert.equal(router.isRepoPaused("xpufx-org/paseo"), true);
+    assert.deepEqual(router.getPausedRepos(), ["xpufx-org/paseo"]);
 
     // Verify config persisted
     const saved = loadRouterConfig();
-    assert.deepEqual(saved.mutedRepos, ["xpufx-org/paseo"]);
+    assert.deepEqual(saved.pausedRepos, ["xpufx-org/paseo"]);
 
-    // Toggle mute off
-    const toggleRes = router.toggleRepoMute("xpufx-org/paseo");
-    assert.equal(toggleRes.isMuted, false);
-    assert.equal(router.isRepoMuted("xpufx-org/paseo"), false);
-    assert.deepEqual(router.getMutedRepos(), []);
+    // Toggle pause off
+    const toggleRes = router.toggleRepoPause("xpufx-org/paseo");
+    assert.equal(toggleRes.isPaused, false);
+    assert.equal(router.isRepoPaused("xpufx-org/paseo"), false);
+    assert.deepEqual(router.getPausedRepos(), []);
 
     // Enroll repo
     router.enrollRepo("xpufx-org/new-repo");
@@ -1261,9 +1261,28 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     assert.ok(!router.getEnrolledRepos().includes("xpufx-org/new-repo"));
   });
 
-  it("suppresses queue drain when repository is muted and resumes on unmute", async () => {
+  it("reads the pre-#984 mutedRepos key and migrates it into pausedRepos", () => {
+    const storage = getUppidiFleetSettingsStorage();
+    storage.update((prev) => ({ ...prev, pausedRepos: [], mutedRepos: ["xpufx-org/legacy"] }));
+
+    const loaded = loadRouterConfig();
+    assert.deepEqual(loaded.pausedRepos, ["xpufx-org/legacy"]);
+
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    assert.equal(router.isRepoPaused("xpufx-org/legacy"), true);
+
+    // A write through the new key drops the legacy entry so an unpaused repo
+    // cannot be resurrected by a stale alias on the next read.
+    router.unpauseRepo("xpufx-org/legacy");
+    assert.equal(router.isRepoPaused("xpufx-org/legacy"), false);
+    assert.deepEqual(loadRouterConfig().pausedRepos, []);
+    const raw = JSON.parse(readFileSync(storage.filePath, "utf8"));
+    assert.equal(raw.mutedRepos, undefined);
+  });
+
+  it("suppresses queue drain when repository is paused and resumes on unpause", async () => {
     const key = "xpufx-org/paseo";
-    const targetAgentId = "agent-orch-mute-1";
+    const targetAgentId = "agent-orch-pause-1";
     const sentMessages: string[] = [];
 
     const mockPaseo = {
@@ -1298,23 +1317,23 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     // Write orchestrator mapping
     router.writeOrchestrator(key, targetAgentId);
 
-    // Mute the repository
-    router.muteRepo(key);
-    assert.equal(router.isRepoMuted(key), true);
+    // Pause the repository
+    router.pauseRepo(key);
+    assert.equal(router.isRepoPaused(key), true);
 
-    // Enqueue message while muted
-    router.enqueue(key, "Muted webhook task");
+    // Enqueue message while paused
+    router.enqueue(key, "Paused webhook task");
 
     // Allow drain check to run
     await new Promise((r) => setTimeout(r, 20));
 
-    // Message should NOT be sent because repo is muted!
+    // Message should NOT be sent because repo is paused!
     assert.equal(sentMessages.length, 0);
     assert.equal(router.getQueue(key).length, 1);
 
-    // Now unmute the repository
-    router.unmuteRepo(key);
-    assert.equal(router.isRepoMuted(key), false);
+    // Now unpause the repository
+    router.unpauseRepo(key);
+    assert.equal(router.isRepoPaused(key), false);
 
     // Trigger drain
     await router.drain(key);
@@ -1322,7 +1341,7 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
 
     // Message should now be dispatched!
     assert.equal(sentMessages.length, 1);
-    assert.equal(sentMessages[0], "Muted webhook task");
+    assert.equal(sentMessages[0], "Paused webhook task");
     assert.equal(router.getQueue(key).length, 0);
   });
 
@@ -1346,7 +1365,7 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     assert.ok(status.repoCount >= 1, "Status repoCount must include enrolled repositories");
   });
 
-  it("getFleetRosterInfo reports enrolled repos, muted repos, and queue depths", () => {
+  it("getFleetRosterInfo reports enrolled repos, paused repos, and queue depths", () => {
     const router = new HookRouter(null, {
       queueDir,
       stateDir,
@@ -1356,14 +1375,14 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
 
     router.enrollRepo("xpufx-org/paseo");
     router.enrollRepo("xpufx-org/aur-automation");
-    router.muteRepo("xpufx-org/aur-automation");
+    router.pauseRepo("xpufx-org/aur-automation");
     router.enqueue("xpufx-org/paseo", "Queued 1");
     router.enqueue("xpufx-org/paseo", "Queued 2");
 
     const info = getFleetRosterInfo();
     assert.ok(info.enrolledRepos.includes("xpufx-org/paseo"));
     assert.ok(info.enrolledRepos.includes("xpufx-org/aur-automation"));
-    assert.deepEqual(info.mutedRepos, ["xpufx-org/aur-automation"]);
+    assert.deepEqual(info.pausedRepos, ["xpufx-org/aur-automation"]);
     assert.equal(info.repoQueuedHooks["xpufx-org/paseo"], 2);
   });
 });
@@ -1795,10 +1814,10 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     );
   });
 
-  it("does not flag un-orchestrated queues when queue is empty or muted or paused (#752)", async () => {
+  it("does not flag un-orchestrated queues when queue is empty or paused (#752)", async () => {
     (router as any).queues.set("empty-repo", []);
-    (router as any).queues.set("muted-repo", [{ id: "m1", key: "muted-repo", msg: "p", ts: Date.now() }]);
-    (router as any).mutedRepos.add("muted-repo");
+    (router as any).queues.set("paused-repo", [{ id: "m1", key: "paused-repo", msg: "p", ts: Date.now() }]);
+    (router as any).pausedRepos.add("paused-repo");
     (router as any).queues.set("paused-repo", [{ id: "m2", key: "paused-repo", msg: "p", ts: Date.now() }]);
     (router as any).pausedQueues.add("paused-repo");
 

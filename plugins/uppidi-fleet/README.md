@@ -171,7 +171,7 @@ The plugin registers one primary surface with three tabs:
 
 | Tab | What it shows |
 | --- | --- |
-| **Agents & Fleet** (tree) | Hierarchical view: projects → orchestrators → workers, with deterministic state badges (working / running / permission-prompt / attention-required / sleeping / idle / quota / failed), worktree names, parentage, and per-repo enrolment/mute flags. Hosts the `+ Create Front Desk`, `+ Add Orchestrator`, `Replace`, archive, and repo-mute controls. |
+| **Agents & Fleet** (tree) | Hierarchical view: projects → orchestrators → workers, with deterministic state badges (working / running / permission-prompt / attention-required / sleeping / idle / quota / failed), worktree names, parentage, and per-repo enrolment/pause flags. Hosts the `+ Create Front Desk`, `+ Add Orchestrator`, `Replace`, archive, and repo-pause controls. |
 | **Work Queue** (dashboard) | Open issues from the board with status, owner, and labels; a **Fleet Needs Attention** board at the top surfaces blocked agents, filter presets (Needs Attention, Triage/Review, In Progress, Verify). Also the collapsible Hook Service, Hook Queues, log tail, Agent Role Models, CI Runner fleet, and fleet-metrics sections. |
 | **Settings** | Hook service management (start/stop/restart, listen host + port), Repository Enrollment (browse Forgejo repos, enroll/unenroll repos into the fleet roster, status badges), and links into role-model editing. |
 
@@ -462,10 +462,11 @@ https://forge.example.com/your-org/your-repo/issues/42
 - Delivery uses the SDK (`paseo.agents.ref(id).send`) when available and falls
   back to `paseo send --no-wait <agentId> <msg>`. SOS messages are delivered
   without steering; normal messages steer into the active turn queue.
-- **Muting** a repo is a circuit breaker: drains for that key are suppressed
-  until unmuted. Toggle it from the Cockpit or `uppidi-fleet.toggle-repo-mute`.
+- **Pausing** a repo is a circuit breaker: drains for that key are suppressed
+  until unpaused. Toggle it from the Cockpit, the paused badge, or
+  `uppidi-fleet.toggle-repo-pause`.
 - **Enrollment** manages fleet roster membership:
-  - `uppidi-fleet.repos`: lists Forgejo repositories with enrollment, mute status, orchestrator presence, and queue depth.
+  - `uppidi-fleet.repos`: lists Forgejo repositories with enrollment, pause status, orchestrator presence, and queue depth.
   - `uppidi-fleet.enroll-repo`: enrolls a repository key (`canonicalRepoKey()`, normalized to `forge.mrs.uppidi.com/owner/repo`) into the router and settings storage.
   - `uppidi-fleet.unenroll-repo`: unenrolls a repository from the roster without destroying orchestrator registrations or queue history.
 
@@ -723,7 +724,7 @@ curl -s http://127.0.0.1:8099/queues | jq '.queues[] | {key, depth, isBusy}'
 ```
 
 If events arrive but nothing reaches an agent, the queue has **no registered
-orchestrator** (or the repo is muted). Register one ([§7.4](#74-control-endpoints))
+orchestrator** (or the repo is paused). Register one ([§7.4](#74-control-endpoints))
 or enrol the repo from the Cockpit's `+ Add Orchestrator`.
 
 ---
@@ -925,7 +926,7 @@ these gaps yourself.
 | `~/.paseo/forgejo-hook/latest-handoff.md` | Active Front Desk hand-off snapshot. |
 | `~/.paseo/uppidi-fleet-role-models.json` | Per-role primary model + fallback group. |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/metrics.json` | Fleet capability metrics (scoped storage; fallback/migration from legacy `~/.paseo/uppidi-fleet-metrics.json`). |
-| `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `enrolledRepos`, `mutedRepos`). |
+| `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `enrolledRepos`, `pausedRepos`; the pre-#984 `mutedRepos` key is still read and migrated). |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/skills/<id>.md` | Operator overrides for the fleet skills (Settings → Fleet Skills). Absent means the bundled `examples/skills/<id>/SKILL.md` is effective. |
 | `<repo-root>/.agents/skills/` | The fleet's operational skills, at the repository root (outside the plugin package). |
 

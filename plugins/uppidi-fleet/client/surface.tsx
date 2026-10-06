@@ -1834,7 +1834,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                                           {r.key}
                                         </Text>
                                         {r.private && <Badge label="Private" variant="neutral" size="sm" />}
-                                        {r.muted && <Badge label="Muted" variant="warning" size="sm" />}
+                                        {r.paused && <Badge label="Paused" variant="warning" size="sm" />}
                                         {r.hasOrchestrator && <Badge label="Orchestrator" variant="info" size="sm" />}
                                         {(r.queueDepth ?? 0) > 0 && (
                                           <Badge label={`${r.queueDepth} queued`} variant="info" size="sm" />

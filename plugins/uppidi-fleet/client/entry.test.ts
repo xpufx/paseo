@@ -222,47 +222,115 @@ describe("uppidi-fleet client entry contract", () => {
     );
   });
 
-  it("verifies ProjectGroupCard mute toggle passes inverted target state and renders stateful label/icon (#532)", () => {
+  it("verifies ProjectGroupCard pause toggle passes target state and renders stateful label/icon (#532, #984)", () => {
     const treeViewPath = path.resolve(__dirname, "tree-view.tsx");
     assert.ok(fs.existsSync(treeViewPath), "client/tree-view.tsx must exist");
     const source = fs.readFileSync(treeViewPath, "utf8");
 
-    // 1. onToggleMute must receive the target inverted state, never the current state.
+    // 1. onTogglePause must receive the target state, never the current state.
     assert.match(
       source,
-      /onToggleMute\(\s*group\.projectName,\s*!group\.isMuted\s*\)/,
-      "onToggleMute must be invoked with !group.isMuted (target state)",
+      /onTogglePause\(\s*group\.projectName,\s*!group\.isPaused\s*\)/,
+      "onTogglePause must be invoked with !group.isPaused (target state)",
     );
     assert.doesNotMatch(
       source,
-      /onToggleMute\(\s*group\.projectName,\s*group\.isMuted\s*\)/,
-      "onToggleMute must not be invoked with the current group.isMuted state",
+      /onTogglePause\(\s*group\.projectName,\s*group\.isPaused\s*\)/,
+      "onTogglePause must not be invoked with the current group.isPaused state",
     );
 
-    // 2. Button label/icon must reflect the current muted state.
+    // 2. Button label/icon must reflect the current paused state.
     assert.match(
       source,
-      /label=\{group\.isMuted\s*\?\s*["']Unmute["']\s*:\s*["']Mute["']\}/,
-      "mute button label must be 'Unmute' when muted and 'Mute' when unmuted",
+      /label=\{group\.isPaused\s*\?\s*["']Unpause["']\s*:\s*["']Pause["']\}/,
+      "pause button label must be 'Unpause' when paused and 'Pause' when unpaused",
     );
     assert.match(
       source,
-      /icon=\{group\.isMuted\s*\?\s*["']Volume2["']\s*:\s*["']VolumeX["']\}/,
-      "mute button icon must be 'Volume2' when muted and 'VolumeX' when unmuted",
-    );
-
-    // 3. A visible muted indicator must render when group.isMuted is true.
-    assert.match(
-      source,
-      /group\.isMuted\s*&&\s*\(\s*<Badge[\s\S]*?label=["'][^"']*Muted[^"']*["']/,
-      "ProjectGroupCard must render a visible Muted badge when group.isMuted is true",
+      /icon=\{group\.isPaused\s*\?\s*["']Play["']\s*:\s*["']Pause["']\}/,
+      "pause button icon must be 'Play' when paused and 'Pause' when unpaused",
     );
 
-    // 4. Toast must reflect the authoritative returned mute state.
+    // 3. A visible paused indicator must render when group.isPaused is true, and
+    //    the indicator itself is the unpause control (#984).
     assert.match(
       source,
-      /res\.message\s*\|\|\s*`Repo \$\{repo\} \$\{res\.isMuted\s*\?\s*["']muted["']\s*:\s*["']unmuted["']\}`/,
-      "handleToggleRepoMute toast must reflect res.isMuted rather than the requested input",
+      /label="⏸ Paused"/,
+      "ProjectGroupCard must render a paused indicator when group.isPaused is true",
+    );
+    assert.match(
+      source,
+      /testID=\{`paused-badge-\$\{group\.projectName\}`\}/,
+      "the paused indicator must carry a per-repo testID so its click is addressable",
+    );
+    assert.match(
+      source,
+      /onPress=\{\(\)\s*=>\s*onTogglePause\(group\.projectName,\s*false\)\}/,
+      "clicking the paused indicator must unpause that repo",
+    );
+
+    // 4. Toast must reflect the authoritative returned pause state.
+    assert.match(
+      source,
+      /res\.message\s*\|\|\s*`Repo \$\{repo\} \$\{res\.isPaused\s*\?\s*["']paused["']\s*:\s*["']unpaused["']\}`/,
+      "handleToggleRepoPause toast must reflect res.isPaused rather than the requested input",
+    );
+  });
+
+  it("clicking the paused badge unpauses that repo and the button toggles pause (#984)", async () => {
+    const { React, UppidiFleetTreeView, TestRenderer, renderWithRoot } = await getHarness();
+
+    const agent = (over: Record<string, unknown> = {}) => ({
+      id: "orch-paseo",
+      shortId: "orch1",
+      name: "Orchestrator · xpufx-org/paseo",
+      status: "idle",
+      deterministicState: "idle:waiting",
+      category: "orchestrator",
+      project: "xpufx-org/paseo",
+      labels: {},
+      ...over,
+    });
+    const payload = {
+      tree: [{ agent: agent(), depth: 0, children: [] }],
+      totalCount: 1,
+      runningCount: 0,
+      idleCount: 1,
+      errorCount: 0,
+      enrolledRepos: ["xpufx-org/paseo"],
+      pausedRepos: ["xpufx-org/paseo"],
+      repoQueuedHooks: {},
+    };
+
+    const calls: Array<[string, boolean | undefined]> = [];
+    const { root } = await renderWithRoot(
+      React.createElement(UppidiFleetTreeView, {
+        agentsData: payload,
+        onToggleRepoPause: (repo: string, paused?: boolean) => {
+          calls.push([repo, paused]);
+        },
+      }),
+    );
+
+    const badge = root.find((n: any) => n.props?.testID === "paused-badge-xpufx-org/paseo");
+    assert.ok(badge, "a paused repo must render a clickable paused badge");
+    await TestRenderer.act(async () => {
+      badge.props.onPress();
+    });
+    assert.deepEqual(calls, [["xpufx-org/paseo", false]], "the badge click must request unpause");
+
+    const button = root.find(
+      (n: any) =>
+        n.props?.accessibilityLabel === "Unpause" && typeof n.props?.onPress === "function",
+    );
+    assert.ok(button, "the paused repo must render an Unpause action button");
+    await TestRenderer.act(async () => {
+      button.props.onPress();
+    });
+    assert.deepEqual(
+      calls[calls.length - 1],
+      ["xpufx-org/paseo", false],
+      "the Unpause button must also request unpause",
     );
   });
 
@@ -1027,7 +1095,7 @@ describe("uppidi-fleet client entry contract", () => {
       idleCount: tree.length,
       errorCount: 0,
       enrolledRepos: ["r"],
-      mutedRepos: [],
+      pausedRepos: [],
       repoQueuedHooks: {},
       ...over,
     });
@@ -1062,7 +1130,7 @@ describe("uppidi-fleet client entry contract", () => {
         ["non-array workers", { workers: "not-an-array", totalCount: 0 }],
         ["non-array orchestrators", { orchestrators: 42, totalCount: 0 }],
         ["non-array enrolledRepos", validAgents([{ agent: agent(), depth: 0, children: [] }], { enrolledRepos: { bad: 1 } })],
-        ["non-array mutedRepos", validAgents([{ agent: agent(), depth: 0, children: [] }], { mutedRepos: { bad: 1 } })],
+        ["non-array pausedRepos", validAgents([{ agent: agent(), depth: 0, children: [] }], { pausedRepos: { bad: 1 } })],
         ["partial agent (missing name/shortId/state)", validAgents([{ agent: { id: "a", labels: {} }, depth: 0, children: [] }])],
         ["non-string deterministicState", validAgents([{ agent: agent({ deterministicState: 123 }), depth: 0, children: [] }])],
       ];
@@ -1245,7 +1313,7 @@ describe("uppidi-fleet client entry contract", () => {
         idleCount: 2,
         errorCount: 0,
         enrolledRepos: [],
-        mutedRepos: [],
+        pausedRepos: [],
         repoQueuedHooks: {},
       };
       const { React, UppidiFleetTreeView, render } = await getHarness();

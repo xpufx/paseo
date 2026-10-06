@@ -782,7 +782,7 @@ export const UppidiAgentSchema = z.object({
   worktree: z.string().optional(),
   project: z.string().optional(),
   isEnrolled: z.boolean().optional(),
-  isMuted: z.boolean().optional(),
+  isPaused: z.boolean().optional(),
   hasOrchestrator: z.boolean().optional(),
   queuedHooksCount: z.number().optional(),
   isDetached: z.boolean().optional(),
@@ -807,7 +807,7 @@ export interface UppidiAgentTreeNode {
   depth: number;
   children: UppidiAgentTreeNode[];
   isEnrolled?: boolean;
-  isMuted?: boolean;
+  isPaused?: boolean;
   hasOrchestrator?: boolean;
   queuedHooksCount?: number;
   isDetached?: boolean;
@@ -819,7 +819,7 @@ export const UppidiAgentTreeNodeSchema: z.ZodType<UppidiAgentTreeNode> = z.lazy(
     depth: z.number(),
     children: z.array(UppidiAgentTreeNodeSchema).default([]),
     isEnrolled: z.boolean().optional(),
-    isMuted: z.boolean().optional(),
+    isPaused: z.boolean().optional(),
     hasOrchestrator: z.boolean().optional(),
     queuedHooksCount: z.number().optional(),
     isDetached: z.boolean().optional(),
@@ -833,7 +833,7 @@ export const UppidiAgentsOutputSchema = z.object({
   workers: z.array(UppidiAgentSchema).default([]),
   tree: z.array(UppidiAgentTreeNodeSchema).default([]),
   enrolledRepos: z.array(z.string()).default([]),
-  mutedRepos: z.array(z.string()).default([]),
+  pausedRepos: z.array(z.string()).default([]),
   repoQueuedHooks: z.record(z.string(), z.number()).default({}),
   totalCount: z.number().default(0),
   runningCount: z.number().default(0),
@@ -1312,27 +1312,27 @@ export const uppidiReplaceOrchestratorContract = defineContract({
   output: UppidiReplaceOrchestratorOutputSchema,
 });
 
-export const UppidiToggleRepoMuteInputSchema = z.object({
+export const UppidiToggleRepoPauseInputSchema = z.object({
   repo: z.string(),
-  muted: z.boolean().optional(),
+  paused: z.boolean().optional(),
 });
-export type UppidiToggleRepoMuteInput = z.infer<typeof UppidiToggleRepoMuteInputSchema>;
+export type UppidiToggleRepoPauseInput = z.infer<typeof UppidiToggleRepoPauseInputSchema>;
 
-export const UppidiToggleRepoMuteOutputSchema = z.object({
+export const UppidiToggleRepoPauseOutputSchema = z.object({
   ok: z.boolean(),
   repo: z.string(),
-  isMuted: z.boolean(),
-  mutedRepos: z.array(z.string()).default([]),
+  isPaused: z.boolean(),
+  pausedRepos: z.array(z.string()).default([]),
   message: z.string().optional(),
   error: z.string().optional(),
 });
-export type UppidiToggleRepoMuteOutput = z.infer<typeof UppidiToggleRepoMuteOutputSchema>;
+export type UppidiToggleRepoPauseOutput = z.infer<typeof UppidiToggleRepoPauseOutputSchema>;
 
-export const uppidiToggleRepoMuteContract = defineContract({
-  name: "uppidi-fleet.toggle-repo-mute",
-  description: "Toggle per-repository webhook muting / circuit breaker",
-  input: UppidiToggleRepoMuteInputSchema,
-  output: UppidiToggleRepoMuteOutputSchema,
+export const uppidiToggleRepoPauseContract = defineContract({
+  name: "uppidi-fleet.toggle-repo-pause",
+  description: "Pause or unpause per-repository webhook processing / circuit breaker",
+  input: UppidiToggleRepoPauseInputSchema,
+  output: UppidiToggleRepoPauseOutputSchema,
 });
 
 // Repository Enrollment (Issue #867)
@@ -1345,7 +1345,7 @@ export const UppidiRepoSchema = z.object({
   url: z.string(),
   private: z.boolean(),
   enrolled: z.boolean(),
-  muted: z.boolean(),
+  paused: z.boolean(),
   hasOrchestrator: z.boolean().default(false).optional(),
   queueDepth: z.number().default(0).optional(),
 });
@@ -1365,7 +1365,7 @@ export type UppidiReposOutput = z.infer<typeof UppidiReposOutputSchema>;
 
 export const uppidiReposContract = defineContract({
   name: "uppidi-fleet.repos",
-  description: "List repositories from Forgejo with enrollment and mute status",
+  description: "List repositories from Forgejo with enrollment and pause status",
   input: UppidiReposInputSchema,
   output: UppidiReposOutputSchema,
 });
@@ -1476,7 +1476,12 @@ export const uppidiFleetSettingsSchema = z.object({
   hookHost: z.string().default("127.0.0.1"),
   hookPort: z.number().int().min(1).max(65535).default(8099),
   enrolledRepos: z.array(z.string()).default([]),
-  mutedRepos: z.array(z.string()).default([]),
+  pausedRepos: z.array(z.string()).default([]),
+  /**
+   * Pre-#984 persisted key. Still read (and merged into `pausedRepos`) so an
+   * existing install keeps its paused repositories; cleared on the next write.
+   */
+  mutedRepos: z.array(z.string()).optional(),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 

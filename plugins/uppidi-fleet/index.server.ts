@@ -24,7 +24,7 @@ import {
   uppidiReplaceFrontDeskContract,
   uppidiAddOrchestratorContract,
   uppidiReplaceOrchestratorContract,
-  uppidiToggleRepoMuteContract,
+  uppidiToggleRepoPauseContract,
   uppidiReposContract,
   uppidiEnrollRepoContract,
   uppidiUnenrollRepoContract,
@@ -63,7 +63,7 @@ import {
   handleUppidiReplaceFrontDesk,
   handleUppidiAddOrchestrator,
   handleUppidiReplaceOrchestrator,
-  handleUppidiToggleRepoMute,
+  handleUppidiToggleRepoPause,
   handleFleetTeardown,
   handleFleetResetState,
   handleUppidiFrontDeskActivity,
@@ -127,7 +127,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiReplaceFrontDeskContract, handleUppidiReplaceFrontDesk);
   server.handle(uppidiAddOrchestratorContract, handleUppidiAddOrchestrator);
   server.handle(uppidiReplaceOrchestratorContract, handleUppidiReplaceOrchestrator);
-  server.handle(uppidiToggleRepoMuteContract, handleUppidiToggleRepoMute);
+  server.handle(uppidiToggleRepoPauseContract, handleUppidiToggleRepoPause);
   server.handle(uppidiReposContract, handleUppidiRepos);
   server.handle(uppidiEnrollRepoContract, handleUppidiEnrollRepo);
   server.handle(uppidiUnenrollRepoContract, handleUppidiUnenrollRepo);

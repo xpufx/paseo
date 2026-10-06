@@ -27,8 +27,8 @@ import type {
   UppidiAddOrchestratorOutput,
   UppidiReplaceOrchestratorInput,
   UppidiReplaceOrchestratorOutput,
-  UppidiToggleRepoMuteInput,
-  UppidiToggleRepoMuteOutput,
+  UppidiToggleRepoPauseInput,
+  UppidiToggleRepoPauseOutput,
   FleetTeardownInput,
   FleetTeardownOutput,
   FleetResetStateInput,
@@ -897,14 +897,14 @@ export async function handleUppidiAgents(
 
     // Parent-project inheritance already applied in fetchPaseoAgents (#530).
 
-    const { enrolledRepos, mutedRepos, repoQueuedHooks } = getFleetRosterInfo();
+    const { enrolledRepos, pausedRepos, repoQueuedHooks } = getFleetRosterInfo();
 
     for (const a of agents) {
       const proj = a.project || DEFAULT_PROJECT;
       const isEnrolled = enrolledRepos.some((r) => isRepoMatching(r, proj));
       a.isEnrolled = isEnrolled;
       a.isDetached = !isEnrolled;
-      a.isMuted = mutedRepos.some((m) => isRepoMatching(m, proj));
+      a.isPaused = pausedRepos.some((m) => isRepoMatching(m, proj));
       let queued = 0;
       for (const [k, count] of Object.entries(repoQueuedHooks)) {
         if (isRepoMatching(k, proj)) {
@@ -931,7 +931,7 @@ export async function handleUppidiAgents(
       workers,
       tree,
       enrolledRepos,
-      mutedRepos,
+      pausedRepos,
       repoQueuedHooks,
       totalCount: agents.length,
       runningCount,
@@ -946,7 +946,7 @@ export async function handleUppidiAgents(
       workers: [],
       tree: [],
       enrolledRepos: [],
-      mutedRepos: [],
+      pausedRepos: [],
       repoQueuedHooks: {},
       totalCount: 0,
       runningCount: 0,
@@ -2632,55 +2632,55 @@ export async function handleUppidiReplaceOrchestrator(
   }
 }
 
-export async function handleUppidiToggleRepoMute(
-  input: UppidiToggleRepoMuteInput,
+export async function handleUppidiToggleRepoPause(
+  input: UppidiToggleRepoPauseInput,
   context: PluginHandlerContext
-): Promise<UppidiToggleRepoMuteOutput> {
+): Promise<UppidiToggleRepoPauseOutput> {
   const repo = input.repo?.trim();
   if (!repo) {
-    return { ok: false, repo: "", isMuted: false, mutedRepos: [], error: "repo is required" };
+    return { ok: false, repo: "", isPaused: false, pausedRepos: [], error: "repo is required" };
   }
 
   try {
     const router = getActiveHookRouter();
     if (router) {
-      const res = router.toggleRepoMute(repo, input.muted);
+      const res = router.toggleRepoPause(repo, input.paused);
       return {
         ok: true,
         repo,
-        isMuted: res.isMuted,
-        mutedRepos: res.mutedRepos,
-        message: res.isMuted ? `Muted repository ${repo}` : `Unmuted repository ${repo}`,
+        isPaused: res.isPaused,
+        pausedRepos: res.pausedRepos,
+        message: res.isPaused ? `Paused repository ${repo}` : `Unpaused repository ${repo}`,
       };
     }
 
     const config = loadRouterConfig();
-    const currentMuted = config.mutedRepos ?? [];
-    const isCurrentlyMuted = currentMuted.some((m) => isRepoMatching(m, repo));
-    const shouldMute = input.muted !== undefined ? input.muted : !isCurrentlyMuted;
+    const currentPaused = config.pausedRepos ?? [];
+    const isCurrentlyPaused = currentPaused.some((m) => isRepoMatching(m, repo));
+    const shouldPause = input.paused !== undefined ? input.paused : !isCurrentlyPaused;
 
-    let updatedMuted: string[];
-    if (shouldMute) {
-      updatedMuted = Array.from(new Set([...currentMuted, repo]));
+    let updatedPaused: string[];
+    if (shouldPause) {
+      updatedPaused = Array.from(new Set([...currentPaused, repo]));
     } else {
-      updatedMuted = currentMuted.filter((m) => !isRepoMatching(m, repo));
+      updatedPaused = currentPaused.filter((m) => !isRepoMatching(m, repo));
     }
 
-    saveRouterConfig({ mutedRepos: updatedMuted });
+    saveRouterConfig({ pausedRepos: updatedPaused });
 
     return {
       ok: true,
       repo,
-      isMuted: shouldMute,
-      mutedRepos: updatedMuted,
-      message: shouldMute ? `Muted repository ${repo}` : `Unmuted repository ${repo}`,
+      isPaused: shouldPause,
+      pausedRepos: updatedPaused,
+      message: shouldPause ? `Paused repository ${repo}` : `Unpaused repository ${repo}`,
     };
   } catch (err: any) {
     return {
       ok: false,
       repo,
-      isMuted: false,
-      mutedRepos: [],
+      isPaused: false,
+      pausedRepos: [],
       error: err?.message || String(err),
     };
   }

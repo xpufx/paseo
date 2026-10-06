@@ -41,7 +41,7 @@ import {
   uppidiReplaceFrontDeskContract,
   uppidiAddOrchestratorContract,
   uppidiReplaceOrchestratorContract,
-  uppidiToggleRepoMuteContract,
+  uppidiToggleRepoPauseContract,
   uppidiFrontDeskActivityContract,
   uppidiFrontDeskPromptContract,
   isSignalActivityItem,
@@ -101,7 +101,7 @@ export interface UppidiFleetTreeViewProps {
   onReplaceFrontDesk?: (existingAgentId?: string) => Promise<void> | void;
   onAddOrchestrator?: (repo: string) => Promise<void> | void;
   onReplaceOrchestrator?: (repo: string, existingAgentId?: string) => Promise<void> | void;
-  onToggleRepoMute?: (repo: string, muted?: boolean) => Promise<void> | void;
+  onToggleRepoPause?: (repo: string, paused?: boolean) => Promise<void> | void;
   selectedRepo?: string;
   /** Agent id currently registered as Front Desk with the hook daemon (#470). */
   registeredFrontDeskAgentId?: string | null;
@@ -2271,7 +2271,7 @@ export function ProjectGroupCard({
   onToggleOrchestrator,
   onAddOrchestrator,
   onReplaceOrchestrator,
-  onToggleMute,
+  onTogglePause,
   isActionLoading = false,
 }: {
   group: ProjectAgentGroup;
@@ -2286,19 +2286,28 @@ export function ProjectGroupCard({
   onToggleOrchestrator?: (orchId: string) => void;
   onAddOrchestrator?: (repo: string) => Promise<void> | void;
   onReplaceOrchestrator?: (repo: string, existingAgentId?: string) => Promise<void> | void;
-  onToggleMute?: (repo: string, currentlyMuted?: boolean) => Promise<void> | void;
+  onTogglePause?: (repo: string, currentlyPaused?: boolean) => Promise<void> | void;
   isActionLoading?: boolean;
 }) {
   const workerCount = group.totalCount - group.orchestrators.length;
+  const pausedBadge = (
+    <Badge
+      label="⏸ Paused"
+      variant="warning"
+      size="sm"
+      dot
+      textStyle={{ fontSize: 10, fontWeight: "700" }}
+    />
+  );
 
   return (
     <View
       style={{
         paddingVertical: 2,
-        opacity: group.isMuted ? 0.65 : 1,
-        borderLeftWidth: group.isMuted ? 2 : 0,
-        borderLeftColor: group.isMuted ? colors.warning || colors.accent : "transparent",
-        paddingLeft: group.isMuted ? 6 : 0,
+        opacity: group.isPaused ? 0.65 : 1,
+        borderLeftWidth: group.isPaused ? 2 : 0,
+        borderLeftColor: group.isPaused ? colors.warning || colors.accent : "transparent",
+        paddingLeft: group.isPaused ? 6 : 0,
         overflow: "visible",
       }}
     >
@@ -2355,15 +2364,21 @@ export function ProjectGroupCard({
               />
 
               {/* Fleet Roster Enrolled & Detached Badges (#426) */}
-              {group.isMuted && (
-                <Badge
-                  label="🔇 Muted"
-                  variant="warning"
-                  size="sm"
-                  dot
-                  textStyle={{ fontSize: 10, fontWeight: "700" }}
-                />
+              {group.isPaused && onTogglePause && (
+                <InteractiveRow
+                  testID={`paused-badge-${group.projectName}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Unpause ${group.projectName}`}
+                  accessibilityHint="Click to unpause this repository"
+                  title={`Click to unpause ${group.projectName}`}
+                  disabled={isActionLoading}
+                  onPress={() => onTogglePause(group.projectName, false)}
+                  hitSlop={4}
+                >
+                  {pausedBadge}
+                </InteractiveRow>
               )}
+              {group.isPaused && !onTogglePause && pausedBadge}
               {group.isEnrolled && (
                 <>
                   {!group.hasOrchestrator && (
@@ -2387,16 +2402,16 @@ export function ProjectGroupCard({
             </Row>
 
             <Row align="center" gap="xs">
-              {/* Lifecycle & Muting Action Buttons (#426) */}
-              {group.isEnrolled && onToggleMute && (
+              {/* Lifecycle & Pausing Action Buttons (#426) */}
+              {group.isEnrolled && onTogglePause && (
                 <Button
-                  label={group.isMuted ? "Unmute" : "Mute"}
-                  icon={group.isMuted ? "Volume2" : "VolumeX"}
+                  label={group.isPaused ? "Unpause" : "Pause"}
+                  icon={group.isPaused ? "Play" : "Pause"}
                   size="sm"
                   variant="ghost"
                   disabled={isActionLoading}
                   loading={isActionLoading}
-                  onPress={() => onToggleMute(group.projectName, !group.isMuted)}
+                  onPress={() => onTogglePause(group.projectName, !group.isPaused)}
                 />
               )}
 
@@ -2581,7 +2596,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   onReplaceFrontDesk,
   onAddOrchestrator,
   onReplaceOrchestrator,
-  onToggleRepoMute,
+  onToggleRepoPause,
   selectedRepo,
   registeredFrontDeskAgentId,
   repoSortField: propsRepoSortField,
@@ -2639,7 +2654,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   const replaceFrontDeskMutation = useRpcMutation(uppidiReplaceFrontDeskContract);
   const addOrchestratorMutation = useRpcMutation(uppidiAddOrchestratorContract);
   const replaceOrchestratorMutation = useRpcMutation(uppidiReplaceOrchestratorContract);
-  const toggleRepoMuteMutation = useRpcMutation(uppidiToggleRepoMuteContract);
+  const toggleRepoPauseMutation = useRpcMutation(uppidiToggleRepoPauseContract);
 
   const isBulkArchiving = isArchiving || localBulkArchiving;
   const archivingAgentId = localArchivingId;
@@ -2728,20 +2743,20 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
     }
   };
 
-  const handleToggleRepoMute = async (repo: string, muted?: boolean) => {
+  const handleToggleRepoPause = async (repo: string, paused?: boolean) => {
     setActionLoadingRepo(repo);
     try {
-      if (onToggleRepoMute) {
-        await onToggleRepoMute(repo, muted);
+      if (onToggleRepoPause) {
+        await onToggleRepoPause(repo, paused);
       } else {
-        const res = await toggleRepoMuteMutation.mutateAsync({ repo, muted });
+        const res = await toggleRepoPauseMutation.mutateAsync({ repo, paused });
         if (res.ok) {
           toast.show(
-            res.message || `Repo ${repo} ${res.isMuted ? "muted" : "unmuted"}`,
+            res.message || `Repo ${repo} ${res.isPaused ? "paused" : "unpaused"}`,
           );
           onRefresh?.();
         } else {
-          toast.error(res.error || `Failed to toggle mute for ${repo}`);
+          toast.error(res.error || `Failed to toggle pause for ${repo}`);
         }
       }
     } catch (err: any) {
@@ -2896,7 +2911,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   const { frontDeskNodes, staleFrontDeskNodes: filteredStaleFrontDeskNodes, enrolledGroups, detachedGroups } = useMemo(() => {
     return buildProjectGroups(filteredTree, {
       enrolledRepos: agentsData?.enrolledRepos,
-      mutedRepos: agentsData?.mutedRepos,
+      pausedRepos: agentsData?.pausedRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
       registeredFrontDeskAgentId,
       sortField: repoSortField,
@@ -2908,7 +2923,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
   const { primaryFrontDeskNode, staleFrontDeskNodes } = useMemo(() => {
     const result = buildProjectGroups(baseTree, {
       enrolledRepos: agentsData?.enrolledRepos,
-      mutedRepos: agentsData?.mutedRepos,
+      pausedRepos: agentsData?.pausedRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
       registeredFrontDeskAgentId,
       sortField: repoSortField,
@@ -3120,7 +3135,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
        *
        * Deliberately the same container, chip anatomy and metrics as
        * surface.tsx's "Dense Metrics Bar" — same surface1 fill, 1px border,
-       * radius 6, and the same icon / muted-label / bold-count chip. The
+       * radius 6, and the same icon / paused-label / bold-count chip. The
        * operator rejected an earlier version of this row for not *looking* like
        * the Queue page, so these values are copied rather than approximated and
        * a test pins them so the two cannot drift apart again.
@@ -3245,7 +3260,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
                 onToggleOrchestrator={handleToggleOrchestrator}
                 onAddOrchestrator={handleAddOrchestrator}
                 onReplaceOrchestrator={handleReplaceOrchestrator}
-                onToggleMute={handleToggleRepoMute}
+                onTogglePause={handleToggleRepoPause}
                 isActionLoading={actionLoadingRepo === group.projectName}
               />
             );

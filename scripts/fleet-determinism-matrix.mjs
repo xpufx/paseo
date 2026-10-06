@@ -285,13 +285,13 @@ const PARTS = [
   },
   {
     file: `${PLUGIN}/server/repos.ts`,
-    part: "Repo enrollment surface: Forgejo listing, roster/mute/queue/orchestrator projection, enroll/unenroll",
+    part: "Repo enrollment surface: Forgejo listing, roster/pause/queue/orchestrator projection, enroll/unenroll",
     layer: "server",
     label: DETERMINISTIC,
     anchors: { exports: ["handleUppidiRepos", "handleUppidiEnrollRepo", "handleUppidiUnenrollRepo"] },
     evidence: [
       [`repos.ts:39-60`, "one classified GET (`/repos/search`) with a `/user/repos` 404 fallback; 401 maps to a fixed message and an empty list"],
-      [`repos.ts:73-95`, "each row is built by matching the roster (enrolled, muted, summed queue depth) and the active router's orchestrator record"],
+      [`repos.ts:73-95`, "each row is built by matching the roster (enrolled, paused, summed queue depth) and the active router's orchestrator record"],
       [`repos.ts:127-150`, "enroll canonicalises the key, delegates to the router, or patches the persisted config when no router is active"],
       [`repos.ts:177-195`, "unenroll is the same shape with a membership filter"],
     ],
@@ -332,7 +332,7 @@ const PARTS = [
   },
   {
     file: `${PLUGIN}/server/hook-router.ts`,
-    part: "Queue persistence, pause/resume/mute, drain scheduling, backoff",
+    part: "Queue persistence, queue/repo pause, drain scheduling, backoff",
     layer: "server",
     label: DETERMINISTIC,
     anchors: {
@@ -340,7 +340,7 @@ const PARTS = [
       symbols: ["drain", "pause", "resume", "persistQueue", "coalesce"],
     },
     evidence: [
-      [`hook-router.ts:2939-3048`, "`drain` is guarded by closed/paused/muted/draining sets"],
+      [`hook-router.ts:2939-3048`, "`drain` is guarded by closed, queue-paused, repo-paused, and draining sets"],
       [`hook-router.ts:2996`, "backoff delay is `min(30000, 3000 * 1.5^attempts)`"],
       [`hook-router.ts:2857-2885`, "pause/resume mutate a `Set`"],
     ],

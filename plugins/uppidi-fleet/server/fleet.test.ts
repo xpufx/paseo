@@ -52,7 +52,7 @@ import {
   handleUppidiReplaceFrontDesk,
   handleUppidiAddOrchestrator,
   handleUppidiReplaceOrchestrator,
-  handleUppidiToggleRepoMute,
+  handleUppidiToggleRepoPause,
   spawnPaseoAgent,
   setExecFileAsyncForTest,
   resolveRepoWorkspace,
@@ -608,7 +608,7 @@ describe("archive agent actions (#402)", () => {
   });
 });
 
-describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
+describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => {
   it("creates Front Desk session via handleUppidiCreateFrontDesk", async () => {
     let createdPayload: any = null;
     const mockContext: any = {
@@ -795,25 +795,25 @@ describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
     assert.equal(archivedId, "agent-orch-old");
   });
 
-  it("toggles repository mute status via handleUppidiToggleRepoMute", async () => {
-    const resMute = await handleUppidiToggleRepoMute(
-      { repo: "xpufx-org/mute-test", muted: true },
+  it("toggles repository pause status via handleUppidiToggleRepoPause", async () => {
+    const resPause = await handleUppidiToggleRepoPause(
+      { repo: "xpufx-org/pause-test", paused: true },
       {} as any
     );
-    assert.equal(resMute.ok, true);
-    assert.equal(resMute.isMuted, true);
-    assert.ok(resMute.mutedRepos?.includes("xpufx-org/mute-test"));
+    assert.equal(resPause.ok, true);
+    assert.equal(resPause.isPaused, true);
+    assert.ok(resPause.pausedRepos?.includes("xpufx-org/pause-test"));
 
-    const resUnmute = await handleUppidiToggleRepoMute(
-      { repo: "xpufx-org/mute-test", muted: false },
+    const resUnpause = await handleUppidiToggleRepoPause(
+      { repo: "xpufx-org/pause-test", paused: false },
       {} as any
     );
-    assert.equal(resUnmute.ok, true);
-    assert.equal(resUnmute.isMuted, false);
-    assert.ok(!resUnmute.mutedRepos?.includes("xpufx-org/mute-test"));
+    assert.equal(resUnpause.ok, true);
+    assert.equal(resUnpause.isPaused, false);
+    assert.ok(!resUnpause.pausedRepos?.includes("xpufx-org/pause-test"));
   });
 
-  it("handleUppidiAgents outputs enrolledRepos, mutedRepos, and repoQueuedHooks", async () => {
+  it("handleUppidiAgents outputs enrolledRepos, pausedRepos, and repoQueuedHooks", async () => {
     const mockContext: any = {
       paseo: {
         agents: {
@@ -844,7 +844,7 @@ describe("fleet roster lifecycle actions and per-repo mute RPCs (#426)", () => {
 
     const output = await handleUppidiAgents({}, mockContext);
     assert.ok(Array.isArray(output.enrolledRepos));
-    assert.ok(Array.isArray(output.mutedRepos));
+    assert.ok(Array.isArray(output.pausedRepos));
     assert.equal(typeof output.repoQueuedHooks, "object");
     assert.ok(output.tree.length > 0);
   });

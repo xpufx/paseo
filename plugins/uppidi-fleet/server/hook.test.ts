@@ -381,14 +381,14 @@ describe("uppidi-fleet hook server handlers", () => {
         hookHost: "192.168.1.50",
         hookPort: 8123,
         enrolledRepos: ["xpufx-org/paseo"],
-        mutedRepos: ["xpufx-org/muted"],
+        pausedRepos: ["xpufx-org/paused"],
       }));
 
       const loaded = storage.read();
       assert.equal(loaded.hookHost, "192.168.1.50");
       assert.equal(loaded.hookPort, 8123);
       assert.deepEqual(loaded.enrolledRepos, ["xpufx-org/paseo"]);
-      assert.deepEqual(loaded.mutedRepos, ["xpufx-org/muted"]);
+      assert.deepEqual(loaded.pausedRepos, ["xpufx-org/paused"]);
 
       // Verify handleHookConfigure updates settings
       await handleHookServiceAction({ action: "start" });

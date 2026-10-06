@@ -40,7 +40,7 @@ import {
   uppidiReplaceFrontDeskContract,
   uppidiAddOrchestratorContract,
   uppidiReplaceOrchestratorContract,
-  uppidiToggleRepoMuteContract,
+  uppidiToggleRepoPauseContract,
   UppidiCreateFrontDeskInputSchema,
   UppidiCreateFrontDeskOutputSchema,
   UppidiReplaceFrontDeskInputSchema,
@@ -49,8 +49,8 @@ import {
   UppidiAddOrchestratorOutputSchema,
   UppidiReplaceOrchestratorInputSchema,
   UppidiReplaceOrchestratorOutputSchema,
-  UppidiToggleRepoMuteInputSchema,
-  UppidiToggleRepoMuteOutputSchema,
+  UppidiToggleRepoPauseInputSchema,
+  UppidiToggleRepoPauseOutputSchema,
   uppidiReposContract,
   UppidiRepoSchema,
   UppidiReposInputSchema,
@@ -645,18 +645,18 @@ describe("uppidi-fleet shared contracts", () => {
     assert.equal(replaceOrchOutput.ok, true);
     assert.equal(replaceOrchOutput.agentId, "agent-orch-new");
 
-    // 5. Toggle Repo Mute
-    assert.equal(uppidiToggleRepoMuteContract.name, "uppidi-fleet.toggle-repo-mute");
-    const muteInput = UppidiToggleRepoMuteInputSchema.parse({ repo: "xpufx-org/paseo", muted: true });
-    assert.equal(muteInput.repo, "xpufx-org/paseo");
-    assert.equal(muteInput.muted, true);
-    const muteOutput = UppidiToggleRepoMuteOutputSchema.parse({
+    // 5. Toggle Repo Pause
+    assert.equal(uppidiToggleRepoPauseContract.name, "uppidi-fleet.toggle-repo-pause");
+    const pauseInput = UppidiToggleRepoPauseInputSchema.parse({ repo: "xpufx-org/paseo", paused: true });
+    assert.equal(pauseInput.repo, "xpufx-org/paseo");
+    assert.equal(pauseInput.paused, true);
+    const pauseOutput = UppidiToggleRepoPauseOutputSchema.parse({
       ok: true,
       repo: "xpufx-org/paseo",
-      isMuted: true,
-      mutedRepos: ["xpufx-org/paseo"],
+      isPaused: true,
+      pausedRepos: ["xpufx-org/paseo"],
     });
-    assert.equal(muteOutput.ok, true);
+    assert.equal(pauseOutput.ok, true);
     // 5b. Repo Enrollment Contracts (#867)
     assert.equal(uppidiReposContract.name, "uppidi-fleet.repos");
     const reposInput = UppidiReposInputSchema.parse({ query: "paseo" });
@@ -673,7 +673,7 @@ describe("uppidi-fleet shared contracts", () => {
           url: "https://forge.mrs.uppidi.com/xpufx-org/paseo",
           private: false,
           enrolled: true,
-          muted: false,
+          paused: false,
           hasOrchestrator: true,
           queueDepth: 2,
         },
@@ -715,7 +715,7 @@ describe("uppidi-fleet shared contracts", () => {
       category: "worker",
       status: "running",
       isEnrolled: true,
-      isMuted: false,
+      isPaused: false,
       hasOrchestrator: true,
       queuedHooksCount: 3,
       isDetached: false,
@@ -740,11 +740,11 @@ describe("uppidi-fleet shared contracts", () => {
       workers: [],
       tree: [treeNode],
       enrolledRepos: ["xpufx-org/paseo"],
-      mutedRepos: ["xpufx-org/other"],
+      pausedRepos: ["xpufx-org/other"],
       repoQueuedHooks: { "xpufx-org/paseo": 3 },
     });
     assert.deepEqual(fleetOutput.enrolledRepos, ["xpufx-org/paseo"]);
-    assert.deepEqual(fleetOutput.mutedRepos, ["xpufx-org/other"]);
+    assert.deepEqual(fleetOutput.pausedRepos, ["xpufx-org/other"]);
     assert.equal(fleetOutput.repoQueuedHooks?.["xpufx-org/paseo"], 3);
   });
 
@@ -754,18 +754,28 @@ describe("uppidi-fleet shared contracts", () => {
     assert.equal(defaults.hookHost, "127.0.0.1");
     assert.equal(defaults.hookPort, 8099);
     assert.deepEqual(defaults.enrolledRepos, []);
-    assert.deepEqual(defaults.mutedRepos, []);
+    assert.deepEqual(defaults.pausedRepos, []);
+    assert.equal(defaults.mutedRepos, undefined);
 
     const customized = uppidiFleetSettingsSchema.parse({
       hookHost: "0.0.0.0",
       hookPort: 9000,
       enrolledRepos: ["xpufx-org/paseo"],
-      mutedRepos: ["xpufx-org/other"],
+      pausedRepos: ["xpufx-org/other"],
     });
     assert.equal(customized.hookHost, "0.0.0.0");
     assert.equal(customized.hookPort, 9000);
     assert.deepEqual(customized.enrolledRepos, ["xpufx-org/paseo"]);
-    assert.deepEqual(customized.mutedRepos, ["xpufx-org/other"]);
+    assert.deepEqual(customized.pausedRepos, ["xpufx-org/other"]);
+
+    // Pre-#984 installs persisted the paused set under the legacy key; the
+    // schema must still parse it so loadRouterConfig can migrate it.
+    const legacy = uppidiFleetSettingsSchema.parse({
+      enrolledRepos: ["xpufx-org/paseo"],
+      mutedRepos: ["xpufx-org/legacy"],
+    });
+    assert.deepEqual(legacy.mutedRepos, ["xpufx-org/legacy"]);
+    assert.deepEqual(legacy.pausedRepos, []);
   });
 });
 

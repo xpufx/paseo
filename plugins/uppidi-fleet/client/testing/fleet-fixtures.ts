@@ -244,7 +244,7 @@ export function agentsPayload(): Record<string, unknown> {
     // fourth count badge on the header row.
     errorCount: 1,
     enrolledRepos: ["paseo", "2fado", "aur-automation", "platform"],
-    mutedRepos: [],
+    pausedRepos: [],
     repoQueuedHooks: { "forgejo:xpufx-org/paseo": 3 },
   };
 }
