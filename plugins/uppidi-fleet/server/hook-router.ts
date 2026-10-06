@@ -32,9 +32,14 @@ import {
   type IssuesCheckIo,
   type StaleWipResult,
 } from "./issues-check.js";
-import { resolveWorkspaceForRepo, type ResolvedWorkspace } from "./workspace-lookup.js";
+import { resolveWorkspaceForRepo, workspaceRegistryPaths, type ResolvedWorkspace, type WorkspaceLookupOptions } from "./workspace-lookup.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
-import { DEFAULT_ROLE_MODELS, loadSavedRoleModels } from "./role-models.js";
+import {
+  DEFAULT_ROLE_MODELS,
+  listEnabledProviders,
+  loadSavedRoleModels,
+  resolveHostHome,
+} from "./role-models.js";
 import { getEffectiveSkillPath } from "./skills.js";
 
 const defaultExecFileAsync = promisify(execFile);
@@ -159,6 +164,11 @@ export interface HookRouterOptions {
   modelFallbackList?: string[];
   /** Overrides provider mode discovery for orchestrator spawns (#894). */
   providerModeResolver?: (provider: string) => Promise<ProviderModeInfo | null>;
+  /**
+   * Enabled host provider ids used to skip disabled providers in the
+   * orchestrator model fallback chain (#973). Omit to probe `paseo provider ls`.
+   */
+  availableProvidersData?: string[];
   spawnAgent?: (opts: {
     title: string;
     prompt: string;
@@ -186,6 +196,8 @@ export interface EnsureOrchestratorResult {
   repo?: string;
   workspaceId?: string;
   cwd?: string;
+  /** Machine-readable failure kind so callers can pick an HTTP status (#973). */
+  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled";
   error?: string;
 }
 
@@ -1335,8 +1347,7 @@ export interface WatchdogAgentDisk {
 }
 
 export function defaultAgentsDir(): string {
-  const home = process.env.HOME ?? os.homedir();
-  return join(home, ".paseo", "agents");
+  return join(resolveHostHome(), ".paseo", "agents");
 }
 
 /** Map agent id -> persisted metadata path under the agents directory subfolders. */
@@ -1569,7 +1580,7 @@ export function defaultCircuitBreakerPath(): string {
   if (process.env.NODE_ENV === "test" && !process.env.MODEL_HEALTH_PATH) {
     return join(os.tmpdir(), `paseo-model-health-test-${process.pid}.json`);
   }
-  return process.env.MODEL_HEALTH_PATH || join(process.env.HOME || os.homedir(), ".paseo", "model-health.json");
+  return process.env.MODEL_HEALTH_PATH || join(resolveHostHome(), ".paseo", "model-health.json");
 }
 
 export interface ModelHealthEntry {
@@ -1693,27 +1704,16 @@ export function recordModelQuotaFailure(
 }
 
 /**
- * Resolve the orchestrator model from explicit inputs or the configured fallback chain,
- * skipping any candidate currently cooling down in the circuit breaker cache (#890).
+ * Build the ordered, de-duplicated orchestrator model candidate list from the
+ * explicit request and the configured role fallback chain (#890/#973).
  */
-export function resolveOrchestratorModel(
+export function orchestratorModelCandidates(
   options: {
     requestedProvider?: string;
     requestedModel?: string;
     fallbackList?: readonly string[];
-    circuitBreakerPath?: string;
-    nowSec?: number;
   } = {},
-): { provider: string; model: string; key: string } {
-  const circuitBreakerPath =
-    options.circuitBreakerPath !== undefined
-      ? options.circuitBreakerPath
-      : process.env.NODE_ENV === "test" && !process.env.MODEL_HEALTH_PATH
-        ? null
-        : defaultCircuitBreakerPath();
-  const nowSec = options.nowSec ?? Math.floor(Date.now() / 1000);
-
-  // 1. Build ordered candidate list
+): string[] {
   let configuredFallbacks: string[] = [];
   if (options.fallbackList && options.fallbackList.length > 0) {
     configuredFallbacks = [...options.fallbackList];
@@ -1726,12 +1726,10 @@ export function resolveOrchestratorModel(
   if (options.requestedModel?.trim()) {
     const reqM = options.requestedModel.trim();
     const reqP = options.requestedProvider?.trim() || "";
-    const reqKey = reqP ? modelKey(reqP, reqM) : reqM;
-    rawCandidates.push(reqKey);
+    rawCandidates.push(reqP ? modelKey(reqP, reqM) : reqM);
   }
   rawCandidates.push(...configuredFallbacks);
 
-  // Deduplicate candidates preserving order
   const candidates: string[] = [];
   const seen = new Set<string>();
   for (const c of rawCandidates) {
@@ -1741,12 +1739,43 @@ export function resolveOrchestratorModel(
       candidates.push(trimmed);
     }
   }
+  return candidates;
+}
 
-  // 2. Filter out cooling down / quota exhausted candidates
+/**
+ * Resolve the orchestrator model from explicit inputs or the configured fallback chain,
+ * skipping any candidate currently cooling down in the circuit breaker cache (#890) and
+ * any candidate whose provider is disabled on the host (#973).
+ */
+export function resolveOrchestratorModel(
+  options: {
+    requestedProvider?: string;
+    requestedModel?: string;
+    fallbackList?: readonly string[];
+    circuitBreakerPath?: string;
+    nowSec?: number;
+    /** When provided, candidates whose provider is absent are skipped (#973). */
+    availableProviders?: ReadonlySet<string> | null;
+  } = {},
+): { provider: string; model: string; key: string } {
+  const circuitBreakerPath =
+    options.circuitBreakerPath !== undefined
+      ? options.circuitBreakerPath
+      : process.env.NODE_ENV === "test" && !process.env.MODEL_HEALTH_PATH
+        ? null
+        : defaultCircuitBreakerPath();
+  const nowSec = options.nowSec ?? Math.floor(Date.now() / 1000);
+
+  const candidates = orchestratorModelCandidates(options);
+  const isAvailable = (provider: string): boolean =>
+    !options.availableProviders || options.availableProviders.has(provider);
+
+  // 1. Prefer the first candidate whose provider is enabled and not cooling down.
   for (const candidate of candidates) {
+    const parsed = parseModelKey(candidate);
+    if (!isAvailable(parsed.provider)) continue;
     const health = circuitBreakerPath ? getCachedModelHealth(candidate, circuitBreakerPath, nowSec) : null;
     if (!health || health.status !== "quota_exhausted") {
-      const parsed = parseModelKey(candidate);
       return {
         key: candidate,
         provider: parsed.provider,
@@ -1755,8 +1784,12 @@ export function resolveOrchestratorModel(
     }
   }
 
-  // 3. If all candidates are cooling down, fall back to first candidate
-  const fallback = candidates[0] || "antigravity-acp/gemini-3.8-flash-low";
+  // 2. No enabled, healthy candidate: prefer the first enabled candidate, else
+  // the configured primary so an explicit operator request is never dropped.
+  const fallback =
+    candidates.find((candidate) => isAvailable(parseModelKey(candidate).provider)) ??
+    candidates[0] ??
+    "antigravity-acp/gemini-3.8-flash-low";
   const parsed = parseModelKey(fallback);
   return {
     key: fallback,
@@ -2012,6 +2045,8 @@ export interface PruneResult {
   ok: boolean;
   prunedCount: number;
   pruned: Array<{ key: string; agentId: string; reason: string }>;
+  /** Closed orchestrator sessions archived and unlinked during this sweep (#973). */
+  archived?: Array<{ key: string; agentId: string; reason: string }>;
   /** Registrations kept but flagged stale because the agent was absent (#889). */
   markedStale?: StaleOrchestratorMark[];
   /** Registrations whose agent reappeared and whose stale markers were cleared (#889). */
@@ -2372,7 +2407,7 @@ export class HookRouter {
       }
     }
 
-    const home = process.env.HOME ?? os.homedir();
+    const home = resolveHostHome();
     const scopedRoot = this.isTestMode
       ? join(os.tmpdir(), `paseo-test-hook-router-${process.pid}`)
       : join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet");
@@ -3690,6 +3725,44 @@ export class HookRouter {
     }
   }
 
+  /** Archive a dead session so it stops accumulating in `paseo ls` (#973). */
+  public async archiveAgent(agentId: string): Promise<boolean> {
+    const id = String(agentId ?? "").trim();
+    if (!id) return false;
+
+    const paseo = this.getPaseo();
+    if (paseo?.agents) {
+      try {
+        const ref = typeof paseo.agents.ref === "function" ? paseo.agents.ref(id) : null;
+        if (typeof (ref as any)?.archive === "function") {
+          await (ref as any).archive();
+          return true;
+        } else if (typeof (paseo.agents as any)?.archive === "function") {
+          await (paseo.agents as any).archive(id);
+          return true;
+        }
+      } catch (err) {
+        this.log(
+          `[warn] SDK archiveAgent failed for ${id}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    if (!this.options?.allowCliSpawn && (this.isTestMode || process.env.NODE_ENV === "test")) {
+      return false;
+    }
+
+    try {
+      await execFileAsync("paseo", ["archive", id], { timeout: 10000 });
+      return true;
+    } catch (err) {
+      this.log(
+        `[warn] CLI agent archive failed for ${id}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
+  }
+
   public async getActiveOrchestrator(
     repo: string,
     cachedAgentMap?: Map<string, WatchdogAgent> | null,
@@ -3728,8 +3801,8 @@ export class HookRouter {
     return null;
   }
 
-  public resolveWorkspace(repo: string): ResolvedWorkspace | null {
-    return resolveWorkspaceForRepo(repo, {
+  private workspaceLookupOptions(): WorkspaceLookupOptions {
+    return {
       workspacesData: this.options?.workspacesData,
       projectsData: this.options?.projectsData,
       workspacesPath: this.options?.workspacesPath,
@@ -3737,7 +3810,11 @@ export class HookRouter {
       paseoDir:
         this.options?.paseoDir ||
         (this.isTestMode ? join(os.tmpdir(), `paseo-test-isolated-${process.pid}`) : undefined),
-    });
+    };
+  }
+
+  public resolveWorkspace(repo: string): ResolvedWorkspace | null {
+    return resolveWorkspaceForRepo(repo, this.workspaceLookupOptions());
   }
 
   private async getProviderModeInfo(provider: string): Promise<ProviderModeInfo | null> {
@@ -3848,6 +3925,28 @@ export class HookRouter {
     }
   }
 
+  /**
+   * The set of provider ids the host reports as enabled, or null when the
+   * question cannot be answered (test, CLI unavailable). A null result disables
+   * availability filtering so an unknown host never blocks a spawn (#973).
+   */
+  private async getAvailableProviderSet(): Promise<Set<string> | null> {
+    if (Array.isArray(this.options?.availableProvidersData)) {
+      return new Set(this.options.availableProvidersData);
+    }
+    if (this.isTestMode || process.env.NODE_ENV === "test") {
+      return null;
+    }
+    try {
+      return new Set(await listEnabledProviders());
+    } catch (err) {
+      this.log(
+        `[warn] provider availability lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
   public async ensureOrchestrator(
     input: EnsureOrchestratorInput,
   ): Promise<EnsureOrchestratorResult> {
@@ -3899,22 +3998,36 @@ export class HookRouter {
     // A. Resolve workspace deterministically
     const resolved = this.resolveWorkspace(repo);
     if (!resolved || (!resolved.cwd && !resolved.workspaceId)) {
-      this.log(`[warn] No workspace found for repository "${repo}"`);
+      const searched = workspaceRegistryPaths(this.workspaceLookupOptions());
+      const registryHint = searched.length > 0 ? searched.join(", ") : "(no registry path configured)";
+      const error =
+        `No workspace found for repository "${repo}": no matching root/workspace in the workspace registry ` +
+        `(${registryHint}). Remediation: open/register the repository in Paseo so a workspace is persisted, ` +
+        `or set PASEO_DIR/PASEO_WORKSPACES_PATH to the registry that contains it, then retry.`;
+      this.log(`[warn] ${error}`);
       return {
         ok: false,
-        error: `No workspace found for repository "${repo}"`,
+        errorCode: "workspace_not_found",
+        error,
         repo,
       };
     }
 
     const circuitBreakerPath = this.options?.circuitBreakerPath ?? this.options?.modelHealthPath;
     const fallbackList = this.options?.orchestratorModelFallback ?? this.options?.modelFallbackList;
+    const availableProviders = await this.getAvailableProviderSet();
     const resolvedModel = resolveOrchestratorModel({
       requestedProvider: input.provider,
       requestedModel: input.model,
       fallbackList,
       circuitBreakerPath,
+      availableProviders,
     });
+    if (availableProviders && !availableProviders.has(resolvedModel.provider)) {
+      this.log(
+        `[warn] no configured orchestrator provider is enabled on the host; keeping ${resolvedModel.key}`,
+      );
+    }
     const targetProvider = resolvedModel.provider;
     const targetModel = resolvedModel.model || undefined;
     const requestedMode = input.mode?.trim() || "yolo";
@@ -3945,7 +4058,7 @@ export class HookRouter {
         });
         agentId = spawned?.id ?? null;
       } catch (err: any) {
-        return { ok: false, error: err?.message ?? String(err), repo };
+        return { ok: false, errorCode: "spawn_failed", error: err?.message ?? String(err), repo };
       }
     } else {
       // Try SDK first
@@ -3992,6 +4105,7 @@ export class HookRouter {
           this.log(`[warn] CLI agent spawning is disabled in test mode for repository "${repo}"`);
           return {
             ok: false,
+            errorCode: "cli_disabled",
             error: `CLI agent spawning is disabled in test mode for repository "${repo}"`,
             repo,
           };
@@ -4023,13 +4137,13 @@ export class HookRouter {
           }
         } catch (err: any) {
           this.log(`[error] CLI agent run failed for ${repo}: ${err?.message ?? String(err)}`);
-          return { ok: false, error: err?.message ?? String(err), repo };
+          return { ok: false, errorCode: "spawn_failed", error: err?.message ?? String(err), repo };
         }
       }
     }
 
     if (!agentId) {
-      return { ok: false, error: "Failed to spawn orchestrator agent", repo };
+      return { ok: false, errorCode: "spawn_failed", error: "Failed to spawn orchestrator agent", repo };
     }
 
     // Explicitly configure autonomous execution mode when the provider exposes one
@@ -4723,6 +4837,8 @@ export class HookRouter {
     verifyAgentAbsent?: (agentId: string) => Promise<boolean>;
     /** Persisted metadata directory used by the default verifier (#889). */
     agentsDir?: string;
+    /** Archives a closed session before its registration is unlinked (#973). */
+    archiveAgent?: (agentId: string) => Promise<boolean>;
     now?: number;
   } = {}): Promise<PruneResult> {
     let agentMap = opts.agentMap ?? null;
@@ -4738,6 +4854,7 @@ export class HookRouter {
     const verify = opts.verifyAgentAbsent ?? ((agentId: string) => this.verifyAgentAbsent(agentId, opts.agentsDir));
     const orchRecords = opts.orchestratorRecords ?? this.listOrchestratorRecords();
     const pruned: Array<{ key: string; agentId: string; reason: string }> = [];
+    const archived: Array<{ key: string; agentId: string; reason: string }> = [];
     const markedStale: StaleOrchestratorMark[] = [];
     const recovered: string[] = [];
     const seen = new Set<string>();
@@ -4748,6 +4865,42 @@ export class HookRouter {
       seen.add(key);
 
       if (agentMap.has(agentId)) {
+        const agent = agentMap.get(agentId)!;
+        const status = String(agent.status ?? "").toLowerCase();
+        const isClosed = status === "closed" || status === "terminated";
+        const alreadyArchived = Boolean(agent.archivedAt) || status === "archived";
+
+        // A closed orchestrator session is dead but still listed by the daemon,
+        // so it never reaches the absent-agent path. Archive it and unlink the
+        // registration here so duplicate closed records stop accumulating (#973).
+        if (isClosed || alreadyArchived) {
+          if (opts.dryRun) {
+            pruned.push({ key, agentId, reason: "closed session (dry-run)" });
+            continue;
+          }
+          let didArchive = alreadyArchived;
+          if (isClosed && !alreadyArchived) {
+            const archive = opts.archiveAgent ?? ((id: string) => this.archiveAgent(id));
+            try {
+              didArchive = await archive(agentId);
+            } catch (err) {
+              this.log(
+                `[warn] prune archive failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              didArchive = false;
+            }
+          }
+          if (didArchive) {
+            const res = this.deleteOrchestrator(key);
+            if (res.ok) {
+              const reason = alreadyArchived ? "archived session unlinked" : "closed session archived and unlinked";
+              archived.push({ key, agentId, reason });
+              pruned.push({ key, agentId, reason });
+            }
+          }
+          continue;
+        }
+
         // The agent is back: clear the stale bookkeeping so a transient outage
         // never accumulates toward a prune (#889).
         if ((record.missCount ?? 0) > 0 || record.stale) {
@@ -4819,6 +4972,7 @@ export class HookRouter {
       ok: true,
       prunedCount: pruned.length,
       pruned,
+      archived,
       markedStale,
       recovered,
       ...(opts.dryRun ? { dryRun: true } : {}),
@@ -6738,10 +6892,13 @@ export class HookRouter {
             mode: typeof body?.mode === "string" ? body.mode.trim() : undefined,
             force: Boolean(body?.force),
           });
+          // Genuinely bad input stays 400 (handled above); a failed provision
+          // stays 500. A missing workspace is a resolvable configuration gap,
+          // so it is surfaced as 422 with the probed registry in `error` (#973).
           const statusCode = result.ok
             ? 200
-            : result.error?.includes("No workspace found")
-              ? 404
+            : result.errorCode === "workspace_not_found" || result.error?.includes("No workspace found")
+              ? 422
               : 500;
           this.sendJson(res, statusCode, result);
         } catch (err: any) {
@@ -7133,7 +7290,7 @@ export function getFleetRosterInfo(): {
   repoQueuedHooks: Record<string, number>;
 } {
   const router = getActiveHookRouter();
-  const home = process.env.HOME ?? os.homedir();
+  const home = resolveHostHome();
   const config = loadRouterConfig();
   const mutedRepos = router ? router.getMutedRepos() : (config.mutedRepos ?? []);
 

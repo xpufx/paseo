@@ -67,7 +67,7 @@ import {
   evaluateWorkerSpawnWorkspace,
   WORKER_PRIMARY_CHECKOUT_ERROR,
 } from "./workspace-guard.js";
-import { loadSavedRoleModels, DEFAULT_ROLE_MODELS } from "./role-models.js";
+import { loadSavedRoleModels, DEFAULT_ROLE_MODELS, resolveHostHome } from "./role-models.js";
 import { getEffectiveSkillPath } from "./skills.js";
 
 
@@ -575,7 +575,7 @@ export function getWorkspaceProjectMap(options: { forceRefresh?: boolean } = {})
 
   const map: WorkspaceProjectMap = {};
   try {
-    const projectsDir = path.join(os.homedir(), ".paseo", "projects");
+    const projectsDir = path.join(resolveHostHome(), ".paseo", "projects");
 
     const projectsById = new Map<string, ProjectRecord>();
     const projectsPath = path.join(projectsDir, "projects.json");
@@ -637,7 +637,7 @@ export function applyParentProjectInheritance(agents: UppidiAgent[]): void {
 export function getQuotaAlertAgentIds(): Set<string> {
   const ids = new Set<string>();
   try {
-    const paseoDir = process.env.PASEO_DIR || path.join(process.env.HOME || os.homedir(), ".paseo");
+    const paseoDir = process.env.PASEO_DIR || path.join(resolveHostHome(), ".paseo");
     const alertPath = path.join(paseoDir, "limit-alerts.json");
     if (fs.existsSync(alertPath)) {
       const content = fs.readFileSync(alertPath, "utf-8");
@@ -660,7 +660,7 @@ export function getQuotaAlertAgentIds(): Set<string> {
 export function getAgentDiskMetadataMap(): Map<string, Partial<RawAgentRecord>> {
   const metaMap = new Map<string, Partial<RawAgentRecord>>();
   try {
-    const paseoDir = process.env.PASEO_DIR || path.join(process.env.HOME || os.homedir(), ".paseo");
+    const paseoDir = process.env.PASEO_DIR || path.join(resolveHostHome(), ".paseo");
     const agentsDir = path.join(paseoDir, "agents");
     if (!fs.existsSync(agentsDir)) return metaMap;
 
@@ -2472,7 +2472,7 @@ export async function resolveRepoWorkspace(
   }
 
   // 3. Fall back to standard ~/code/<repoBasename> path if it exists
-  const home = process.env.HOME || "";
+  const home = resolveHostHome();
   if (home) {
     const candidate = join(home, "code", repoBasename);
     if (fs.existsSync(candidate)) {

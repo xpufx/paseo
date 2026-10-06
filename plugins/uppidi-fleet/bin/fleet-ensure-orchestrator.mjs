@@ -16,7 +16,7 @@ Deterministically ensure an active, autonomous orchestrator agent exists for a r
 Options:
   --repo <repo>          Target repository slug or key (e.g. 'owner/repo')
   --mode <mode>          Execution permission mode (default: 'yolo')
-  --provider <provider>  Agent model provider (default: 'antigravity-acp')
+  --provider <provider>  Agent model provider (default: configured orchestrator role, skipping disabled host providers)
   --model <model>        Model name override
   --force                Force provisioning even if an orchestrator is active
   --json                 Output JSON instead of formatted text

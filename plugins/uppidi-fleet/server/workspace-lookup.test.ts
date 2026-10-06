@@ -1,6 +1,10 @@
-import { describe, it } from "node:test";
+import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveWorkspaceForRepo, type WorkspaceRecord, type ProjectRecord } from "./workspace-lookup.js";
+import { resolveHostHome } from "./role-models.js";
 
 describe("workspace-lookup deterministic resolution (#793)", () => {
   const sampleProjects: ProjectRecord[] = [
@@ -126,5 +130,63 @@ describe("workspace-lookup deterministic resolution (#793)", () => {
     assert.equal(resolveWorkspaceForRepo("", { workspacesData: sampleWorkspaces }), null);
     assert.equal(resolveWorkspaceForRepo("   ", { workspacesData: sampleWorkspaces }), null);
     assert.equal(resolveWorkspaceForRepo(null as any, { workspacesData: sampleWorkspaces }), null);
+  });
+});
+
+describe("host home resolution under agent-mux profiles (#973)", () => {
+  const originalEnv = {
+    HOME: process.env.HOME,
+    REAL_HOME: process.env.REAL_HOME,
+    NODE_ENV: process.env.NODE_ENV,
+  };
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  it("returns HOME unchanged when it is not an agent-mux profile", () => {
+    process.env.HOME = "/home/user";
+    delete process.env.REAL_HOME;
+    assert.equal(resolveHostHome(), "/home/user");
+  });
+
+  it("prefers REAL_HOME when HOME points into an agent-mux profile", () => {
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    process.env.REAL_HOME = "/home/user";
+    assert.equal(resolveHostHome(), "/home/user");
+  });
+
+  it("derives the host home from the profile prefix when REAL_HOME is absent", () => {
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    delete process.env.REAL_HOME;
+    assert.equal(resolveHostHome(), "/home/user");
+  });
+
+  it("reads the host ~/.paseo registry when HOME is a profile directory (#973)", () => {
+    const realHome = mkdtempSync(join(tmpdir(), "paseo-host-home-"));
+    const repoDir = join(realHome, "code", "paseo");
+    mkdirSync(repoDir, { recursive: true });
+    mkdirSync(join(realHome, ".paseo", "projects"), { recursive: true });
+    writeFileSync(
+      join(realHome, ".paseo", "projects", "workspaces.json"),
+      JSON.stringify([{ workspaceId: "ws-host", cwd: repoDir, displayName: "main" }]),
+    );
+
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    process.env.REAL_HOME = realHome;
+    delete process.env.PASEO_DIR;
+    delete process.env.PASEO_WORKSPACES_PATH;
+    process.env.NODE_ENV = "production";
+    try {
+      const res = resolveWorkspaceForRepo("xpufx-org/paseo");
+      assert.ok(res);
+      assert.equal(res.workspaceId, "ws-host");
+      assert.equal(res.cwd, repoDir);
+    } finally {
+      rmSync(realHome, { recursive: true, force: true });
+    }
   });
 });

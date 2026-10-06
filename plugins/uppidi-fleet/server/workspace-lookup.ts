@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import os from "node:os";
 import { candidateRepoKeys, canonicalRepoKey, normalizeRepoKey } from "./hook-router.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
+import { resolveHostHome } from "./role-models.js";
 
 export interface WorkspaceRecord {
   workspaceId: string;
@@ -49,6 +50,42 @@ export interface WorkspaceLookupOptions {
 }
 
 /**
+ * The Paseo data directory the lookup reads from. Under an agent-mux profile
+ * `HOME` is the profile directory, so this must resolve against the host home
+ * (`REAL_HOME`) to find the live `~/.paseo` (#973).
+ */
+export function resolvePaseoDir(options?: WorkspaceLookupOptions): string {
+  if (options?.paseoDir) return options.paseoDir;
+  if (process.env.PASEO_DIR) return process.env.PASEO_DIR;
+  if (process.env.NODE_ENV === "test") {
+    return join(os.tmpdir(), `paseo-test-isolated-workspace-${process.pid}`);
+  }
+  return join(resolveHostHome(), ".paseo");
+}
+
+/** Ordered workspace-registry paths probed by the lookup, exposed for diagnostics (#973). */
+export function workspaceRegistryPaths(options?: WorkspaceLookupOptions): string[] {
+  const paseoDir = resolvePaseoDir(options);
+  return [
+    options?.workspacesPath,
+    process.env.PASEO_WORKSPACES_PATH,
+    join(paseoDir, "projects", "workspaces.json"),
+    join(paseoDir, "workspaces.json"),
+  ].filter(Boolean) as string[];
+}
+
+/** Ordered project-registry paths probed by the lookup, exposed for diagnostics (#973). */
+export function projectRegistryPaths(options?: WorkspaceLookupOptions): string[] {
+  const paseoDir = resolvePaseoDir(options);
+  return [
+    options?.projectsPath,
+    process.env.PASEO_PROJECTS_PATH,
+    join(paseoDir, "projects", "projects.json"),
+    join(paseoDir, "projects.json"),
+  ].filter(Boolean) as string[];
+}
+
+/**
  * Deterministically resolves a repository slug to a daemon workspace.
  *
  * Inspects `~/.paseo/projects/workspaces.json` and `projects.json`, ranking
@@ -68,24 +105,11 @@ export function resolveWorkspaceForRepo(
   const norm = (normalizeRepoKey(repo) ?? repo).toLowerCase();
   const repoBasename = basename(repo).replace(/\.git$/, "").toLowerCase();
 
-  const isTestMode = process.env.NODE_ENV === "test";
-  const paseoDir =
-    options?.paseoDir ||
-    process.env.PASEO_DIR ||
-    (isTestMode
-      ? join(os.tmpdir(), `paseo-test-isolated-workspace-${process.pid}`)
-      : join(process.env.HOME || os.homedir(), ".paseo"));
-
   let workspaces: WorkspaceRecord[] = [];
   if (Array.isArray(options?.workspacesData)) {
     workspaces = options.workspacesData;
   } else {
-    const candidatePaths = [
-      options?.workspacesPath,
-      process.env.PASEO_WORKSPACES_PATH,
-      join(paseoDir, "projects", "workspaces.json"),
-      join(paseoDir, "workspaces.json"),
-    ].filter(Boolean) as string[];
+    const candidatePaths = workspaceRegistryPaths(options);
 
     for (const p of candidatePaths) {
       if (existsSync(p)) {
@@ -107,12 +131,7 @@ export function resolveWorkspaceForRepo(
   if (Array.isArray(options?.projectsData)) {
     projects = options.projectsData;
   } else {
-    const candidatePaths = [
-      options?.projectsPath,
-      process.env.PASEO_PROJECTS_PATH,
-      join(paseoDir, "projects", "projects.json"),
-      join(paseoDir, "projects.json"),
-    ].filter(Boolean) as string[];
+    const candidatePaths = projectRegistryPaths(options);
 
     for (const p of candidatePaths) {
       if (existsSync(p)) {
@@ -288,8 +307,9 @@ export function resolveWorkspaceForRepo(
     };
   }
 
-  // Fallback: Check local filesystem ~/code/<repoBasename>
-  const codeHome = join(process.env.HOME || os.homedir(), "code", repoBasename);
+  // Fallback: Check local filesystem ~/code/<repoBasename>, resolved against
+  // the host home so an agent-mux profile HOME does not miss the checkout (#973).
+  const codeHome = join(resolveHostHome(), "code", repoBasename);
   if (existsSync(codeHome)) {
     return {
       cwd: codeHome,

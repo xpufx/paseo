@@ -28,15 +28,38 @@ export function setExecFileAsyncForTest(fn: ExecFileAsyncFn | null): void {
 
 const CONFIG_BASENAME = "uppidi-fleet-role-models.json";
 
+const AGENT_MUX_PROFILE_HOME_RE = /(?:^|[\\/])\.agent-mux[\\/]profiles[\\/]/;
+
+/**
+ * Resolve the real user home even when `HOME` points into an agent-mux profile.
+ * In a profile session `HOME` is `~/.agent-mux/profiles/<provider>/<profile>`
+ * while the live Paseo state stays on the host home. agent-mux exports
+ * `REAL_HOME` for every profile session, so prefer it; otherwise strip the
+ * profile prefix so paths under `~/.paseo` still resolve to the host (#973).
+ */
+export function resolveHostHome(env: NodeJS.ProcessEnv = process.env): string {
+  const home = (env.HOME || homedir() || "").trim();
+  if (!home || !AGENT_MUX_PROFILE_HOME_RE.test(home)) {
+    return home;
+  }
+  const realHome = (env.REAL_HOME || "").trim();
+  if (realHome) return realHome;
+  const marker = home.match(AGENT_MUX_PROFILE_HOME_RE);
+  if (marker && typeof marker.index === "number" && marker.index > 0) {
+    return home.slice(0, marker.index);
+  }
+  return home;
+}
+
 // Resolved per call rather than at import time so an override set after the
 // module loads still takes effect, and so an absolute override is honored
 // instead of being re-rooted under the operator's home (#945).
 function getRoleModelsConfigPath(): string {
   const override = process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG?.trim();
   if (override) {
-    return isAbsolute(override) ? override : join(homedir(), override);
+    return isAbsolute(override) ? override : join(resolveHostHome(), override);
   }
-  return join(homedir(), CONFIG_BASENAME);
+  return join(resolveHostHome(), CONFIG_BASENAME);
 }
 
 export const DEFAULT_ROLE_MODELS: Record<string, RoleModelConfig> = {
@@ -157,7 +180,7 @@ export async function discoverAvailableModels(
   return Array.from(models).sort();
 }
 
-async function listEnabledProviders(): Promise<string[]> {
+export async function listEnabledProviders(): Promise<string[]> {
   const { stdout } = await execFileAsync("paseo", ["provider", "ls", "--json"], {
     timeout: 5000,
     encoding: "utf-8",

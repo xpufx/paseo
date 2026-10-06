@@ -2232,6 +2232,103 @@ describe("hook-router orchestrator pruning (#458)", () => {
     assert.equal(second.ok, false);
     assert.equal(second.error, "not found");
   });
+
+  it("archives a closed orchestrator session and unlinks its registration (#973)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-closed", "agent-closed");
+    const archivedIds: string[] = [];
+
+    const result = await router.pruneOrchestrators({
+      orchestratorRecords: router.listOrchestratorRecords(),
+      agentMap: new Map([["agent-closed", { id: "agent-closed", status: "closed" }]]),
+      archiveAgent: async (id) => {
+        archivedIds.push(id);
+        return true;
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(archivedIds, ["agent-closed"]);
+    assert.equal(result.prunedCount, 1);
+    assert.equal(result.pruned[0].key, "repo-closed");
+    assert.deepEqual(result.archived, [
+      { key: "repo-closed", agentId: "agent-closed", reason: "closed session archived and unlinked" },
+    ]);
+    assert.equal(router.readOrchestrator("repo-closed"), null);
+  });
+
+  it("keeps a closed registration when archival fails so a later sweep retries (#973)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-closed", "agent-closed");
+
+    const result = await router.pruneOrchestrators({
+      orchestratorRecords: router.listOrchestratorRecords(),
+      agentMap: new Map([["agent-closed", { id: "agent-closed", status: "closed" }]]),
+      archiveAgent: async () => false,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.prunedCount, 0);
+    assert.equal(router.readOrchestrator("repo-closed")?.agentId, "agent-closed");
+  });
+
+  it("unlinks an already-archived session without re-archiving (#973)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-archived", "agent-archived");
+    const archivedIds: string[] = [];
+
+    const result = await router.pruneOrchestrators({
+      orchestratorRecords: router.listOrchestratorRecords(),
+      agentMap: new Map([
+        ["agent-archived", { id: "agent-archived", status: "closed", archivedAt: "2026-01-01T00:00:00Z" }],
+      ]),
+      archiveAgent: async (id) => {
+        archivedIds.push(id);
+        return true;
+      },
+    });
+
+    assert.deepEqual(archivedIds, []);
+    assert.equal(result.archived?.[0]?.reason, "archived session unlinked");
+    assert.equal(router.readOrchestrator("repo-archived"), null);
+  });
+
+  it("archiveAgent uses the daemon SDK ref when available (#973)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const archived: string[] = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: (id: string) => ({
+          archive: async () => {
+            archived.push(id);
+          },
+        }),
+      },
+    };
+
+    assert.equal(await router.archiveAgent("agent-sdk"), true);
+    assert.deepEqual(archived, ["agent-sdk"]);
+  });
+
+  it("dry-run reports closed sessions without archiving or unlinking (#973)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-closed", "agent-closed");
+    const archivedIds: string[] = [];
+
+    const result = await router.pruneOrchestrators({
+      orchestratorRecords: router.listOrchestratorRecords(),
+      agentMap: new Map([["agent-closed", { id: "agent-closed", status: "closed" }]]),
+      archiveAgent: async (id) => {
+        archivedIds.push(id);
+        return true;
+      },
+      dryRun: true,
+    });
+
+    assert.deepEqual(archivedIds, []);
+    assert.equal(result.dryRun, true);
+    assert.equal(router.readOrchestrator("repo-closed")?.agentId, "agent-closed");
+  });
 });
 
 describe("hook-router bidirectional repo key reconciliation (#752)", () => {
@@ -3083,6 +3180,27 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("resolveOrchestratorModel skips providers that are disabled on the host (#973)", () => {
+    const resolved = resolveOrchestratorModel({
+      fallbackList: [
+        "antigravity-acp/gemini-3.8-flash-low",
+        "codex/gpt-5.6-luna",
+        "antigravity/gemini-3.8-flash-low",
+      ],
+      availableProviders: new Set(["antigravity"]),
+    });
+    assert.equal(resolved.key, "antigravity/gemini-3.8-flash-low");
+    assert.equal(resolved.provider, "antigravity");
+  });
+
+  it("resolveOrchestratorModel keeps the configured primary when no provider is enabled (#973)", () => {
+    const resolved = resolveOrchestratorModel({
+      fallbackList: ["antigravity-acp/gemini-3.8-flash-low", "codex/gpt-5.6-luna"],
+      availableProviders: new Set<string>(),
+    });
+    assert.equal(resolved.provider, "antigravity-acp");
   });
 
   it("runWatchdogAudit records quota failure into circuit breaker and suppresses steer (#890)", async () => {
@@ -4355,10 +4473,12 @@ describe("hook-router ensure-orchestrator deterministic resolution and idempoten
     assert.match(res.error ?? "", /repo is required/);
   });
 
-  it("returns error when no workspace found for unknown repository", async () => {
+  it("returns an actionable error when no workspace found for unknown repository", async () => {
     const res = await router.ensureOrchestrator({ repo: "unknown/repo" });
     assert.equal(res.ok, false);
+    assert.equal(res.errorCode, "workspace_not_found");
     assert.match(res.error ?? "", /No workspace found/);
+    assert.match(res.error ?? "", /Remediation:/);
     assert.equal(res.repo, "unknown/repo");
   });
 
@@ -4423,6 +4543,42 @@ describe("hook-router ensure-orchestrator deterministic resolution and idempoten
     // Verify authoritative registry is updated
     const record = router.readOrchestrator("xpufx-org/paseo");
     assert.equal(record?.agentId, "agent-1");
+  });
+
+  it("falls back to an enabled host provider when the configured default is disabled (#973)", async () => {
+    const fallbackSpawns: any[] = [];
+    const fallbackRouter = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      workspacesData: [
+        {
+          workspaceId: "ws-paseo-main",
+          cwd: tempRepoDir,
+          displayName: "Paseo",
+          isolation: "local",
+          projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo",
+        },
+      ],
+      orchestratorModelFallback: [
+        "antigravity-acp/gemini-3.8-flash-low",
+        "antigravity/gemini-3.8-flash-low",
+      ],
+      circuitBreakerPath: join(tempDir, "model-health-fallback.json"),
+      availableProvidersData: ["antigravity"],
+      providerModeResolver: async () => ({ modes: [] }),
+      spawnAgent: async (opts) => {
+        fallbackSpawns.push(opts);
+        return { id: "agent-fallback" };
+      },
+    });
+    (fallbackRouter as any).hasParentAgentLabel = async () => false;
+
+    const res = await fallbackRouter.ensureOrchestrator({ repo: "xpufx-org/paseo" });
+    assert.equal(res.ok, true);
+    assert.equal(fallbackSpawns.length, 1);
+    assert.equal(fallbackSpawns[0].provider, "antigravity");
+    assert.equal(fallbackSpawns[0].model, "gemini-3.8-flash-low");
   });
 
   it("is idempotent: returns existing active orchestrator without duplicate spawns", async () => {
@@ -4500,15 +4656,19 @@ describe("hook-router ensure-orchestrator deterministic resolution and idempoten
     const badBody = await badRes.json();
     assert.equal(badBody.ok, false);
 
-    // 2. Unknown repo -> 404
+    // 2. Unknown repo -> 422 with an actionable diagnostic naming the registry
     const notFoundRes = await fetch(`http://127.0.0.1:${router.port}/orchestrators/spawn`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ repo: "unknown/repo" }),
     });
-    assert.equal(notFoundRes.status, 404);
+    assert.equal(notFoundRes.status, 422);
     const notFoundBody = await notFoundRes.json();
     assert.equal(notFoundBody.ok, false);
+    assert.equal(notFoundBody.errorCode, "workspace_not_found");
+    assert.match(notFoundBody.error, /No workspace found for repository "unknown\/repo"/);
+    assert.match(notFoundBody.error, /workspaces\.json/);
+    assert.match(notFoundBody.error, /Remediation:/);
     assert.equal(
       router.readOrchestrator("unknown/repo"),
       null,
