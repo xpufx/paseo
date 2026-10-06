@@ -2121,10 +2121,10 @@ export function resolveOrchestratorModel(
     !options.availableProviders || options.availableProviders.has(provider);
 
   // #987: when every configured candidate points at a disabled provider (a
-  // stale saved `~/.paseo/uppidi-fleet-role-models.json`, or a pinned fallback
-  // list), append the built-in orchestrator defaults, which track enabled host
-  // providers, so resolution lands on something spawnable instead of keeping
-  // the disabled primary.
+  // stale saved `~/.paseo/plugin-data/xpufx/uppidi-fleet/role-models.json`, or
+  // a pinned fallback list), append the built-in orchestrator defaults, which
+  // track enabled host providers, so resolution lands on something spawnable
+  // instead of keeping the disabled primary.
   if (
     options.availableProviders &&
     candidates.length > 0 &&

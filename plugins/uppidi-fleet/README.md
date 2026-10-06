@@ -368,7 +368,7 @@ and adapt for your own environment:
    installed; or through a board CLI of your choice. The plugin never loads
    either.
 5. **Pick your models per role** and record them (Cockpit → Agent Role Models,
-   or `~/.paseo/uppidi-fleet-role-models.json`). See
+   or `~/.paseo/plugin-data/xpufx/uppidi-fleet/role-models.json`). See
    [§12](#12-runtime-state--file-map).
 6. **Adapt the Front Desk skill.** Review [`examples/skills/front-desk/SKILL.md`](./examples/skills/front-desk/SKILL.md):
    how to register with the router, how to ingest escalations (`attention/2-user`,
@@ -872,7 +872,7 @@ these gaps yourself.
   data — it remains exported for tests/back-compat, but a missing/empty file
   yields an explicit empty state ("no empirical data yet"), never placeholders.
 - **Action:** override role models from the Cockpit or
-  `~/.paseo/uppidi-fleet-role-models.json`; the runner panel needs a token that
+  `~/.paseo/plugin-data/xpufx/uppidi-fleet/role-models.json`; the runner panel needs a token that
   can read at least one runner scope, and a fleet with no registered runners
   shows as `empty` until one is registered. Metrics need no seeding — they
   populate as agents run ([§13.4](#134-fleet-metrics-empirical-receipts-empty-until-earned)).
@@ -924,7 +924,7 @@ these gaps yourself.
 | `~/.paseo/forgejo-hook/orchestrators/<key>.json` | Repo → orchestrator agent id. |
 | `~/.paseo/forgejo-hook/frontdesk.json` | Front Desk agent id (watchdog recipient; resolved via fallbacks — see [§7.7.3](#773-recipient-routing--delivery)). |
 | `~/.paseo/forgejo-hook/latest-handoff.md` | Active Front Desk hand-off snapshot. |
-| `~/.paseo/uppidi-fleet-role-models.json` | Per-role primary model + fallback group. |
+| `~/.paseo/plugin-data/xpufx/uppidi-fleet/role-models.json` | Per-role primary model + fallback group (scoped storage; migrates legacy `~/.paseo/uppidi-fleet-role-models.json` and `$HOME/uppidi-fleet-role-models.json` on first read). |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/metrics.json` | Fleet capability metrics (scoped storage; fallback/migration from legacy `~/.paseo/uppidi-fleet-metrics.json`). |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `enrolledRepos`, `pausedRepos`; the pre-#984 `mutedRepos` key is still read and migrated). |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/skills/<id>.md` | Operator overrides for the fleet skills (Settings → Fleet Skills). Absent means the bundled `examples/skills/<id>/SKILL.md` is effective. |
