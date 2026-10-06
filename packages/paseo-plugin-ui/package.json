@@ -1,0 +1,47 @@
+{
+  "name": "@xpufx/paseo-plugin-ui",
+  "version": "0.1.0",
+  "description": "Private, in-repo shared UI composition for Paseo plugins (bundled into each plugin at build)",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "NODE_OPTIONS=\"--max-old-space-size=2048\" tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "@getpaseo/plugin": ">=0.9.0",
+    "react": ">=18.0.0",
+    "react-native": ">=0.70.0"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "^0.9.0",
+    "@types/react": "^19.0.10",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-test-renderer": "^19.1.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xpufx/paseo.git"
+  }
+}

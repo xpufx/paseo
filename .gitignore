@@ -36,9 +36,10 @@ publish-stage/
 coverage/
 .vitest/
 
-# Plugin build artifacts (scoped — helper dist stays tracked for package exports)
+# Plugin build artifacts (scoped — helper + shared UI dist stay tracked for package exports)
 dist/
 !packages/paseo-plugin-helper/dist/
+!packages/paseo-plugin-ui/dist/
 plugins/*/dist/
 
 # Self-installed companion binaries (acquired in-process from releases)

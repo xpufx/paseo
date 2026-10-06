@@ -60,19 +60,20 @@ describe("wellbeing client entry contract", () => {
       );
     }
 
-    // Import-graph smoke test: the theme hook must come from the lifecycle
-    // entry and the local progress bar's status resolver from shared, so
-    // neither hides behind the frozen barrel.
+    // Import-graph smoke test: the local host-ui shim must now re-export the
+    // shared package (xpufx-org/paseo#976) rather than re-implement the
+    // Pressable/StyleSheet seam, and the lifecycle entry must still register
+    // the surface.
     const hostUi = fs.readFileSync(path.resolve(pluginDir, "client/host-ui.tsx"), "utf8");
     assert.match(
       hostUi,
-      /import\s*\{[^}]*useHostTheme[^}]*\}\s*from\s*["']paseo-plugin-helper\/lifecycle["']/,
-      "host-ui.tsx must read colors via useHostTheme from paseo-plugin-helper/lifecycle",
+      /from\s*["']@xpufx\/paseo-plugin-ui["']/,
+      "host-ui.tsx must re-export the shared @xpufx/paseo-plugin-ui package",
     );
-    assert.match(
+    assert.doesNotMatch(
       hostUi,
-      /from\s*["']paseo-plugin-helper\/shared["'][\s\S]*resolveMetricStatus|import\s*\{[^}]*resolveMetricStatus[^}]*\}\s*from\s*["']paseo-plugin-helper\/shared["']/,
-      "host-ui.tsx must resolve metric status from paseo-plugin-helper/shared",
+      /from\s*["']react-native["']/,
+      "host-ui.tsx must not compose react-native primitives locally",
     );
 
     const entry = fs.readFileSync(path.resolve(pluginDir, "index.client.tsx"), "utf8");

@@ -1,5 +1,3 @@
 {
-  "exempt": {
-    "no-bespoke-react-native-interactions": "client/host-ui.tsx is the local composition that replaces the frozen paseo-plugin-helper/client kit for wellbeing (xpufx-org/paseo#937, #924). The host SDK exposes no button pressable primitive, so the surface button must compose Pressable over react-native. Every other helper/UI rule is followed; this is the single interaction seam."
-  }
+  "exempt": {}
 }
