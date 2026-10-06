@@ -219,7 +219,7 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
       assert.equal(json?.props?.name, "RadioTower");
     });
 
-    it("queries uppidiAgentsContract and passes navigation.openAgent on row press", async () => {
+    it("navigates to the clicked agent through the host route on web", async () => {
       const harness = await getFleetHarness();
       const { AgentSwitcherPopover } = await import("./agent-switcher.js");
 
@@ -249,47 +249,52 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
         repoQueuedHooks: {},
       };
 
-      const openedAgents: string[] = [];
-      const navigation = {
-        openAgent: (input: { agentId: string }) => {
-          openedAgents.push(input.agentId);
+      const opened: Array<{ url: string; target?: string }> = [];
+      (globalThis as any).__fleetLinking = {
+        openURL: async (url: string, target?: string) => {
+          opened.push({ url, target });
         },
-        openWorkspace: () => {},
+        canOpenURL: async () => true,
       };
 
-      const { root, renderer } = await harness.renderWithRoot(
-        React.createElement(AgentSwitcherPopover, {
-          close: () => {},
-          navigation,
-          workspaceId: "ws-test",
-          context: "workspace",
-        } as any),
-      );
+      try {
+        const { root, renderer } = await harness.renderWithRoot(
+          React.createElement(AgentSwitcherPopover, {
+            close: () => {},
+            host: { id: "srv-test", label: "Test Host" },
+            layout: { compact: false, platform: "web" },
+            workspaceId: "ws-test",
+            context: "workspace",
+          } as any),
+        );
 
-      await harness.TestRenderer.act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 60));
-      });
+        await harness.TestRenderer.act(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        });
 
-      const text = renderedText(renderer.toJSON());
-      assert.match(text, /Live Front Desk/);
-      assert.match(text, /Repo Orchestrator/);
+        const text = renderedText(renderer.toJSON());
+        assert.match(text, /Live Front Desk/);
+        assert.match(text, /Repo Orchestrator/);
 
-      const fdRow = root.find((n: any) => n.props?.testID === "agent-row-fd-pop-id");
-      const orchRow = root.find((n: any) => n.props?.testID === "agent-row-orch-pop-id");
-      assert.ok(fdRow, "must find Front Desk row in popover");
-      assert.ok(orchRow, "must find Orchestrator row in popover");
+        const fdRow = root.find((n: any) => n.props?.testID === "agent-row-fd-pop-id");
+        const orchRow = root.find((n: any) => n.props?.testID === "agent-row-orch-pop-id");
+        assert.ok(fdRow, "must find Front Desk row in popover");
+        assert.ok(orchRow, "must find Orchestrator row in popover");
 
-      // Press frontdesk row
-      await harness.TestRenderer.act(async () => {
-        fdRow.props.onPress();
-      });
-      assert.equal(openedAgents[0], "fd-pop-id");
+        await harness.TestRenderer.act(async () => {
+          fdRow.props.onPress();
+        });
+        await harness.TestRenderer.act(async () => {
+          orchRow.props.onPress();
+        });
 
-      // Press orchestrator row
-      await harness.TestRenderer.act(async () => {
-        orchRow.props.onPress();
-      });
-      assert.equal(openedAgents[1], "orch-pop-id");
+        assert.deepEqual(opened, [
+          { url: "/h/srv-test/agent/fd-pop-id", target: "_self" },
+          { url: "/h/srv-test/agent/orch-pop-id", target: "_self" },
+        ]);
+      } finally {
+        delete (globalThis as any).__fleetLinking;
+      }
     });
 
     it("keeps exactly one scroll owner (no nested ScrollView inside popover content)", async () => {
@@ -329,48 +334,22 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
       );
     });
 
-    it("falls back to client.navigation or client.paseo.agents navigation when props.navigation is absent", async () => {
-      const harness = await getFleetHarness();
-      const { AgentSwitcherPopover } = await import("./agent-switcher.js");
+    it("builds the web route and the native paseo deep link for a selected agent", async () => {
+      await getFleetHarness();
+      const { buildAgentHref } = await import("./agent-switcher.js");
 
-      harness.payloads["uppidi-fleet.agents"] = {
-        ok: true,
-        frontDesk: [makeAgent({ id: "fd-fallback-id", category: "front-desk" })],
-        orchestrators: [],
-        workers: [],
-        tree: [],
-        enrolledRepos: [],
-        pausedRepos: [],
-        repoQueuedHooks: {},
-      };
-
-      const openedViaClientNav: string[] = [];
-      const clientWithNav = {
-        navigation: {
-          openAgent: (input: { agentId: string }) => openedViaClientNav.push(input.agentId),
-        },
-      };
-
-      const { root } = await harness.renderWithRoot(
-        React.createElement(AgentSwitcherPopover, {
-          close: () => {},
-          client: clientWithNav,
-          workspaceId: "ws-test",
-          context: "workspace",
-        } as any),
+      assert.equal(
+        buildAgentHref({ serverId: "srv-1", agentId: "agent-2", platform: "web" }),
+        "/h/srv-1/agent/agent-2",
       );
-
-      await harness.TestRenderer.act(async () => {
-        await new Promise((resolve) => setTimeout(resolve, 60));
-      });
-
-      const fdRow = root.find((n: any) => n.props?.testID === "agent-row-fd-fallback-id");
-      assert.ok(fdRow, "must find Front Desk row");
-
-      await harness.TestRenderer.act(async () => {
-        fdRow.props.onPress();
-      });
-      assert.equal(openedViaClientNav[0], "fd-fallback-id");
+      assert.equal(
+        buildAgentHref({ serverId: "srv-1", agentId: "agent-2", platform: "ios" }),
+        "paseo://h/srv-1/agent/agent-2",
+      );
+      assert.equal(
+        buildAgentHref({ serverId: "srv 1", agentId: "agent/2", platform: "android" }),
+        "paseo://h/srv%201/agent/agent%2F2",
+      );
     });
   });
 });

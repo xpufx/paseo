@@ -65,6 +65,12 @@ describe("uppidi-fleet client entry contract", () => {
       /client\.addHeaderButton\s*\(\s*\{[\s\S]*id:\s*["']uppidi-fleet-agent-switcher["'][\s\S]*\}\s*\)/,
       "index.client.tsx must register agent switcher header button",
     );
+
+    assert.match(
+      source,
+      /<HostThemeProvider\s+theme=\{props\.theme\}>[\s\S]*<AgentSwitcherPopover/,
+      "index.client.tsx must wrap the header popover in HostThemeProvider so the first paint uses the host theme",
+    );
   });
 
 

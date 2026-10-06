@@ -1,9 +1,8 @@
 import React from "react";
-import { View, Text } from "react-native";
+import { View, Text, Linking } from "react-native";
 import type {
   PluginButtonContentProps,
   PluginButtonIconProps,
-  PluginSurfaceProps,
 } from "@getpaseo/plugin/client";
 
 import { Icon } from "@getpaseo/plugin/client/react-native";
@@ -217,12 +216,41 @@ export function AgentSwitcherDropdown({
   );
 }
 
-export function AgentSwitcherPopover(
-  props: PluginButtonContentProps & {
-    navigation?: PluginSurfaceProps["navigation"];
-    client?: { paseo?: { agents?: { openAgent?: (input: { agentId: string }) => void } }; navigation?: PluginSurfaceProps["navigation"] };
-  },
-) {
+/**
+ * A header-button popover receives `PluginButtonContentProps`, which carries no
+ * `navigation` (the SDK only hands that to surfaces, workspace panels, and
+ * settings screens — see `@getpaseo/plugin/client` contracts). The host does
+ * expose agent navigation as a route: `/h/<serverId>/agent/<agentId>` on web
+ * (and Electron) and the `paseo://h/<serverId>/agent/<agentId>` deep link on
+ * native. `Linking.openURL` with `_self` keeps web/Electron navigation in the
+ * current window; native hands the deep link to the OS.
+ */
+export type AgentNavigationPlatform = "ios" | "android" | "web";
+
+export function buildAgentHref(input: {
+  serverId: string;
+  agentId: string;
+  platform: AgentNavigationPlatform;
+}): string {
+  const serverId = encodeURIComponent(input.serverId);
+  const agentId = encodeURIComponent(input.agentId);
+  if (input.platform === "web") {
+    return `/h/${serverId}/agent/${agentId}`;
+  }
+  return `paseo://h/${serverId}/agent/${agentId}`;
+}
+
+export function openAgentInHost(input: {
+  serverId: string;
+  agentId: string;
+  platform: AgentNavigationPlatform;
+}): void {
+  const href = buildAgentHref(input);
+  const openURL = Linking.openURL as (url: string, target?: string) => Promise<unknown>;
+  void openURL(href, input.platform === "web" ? "_self" : undefined).catch(() => {});
+}
+
+export function AgentSwitcherPopover(props: PluginButtonContentProps) {
   const { data: agentsData } = useRpcQuery(
     uppidiAgentsContract,
     {},
@@ -232,18 +260,11 @@ export function AgentSwitcherPopover(
   const { frontDesk, orchestratorsByRepo } = mapAgentSwitcherData(agentsData);
 
   const handleSelectAgent = (agentId: string) => {
-    if (props.navigation?.openAgent) {
-      props.navigation.openAgent({ agentId });
-      return;
-    }
-    if (props.client?.navigation?.openAgent) {
-      props.client.navigation.openAgent({ agentId });
-      return;
-    }
-    if (props.client?.paseo?.agents?.openAgent) {
-      props.client.paseo.agents.openAgent({ agentId });
-      return;
-    }
+    openAgentInHost({
+      serverId: props.host.id,
+      agentId,
+      platform: props.layout.platform,
+    });
   };
 
   const content = (

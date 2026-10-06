@@ -21,6 +21,7 @@ import {
   AgentSwitcherHeaderIcon,
   AgentSwitcherPopover,
 } from "./client/index.js";
+import { HostThemeProvider } from "./client/theme.js";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
@@ -38,7 +39,11 @@ export default function contribute(client: PluginClientContext) {
           icon: AgentSwitcherHeaderIcon,
           behavior: {
             kind: "popover",
-            Content: (props) => <AgentSwitcherPopover {...props} client={client as any} />,
+            Content: (props) => (
+              <HostThemeProvider theme={props.theme}>
+                <AgentSwitcherPopover {...props} />
+              </HostThemeProvider>
+            ),
           },
         },
       });

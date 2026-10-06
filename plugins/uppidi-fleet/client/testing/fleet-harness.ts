@@ -60,7 +60,10 @@ export const Appearance = { getColorScheme: () => "dark", addChangeListener: (cb
 export const useColorScheme = () => "dark";
 export const Dimensions = { get: () => ({ width: 800, height: 600, scale: 1, fontScale: 1 }) };
 export const useWindowDimensions = () => ({ width: 800, height: 600, scale: 1, fontScale: 1 });
-export const Linking = { openURL: async () => {}, canOpenURL: async () => true };
+export const Linking = {
+  openURL: (url, target) => (globalThis.__fleetLinking?.openURL ?? (async () => {}))(url, target),
+  canOpenURL: (url) => (globalThis.__fleetLinking?.canOpenURL ?? (async () => true))(url),
+};
 export const PanResponder = { create: () => ({ panHandlers: {} }) };
 export const Animated = {
   Value: AnimatedValue,
