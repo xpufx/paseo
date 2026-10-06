@@ -4,7 +4,7 @@ Paseo plugin that registers `antigravity-claude` as a separate provider alongsid
 
 ## What it does
 
-Google Antigravity tracks quota for Gemini models and partner models (Claude and GPT) in separate pools. This plugin exposes the Claude and GPT models under their own provider name in Paseo, so partner-model sessions keep working while the Gemini pool is unavailable. It sets `claude-sonnet-5-5-medium` as the default model.
+This plugin exposes ONLY the Claude and GPT models under their own provider name in Paseo making it easier to have a Claude/GPT based selection.
 
 ## How it works
 
@@ -48,7 +48,7 @@ paseo daemon restart
 
 ## agent-mux integration
 
-The plugin always sets `AGY_TARGET_POOL=claude` in the child environment before launching `agy`. If [agent-mux](https://forge.mrs.uppidi.com/xpufx-org/agent-mux) is installed, its `agy` wrapper reads that variable and routes the session to an account with Claude quota available; with a plain `agy` binary the variable has no effect.
+The plugin always sets `AGY_TARGET_POOL=claude` in the child environment before launching `agy`. If [agent-mux](https://github.com/xpufx/agent-mux) is installed, its `agy` wrapper reads that variable and routes the session to an account with Claude quota available; with a plain `agy` binary the variable has no effect.
 
 ## Verification
 
