@@ -18,7 +18,8 @@
     "plugins/uppidi-fleet",
     "plugins/worktree-install",
     "plugins/wellbeing",
-    "plugins/permission-logger"
+    "plugins/permission-logger",
+    "plugins/antigravity-claude"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
