@@ -1420,6 +1420,8 @@ export type FleetTeardownTarget = z.infer<typeof FleetTeardownTargetSchema>;
 export const FleetTeardownInputSchema = z.object({
   targets: z.array(FleetTeardownTargetSchema).min(1),
   confirm: z.literal(true),
+  drain: z.boolean().optional(),
+  drainTimeoutMs: z.number().int().positive().default(30000).optional(),
 });
 export type FleetTeardownInput = z.infer<typeof FleetTeardownInputSchema>;
 

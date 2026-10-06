@@ -5079,7 +5079,12 @@ export class HookRouter {
    */
   public async runWatchdogAudit(opts: WatchdogAuditOptions = {}): Promise<WatchdogAuditResult> {
     if (this.isHaltedState) {
-      return { ok: true, now: opts.now ?? Date.now(), anomalies: [], actions: [] };
+      return {
+        ok: true,
+        timestamp: opts.now ?? Date.now(),
+        audited: { orchestrators: 0, agents: 0, queues: 0 },
+        anomalies: [],
+      };
     }
     const now = opts.now ?? Date.now();
     const reloadFn = opts.reloadAgent ?? ((id: string) => this.reloadAgent(id));
@@ -6074,7 +6079,7 @@ export class HookRouter {
 
   public async runBoardSweep(repos?: string[], io?: IssuesCheckIo): Promise<BoardSweepResult> {
     if (this.isHaltedState) {
-      return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
+      return { ok: true, swept: 0, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
     }
     const rawTargets = (repos ?? this.getEnrolledRepos()).filter((k) => {
       if (!k || k === "frontdesk") return false;

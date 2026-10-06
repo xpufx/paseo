@@ -1147,7 +1147,7 @@ export async function handleFleetTeardown(
       // If fetching fails, proceed with state cleanup
     }
 
-    const agentsToTeardown = agents.filter((a) => targetCategories.has(a.category));
+    let agentsToTeardown = agents.filter((a) => targetCategories.has(a.category));
 
     const tornDown = { workers: 0, orchestrators: 0, frontdesk: 0 };
     const errors: string[] = [];
@@ -1159,6 +1159,32 @@ export async function handleFleetTeardown(
       } catch (err: any) {
         errors.push(`Failed to engage router halt: ${err?.message || String(err)}`);
       }
+    }
+
+    if (input.drain) {
+      const timeoutMs = input.drainTimeoutMs ?? 30000;
+      const pollIntervalMs = 250;
+      const startDrain = Date.now();
+      while (Date.now() - startDrain < timeoutMs) {
+        let currentAgents: UppidiAgent[] = [];
+        try {
+          currentAgents = await fetchPaseoAgents(context);
+        } catch {
+          break;
+        }
+        const activeRemaining = currentAgents.filter(
+          (a) => targetCategories.has(a.category) && a.status === "running"
+        );
+        if (activeRemaining.length === 0) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      }
+      // Refresh agents to teardown after draining
+      try {
+        const refreshed = await fetchPaseoAgents(context);
+        agentsToTeardown = refreshed.filter((a) => targetCategories.has(a.category));
+      } catch {}
     }
 
     // Notify remaining registered groups BEFORE archiving/culling (#872).

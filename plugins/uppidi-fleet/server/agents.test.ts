@@ -1142,6 +1142,87 @@ describe("Fleet teardown state cleanup (#774)", () => {
     assert.equal(ensureOrchRes.ok, false);
     assert.match(ensureOrchRes.error || "", /halted/i);
   });
+
+  it("handles fleet teardown with drain: true waiting for running agent to become idle (#995)", async () => {
+    let checkCount = 0;
+    const archivedAgents: string[] = [];
+
+    const mockContext = {
+      paseo: {
+        agents: {
+          list: async () => {
+            checkCount++;
+            return {
+              entries: [
+                {
+                  id: "agent-running-1",
+                  name: "Worker 1",
+                  labels: { role: "worker" },
+                  // Status is running on first call, becomes idle on subsequent calls
+                  status: checkCount === 1 ? "running" : "idle",
+                },
+              ],
+            };
+          },
+          ref: (id: string) => ({
+            archive: async () => {
+              archivedAgents.push(id);
+              return { ok: true };
+            },
+          }),
+        },
+      },
+    } as any;
+
+    const res = await handleFleetTeardown(
+      { targets: ["workers"], confirm: true, drain: true, drainTimeoutMs: 2000 },
+      mockContext
+    );
+
+    assert.equal(res.ok, true);
+    assert.equal(res.tornDown.workers, 1);
+    assert.deepEqual(archivedAgents, ["agent-running-1"]);
+    assert.ok(checkCount >= 2, "must poll until the running agent becomes idle");
+  });
+
+  it("handles fleet teardown with drain: true timing out when agent remains running (#995)", async () => {
+    const archivedAgents: string[] = [];
+
+    const mockContext = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              {
+                id: "agent-running-forever",
+                name: "Worker Stuck",
+                labels: { role: "worker" },
+                status: "running",
+              },
+            ],
+          }),
+          ref: (id: string) => ({
+            archive: async () => {
+              archivedAgents.push(id);
+              return { ok: true };
+            },
+          }),
+        },
+      },
+    } as any;
+
+    const start = Date.now();
+    const res = await handleFleetTeardown(
+      { targets: ["workers"], confirm: true, drain: true, drainTimeoutMs: 300 },
+      mockContext
+    );
+    const elapsed = Date.now() - start;
+
+    assert.equal(res.ok, true);
+    assert.ok(elapsed >= 250, "must wait for drain interval before timeout");
+    assert.equal(res.tornDown.workers, 1, "archives remaining running agents after timeout");
+    assert.deepEqual(archivedAgents, ["agent-running-forever"]);
+  });
 });
 
 describe("Front Desk intro prompt hook context (#903)", () => {
