@@ -151,7 +151,9 @@ function AuditBadge({ label, variant }: { label: string; variant: StatusVariant 
   return (
     <View style={[styles.badge, { borderColor: color }]}>
       <View style={[styles.badgeDot, { backgroundColor: color }]} />
-      <Text style={[styles.badgeText, { color }]}>{label}</Text>
+      <Text numberOfLines={1} style={[styles.badgeText, { color }]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -160,16 +162,19 @@ function AuditButton({
   label,
   variant = "secondary",
   onPress,
+  testID,
 }: {
   label: string;
   variant?: "primary" | "secondary";
   onPress: () => void;
+  testID?: string;
 }) {
   const colors = usePermissionAuditColors();
   const primary = variant === "primary";
   return (
     <Pressable
       accessibilityRole="button"
+      testID={testID}
       onPress={onPress}
       style={[
         styles.button,
@@ -180,6 +185,7 @@ function AuditButton({
       ]}
     >
       <Text
+        numberOfLines={1}
         style={[
           styles.buttonText,
           { color: primary ? colors.accentForeground : colors.foreground },
@@ -474,21 +480,23 @@ function PermissionAuditViewContent({
         placeholder="Search tool, agent, outcome, or arguments…"
         testID="permission-audit-search"
       />
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      <View style={styles.filterRow}>
         {TYPE_FILTERS.map((value) => (
           <AuditButton
             key={value}
             label={typeLabel(value)}
+            testID={`permission-audit-type-${value}`}
             variant={type === value ? "primary" : "secondary"}
             onPress={() => setType(value)}
           />
         ))}
       </View>
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      <View style={styles.filterRow}>
         {DECISION_FILTERS.map((value) => (
           <AuditButton
             key={value}
             label={decisionLabel(value)}
+            testID={`permission-audit-decision-${value}`}
             variant={decision === value ? "primary" : "secondary"}
             onPress={() => setDecision(value)}
           />
@@ -508,7 +516,9 @@ function PermissionAuditViewContent({
           header: "Time",
           flex: 2,
           render: (item) => (
-            <Text style={{ color: colors.foregroundMuted }}>{formatAuditTime(item.timestamp)}</Text>
+            <Text numberOfLines={1} ellipsizeMode="middle" style={{ color: colors.foregroundMuted }}>
+              {formatAuditTime(item.timestamp)}
+            </Text>
           ),
         },
         {
@@ -517,13 +527,19 @@ function PermissionAuditViewContent({
           flex: 3,
           render: (item) => (
             <View style={{ gap: 2 }}>
-              <Text style={{ color: colors.foreground, fontWeight: "600" }}>{item.name}</Text>
+              <Text
+                numberOfLines={1}
+                ellipsizeMode="middle"
+                style={{ color: colors.foreground, fontWeight: "600" }}
+              >
+                {item.name}
+              </Text>
               <Text style={{ color: colors.foregroundMuted }} numberOfLines={1}>
                 {isToolCallEntry(item) ? "tool_call" : item.kind} · {item.agentId}
                 {item.agentModel ? ` · ${item.agentModel}` : ""}
                 {isToolCallEntry(item) && item.turnId ? ` · turn ${item.turnId}` : ""}
               </Text>
-              <Text style={{ color: colors.foregroundMuted }} numberOfLines={1}>
+              <Text style={{ color: colors.foregroundMuted }} numberOfLines={1} ellipsizeMode="middle">
                 {summarizeAuditInput(item.input)}
               </Text>
             </View>
@@ -574,6 +590,8 @@ function createStyleSheet() {
       flexDirection: "row" as const,
       alignItems: "center" as const,
       alignSelf: "flex-start" as const,
+      maxWidth: "100%" as const,
+      flexShrink: 1,
       borderWidth: 1,
       borderRadius: 9999,
       paddingHorizontal: 8,
@@ -595,12 +613,19 @@ function createStyleSheet() {
       paddingHorizontal: 12,
       paddingVertical: 6,
       minHeight: 32,
+      flexShrink: 1,
+      maxWidth: "100%" as const,
       alignItems: "center" as const,
       justifyContent: "center" as const,
     },
     buttonText: {
       fontSize: 12,
       fontWeight: "600" as const,
+    },
+    filterRow: {
+      flexDirection: "row" as const,
+      flexWrap: "wrap" as const,
+      gap: 8,
     },
     searchInput: {
       borderWidth: 1,
@@ -659,6 +684,8 @@ function createStyleSheet() {
     cell: {
       paddingHorizontal: 10,
       paddingVertical: 8,
+      minWidth: 0,
+      flexShrink: 1,
     },
     alignLeft: {
       alignItems: "flex-start" as const,

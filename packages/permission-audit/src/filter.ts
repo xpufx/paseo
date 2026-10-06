@@ -9,12 +9,23 @@ export function formatAuditTime(iso: string): string {
   return new Date(ms).toLocaleString();
 }
 
+/**
+ * Middle-ellipsis for long values, keeping the leading key and the trailing
+ * identifier. `maxLength` is the content budget; the returned string can be one
+ * character longer once the ellipsis is inserted.
+ */
+function truncateMiddle(text: string, maxLength = 120): string {
+  if (text.length <= maxLength) return text;
+  const head = Math.ceil(maxLength / 2);
+  const tail = Math.floor(maxLength / 2);
+  return `${text.slice(0, head)}…${text.slice(text.length - tail)}`;
+}
+
 export function summarizeAuditInput(input: unknown): string {
   if (input === null || input === undefined) return "—";
-  if (typeof input === "string") return input.length > 120 ? `${input.slice(0, 120)}…` : input;
+  if (typeof input === "string") return truncateMiddle(input);
   try {
-    const text = JSON.stringify(input);
-    return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+    return truncateMiddle(JSON.stringify(input));
   } catch {
     return "—";
   }
