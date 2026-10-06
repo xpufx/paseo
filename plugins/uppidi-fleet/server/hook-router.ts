@@ -1,7 +1,7 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, renameSync, readdirSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -768,13 +768,33 @@ export function watchdogEnvelope({
   return { origin: "watchdog", sender: WATCHDOG_SENDER, repo, kind: "alert", ref };
 }
 
-/** Alert repo context for a daemon agent, when resolvable (mirrors the standalone router). */
+/** Alert repo context for a daemon agent, when resolvable (mirrors the standalone router) (#999). */
 export function agentRepoKey(
-  agent: Pick<WatchdogAgent, "id" | "labels"> | null | undefined,
+  agent: (Pick<WatchdogAgent, "id" | "labels"> & { title?: string | null; name?: string | null }) | null | undefined,
   orchRecords: ReadonlyArray<Pick<OrchestratorRecord, "agentId" | "key">>,
 ): string {
   const record = orchRecords.find((r) => r.agentId === agent?.id);
-  return record?.key ?? agent?.labels?.repo ?? FLEET_REPO;
+  if (record?.key) return record.key;
+
+  // Extract repo from Orchestrator title / name (#999)
+  for (const raw of [agent?.title, agent?.name]) {
+    if (!raw || typeof raw !== "string") continue;
+    const match = raw.trim().match(/^Orchestrator\s*[·\-\:\.]\s*(.+)$/i);
+    if (match) {
+      const cand = match[1].trim();
+      const canonical = canonicalRepoKey(cand);
+      if (canonical) return canonical;
+      const firstWord = cand.split(/\s+/)[0];
+      if (firstWord) {
+        const firstCanonical = canonicalRepoKey(firstWord);
+        if (firstCanonical) return firstCanonical;
+        return firstWord;
+      }
+      return cand;
+    }
+  }
+
+  return agent?.labels?.repo ?? FLEET_REPO;
 }
 
 export interface CoalesceEvent {
@@ -862,6 +882,7 @@ export interface WatchdogAgent {
   id: string;
   title?: string | null;
   name?: string | null;
+  cwd?: string | null;
   status?: string | null;
   role?: string | null;
   provider?: string | null;
@@ -1301,36 +1322,58 @@ const PROBE_AGENT_TITLES = new Set([
 
 /**
  * True when the agent is an orchestrator peer rather than a delegated worker
- * (#895). Two-tier spawn authority means orchestrators are Front Desk's peers
+ * (#895/#999). Two-tier spawn authority means orchestrators are Front Desk's peers
  * even when the daemon stamps a `paseo.parent-agent-id` on them.
+ * Standardized on agent title/name matching `/^Orchestrator\s*[·\-\:\.]/i`, `/^Orchestrator\b/i`,
+ * or title `"orchestrator"`, with fallback to role/labels.
  */
 export function isOrchestratorAgent(
   agent: Pick<WatchdogAgent, "role" | "labels"> & { title?: string | null; name?: string | null },
 ): boolean {
+  if (!agent) return false;
+  const title = String(agent.title ?? agent.name ?? "").trim();
+  if (
+    /^Orchestrator\s*[·\-\:\.]/i.test(title) ||
+    /^Orchestrator\b/i.test(title) ||
+    title.toLowerCase() === "orchestrator"
+  ) {
+    return true;
+  }
   const labels = agent.labels ?? {};
   const role = String(agent.role ?? labels.role ?? "").trim().toLowerCase();
   if (role === "orchestrator") return true;
   if (String(labels.category ?? "").trim().toLowerCase() === "orchestrator") return true;
-  const title = String(agent.title ?? agent.name ?? "").trim().toLowerCase();
-  if (
-    title.startsWith("orchestrator ·") ||
-    title.startsWith("orchestrator -") ||
-    title.startsWith("orchestrator:") ||
-    title.startsWith("orchestrator.") ||
-    title === "orchestrator"
-  ) {
-    return true;
-  }
   return false;
 }
 
 /**
- * Tests whether an agent matches an orchestrator identity for the given repository (#987/#993).
- * Matches by labels.repo or by title/name matching 'Orchestrator · <repo>' (including forge-qualified repo names).
+ * True when the agent is a Front Desk agent (#999).
+ * Standardized on agent title/name matching `/^Front Desk\b/i`, with fallback to role/labels.
+ */
+export function isFrontDeskAgent(
+  agent: Pick<WatchdogAgent, "role" | "labels"> & { title?: string | null; name?: string | null },
+): boolean {
+  if (!agent) return false;
+  const title = String(agent.title ?? agent.name ?? "").trim();
+  if (/^Front Desk\b/i.test(title) || title.toLowerCase() === "frontdesk") {
+    return true;
+  }
+  const labels = agent.labels ?? {};
+  const role = String(agent.role ?? labels.role ?? "").trim().toLowerCase();
+  if (role === "front-desk" || role === "frontdesk") return true;
+  if (String(labels.category ?? "").trim().toLowerCase() === "front-desk") return true;
+  return false;
+}
+
+/**
+ * Tests whether an agent matches an orchestrator identity for the given repository (#987/#993/#999).
+ * Matches by title/name matching 'Orchestrator · <repo>' (including forge-qualified repo names),
+ * or matching agent cwd against the repo workspace checkout, with fallback to labels.repo.
  */
 export function isOrchestratorMatchingRepo(
-  agent: Pick<WatchdogAgent, "role" | "labels" | "title" | "name">,
+  agent: Pick<WatchdogAgent, "role" | "labels" | "title" | "name" | "cwd">,
   repo: string,
+  workspaceCwd?: string | null,
 ): boolean {
   if (!agent) return false;
   const target = String(repo ?? "").trim();
@@ -1354,15 +1397,7 @@ export function isOrchestratorMatchingRepo(
     return false;
   };
 
-  // 1. Check labels.repo if it is an orchestrator
-  if (isOrchestratorAgent(agent)) {
-    const agentRepo = String(agent.labels?.repo ?? "").trim();
-    if (agentRepo && candidateMatchesRepo(agentRepo)) {
-      return true;
-    }
-  }
-
-  // 2. Check title / name matching 'Orchestrator · <repo>'
+  // 1. Check title / name matching 'Orchestrator · <repo>' or 'Orchestrator · <forge>/<repo>'
   for (const raw of [agent.title, agent.name]) {
     if (!raw || typeof raw !== "string") continue;
     const trimmed = raw.trim();
@@ -1375,22 +1410,63 @@ export function isOrchestratorMatchingRepo(
     }
   }
 
+  // 2. Check workspace cwd matching if available
+  const agentCwd = String(agent.cwd ?? "").trim();
+  if (agentCwd) {
+    const normalizedAgentCwd = resolve(agentCwd).toLowerCase();
+    // Compare against explicit workspaceCwd if provided
+    if (workspaceCwd) {
+      const normalizedTargetCwd = resolve(workspaceCwd).toLowerCase();
+      if (normalizedAgentCwd === normalizedTargetCwd) return true;
+    } else {
+      // Resolve workspace deterministically for target repo
+      try {
+        const resolved = resolveWorkspaceForRepo(target);
+        if (resolved?.cwd) {
+          const normalizedTargetCwd = resolve(resolved.cwd).toLowerCase();
+          if (normalizedAgentCwd === normalizedTargetCwd) return true;
+        }
+      } catch {
+        // ignore workspace lookup failures
+      }
+    }
+  }
+
+  // 3. Fallback: check labels.repo if it is an orchestrator
+  if (isOrchestratorAgent(agent)) {
+    const agentRepo = String(agent.labels?.repo ?? "").trim();
+    if (agentRepo && candidateMatchesRepo(agentRepo)) {
+      return true;
+    }
+  }
+
   return false;
 }
 
 /**
- * Find all live orchestrator agents running for `repo` (#987/#993).
- * Matches by labels.repo or title/name matching 'Orchestrator · <repo>'.
+ * Find all live orchestrator agents running for `repo` (#987/#993/#999).
+ * Matches by title/name matching 'Orchestrator · <repo>' or agent cwd matching the repo checkout.
  * Enforces singleton invariant by sorting the newest/authoritative agent first.
  */
 export function findLiveOrchestratorAgents(
   repo: string,
   agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
   registeredAgentId?: string | null,
+  workspaceCwd?: string | null,
 ): WatchdogAgent[] {
   if (!agentMap || agentMap.size === 0) return [];
   const target = String(repo ?? "").trim();
   if (!target) return [];
+
+  let targetCwd = workspaceCwd;
+  if (!targetCwd) {
+    try {
+      const resolved = resolveWorkspaceForRepo(target);
+      targetCwd = resolved?.cwd ?? null;
+    } catch {
+      targetCwd = null;
+    }
+  }
 
   const matched: WatchdogAgent[] = [];
   const matchedIds = new Set<string>();
@@ -1409,7 +1485,7 @@ export function findLiveOrchestratorAgents(
   for (const [id, agent] of agentMap) {
     if (!isLive(agent)) continue;
 
-    if (isOrchestratorMatchingRepo(agent, target)) {
+    if (isOrchestratorMatchingRepo(agent, target, targetCwd)) {
       matched.push(agent);
       matchedIds.add(id);
     }
@@ -1450,15 +1526,16 @@ export function findLiveOrchestratorAgents(
 }
 
 /**
- * Find a live orchestrator agent already running for `repo` (#987/#993).
+ * Find a live orchestrator agent already running for `repo` (#987/#993/#999).
  * Returns the newest/authoritative agent id, or null when no matching live agent exists.
  */
 export function findLiveOrchestratorAgent(
   repo: string,
   agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
   registeredAgentId?: string | null,
+  workspaceCwd?: string | null,
 ): string | null {
-  const matching = findLiveOrchestratorAgents(repo, agentMap, registeredAgentId);
+  const matching = findLiveOrchestratorAgents(repo, agentMap, registeredAgentId, workspaceCwd);
   return matching[0]?.id ?? null;
 }
 
@@ -1501,6 +1578,7 @@ export function isChildWakeupCandidate(
   const parentId = child.labels?.["paseo.parent-agent-id"]?.trim();
   if (!parentId) return false;
   if (isOrchestratorAgent(child)) return false;
+  if (isFrontDeskAgent(child)) return false;
   if (isProbeAgent(child)) return false;
   if (context.frontDeskId && parentId === context.frontDeskId) return false;
   return true;
@@ -1520,6 +1598,7 @@ export function assessChildWakeup(
 ): ChildWakeupAssessment | null {
   if (!agent || agent.archivedAt) return null;
   if (isOrchestratorAgent(agent)) return null;
+  if (isFrontDeskAgent(agent)) return null;
   if (isProbeAgent(agent)) return null;
   const parentId = agent.labels?.["paseo.parent-agent-id"]?.trim();
   if (context.frontDeskId && parentId === context.frontDeskId) return null;
@@ -1600,6 +1679,7 @@ export function formatChildWakeupMessage(
 /** Persisted agent metadata from `~/.paseo/agents` subdirectories (fusion input). */
 export interface WatchdogAgentDisk {
   path?: string;
+  cwd?: string | null;
   lastStatus?: string | null;
   lastError?: string | null;
   requiresAttention?: boolean;
@@ -4174,8 +4254,15 @@ export class HookRouter {
       };
     };
 
+    let repoWorkspaceCwd: string | null = null;
+    try {
+      repoWorkspaceCwd = this.resolveWorkspace(repo)?.cwd ?? null;
+    } catch {
+      repoWorkspaceCwd = null;
+    }
+
     if (agentMap) {
-      const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId);
+      const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId, repoWorkspaceCwd);
       if (matching.length > 0) {
         return await adoptAndDeduplicate(matching);
       }
@@ -4193,7 +4280,7 @@ export class HookRouter {
       }
       if (fresh) {
         agentMap = fresh;
-        const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId);
+        const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId, repoWorkspaceCwd);
         if (matching.length > 0) {
           return await adoptAndDeduplicate(matching);
         }
@@ -4471,7 +4558,12 @@ export class HookRouter {
 
     if (preSpawnAgentMap) {
       const existing = this.readOrchestrator(repo);
-      const matchingLive = findLiveOrchestratorAgents(repo, preSpawnAgentMap, existing?.agentId);
+      const matchingLive = findLiveOrchestratorAgents(
+        repo,
+        preSpawnAgentMap,
+        existing?.agentId,
+        resolved?.cwd ?? null,
+      );
       if (!input.force) {
         if (matchingLive.length > 0) {
           const authoritative = matchingLive[0];

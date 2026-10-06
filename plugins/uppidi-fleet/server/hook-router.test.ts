@@ -69,6 +69,9 @@ import {
   assessChildWakeup,
   formatChildWakeupMessage,
   isOrchestratorAgent,
+  isFrontDeskAgent,
+  isOrchestratorMatchingRepo,
+  findLiveOrchestratorAgents,
   isProbeAgent,
   isChildWakeupCandidate,
   CHILD_WAKEUP_EVENTS,
@@ -5581,6 +5584,81 @@ describe("board sweep auto-reconciliation (#794)", () => {
     assert.equal(sweep2.ok, true);
     assert.equal(sweepCheckCount, 1, "concurrent sweeps must coalesce and not duplicate board checks");
     assert.equal(spawnedCalls.length, 1, "exactly one orchestrator is spawned across concurrent sweeps");
+  });
+
+  it("standardizes agent identity on title/name and cwd without reliance on labels (#999)", async () => {
+    // 1. isOrchestratorAgent identification by title/name variants without labels
+    assert.equal(isOrchestratorAgent({ title: "Orchestrator · xpufx-org/paseo" }), true);
+    assert.equal(isOrchestratorAgent({ name: "Orchestrator · forge.mrs.uppidi.com/xpufx-org/paseo" }), true);
+    assert.equal(isOrchestratorAgent({ title: "Orchestrator - xpufx-org/paseo" }), true);
+    assert.equal(isOrchestratorAgent({ title: "Orchestrator: xpufx-org/paseo" }), true);
+    assert.equal(isOrchestratorAgent({ title: "orchestrator" }), true);
+    assert.equal(isOrchestratorAgent({ title: "Worker: task-1" }), false);
+    assert.equal(isOrchestratorAgent({ title: "Front Desk" }), false);
+
+    // 2. isFrontDeskAgent identification by title/name
+    assert.equal(isFrontDeskAgent({ title: "Front Desk" }), true);
+    assert.equal(isFrontDeskAgent({ name: "Front Desk (primary)" }), true);
+    assert.equal(isFrontDeskAgent({ title: "frontdesk" }), true);
+    assert.equal(isFrontDeskAgent({ title: "Orchestrator · xpufx-org/paseo" }), false);
+    assert.equal(isFrontDeskAgent({ title: "Worker: coding" }), false);
+
+    // 3. isOrchestratorMatchingRepo matches forge-qualified and slug titles without labels
+    const orchAgent: WatchdogAgent = {
+      id: "orch-unlabelled",
+      title: "Orchestrator · forge.mrs.uppidi.com/xpufx-org/paseo",
+      status: "idle",
+    };
+    assert.equal(isOrchestratorMatchingRepo(orchAgent, "xpufx-org/paseo"), true);
+    assert.equal(isOrchestratorMatchingRepo(orchAgent, "forge.mrs.uppidi.com/xpufx-org/paseo"), true);
+    assert.equal(isOrchestratorMatchingRepo(orchAgent, "other-org/other-repo"), false);
+
+    // 4. isOrchestratorMatchingRepo matches agent cwd against workspace checkout without labels
+    const workspaceCheckout = "/home/xpufx/.paseo/worktrees/repo-checkout";
+    const cwdOrchAgent: WatchdogAgent = {
+      id: "orch-cwd",
+      title: "Orchestrator · unlabelled",
+      cwd: workspaceCheckout,
+      status: "running",
+    };
+    assert.equal(
+      isOrchestratorMatchingRepo(cwdOrchAgent, "xpufx-org/paseo", workspaceCheckout),
+      true,
+      "matches when agent cwd matches repo workspace checkout",
+    );
+    assert.equal(
+      isOrchestratorMatchingRepo(cwdOrchAgent, "xpufx-org/paseo", "/other/workspace"),
+      false,
+      "does not match when agent cwd differs from repo workspace checkout",
+    );
+
+    // 5. findLiveOrchestratorAgents finds agent by cwd when title is generic
+    const liveMapWithCwd = new Map<string, WatchdogAgent>([
+      [
+        "orch-cwd-match",
+        {
+          id: "orch-cwd-match",
+          title: "Orchestrator",
+          cwd: "/home/xpufx/code/platform",
+          status: "running",
+        },
+      ],
+    ]);
+    const matches = findLiveOrchestratorAgents(
+      "xpufx-org/platform",
+      liveMapWithCwd,
+      null,
+      "/home/xpufx/code/platform",
+    );
+    assert.equal(matches.length, 1);
+    assert.equal(matches[0].id, "orch-cwd-match");
+
+    // 6. getActiveOrchestrator adopts live orchestrator discovered via cwd matching without labels
+    router.enrollRepo("xpufx-org/platform");
+    (router as any).resolveWorkspace = (repo: string) => ({ cwd: "/home/xpufx/code/platform" });
+    const active = await router.getActiveOrchestrator("xpufx-org/platform", liveMapWithCwd);
+    assert.ok(active);
+    assert.equal(active?.agentId, "orch-cwd-match");
   });
 });
 
