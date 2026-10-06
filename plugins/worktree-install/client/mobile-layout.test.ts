@@ -2,7 +2,7 @@ import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
 import { installHostStubs, readSkin, renderInSkin } from "./testing/host.js";
 import { DARK_THEME, surfaceCases } from "./testing/fixtures.js";
-import { findHorizontalOverflows, resolveStyle, type OverflowFinding } from "./testing/flex-measure.js";
+import { findHorizontalOverflows, resolveStyle, type OverflowFinding } from "paseo-plugin-ui-testing";
 
 /**
  * Mobile layout guard (#684).

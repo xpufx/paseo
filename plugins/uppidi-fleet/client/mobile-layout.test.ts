@@ -9,7 +9,7 @@ import {
 import {
   findHorizontalOverflows,
   type OverflowFinding,
-} from "./testing/flex-measure.js";
+} from "paseo-plugin-ui-testing";
 
 /**
  * Mobile layout guard (#621).

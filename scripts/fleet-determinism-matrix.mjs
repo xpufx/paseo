@@ -820,18 +820,6 @@ const PARTS = [
     ],
     note: "Test scaffolding. Never shipped: package.json `files` excludes `client/testing`.",
   },
-  {
-    file: `${PLUGIN}/client/testing/flex-measure.ts`,
-    part: "Layout measurement double for mobile/zebra assertions",
-    layer: "client",
-    label: DETERMINISTIC,
-    anchors: { exports: ["measureText", "resolveStyle", "findHorizontalOverflows"] },
-    evidence: [
-      [`flex-measure.ts:153`, "text width is computed from the style, not a real layout pass"],
-      [`flex-measure.ts:371`, "overflow findings are walked off the resolved style tree"],
-    ],
-    note: "Test scaffolding for layout assertions. Not shipped.",
-  },
 
   // ---------------------------------------------------------------- shared ---
   {

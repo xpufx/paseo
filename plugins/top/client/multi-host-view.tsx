@@ -19,7 +19,7 @@ import {
   type FleetHostSnapshot,
   type FleetHostStatus,
 } from "../shared/multi-host";
-import { useFleetPolling } from "./multi-host";
+import { multiHostSupported, useFleetPolling } from "./multi-host";
 
 const STATUS_VARIANT: Record<
   FleetHostStatus,
@@ -128,6 +128,18 @@ export function FleetView() {
   const snapshots = useFleetPolling();
   const now = Date.now();
   const aggregate = useMemo(() => aggregateFleet(snapshots), [snapshots]);
+
+  // A host that does not supply `useHosts`/`getPaseoClient` (the mobile bundle)
+  // cannot borrow remote clients. Say so instead of throwing.
+  if (!multiHostSupported()) {
+    return (
+      <HostEmptyState
+        icon="Server"
+        title="Multi-host fleet unavailable"
+        description="This host build does not provide multi-host access. Open Paseo on desktop to see other hosts."
+      />
+    );
+  }
 
   if (snapshots.length === 0) {
     return (

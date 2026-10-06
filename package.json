@@ -6,6 +6,7 @@
   "type": "module",
   "workspaces": [
     "packages/paseo-plugin-helper",
+    "packages/paseo-plugin-ui-testing",
     "packages/permission-audit",
     "plugins/top",
     "plugins/mcp-tools",

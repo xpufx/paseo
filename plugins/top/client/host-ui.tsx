@@ -653,6 +653,59 @@ export interface HostMetricGaugeProps {
   style?: StyleProp<ViewStyle>;
 }
 
+interface GaugeArcProps {
+  which: "left" | "right";
+  size: number;
+  strokeWidth: number;
+  color: string;
+  rotate: number;
+  testID: string;
+}
+
+/**
+ * One half of a no-SVG ring arc.
+ *
+ * A full ring with only its top and right borders colored is a 180deg arc; the
+ * half-width window clips it to one side of the circle, and the rotation places
+ * where that half begins. Two halves compose the full 0..360 sweep without
+ * `react-native-svg`, which the host plugin runtime does not bundle. The angle
+ * math is in `HostMetricGauge`: the right window shows the 0..min(A,180) part,
+ * the left window the 180..A part.
+ */
+function GaugeArc({ which, size, strokeWidth, color, rotate, testID }: GaugeArcProps) {
+  const radius = size / 2;
+  const right = which === "right";
+  return (
+    <View
+      style={{
+        position: "absolute",
+        top: 0,
+        left: right ? size / 2 : 0,
+        width: size / 2,
+        height: size,
+        overflow: "hidden",
+      }}
+    >
+      <View
+        testID={testID}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: right ? -size / 2 : 0,
+          width: size,
+          height: size,
+          borderRadius: radius,
+          borderWidth: strokeWidth,
+          borderColor: "transparent",
+          borderTopColor: color,
+          borderRightColor: color,
+          transform: [{ rotate: `${rotate}deg` }],
+        }}
+      />
+    </View>
+  );
+}
+
 export function HostMetricGauge({
   value,
   size = 76,
@@ -722,10 +775,12 @@ export function HostMetricGauge({
     );
   }
 
+  const progressAngle = (clamped / 100) * 360;
   return (
     <View style={[styles.gaugeWrapper, style]}>
       <View style={[styles.gaugeBox, { width: size, height: size, borderRadius: radius }]}>
         <View
+          testID="gauge-track"
           style={{
             position: "absolute",
             top: 0,
@@ -737,18 +792,35 @@ export function HostMetricGauge({
             borderColor: trackColor,
           }}
         />
-        <View
-          style={[
-            styles.gaugeFill,
-            {
-              width: innerSize,
-              height: innerSize,
-              borderRadius: innerRadius,
-              backgroundColor: gaugeColor,
-              opacity: 0.25 + 0.75 * (clamped / 100),
-            },
-          ]}
-        />
+        {clamped > 0 ? (
+          <GaugeArc
+            which="right"
+            size={size}
+            strokeWidth={strokeWidth}
+            color={gaugeColor}
+            rotate={progressAngle <= 180 ? progressAngle - 135 : 45}
+            testID="gauge-arc-right"
+          />
+        ) : null}
+        {progressAngle > 180 ? (
+          <GaugeArc
+            which="left"
+            size={size}
+            strokeWidth={strokeWidth}
+            color={gaugeColor}
+            rotate={progressAngle - 135}
+            testID="gauge-arc-left"
+          />
+        ) : null}
+        <View style={styles.gaugeCenterHole}>
+          {centerSlot ? (
+            centerSlot
+          ) : showPercent ? (
+            <Text style={[styles.gaugePercent, { color: colors.foreground }]}>
+              {Math.round(clamped)}%
+            </Text>
+          ) : null}
+        </View>
       </View>
       {label ? (
         <Text style={[styles.gaugeLabel, { color: colors.foregroundMuted }]}>{label}</Text>
@@ -1703,7 +1775,6 @@ const styles = {
   gaugeWrapper: { alignItems: "center", gap: 4 },
   gaugeBox: { alignItems: "center", justifyContent: "center", overflow: "hidden" },
   gaugeCenterHole: { alignItems: "center", justifyContent: "center" },
-  gaugeFill: { position: "absolute", bottom: 0, left: 0, right: 0 },
   gaugePercent: { fontSize: 13, fontWeight: "700" },
   gaugeLabel: { fontSize: 11 },
   kvContainer: { gap: 2, width: "100%" },

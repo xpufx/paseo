@@ -3,6 +3,7 @@ import React from "react";
 import TestRenderer, { act, type ReactTestInstance } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { initClientHelpers } from "paseo-plugin-helper/core";
+import { scrollContainers, sheetScrollersInsideModal } from "paseo-plugin-ui-testing";
 import { contributeClient } from "./pill";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -171,18 +172,21 @@ afterEach(() => {
 });
 
 /**
- * Regression for xpufx-org/paseo#1043: the MCP pill modal did not scroll.
+ * Regression for xpufx-org/paseo#1043: the MCP pill modal did not scroll, and
+ * then its inner scroller fought the host modal gesture.
  *
  * Like the #975 top surface, the centered composer-pill wrapper hands
  * `renderModal` a bounded `flex: 1` frame and, with `hostScroll` unset, renders
  * `<Modal.Content scrollable={false}>`. The plugin is therefore the required
- * scroll owner and must supply exactly one scroller (`HostScroll`) inside a
- * fully flex-bounded chain. Before the fix `HostModalSection` merely had
- * `width`/`gap`, so it sized to its content, the scroller never got a viewport,
- * and content clipped. This pins the single-owner contract for mcp-tools.
+ * scroll owner and must supply exactly one scroller inside a fully bounded
+ * chain — but that scroller must be a plain React Native `ScrollView`. The host
+ * SDK's `ScrollView` wires the host's sheet pan gestures, so using it as the
+ * inner scroller of a host modal hands the same gesture to two recognizers (the
+ * xpufx-org/paseo#219 class). Before the fix `HostScroll` used the SDK scroller,
+ * so this suite pins both halves: exactly one owner, and it is the plain one.
  */
 describe("mcp-tools pill modal scroll ownership (#1043)", () => {
-  it("renders exactly one scroll owner inside a fully bounded flex chain", async () => {
+  it("owns the scroll with a plain React Native scroller, not the host sheet", async () => {
     const pill = registerMcpPill();
     await act(async () => {
       await Promise.resolve();
@@ -199,17 +203,18 @@ describe("mcp-tools pill modal scroll ownership (#1043)", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
-    const scrollers = mounted.root.findAll((node) => typeOf(node) === "host-scroll-view");
-    expect(scrollers).toHaveLength(1);
-    // No second, plain React Native scroller nested under it.
-    expect(mounted.root.findAll((node) => typeOf(node) === "ScrollView")).toHaveLength(0);
+    // Exactly one plugin scroller, and it is the plain React Native one.
+    const plainScrollers = mounted.root.findAll((node) => typeOf(node) === "ScrollView");
+    expect(plainScrollers).toHaveLength(1);
+    // The host SDK's sheet-gesture scroller must not appear at all here.
+    expect(mounted.root.findAll((node) => typeOf(node) === "host-scroll-view")).toHaveLength(0);
 
     const modalContent = mounted.root.find((node) => typeOf(node) === "host-modal-content");
     expect(modalContent.props.scrollable).toBe(false);
 
     // Every View between the host's modal body and the single scroller must
     // flex-fill, or one of them sizes to its content and the scroller collapses.
-    const chain = ancestorsOf(scrollers[0]!);
+    const chain = ancestorsOf(plainScrollers[0]!);
     const modalIndex = chain.findIndex((node) => typeOf(node) === "host-modal-content");
     expect(modalIndex).toBeGreaterThan(0);
     const innerViews = chain.slice(0, modalIndex).filter((node) => typeOf(node) === "View");
@@ -219,5 +224,24 @@ describe("mcp-tools pill modal scroll ownership (#1043)", () => {
       expect(style.flex, `flex ancestor ${typeOf(view)} must flex-fill`).toBe(1);
       expect(style.minHeight, `flex ancestor ${typeOf(view)} must allow shrink`).toBe(0);
     }
+  });
+
+  it("carries no host sheet scroller inside the modal body (harness invariant)", async () => {
+    const pill = registerMcpPill();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const Icon = pill.PillIcon();
+    act(() => pill.open());
+    mounted = renderModal(Icon!);
+    cleanupPill = pill.cleanup;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    const tree = mounted.toJSON();
+    expect(sheetScrollersInsideModal(tree)).toEqual([]);
+    const owners = scrollContainers(tree).filter((container) => !container.hostOwned);
+    expect(owners).toHaveLength(1);
   });
 });

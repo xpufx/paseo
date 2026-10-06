@@ -3,6 +3,7 @@ import React from "react";
 import TestRenderer, { act, type ReactTestInstance } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { initClientHelpers } from "paseo-plugin-helper/core";
+import { sheetScrollersInsideModal } from "paseo-plugin-ui-testing";
 import { contributeClient } from "./pill";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -217,6 +218,13 @@ describe("top pill modal scroll ownership (#975)", () => {
 
     const scrollers = mounted.root.findAll((node) => typeOf(node) === "host-scroll-view");
     expect(scrollers).toHaveLength(1);
+
+    // Census finding (xpufx-org/paseo#1043): the top pill still uses the host
+    // SDK's sheet-gesture scroller inside the host modal body. mcp-tools was
+    // moved to plain React Native in this slice; top's `HostScroll` is shared
+    // with the full-page surface and turn panel, so swapping it is a separate,
+    // reviewed change. Pinned so the defect stays visible and cannot grow.
+    expect(sheetScrollersInsideModal(mounted.toJSON())).toHaveLength(1);
     // No second, plain React Native scroller nested under it.
     expect(mounted.root.findAll((node) => typeOf(node) === "ScrollView")).toHaveLength(0);
 

@@ -5,6 +5,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   View,
   type StyleProp,
@@ -13,7 +14,6 @@ import {
 } from "react-native";
 import {
   Icon,
-  ScrollView as HostScrollView,
   TextInput as HostTextInputBase,
   copyText,
   useToast,
@@ -67,6 +67,11 @@ export interface HostScrollProps {
  * Pill `renderModal` content is the owner when `hostScroll` is unset: the host
  * renders `<Modal.Content scrollable={false}>`, so this must be the only
  * vertical scroller in the subtree. Never nest it inside another scroller.
+ *
+ * It is a plain React Native `ScrollView`, not `@getpaseo/plugin/client/react-native`'s
+ * `ScrollView`. The host SDK scroller wires the host's sheet pan gestures; as
+ * the inner scroller of a host modal it fights the modal's own recognizer, the
+ * xpufx-org/paseo#219 class. Plain RN scrolls without claiming the gesture.
  */
 export function HostScroll({
   children,
@@ -75,13 +80,13 @@ export function HostScroll({
   ...props
 }: HostScrollProps & Record<string, unknown>) {
   return (
-    <HostScrollView
+    <ScrollView
       {...(props as Record<string, unknown>)}
       style={[styles.fluid, style]}
       contentContainerStyle={contentContainerStyle}
     >
       {children}
-    </HostScrollView>
+    </ScrollView>
   );
 }
 

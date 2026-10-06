@@ -10,8 +10,7 @@ import {
   type ScrollContainer,
 } from "./testing/host.js";
 import { DARK_THEME, TICKETS, surfaceCases, type SurfaceCase } from "./testing/fixtures.js";
-import { contentHeightFloor, heightClamps } from "./testing/scroll-measure.js";
-import { resolveStyle } from "./testing/flex-measure.js";
+import { contentHeightFloor, heightClamps, resolveStyle } from "paseo-plugin-ui-testing";
 
 /**
  * Vertical reachability guard (#684).

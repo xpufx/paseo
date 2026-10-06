@@ -1,0 +1,20 @@
+{
+  "name": "paseo-plugin-ui-testing",
+  "version": "0.1.0",
+  "description": "Private dev-only render-level UI guard harness for Paseo plugin surfaces",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
+  }
+}

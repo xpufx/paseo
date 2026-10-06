@@ -35,7 +35,7 @@ the easy mistake.
 | `contested` | 1 |
 | **total** | **91** |
 
-Inventory: 83 tracked source files in scope — 53 described above as source (45 files, some carrying several parts) and 38 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 83 tracked source files in scope — 52 described above as source (44 files, some carrying several parts) and 39 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -125,7 +125,6 @@ See *What this table does not cover* below for the sessions themselves.
 | Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle | `client/host-ui.tsx` | 77 | 2117 | `deterministic` | `Card`, `Button`, `Badge`, `DataTable`, `ModalBody`, `ForgeIcon`, +2 more | host-ui.tsx:1-20 — component library over the host theme, host Icon and plain react-native; no model call<br>host-ui.tsx:100-200 — Row/Stack/Grid and Card/Tabs compose host theme colors only<br>host-ui.tsx:2000-2112 — ticket lifecycle view renders RPC payloads; it does not produce model output |
 | Static fleet fixtures for client tests | `client/testing/fleet-fixtures.ts` | 9 | 422 | `deterministic` | `agentsPayload`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `hookQueuesPayload` | fleet-fixtures.ts:222-370 — seven payload builders returning fixed records<br>fleet-fixtures.ts:32 — one wide-worktree geometry constant |
 | Render harness: host element stubs, rpc stubs, provider wrapper | `client/testing/fleet-harness.ts` | 36 | 280 | `deterministic` | `getFleetHarness`, `useToast`, `Icon`, `useRevealedText` | fleet-harness.ts:28-58 — host components stubbed to inert React elements<br>fleet-harness.ts:70-80 — toast, icon, scroll/flatlist and copyText stubs<br>fleet-harness.ts:111 — the harness is assembled once and awaited |
-| Layout measurement double for mobile/zebra assertions | `client/testing/flex-measure.ts` | 5 | 438 | `deterministic` | `measureText`, `resolveStyle`, `findHorizontalOverflows` | flex-measure.ts:153 — text width is computed from the style, not a real layout pass<br>flex-measure.ts:371 — overflow findings are walked off the resolved style tree |
 
 - **Barrel re-export for surface, tree-view, panel and tooling** (`client/index.ts`) — Pure re-export barrel.
 - **Fleet tooling surface: schema-driven manual runner and result viewer** (`client/tooling.tsx`) — Manual schema-driven tool runner surface. Queries tool schemas and displays execution output.
@@ -141,7 +140,6 @@ See *What this table does not cover* below for the sessions themselves.
 - **Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle** (`client/host-ui.tsx`) — Replaces the removed frozen helper client kit for uppidi-fleet. Deterministic presentation; model work stays behind the RPCs it renders.
 - **Static fleet fixtures for client tests** (`client/testing/fleet-fixtures.ts`) — Test data. Deterministic by construction.
 - **Render harness: host element stubs, rpc stubs, provider wrapper** (`client/testing/fleet-harness.ts`) — Test scaffolding. Never shipped: package.json `files` excludes `client/testing`.
-- **Layout measurement double for mobile/zebra assertions** (`client/testing/flex-measure.ts`) — Test scaffolding for layout assertions. Not shipped.
 
 ## Shared
 
@@ -206,6 +204,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `client/search-height.test.ts` | client/search-height | `test:tsx` | 166 | `deterministic` |
 | `client/surface-halt.test.tsx` | client/surface-halt | `test:tsx` | 173 | `deterministic` |
 | `client/tree-zebra.test.tsx` | Tree zebra striping | `test:tsx` | 47 | `deterministic` |
+| `client/ui-guard.test.ts` | client/ui-guard | `test:tsx` | 95 | `deterministic` |
 | `server/agents.test.ts` | Agent normalisation, state derivation, spawn-authority and archive paths | `test:node` | 1516 | `deterministic` |
 | `server/fleet-reset.test.ts` | server/fleet-reset | `test:node` | 168 | `deterministic` |
 | `server/fleet.test.ts` | Cross-surface fleet behaviour | `test:node` | 1339 | `deterministic` |
@@ -283,11 +282,11 @@ matrix above is the judgement half.
 | `client/surface.tsx` | client | 3207 | 19 | `AttentionAgentCard`, `AttentionAgentCardProps`, `HaltConfirmModal`, `HaltConfirmModalProps`, `HaltedBanner`, `HaltedBannerProps`, `ModelAlertBanner`, `ModelAlertBannerProps`, `ResetStateModal`, `ResetStateModalProps`, `RouterStatusBadge`, `SurfaceTab` …+7 more |
 | `client/testing/fleet-fixtures.ts` | client | 422 | 9 | `WIDE_WORKTREE`, `agentsPayload`, `agentsPayloadNoFrontDesk`, `hookQueuesPayload`, `installPayloads`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `skillsPayload` |
 | `client/testing/fleet-harness.ts` | client | 280 | 36 | `ActivityIndicator`, `Animated`, `Appearance`, `Dimensions`, `Easing`, `FlatList`, `FleetRenderHarness`, `Icon`, `Image`, `Linking`, `Modal`, `PanResponder` …+24 more |
-| `client/testing/flex-measure.ts` | client | 438 | 5 | `OverflowFinding`, `StyleValue`, `findHorizontalOverflows`, `measureText`, `resolveStyle` |
 | `client/theme.ts` | client | 62 | 5 | `FleetTheme`, `FleetTypographyScale`, `FleetTypographyToken`, `HostThemeProvider`, `useFleetTheme` |
 | `client/tooling.tsx` | client | 392 | 2 | `UppidiFleetToolingProps`, `UppidiFleetToolingView` |
 | `client/tree-view.tsx` | client | 3382 | 40 | `AgentAttentionBanner`, `AgentAttentionBannerProps`, `AgentHealthGauge`, `AgentHealthGaugeProps`, `AgentLabelsRow`, `AgentMetricsCard`, `AgentMetricsCardProps`, `AgentStateDot`, `AgentStatusLight`, `AgentStatusLightProps`, `AgentStatusLightsRow`, `AgentStatusLightsRowProps` …+28 more |
 | `client/tree-zebra.test.tsx` | client | 47 | 0 | — |
+| `client/ui-guard.test.ts` | client | 95 | 0 | — |
 | `index.client.tsx` | entry | 108 | 10 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherJumpScreen`, `AgentSwitcherSidebarItem`, `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |
 | `index.server.ts` | entry | 190 | 1 | `contribute` |
 | `server/agents.test.ts` | server | 1516 | 0 | — |
