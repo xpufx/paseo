@@ -113,6 +113,8 @@ export const SettingsSelect = stub("SettingsSelect");
 export const SettingsInput = stub("SettingsInput");
 export const SettingsRow = stub("SettingsRow");
 export const SettingsButton = stub("SettingsButton");
+export const SidebarRow = stub("SidebarRow");
+export const SidebarSeparator = stub("SidebarSeparator");
 `;
 
 const PASEO_UI_STUB_URL = `data:text/javascript,${encodeURIComponent(PASEO_UI_STUB_SOURCE)}`;

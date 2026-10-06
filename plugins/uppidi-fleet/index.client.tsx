@@ -18,63 +18,36 @@ import {
   UppidiForgePanel,
   UppidiFleetSidebar,
   registerWorkspacePanel,
-  AgentSwitcherHeaderIcon,
-  AgentSwitcherPopover,
+  AgentSwitcherSidebarItem,
+  AgentSwitcherJumpScreen,
+  AGENT_SWITCHER_JUMP_SCREEN_ID,
 } from "./client/index.js";
 import { HostThemeProvider } from "./client/theme.js";
 
 initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
 export default function contribute(client: PluginClientContext) {
-  const headerButtons = new Map<string, () => void>();
-
-  const addSwitcherButton = (workspaceId: string) => {
-    if (!workspaceId || headerButtons.has(workspaceId)) return;
-    if (typeof client.addHeaderButton === "function") {
-      const registration = client.addHeaderButton({
-        id: "uppidi-fleet-agent-switcher",
-        workspaceId,
-        button: {
+  const removeSwitcherItem =
+    typeof client.addSidebarHeaderItem === "function"
+      ? client.addSidebarHeaderItem({
+          id: "uppidi-fleet-agent-switcher",
           title: "Agent Switcher",
-          icon: AgentSwitcherHeaderIcon,
-          behavior: {
-            kind: "popover",
-            Content: (props) => (
-              <HostThemeProvider theme={props.theme}>
-                <AgentSwitcherPopover {...props} />
-              </HostThemeProvider>
-            ),
-          },
-        },
-      });
-      headerButtons.set(workspaceId, () => {
-        if (typeof registration?.remove === "function") {
-          registration.remove();
-        }
-      });
-    }
-  };
+          Component: AgentSwitcherSidebarItem,
+        })
+      : undefined;
 
-  const unsubscribeAgents = client.paseo?.agents?.subscribe?.((update: any) => {
-    if (update.kind !== "upsert" || !update.agent?.workspaceId) return;
-    addSwitcherButton(update.agent.workspaceId);
-  });
-
-  if (client.paseo?.agents?.list) {
-    void Promise.resolve()
-      .then(() => client.paseo.agents.list())
-      .then(
-        (res: any) => {
-          const entries = Array.isArray(res?.entries) ? res.entries : [];
-          for (const { agent } of entries) {
-            if (typeof agent?.workspaceId === "string") {
-              addSwitcherButton(agent.workspaceId);
-            }
-          }
-        },
-        (err) => console.warn("[uppidi-fleet] Failed to list agents for header switcher:", err),
-      );
-  }
+  const removeSwitcherScreen =
+    typeof client.addScreen === "function"
+      ? client.addScreen({
+          id: AGENT_SWITCHER_JUMP_SCREEN_ID,
+          title: "Agent Switcher",
+          Component: (props) => (
+            <HostThemeProvider theme={props.theme}>
+              <AgentSwitcherJumpScreen {...props} />
+            </HostThemeProvider>
+          ),
+        })
+      : undefined;
 
   const removeSidebar = registerSidebarSurface(client, {
     id: "uppidi-fleet",
@@ -104,28 +77,19 @@ export default function contribute(client: PluginClientContext) {
   });
 
   return () => {
-    if (typeof unsubscribeAgents === "function") {
-      unsubscribeAgents();
-    }
-    for (const remove of headerButtons.values()) {
-      remove();
-    }
-    headerButtons.clear();
-
-    if (typeof removeSettings === "function") {
-      removeSettings();
-    } else if (removeSettings && typeof (removeSettings as any).remove === "function") {
-      (removeSettings as any).remove();
-    }
-    if (typeof removePanel === "function") {
-      removePanel();
-    } else if (removePanel && typeof (removePanel as any).remove === "function") {
-      (removePanel as any).remove();
-    }
-    if (typeof removeSidebar === "function") {
-      removeSidebar();
-    } else if (removeSidebar && typeof (removeSidebar as any).remove === "function") {
-      (removeSidebar as any).remove();
+    const registrations = [
+      removeSwitcherItem,
+      removeSwitcherScreen,
+      removeSettings,
+      removePanel,
+      removeSidebar,
+    ];
+    for (const registration of registrations) {
+      if (typeof registration === "function") {
+        registration();
+      } else if (registration && typeof (registration as any).remove === "function") {
+        (registration as any).remove();
+      }
     }
   };
 }
@@ -137,7 +101,8 @@ export {
   UppidiForgePanel,
   UppidiFleetSidebar,
   registerWorkspacePanel,
-  AgentSwitcherHeaderIcon,
-  AgentSwitcherPopover,
+  AgentSwitcherSidebarItem,
+  AgentSwitcherJumpScreen,
+  AGENT_SWITCHER_JUMP_SCREEN_ID,
 };
 

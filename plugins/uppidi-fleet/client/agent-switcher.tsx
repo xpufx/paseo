@@ -1,9 +1,11 @@
 import React from "react";
-import { View, Text, Linking } from "react-native";
+import { View, Text } from "react-native";
 import type {
-  PluginButtonContentProps,
-  PluginButtonIconProps,
+  PluginPopoverProps,
+  PluginScreenProps,
+  PluginSidebarItemProps,
 } from "@getpaseo/plugin/client";
+import { SidebarRow } from "@getpaseo/plugin/client/ui";
 
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
@@ -12,7 +14,7 @@ import {
   Responsive,
 } from "./host-ui.js";
 import { useRpcQuery } from "paseo-plugin-helper/core";
-import { useFleetTheme } from "./theme.js";
+import { HostThemeProvider, useFleetTheme } from "./theme.js";
 import {
   uppidiAgentsContract,
   getDeterministicStateConfig,
@@ -20,7 +22,10 @@ import {
 } from "../shared/contracts.js";
 import { mapAgentSwitcherData } from "./agent-switcher-data.js";
 
-export function AgentSwitcherHeaderIcon({ size, color }: PluginButtonIconProps) {
+/** Screen the switcher opens to hand a selection to `navigation.openAgent`. */
+export const AGENT_SWITCHER_JUMP_SCREEN_ID = "uppidi-fleet-agent-switcher-jump";
+
+export function AgentSwitcherSidebarIcon({ size, color }: { size: number; color: string }) {
   return <Icon name="RadioTower" size={size} color={color} />;
 }
 
@@ -217,40 +222,34 @@ export function AgentSwitcherDropdown({
 }
 
 /**
- * A header-button popover receives `PluginButtonContentProps`, which carries no
- * `navigation` (the SDK only hands that to surfaces, workspace panels, and
- * settings screens — see `@getpaseo/plugin/client` contracts). The host does
- * expose agent navigation as a route: `/h/<serverId>/agent/<agentId>` on web
- * (and Electron) and the `paseo://h/<serverId>/agent/<agentId>` deep link on
- * native. `Linking.openURL` with `_self` keeps web/Electron navigation in the
- * current window; native hands the deep link to the OS.
+ * Sidebar-header entry for the switcher.
+ *
+ * `addHeaderButton` popovers receive `PluginButtonContentProps`, which carries
+ * no `navigation`; the SDK hands `navigation` only to navigable registrations
+ * (`PluginSurfaceProps`, `PluginScreenProps`, panels). This item opens the
+ * dropdown through `openPopover`, and each row hands its selection to a
+ * registered screen through `openScreen` — the screen is what carries
+ * `navigation.openAgent`.
  */
-export type AgentNavigationPlatform = "ios" | "android" | "web";
-
-export function buildAgentHref(input: {
-  serverId: string;
-  agentId: string;
-  platform: AgentNavigationPlatform;
-}): string {
-  const serverId = encodeURIComponent(input.serverId);
-  const agentId = encodeURIComponent(input.agentId);
-  if (input.platform === "web") {
-    return `/h/${serverId}/agent/${agentId}`;
-  }
-  return `paseo://h/${serverId}/agent/${agentId}`;
+export function AgentSwitcherSidebarItem(props: PluginSidebarItemProps) {
+  return (
+    <SidebarRow
+      icon={AgentSwitcherSidebarIcon}
+      label="Agent Switcher"
+      onPress={() => props.openPopover(AgentSwitcherPopoverHost)}
+    />
+  );
 }
 
-export function openAgentInHost(input: {
-  serverId: string;
-  agentId: string;
-  platform: AgentNavigationPlatform;
-}): void {
-  const href = buildAgentHref(input);
-  const openURL = Linking.openURL as (url: string, target?: string) => Promise<unknown>;
-  void openURL(href, input.platform === "web" ? "_self" : undefined).catch(() => {});
+function AgentSwitcherPopoverHost(props: PluginPopoverProps) {
+  return (
+    <HostThemeProvider theme={props.theme}>
+      <AgentSwitcherPopover {...props} />
+    </HostThemeProvider>
+  );
 }
 
-export function AgentSwitcherPopover(props: PluginButtonContentProps) {
+export function AgentSwitcherPopover(props: PluginPopoverProps) {
   const { data: agentsData } = useRpcQuery(
     uppidiAgentsContract,
     {},
@@ -260,10 +259,9 @@ export function AgentSwitcherPopover(props: PluginButtonContentProps) {
   const { frontDesk, orchestratorsByRepo } = mapAgentSwitcherData(agentsData);
 
   const handleSelectAgent = (agentId: string) => {
-    openAgentInHost({
-      serverId: props.host.id,
-      agentId,
-      platform: props.layout.platform,
+    props.openScreen({
+      screenId: AGENT_SWITCHER_JUMP_SCREEN_ID,
+      params: { agentId, serverId: props.host.id },
     });
   };
 
@@ -298,5 +296,35 @@ export function AgentSwitcherPopover(props: PluginButtonContentProps) {
         {content}
       </View>
     </Responsive>
+  );
+}
+
+/**
+ * In-client hand-off. The popover itself cannot navigate (no `navigation`), so
+ * it opens this registered screen, which receives `navigation` and forwards the
+ * selection to `openAgent` on mount. The host replaces this route with the agent
+ * timeline; nothing reloads the client or leaves the app.
+ */
+export function AgentSwitcherJumpScreen(props: PluginScreenProps) {
+  const { colors } = useFleetTheme();
+  const agentId = props.params.agentId;
+  const openAgent = props.navigation?.openAgent;
+  const didNavigate = React.useRef(false);
+
+  React.useLayoutEffect(() => {
+    if (didNavigate.current || !agentId || !openAgent) return;
+    didNavigate.current = true;
+    openAgent({ agentId, serverId: props.params.serverId || props.host.id });
+  }, [agentId, openAgent, props.params.serverId, props.host.id]);
+
+  return (
+    <View
+      testID="agent-switcher-jump"
+      style={{ flex: 1, alignItems: "center", justifyContent: "center", padding: 24 }}
+    >
+      <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
+        {openAgent ? "Opening agent…" : "In-client navigation is unavailable on this host."}
+      </Text>
+    </View>
   );
 }

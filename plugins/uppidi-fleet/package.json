@@ -20,7 +20,7 @@
     "test:tsx": "NODE_ENV=test tsx --test client/entry.test.ts client/agent-switcher.test.tsx client/cross-repo-issues.test.ts client/mobile-layout.test.ts client/tree-zebra.test.tsx client/search-height.test.ts client/kanban-board.test.tsx client/forges-tab.test.tsx client/surface-halt.test.tsx client/frontdesk-follow-scroll.test.tsx client/repo-enrollment.test.ts"
   },
   "devDependencies": {
-    "@getpaseo/plugin": "^0.9.0",
+    "@getpaseo/plugin": "^0.11.0-beta.3",
     "@tanstack/react-query": "^5.90.11",
     "@types/react": "^19.0.10",
     "esbuild": "0.27.7",

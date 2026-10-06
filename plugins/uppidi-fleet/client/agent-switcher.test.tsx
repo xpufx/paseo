@@ -201,14 +201,13 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
     });
   });
 
-
-  describe("AgentSwitcherPopover and header icon integration", () => {
-    it("renders AgentSwitcherHeaderIcon with RadioTower icon", async () => {
+  describe("AgentSwitcherSidebarItem and in-client navigation", () => {
+    it("renders the sidebar icon with the RadioTower glyph", async () => {
       const harness = await getFleetHarness();
-      const { AgentSwitcherHeaderIcon } = await import("./agent-switcher.js");
+      const { AgentSwitcherSidebarIcon } = await import("./agent-switcher.js");
 
       const { renderer } = await harness.renderWithRoot(
-        React.createElement(AgentSwitcherHeaderIcon, {
+        React.createElement(AgentSwitcherSidebarIcon, {
           size: 18,
           color: "#fff",
         } as any),
@@ -219,9 +218,41 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
       assert.equal(json?.props?.name, "RadioTower");
     });
 
-    it("navigates to the clicked agent through the host route on web", async () => {
+    it("opens the switcher popover from the host SidebarRow", async () => {
       const harness = await getFleetHarness();
-      const { AgentSwitcherPopover } = await import("./agent-switcher.js");
+      const { AgentSwitcherSidebarItem } = await import("./agent-switcher.js");
+
+      let opened: unknown;
+      const { root } = await harness.renderWithRoot(
+        React.createElement(AgentSwitcherSidebarItem, {
+          theme: {},
+          host: { id: "srv-test", label: "Test" },
+          layout: { compact: false, platform: "web" },
+          currentScreen: null,
+          openScreen: () => {},
+          openPopover: (Content: unknown) => {
+            opened = Content;
+          },
+        } as any),
+      );
+
+      const row = root.find((n: any) => n.type === "SidebarRow");
+      assert.ok(row, "sidebar item must render a host SidebarRow");
+      await harness.TestRenderer.act(async () => {
+        row.props.onPress();
+      });
+      assert.equal(
+        typeof opened,
+        "function",
+        "openPopover must receive the switcher content component",
+      );
+    });
+
+    it("hands the selected agent to the jump screen through openScreen", async () => {
+      const harness = await getFleetHarness();
+      const { AgentSwitcherPopover, AGENT_SWITCHER_JUMP_SCREEN_ID } = await import(
+        "./agent-switcher.js"
+      );
 
       const fd = makeAgent({
         id: "fd-pop-id",
@@ -249,52 +280,87 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
         repoQueuedHooks: {},
       };
 
-      const opened: Array<{ url: string; target?: string }> = [];
-      (globalThis as any).__fleetLinking = {
-        openURL: async (url: string, target?: string) => {
-          opened.push({ url, target });
+      const opened: Array<{ screenId: string; params?: Record<string, string> }> = [];
+      const { root, renderer } = await harness.renderWithRoot(
+        React.createElement(AgentSwitcherPopover, {
+          theme: {},
+          host: { id: "srv-test", label: "Test Host" },
+          layout: { compact: false, platform: "web" },
+          close: () => {},
+          openScreen: (input: { screenId: string; params?: Record<string, string> }) => {
+            opened.push(input);
+          },
+        } as any),
+      );
+
+      await harness.TestRenderer.act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 60));
+      });
+
+      const text = renderedText(renderer.toJSON());
+      assert.match(text, /Live Front Desk/);
+      assert.match(text, /Repo Orchestrator/);
+
+      const fdRow = root.find((n: any) => n.props?.testID === "agent-row-fd-pop-id");
+      const orchRow = root.find((n: any) => n.props?.testID === "agent-row-orch-pop-id");
+      assert.ok(fdRow, "must find Front Desk row in popover");
+      assert.ok(orchRow, "must find Orchestrator row in popover");
+
+      await harness.TestRenderer.act(async () => {
+        fdRow.props.onPress();
+      });
+      await harness.TestRenderer.act(async () => {
+        orchRow.props.onPress();
+      });
+
+      assert.deepEqual(opened, [
+        {
+          screenId: AGENT_SWITCHER_JUMP_SCREEN_ID,
+          params: { agentId: "fd-pop-id", serverId: "srv-test" },
         },
-        canOpenURL: async () => true,
-      };
+        {
+          screenId: AGENT_SWITCHER_JUMP_SCREEN_ID,
+          params: { agentId: "orch-pop-id", serverId: "srv-test" },
+        },
+      ]);
+    });
 
-      try {
-        const { root, renderer } = await harness.renderWithRoot(
-          React.createElement(AgentSwitcherPopover, {
-            close: () => {},
-            host: { id: "srv-test", label: "Test Host" },
-            layout: { compact: false, platform: "web" },
-            workspaceId: "ws-test",
-            context: "workspace",
-          } as any),
-        );
+    it("jump screen forwards the selection to navigation.openAgent on mount", async () => {
+      const harness = await getFleetHarness();
+      const { AgentSwitcherJumpScreen } = await import("./agent-switcher.js");
 
-        await harness.TestRenderer.act(async () => {
-          await new Promise((resolve) => setTimeout(resolve, 60));
-        });
+      const navigations: Array<{ agentId: string; serverId?: string }> = [];
+      await harness.renderWithRoot(
+        React.createElement(AgentSwitcherJumpScreen, {
+          theme: {},
+          host: { id: "srv-host", label: "Test" },
+          layout: { compact: false, platform: "web" },
+          params: { agentId: "agent-9", serverId: "srv-param" },
+          navigation: {
+            openAgent: (input: { agentId: string; serverId?: string }) =>
+              navigations.push(input),
+          },
+        } as any),
+      );
 
-        const text = renderedText(renderer.toJSON());
-        assert.match(text, /Live Front Desk/);
-        assert.match(text, /Repo Orchestrator/);
+      assert.deepEqual(navigations, [{ agentId: "agent-9", serverId: "srv-param" }]);
+    });
 
-        const fdRow = root.find((n: any) => n.props?.testID === "agent-row-fd-pop-id");
-        const orchRow = root.find((n: any) => n.props?.testID === "agent-row-orch-pop-id");
-        assert.ok(fdRow, "must find Front Desk row in popover");
-        assert.ok(orchRow, "must find Orchestrator row in popover");
+    it("jump screen degrades when the host exposes no navigation", async () => {
+      const harness = await getFleetHarness();
+      const { AgentSwitcherJumpScreen } = await import("./agent-switcher.js");
 
-        await harness.TestRenderer.act(async () => {
-          fdRow.props.onPress();
-        });
-        await harness.TestRenderer.act(async () => {
-          orchRow.props.onPress();
-        });
+      const { renderer } = await harness.renderWithRoot(
+        React.createElement(AgentSwitcherJumpScreen, {
+          theme: {},
+          host: { id: "srv-host", label: "Test" },
+          layout: { compact: false, platform: "ios" },
+          params: { agentId: "agent-9" },
+          navigation: undefined,
+        } as any),
+      );
 
-        assert.deepEqual(opened, [
-          { url: "/h/srv-test/agent/fd-pop-id", target: "_self" },
-          { url: "/h/srv-test/agent/orch-pop-id", target: "_self" },
-        ]);
-      } finally {
-        delete (globalThis as any).__fleetLinking;
-      }
+      assert.match(renderedText(renderer.toJSON()), /navigation is unavailable/i);
     });
 
     it("keeps exactly one scroll owner (no nested ScrollView inside popover content)", async () => {
@@ -314,9 +380,11 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
 
       const { root } = await harness.renderWithRoot(
         React.createElement(AgentSwitcherPopover, {
+          theme: {},
+          host: { id: "srv-test", label: "Test" },
+          layout: { compact: false, platform: "web" },
           close: () => {},
-          workspaceId: "ws-test",
-          context: "workspace",
+          openScreen: () => {},
         } as any),
       );
 
@@ -333,24 +401,5 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
         "AgentSwitcherPopover must not contain a nested ScrollView; host popover owns scroll",
       );
     });
-
-    it("builds the web route and the native paseo deep link for a selected agent", async () => {
-      await getFleetHarness();
-      const { buildAgentHref } = await import("./agent-switcher.js");
-
-      assert.equal(
-        buildAgentHref({ serverId: "srv-1", agentId: "agent-2", platform: "web" }),
-        "/h/srv-1/agent/agent-2",
-      );
-      assert.equal(
-        buildAgentHref({ serverId: "srv-1", agentId: "agent-2", platform: "ios" }),
-        "paseo://h/srv-1/agent/agent-2",
-      );
-      assert.equal(
-        buildAgentHref({ serverId: "srv 1", agentId: "agent/2", platform: "android" }),
-        "paseo://h/srv%201/agent/agent%2F2",
-      );
-    });
   });
 });
-

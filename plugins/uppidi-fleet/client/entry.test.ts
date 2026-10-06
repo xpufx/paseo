@@ -62,14 +62,14 @@ describe("uppidi-fleet client entry contract", () => {
 
     assert.match(
       source,
-      /client\.addHeaderButton\s*\(\s*\{[\s\S]*id:\s*["']uppidi-fleet-agent-switcher["'][\s\S]*\}\s*\)/,
-      "index.client.tsx must register agent switcher header button",
+      /client\.addSidebarHeaderItem\s*\(\s*\{[\s\S]*id:\s*["']uppidi-fleet-agent-switcher["'][\s\S]*\}\s*\)/,
+      "index.client.tsx must register the agent switcher as a navigable sidebar item",
     );
 
     assert.match(
       source,
-      /<HostThemeProvider\s+theme=\{props\.theme\}>[\s\S]*<AgentSwitcherPopover/,
-      "index.client.tsx must wrap the header popover in HostThemeProvider so the first paint uses the host theme",
+      /client\.addScreen\s*\(\s*\{[\s\S]*Component:\s*\(props\)\s*=>[\s\S]*<HostThemeProvider\s+theme=\{props\.theme\}>[\s\S]*<AgentSwitcherJumpScreen/,
+      "index.client.tsx must register the jump screen and wrap it in HostThemeProvider",
     );
   });
 
