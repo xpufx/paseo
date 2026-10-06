@@ -18,6 +18,14 @@ import type {
   FleetModelAlert,
   DroppedModelCandidate,
   UppidiFleetAlertsOutput,
+  RotationPolicy,
+  RotationRolePolicy,
+  UppidiRotateRoleInput,
+  UppidiRotateRoleOutput,
+  UppidiRotationStatusInput,
+  UppidiRotationStatusOutput,
+  UppidiSetRotationPolicyInput,
+  UppidiSetRotationPolicyOutput,
 } from "../shared/contracts.js";
 import { extractPermissionScope } from "../shared/contracts.js";
 import {
@@ -45,6 +53,19 @@ import {
   resolveHostHome,
 } from "./role-models.js";
 import { getEffectiveSkillPath } from "./skills.js";
+import {
+  DEFAULT_ROTATION_POLICY,
+  RotationLock,
+  buildRotationBrief,
+  evaluateRotationTrigger,
+  isRotationRole,
+  resolveRotationPolicy,
+  ROTATION_ROLES,
+  type RotationBriefInput,
+  type RotationBriefTicket,
+  type RotationObservation,
+  type RotationTriggerReason,
+} from "./rotation.js";
 
 const defaultExecFileAsync = promisify(execFile);
 let execFileAsync = defaultExecFileAsync;
@@ -225,6 +246,16 @@ export interface HookRouterOptions {
    * Injected agent archiver used by deduplication, prune, and tests (#973/#993).
    */
   archiveAgent?: (agentId: string) => Promise<boolean>;
+  /**
+   * Injected Front Desk spawner for rotation tests (#1019). Production falls
+   * back to `handleUppidiCreateFrontDesk`, the existing Front Desk primitive.
+   */
+  spawnFrontDesk?: (input: { title: string; prompt: string }) => Promise<{ id: string; error?: string } | null>;
+  /**
+   * Enable automatic rotation evaluation during board sweeps (#1019).
+   * Defaults off in test mode, matching the other direct-action guards.
+   */
+  rotationAutoEnabled?: boolean;
 }
 
 export interface EnsureOrchestratorInput {
@@ -233,6 +264,11 @@ export interface EnsureOrchestratorInput {
   model?: string;
   mode?: string;
   force?: boolean;
+  /**
+   * Spawn a replacement without adopting or archiving the incumbent. Used by
+   * the rotation protocol's spawn-before-archive ordering (#1019).
+   */
+  rotation?: boolean;
 }
 
 export interface EnsureOrchestratorResult {
@@ -2469,6 +2505,77 @@ export async function handleUppidiFleetAlerts(): Promise<UppidiFleetAlertsOutput
   }
 }
 
+/** RPC: manually rotate a long-lived role (dashboard/RPC/MCP surface, #1019). */
+export async function handleUppidiRotateRole(input: UppidiRotateRoleInput): Promise<UppidiRotateRoleOutput> {
+  try {
+    const router = getActiveHookRouter();
+    if (!router) {
+      return { ok: false, role: input.role, triggers: [], errorCode: "not_found", error: "hook router is not running" };
+    }
+    return await router.rotateRole({
+      role: input.role,
+      repo: input.repo,
+      reason: input.reason,
+      force: input.force ?? true,
+    });
+  } catch (err) {
+    return { ok: false, role: input.role, triggers: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** RPC: rotation policy and guardrail state per role. */
+export async function handleUppidiRotationStatus(
+  input: UppidiRotationStatusInput,
+): Promise<UppidiRotationStatusOutput> {
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    return router.rotationStatus(input);
+  } catch (err) {
+    return { ok: false, statuses: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** RPC: hot-apply a global or per-repo rotation policy for one role. */
+export async function handleUppidiSetRotationPolicy(
+  input: UppidiSetRotationPolicyInput,
+): Promise<UppidiSetRotationPolicyOutput> {
+  try {
+    const router = getActiveHookRouter();
+    const policy = router
+      ? router.setRotationPolicyRole(input.role, input.repo, input.policy)
+      : persistRotationPolicyWithoutRouter(input.role, input.repo, input.policy);
+    return {
+      ok: true,
+      policy,
+      message: `Updated rotation policy for ${input.role}${input.repo ? ` in ${input.repo}` : ""}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      policy: DEFAULT_ROTATION_POLICY,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function persistRotationPolicyWithoutRouter(
+  role: string,
+  repo: string | undefined,
+  patch: RotationRolePolicy,
+): RotationPolicy {
+  const storage = getUppidiFleetSettingsStorage();
+  const current = (storage.read() as { rotationPolicy?: RotationPolicy }).rotationPolicy ?? DEFAULT_ROTATION_POLICY;
+  const next: RotationPolicy = { roles: { ...(current.roles ?? {}) }, byRepo: { ...(current.byRepo ?? {}) } };
+  if (repo) {
+    const repoKey = canonicalRepoKey(repo) ?? repo;
+    next.byRepo[repoKey] = { ...(next.byRepo[repoKey] ?? {}), [role]: { ...(next.byRepo[repoKey]?.[role] ?? {}), ...patch } };
+  } else {
+    next.roles[role] = { ...(next.roles[role] ?? {}), ...patch };
+  }
+  storage.update((prev) => ({ ...prev, rotationPolicy: next }));
+  return next;
+}
+
 export interface ProviderModeInfo {
   modes: Array<{ id: string; label?: string }>;
   defaultModeId?: string | null;
@@ -3011,6 +3118,11 @@ export class HookRouter {
   private inFlightUnstaffed = new Map<string, Promise<EnsureOrchestratorResult | null>>();
   /** Guard runBoardSweep against overlapping concurrent sweeps (#993). */
   private inFlightBoardSweep = new Map<string, Promise<BoardSweepResult>>();
+  /** One rotation per role (per repo for orchestrators) + cooldown clock (#1019). */
+  private readonly rotationLock = new RotationLock();
+  private readonly lastRotationAt = new Map<string, number>();
+  private readonly lastSweepDigests = new Map<string, string>();
+  private rotationAutoEnabled: boolean;
   /** Direct-action guards (#847). */
   public readonly labelTriageEnabled: boolean;
   public readonly closeGuardEnabled: boolean;
@@ -3049,6 +3161,7 @@ export class HookRouter {
     this.ciFailureEnabled = options?.ciFailureEnabled ?? !this.isTestMode;
     this.repoOnboardingEnabled = options?.repoOnboardingEnabled ?? !this.isTestMode;
     this.staleWipSweepEnabled = options?.staleWipSweepEnabled ?? !this.isTestMode;
+    this.rotationAutoEnabled = options?.rotationAutoEnabled ?? !this.isTestMode;
     this.staleWipHours =
       options?.staleWipHours ??
       Number(process.env.STALE_WIP_HOURS ?? ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS);
@@ -4870,8 +4983,9 @@ export class HookRouter {
     const repo = rawRepo.trim();
     const canonicalKey = canonicalRepoKey(repo) ?? repo;
 
-    // 1. Existing live agent check (idempotency)
-    if (!input.force) {
+    // 1. Existing live agent check (idempotency). Rotation skips adoption so a
+    // replacement can be spawned while the incumbent is still registered.
+    if (!input.force && !input.rotation) {
       const active = await this.getActiveOrchestrator(repo);
       if (active) {
         this.log(`[info] Active orchestrator already exists for ${repo}: ${active.agentId}`);
@@ -4980,7 +5094,7 @@ export class HookRouter {
       preSpawnAgentMap = null;
     }
 
-    if (preSpawnAgentMap) {
+    if (preSpawnAgentMap && !input.rotation) {
       const existing = this.readOrchestrator(repo);
       const matchingLive = findLiveOrchestratorAgents(
         repo,
@@ -6430,6 +6544,375 @@ export class HookRouter {
   }
 
   // -------------------------------------------------------------------------
+  // Long-lived role rotation (#1019)
+  // -------------------------------------------------------------------------
+
+  /** Effective rotation policy from fleet settings (hot-applied). */
+  public readRotationPolicy(): RotationPolicy {
+    try {
+      const stored = getUppidiFleetSettingsStorage().read() as { rotationPolicy?: RotationPolicy };
+      return stored?.rotationPolicy ?? DEFAULT_ROTATION_POLICY;
+    } catch {
+      return DEFAULT_ROTATION_POLICY;
+    }
+  }
+
+  private saveRotationPolicy(policy: RotationPolicy): void {
+    const storage = getUppidiFleetSettingsStorage();
+    storage.update((prev) => ({ ...prev, rotationPolicy: policy }));
+  }
+
+  public getRotationPolicyFor(role: string, repo?: string | null): Required<RotationRolePolicy> {
+    return resolveRotationPolicy(this.readRotationPolicy(), role, repo);
+  }
+
+  public setRotationPolicyRole(role: string, repo: string | undefined, patch: RotationRolePolicy): RotationPolicy {
+    const current = this.readRotationPolicy();
+    const next: RotationPolicy = {
+      roles: { ...(current.roles ?? {}) },
+      byRepo: { ...(current.byRepo ?? {}) },
+    };
+    if (repo) {
+      const repoKey = canonicalRepoKey(repo) ?? repo;
+      next.byRepo[repoKey] = { ...(next.byRepo[repoKey] ?? {}), [role]: { ...(next.byRepo[repoKey]?.[role] ?? {}), ...patch } };
+    } else {
+      next.roles[role] = { ...(next.roles[role] ?? {}), ...patch };
+    }
+    this.saveRotationPolicy(next);
+    return next;
+  }
+
+  private rotationBriefPath(role: string, repo?: string | null): string {
+    const key = repo ? sanitizeKey(canonicalRepoKey(repo) ?? repo) : role;
+    return join(dirname(this.stateDir), `rotation-brief-${key}.md`);
+  }
+
+  private writeRotationBriefFile(role: string, repo: string | null | undefined, text: string): string {
+    const target = this.rotationBriefPath(role, repo);
+    mkdirSync(dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tmp, String(text ?? ""), "utf8");
+    renameSync(tmp, target);
+    return target;
+  }
+
+  private observationForRole(role: string, repo: string | null, live: WatchdogAgent | null): RotationObservation {
+    const anyLive = live as any;
+    return {
+      role,
+      repo,
+      spawnedAtMs: anyLive?.updatedAt ? Date.parse(String(anyLive.updatedAt)) || null : null,
+      turns: typeof anyLive?.turns === "number" ? anyLive.turns : typeof anyLive?.turnCount === "number" ? anyLive.turnCount : null,
+      contextWindowUsedTokens:
+        live?.lastUsage?.contextWindowUsedTokens ?? live?.metrics?.contextUsedTokens ?? null,
+      contextWindowMaxTokens:
+        live?.lastUsage?.contextWindowMaxTokens ?? live?.metrics?.contextMaxTokens ?? null,
+      failureTimestampsMs: [],
+    };
+  }
+
+  private async buildRotationBriefForRole(
+    role: string,
+    repo: string | null,
+    opts: { reason?: string | null; previousAgentId?: string | null; io?: IssuesCheckIo },
+  ): Promise<string> {
+    const activeTickets: RotationBriefTicket[] = [];
+    const pendingAttention: RotationBriefTicket[] = [];
+    if (repo) {
+      try {
+        const check = await this.runBoardCheck(repo, undefined, opts.io);
+        if (check.ok && Array.isArray(check.candidates)) {
+          for (const c of check.candidates) {
+            const labels = Array.isArray(c.labels) ? c.labels : [];
+            const isWip = labels.includes("state/1-wip");
+            const isReview = labels.some((l: string) => l.startsWith("review/") || l === "state/2-review");
+            const needsAttention = labels.some(
+              (l: string) =>
+                l.startsWith("dep/blocked") ||
+                l === "priority/0-sos" ||
+                l === "flag/stop-work" ||
+                l === "attention/2-user" ||
+                l === "attention/frontdesk",
+            );
+            if (isWip || isReview) activeTickets.push({ number: c.number, title: c.title, reason: c.reason });
+            if (needsAttention) pendingAttention.push({ number: c.number, title: c.title, reason: c.reason });
+          }
+        }
+      } catch {
+        // Board is rediscoverable by the replacement; a failed read must not block rotation.
+      }
+    }
+    const queueDepth = repo ? candidateRepoKeys(repo).reduce((n, key) => n + this.getQueue(key).length, 0) : 0;
+    const hookTail = repo
+      ? candidateRepoKeys(repo)
+          .map((key) => this.getQueue(key).at(-1)?.msg)
+          .filter(Boolean)
+          .join(" | ")
+      : "";
+    const input: RotationBriefInput = {
+      role,
+      repo,
+      reason: opts.reason ?? null,
+      previousAgentId: opts.previousAgentId ?? null,
+      generatedAt: new Date().toISOString(),
+      skillPath: getEffectiveSkillPath(role === "orchestrator" ? "orchestrator" : role === "front-desk" ? "front-desk" : "coding-agent"),
+      activeTickets,
+      pendingAttention,
+      queueDepth,
+      lastHookDigest: hookTail ? this.handoffSummary(hookTail, 220) : null,
+      lastSweepDigest: this.lastSweepDigests.get(repo ?? FRONT_DESK_REPO) ?? null,
+    };
+    return buildRotationBrief(input);
+  }
+
+  private async spawnRotationReplacement(
+    role: string,
+    repo: string | null,
+    brief: string,
+  ): Promise<{ ok: boolean; agentId?: string; error?: string }> {
+    if (role === "orchestrator" && repo) {
+      const res = await this.ensureOrchestrator({ repo, rotation: true });
+      return { ok: res.ok, agentId: res.agentId, error: res.error };
+    }
+    if (role === "front-desk") {
+      const injected = this.options?.spawnFrontDesk;
+      if (injected) {
+        const spawned = await injected({ title: "Front Desk", prompt: brief });
+        if (!spawned?.id) return { ok: false, error: spawned?.error || "Failed to spawn Front Desk replacement" };
+        this.writeFrontDesk(spawned.id, "rotation");
+        return { ok: true, agentId: spawned.id };
+      }
+      try {
+        const { handleUppidiCreateFrontDesk } = await import("./agents.js");
+        const res = await handleUppidiCreateFrontDesk(
+          { title: "Front Desk", prompt: brief },
+          { paseo: this.getPaseo() } as any,
+        );
+        return { ok: res.ok, agentId: res.agentId, error: res.error };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    return { ok: false, error: `role ${role} does not support rotation` };
+  }
+
+  private async verifyRotationReplacement(
+    role: string,
+    repo: string | null,
+    agentId: string,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const registered = role === "orchestrator" && repo ? this.readOrchestrator(repo)?.agentId : this.readFrontDesk()?.agentId;
+    if (registered !== agentId) {
+      return { ok: false, reason: `replacement ${agentId} not registered for ${role}` };
+    }
+    const map = await this.fetchAgentMap().catch(() => null);
+    if (map && map.size > 0) {
+      const live = map.get(agentId);
+      if (!live) return { ok: false, reason: `replacement ${agentId} missing from live roster` };
+      const roleText = `${live.role ?? ""} ${live.title ?? ""} ${live.name ?? ""}`.toLowerCase();
+      const expected = role === "front-desk" ? ["front-desk", "front desk"] : [role];
+      if (!expected.some((token) => roleText.includes(token))) {
+        return { ok: false, reason: `replacement ${agentId} registered without ${role} role/title` };
+      }
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Rotate one long-lived role. Contract: spawn replacement, verify it
+   * registered, deliver the rotation brief, then archive the incumbent. On
+   * spawn/verify failure the incumbent is left untouched and the replacement
+   * (if any) is archived. Manual triggers bypass policy/cooldown/mid-turn but
+   * never overlap an in-flight rotation.
+   */
+  public async rotateRole(input: {
+    role: string;
+    repo?: string;
+    reason?: string;
+    force?: boolean;
+    io?: IssuesCheckIo;
+  }): Promise<UppidiRotateRoleOutput> {
+    const role = String(input.role ?? "").trim();
+    if (!isRotationRole(role)) {
+      return { ok: false, role, triggers: [], errorCode: "invalid", error: `unknown rotation role: ${role}` };
+    }
+    const repo = role === "orchestrator" ? (input.repo?.trim() ? canonicalRepoKey(input.repo.trim()) ?? input.repo.trim() : "") : null;
+    if (role === "orchestrator" && !repo) {
+      return { ok: false, role, triggers: [], errorCode: "invalid", error: "repo is required for orchestrator rotation" };
+    }
+
+    const lockKey = RotationLock.key(role, repo);
+    if (!this.rotationLock.acquire(role, repo)) {
+      return { ok: false, role, repo: repo ?? undefined, triggers: [], errorCode: "in_flight", error: `rotation already in progress for ${role}` };
+    }
+
+    try {
+      const policy = this.getRotationPolicyFor(role, repo);
+      if (!input.force && !policy.enabled) {
+        return { ok: false, role, repo: repo ?? undefined, triggers: [], errorCode: "disabled", error: `rotation disabled for ${role}` };
+      }
+
+      const oldAgentId = role === "orchestrator" ? this.readOrchestrator(repo!)?.agentId ?? null : this.readFrontDesk()?.agentId ?? null;
+      const reasons: RotationTriggerReason[] = input.force ? ["manual"] : [];
+      if (!input.force) {
+        const map = await this.fetchAgentMap().catch(() => null);
+        const live = oldAgentId ? map?.get(oldAgentId) ?? null : null;
+        const decision = evaluateRotationTrigger(
+          this.observationForRole(role, repo, live),
+          {
+            nowMs: Date.now(),
+            lastRotationAtMs: this.lastRotationAt.get(lockKey) ?? null,
+            midTurn: oldAgentId ? this.isAgentBusy(oldAgentId, map) : false,
+            inFlight: false,
+          },
+          this.readRotationPolicy(),
+        );
+        if (!decision.shouldRotate) {
+          return {
+            ok: false,
+            role,
+            repo: repo ?? undefined,
+            triggers: [],
+            errorCode: decision.blocked === "cooldown" ? "in_flight" : "disabled",
+            error: decision.blocked ? `rotation blocked: ${decision.blocked}` : "no rotation trigger fired",
+          };
+        }
+        reasons.push(...decision.triggers);
+      }
+
+      const brief = await this.buildRotationBriefForRole(role, repo, {
+        reason: input.reason ?? (reasons.length ? reasons.join(", ") : "manual"),
+        previousAgentId: oldAgentId,
+        io: input.io,
+      });
+
+      const spawn = await this.spawnRotationReplacement(role, repo, brief);
+      if (!spawn.ok || !spawn.agentId) {
+        return { ok: false, role, repo: repo ?? undefined, oldAgentId: oldAgentId ?? undefined, triggers: reasons, errorCode: "spawn_failed", error: spawn.error || "spawn failed" };
+      }
+
+      const verify = await this.verifyRotationReplacement(role, repo, spawn.agentId);
+      if (!verify.ok) {
+        await this.archiveAgent(spawn.agentId).catch(() => {});
+        if (oldAgentId) {
+          if (role === "orchestrator") this.writeOrchestrator(repo!, oldAgentId, "rotation-abort");
+          else this.writeFrontDesk(oldAgentId, "rotation-abort");
+        }
+        return { ok: false, role, repo: repo ?? undefined, oldAgentId: oldAgentId ?? undefined, agentId: spawn.agentId, triggers: reasons, errorCode: "verify_failed", error: verify.reason || "verification failed" };
+      }
+
+      const briefPath = this.writeRotationBriefFile(role, repo, brief);
+      const envelope = withFleetEnvelope(routerEnvelope({ repo: repo ?? FRONT_DESK_REPO, kind: "handoff" }), brief);
+      await this.deliverMessage(spawn.agentId, envelope, { noWait: true, steer: true }).catch(() => {});
+
+      if (oldAgentId && oldAgentId !== spawn.agentId) {
+        await this.archiveAgent(oldAgentId).catch(() => {});
+      }
+      this.lastRotationAt.set(lockKey, Date.now());
+      this.log(`[info] rotated ${role}${repo ? ` for ${repo}` : ""}: ${oldAgentId?.slice(0, 7) ?? "none"} -> ${spawn.agentId.slice(0, 7)} (${reasons.join(", ") || "manual"})`);
+      return {
+        ok: true,
+        role,
+        repo: repo ?? undefined,
+        oldAgentId: oldAgentId ?? undefined,
+        agentId: spawn.agentId,
+        reason: reasons.join(", ") || "manual",
+        triggers: reasons,
+        briefPath,
+      };
+    } finally {
+      this.rotationLock.release(role, repo);
+    }
+  }
+
+  public rotationStatus(input?: { role?: string; repo?: string }): UppidiRotationStatusOutput {
+    const filterRole = input?.role;
+    const statuses: UppidiRotationStatusOutput["statuses"] = [];
+    const now = Date.now();
+    for (const role of ROTATION_ROLES) {
+      if (filterRole && role !== filterRole) continue;
+      if (role === "orchestrator") {
+        const records = this.listOrchestratorRecords();
+        const repos = input?.repo ? [canonicalRepoKey(input.repo) ?? input.repo] : records.map((r) => r.key);
+        for (const repo of repos.length ? repos : [null]) {
+          const key = RotationLock.key(role, repo);
+          statuses.push({
+            role,
+            repo,
+            enabled: this.getRotationPolicyFor(role, repo).enabled,
+            agentId: repo ? this.readOrchestrator(repo)?.agentId ?? null : null,
+            lastRotationAt: this.lastRotationAt.has(key) ? new Date(this.lastRotationAt.get(key)!).toISOString() : null,
+            cooldownRemainingMs: this.cooldownRemaining(role, repo, now),
+            inProgress: this.rotationLock.isLocked(role, repo),
+            policy: this.getRotationPolicyFor(role, repo),
+          });
+        }
+      } else {
+        statuses.push({
+          role,
+          repo: null,
+          enabled: this.getRotationPolicyFor(role, null).enabled,
+          agentId: role === "front-desk" ? this.readFrontDesk()?.agentId ?? null : null,
+          lastRotationAt: this.lastRotationAt.has(role) ? new Date(this.lastRotationAt.get(role)!).toISOString() : null,
+          cooldownRemainingMs: this.cooldownRemaining(role, null, now),
+          inProgress: this.rotationLock.isLocked(role),
+          policy: this.getRotationPolicyFor(role, null),
+        });
+      }
+    }
+    return { ok: true, statuses };
+  }
+
+  private cooldownRemaining(role: string, repo: string | null, now: number): number {
+    const last = this.lastRotationAt.get(RotationLock.key(role, repo));
+    if (last == null) return 0;
+    return Math.max(0, this.getRotationPolicyFor(role, repo).cooldownMs - (now - last));
+  }
+
+  /**
+   * Evaluate and apply automatic rotations for every registered live role.
+   * Called from the periodic board sweep; a no-op unless `rotationAutoEnabled`.
+   */
+  public async evaluateAutomaticRotations(): Promise<UppidiRotateRoleOutput[]> {
+    if (!this.rotationAutoEnabled || this.isHaltedState) return [];
+    const agentMap = await this.fetchAgentMap().catch(() => null);
+    const out: UppidiRotateRoleOutput[] = [];
+    for (const record of this.listOrchestratorRecords()) {
+      const live = agentMap?.get(record.agentId) ?? null;
+      out.push(await this.maybeRotateFromObservation("orchestrator", record.key, live, agentMap));
+    }
+    const frontDeskId = this.readFrontDesk()?.agentId ?? null;
+    if (frontDeskId) {
+      const live = agentMap?.get(frontDeskId) ?? null;
+      out.push(await this.maybeRotateFromObservation("front-desk", null, live, agentMap));
+    }
+    return out.filter((r) => r.ok || r.errorCode !== "disabled");
+  }
+
+  private async maybeRotateFromObservation(
+    role: string,
+    repo: string | null,
+    live: WatchdogAgent | null,
+    agentMap: Map<string, WatchdogAgent> | null,
+  ): Promise<UppidiRotateRoleOutput> {
+    const lockKey = RotationLock.key(role, repo);
+    const decision = evaluateRotationTrigger(
+      this.observationForRole(role, repo, live),
+      {
+        nowMs: Date.now(),
+        lastRotationAtMs: this.lastRotationAt.get(lockKey) ?? null,
+        midTurn: live ? this.isAgentBusy(live.id, agentMap) : false,
+        inFlight: this.rotationLock.isLocked(role, repo),
+      },
+      this.readRotationPolicy(),
+    );
+    if (!decision.shouldRotate) {
+      return { ok: false, role, repo: repo ?? undefined, triggers: [], errorCode: decision.blocked === "disabled" ? "disabled" : "in_flight", error: decision.blocked ? `blocked: ${decision.blocked}` : decision.reasons.join(", ") || "no trigger" };
+    }
+    return await this.rotateRole({ role, repo: repo ?? undefined, reason: decision.reason ?? "auto" });
+  }
+
+  // -------------------------------------------------------------------------
   // Deterministic board sweep
   // -------------------------------------------------------------------------
 
@@ -6540,6 +7023,10 @@ export class HookRouter {
         if (!res.ok || res.candidates.length === 0) continue;
         const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
         actionable.push({ repo, count: res.candidates.length, dispatchable });
+        this.lastSweepDigests.set(
+          repo,
+          `${res.candidates.length} candidate(s), ${dispatchable} dispatchable at ${new Date().toISOString()}`,
+        );
       }
 
       // Self-heal staffing (#889): an enrolled repo with actionable board work but
@@ -6589,6 +7076,7 @@ export class HookRouter {
       this.log(
         `[info] Board sweep complete: ${targets.length} repo(s) swept, ${actionable.length} actionable, ${prunedCount} orchestrator record(s) pruned, ${autoEnsured.length} auto-staffed, ${errors.length} failed`,
       );
+      await this.evaluateAutomaticRotations().catch(() => []);
       return {
         ok: true,
         swept: targets.length,
@@ -8041,6 +8529,54 @@ export class HookRouter {
           this.sendJson(res, 200, out);
         } catch (err: any) {
           this.sendJson(res, Number(err?.status) || 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/orchestrator-rotate") {
+        const body = await this.readJsonBody(req).catch(() => ({}));
+        try {
+          const out = await this.rotateRole({
+            role: typeof body?.role === "string" ? body.role : "orchestrator",
+            repo: typeof body?.repo === "string" ? body.repo : undefined,
+            reason: typeof body?.reason === "string" ? body.reason : undefined,
+            force: body?.force === undefined ? true : Boolean(body.force),
+          });
+          this.sendJson(res, out.ok ? 200 : 409, out);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/orchestrator-rotation") {
+        const role = url.searchParams.get("role") ?? undefined;
+        const repo = url.searchParams.get("repo") ?? undefined;
+        this.sendJson(res, 200, this.rotationStatus({ role, repo }));
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/rotation-policy") {
+        this.sendJson(res, 200, { ok: true, policy: this.readRotationPolicy() });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/rotation-policy") {
+        const body = await this.readJsonBody(req).catch(() => ({}));
+        const role = typeof body?.role === "string" ? body.role.trim() : "";
+        if (!role || typeof body?.policy !== "object" || body.policy === null) {
+          this.sendJson(res, 400, { ok: false, error: "role and policy are required" });
+          return;
+        }
+        try {
+          const policy = this.setRotationPolicyRole(
+            role,
+            typeof body.repo === "string" ? body.repo : undefined,
+            body.policy,
+          );
+          this.sendJson(res, 200, { ok: true, policy });
+        } catch (err: any) {
+          this.sendJson(res, 400, { ok: false, error: err?.message ?? String(err) });
         }
         return;
       }

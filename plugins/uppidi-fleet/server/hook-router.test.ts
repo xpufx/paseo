@@ -7362,3 +7362,200 @@ describe("HookRouter canonical ALL HALT mode (#994)", () => {
   });
 });
 
+
+describe("HookRouter role rotation (#1019)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-rotation-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    mkdirSync(queueDir, { recursive: true });
+    mkdirSync(stateDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  function makeRouter(overrides: Partial<HookRouterOptions> = {}) {
+    const spawned: any[] = [];
+    const archived: string[] = [];
+    const delivered: Array<{ id: string; text: string; options?: any }> = [];
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      rotationAutoEnabled: true,
+      workspacesData: [
+        {
+          workspaceId: "ws-paseo-main",
+          cwd: tempDir,
+          displayName: "Paseo",
+          isolation: "local",
+          projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo",
+        },
+      ],
+      orchestratorModelFallback: ["antigravity-acp/gemini-3.8-flash-low"],
+      circuitBreakerPath: join(tempDir, "model-health.json"),
+      spawnAgent: async (opts) => {
+        spawned.push(opts);
+        return { id: `agent-new-${spawned.length}` };
+      },
+      archiveAgent: async (id) => {
+        archived.push(id);
+        return true;
+      },
+      ...overrides,
+    });
+    (router as any).deliverMessage = async (id: string, text: string, options?: any) => {
+      delivered.push({ id, text, options });
+      return true;
+    };
+    return { router, spawned, archived, delivered };
+  }
+
+  it("rotates an orchestrator: spawn -> verify -> deliver brief -> archive incumbent", async () => {
+    const { router, spawned, archived, delivered } = makeRouter();
+    router.writeOrchestrator("xpufx-org/paseo", "agent-old", "test");
+    (router as any).fetchAgentMap = async () =>
+      new Map<string, WatchdogAgent>([
+        ["agent-new-1", { id: "agent-new-1", role: "orchestrator", title: "Orchestrator · xpufx-org/paseo", status: "idle" }],
+      ]);
+
+    const res = await router.rotateRole({ role: "orchestrator", repo: "xpufx-org/paseo", reason: "operator test", force: true });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.oldAgentId, "agent-old");
+    assert.equal(res.agentId, "agent-new-1");
+    assert.equal(spawned.length, 1, "exactly one replacement is spawned");
+    assert.equal(archived.length, 1, "exactly one agent is archived");
+    assert.equal(archived[0], "agent-old", "the incumbent is archived, never the replacement");
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-new-1");
+    assert.equal(delivered.length, 1);
+    assert.equal(delivered[0].id, "agent-new-1");
+    assert.match(delivered[0].text, /Rotation Brief/);
+    assert.match(delivered[0].text, /operator test/);
+    assert.ok(delivered[0].options?.steer, "the brief is steered to the replacement");
+  });
+
+  it("aborts cleanly on spawn failure and leaves the incumbent registered", async () => {
+    const { router, archived } = makeRouter({ spawnAgent: async () => null });
+    router.writeOrchestrator("xpufx-org/paseo", "agent-old", "test");
+    (router as any).fetchAgentMap = async () => new Map();
+
+    const res = await router.rotateRole({ role: "orchestrator", repo: "xpufx-org/paseo", force: true });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.errorCode, "spawn_failed");
+    assert.equal(archived.length, 0, "the incumbent is not archived when the spawn fails");
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-old");
+  });
+
+  it("archives the replacement and restores the incumbent when verification fails", async () => {
+    const { router, archived } = makeRouter();
+    router.writeOrchestrator("xpufx-org/paseo", "agent-old", "test");
+    // The live roster never shows the spawned replacement.
+    (router as any).fetchAgentMap = async () => new Map<string, WatchdogAgent>([["agent-old", { id: "agent-old" }]]);
+
+    const res = await router.rotateRole({ role: "orchestrator", repo: "xpufx-org/paseo", force: true });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.errorCode, "verify_failed");
+    assert.deepEqual(archived, ["agent-new-1"]);
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-old", "incumbent registry is restored");
+  });
+
+  it("allows only one rotation per role at a time", async () => {
+    const { router } = makeRouter();
+    router.writeOrchestrator("xpufx-org/paseo", "agent-old", "test");
+    (router as any).fetchAgentMap = async () =>
+      new Map<string, WatchdogAgent>([
+        ["agent-new-1", { id: "agent-new-1", role: "orchestrator", title: "Orchestrator · xpufx-org/paseo" }],
+      ]);
+
+    const first = router.rotateRole({ role: "orchestrator", repo: "xpufx-org/paseo", reason: "first", force: true });
+    const second = await router.rotateRole({ role: "orchestrator", repo: "xpufx-org/paseo", reason: "second", force: true });
+    const firstRes = await first;
+
+    assert.equal(second.ok, false);
+    assert.equal(second.errorCode, "in_flight");
+    assert.equal(firstRes.ok, true);
+  });
+
+  it("rotates the Front Desk singleton with the injected spawn seam", async () => {
+    const spawnedFd: string[] = [];
+    const { router, archived, delivered } = makeRouter({
+      spawnFrontDesk: async (input) => {
+        spawnedFd.push(input.title);
+        return { id: "fd-new" };
+      },
+    });
+    router.writeFrontDesk("fd-old", "test");
+    (router as any).fetchAgentMap = async () =>
+      new Map<string, WatchdogAgent>([["fd-new", { id: "fd-new", role: "front-desk", title: "Front Desk" }]]);
+
+    const res = await router.rotateRole({ role: "front-desk", reason: "manual", force: true });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.oldAgentId, "fd-old");
+    assert.equal(res.agentId, "fd-new");
+    assert.deepEqual(spawnedFd, ["Front Desk"]);
+    assert.deepEqual(archived, ["fd-old"]);
+    assert.equal(router.readFrontDesk()?.agentId, "fd-new");
+    assert.equal(delivered[0].id, "fd-new");
+  });
+
+  it("round-trips the policy and applies a per-repo override", () => {
+    const { router } = makeRouter();
+    router.setRotationPolicyRole("orchestrator", undefined, { maxTurns: 9 });
+    assert.equal(router.getRotationPolicyFor("orchestrator", "xpufx-org/paseo").maxTurns, 9);
+
+    router.setRotationPolicyRole("orchestrator", "xpufx-org/paseo", { maxTurns: 3 });
+    assert.equal(router.getRotationPolicyFor("orchestrator", "xpufx-org/paseo").maxTurns, 3);
+    assert.equal(router.getRotationPolicyFor("orchestrator", "xpufx-org/other").maxTurns, 9);
+  });
+
+  it("reports status and remaining cooldown after a rotation", async () => {
+    const { router } = makeRouter();
+    router.writeOrchestrator("xpufx-org/paseo", "agent-old", "test");
+    (router as any).fetchAgentMap = async () =>
+      new Map<string, WatchdogAgent>([
+        ["agent-new-1", { id: "agent-new-1", role: "orchestrator", title: "Orchestrator · xpufx-org/paseo" }],
+      ]);
+
+    await router.rotateRole({ role: "orchestrator", repo: "xpufx-org/paseo", reason: "test", force: true });
+    const status = router.rotationStatus({ role: "orchestrator", repo: "xpufx-org/paseo" });
+    assert.equal(status.ok, true);
+    assert.equal(status.statuses.length, 1);
+    assert.equal(status.statuses[0].agentId, "agent-new-1");
+    assert.ok(status.statuses[0].lastRotationAt);
+    assert.ok(status.statuses[0].cooldownRemainingMs > 0);
+    assert.equal(status.statuses[0].policy.maxTurns, 50);
+  });
+
+  it("automatically rotates when age crosses the threshold and respects cooldown", async () => {
+    const { router } = makeRouter();
+    router.writeOrchestrator("xpufx-org/paseo", "agent-old", "test");
+    const oldTs = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    (router as any).fetchAgentMap = async () =>
+      new Map<string, WatchdogAgent>([
+        [
+          "agent-old",
+          { id: "agent-old", role: "orchestrator", title: "Orchestrator · xpufx-org/paseo", updatedAt: oldTs },
+        ],
+        ["agent-new-1", { id: "agent-new-1", role: "orchestrator", title: "Orchestrator · xpufx-org/paseo" }],
+      ]);
+
+    const first = await router.evaluateAutomaticRotations();
+    assert.ok(first.some((r) => r.ok && r.role === "orchestrator"), "age trigger rotates the stale orchestrator");
+
+    // A second evaluation within the cooldown window must not rotate again.
+    const second = await router.evaluateAutomaticRotations();
+    assert.equal(second.some((r) => r.ok), false, "cooldown suppresses a second automatic rotation");
+  });
+});

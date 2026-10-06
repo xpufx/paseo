@@ -485,6 +485,9 @@ Beyond ingress, the router exposes:
 | `POST /orchestrator` (alias `/orchestrate`) | Register `{repo, agentId}`. |
 | `POST /orchestrators/spawn` | Provision `{repo, provider?, model?, mode?, force?}` server-side and atomically register it as a peer orchestrator (idempotent; no Front Desk parent). |
 | `POST /orchestrators/prune` | Delete registrations whose agent no longer exists on the daemon. |
+| `POST /orchestrator-rotate` | Rotate a long-lived role onto a fresh agent (`{role?, repo?, reason?, force?}`): spawn → verify → brief → archive; aborts cleanly on spawn failure. |
+| `GET /orchestrator-rotation` | Rotation policy + guardrail state per role (`?role=&repo=`). |
+| `GET /rotation-policy` · `POST /rotation-policy` | Read / hot-apply the global or per-repo rotation policy (`{role, repo?, policy}`). |
 | `POST /board-sweep` | Run the in-process deterministic board check (`{repos?: string[]}`); notify Front Desk of actionable tickets and failed repo checks. |
 | `POST /queues/:key/pause` · `/resume` · `/drain` | Per-queue control (also `POST /queue/{pause,resume,drain}` with `{repo}`). |
 
@@ -1174,6 +1177,41 @@ report the active registration plus a snapshot summary). Body:
 5. Steer an onboarding message to the new agent (handoff path + snapshot
    excerpt) and notify every registered orchestrator with the handover notice
    and the escalation route (`paseo send --no-wait <id> <msg>`).
+
+## 13.5.1 Role rotation protocol (#1019)
+
+The long-lived roles (orchestrator, Front Desk) are rotated onto a fresh agent
+rather than compacted in place, so the mechanism is provider-independent. The
+implementation lives in [`server/rotation.ts`](./server/rotation.ts) (pure
+policy + trigger evaluation + brief + one-at-a-time lock) and
+`HookRouter.rotateRole` in [`server/hook-router.ts`](./server/hook-router.ts)
+(the side-effecting protocol). It reuses the existing spawn primitives
+(`ensureOrchestrator` with `rotation: true`, `handleUppidiCreateFrontDesk`),
+`generateHandoff`-style board reads, and `archiveAgent`; it does not add a
+second lifecycle mechanism.
+
+**Protocol.** `spawn replacement → verify it registered (role/title) → deliver a
+rotation brief → archive the incumbent`. If the spawn fails the incumbent is
+left untouched; if verification fails the replacement is archived and the
+incumbent's registry entry is restored. A repo is never left without an
+orchestrator, and at most one rotation per role (per repo for orchestrators)
+can be in flight at once.
+
+**Triggers.** Automatic rotation fires on age OR turns (whichever first), plus
+token pressure and repeated failures. Manual rotation (Cockpit action, RPC,
+MCP `fleet_rotate_role`, or `POST /orchestrator-rotate`) is always available,
+ignores cooldown/mid-turn, but still cannot overlap an in-flight rotation. A
+cooldown separates automatic rotations.
+
+**Defaults** (all configurable, hot-applied, global + per-repo + per-role via
+the `rotationPolicy` setting and `POST /rotation-policy`):
+
+| Role | enabled | maxAge | maxTurns | tokenPressure | failures/window | cooldown |
+| --- | :-: | --- | --- | --- | --- | --- |
+| orchestrator | true | 2h | 50 | 85% | 3 / 15m | 30m |
+| front-desk | true | 3h | 75 | 85% | 3 / 15m | 30m |
+| auditor | false | — | — | — | — | — |
+| coding-agent | false | — | — | — | — | — |
 
 ## 13.6 Subagent lifecycle contract, reactive wakeups & capability grants
 

@@ -222,6 +222,35 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
     },
   },
   {
+    name: "fleet_rotate_role",
+    description:
+      "Rotate a long-lived fleet role onto a fresh agent (provider-independent respawn): spawn replacement, verify it registered, deliver a rotation brief, then archive the incumbent. Manual by default; manual triggers ignore cooldown and mid-turn but never overlap an in-flight rotation.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        role: {
+          type: "string",
+          enum: ["orchestrator", "front-desk", "auditor", "coding-agent"],
+          description: "Role to rotate (default: orchestrator)",
+          default: "orchestrator",
+        },
+        repo: {
+          type: "string",
+          description: "Repository slug; required for orchestrator rotation",
+        },
+        reason: {
+          type: "string",
+          description: "Operator-supplied rationale recorded in the rotation brief",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+    },
+  },
+  {
     name: "fleet_ensure_orchestrator",
     description:
       "Deterministically ensure an active, autonomous orchestrator agent exists for a repository. If already running, returns existing agentId; otherwise resolves workspace from daemon workspaces.json, provisions agent defaulting to autonomous yolo mode, registers it, and drains pending queues.",
@@ -709,6 +738,46 @@ export async function executeFleetHandoffGenerate(
 }
 
 /**
+ * Execute fleet_rotate_role with validated parameters.
+ */
+export async function executeFleetRotateRole(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const role = typeof args.role === "string" && args.role.trim() ? args.role.trim() : "orchestrator";
+  const repo = typeof args.repo === "string" && args.repo.trim() ? args.repo.trim() : undefined;
+  const reason = typeof args.reason === "string" && args.reason.trim() ? args.reason.trim() : undefined;
+
+  try {
+    const router = getActiveHookRouter();
+    if (!router) {
+      return { content: [{ type: "text", text: "fleet_rotate_role failed: hook router is not running" }], isError: true };
+    }
+    const result = await router.rotateRole({ role, repo, reason, force: true });
+    if (json) {
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], isError: !result.ok };
+    }
+    if (!result.ok) {
+      return {
+        content: [{ type: "text", text: `fleet_rotate_role failed for ${role}${repo ? `/${repo}` : ""}: ${result.error ?? "unknown error"}` }],
+        isError: true,
+      };
+    }
+    const lines = [
+      `# Role Rotation — ${result.role}${result.repo ? ` · ${result.repo}` : ""}`,
+      `- Previous agent: ${result.oldAgentId ? `\`${result.oldAgentId}\`` : "_none_"}`,
+      `- Replacement: \`${result.agentId}\``,
+      `- Triggers: ${result.triggers.join(", ") || "manual"}`,
+    ];
+    if (result.briefPath) lines.push(`- Brief: \`${result.briefPath}\``);
+    return { content: [{ type: "text", text: lines.join("\n") }], isError: false };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { content: [{ type: "text", text: `fleet_rotate_role failed: ${message}` }], isError: true };
+  }
+}
+
+/**
  * Execute fleet_ensure_orchestrator with validated parameters.
  */
 export async function executeFleetEnsureOrchestrator(
@@ -818,6 +887,8 @@ export async function executeFleetTool(
       return executeFleetQueuePurge(args);
     case "fleet_handoff_generate":
       return executeFleetHandoffGenerate(args);
+    case "fleet_rotate_role":
+      return executeFleetRotateRole(args);
     case "fleet_ensure_orchestrator":
       return executeFleetEnsureOrchestrator(args);
     case "fleet_validate_workspace":

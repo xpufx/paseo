@@ -36,6 +36,9 @@ import {
   uppidiFleetResetStateContract,
   uppidiFleetHaltContract,
   uppidiFleetResumeContract,
+  uppidiRotateRoleContract,
+  uppidiRotationStatusContract,
+  uppidiSetRotationPolicyContract,
   uppidiFrontDeskActivityContract,
   uppidiFrontDeskPromptContract,
   uppidiTransitionIssueContract,
@@ -80,7 +83,7 @@ import { handleUppidiSkills, handleUppidiSetSkill } from "./server/skills.js";
 import { handleUppidiRunners } from "./server/runners.js";
 import { handleUppidiFleetMetrics } from "./server/metrics.js";
 import { handleFleetToolList, handleFleetToolExecute } from "./server/mcp-tools.js";
-import { startHookRouter, getActiveHookRouter, handleUppidiFleetAlerts } from "./server/hook-router.js";
+import { startHookRouter, getActiveHookRouter, handleUppidiFleetAlerts, handleUppidiRotateRole, handleUppidiRotationStatus, handleUppidiSetRotationPolicy } from "./server/hook-router.js";
 import { createPluginLogger, registerSettingsRpc, registerTicketHandlers } from "paseo-plugin-helper/server";
 import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 import { PLUGIN_VERSION } from "./shared/version.js";
@@ -123,6 +126,9 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiRoleModelsContract, handleUppidiRoleModels);
   server.handle(uppidiSetRoleModelContract, handleUppidiSetRoleModel);
   server.handle(uppidiFleetAlertsContract, handleUppidiFleetAlerts);
+  server.handle(uppidiRotateRoleContract, handleUppidiRotateRole);
+  server.handle(uppidiRotationStatusContract, handleUppidiRotationStatus);
+  server.handle(uppidiSetRotationPolicyContract, handleUppidiSetRotationPolicy);
   server.handle(uppidiSkillsContract, handleUppidiSkills);
   server.handle(uppidiSetSkillContract, handleUppidiSetSkill);
   server.handle(uppidiRunnersContract, handleUppidiRunners);

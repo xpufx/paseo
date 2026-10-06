@@ -349,12 +349,12 @@ Tooling configuration is supplied by the active runtime environment. This skill 
 Rotation timing and thresholds are runtime/operator policy, not hardcoded in this skill. The Orchestrator may hand over when directed by the operator, when active runtime signals require it, or when the current session can no longer safely continue.
 
 **Pre‑flight Hand‑over Checklist**
-1. **Persist state** – record the active issue list, pending operator questions, current labels, and timestamp using the supported Paseo/session handover mechanism.
+1. **Persist state** – the router now builds the rotation brief for you from the board, pending attention, queue depth, and the last hook/sweep digests; the replacement re-reads this skill file and the brief. Trigger it with the operator slash-command, the Cockpit action, MCP `fleet_rotate_role`, or `POST /orchestrator-rotate` (`{role:"orchestrator", repo, reason?}`).
 2. **Sync issue board** – ensure every issue the agent touches has an up‑to‑date label reflecting its latest state (`state/*`, `attention/*`).
 3. **Validate worktrees** – confirm no stray git changes in any worktree (`git status --porcelain` empty) and that all workers are either finished or paused.
-4. **Archive old session** – use the supported Paseo/session lifecycle operation so the old session cannot receive new dispatches.
-5. **Register fresh session** – use the normal Front Desk/router registration flow so the new session receives a clean identity.
-6. **Post hand‑over note** – add an envelope comment on each affected issue summarising the rotation and linking to the archived state file.
+4. **Let the router archive the old session** – `rotateRole` spawns and verifies the replacement first, then archives the incumbent, so the repo never has zero orchestrators.
+5. **Register fresh session** – the router re-registers the replacement with role `orchestrator` and its skill path before the incumbent is retired.
+6. **Post hand‑over note** – the replacement receives the rotation brief steered into its session; add an envelope comment on each affected issue if the reason was operator-driven.
 
 **Safe Decommission Procedure**
 - Do not delete agent registry files, worktrees, or branches with raw filesystem or Git commands as part of handover.

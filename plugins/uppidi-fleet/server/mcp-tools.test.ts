@@ -47,7 +47,7 @@ describe("fleet MCP tools and handlers", () => {
   });
 
   test("FLEET_MCP_TOOLS declares typed tools with valid schemas", () => {
-    assert.equal(FLEET_MCP_TOOLS.length, 9);
+    assert.equal(FLEET_MCP_TOOLS.length, 10);
 
     const toolNames = FLEET_MCP_TOOLS.map((t) => t.name);
     assert.deepEqual(toolNames, [
@@ -58,6 +58,7 @@ describe("fleet MCP tools and handlers", () => {
       "fleet_queue_inspect",
       "fleet_queue_purge",
       "fleet_handoff_generate",
+      "fleet_rotate_role",
       "fleet_ensure_orchestrator",
       "fleet_validate_workspace",
     ]);
@@ -113,6 +114,12 @@ describe("fleet MCP tools and handlers", () => {
     assert.ok(ensureTool.inputSchema.properties.repo);
     assert.ok(ensureTool.inputSchema.properties.mode);
     assert.deepEqual(ensureTool.inputSchema.required, ["repo"]);
+
+    const rotateTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_rotate_role");
+    assert.ok(rotateTool, "fleet_rotate_role tool must be registered");
+    assert.equal(rotateTool.inputSchema.type, "object");
+    assert.ok(rotateTool.inputSchema.properties.role);
+    assert.ok(rotateTool.inputSchema.properties.repo);
   });
 
   test("executeFleetCheckBoard rejects invalid role", async () => {
@@ -275,10 +282,10 @@ describe("fleet MCP tools and handlers", () => {
     assert.match(res.content[0]!.text, /Unknown tool/);
   });
 
-  test("handleFleetToolList returns all 9 available tools", async () => {
+  test("handleFleetToolList returns all 10 available tools", async () => {
     const res = await handleFleetToolList({});
     assert.equal(res.ok, true);
-    assert.equal(res.tools.length, 9);
+    assert.equal(res.tools.length, 10);
     assert.deepEqual(
       res.tools.map((t) => t.name),
       [
@@ -289,6 +296,7 @@ describe("fleet MCP tools and handlers", () => {
         "fleet_queue_inspect",
         "fleet_queue_purge",
         "fleet_handoff_generate",
+        "fleet_rotate_role",
         "fleet_ensure_orchestrator",
         "fleet_validate_workspace",
       ],

@@ -490,6 +490,29 @@ const PARTS = [
     note: "Performs no inference and takes no decision that depends on one, so by the test used everywhere else in this table it is deterministic. It is contested because it is the plugin's only surface whose entire purpose is choosing which model other rows spawn -- the AI/LLM character of the fleet is set here and executed in `agents.ts`. The bucket depends on whether you classify a control surface or the thing it controls.",
   },
   {
+    file: `${PLUGIN}/server/rotation.ts`,
+    part: "Long-lived role rotation: layered policy resolution, trigger evaluation, brief rendering, one-at-a-time lock (#1019)",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "DEFAULT_ROTATION_ROLE_POLICY",
+        "resolveRotationPolicy",
+        "evaluateRotationTrigger",
+        "buildRotationBrief",
+        "RotationLock",
+      ],
+    },
+    evidence: [
+      [`rotation.ts:18-69`, "role defaults are a literal role -> threshold table (2h/50 and 3h/75 per the approved spec)"],
+      [`rotation.ts:89-116`, "effective policy is a fixed merge of defaults -> global role -> per-repo role"],
+      [`rotation.ts:177-268`, "trigger evaluation is timestamp/turn arithmetic over fixed thresholds; manual/in-flight/cooldown guards are literal branches"],
+      [`rotation.ts:304-341`, "the rotation brief is string concatenation over caller-supplied board state"],
+      [`rotation.ts:343-364`, "the one-at-a-time guard is a Set keyed by role+repo"],
+    ],
+    note: "The whole trigger decision is deterministic: same observation and policy, same verdict. It drives a model-backed respawn (classified under `hook-router.ts` / `agents.ts`) but performs no inference of its own.",
+  },
+  {
     file: `${PLUGIN}/server/skills.ts`,
     part: "Fleet skill effective resolution, override persistence, and Settings RPC handlers",
     layer: "server",

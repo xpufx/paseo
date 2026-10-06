@@ -1571,6 +1571,123 @@ export const uppidiFleetResumeContract = defineContract({
   output: FleetResumeOutputSchema,
 });
 
+// Agent Rotation Policy (Issue #1019)
+//
+// Provider-independent rotation of the long-lived roles. Policy is declared
+// here so it can live in fleet settings (hot-applied, no redeploy) and be
+// layered globally -> per-role -> per-repo. The evaluator itself is in
+// `server/rotation.ts`; this file only owns the shape and defaults contract.
+export const RotationRoleSchema = z.enum(["orchestrator", "front-desk", "auditor", "coding-agent"]);
+export type RotationRole = z.infer<typeof RotationRoleSchema>;
+
+export const RotationRolePolicySchema = z.object({
+  enabled: z.boolean().optional(),
+  maxAgeMs: z.number().int().positive().optional(),
+  maxTurns: z.number().int().positive().optional(),
+  /** Fraction of the context window (0..1) at which rotation is triggered. */
+  tokenPressure: z.number().min(0).max(1).optional(),
+  /** Sliding window for repeated failures/timeouts. */
+  failureWindowMs: z.number().int().positive().optional(),
+  failureThreshold: z.number().int().positive().optional(),
+  /** Minimum age of the previous automatic rotation before another can fire. */
+  cooldownMs: z.number().int().positive().optional(),
+});
+export type RotationRolePolicy = z.infer<typeof RotationRolePolicySchema>;
+
+export const RotationPolicySchema = z.object({
+  /** Global per-role overrides layered over the built-in defaults. */
+  roles: z.record(z.string(), RotationRolePolicySchema).default({}),
+  /** Per-repository overrides: repo key -> role -> policy. */
+  byRepo: z.record(z.string(), z.record(z.string(), RotationRolePolicySchema)).default({}),
+});
+export type RotationPolicy = z.infer<typeof RotationPolicySchema>;
+
+export const UppidiRotateRoleInputSchema = z.object({
+  role: RotationRoleSchema,
+  /** Required for orchestrator rotation; ignored for singleton roles. */
+  repo: z.string().optional(),
+  reason: z.string().optional(),
+  /** Manual force bypasses cooldown/mid-turn but never spawns two at once. */
+  force: z.boolean().optional(),
+});
+export type UppidiRotateRoleInput = z.infer<typeof UppidiRotateRoleInputSchema>;
+
+export const UppidiRotateRoleOutputSchema = z.object({
+  ok: z.boolean(),
+  role: z.string().default(""),
+  repo: z.string().optional(),
+  oldAgentId: z.string().optional(),
+  agentId: z.string().optional(),
+  reason: z.string().optional(),
+  triggers: z.array(z.string()).default([]),
+  briefPath: z.string().optional(),
+  errorCode: z.enum(["in_flight", "disabled", "spawn_failed", "verify_failed", "not_found", "invalid"]).optional(),
+  error: z.string().optional(),
+});
+export type UppidiRotateRoleOutput = z.infer<typeof UppidiRotateRoleOutputSchema>;
+
+export const uppidiRotateRoleContract = defineContract({
+  name: "uppidi-fleet.rotate-role",
+  description: "Rotate a long-lived role (orchestrator/front-desk) onto a fresh agent: spawn, verify, brief, archive",
+  input: UppidiRotateRoleInputSchema,
+  output: UppidiRotateRoleOutputSchema,
+});
+
+export const RotationRoleStatusSchema = z.object({
+  role: z.string(),
+  repo: z.string().nullable().default(null),
+  enabled: z.boolean(),
+  agentId: z.string().nullable().default(null),
+  lastRotationAt: z.string().nullable().default(null),
+  cooldownRemainingMs: z.number().default(0),
+  inProgress: z.boolean().default(false),
+  policy: RotationRolePolicySchema,
+});
+export type RotationRoleStatus = z.infer<typeof RotationRoleStatusSchema>;
+
+export const UppidiRotationStatusInputSchema = z.object({
+  role: RotationRoleSchema.optional(),
+  repo: z.string().optional(),
+});
+export type UppidiRotationStatusInput = z.infer<typeof UppidiRotationStatusInputSchema>;
+
+export const UppidiRotationStatusOutputSchema = z.object({
+  ok: z.boolean(),
+  statuses: z.array(RotationRoleStatusSchema).default([]),
+  error: z.string().optional(),
+});
+export type UppidiRotationStatusOutput = z.infer<typeof UppidiRotationStatusOutputSchema>;
+
+export const uppidiRotationStatusContract = defineContract({
+  name: "uppidi-fleet.rotation-status",
+  description: "Get rotation policy and guardrail state for the fleet roles",
+  input: UppidiRotationStatusInputSchema,
+  output: UppidiRotationStatusOutputSchema,
+});
+
+export const UppidiSetRotationPolicyInputSchema = z.object({
+  role: RotationRoleSchema,
+  /** When set, writes a per-repo override; otherwise the global role policy. */
+  repo: z.string().optional(),
+  policy: RotationRolePolicySchema,
+});
+export type UppidiSetRotationPolicyInput = z.infer<typeof UppidiSetRotationPolicyInputSchema>;
+
+export const UppidiSetRotationPolicyOutputSchema = z.object({
+  ok: z.boolean(),
+  policy: RotationPolicySchema,
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiSetRotationPolicyOutput = z.infer<typeof UppidiSetRotationPolicyOutputSchema>;
+
+export const uppidiSetRotationPolicyContract = defineContract({
+  name: "uppidi-fleet.set-rotation-policy",
+  description: "Set the global or per-repo rotation policy for a role (hot-applied)",
+  input: UppidiSetRotationPolicyInputSchema,
+  output: UppidiSetRotationPolicyOutputSchema,
+});
+
 // Uppidi Fleet Plugin Settings Contract (Issue #444)
 export const uppidiFleetSettingsSchema = z.object({
   hookHost: z.string().default("127.0.0.1"),
@@ -1582,6 +1699,8 @@ export const uppidiFleetSettingsSchema = z.object({
    * existing install keeps its paused repositories; cleared on the next write.
    */
   mutedRepos: z.array(z.string()).optional(),
+  /** Agent rotation policy (#1019). Omitted means built-in defaults. */
+  rotationPolicy: RotationPolicySchema.optional(),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 
