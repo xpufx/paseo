@@ -128,9 +128,12 @@ fleet configuration.
 - **Plugin lifecycle:** `stop()`/`reload()` must not drop in-flight steers. A shared
   core needs the same graceful drain the plugin host already has.
 - **Backward compatibility:** keep the existing human-readable Markdown semantics
-  and the `[forgejo-hook] {machine}` first line; the fleet envelope is a prepended
-  hidden HTML comment only (this port does exactly that). Legacy parsers must keep
-  working unchanged.
+  and the `[forgejo-hook] {machine}` first line. The fleet envelope stays available
+  as the legacy prepended `<!-- {"fleet": ...} -->` comment for parsers, but since
+  #1003 `deliverMessage` lifts it into a `fleet_envelope` text attachment at the SDK
+  boundary, so the app renders a subtle pill instead of raw JSON in the composer
+  (the daemon still folds the attachment text into the provider prompt). The CLI
+  fallback re-inlines the comment. Legacy parsers must keep working unchanged.
 
 ## 5. Recommendation
 

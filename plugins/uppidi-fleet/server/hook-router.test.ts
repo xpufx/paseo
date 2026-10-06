@@ -17,6 +17,10 @@ import {
   fleetEnvelope,
   formatFleetEnvelope,
   withFleetEnvelope,
+  fleetEnvelopeAttachment,
+  extractFleetEnvelopeAttachments,
+  FLEET_ENVELOPE_CONTEXT_KIND,
+  FLEET_ENVELOPE_TITLE,
   routerEnvelope,
   watchdogEnvelope,
   agentRepoKey,
@@ -124,6 +128,19 @@ function parseFleetComment(text: string | undefined): Record<string, any> | null
   if (end < 0) return null;
   try {
     return JSON.parse(text.slice(start + 5, end)).fleet ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract the `fleet_envelope` JSON from a delivered prompt's send options (#1003). */
+function parseFleetAttachment(options: any): Record<string, any> | null {
+  const attachment = (options?.attachments ?? []).find(
+    (a: any) => a?.type === "text" && a?.contextKind === "fleet_envelope",
+  );
+  if (!attachment) return null;
+  try {
+    return JSON.parse(attachment.text).fleet ?? null;
   } catch {
     return null;
   }
@@ -320,6 +337,62 @@ describe("fleet JSON envelope (#283/#985)", () => {
 
     const formatted = formatFleetEnvelope(routerEnvelope({ repo: "forge/o/r", kind: "steer" }));
     assert.equal(withFleetEnvelope(routerEnvelope({ repo: "forge/o/r", kind: "steer" }), formatted), formatted);
+  });
+
+  it("builds a `fleet_envelope` text attachment with the JSON envelope as its body (#1003)", () => {
+    const attachment = fleetEnvelopeAttachment({
+      origin: "router",
+      sender: ROUTER_SENDER,
+      repo: "forge/o/r",
+      kind: "webhook",
+      ref: 7,
+    });
+    assert.equal(attachment.type, "text");
+    assert.equal(attachment.mimeType, "text/plain");
+    assert.equal(attachment.contextKind, FLEET_ENVELOPE_CONTEXT_KIND);
+    assert.equal(attachment.contextKind, "fleet_envelope");
+    assert.equal(attachment.title, FLEET_ENVELOPE_TITLE);
+    assert.equal(attachment.title, "Fleet context");
+    assert.deepEqual(JSON.parse(attachment.text), fleetEnvelope({
+      origin: "router",
+      sender: ROUTER_SENDER,
+      repo: "forge/o/r",
+      kind: "webhook",
+      ref: 7,
+    }));
+  });
+
+  it("extracts legacy in-band comments into attachments and strips them from the body (#1003)", () => {
+    const wrapped = withFleetEnvelope(
+      routerEnvelope({ repo: "forge/o/r", kind: "steer" }),
+      "human body",
+    );
+    const { text, attachments } = extractFleetEnvelopeAttachments(wrapped);
+    assert.equal(text, "human body");
+    assert.equal(attachments.length, 1);
+    assert.equal(attachments[0].contextKind, "fleet_envelope");
+    assert.match(attachments[0].text, /^\{"fleet":/);
+  });
+
+  it("keeps the `[forgejo-hook]` machine line and moves the fleet comment to an attachment (#1003)", () => {
+    const payload = {
+      repository: { full_name: "xpufx-org/paseo", html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo" },
+      sender: { login: "testuser" },
+      issue: { number: 380, title: "Test issue", html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/380" },
+      action: "opened",
+    };
+    const { text, attachments } = extractFleetEnvelopeAttachments(formatWebhookMessage("issues", payload));
+    assert.ok(text.startsWith("[forgejo-hook] {"));
+    assert.equal(text.includes("<!-- {"), false);
+    assert.equal(attachments.length, 1);
+    assert.match(text, /🔔 Forgejo webhook incoming/);
+  });
+
+  it("leaves a malformed fleet comment in the body rather than dropping text (#1003)", () => {
+    const message = "<!-- {\"fleet\": not-json} -->\nbody";
+    const { text, attachments } = extractFleetEnvelopeAttachments(message);
+    assert.equal(attachments.length, 0);
+    assert.equal(text, message);
   });
 
   it("stamps router and watchdog senders with the canonical origins", () => {
@@ -1156,6 +1229,91 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
     }
     assert.deepEqual(calls[0], ["send", "--no-wait", "--steer", "agent-cli-steer", "go"]);
     assert.deepEqual(calls[1], ["send", "--no-wait", "agent-cli-plain", "go"]);
+  });
+
+  it("deliverMessage sends fleet provenance as a `fleet_envelope` attachment, not in the body (#1003)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const payloads: Array<{ text: string; options: any }> = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          send: async (text: string, options: any) => {
+            payloads.push({ text, options });
+          },
+        }),
+      },
+    };
+
+    const wrapped = withFleetEnvelope(
+      routerEnvelope({ repo: "forge.mrs.uppidi.com/xpufx-org/paseo", kind: "webhook", ref: 1003 }),
+      "🔔 Forgejo webhook incoming [issues:opened] xpufx-org/paseo#1003 Fleet pill",
+    );
+    assert.equal(await router.deliverMessage("agent-envelope", wrapped, { steer: true }), true);
+
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].text.includes("<!-- {"), false);
+    assert.ok(payloads[0].text.startsWith("🔔 Forgejo webhook incoming"));
+    const attachments = payloads[0].options.attachments;
+    assert.equal(Array.isArray(attachments), true);
+    assert.equal(attachments.length, 1);
+    assert.equal(attachments[0].type, "text");
+    assert.equal(attachments[0].contextKind, "fleet_envelope");
+    assert.equal(attachments[0].title, "Fleet context");
+    assert.deepEqual(JSON.parse(attachments[0].text), fleetEnvelope({
+      origin: "router",
+      sender: ROUTER_SENDER,
+      repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
+      kind: "webhook",
+      ref: 1003,
+    }));
+    assert.equal(payloads[0].options.activeTurnBehavior, "steer");
+  });
+
+  it("deliverMessage forwards explicit attachments alongside an extracted envelope (#1003)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const payloads: Array<{ text: string; options: any }> = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          send: async (text: string, options: any) => {
+            payloads.push({ text, options });
+          },
+        }),
+      },
+    };
+
+    await router.deliverMessage(
+      "agent-attach",
+      withFleetEnvelope(watchdogEnvelope({ repo: "forge/o/r" }), "alert body"),
+      { noWait: true, attachments: [fleetEnvelopeAttachment(routerEnvelope({ repo: "other", kind: "handoff" }))] },
+    );
+    assert.equal(payloads[0].text, "alert body");
+    assert.deepEqual(
+      payloads[0].options.attachments.map((a: any) => a.contextKind),
+      ["fleet_envelope", "fleet_envelope"],
+    );
+  });
+
+  it("deliverMessage CLI fallback re-inlines the envelope for the model (#1003)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    (router as any).activePaseo = null;
+    const calls: string[][] = [];
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      calls.push([...args]);
+      return { stdout: "" };
+    });
+    try {
+      await router.deliverMessage(
+        "agent-cli-envelope",
+        withFleetEnvelope(routerEnvelope({ repo: "forge/o/r", kind: "steer" }), "body"),
+        { noWait: true },
+      );
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+    const sent = calls[0][calls[0].length - 1];
+    assert.ok(sent.startsWith('<!-- {"fleet"'));
+    assert.ok(sent.endsWith("\nbody"));
   });
 
   it("routes frontdesk events to frontdesk agent", async () => {
@@ -2626,7 +2784,7 @@ describe("hook-router Front Desk handoff (#458)", () => {
   let queueDir: string;
   let stateDir: string;
   let router: HookRouter;
-  let sent: Array<{ id: string; text: string }>;
+  let sent: Array<{ id: string; text: string; options?: any }>;
   let updated: Array<{ id: string; name: string; labels: Record<string, string> }>;
 
   beforeEach(() => {
@@ -2642,8 +2800,8 @@ describe("hook-router Front Desk handoff (#458)", () => {
           id,
           current: () => ({ id, status: "idle", activeTurn: null }),
           refresh: async () => ({ agent: { id, status: "idle" } }),
-          send: async (text: string) => {
-            sent.push({ id, text });
+          send: async (text: string, options?: any) => {
+            sent.push({ id, text, options });
           },
           update: async (update: { name: string; labels: Record<string, string> }) => {
             updated.push({ id, name: update.name, labels: update.labels });
@@ -2694,29 +2852,30 @@ describe("hook-router Front Desk handoff (#458)", () => {
     assert.equal(out.orchestratorsNotified, 1);
   });
 
-  it("wraps onboarding, handover, and stand-down notices in fleet envelopes (#985)", async () => {
+  it("wraps onboarding, handover, and stand-down notices in `fleet_envelope` attachments (#985/#1003)", async () => {
     router.writeOrchestrator("forge.test/xpufx-org/paseo", "orch-agent-1");
     router.writeFrontDesk("fd-old", "test");
 
     await router.doFrontDeskHandoff({ agentId: "fd-new", handoffText: "# New Front Desk" });
 
     const onboarding = sent.find((s) => s.id === "fd-new");
-    const onboardingFleet = parseFleetComment(onboarding?.text);
+    const onboardingFleet = parseFleetAttachment(onboarding?.options);
     assert.equal(onboardingFleet?.origin, "router");
     assert.equal(onboardingFleet?.sender, ROUTER_SENDER);
     assert.equal(onboardingFleet?.repo, FRONT_DESK_REPO);
     assert.equal(onboardingFleet?.kind, "handoff");
+    assert.equal(onboarding?.text.includes("<!-- {"), false);
     assert.ok(onboarding?.text.includes("You are now the Front Desk agent"));
 
     const handover = sent.find((s) => s.id === "orch-agent-1");
-    const handoverFleet = parseFleetComment(handover?.text);
+    const handoverFleet = parseFleetAttachment(handover?.options);
     assert.equal(handoverFleet?.origin, "router");
     assert.equal(handoverFleet?.repo, "forge.test/xpufx-org/paseo");
     assert.equal(handoverFleet?.kind, "handoff");
     assert.ok(handover?.text.includes("Front Desk handover"));
 
     const standDown = sent.find((s) => s.id === "fd-old");
-    const standDownFleet = parseFleetComment(standDown?.text);
+    const standDownFleet = parseFleetAttachment(standDown?.options);
     assert.equal(standDownFleet?.origin, "router");
     assert.equal(standDownFleet?.sender, ROUTER_SENDER);
     assert.equal(standDownFleet?.repo, FRONT_DESK_REPO);

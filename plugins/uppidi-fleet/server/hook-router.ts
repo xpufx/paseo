@@ -7,7 +7,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PaseoApi, PaseoAgentSendOptions } from "@getpaseo/client";
 import type {
   HookServiceStatusOutput,
   HookServiceActionOutput,
@@ -745,11 +745,17 @@ export function eventHash(repoKey: string, issue: number | null, kind: string, a
 
 export const FORGEJO_DIGEST_PREFIX = "🔔 Forgejo digest";
 
-// Issue #283/#985: fleet-originated prompts carry a hidden JSON signature as an
-// HTML comment so models can route machine turns without cluttering the
-// operator's rendered composer feed. Process-originated messages (router,
-// watchdog) have no agent id, so `sender` carries the process identity.
+// Issue #283/#985: fleet-originated prompts carry a JSON signature so models can
+// route machine turns. #1003 delivers it as a `fleet_envelope` text attachment
+// (the operator sees a subtle pill, the daemon folds it back into the provider
+// prompt); the legacy HTML-comment grammar stays for the queue and CLI fallback.
+// Process-originated messages (router, watchdog) have no agent id, so `sender`
+// carries the process identity.
 export const FLEET_ENVELOPE_VERSION = 1;
+/** Attachment context kind the client renders as a fleet-provenance pill (#1003). */
+export const FLEET_ENVELOPE_CONTEXT_KIND = "fleet_envelope";
+/** Pill title shown by the client for {@link FLEET_ENVELOPE_CONTEXT_KIND}. */
+export const FLEET_ENVELOPE_TITLE = "Fleet context";
 export const ROUTER_SENDER = "forgejo-hook";
 export const WATCHDOG_SENDER = "fleet-watchdog";
 export const FRONT_DESK_REPO = "frontdesk";
@@ -795,6 +801,68 @@ export function formatFleetEnvelope(fields: FleetEnvelopeFields): string {
 export function withFleetEnvelope(fields: FleetEnvelopeFields, message: string): string {
   if (typeof message === "string" && message.startsWith('<!-- {"fleet"')) return message;
   return `${formatFleetEnvelope(fields)}\n${message}`;
+}
+
+/**
+ * The attachment arm the Paseo client renders as a subtle pill and the daemon
+ * folds back into the provider prompt ({@link renderPromptAttachmentAsText}).
+ * Derived from the installed send options so a protocol drift fails typecheck.
+ */
+export type FleetEnvelopeAttachment = Extract<
+  NonNullable<PaseoAgentSendOptions["attachments"]>[number],
+  { type: "text" }
+>;
+
+function fleetEnvelopeAttachmentFromJson(json: string): FleetEnvelopeAttachment {
+  return {
+    type: "text",
+    mimeType: "text/plain",
+    contextKind: FLEET_ENVELOPE_CONTEXT_KIND,
+    title: FLEET_ENVELOPE_TITLE,
+    text: json,
+  };
+}
+
+/**
+ * Build the out-of-band form of the fleet envelope (#1003). The envelope stays
+ * model-visible via the daemon's prompt-attachment fold, but reaches the
+ * operator as an attachment pill instead of raw JSON in the composer bubble.
+ */
+export function fleetEnvelopeAttachment(fields: FleetEnvelopeFields): FleetEnvelopeAttachment {
+  return fleetEnvelopeAttachmentFromJson(JSON.stringify(fleetEnvelope(fields)));
+}
+
+const FLEET_ENVELOPE_COMMENT_RE = /<!-- ({"fleet":.*?}) -->\n?/g;
+
+/**
+ * Move any legacy in-band `<!-- {"fleet": ...} -->` comments out of a delivered
+ * prompt into structured attachments. Kept at the delivery boundary so queued
+ * strings (including ones persisted before this change) still parse, while no
+ * new fleet turn ships raw JSON in the message text.
+ */
+export function extractFleetEnvelopeAttachments(message: string): {
+  text: string;
+  attachments: FleetEnvelopeAttachment[];
+} {
+  const attachments: FleetEnvelopeAttachment[] = [];
+  const text = message.replace(FLEET_ENVELOPE_COMMENT_RE, (match, json: string) => {
+    try {
+      if (JSON.parse(json)?.fleet) {
+        attachments.push(fleetEnvelopeAttachmentFromJson(json));
+        return "";
+      }
+    } catch {
+      // Malformed comment: leave it in the body rather than drop a message.
+    }
+    return match;
+  });
+  return { text, attachments };
+}
+
+/** Re-inline attachments for the CLI fallback, which has no attachment channel. */
+function inlineFleetEnvelopeAttachments(text: string, attachments: readonly FleetEnvelopeAttachment[]): string {
+  const comments = attachments.map((a) => `<!-- ${a.text} -->`).join("\n");
+  return text.length > 0 ? `${comments}\n${text}` : comments;
 }
 
 export function routerEnvelope({
@@ -997,6 +1065,8 @@ export interface WatchdogAnomaly {
 export interface DeliverOptions {
   noWait?: boolean;
   steer?: boolean;
+  /** Extra structured prompt attachments; legacy envelope comments are merged in. */
+  attachments?: FleetEnvelopeAttachment[];
 }
 
 export interface WatchdogAuditOptions {
@@ -4093,6 +4163,10 @@ export class HookRouter {
   ): Promise<boolean> {
     const paseo = this.getPaseo();
     const shouldSteer = options?.steer ?? false;
+    // Fleet provenance rides on `attachments`; extract any legacy in-band
+    // comment so the SDK send carries the body as `text` (#1003).
+    const extracted = extractFleetEnvelopeAttachments(msg);
+    const attachments = [...(options?.attachments ?? []), ...extracted.attachments];
     if (paseo?.agents?.ref) {
       try {
         const agentRef = paseo.agents.ref(targetAgentId);
@@ -4105,7 +4179,10 @@ export class HookRouter {
         const sendOptions: AgentSendOptions = {
           activeTurnBehavior: shouldSteer ? "steer" : "interrupt",
         };
-        await agentRef.send(msg, sendOptions);
+        if (attachments.length > 0) {
+          sendOptions.attachments = attachments;
+        }
+        await agentRef.send(extracted.text, sendOptions);
         return true;
       } catch (err) {
         this.log(`[warn] SDK send failed for ${targetAgentId}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`);
@@ -4120,7 +4197,11 @@ export class HookRouter {
       if (shouldSteer) {
         args.push("--steer");
       }
-      args.push(targetAgentId, msg);
+      // The CLI has no attachment channel; re-inline the envelope so the
+      // fallback path still carries provenance to the model (legacy grammar).
+      const cliMsg =
+        attachments.length > 0 ? inlineFleetEnvelopeAttachments(extracted.text, attachments) : msg;
+      args.push(targetAgentId, cliMsg);
       await execFileAsync("paseo", args, { timeout: options?.noWait ? 5000 : 15000 });
       return true;
     } catch (err) {
