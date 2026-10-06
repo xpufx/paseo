@@ -23,15 +23,23 @@ export function configuredHostAgentKey(serverId: string, agentId: string): strin
 /**
  * Query only currently online configured hosts. Each call obtains a fresh
  * borrowed API; callers must discard the result after a host-status change.
+ *
+ * The client getter may yield `undefined` on a host that omits the multi-host
+ * seam (`useOptionalHosts`/`getOptionalPaseoClient`); that is reported as a
+ * per-host unavailable error rather than a throw (#1043).
  */
 export async function listConfiguredHostAgents(
   hosts: readonly PluginHostSummary[],
-  getClient: (serverId: string) => PaseoApi,
+  getClient: (serverId: string) => PaseoApi | undefined,
 ): Promise<ConfiguredHostAgents[]> {
   return Promise.all(hosts.map(async (host) => {
     if (host.status !== "online") return { host, agents: [], error: null };
     try {
-      const result = await getClient(host.serverId).agents.list();
+      const client = getClient(host.serverId);
+      if (!client) {
+        return { host, agents: [], error: "Multi-host access is unavailable on this host." };
+      }
+      const result = await client.agents.list();
       return {
         host,
         agents: result.entries.map(({ agent }) => ({

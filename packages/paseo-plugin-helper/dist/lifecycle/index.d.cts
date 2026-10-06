@@ -3,8 +3,9 @@ import React__default, { ReactNode, ComponentType } from 'react';
 import { g as HostPillProps, c as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, r as HostAgentPanelProps, t as HostWorkspacePanelProps, k as HostToast, f as HostLayout } from '../host-BAF48X1U.cjs';
 export { H as HostLayoutProvider, a as HostLayoutProviderProps, b as HostTheme, c as HostThemeProvider, d as HostThemeProviderProps, e as alpha, g as getContrastColor, f as getLuminance, h as getStatusColor, i as getVariantPalette, u as useHostLayout, j as useHostTheme } from '../host-color-DAZYIfPn.cjs';
 import { P as PluginTheme } from '../types-4TBN5lgi.cjs';
+import * as pluginClient from '@getpaseo/plugin/client';
+import { PluginHostSummary } from '@getpaseo/plugin/client';
 import 'react-native';
-import '@getpaseo/plugin/client';
 
 /**
  * Visual flair vocabulary accepted by the lifecycle registration options.
@@ -362,4 +363,25 @@ declare function setRegistrarLegacyThemeProvider(provider: RegistrarLegacyThemeP
 /** Mounts the host theme (always) and the legacy provider (when installed). */
 declare function RegistrarThemeScope({ theme, layout, flair, children }: RegistrarThemeProps): React__default.JSX.Element;
 
-export { type ClipboardEnvironment, type ClipboardTier, type CopyToClipboardOptions, DEFAULT_SIDEBAR_MAX_CONTENT_WIDTH, type DensityStyle, type HapticFeedbackType, type HeadingTransform, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RegistrarLegacyThemeProvider, type RegistrarThemeProps, RegistrarThemeScope, type RenderModalProps, type SidebarSurfaceRegistrar, type SurfaceStyle, type VisualFlair, type WorkspacePanelRegistrar, clipboardTierOrder, copyToClipboard, registerAgentPanel, registerComposerPill, registerSidebarSurface, registerWorkspacePanel, resolvePillModalScrollable, setRegistrarLegacyThemeProvider, triggerHaptic };
+/**
+ * The desktop host bundle supplies `useHosts`/`getPaseoClient`; the mobile
+ * bundle omits them, so a direct named call throws `useHosts is not a
+ * function` and takes the whole surface with it (#1043, #1057-G). These seams
+ * reach the primitives through a feature-detected namespace so a surface
+ * degrades to "no hosts" instead of crashing the plugin.
+ */
+/** The host summary shape `useHosts()` returns (the SDK's `PluginHostSummary`). */
+type OptionalHostSummary = PluginHostSummary;
+/** The borrowed per-host client `getPaseoClient(serverId)` returns. */
+type OptionalPaseoClient = ReturnType<typeof pluginClient.getPaseoClient>;
+/** True when the running host supplies the multi-host primitives. */
+declare function isMultiHostSupported(): boolean;
+/**
+ * `useHosts()` when the host supplies it, otherwise an empty host list, so a
+ * surface that enumerates hosts degrades instead of crashing the bundle.
+ */
+declare function useOptionalHosts(): readonly PluginHostSummary[];
+/** Borrow an online host's API, or `undefined` when the host omits the seam. */
+declare function getOptionalPaseoClient(serverId: string): OptionalPaseoClient | undefined;
+
+export { type ClipboardEnvironment, type ClipboardTier, type CopyToClipboardOptions, DEFAULT_SIDEBAR_MAX_CONTENT_WIDTH, type DensityStyle, type HapticFeedbackType, type HeadingTransform, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type OptionalHostSummary, type OptionalPaseoClient, type PillIconResolver, type PillLabelResolver, type PillLiveContext, type PillLivePayload, type RadiusStyle, type RegisterAgentPanelOptions, type RegisterComposerPillOptions, type RegisterSidebarSurfaceOptions, type RegisterWorkspacePanelOptions, type RegistrarLegacyThemeProvider, type RegistrarThemeProps, RegistrarThemeScope, type RenderModalProps, type SidebarSurfaceRegistrar, type SurfaceStyle, type VisualFlair, type WorkspacePanelRegistrar, clipboardTierOrder, copyToClipboard, getOptionalPaseoClient, isMultiHostSupported, registerAgentPanel, registerComposerPill, registerSidebarSurface, registerWorkspacePanel, resolvePillModalScrollable, setRegistrarLegacyThemeProvider, triggerHaptic, useOptionalHosts };

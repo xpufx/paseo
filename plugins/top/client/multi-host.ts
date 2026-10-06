@@ -1,5 +1,9 @@
-import * as pluginClient from "@getpaseo/plugin/client";
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  getOptionalPaseoClient,
+  isMultiHostSupported,
+  useOptionalHosts,
+} from "paseo-plugin-helper/lifecycle";
 import {
   MultiHostPoller,
   type FleetHostClient,
@@ -7,56 +11,32 @@ import {
   type FleetHostSnapshot,
 } from "../shared/multi-host";
 
-/** The host summary shape `useHosts` returns (the SDK's `PluginHostSummary`). */
-interface HostSummary {
-  readonly serverId: string;
-  readonly label: string;
-  readonly status: "idle" | "connecting" | "online" | "offline" | "error";
-}
-
-/** The structural slice of the borrowed host client this module reads. */
-interface BorrowedPaseoClient {
-  agents: { list(): Promise<{ entries?: Array<{ agent?: { status?: string } }> }> };
-  workspaces: { list(): Promise<{ entries?: unknown[] }> };
-  dispose(): Promise<void> | void;
-}
-
 /**
- * `@getPaseo/plugin/client` declares `useHosts`/`getPaseoClient` but only the
- * app's client bundle loader supplies them, and not every host does: the mobile
- * bundle omits them, so the named imports bind `undefined` there. Access them
- * through a namespace and feature-detect, rather than calling an absent hook
- * and crashing the whole Fleet tab.
+ * True when the running host supplies the multi-host primitives.
+ *
+ * Feature detection lives in `paseo-plugin-helper/lifecycle` so top and
+ * x-comms share one seam; this wrapper keeps the Fleet tab's local name.
  */
-const clientPrimitives = pluginClient as unknown as {
-  useHosts?: () => readonly HostSummary[];
-  getPaseoClient?: (serverId: string) => BorrowedPaseoClient;
-};
-
-/** True when the running host supplies the multi-host primitives. */
 export function multiHostSupported(): boolean {
-  return (
-    typeof clientPrimitives.useHosts === "function" &&
-    typeof clientPrimitives.getPaseoClient === "function"
-  );
+  return isMultiHostSupported();
 }
 
 /**
- * Wrap a borrowed `getPaseoClient(serverId)` as a fleet client.
+ * Wrap a borrowed `getOptionalPaseoClient(serverId)` as a fleet client.
  *
  * Only counts are read. The borrowed API exposes agents/workspaces/projects/
  * terminals/providers/config and no host-metrics RPC, so the fleet view cannot
  * show remote CPU/RAM/load/uptime; fabricating them would be mock data.
  */
 export function createFleetClient(serverId: string): FleetHostClient {
-  const getClient = clientPrimitives.getPaseoClient;
-  if (!getClient) {
+  // getOptionalPaseoClient throws for a non-online/unknown host; the poller
+  // only acquires for online hosts, and the throw is caught per host so one bad
+  // host cannot break the others. It returns undefined only when the host omits
+  // the seam entirely, which the poller never reaches.
+  const client = getOptionalPaseoClient(serverId);
+  if (!client) {
     throw new Error("multi-host fleet is not available on this host");
   }
-  // getPaseoClient throws for a non-online/unknown host; the poller only
-  // acquires for online hosts, and the throw is caught per host so one bad
-  // host cannot break the others.
-  const client = getClient(serverId);
   return {
     async readCounts(): Promise<FleetHostCounts> {
       const [agents, workspaces] = await Promise.all([
@@ -85,8 +65,8 @@ export interface UseFleetPollingOptions {
 /**
  * Bounded multi-host fleet polling hook.
  *
- * Enumerates online hosts with `useHosts()`, acquires a borrowed
- * `getPaseoClient(serverId)` per online host, and drives the pure
+ * Enumerates online hosts with `useOptionalHosts()`, acquires a borrowed
+ * `getOptionalPaseoClient(serverId)` per online host, and drives the pure
  * {@link MultiHostPoller} state machine: max one in-flight probe per host,
  * 15s cadence, 4s per-host timeout, stale marking, and dispose/reacquire on
  * host status transitions. Local Top behavior is untouched because nothing
@@ -94,10 +74,10 @@ export interface UseFleetPollingOptions {
  */
 export function useFleetPolling({ enabled = true }: UseFleetPollingOptions = {}) {
   // The mobile host omits the primitives; nothing to poll, so no hooks run and
-  // the caller renders an unavailable state. The check is module-constant, so
-  // the hook order is stable for a given host.
-  const supported = multiHostSupported();
-  const hosts = supported ? clientPrimitives.useHosts!() : [];
+  // the caller renders an unavailable state. Both checks are module-constant,
+  // so the hook order is stable for a given host.
+  const supported = isMultiHostSupported();
+  const hosts = useOptionalHosts();
   const [snapshots, setSnapshots] = useState<FleetHostSnapshot[]>([]);
   const pollerRef = useRef<MultiHostPoller | null>(null);
 

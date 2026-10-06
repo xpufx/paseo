@@ -24,4 +24,4 @@ export const HELPER_SERVED_FROM = "checkout";
 // resolving it fails in any clean clone while passing on a machine that still
 // holds the branch worktree. A digest of the files cannot be invalidated that
 // way. Re-stamp with `npm run stamp` in the plugin after a helper change.
-export const HELPER_REVISION = "sha256:c06bd8a2894e";
+export const HELPER_REVISION = "sha256:ae84825b8323";

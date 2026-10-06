@@ -45,6 +45,15 @@ describe("configured-host picker", () => {
     assert.equal(acquired, 1);
   });
 
+  it("degrades when the host omits the multi-host client API", async () => {
+    const results = await listConfiguredHostAgents(
+      [{ serverId: "srv_one", label: "One", status: "online" }],
+      () => undefined as unknown as never,
+    );
+    assert.equal(results[0].agents.length, 0);
+    assert.match(results[0].error ?? "", /multi-host/i);
+  });
+
   it("reports an unreadable host without failing the other hosts", async () => {
     const results = await listConfiguredHostAgents([
       { serverId: "srv_one", label: "One", status: "online" },

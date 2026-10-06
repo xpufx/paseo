@@ -20,3 +20,4 @@ export * from "./host-theme.js";
 export * from "./host-color.js";
 export * from "./flair.js";
 export * from "./providers.js";
+export * from "./multi-host.js";
