@@ -172,7 +172,7 @@ export function TopDashboardSurface(props: PluginSurfaceProps) {
 
             {activeTab === "fleet" && <FleetView />}
 
-            {activeTab === "permissions" && <PermissionAuditView variant="compact" />}
+            {activeTab === "permissions" && <PermissionAuditView variant="compact" theme={theme} layout={layout} />}
 
             {activeTab === "settings" && (
               <HostStack gap={12}>

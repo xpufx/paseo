@@ -1026,7 +1026,7 @@ function ResourceModal(props: ResourceModalProps) {
   );
 }
 
-function ResourceModalBody({ workspaceId, agentId, initialTab, payload }: ResourceModalProps) {
+function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, layout }: ResourceModalProps) {
   const { colors } = useHostTheme();
   const { compact } = useHostLayout();
   // Host-density padding rhythm (the helper's "comfortable" scale): the host
@@ -1729,7 +1729,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload }: Resour
     )}
 
     {activeTab === "permissions" && (
-      <PermissionAuditView variant="compact" />
+      <PermissionAuditView variant="compact" theme={theme} layout={layout} />
     )}
 
     {activeTab === "about" && (
@@ -2238,8 +2238,12 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
               );
             },
             refreshIntervalMs: 5000,
-            renderModal: () => (
-              <LiveCustomPillModal pillId={pill.id} initial={pill} />
+            renderModal: (props) => (
+              <HostThemeProvider theme={props.theme}>
+                <HostLayoutProvider layout={props.layout}>
+                  <LiveCustomPillModal pillId={pill.id} initial={pill} />
+                </HostLayoutProvider>
+              </HostThemeProvider>
             ),
           });
           activeCustomPills.set(pill.id, cleanup);
