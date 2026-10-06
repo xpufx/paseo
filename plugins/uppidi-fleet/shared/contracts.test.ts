@@ -66,6 +66,12 @@ import {
   FleetResetStateInputSchema,
   FleetResetStateOutputSchema,
   uppidiFleetResetStateContract,
+  FleetHaltInputSchema,
+  FleetHaltOutputSchema,
+  uppidiFleetHaltContract,
+  FleetResumeInputSchema,
+  FleetResumeOutputSchema,
+  uppidiFleetResumeContract,
   uppidiFrontDeskActivityContract,
   UppidiFrontDeskActivityInputSchema,
   UppidiFrontDeskActivityOutputSchema,
@@ -946,6 +952,24 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
     assert.equal(output.cleared.queueFiles, 2);
     assert.equal(output.cleared.cacheFiles, 5);
     assert.equal(output.notifiedOrchestrators, 1);
+  });
+
+  it("validates the fleet HALT / RESUME contracts and schemas (#1013)", () => {
+    assert.equal(uppidiFleetHaltContract.name, "uppidi-fleet.fleet-halt");
+    assert.equal(uppidiFleetResumeContract.name, "uppidi-fleet.fleet-resume");
+
+    assert.equal(FleetHaltInputSchema.parse({ confirm: true }).confirm, true);
+    assert.throws(() => FleetHaltInputSchema.parse({}));
+    assert.equal(FleetResumeInputSchema.parse({ confirm: true }).confirm, true);
+
+    const halt = FleetHaltOutputSchema.parse({ ok: true });
+    assert.equal(halt.halted, false);
+    assert.equal(halt.alreadyHalted, false);
+    assert.equal(halt.teardownInProgress, false);
+
+    const resume = FleetResumeOutputSchema.parse({ ok: true });
+    assert.equal(resume.halted, false);
+    assert.equal(resume.teardownInProgress, false);
   });
 
   describe("Front Desk Watch & Console Drawer (#710)", () => {

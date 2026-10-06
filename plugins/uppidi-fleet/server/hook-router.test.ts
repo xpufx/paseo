@@ -6896,5 +6896,42 @@ describe("HookRouter canonical ALL HALT mode (#994)", () => {
     assert.equal(router.isHalted(), false);
     assert.equal(router.isAllPaused(), false);
   });
+
+  it("exposes halted and teardownInProgress on the status overview (#1013)", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+
+    const before = router.getStatusOverview();
+    assert.equal(before.halted, false);
+    assert.equal(before.teardownInProgress, false);
+
+    router.halt();
+    assert.equal(router.getStatusOverview().halted, true);
+
+    router.markTeardownStart();
+    assert.equal(router.getStatusOverview().teardownInProgress, true);
+
+    router.markTeardownEnd();
+    assert.equal(router.getStatusOverview().teardownInProgress, false);
+  });
+
+  it("ignores resume while a teardown is in progress and allows it afterwards (#1013)", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.halt();
+    router.markTeardownStart();
+
+    router.resume("all");
+    assert.equal(router.isHalted(), true, "resume must not clear the halt during teardown");
+
+    const refused = router.resumeAll();
+    assert.equal(refused.ok, false);
+    assert.equal(refused.resumed, false);
+    assert.match(refused.error || "", /teardown/i);
+
+    router.markTeardownEnd();
+    const allowed = router.resumeAll();
+    assert.equal(allowed.ok, true);
+    assert.equal(allowed.resumed, true);
+    assert.equal(router.isHalted(), false);
+  });
 });
 

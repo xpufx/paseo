@@ -34,6 +34,8 @@ import {
   handleUppidiFrontDeskPrompt,
   handleUppidiCreateFrontDesk,
   handleFleetTeardown,
+  handleFleetHalt,
+  handleFleetResume,
   getPersistedStateDir,
   resolveRegisteredFrontDeskAgentId,
   checkRepoMainDirty,
@@ -1380,5 +1382,135 @@ describe("repo root off-main inspection (#919)", () => {
     } finally {
       fs.rmSync(nonRepo, { recursive: true, force: true });
     }
+  });
+});
+
+describe("Fleet HALT / RESUME handlers (#1013)", () => {
+  let tmpDir: string;
+  let prevHookStateDir: string | undefined;
+  let prevHookQueueDir: string | undefined;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "uppidi-fleet-halt-rpc-test-"));
+    prevHookStateDir = process.env.HOOK_STATE_DIR;
+    prevHookQueueDir = process.env.HOOK_QUEUE_DIR;
+    process.env.HOOK_STATE_DIR = tmpDir;
+    process.env.HOOK_QUEUE_DIR = path.join(tmpDir, "queues");
+    setExecFileAsyncForTest(async () => ({ stdout: "[]", stderr: "" }));
+  });
+
+  afterEach(() => {
+    setExecFileAsyncForTest(null);
+    setActiveHookRouter(null);
+    if (prevHookStateDir !== undefined) process.env.HOOK_STATE_DIR = prevHookStateDir;
+    else delete process.env.HOOK_STATE_DIR;
+    if (prevHookQueueDir !== undefined) process.env.HOOK_QUEUE_DIR = prevHookQueueDir;
+    else delete process.env.HOOK_QUEUE_DIR;
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  function makeRouter(): HookRouter {
+    const router = new HookRouter(null, {
+      stateDir: tmpDir,
+      queueDir: path.join(tmpDir, "queues"),
+      port: 0,
+    });
+    setActiveHookRouter(router);
+    return router;
+  }
+
+  it("engages the canonical halt and reports a no-op on a second engage", async () => {
+    const router = makeRouter();
+    assert.equal(router.isHalted(), false);
+
+    const first = await handleFleetHalt({ confirm: true });
+    assert.equal(first.ok, true);
+    assert.equal(first.halted, true);
+    assert.equal(first.alreadyHalted, false);
+    assert.equal(router.isHalted(), true);
+    assert.equal(router.isAllPaused(), true);
+
+    const second = await handleFleetHalt({ confirm: true });
+    assert.equal(second.ok, true);
+    assert.equal(second.halted, true);
+    assert.equal(second.alreadyHalted, true, "double-engage must be guarded");
+  });
+
+  it("clears the halt through resume('all')", async () => {
+    const router = makeRouter();
+    await handleFleetHalt({ confirm: true });
+    assert.equal(router.isHalted(), true);
+
+    const res = await handleFleetResume({ confirm: true });
+    assert.equal(res.ok, true);
+    assert.equal(res.halted, false);
+    assert.equal(router.isHalted(), false);
+    assert.equal(router.isAllPaused(), false);
+  });
+
+  it("refuses resume while a teardown is mid-flight", async () => {
+    const router = makeRouter();
+    await handleFleetHalt({ confirm: true });
+    router.markTeardownStart();
+
+    const res = await handleFleetResume({ confirm: true });
+    assert.equal(res.ok, false);
+    assert.equal(res.teardownInProgress, true);
+    assert.match(res.error || "", /teardown in progress/i);
+    assert.equal(router.isHalted(), true, "halt must remain engaged during teardown");
+
+    router.markTeardownEnd();
+    const after = await handleFleetResume({ confirm: true });
+    assert.equal(after.ok, true);
+    assert.equal(router.isHalted(), false);
+  });
+
+  it("treats a missing active router as an error", async () => {
+    setActiveHookRouter(null);
+    const halt = await handleFleetHalt({ confirm: true });
+    assert.equal(halt.ok, false);
+    assert.match(halt.error || "", /not running/i);
+    const resume = await handleFleetResume({ confirm: true });
+    assert.equal(resume.ok, false);
+    assert.match(resume.error || "", /not running/i);
+  });
+
+  it("holds the teardown window across handleFleetTeardown and releases it afterwards", async () => {
+    const router = makeRouter();
+    let sawTeardownWindow = false;
+    let sawHalted = false;
+    let sawListDuringTeardown = false;
+    // The broadcast happens after halt() but before archiving, so it is the
+    // earliest point where both the teardown window and the halt must be set.
+    (router as any).broadcastTeardownNotice = async () => {
+      sawTeardownWindow = router.isTeardownInProgress();
+      sawHalted = router.isHalted();
+      return { queuedKeys: [], delivered: 0 };
+    };
+    const mockContext = {
+      paseo: {
+        agents: {
+          list: async () => {
+            sawListDuringTeardown = sawListDuringTeardown || router.isTeardownInProgress();
+            return { entries: [] };
+          },
+          ref: () => ({ archive: async () => ({ ok: true }) }),
+        },
+      },
+    } as any;
+
+    await handleFleetTeardown({ targets: ["workers"], confirm: true }, mockContext);
+
+    assert.equal(sawListDuringTeardown, true, "teardown window must be open before archiving runs");
+    assert.equal(sawTeardownWindow, true, "teardown window must be open while archiving runs");
+    assert.equal(sawHalted, true, "canonical halt must be engaged while teardown runs");
+    assert.equal(router.isTeardownInProgress(), false, "teardown window must close when the handler returns");
+    assert.equal(router.isHalted(), true, "the halt remains engaged after teardown until RESUME");
+
+    const resume = await handleFleetResume({ confirm: true });
+    assert.equal(resume.ok, true);
+    assert.equal(router.isHalted(), false);
   });
 });

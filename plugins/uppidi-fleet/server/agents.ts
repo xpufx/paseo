@@ -33,6 +33,10 @@ import type {
   FleetTeardownOutput,
   FleetResetStateInput,
   FleetResetStateOutput,
+  FleetHaltInput,
+  FleetHaltOutput,
+  FleetResumeInput,
+  FleetResumeOutput,
   UppidiFrontDeskActivityInput,
   UppidiFrontDeskActivityOutput,
   UppidiFrontDeskActivityItem,
@@ -1134,6 +1138,10 @@ export async function handleFleetTeardown(
   input: FleetTeardownInput,
   context: PluginHandlerContext
 ): Promise<FleetTeardownOutput> {
+  // #1013: hold the teardown window for the whole handler so a dashboard RESUME
+  // cannot clear the canonical halt while agents/state are still being archived.
+  const router = getActiveHookRouter();
+  router?.markTeardownStart();
   try {
     const targetSet = new Set(input.targets);
     const targetCategories = new Set(
@@ -1152,7 +1160,6 @@ export async function handleFleetTeardown(
     const tornDown = { workers: 0, orchestrators: 0, frontdesk: 0 };
     const errors: string[] = [];
 
-    const router = getActiveHookRouter();
     if (router) {
       try {
         router.halt();
@@ -1441,7 +1448,105 @@ export async function handleFleetTeardown(
       errors: [err?.message || String(err)],
       error: err?.message || String(err),
     };
+  } finally {
+    router?.markTeardownEnd();
   }
+}
+
+/**
+ * Engage the canonical ALL HALT (#1013). Reuses the #994 `HookRouter.halt()`
+ * path rather than introducing a second halt mechanism. A double-engage is a
+ * no-op that reports `alreadyHalted` so the dashboard can disable the control.
+ */
+export async function handleFleetHalt(
+  _input: FleetHaltInput,
+  _context?: PluginHandlerContext
+): Promise<FleetHaltOutput> {
+  const router = getActiveHookRouter();
+  if (!router) {
+    return {
+      ok: false,
+      halted: false,
+      alreadyHalted: false,
+      teardownInProgress: false,
+      error: "Hook router is not running; cannot engage halt",
+    };
+  }
+
+  if (router.isHalted()) {
+    return {
+      ok: true,
+      halted: true,
+      alreadyHalted: true,
+      teardownInProgress: router.isTeardownInProgress(),
+      message: "Canonical ALL HALT is already engaged",
+    };
+  }
+
+  try {
+    router.halt();
+    return {
+      ok: true,
+      halted: true,
+      alreadyHalted: false,
+      teardownInProgress: router.isTeardownInProgress(),
+      message: "Canonical ALL HALT engaged — ingress paused, background loops stopped, auto-provisioning disabled",
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      halted: router.isHalted(),
+      alreadyHalted: false,
+      teardownInProgress: router.isTeardownInProgress(),
+      error: err?.message || String(err),
+    };
+  }
+}
+
+/**
+ * Clear the canonical ALL HALT (#1013) via `router.resume("all")`. Refuses
+ * while a fleet teardown is mid-flight so resume cannot race archiving.
+ */
+export async function handleFleetResume(
+  _input: FleetResumeInput,
+  _context?: PluginHandlerContext
+): Promise<FleetResumeOutput> {
+  const router = getActiveHookRouter();
+  if (!router) {
+    return {
+      ok: false,
+      halted: false,
+      teardownInProgress: false,
+      error: "Hook router is not running; cannot resume halt",
+    };
+  }
+
+  if (router.isTeardownInProgress()) {
+    return {
+      ok: false,
+      halted: router.isHalted(),
+      teardownInProgress: true,
+      error: "Fleet teardown in progress; halt cannot be resumed until it completes",
+    };
+  }
+
+  if (!router.isHalted()) {
+    return {
+      ok: true,
+      halted: false,
+      teardownInProgress: false,
+      message: "Fleet is not halted",
+    };
+  }
+
+  const result = router.resumeAll();
+  return {
+    ok: result.ok,
+    halted: router.isHalted(),
+    teardownInProgress: router.isTeardownInProgress(),
+    message: result.resumed ? "Canonical ALL HALT cleared — ingress and auto-provisioning resumed" : undefined,
+    error: result.error,
+  };
 }
 
 /**

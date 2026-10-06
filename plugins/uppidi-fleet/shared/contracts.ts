@@ -128,6 +128,10 @@ export const HookStatusOutputSchema = z.object({
     .nullable()
     .optional(),
   paused: z.array(z.string()).default([]),
+  // Canonical ALL HALT state (#994) and the teardown window that activates it.
+  // The dashboard banner and RESUME guard read these off the status snapshot.
+  halted: z.boolean().default(false),
+  teardownInProgress: z.boolean().default(false),
   totalQueued: z.number().default(0),
   repoCount: z.number().default(0),
   // Cross-plugin presence, resolved per call from the daemon (never file
@@ -1471,6 +1475,53 @@ export const uppidiFleetResetStateContract = defineContract({
   description: "Reset fleet state: purge stale cache, board status, queues, and notify orchestrators",
   input: FleetResetStateInputSchema,
   output: FleetResetStateOutputSchema,
+});
+
+// Fleet HALT / RESUME (Issue #1013) — operator controls over the canonical ALL
+// HALT from #994. The input confirm literal mirrors teardown/reset so the
+// dashboard must arm an explicit confirmation before freezing the fleet.
+export const FleetHaltInputSchema = z.object({
+  confirm: z.literal(true),
+});
+export type FleetHaltInput = z.infer<typeof FleetHaltInputSchema>;
+
+export const FleetHaltOutputSchema = z.object({
+  ok: z.boolean(),
+  halted: z.boolean().default(false),
+  alreadyHalted: z.boolean().default(false),
+  teardownInProgress: z.boolean().default(false),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type FleetHaltOutput = z.infer<typeof FleetHaltOutputSchema>;
+
+export const uppidiFleetHaltContract = defineContract({
+  name: "uppidi-fleet.fleet-halt",
+  description:
+    "Engage the canonical ALL HALT: pause queue ingress/processing, stop background loops, suppress auto-provisioning",
+  input: FleetHaltInputSchema,
+  output: FleetHaltOutputSchema,
+});
+
+export const FleetResumeInputSchema = z.object({
+  confirm: z.literal(true),
+});
+export type FleetResumeInput = z.infer<typeof FleetResumeInputSchema>;
+
+export const FleetResumeOutputSchema = z.object({
+  ok: z.boolean(),
+  halted: z.boolean().default(false),
+  teardownInProgress: z.boolean().default(false),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type FleetResumeOutput = z.infer<typeof FleetResumeOutputSchema>;
+
+export const uppidiFleetResumeContract = defineContract({
+  name: "uppidi-fleet.fleet-resume",
+  description: "Clear the canonical ALL HALT and resume queue ingress/processing",
+  input: FleetResumeInputSchema,
+  output: FleetResumeOutputSchema,
 });
 
 // Uppidi Fleet Plugin Settings Contract (Issue #444)

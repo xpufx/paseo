@@ -2676,6 +2676,7 @@ export class HookRouter {
   private unsubscribeLifecycle?: () => void;
   private isClosed = false;
   private isHaltedState = false;
+  private teardownInProgress = false;
   private startedAt: number | null = null;
   private pausedRepos = new Set<string>();
   private enrolledRepos = new Set<string>();
@@ -6350,6 +6351,10 @@ export class HookRouter {
   }
 
   public resume(key?: string): string[] {
+    if (this.teardownInProgress) {
+      this.log("[warn] resume ignored: fleet teardown in progress");
+      return Array.from(this.pausedQueues);
+    }
     if (!key || key === "all") {
       this.isHaltedState = false;
       this.allQueuesPaused = false;
@@ -6407,6 +6412,41 @@ export class HookRouter {
   /** Returns true when the canonical ALL HALT state is engaged (#994). */
   public isHalted(): boolean {
     return this.isHaltedState;
+  }
+
+  /**
+   * Marks the start of a fleet teardown window (#1013). While a teardown is
+   * mid-flight `resume()`/`resumeAll()` must not clear the halt, otherwise
+   * ingress and auto-provisioning would race the archiving work.
+   */
+  public markTeardownStart(): void {
+    this.teardownInProgress = true;
+  }
+
+  /** Clears the teardown window once teardown finishes (success or error). */
+  public markTeardownEnd(): void {
+    this.teardownInProgress = false;
+  }
+
+  /** True while a fleet teardown is running (#1013). */
+  public isTeardownInProgress(): boolean {
+    return this.teardownInProgress;
+  }
+
+  /**
+   * Thin operator-facing wrapper over `resume("all")` (#1013). Refuses while a
+   * teardown is mid-flight and reports whether the halt was actually cleared.
+   */
+  public resumeAll(): { ok: boolean; resumed: boolean; error?: string } {
+    if (this.teardownInProgress) {
+      return {
+        ok: false,
+        resumed: false,
+        error: "Fleet teardown in progress; halt cannot be resumed until it completes",
+      };
+    }
+    this.resume("all");
+    return { ok: true, resumed: true };
   }
 
   /**
@@ -7236,6 +7276,7 @@ export class HookRouter {
         : null,
       paused: Array.from(this.pausedQueues),
       halted: this.isHaltedState,
+      teardownInProgress: this.teardownInProgress,
       totalQueued,
       repoCount: allKeys.size,
       teardown: { at: this.lastTeardownAt, targets: [...this.lastTeardownTargets] },

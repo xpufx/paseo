@@ -33,6 +33,8 @@ import {
   uppidiFleetToolListContract,
   uppidiFleetToolExecuteContract,
   uppidiFleetResetStateContract,
+  uppidiFleetHaltContract,
+  uppidiFleetResumeContract,
   uppidiFrontDeskActivityContract,
   uppidiFrontDeskPromptContract,
   uppidiTransitionIssueContract,
@@ -66,6 +68,8 @@ import {
   handleUppidiToggleRepoPause,
   handleFleetTeardown,
   handleFleetResetState,
+  handleFleetHalt,
+  handleFleetResume,
   handleUppidiFrontDeskActivity,
   handleUppidiFrontDeskPrompt,
 } from "./server/agents.js";
@@ -133,6 +137,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiUnenrollRepoContract, handleUppidiUnenrollRepo);
   server.handle(uppidiFleetTeardownContract, handleFleetTeardown);
   server.handle(uppidiFleetResetStateContract, handleFleetResetState);
+  server.handle(uppidiFleetHaltContract, handleFleetHalt);
+  server.handle(uppidiFleetResumeContract, handleFleetResume);
   server.handle(uppidiFleetToolListContract, handleFleetToolList);
   server.handle(uppidiFleetToolExecuteContract, handleFleetToolExecute);
   server.handle(uppidiFrontDeskActivityContract, handleUppidiFrontDeskActivity);
