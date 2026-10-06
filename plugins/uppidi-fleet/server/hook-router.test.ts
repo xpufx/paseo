@@ -988,10 +988,10 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
     // Allow async drain to complete
     await new Promise((r) => setTimeout(r, 20));
 
-    // Routine webhook message should now have been dispatched via in-process send with steer: false (#536)
+    // Routine webhook message should now have been dispatched via in-process send with activeTurnBehavior: interrupt (#1027)
     assert.equal(sentMessages.length, 1);
     assert.equal(sentMessages[0].text, "Prompt to orchestrator");
-    assert.equal(sentMessages[0].options?.steer, false);
+    assert.equal(sentMessages[0].options?.activeTurnBehavior, "interrupt");
     assert.equal(router.getQueue(key).length, 0);
   });
 
@@ -1034,10 +1034,10 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
 
     await new Promise((r) => setTimeout(r, 20));
 
-    // SOS must preempt immediately and pass steer: true
+    // SOS must preempt immediately and pass activeTurnBehavior: steer
     assert.equal(sentMessages.length, 1);
     assert.equal(sentMessages[0].text, "EMERGENCY STOP");
-    assert.equal(sentMessages[0].options?.steer, true);
+    assert.equal(sentMessages[0].options?.activeTurnBehavior, "steer");
     assert.equal(router.getQueue(key).length, 0);
   });
 
@@ -1100,14 +1100,57 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
 
     await new Promise((r) => setTimeout(r, 20));
 
-    // All 3 messages must be coalesced into a SINGLE batch turn with steer: false
+    // All 3 messages must be coalesced into a SINGLE batch turn with activeTurnBehavior: interrupt
     assert.equal(sentMessages.length, 1);
     assert.ok(sentMessages[0].text.includes("Batch notification (3 events)"));
     assert.ok(sentMessages[0].text.includes("Event 1: PR closed"));
     assert.ok(sentMessages[0].text.includes("Event 2: Action failure"));
     assert.ok(sentMessages[0].text.includes("Event 3: Issue labeled"));
-    assert.equal(sentMessages[0].options?.steer, false);
+    assert.equal(sentMessages[0].options?.activeTurnBehavior, "interrupt");
     assert.equal(router.getQueue(key).length, 0);
+  });
+
+  it("deliverMessage sends activeTurnBehavior and never the dead SDK steer key (#1027)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const payloads: Array<{ text: string; options: Record<string, unknown> }> = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          send: async (text: string, options: Record<string, unknown>) => {
+            payloads.push({ text, options });
+          },
+        }),
+      },
+    };
+
+    assert.equal(await router.deliverMessage("agent-steer", "steer this", { steer: true }), true);
+    assert.equal(await router.deliverMessage("agent-interrupt", "interrupt this", { steer: false }), true);
+    assert.equal(await router.deliverMessage("agent-default", "default to interrupt"), true);
+
+    assert.deepEqual(payloads[0], { text: "steer this", options: { activeTurnBehavior: "steer" } });
+    assert.deepEqual(payloads[1], { text: "interrupt this", options: { activeTurnBehavior: "interrupt" } });
+    assert.deepEqual(payloads[2], { text: "default to interrupt", options: { activeTurnBehavior: "interrupt" } });
+    for (const { options } of payloads) {
+      assert.equal("steer" in options, false, "the SDK payload must not carry the dead steer key");
+    }
+  });
+
+  it("deliverMessage CLI fallback keeps --steer when the SDK ref is unavailable (#1027)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    (router as any).activePaseo = null;
+    const calls: string[][] = [];
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      calls.push([...args]);
+      return { stdout: "" };
+    });
+    try {
+      assert.equal(await router.deliverMessage("agent-cli-steer", "go", { steer: true, noWait: true }), true);
+      assert.equal(await router.deliverMessage("agent-cli-plain", "go", { noWait: true }), true);
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+    assert.deepEqual(calls[0], ["send", "--no-wait", "--steer", "agent-cli-steer", "go"]);
+    assert.deepEqual(calls[1], ["send", "--no-wait", "agent-cli-plain", "go"]);
   });
 
   it("routes frontdesk events to frontdesk agent", async () => {
@@ -4065,7 +4108,7 @@ describe("hook-router Front Desk non-interrupting delivery and watchdog alerts (
     const frontDeskId = "fd-agent-780";
     let agentStatus = "running";
     let turnEndedHandler: any = null;
-    const sentMessages: Array<{ text: string; steer?: boolean }> = [];
+    const sentMessages: Array<{ text: string; activeTurnBehavior?: "interrupt" | "steer" }> = [];
 
     const mockPaseo = {
       agents: {
@@ -4074,7 +4117,7 @@ describe("hook-router Front Desk non-interrupting delivery and watchdog alerts (
           return {
             current: () => ({ id, status: agentStatus, activeTurn: agentStatus === "running" ? { id: "turn-1" } : null }),
             send: async (text: string, options?: any) => {
-              sentMessages.push({ text, steer: options?.steer });
+              sentMessages.push({ text, activeTurnBehavior: options?.activeTurnBehavior });
             },
           };
         },
@@ -4124,14 +4167,14 @@ describe("hook-router Front Desk non-interrupting delivery and watchdog alerts (
 
     // Message delivered without steering
     assert.equal(sentMessages.length, 1);
-    assert.equal(sentMessages[0].steer, false);
+    assert.equal(sentMessages[0].activeTurnBehavior, "interrupt");
     assert.equal(router.getQueue("frontdesk").length, 0);
   });
 
   it("SOS webhook for Front Desk bypasses busy check and delivers with steer: true", async () => {
     const frontDeskId = "fd-agent-780-sos";
     let agentStatus = "running";
-    const sentMessages: Array<{ text: string; steer?: boolean }> = [];
+    const sentMessages: Array<{ text: string; activeTurnBehavior?: "interrupt" | "steer" }> = [];
 
     const mockPaseo = {
       agents: {
@@ -4140,7 +4183,7 @@ describe("hook-router Front Desk non-interrupting delivery and watchdog alerts (
           return {
             current: () => ({ id, status: agentStatus, activeTurn: { id: "turn-sos" } }),
             send: async (text: string, options?: any) => {
-              sentMessages.push({ text, steer: options?.steer });
+              sentMessages.push({ text, activeTurnBehavior: options?.activeTurnBehavior });
             },
           };
         },
@@ -4173,9 +4216,9 @@ describe("hook-router Front Desk non-interrupting delivery and watchdog alerts (
 
     await new Promise((r) => setTimeout(r, 20));
 
-    // Delivered immediately with steer: true despite agentStatus === "running"
+    // Delivered immediately with activeTurnBehavior: steer despite agentStatus === "running"
     assert.equal(sentMessages.length, 1);
-    assert.equal(sentMessages[0].steer, true);
+    assert.equal(sentMessages[0].activeTurnBehavior, "steer");
     assert.ok(sentMessages[0].text.includes("Emergency"));
   });
 

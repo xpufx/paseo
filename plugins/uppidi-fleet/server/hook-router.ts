@@ -974,12 +974,19 @@ export interface WatchdogAnomaly {
   scope?: string;
 }
 
+/** Fleet-level delivery options. `deliverMessage` translates `steer` into the
+ * SDK's `activeTurnBehavior`; callers must not pass SDK-only keys here. */
+export interface DeliverOptions {
+  noWait?: boolean;
+  steer?: boolean;
+}
+
 export interface WatchdogAuditOptions {
   now?: number;
   agentMap?: Map<string, WatchdogAgent> | null;
   orchestratorRecords?: OrchestratorRecord[];
   frontDeskId?: string | null;
-  deliver?: (targetAgentId: string, msg: string, options?: { noWait?: boolean; steer?: boolean }) => Promise<boolean>;
+  deliver?: (targetAgentId: string, msg: string, options?: DeliverOptions) => Promise<boolean>;
   reloadAgent?: (id: string) => Promise<{ ok: boolean; error?: string }>;
   /** Stop a wedged agent (`paseo agent stop <id>`); injectable for tests. */
   stopAgent?: (id: string) => Promise<{ ok: boolean; error?: string }>;
@@ -3889,14 +3896,23 @@ export class HookRouter {
   public async deliverMessage(
     targetAgentId: string,
     msg: string,
-    options?: { noWait?: boolean; steer?: boolean },
+    options?: DeliverOptions,
   ): Promise<boolean> {
     const paseo = this.getPaseo();
     const shouldSteer = options?.steer ?? false;
     if (paseo?.agents?.ref) {
       try {
         const agentRef = paseo.agents.ref(targetAgentId);
-        await agentRef.send(msg, { steer: shouldSteer } as any);
+        // The public handle type has lagged the protocol; type the payload
+        // structurally so the SDK-only key stays visible and the old dead
+        // `steer` key cannot slip through as `any`.
+        type AgentSendOptions = NonNullable<Parameters<typeof agentRef.send>[1]> & {
+          activeTurnBehavior: "interrupt" | "steer";
+        };
+        const sendOptions: AgentSendOptions = {
+          activeTurnBehavior: shouldSteer ? "steer" : "interrupt",
+        };
+        await agentRef.send(msg, sendOptions);
         return true;
       } catch (err) {
         this.log(`[warn] SDK send failed for ${targetAgentId}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`);
@@ -4023,7 +4039,7 @@ export class HookRouter {
     frontDeskId: string,
     alert: string,
     opts: {
-      deliverFn: (id: string, msg: string, o?: any) => Promise<boolean> | void;
+      deliverFn: (id: string, msg: string, o?: DeliverOptions) => Promise<boolean> | void;
       agentMap?: Map<string, WatchdogAgent> | null;
       isSos?: boolean;
       /** Repo context for the fleet envelope; defaults to the fleet-wide pseudo repo. */
@@ -5120,7 +5136,7 @@ export class HookRouter {
     const now = opts.now ?? Date.now();
     const reloadFn = opts.reloadAgent ?? ((id: string) => this.reloadAgent(id));
     const stopFn = opts.stopAgent ?? ((id: string) => this.stopAgent(id));
-    const deliverFn = opts.deliver ?? ((id: string, msg: string, o?: any) => this.deliverMessage(id, msg, o));
+    const deliverFn = opts.deliver ?? ((id: string, msg: string, o?: DeliverOptions) => this.deliverMessage(id, msg, o));
     const steerFn = (id: string, msg: string) => deliverFn(id, msg, { noWait: true, steer: true });
     const recover = opts.recover ?? true;
     const steerMessage = opts.steerMessage ?? DEFAULT_WATCHDOG_STEER_MESSAGE;
