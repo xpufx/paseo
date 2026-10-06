@@ -1,6 +1,47 @@
 import type { StatusVariant, ThemeColors } from "../../../../shared/vendor/paseo-plugin-helper/types";
 
 /**
+ * The single host-color fallback owned by the helper.
+ *
+ * A host `theme` prop normally supplies every token, but a partial or older
+ * payload may omit some. Rather than each plugin inventing its own
+ * `colors.border || "#334155"` guard, the helper resolves a theme once, here,
+ * and every adapter reads the resolved token. Plugins may pass this palette to
+ * code that renders outside a provider (recipes, previews, tests); they must
+ * not define their own literal fallbacks.
+ */
+export const FALLBACK_COLORS: ThemeColors = {
+  surface0: "#18181b",
+  surface1: "#27272a",
+  surface2: "#3f3f46",
+  border: "#3f3f46",
+  foreground: "#fafafa",
+  foregroundMuted: "#a1a1aa",
+  accent: "#3b82f6",
+  accentForeground: "#ffffff",
+  statusSuccess: "#22c55e",
+  statusWarning: "#eab308",
+  statusDanger: "#ef4444",
+};
+
+/**
+ * The host theme carries no shadow token, so shadows use this documented
+ * overlay constant owned by the helper. It is not a `ThemeColors` token and is
+ * intentionally not part of the palette a render guard checks; it is the one
+ * allowed non-theme color.
+ */
+export const HOST_SHADOW_COLOR = "rgba(0, 0, 0, 0.4)";
+
+/**
+ * Fills a possibly-partial host `theme.colors` from {@link FALLBACK_COLORS}.
+ * This is the one place a missing token becomes a literal, so surfaces never
+ * need a per-property `|| "#hex"` guard.
+ */
+export function resolveHostColors(colors?: Partial<ThemeColors> | null): ThemeColors {
+  return { ...FALLBACK_COLORS, ...(colors ?? {}) };
+}
+
+/**
  * Paseo Plugin Helper — UI color tokens (`paseo-plugin-helper/ui`).
  *
  * Pure color math for the ui/ adapter layer. These helpers are deliberately

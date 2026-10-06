@@ -1,6 +1,6 @@
 import React, { createContext, useContext, type ReactNode } from "react";
 import type { PluginTheme, ResponsiveLayout, StatusVariant, ThemeColors } from "../shared/types.js";
-import { alpha, getStatusColor, getVariantPalette } from "./host-color.js";
+import { alpha, getStatusColor, getVariantPalette, FALLBACK_COLORS, resolveHostColors } from "./host-color.js";
 
 /**
  * Paseo Plugin Helper — Host theme context (`paseo-plugin-helper/ui`).
@@ -37,24 +37,10 @@ export interface HostTheme {
 
 /**
  * Neutral fallback palette so ui/ adapters still render outside a provider
- * (tests, previews, host surfaces that have not migrated yet). It is a static
- * literal — never scraped from the DOM — so a missing provider degrades to
- * visible-but-plain colors instead of wrong ones.
+ * (tests, previews, host surfaces that have not migrated yet). It is the single
+ * helper-owned fallback; see {@link FALLBACK_COLORS}. A supplied `theme` is
+ * merged over it, so a partial host payload never paints a raw literal.
  */
-const FALLBACK_COLORS: ThemeColors = {
-  surface0: "#18181b",
-  surface1: "#27272a",
-  surface2: "#3f3f46",
-  border: "#3f3f46",
-  foreground: "#fafafa",
-  foregroundMuted: "#a1a1aa",
-  accent: "#3b82f6",
-  accentForeground: "#ffffff",
-  statusSuccess: "#22c55e",
-  statusWarning: "#eab308",
-  statusDanger: "#ef4444",
-};
-
 function createHostTheme(colors: ThemeColors): HostTheme {
   return {
     colors,
@@ -80,7 +66,7 @@ export interface HostThemeProviderProps {
  * variables and no flair.
  */
 export function HostThemeProvider({ theme, children }: HostThemeProviderProps) {
-  const value = createHostTheme(theme.colors);
+  const value = createHostTheme(resolveHostColors(theme.colors));
   return <HostThemeContext.Provider value={value}>{children}</HostThemeContext.Provider>;
 }
 

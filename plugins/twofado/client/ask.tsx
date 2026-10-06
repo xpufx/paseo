@@ -216,7 +216,7 @@ export function AskItem({
               justifyContent: "center",
             }}
           >
-            <Icon name={answered ? "Check" : "MessageSquare"} size={12} color="#ffffff" />
+            <Icon name={answered ? "Check" : "MessageSquare"} size={12} color={colors.accentForeground} />
           </View>
           <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>
             {answered ? "Answered" : multiSelect ? "Select one or more" : "Choose an option"}

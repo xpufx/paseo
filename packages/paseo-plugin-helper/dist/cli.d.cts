@@ -61,6 +61,19 @@ interface AuditRule {
     docUrl?: string;
 }
 
+/**
+ * The only client files permitted to contain raw color literals: a plugin's own
+ * appearance module, where a literal palette is the file's reason to exist and
+ * is not host-theme-driven by design. Keyed by plugin directory name, values are
+ * plugin-relative POSIX paths. This is the structural exemption the
+ * `no-raw-color-literal` rule uses for xpufx-org/paseo#629 / T10
+ * (`worktree-install` deliberately ships its own palette). `addTheme`
+ * contributions are exempted inside the scanner by call span, not by path.
+ *
+ * A `conformance.json` exemption for `no-raw-color-literal` is deliberately
+ * ignored: the theme seam must not be no-op-able from a manifest.
+ */
+declare const RAW_COLOR_APPEARANCE_MODULES: Record<string, readonly string[]>;
 declare const AUDIT_RULES: Record<string, AuditRule>;
 
 declare function auditProject(targetDir: string, options?: AuditOptions): AuditReport;
@@ -98,4 +111,4 @@ declare function formatAdoptResult(result: AdoptResult): string;
 
 declare function runCli(argv?: string[]): number;
 
-export { AUDIT_RULES, type AdoptOptions, type AdoptResult, type AuditExemption, type AuditIssue, type AuditOptions, type AuditReport, type AuditRule, type AuditSeverity, UI_CONFORMANCE_RULES, adoptProject, auditAllPlugins, auditPluginConformance, auditProject, doctorProject, findPluginDirectories, formatAdoptResult, formatReportJson, formatReportPretty, runCli };
+export { AUDIT_RULES, type AdoptOptions, type AdoptResult, type AuditExemption, type AuditIssue, type AuditOptions, type AuditReport, type AuditRule, type AuditSeverity, RAW_COLOR_APPEARANCE_MODULES, UI_CONFORMANCE_RULES, adoptProject, auditAllPlugins, auditPluginConformance, auditProject, doctorProject, findPluginDirectories, formatAdoptResult, formatReportJson, formatReportPretty, runCli };

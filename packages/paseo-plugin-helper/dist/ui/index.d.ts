@@ -1,4 +1,4 @@
-export { H as HostLayoutProvider, a as HostLayoutProviderProps, b as HostTheme, c as HostThemeProvider, d as HostThemeProviderProps, e as alpha, g as getContrastColor, f as getLuminance, h as getStatusColor, i as getVariantPalette, u as useHostLayout, j as useHostTheme } from '../host-color-DMCvQ95S.js';
+export { F as FALLBACK_COLORS, H as HOST_SHADOW_COLOR, a as HostLayoutProvider, b as HostLayoutProviderProps, c as HostTheme, d as HostThemeProvider, e as HostThemeProviderProps, f as alpha, g as getContrastColor, h as getLuminance, i as getStatusColor, j as getVariantPalette, r as resolveHostColors, u as useHostLayout, k as useHostTheme } from '../host-color-D7eYd9g_.js';
 import React__default, { ReactNode, ComponentType } from 'react';
 import { StyleProp, ViewStyle, ScrollViewProps, TextStyle, KeyboardTypeOptions, GestureResponderEvent, AccessibilityRole } from 'react-native';
 import { S as StatusVariant, T as ThemeColors } from '../types-4TBN5lgi.js';

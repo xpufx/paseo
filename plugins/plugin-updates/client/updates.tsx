@@ -218,9 +218,9 @@ function PluginUpdatesIconInner(props: PluginButtonIconProps) {
   const stale = data?.plugins.some((plugin) => plugin.updateAvailable) ?? false;
   const failed = isError || data?.plugins.some((plugin) => plugin.status === "error") === true;
   const color = failed
-    ? props.theme.colors.statusDanger || "#ef4444"
+    ? props.theme.colors.statusDanger
     : stale
-      ? props.theme.colors.statusWarning || "#f59e0b"
+      ? props.theme.colors.statusWarning
       : props.color;
   return (
     <View style={{ width: props.size, height: props.size, alignItems: "center", justifyContent: "center" }}>
@@ -235,12 +235,12 @@ function PluginUpdatesIconInner(props: PluginButtonIconProps) {
           height: 7,
           borderRadius: 4,
           backgroundColor: isFetching
-            ? props.theme.colors.statusWarning || "#f59e0b"
+            ? props.theme.colors.statusWarning
             : failed
-              ? props.theme.colors.statusDanger || "#ef4444"
+              ? props.theme.colors.statusDanger
               : stale
-                ? props.theme.colors.statusWarning || "#f59e0b"
-                : props.theme.colors.statusSuccess || "#22c55e",
+                ? props.theme.colors.statusWarning
+                : props.theme.colors.statusSuccess,
         }}
       />
     </View>

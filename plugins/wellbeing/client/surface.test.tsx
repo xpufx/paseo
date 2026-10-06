@@ -3,6 +3,8 @@ import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { initClientHelpers } from "paseo-plugin-helper/core";
+import { HostThemeProvider } from "paseo-plugin-helper/lifecycle";
+import { colorsOutsidePalette } from "paseo-plugin-ui-testing";
 import { WellbeingSurface } from "./surface";
 
 // The real `react-native` entrypoint carries Flow syntax Vite cannot parse.
@@ -76,6 +78,36 @@ function textOf(node: unknown): string {
 }
 
 describe("WellbeingSurface", () => {
+  it("paints from the host palette, never raw #ffffff or rgba(128,128,128) (T3/T4)", () => {
+    // `surface.tsx` reads `typeof window?.addEventListener`; React Native has a
+    // bare `window` global, so provide one like the host runtime does.
+    (globalThis as Record<string, unknown>).window = {};
+    const sentinel = {
+      colors: {
+        surface0: "#010101",
+        surface1: "#020202",
+        surface2: "#030303",
+        border: "#040404",
+        foreground: "#050505",
+        foregroundMuted: "#060606",
+        accent: "#070707",
+        accentForeground: "#080808",
+        statusSuccess: "#090909",
+        statusWarning: "#0a0a0a",
+        statusDanger: "#0b0b0b",
+      },
+    };
+    const renderer = render(
+      React.createElement(
+        HostThemeProvider,
+        { theme: sentinel } as never,
+        React.createElement(WellbeingSurface),
+      ),
+    );
+    expect(colorsOutsidePalette(renderer.toJSON(), Object.values(sentinel.colors))).toEqual([]);
+    renderer.unmount();
+  });
+
   it("mounts without DOM APIs on a Hermes-shaped (mobile) runtime", () => {
     // Regression for the "undefined is not a function" surface crash: the
     // presence effect previously gated on `typeof window !== "undefined"`,

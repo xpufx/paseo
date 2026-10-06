@@ -59,8 +59,6 @@ export type ScrollViewInstance = React.ElementRef<typeof HostScrollView>;
 const PILL_RADIUS = 9999;
 const SPACING = { xs: 4, sm: 8, md: 12, lg: 16 } as const;
 
-const FALLBACK_ACCENT_FOREGROUND = "#ffffff";
-
 // --- text ------------------------------------------------------------------
 
 export interface HighlightedTextProps {
@@ -275,7 +273,7 @@ export function Badge({
   } else if (styleVariant === "solid") {
     bg = getStatusColor(variant);
     border = "transparent";
-    textColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
+    textColor = colors.accentForeground;
   }
 
   return (
@@ -361,7 +359,7 @@ export function Button({
   if (variant === "primary") {
     bg = colors.accent;
     border = "transparent";
-    textColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
+    textColor = colors.accentForeground;
   } else if (variant === "danger") {
     bg = alpha(colors.statusDanger, 0.15);
     border = alpha(colors.statusDanger, 0.4);

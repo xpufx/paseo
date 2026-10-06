@@ -10,6 +10,7 @@ export const UI_CONFORMANCE_RULES = new Set([
   "no-hardcoded-modal-dimensions",
   "no-helper-width-cap",
   "no-host-scroll-hijack",
+  "no-raw-color-literal",
 ]);
 
 export function findPluginDirectories(pluginsDir: string): string[] {

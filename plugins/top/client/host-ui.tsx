@@ -30,6 +30,7 @@ import {
   type StatusVariant,
   type ThemeColors,
 } from "paseo-plugin-helper/shared";
+import { FALLBACK_COLORS, resolveHostColors } from "paseo-plugin-helper/lifecycle";
 
 /**
  * Local composition of the presentational pieces plugins/top used to import
@@ -114,20 +115,6 @@ export interface TopTheme {
   getVariantPalette: (variant: StatusVariant) => { bg: string; text: string; border: string };
 }
 
-const FALLBACK_COLORS: ThemeColors = {
-  surface0: "#18181b",
-  surface1: "#27272a",
-  surface2: "#3f3f46",
-  border: "#3f3f46",
-  foreground: "#fafafa",
-  foregroundMuted: "#a1a1aa",
-  accent: "#3b82f6",
-  accentForeground: "#ffffff",
-  statusSuccess: "#22c55e",
-  statusWarning: "#eab308",
-  statusDanger: "#ef4444",
-};
-
 function createTopTheme(colors: ThemeColors): TopTheme {
   return {
     colors,
@@ -149,7 +136,7 @@ export interface HostThemeProviderProps {
 
 /** Carries the host `theme` prop colors to every local adapter below it. */
 export function HostThemeProvider({ theme, children }: HostThemeProviderProps) {
-  const value = useMemo(() => createTopTheme(theme.colors), [theme.colors]);
+  const value = useMemo(() => createTopTheme(resolveHostColors(theme.colors)), [theme.colors]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 

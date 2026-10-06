@@ -31,7 +31,7 @@ import {
   copyText,
   useToast,
 } from "@getpaseo/plugin/client/react-native";
-import { useHostTheme, triggerHaptic } from "paseo-plugin-helper/lifecycle";
+import { useHostTheme, triggerHaptic, FALLBACK_COLORS, HOST_SHADOW_COLOR } from "paseo-plugin-helper/lifecycle";
 import { HostScroll } from "paseo-plugin-helper/ui";
 import type { SurfaceStyle } from "paseo-plugin-helper/lifecycle";
 import {
@@ -97,8 +97,6 @@ const TYPOGRAPHY: Record<
   caption: { fontSize: 11, lineHeight: 15, fontWeight: "400" },
   label: { fontSize: 12, lineHeight: 16, fontWeight: "600" },
 };
-
-const FALLBACK_ACCENT_FOREGROUND = "#ffffff";
 
 const RESOLVE_RADIUS: Record<"xs" | "sm" | "md" | "lg" | "pill", number> = {
   xs: 4,
@@ -197,7 +195,7 @@ export function Button({
   switch (variant) {
     case "primary":
       bg = colors.accent;
-      textColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
+      textColor = colors.accentForeground;
       break;
     case "danger":
       bg = alpha(colors.statusDanger, 0.15);
@@ -367,7 +365,7 @@ export function Badge({
   } else if (styleVariant === "solid") {
     bg = solidColor;
     border = "transparent";
-    textColor = colors.accentForeground || FALLBACK_ACCENT_FOREGROUND;
+    textColor = colors.accentForeground;
   }
 
   return (
@@ -975,7 +973,7 @@ export function Tabs({ tabs, activeTab, onTabChange, mode = "auto", style }: Tab
             <Text
               style={[
                 styles.tabBadgeText,
-                { color: isActive ? colors.accentForeground || FALLBACK_ACCENT_FOREGROUND : colors.foregroundMuted },
+                { color: isActive ? colors.accentForeground : colors.foregroundMuted },
               ]}
             >
               {tab.badge}
@@ -1475,19 +1473,7 @@ type ThemeInput = ThemeColors | { colors: ThemeColors } | undefined;
 function resolveRecipeColors(input: ThemeInput): ThemeColors {
   if (input && "colors" in input && input.colors) return input.colors;
   if (input && "surface0" in input) return input as ThemeColors;
-  return {
-    surface0: "#18181b",
-    surface1: "#27272a",
-    surface2: "#3f3f46",
-    border: "#3f3f46",
-    foreground: "#fafafa",
-    foregroundMuted: "#a1a1aa",
-    accent: "#3b82f6",
-    accentForeground: "#ffffff",
-    statusSuccess: "#22c55e",
-    statusWarning: "#eab308",
-    statusDanger: "#ef4444",
-  };
+  return FALLBACK_COLORS;
 }
 
 /** Local card style recipe for timeline content; mirrors the removed kit. */
@@ -1745,7 +1731,7 @@ const styles = {
   toggleText: { flex: 1, minWidth: 0, gap: 2 },
   toggleLabel: { fontWeight: "500" },
   toggleTrack: { justifyContent: "center", flexShrink: 0 },
-  toggleThumb: { shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+  toggleThumb: { shadowColor: HOST_SHADOW_COLOR, shadowOpacity: 0.12, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
 
   textInput: { borderWidth: 1 },
   textInputLabel: { fontWeight: "600" },

@@ -28,7 +28,7 @@ describe("DenseAgentRow zebra striping (#628)", () => {
 
   it("stays theme-aware rather than hardcoding a light/dark value", () => {
     assert.ok(
-      /alpha\?\.\(colors\.surface1/.test(src),
+      /alpha\(colors\.surface1/.test(src),
       "the stripe tint must come from the theme",
     );
     // A literal rgba tint would be near-invisible in one of the two themes.

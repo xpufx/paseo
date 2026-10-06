@@ -139,8 +139,8 @@ Worktree-install deliberately composes its own two-palette theme
 SDK token names, so the census passes its own declared palette (the allowed
 theme module) rather than `theme.colors`. The alpha-suffixed tone washes
 (`#5aa2ff2e`) are accepted as palette-derived. This is a documented exception,
-not a hole: the harness's static counterpart (`no-raw-color-literal`, still to
-land per the design doc) is what confines those literals to the theme module.
+not a hole: the harness's static counterpart (`no-raw-color-literal`, shipped in
+#1057-C, see `docs/cli.md`) is what confines those literals to the theme module.
 
 ### Finding 4 — Fleet tab crash on mobile (fixed)
 

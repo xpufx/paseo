@@ -25,7 +25,7 @@ const typography = {
 } as const;
 
 export function WellbeingSurface() {
-  const { colors } = useHostTheme();
+  const { colors, alpha } = useHostTheme();
   const { data: status, isLoading, refetch } = useRpcQuery(statusRpc, {}, { refetchInterval: 5000 });
   const toggleMutation = useRpcMutation(toggleBedModeRpc);
   const snoozeMutation = useRpcMutation(snoozeAlertRpc);
@@ -131,8 +131,8 @@ export function WellbeingSurface() {
   };
 
   const phaseThemeMap: Record<OperatorPhase, { bg: string; text: string; label: string }> = {
-    working: { bg: colors.statusSuccess, text: "#ffffff", label: "DESK FOCUS" },
-    "extended-stretch": { bg: colors.statusWarning, text: "#ffffff", label: "FATIGUE ALERT" },
+    working: { bg: colors.statusSuccess, text: colors.accentForeground, label: "DESK FOCUS" },
+    "extended-stretch": { bg: colors.statusWarning, text: colors.accentForeground, label: "FATIGUE ALERT" },
     "wind-down": { bg: colors.accent, text: colors.accentForeground, label: "WIND-DOWN" },
     "bed-mode": { bg: colors.surface2, text: colors.foreground, label: "BED MODE" },
     idle: { bg: colors.surface2, text: colors.foregroundMuted, label: "AWAY" },
@@ -355,7 +355,7 @@ export function WellbeingSurface() {
           style={{
             borderTopWidth: 1,
             paddingTop: 6,
-            borderColor: "rgba(128,128,128,0.2)",
+            borderColor: alpha(colors.border, 0.2),
           }}
         >
           <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>

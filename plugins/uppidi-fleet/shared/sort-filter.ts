@@ -13,27 +13,24 @@ import { extractAgentProject, extractAgentWorktree, agentRequiresAttention } fro
 
 // --- Agent Status Lights (#410) ---
 
-export const STATUS_LIGHT_GREEN = "#10b981";
-export const STATUS_LIGHT_ORANGE = "#f59e0b";
-export const STATUS_LIGHT_RED = "#ef4444";
-
-export const STATUS_LIGHT_COLORS = {
-  GREEN: STATUS_LIGHT_GREEN,
-  ORANGE: STATUS_LIGHT_ORANGE,
-  RED: STATUS_LIGHT_RED,
-} as const;
+/**
+ * Status-light tone, resolved to a host theme token by the caller
+ * (`colors.statusSuccess` / `statusWarning` / `statusDanger`). The taxonomy
+ * itself carries no literal color.
+ */
+export type StatusLightTone = "success" | "warning" | "danger";
 
 /**
- * Resolves status light color for an agent according to taxonomy:
- * - Green (#10b981): working / running / executing
- * - Orange / Amber (#f59e0b): idle / waiting / paused / ready / non-failure mode
- * - Red (#ef4444): error / failed / timeout / failure mode
+ * Resolves the status-light tone for an agent according to taxonomy:
+ * - `success` (host `statusSuccess`): working / running / executing
+ * - `warning` (host `statusWarning`): idle / waiting / paused / ready / non-failure mode
+ * - `danger` (host `statusDanger`): error / failed / timeout / failure mode
  */
-export function getStatusLightColor(agent?: {
+export function getStatusLightTone(agent?: {
   status?: string | null;
   deterministicState?: DeterministicAgentState | string | null;
-} | null): string {
-  if (!agent) return STATUS_LIGHT_ORANGE;
+} | null): StatusLightTone {
+  if (!agent) return "warning";
 
   // Partial/legacy payloads can carry non-string state or status; coerce rather
   // than calling `.toLowerCase()` on whatever arrived (#510).
@@ -50,7 +47,7 @@ export function getStatusLightColor(agent?: {
     status.includes("error") ||
     status.includes("fail")
   ) {
-    return STATUS_LIGHT_RED;
+    return "danger";
   }
 
   // 2. Orange / Amber: idle / waiting / paused / ready / sleeping / blocked (#534)
@@ -65,7 +62,7 @@ export function getStatusLightColor(agent?: {
     status === "ready" ||
     status === "standby"
   ) {
-    return STATUS_LIGHT_ORANGE;
+    return "warning";
   }
 
   // 3. Green: working / running / executing
@@ -77,11 +74,11 @@ export function getStatusLightColor(agent?: {
     status === "working" ||
     status === "executing"
   ) {
-    return STATUS_LIGHT_GREEN;
+    return "success";
   }
 
-  // Fallback: non-failure mode defaults to Orange
-  return STATUS_LIGHT_ORANGE;
+  // Fallback: non-failure mode defaults to warning
+  return "warning";
 }
 
 // --- Compact Agent Health Gauge (#560) ---

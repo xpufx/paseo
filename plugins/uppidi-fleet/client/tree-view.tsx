@@ -17,7 +17,7 @@ import {
   StatusDot,
   TextInput,
 } from "./host-ui.js";
-import { copyToClipboard } from "paseo-plugin-helper/lifecycle";
+import { copyToClipboard, HOST_SHADOW_COLOR } from "paseo-plugin-helper/lifecycle";
 import { useRpcMutation, useRpcQuery } from "paseo-plugin-helper/core";
 import { useFleetTheme } from "./theme.js";
 import { MetricsBar } from "./metrics-bar.js";
@@ -52,16 +52,13 @@ import {
   filterBulkArchiveCandidates,
   buildProjectGroups,
   filterAgentTree,
-  getStatusLightColor,
+  getStatusLightTone,
   deriveHealthGauge,
   DEFAULT_HEALTH_GAUGE_THRESHOLDS,
   type HealthGauge,
   type HealthGaugeSegment,
   type HealthGaugeTone,
-  STATUS_LIGHT_GREEN,
-  STATUS_LIGHT_ORANGE,
-  STATUS_LIGHT_RED,
-  STATUS_LIGHT_COLORS,
+  type StatusLightTone,
   isRepoMatching,
   type ProjectAgentGroup,
   type ProjectSortField,
@@ -72,11 +69,8 @@ export {
   type DeterministicStateConfig,
   getAgentCategoryIcon,
   getDeterministicStateConfig,
-  getStatusLightColor,
-  STATUS_LIGHT_GREEN,
-  STATUS_LIGHT_ORANGE,
-  STATUS_LIGHT_RED,
-  STATUS_LIGHT_COLORS,
+  getStatusLightTone,
+  type StatusLightTone,
 };
 
 /**
@@ -134,8 +128,9 @@ export function AgentStatusLight({
 }: AgentStatusLightProps) {
   const [hovered, setHovered] = useState(false);
   const { colors } = useFleetTheme();
-  const color = getStatusLightColor(agent);
-  const isWorking = color === STATUS_LIGHT_GREEN;
+  const tone = getStatusLightTone(agent);
+  const color = statusLightColor(colors, tone);
+  const isWorking = tone === "success";
 
   const statusDetail =
     agent.stateDetail
@@ -196,13 +191,13 @@ export function AgentStatusLight({
             transform: [{ translateX: "-50%" as any }],
             zIndex: 100,
             pointerEvents: "none" as any,
-            backgroundColor: (colors as any).surfaceRaised || colors.surface2 || colors.surface1 || "#1e293b",
-            borderColor: colors.border || "#334155",
+            backgroundColor: colors.surface2,
+            borderColor: colors.border,
             borderWidth: 1,
             borderRadius: 9999,
             paddingHorizontal: 8,
             paddingVertical: 3,
-            shadowColor: "#000",
+            shadowColor: HOST_SHADOW_COLOR,
             shadowOffset: { width: 0, height: 2 },
             shadowOpacity: 0.35,
             shadowRadius: 4,
@@ -224,7 +219,7 @@ export function AgentStatusLight({
           <Text
             numberOfLines={1}
             style={{
-              color: colors.foreground || "#f8fafc",
+              color: colors.foreground,
               fontSize: 11,
               fontWeight: "600",
               whiteSpace: "nowrap" as any,
@@ -236,7 +231,7 @@ export function AgentStatusLight({
           <Text
             numberOfLines={1}
             style={{
-              color: colors.foregroundMuted || "#94a3b8",
+              color: colors.foregroundMuted,
               fontSize: 10,
               whiteSpace: "nowrap" as any,
               flexShrink: 1,
@@ -433,10 +428,20 @@ export function formatDurationMs(ms?: number | null): string {
   return remHours ? `${days}d ${remHours}h` : `${days}d`;
 }
 
-function healthToneColor(tone: HealthGaugeTone, colors: any): string {
-  if (tone === "critical") return colors.statusDanger ?? STATUS_LIGHT_RED;
-  if (tone === "warn") return colors.statusWarning ?? STATUS_LIGHT_ORANGE;
-  return colors.statusSuccess ?? STATUS_LIGHT_GREEN;
+function healthToneColor(tone: HealthGaugeTone, colors: { statusSuccess: string; statusWarning: string; statusDanger: string }): string {
+  if (tone === "critical") return colors.statusDanger;
+  if (tone === "warn") return colors.statusWarning;
+  return colors.statusSuccess;
+}
+
+/** Maps the #410 status-light tone onto the host theme's status tokens. */
+function statusLightColor(
+  colors: { statusSuccess: string; statusWarning: string; statusDanger: string },
+  tone: StatusLightTone,
+): string {
+  if (tone === "danger") return colors.statusDanger;
+  if (tone === "success") return colors.statusSuccess;
+  return colors.statusWarning;
 }
 
 /** Milliseconds since an ISO timestamp, or undefined when unparseable. */
@@ -1796,9 +1801,9 @@ export function DenseAgentRow({
           // only there to help the eye track across a wide row. Hover wins, and
           // alpha() over colors.surface1 keeps it correct in light and dark.
           backgroundColor: isHovered
-            ? (alpha?.(colors.accent, 0.05) || colors.surface1 || "rgba(255,255,255,0.04)")
+            ? alpha(colors.accent, 0.05)
             : siblingIndex % 2 === 1
-              ? (alpha?.(colors.surface1, 0.5) || "rgba(128,128,128,0.06)")
+              ? alpha(colors.surface1, 0.5)
               : "transparent",
           overflow: "visible",
         }}
@@ -2035,9 +2040,7 @@ export function OrchestratorRow({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 4,
-        backgroundColor: isHovered
-          ? (alpha?.(colors.accent, 0.05) || colors.surface1 || "rgba(255,255,255,0.04)")
-          : "transparent",
+        backgroundColor: isHovered ? alpha(colors.accent, 0.05) : "transparent",
         overflow: "visible",
       }}
     >

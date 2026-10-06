@@ -415,6 +415,45 @@ palettes, `layout.compact` true/false, phone widths 320/360/390/430 and wide
    `flex-measure.ts` already treats `numberOfLines` as the sole compressible-text
    case, so this falls straight out of the existing solver. Class D.
 
+### 5.2.1 Two sentinel renders catch `theme.colors.x || "#fallback"`
+
+The palette assertion above is necessary but not sufficient on its own. A
+*single* render with a **complete** sentinel palette cannot see a fallback: if
+the supplied palette defines every token, `theme.colors.border || "#334155"`
+never evaluates the right-hand side, so the literal is dead code in that render.
+The fallback only paints when a host supplies a *partial* theme (an older daemon,
+a migrated surface, a context that forgot a token). #1057-A therefore adds the
+**complete sentinel** render to every audited surface, and this section records
+the second render that closes the fallback gap.
+
+A surface is rendered **twice**, and `colorsOutsidePalette` must be empty on
+both:
+
+1. **Complete sentinel** — all eleven `ThemeColors` tokens are unique values
+   that appear nowhere in the tree. This proves the surface paints from the
+   host theme at all. This is the shape the #1057-A per-plugin tests use
+   (`plugins/uppidi-fleet/client/ui-guard.test.ts`, plus the palette passes in
+   `forges`, `twofado`, `wellbeing`, `plugin-updates`, `x-comms`).
+2. **Partial sentinel** — a palette that omits the tokens whose fallbacks the
+   census recorded (or, for a newly audited surface, every token with a known
+   `|| "#…"` guard). The surface must still paint only allowed colors. Because
+   #1057-B collapsed the per-surface `|| "#…"` guards into the helper's single
+   `FALLBACK_COLORS` (`resolveHostColors` in
+   `packages/paseo-plugin-helper/src/lifecycle/host-color.ts`), the allowed set
+   for this render is `[...partialPalette, ...FALLBACK_COLORS]`: a missing token
+   resolves to the helper fallback, and any color outside that union is a
+   plugin-local literal the surface should not carry. Before #1057-B the render
+   reports the surface's own hex (`plugins/uppidi-fleet/client/tree-view.tsx`,
+   `plugins/plugin-updates/client/updates.tsx`,
+   `plugins/forges/client/host-ui.tsx`, `plugins/x-comms/client/host-ui.tsx`);
+   after, it is green.
+
+The `addTheme` contribution is the one surface that is *supposed* to keep its
+literal palette; it is exempted statically (see `docs/cli.md`), not by a palette
+of its own. A sentinel palette is a list of unique values, not a light/dark
+pair: the assertion is "every painted color is a value the host supplied", and
+uniqueness is what makes a hardcoded literal distinguishable from a token.
+
 **What the harness can and cannot do (feasibility, explicitly):**
 
 | Deterministic under react-native-web + react-test-renderer | Not feasible — needs manual/visual |

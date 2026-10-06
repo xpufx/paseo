@@ -276,11 +276,11 @@ function ApprovalHeaderIconInner(props: PluginButtonIconProps) {
   }, [workspaceId, count, down]);
 
   const activeColor = down
-    ? theme.colors.statusDanger || "#ef4444"
+    ? theme.colors.statusDanger
     : count > 0
     ? hasConfirm
-      ? theme.colors.statusDanger || "#ef4444"
-      : theme.colors.statusWarning || "#f59e0b"
+      ? theme.colors.statusDanger
+      : theme.colors.statusWarning
     : color;
 
   return (
@@ -468,7 +468,7 @@ function ApprovalItem({
               justifyContent: "center",
             }}
           >
-            <Icon name={isConfirm ? "AlertTriangle" : "Terminal"} size={12} color="#ffffff" />
+            <Icon name={isConfirm ? "AlertTriangle" : "Terminal"} size={12} color={colors.accentForeground} />
           </View>
           <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>
             {program ?? "(empty)"}
@@ -708,7 +708,7 @@ function NotifyItem({
               justifyContent: "center",
             }}
           >
-            <Icon name="Bell" size={12} color="#ffffff" />
+            <Icon name="Bell" size={12} color={colors.accentForeground} />
           </View>
           <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>
             Action needed
@@ -845,7 +845,7 @@ function ExecutingItem({  item,
             <Icon
               name={isSuccess ? "Check" : isFailed || isConfirming ? "AlertTriangle" : "Activity"}
               size={12}
-              color="#ffffff"
+              color={colors.accentForeground}
             />
           </View>
           <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "700", flex: 1 }}>

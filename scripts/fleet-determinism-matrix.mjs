@@ -883,7 +883,7 @@ const PARTS = [
         "deriveHealthGauge",
         "buildProjectGroups",
         "isAgentEligibleForBulkArchive",
-        "getStatusLightColor",
+        "getStatusLightTone",
       ],
     },
     evidence: [

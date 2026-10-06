@@ -7,6 +7,7 @@ import { ActivityIndicator, Clipboard, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
 import { getOptionalPaseoClient, useOptionalHosts } from "paseo-plugin-helper/lifecycle";
 import { Button, InlineButton, ModalContent, TextInput } from "./host-ui";
+import { HOST_SHADOW_COLOR } from "paseo-plugin-helper/lifecycle";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc, uiPrefsGetRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
 import { listConfiguredHostAgents } from "./configured-hosts";
@@ -426,7 +427,7 @@ export function CrossDaemonConversation({
                       borderBottomLeftRadius: 12,
                       borderBottomRightRadius: 12,
                       padding: 8,
-                      shadowColor: "#000",
+                      shadowColor: HOST_SHADOW_COLOR,
                       shadowOpacity: 0.05,
                       shadowOffset: { width: 0, height: 1 },
                       shadowRadius: 2,

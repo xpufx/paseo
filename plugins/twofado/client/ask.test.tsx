@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import { initClientHelpers } from "paseo-plugin-helper/core";
+import { HostThemeProvider } from "paseo-plugin-helper/lifecycle";
+import { colorsOutsidePalette } from "paseo-plugin-ui-testing";
 import {
   AskItem,
   buildSelectionPayload,
@@ -166,6 +168,36 @@ describe("isAskAnswered", () => {
 });
 
 describe("AskItem", () => {
+  it("paints from the host palette, never the raw #ffffff glyph color (T2)", () => {
+    const sentinel = {
+      colors: {
+        surface0: "#010101",
+        surface1: "#020202",
+        surface2: "#030303",
+        border: "#040404",
+        foreground: "#050505",
+        foregroundMuted: "#060606",
+        accent: "#070707",
+        accentForeground: "#080808",
+        statusSuccess: "#090909",
+        statusWarning: "#0a0a0a",
+        statusDanger: "#0b0b0b",
+      },
+    };
+    const renderer = render(
+      React.createElement(
+        HostThemeProvider,
+        { theme: sentinel } as never,
+        React.createElement(AskItem, {
+          item: { id: "ask1", question: "Which?", options, expiresIn: 60 },
+          onSubmit: () => {},
+        }),
+      ),
+    );
+    expect(colorsOutsidePalette(renderer.toJSON(), Object.values(sentinel.colors))).toEqual([]);
+    renderer.unmount();
+  });
+
   it("submits a single-select answer on the first option tap", () => {
     const submitted: AskSelectionPayload[] = [];
     const renderer = render(

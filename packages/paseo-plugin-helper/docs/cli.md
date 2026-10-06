@@ -87,6 +87,41 @@ npm install && npm run typecheck
 | `missing-client-init` | `warn` | Helper `ui/` adapter usage without `initClientHelpers()` | Call `initClientHelpers()` from `paseo-plugin-helper/core` once in the client entry |
 | `no-bespoke-react-native-interactions` | `warn` | Raw `Pressable` imported in plugin client code | Compose a local interaction seam (or use `paseo-plugin-helper/ui` adapters) and declare the conformance exemption |
 | `no-bespoke-style-system` | `warn` | `StyleSheet` imported in plugin client code | Use `paseo-plugin-helper/ui` adapters with host theme colors; retain only small composition styles |
+| `no-raw-color-literal` | `warn` | Quoted `#hex` / `rgb()` / `hsl()` / named color in plugin client code | Read the host `theme.colors.*` tokens; keep literals only in the documented appearance module or an `addTheme` contribution |
+
+---
+
+## `no-raw-color-literal`
+
+Flags a quoted color literal in a plugin's `client/**` code:
+
+- `#rgb` / `#rgba` / `#rrggbb` / `#rrggbbaa`
+- `rgb(…)` / `rgba(…)` / `hsl(…)` / `hsla(…)`
+- a named color (`white`, `black`, `red`, …) assigned to a color style property
+
+The host owns the palette; plugin surfaces read `theme.colors.*`. A literal is
+a color the host cannot retheme, which is the Class-B regression this rule
+closes. Comments and unquoted runtime builders (`\`rgba(0, 0, 0, ${opacity})\``)
+are not flagged.
+
+### The two exemptions
+
+A raw literal is allowed in exactly two places, and neither is a
+`conformance.json` opt-out:
+
+1. **A plugin's own appearance module.** `worktree-install` deliberately ships
+   its two local palettes (`client/theme.ts`) as the #629 "no shared kit"
+   proof. The allowed paths live in `RAW_COLOR_APPEARANCE_MODULES` in
+   `packages/paseo-plugin-helper/src/cli/rules.ts`, keyed by plugin directory.
+2. **An `addTheme({ colors: { … } })` contribution.** Contributing a host theme
+   is the one place raw hex is correct. The scanner balances the call's
+   parentheses and skips every line inside the contribution; no marker comment
+   is needed.
+
+Declaring `no-raw-color-literal` in `conformance.json` is ignored and reported
+as an error, so a plugin cannot no-op the theme seam from a manifest. If a
+surface genuinely needs a literal that is not a theme contribution, the fix is
+to read the host token or add a helper-owned color, not to exempt the rule.
 
 ---
 

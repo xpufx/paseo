@@ -68,6 +68,30 @@ declare function HostLayoutProvider({ layout, children }: HostLayoutProviderProp
 declare function useHostLayout(): ResponsiveLayout;
 
 /**
+ * The single host-color fallback owned by the helper.
+ *
+ * A host `theme` prop normally supplies every token, but a partial or older
+ * payload may omit some. Rather than each plugin inventing its own
+ * `colors.border || "#334155"` guard, the helper resolves a theme once, here,
+ * and every adapter reads the resolved token. Plugins may pass this palette to
+ * code that renders outside a provider (recipes, previews, tests); they must
+ * not define their own literal fallbacks.
+ */
+declare const FALLBACK_COLORS: ThemeColors;
+/**
+ * The host theme carries no shadow token, so shadows use this documented
+ * overlay constant owned by the helper. It is not a `ThemeColors` token and is
+ * intentionally not part of the palette a render guard checks; it is the one
+ * allowed non-theme color.
+ */
+declare const HOST_SHADOW_COLOR = "rgba(0, 0, 0, 0.4)";
+/**
+ * Fills a possibly-partial host `theme.colors` from {@link FALLBACK_COLORS}.
+ * This is the one place a missing token becomes a literal, so surfaces never
+ * need a per-property `|| "#hex"` guard.
+ */
+declare function resolveHostColors(colors?: Partial<ThemeColors> | null): ThemeColors;
+/**
  * Paseo Plugin Helper — UI color tokens (`paseo-plugin-helper/ui`).
  *
  * Pure color math for the ui/ adapter layer. These helpers are deliberately
@@ -107,4 +131,4 @@ declare function getLuminance(hexColor: string): number;
  */
 declare function getContrastColor(bgHex: string, lightText?: string, darkText?: string): string;
 
-export { HostLayoutProvider as H, type HostLayoutProviderProps as a, type HostTheme as b, HostThemeProvider as c, type HostThemeProviderProps as d, alpha as e, getLuminance as f, getContrastColor as g, getStatusColor as h, getVariantPalette as i, useHostTheme as j, useHostLayout as u };
+export { FALLBACK_COLORS as F, HOST_SHADOW_COLOR as H, HostLayoutProvider as a, type HostLayoutProviderProps as b, type HostTheme as c, HostThemeProvider as d, type HostThemeProviderProps as e, alpha as f, getContrastColor as g, getLuminance as h, getStatusColor as i, getVariantPalette as j, useHostTheme as k, resolveHostColors as r, useHostLayout as u };
