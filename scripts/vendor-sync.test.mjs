@@ -48,8 +48,8 @@ const check = (name, fn) => {
 
 // A committed vendored copy small enough to edit one value in, chosen because
 // it is copied verbatim from helper src and present in several plugin trees.
-const SAMPLE = "plugins/demo/client/vendor/paseo-plugin-helper/components/AttentionBeacon.tsx";
-const SAMPLE_EDIT = ["    borderRadius: 12,", "    borderRadius: 47,"];
+const SAMPLE = "plugins/demo/client/vendor/paseo-plugin-helper/ui/content.tsx";
+const SAMPLE_EDIT = ['"Copy failed"', '"Copy failed (drift)"'];
 
 // The tracked helper dist/ and the src it must be built from (#682). The edit
 // lands in a formatted return string, so it survives minification into every
@@ -199,19 +199,20 @@ check("--materialize-links leaves a stale committed copy stale, so --check can s
 check("--materialize-links materializes a legacy dev symlink into a real copy (#146)", () => {
   const dir = makeFixture();
   const dest = path.join(dir, "plugins/top/client/vendor/paseo-plugin-helper");
-  const elsewhere = path.join(dir, "elsewhere/paseo-plugin-helper");
+  const treeDest = path.join(dest, "ui");
+  const elsewhere = path.join(dir, "elsewhere/ui");
   fs.mkdirSync(path.dirname(elsewhere), { recursive: true });
-  fs.renameSync(dest, elsewhere);
-  fs.symlinkSync("../../../../elsewhere/paseo-plugin-helper", dest);
-  assert.ok(fs.lstatSync(dest).isSymbolicLink());
+  fs.renameSync(treeDest, elsewhere);
+  fs.symlinkSync("../../../../../elsewhere/ui", treeDest);
+  assert.ok(fs.lstatSync(treeDest).isSymbolicLink());
 
   const materialize = run(dir, "--materialize-links");
   assert.equal(materialize.status, 0, materialize.stderr);
   assert.match(materialize.stdout, /materialized 1 legacy dev symlink/);
-  assert.ok(!fs.lstatSync(dest).isSymbolicLink(), "the symlink survived materialization");
-  assert.equal(fs.lstatSync(dest).isDirectory(), true, "the materialized dest is not a real directory");
+  assert.ok(!fs.lstatSync(treeDest).isSymbolicLink(), "the symlink survived materialization");
+  assert.equal(fs.lstatSync(treeDest).isDirectory(), true, "the materialized dest is not a real directory");
 
-  const sample = path.join(dest, "components/AttentionBeacon.tsx");
+  const sample = path.join(dest, "ui/content.tsx");
   assert.ok(fs.existsSync(sample), "materialized tree is partial — no component copy");
   assert.ok(
     fs.readFileSync(sample, "utf-8").includes('from "../../../../shared/vendor/paseo-plugin-helper/types"'),
