@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import {
   Icon,
+  ScrollView as HostScrollView,
   TextInput as HostTextInputBase,
   copyText,
   useToast,
@@ -41,9 +42,47 @@ export interface HostModalSectionProps {
   style?: StyleProp<ViewStyle>;
 }
 
-/** Fluid plain section for a pill `renderModal` body (no nested Modal.Content). */
+/**
+ * Fluid plain section for a pill `renderModal` body (no nested Modal.Content).
+ *
+ * The host centered-modal wrapper hands the body a bounded `flex: 1` frame and
+ * (with the default `hostScroll: false`) no scroller, so this section must fill
+ * that frame: without `flex: 1` / `minHeight: 0` the section sizes to its
+ * content and the child `HostScroll` is never given a viewport to scroll in
+ * (xpufx-org/paseo#975).
+ */
 export function HostModalSection({ children, style }: HostModalSectionProps) {
   return <View style={[styles.modalSection, style]}>{children}</View>;
+}
+
+export interface HostScrollProps {
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+}
+
+/**
+ * Explicit single scroll owner for surfaces where the host supplies none.
+ *
+ * Pill `renderModal` content is the owner when `hostScroll` is unset: the host
+ * renders `<Modal.Content scrollable={false}>`, so this must be the only
+ * vertical scroller in the subtree. Never nest it inside another scroller.
+ */
+export function HostScroll({
+  children,
+  style,
+  contentContainerStyle,
+  ...props
+}: HostScrollProps & Record<string, unknown>) {
+  return (
+    <HostScrollView
+      {...(props as Record<string, unknown>)}
+      style={[styles.fluid, style]}
+      contentContainerStyle={contentContainerStyle}
+    >
+      {children}
+    </HostScrollView>
+  );
 }
 
 export interface HostActionBarProps {
@@ -1000,7 +1039,8 @@ export function HostAboutSection({
 // --- styles ----------------------------------------------------------------
 
 const styles = {
-  modalSection: { width: "100%", gap: 12 },
+  fluid: { width: "100%" },
+  modalSection: { flex: 1, minHeight: 0, width: "100%" },
   actionBar: { width: "100%", flexWrap: "wrap", gap: 8 },
   formRow: { gap: 4, width: "100%" },
   formRowLabel: { gap: 2 },

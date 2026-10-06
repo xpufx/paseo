@@ -19,5 +19,9 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true
   },
-  "include": ["**/*.ts", "**/*.tsx"]
+  "include": ["**/*.ts", "**/*.tsx"],
+  // `vitest/config` drags Vite's DOM `setTimeout` overload in, which flips the
+  // return type in the vendored helper's `mcp/client.ts` from `NodeJS.Timeout`
+  // to `number`. The config has no other consumer, so keep it out of tsc.
+  "exclude": ["client/vitest.config.ts"]
 }

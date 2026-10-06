@@ -19,6 +19,7 @@ import {
   HostEmptyState,
   HostFormRow,
   HostModalSection,
+  HostScroll,
   HostSearchInput,
   HostStatusDot,
   HostTabs,
@@ -730,53 +731,63 @@ function McpModalContent({ agentId, close }: RenderModalProps) {
 
   return (
     <HostModalSection>
-      <HostTabs
-        tabs={TABS}
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          triggerHaptic("light");
-          setActiveTab(tab);
-        }}
-        mode="auto"
-      />
-      {activeTab === "servers" ? renderServers() : null}
-      {activeTab === "diagnostics" ? renderDiagnostics() : null}
-      {activeTab === "settings" ? renderSettings() : null}
-      {activeTab === "about" ? (
-        <HostAboutSection
-          name="MCP Tools"
-          description="Live MCP server inspector, health probes, diagnostics and tool runner for Paseo agents."
-          version={PLUGIN_VERSION}
-          author="xpufx"
-          repository="https://github.com/xpufx/paseo-mcp-tools"
-          issues="https://github.com/xpufx/paseo-mcp-tools/issues"
-          license="MIT"
-          density="tiny"
-          extraItems={[
-            { label: "Servers", value: `${query.data?.servers.length ?? 0}`, copyable: false },
-            { label: "Provider", value: query.data?.provider ?? "unknown", copyable: true },
-            { label: "Health Polling", value: settings.healthPollingRate, copyable: false },
-          ]}
-        />
-      ) : null}
-      <HostActionBar align="flex-end">
-        <HostButton
-          label="Close"
-          variant="ghost"
-          onPress={() => {
+      <View style={styles.modalColumn}>
+        <HostTabs
+          tabs={TABS}
+          activeTab={activeTab}
+          onTabChange={(tab) => {
             triggerHaptic("light");
-            close();
+            setActiveTab(tab);
           }}
+          mode="auto"
         />
-      </HostActionBar>
-      <View style={{ alignItems: "center", paddingVertical: 8 }}>
-        <Text style={{ fontSize: 10, color: colors.foregroundMuted, opacity: 0.7 }}>
-          {PLUGIN_ATTRIBUTION} {PLUGIN_VERSION}
-        </Text>
+        <HostScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+          {activeTab === "servers" ? renderServers() : null}
+          {activeTab === "diagnostics" ? renderDiagnostics() : null}
+          {activeTab === "settings" ? renderSettings() : null}
+          {activeTab === "about" ? (
+            <HostAboutSection
+              name="MCP Tools"
+              description="Live MCP server inspector, health probes, diagnostics and tool runner for Paseo agents."
+              version={PLUGIN_VERSION}
+              author="xpufx"
+              repository="https://github.com/xpufx/paseo-mcp-tools"
+              issues="https://github.com/xpufx/paseo-mcp-tools/issues"
+              license="MIT"
+              density="tiny"
+              extraItems={[
+                { label: "Servers", value: `${query.data?.servers.length ?? 0}`, copyable: false },
+                { label: "Provider", value: query.data?.provider ?? "unknown", copyable: true },
+                { label: "Health Polling", value: settings.healthPollingRate, copyable: false },
+              ]}
+            />
+          ) : null}
+          <HostActionBar align="flex-end">
+            <HostButton
+              label="Close"
+              variant="ghost"
+              onPress={() => {
+                triggerHaptic("light");
+                close();
+              }}
+            />
+          </HostActionBar>
+          <View style={{ alignItems: "center", paddingVertical: 8 }}>
+            <Text style={{ fontSize: 10, color: colors.foregroundMuted, opacity: 0.7 }}>
+              {PLUGIN_ATTRIBUTION} {PLUGIN_VERSION}
+            </Text>
+          </View>
+        </HostScroll>
       </View>
     </HostModalSection>
   );
 }
+
+const styles = {
+  modalColumn: { flex: 1, minHeight: 0 },
+  modalScroll: { flex: 1, minHeight: 0 },
+  modalScrollContent: { gap: 12, paddingBottom: 4 },
+} as const;
 
 export function contributeClient(client: ComposerPillRegistrar) {
   return registerComposerPill(client, {
@@ -785,6 +796,10 @@ export function contributeClient(client: ComposerPillRegistrar) {
     compactTitle: "MCP",
     modalTitle: "MCP Tools",
     icon: "Plug",
+    // Centered modal, matching the top reference: the plugin owns the single
+    // scroller inside the bounded body frame (see `McpModalContent`). A popover
+    // would hand scroll to the host's surface scroller.
+    presentation: "centered",
     renderModal: (props) => <McpModalContent {...props} />,
   });
 }
