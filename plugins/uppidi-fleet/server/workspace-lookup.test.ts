@@ -189,4 +189,48 @@ describe("host home resolution under agent-mux profiles (#973)", () => {
       rmSync(realHome, { recursive: true, force: true });
     }
   });
+
+  it("falls back to the host ~/code/<basename> checkout in a profile session (#987)", () => {
+    const realHome = mkdtempSync(join(tmpdir(), "paseo-host-fallback-"));
+    const repoDir = join(realHome, "code", "paseo");
+    mkdirSync(repoDir, { recursive: true });
+
+    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/oktaya";
+    process.env.REAL_HOME = realHome;
+    delete process.env.PASEO_DIR;
+    delete process.env.PASEO_WORKSPACES_PATH;
+    process.env.NODE_ENV = "production";
+    try {
+      const res = resolveWorkspaceForRepo("xpufx-org/paseo");
+      assert.ok(res, "the host checkout must resolve when no registry exists");
+      assert.equal(res.cwd, repoDir);
+      assert.equal(res.workspaceId, undefined);
+    } finally {
+      rmSync(realHome, { recursive: true, force: true });
+    }
+  });
+
+  it("honors PASEO_DIR as the workspace registry root in CLI contexts (#987)", () => {
+    const paseoDir = mkdtempSync(join(tmpdir(), "paseo-dir-override-"));
+    const repoDir = join(paseoDir, "code", "paseo");
+    mkdirSync(repoDir, { recursive: true });
+    writeFileSync(
+      join(paseoDir, "workspaces.json"),
+      JSON.stringify([{ workspaceId: "ws-paseo-dir", cwd: repoDir, displayName: "paseo" }]),
+    );
+
+    const previousPaseoDir = process.env.PASEO_DIR;
+    process.env.PASEO_DIR = paseoDir;
+    delete process.env.PASEO_WORKSPACES_PATH;
+    try {
+      const res = resolveWorkspaceForRepo("xpufx-org/paseo");
+      assert.ok(res);
+      assert.equal(res.workspaceId, "ws-paseo-dir");
+      assert.equal(res.cwd, repoDir);
+    } finally {
+      if (previousPaseoDir === undefined) delete process.env.PASEO_DIR;
+      else process.env.PASEO_DIR = previousPaseoDir;
+      rmSync(paseoDir, { recursive: true, force: true });
+    }
+  });
 });

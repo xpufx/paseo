@@ -999,6 +999,7 @@ export type WatchdogAnomalyType =
   | "AGENT_ATTENTION_REQUIRED"
   | "AGENT_ERROR"
   | "ORCHESTRATOR_MISSING"
+  | "ORCHESTRATOR_PROVISIONED"
   | "QUEUE_WEDGED"
   | "QUEUE_UNORCHESTRATED"
   | "CHILD_WAKEUP"
@@ -1311,6 +1312,46 @@ export function isOrchestratorAgent(
   const role = String(agent.role ?? labels.role ?? "").trim().toLowerCase();
   if (role === "orchestrator") return true;
   return String(labels.category ?? "").trim().toLowerCase() === "orchestrator";
+}
+
+/**
+ * Find a live orchestrator agent already running for `repo` (#987). The daemon
+ * is the source of truth: a non-dead agent carrying `role=orchestrator` (label
+ * or field) whose `repo` label matches is adopted into the registry instead of
+ * letting the caller provision a duplicate. Returns the agent id, or null when
+ * no matching live agent exists.
+ */
+export function findLiveOrchestratorAgent(
+  repo: string,
+  agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
+): string | null {
+  if (!agentMap || agentMap.size === 0) return null;
+  const target = String(repo ?? "").trim();
+  if (!target) return null;
+  const canonical = canonicalRepoKey(target) ?? target;
+
+  for (const [id, agent] of agentMap) {
+    if (!agent || agent.archivedAt) continue;
+    if (!isOrchestratorAgent(agent)) continue;
+    const agentRepo = String(agent.labels?.repo ?? "").trim();
+    if (!agentRepo) continue;
+    const repoMatches =
+      isRepoMatching(agentRepo, target) ||
+      (canonicalRepoKey(agentRepo) ?? agentRepo) === canonical;
+    if (!repoMatches) continue;
+
+    const status = String(agent.status ?? "").toLowerCase();
+    if (
+      status === "closed" ||
+      status === "archived" ||
+      status === "terminated" ||
+      status === "error"
+    ) {
+      continue;
+    }
+    return id;
+  }
+  return null;
 }
 
 /**
@@ -1891,6 +1932,27 @@ export function resolveOrchestratorModel(
   const isAvailable = (provider: string): boolean =>
     !options.availableProviders || options.availableProviders.has(provider);
 
+  // #987: when every configured candidate points at a disabled provider (a
+  // stale saved `~/.paseo/uppidi-fleet-role-models.json`, or a pinned fallback
+  // list), append the built-in orchestrator defaults, which track enabled host
+  // providers, so resolution lands on something spawnable instead of keeping
+  // the disabled primary.
+  if (
+    options.availableProviders &&
+    candidates.length > 0 &&
+    candidates.every((candidate) => !isAvailable(parseModelKey(candidate).provider))
+  ) {
+    const defaultRole = DEFAULT_ROLE_MODELS.orchestrator;
+    const seen = new Set(candidates);
+    for (const candidate of [defaultRole.primaryModel, ...(defaultRole.fallbackGroup ?? [])]) {
+      const trimmed = candidate.trim();
+      if (trimmed && !seen.has(trimmed)) {
+        seen.add(trimmed);
+        candidates.push(trimmed);
+      }
+    }
+  }
+
   // 1. Prefer the first candidate whose provider is enabled and not cooling down.
   for (const candidate of candidates) {
     const parsed = parseModelKey(candidate);
@@ -1910,7 +1972,7 @@ export function resolveOrchestratorModel(
   const fallback =
     candidates.find((candidate) => isAvailable(parseModelKey(candidate).provider)) ??
     candidates[0] ??
-    "antigravity-acp/gemini-3.8-flash-low";
+    "pi/commandcode/deepseek/deepseek-v4-flash";
   const parsed = parseModelKey(fallback);
   return {
     key: fallback,
@@ -2452,6 +2514,11 @@ export class HookRouter {
   public readonly options?: HookRouterOptions;
   public readonly isTestMode: boolean;
   private inFlightEnsure = new Map<string, Promise<EnsureOrchestratorResult>>();
+  /**
+   * Per-repo coalescing for auto-ensure (#987): overlapping watchdog, webhook,
+   * and board-sweep passes must not each observe "unstaffed" and spawn one.
+   */
+  private inFlightUnstaffed = new Map<string, Promise<EnsureOrchestratorResult | null>>();
   /** Direct-action guards (#847). */
   public readonly labelTriageEnabled: boolean;
   public readonly closeGuardEnabled: boolean;
@@ -3354,18 +3421,34 @@ export class HookRouter {
     if (this.isRepoPaused(canonical) || this.isPaused(canonical)) return null;
     if (!this.isEnrolledRepo(canonical)) return null;
 
-    try {
-      const active = await this.getActiveOrchestrator(canonical, opts.agentMap);
-      if (active) return null;
-    } catch {
-      // Liveness unknown: skip rather than spawn a duplicate.
-      return null;
-    }
+    // #987: coalesce overlapping auto-ensure calls per repo. Without this, two
+    // passes that each observe "no active orchestrator" both provision one and
+    // the registry flips between duplicates. The in-flight entry is installed
+    // synchronously, before the first await yields.
+    const inFlight = this.inFlightUnstaffed.get(canonical);
+    if (inFlight) return await inFlight;
 
-    this.log(
-      `[info] Auto-ensure: unstaffed enrolled repo ${canonical}${opts.reason ? ` (${opts.reason})` : ""}; provisioning orchestrator`,
-    );
-    return await this.ensureOrchestrator({ repo: canonical });
+    const promise = (async (): Promise<EnsureOrchestratorResult | null> => {
+      try {
+        const active = await this.getActiveOrchestrator(canonical, opts.agentMap);
+        if (active) return null;
+      } catch {
+        // Liveness unknown: skip rather than spawn a duplicate.
+        return null;
+      }
+
+      this.log(
+        `[info] Auto-ensure: unstaffed enrolled repo ${canonical}${opts.reason ? ` (${opts.reason})` : ""}; provisioning orchestrator`,
+      );
+      return await this.ensureOrchestrator({ repo: canonical });
+    })();
+
+    this.inFlightUnstaffed.set(canonical, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inFlightUnstaffed.delete(canonical);
+    }
   }
 
   private isRepoPausedMatch(a: string, b: string): boolean {
@@ -3927,36 +4010,74 @@ export class HookRouter {
     cachedAgentMap?: Map<string, WatchdogAgent> | null,
   ): Promise<{ agentId: string; record: OrchestratorRecord } | null> {
     const existing = this.readOrchestrator(repo);
-    if (!existing?.agentId) return null;
+    const hadCachedMap = cachedAgentMap !== undefined;
 
-    let isAlive = false;
-    try {
-      const agentMap =
-        cachedAgentMap !== undefined ? cachedAgentMap : await this.fetchAgentMap();
-      if (agentMap) {
-        const agent = agentMap.get(existing.agentId);
-        if (
-          agent &&
+    let agentMap: Map<string, WatchdogAgent> | null | undefined = cachedAgentMap;
+    if (agentMap === undefined) {
+      try {
+        agentMap = await this.fetchAgentMap();
+      } catch {
+        agentMap = null;
+      }
+    }
+
+    const registeredIsLive = (): boolean => {
+      if (!existing?.agentId || !agentMap) return false;
+      const agent = agentMap.get(existing.agentId);
+      return Boolean(
+        agent &&
           agent.status !== "closed" &&
           agent.status !== "archived" &&
           agent.status !== "terminated" &&
-          agent.status !== "error"
-        ) {
-          isAlive = true;
-        }
-      } else {
-        const activeIds = await this.getActiveAgentIds();
-        if (activeIds.has(existing.agentId)) {
-          isAlive = true;
-        }
-      }
-    } catch {
-      // ignore error in liveness check
-    }
+          agent.status !== "error",
+      );
+    };
 
-    if (isAlive) {
+    if (existing?.agentId && registeredIsLive()) {
       return { agentId: existing.agentId, record: existing };
     }
+
+    // #987: a cached snapshot can be stale. When a registration exists but the
+    // snapshot omits it, refresh once from the daemon before concluding the
+    // repo is unstaffed.
+    if (hadCachedMap && existing?.agentId) {
+      let fresh: Map<string, WatchdogAgent> | null = null;
+      try {
+        fresh = await this.fetchAgentMap();
+      } catch {
+        fresh = null;
+      }
+      if (fresh) {
+        agentMap = fresh;
+        if (registeredIsLive()) {
+          return { agentId: existing.agentId, record: existing };
+        }
+      }
+    }
+
+    // Lost-registration recovery (#987): the daemon may still be running the
+    // orchestrator even though the registry entry is missing or dead. Adopt the
+    // live labelled agent *before* the caller can provision a duplicate.
+    const recoveredId = findLiveOrchestratorAgent(repo, agentMap);
+    if (recoveredId) {
+      this.writeOrchestrator(repo, recoveredId, "recovered");
+      this.log(`[info] Recovered lost orchestrator registration for ${repo}: ${recoveredId}`);
+      const record = this.readOrchestrator(repo);
+      return { agentId: recoveredId, record: record ?? { key: repo, agentId: recoveredId } };
+    }
+
+    // No roster could be read at all: fall back to the id-only live list.
+    if (!agentMap && existing?.agentId) {
+      try {
+        const activeIds = await this.getActiveAgentIds();
+        if (activeIds.has(existing.agentId)) {
+          return { agentId: existing.agentId, record: existing };
+        }
+      } catch {
+        // ignore error in liveness check
+      }
+    }
+
     return null;
   }
 
@@ -5016,13 +5137,47 @@ export class HookRouter {
     for (const [key, q] of this.queues.entries()) {
       if (key === "frontdesk" || q.length === 0) continue;
       if (this.isRepoPaused(key) || this.isPaused(key)) continue;
-      const orch = this.readOrchestrator(key);
+      let orch = this.readOrchestrator(key);
+      if (!orch) {
+        // Lost-registration recovery (#987): adopt a live labelled orchestrator
+        // before treating this queue as unorchestrated.
+        try {
+          const active = await this.getActiveOrchestrator(key, agentMap);
+          if (active) orch = active.record;
+        } catch {
+          // Liveness unknown: leave it unorchestrated rather than spawning.
+        }
+      }
       if (!orch) {
         anomalies.push({ type: "QUEUE_UNORCHESTRATED", key, queueDepth: q.length });
+        // Auto-provision an enrolled repo with pending work and no live
+        // orchestrator after recovery (#987). Muted/paused repos returned above,
+        // and `ensureUnstaffedEnrolledRepo` re-checks both.
+        let provisioned: EnsureOrchestratorResult | null = null;
+        try {
+          provisioned = await this.ensureUnstaffedEnrolledRepo(key, {
+            reason: "watchdog queued work",
+            agentMap,
+          });
+        } catch (err) {
+          this.log(
+            `[warn] watchdog auto-provision failed for ${key}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        if (provisioned?.ok) {
+          anomalies.push({
+            type: "ORCHESTRATOR_PROVISIONED",
+            key,
+            agentId: provisioned.agentId,
+            queueDepth: q.length,
+          });
+        }
         const alertKey = `unorchestrated:${key}`;
         if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
           this.watchdogAlerts.set(alertKey, now);
-          const alert = `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) but no orchestrator is registered.`;
+          const alert = provisioned?.ok
+            ? `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s); auto-provisioned orchestrator ${provisioned.agentId ?? ""}.`
+            : `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) but no orchestrator is registered.`;
           this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
         }
       }

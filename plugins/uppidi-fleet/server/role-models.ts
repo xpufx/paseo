@@ -74,11 +74,13 @@ export const DEFAULT_ROLE_MODELS: Record<string, RoleModelConfig> = {
   },
   orchestrator: {
     role: "orchestrator",
-    primaryModel: "antigravity-acp/gemini-3.8-flash-low",
+    // Enabled-provider defaults (#987): the orchestrator spawn path must never
+    // resolve to a disabled provider (antigravity-acp/codex) out of the box.
+    primaryModel: "pi/commandcode/deepseek/deepseek-v4-flash",
     fallbackGroup: [
-      "antigravity-acp/gemini-3.8-flash-low",
-      "codex/gpt-5.6-luna",
-      "uppidi/opencode-go/deepseek-v4.1-flash",
+      "pi/commandcode/deepseek/deepseek-v4-flash",
+      "pi/commandcode/deepseek/deepseek-v4.1-flash",
+      "antigravity/gemini-3.8-flash-low",
     ],
   },
   "coding-agent": {

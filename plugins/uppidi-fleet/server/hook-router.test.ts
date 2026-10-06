@@ -3416,6 +3416,42 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     assert.equal(resolved.provider, "antigravity-acp");
   });
 
+  it("resolveOrchestratorModel falls back to an enabled default provider when every configured candidate is disabled (#987)", () => {
+    const resolved = resolveOrchestratorModel({
+      fallbackList: ["antigravity-acp/gemini-3.8-flash-low", "codex/gpt-5.6-luna"],
+      availableProviders: new Set(["pi"]),
+    });
+    assert.equal(resolved.provider, "pi");
+    assert.equal(resolved.key, "pi/commandcode/deepseek/deepseek-v4-flash");
+    assert.equal(resolved.model, "commandcode/deepseek/deepseek-v4-flash");
+  });
+
+  it("resolveOrchestratorModel recovers a stale saved config of disabled providers (#987)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-role-models-stale-"));
+    const configPath = join(dir, "uppidi-fleet-role-models.json");
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        orchestrator: {
+          role: "orchestrator",
+          primaryModel: "antigravity-acp/gemini-3.8-flash-low",
+          fallbackGroup: ["antigravity-acp/gemini-3.8-flash-low", "codex/gpt-5.6-luna"],
+        },
+      }),
+    );
+    const previous = process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG;
+    process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = configPath;
+    try {
+      const resolved = resolveOrchestratorModel({ availableProviders: new Set(["pi"]) });
+      assert.equal(resolved.provider, "pi");
+      assert.equal(resolved.key, "pi/commandcode/deepseek/deepseek-v4-flash");
+    } finally {
+      if (previous === undefined) delete process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG;
+      else process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runWatchdogAudit records quota failure into circuit breaker and suppresses steer (#890)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "paseo-watchdog-cb-"));
     try {
@@ -5335,6 +5371,115 @@ describe("board sweep auto-reconciliation (#794)", () => {
       new Map([["errored-agent", { id: "errored-agent", status: "error" }]]);
 
     assert.equal(await router.getActiveOrchestrator("xpufx-org/paseo"), null);
+  });
+
+  it("recovers a lost orchestrator registration from a live labelled agent (#987)", async () => {
+    const liveMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-recovered",
+        {
+          id: "agent-recovered",
+          status: "idle",
+          labels: { role: "orchestrator", category: "orchestrator", repo: "xpufx-org/paseo" },
+        },
+      ],
+    ]);
+
+    const active = await router.getActiveOrchestrator("xpufx-org/paseo", liveMap);
+    assert.ok(active, "a live labelled orchestrator is adopted into the registry");
+    assert.equal(active?.agentId, "agent-recovered");
+
+    const record = router.readOrchestrator("xpufx-org/paseo");
+    assert.equal(record?.agentId, "agent-recovered");
+    assert.equal(record?.by, "recovered");
+    assert.equal(record?.stale, false);
+  });
+
+  it("does not provision a duplicate when a live orchestrator exists without a registration (#987)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    const liveMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-lost-reg",
+        { id: "agent-lost-reg", status: "running", labels: { role: "orchestrator", repo: "xpufx-org/paseo" } },
+      ],
+    ]);
+
+    const ensured = await router.ensureUnstaffedEnrolledRepo("xpufx-org/paseo", { agentMap: liveMap });
+
+    assert.equal(ensured, null, "a live orchestrator must short-circuit provisioning");
+    assert.equal(spawnedCalls.length, 0, "no duplicate orchestrator may be spawned");
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-lost-reg");
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.by, "recovered");
+  });
+
+  it("watchdog auto-provisions an unstaffed enrolled repo with pending work (#987)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    (router as any).fetchAgentMap = async () => new Map();
+    (router as any).queues.set("xpufx-org/paseo", [
+      { id: "m1", key: "xpufx-org/paseo", msg: "pending", ts: Date.now() },
+    ]);
+
+    const audit = await router.runWatchdogAudit({
+      agentMap: new Map(),
+      orchestratorRecords: [],
+      reloadAgent: async () => ({ ok: true }),
+    });
+
+    assert.ok(
+      audit.anomalies.some((a) => a.type === "ORCHESTRATOR_PROVISIONED" && a.key === "xpufx-org/paseo"),
+      "expected the watchdog to provision an orchestrator for the unstaffed queue",
+    );
+    assert.equal(spawnedCalls.length, 1, "one orchestrator is provisioned, not a duplicate");
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-1");
+    assert.ok(
+      deliveredMessages.some((d) => d.msg.includes("auto-provisioned orchestrator agent-1")),
+      "Front Desk is told the queue was auto-staffed",
+    );
+  });
+
+  it("recovers a registered orchestrator omitted by a stale cached agent map (#987)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    router.writeOrchestrator("xpufx-org/paseo", "agent-live-registered");
+
+    const staleMap = new Map<string, WatchdogAgent>(); // stale: omits the live registration
+    const freshMap = new Map<string, WatchdogAgent>([
+      ["agent-live-registered", { id: "agent-live-registered", status: "idle" }],
+    ]);
+    let fetches = 0;
+    (router as any).fetchAgentMap = async () => {
+      fetches += 1;
+      return freshMap;
+    };
+
+    const ensured = await router.ensureUnstaffedEnrolledRepo("xpufx-org/paseo", { agentMap: staleMap });
+
+    assert.equal(ensured, null, "the live registered orchestrator must be found after refresh");
+    assert.equal(spawnedCalls.length, 0, "no duplicate orchestrator may be spawned");
+    assert.equal(fetches, 1, "exactly one fresh roster fetch is attempted");
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-live-registered");
+  });
+
+  it("coalesces concurrent auto-ensure calls into a single orchestrator spawn (#987)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    (router as any).fetchAgentMap = async () => new Map();
+
+    let ensureCalls = 0;
+    const realEnsure = router.ensureOrchestrator.bind(router);
+    router.ensureOrchestrator = (async (input: any) => {
+      ensureCalls += 1;
+      return await realEnsure(input);
+    }) as typeof router.ensureOrchestrator;
+
+    const [a, b, c] = await Promise.all([
+      router.ensureUnstaffedEnrolledRepo("xpufx-org/paseo", { reason: "concurrent a" }),
+      router.ensureUnstaffedEnrolledRepo("xpufx-org/paseo", { reason: "concurrent b" }),
+      router.ensureUnstaffedEnrolledRepo("xpufx-org/paseo", { reason: "concurrent c" }),
+    ]);
+
+    assert.equal(spawnedCalls.length, 1, "concurrent ensures must coalesce to one spawn");
+    assert.equal(ensureCalls, 1, "the per-repo guard coalesces before provisioning");
+    assert.ok(a && b === a && c === a, "all callers share the coalesced result");
+    assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-1");
   });
 });
 

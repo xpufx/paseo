@@ -877,17 +877,19 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
     assert.equal(createdPayload.role, "front-desk");
     assert.equal(createdPayload.mode, "yolo");
 
-    // 2. handleUppidiAddOrchestrator without explicit model
+    // 2. handleUppidiAddOrchestrator without explicit model resolves to the
+    // enabled-provider orchestrator default (#987).
     createdPayload = null;
     const orchRes = await handleUppidiAddOrchestrator(
       { repo: "xpufx-org/runner-containers" },
       mockContext
     );
     assert.equal(orchRes.ok, true);
-    assert.equal(createdPayload.provider, "antigravity-acp");
-    assert.equal(createdPayload.model, "gemini-3.8-flash-low");
+    assert.equal(createdPayload.provider, "pi");
+    assert.equal(createdPayload.model, "commandcode/deepseek/deepseek-v4-flash");
     assert.equal(createdPayload.role, "orchestrator");
-    assert.equal(createdPayload.mode, "yolo");
+    // `pi` advertises no session modes, so the orchestrator spawn carries none.
+    assert.equal(createdPayload.mode, undefined);
 
     // 3. handleUppidiAddOrchestrator with explicit model
     createdPayload = null;
