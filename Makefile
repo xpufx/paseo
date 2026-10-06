@@ -1,4 +1,4 @@
-.PHONY: all doctor reload check test typecheck conformance build clean help
+.PHONY: all doctor reload check test typecheck conformance build clean help migrate-numberless-labels
 
 # Default target: diagnostic freshness check
 all: doctor
@@ -30,6 +30,11 @@ conformance:
 board-hygiene:
 	@node scripts/board-hygiene.test.mjs
 	@node scripts/board-hygiene.mjs
+
+## migrate-numberless-labels: Test and dry-run the numeric-to-numberless label migration (#1007)
+migrate-numberless-labels:
+	@node scripts/migrate-numberless-labels.test.mjs
+	@node scripts/migrate-numberless-labels.mjs
 
 ## build: Build helper and compile plugin bundles
 build:
