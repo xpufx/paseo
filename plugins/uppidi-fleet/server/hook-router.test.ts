@@ -5614,7 +5614,7 @@ describe("board sweep auto-reconciliation (#794)", () => {
     assert.equal(isOrchestratorMatchingRepo(orchAgent, "other-org/other-repo"), false);
 
     // 4. isOrchestratorMatchingRepo matches agent cwd against workspace checkout without labels
-    const workspaceCheckout = "/home/xpufx/.paseo/worktrees/repo-checkout";
+    const workspaceCheckout = "/home/dev-user/.paseo/worktrees/repo-checkout";
     const cwdOrchAgent: WatchdogAgent = {
       id: "orch-cwd",
       title: "Orchestrator · unlabelled",
@@ -5639,7 +5639,7 @@ describe("board sweep auto-reconciliation (#794)", () => {
         {
           id: "orch-cwd-match",
           title: "Orchestrator",
-          cwd: "/home/xpufx/code/platform",
+          cwd: "/home/dev-user/code/platform",
           status: "running",
         },
       ],
@@ -5648,14 +5648,14 @@ describe("board sweep auto-reconciliation (#794)", () => {
       "xpufx-org/platform",
       liveMapWithCwd,
       null,
-      "/home/xpufx/code/platform",
+      "/home/dev-user/code/platform",
     );
     assert.equal(matches.length, 1);
     assert.equal(matches[0].id, "orch-cwd-match");
 
     // 6. getActiveOrchestrator adopts live orchestrator discovered via cwd matching without labels
     router.enrollRepo("xpufx-org/platform");
-    (router as any).resolveWorkspace = (repo: string) => ({ cwd: "/home/xpufx/code/platform" });
+    (router as any).resolveWorkspace = (repo: string) => ({ cwd: "/home/dev-user/code/platform" });
     const active = await router.getActiveOrchestrator("xpufx-org/platform", liveMapWithCwd);
     assert.ok(active);
     assert.equal(active?.agentId, "orch-cwd-match");
