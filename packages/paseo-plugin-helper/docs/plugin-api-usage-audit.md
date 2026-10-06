@@ -24,7 +24,7 @@ shapes the follow-up checklist. It deliberately separates **verified in code** f
   - `@getpaseo/plugin@0.11.0-beta.5` at
     `/usr/lib/node_modules/@getpaseo/cli/node_modules/@getpaseo/plugin` — the host the
     reference documents.
-  - `@getpaseo/plugin@0.9.0-beta.2` at `/home/xpufx/code/paseo/node_modules/@getpaseo/plugin`
+  - `@getpaseo/plugin@0.9.0-beta.2` at `<repo>/node_modules/@getpaseo/plugin`
     — the range the plugins declare (`^0.9.0`), read from the primary checkout.
 - Repo docs: `docs/plugin/*.md`, `packages/paseo-plugin-helper/docs/*.md`,
   `packages/paseo-plugin-ui-testing/src/ui-guard.ts`, and the per-plugin
