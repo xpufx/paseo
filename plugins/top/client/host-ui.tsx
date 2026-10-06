@@ -1410,9 +1410,17 @@ export interface HostModalSectionProps {
   style?: StyleProp<ViewStyle>;
 }
 
-/** Fluid plain View for pill `renderModal` bodies (no nested Modal.Content). */
+/**
+ * Fluid plain View for pill `renderModal` bodies (no nested Modal.Content).
+ *
+ * The host centered-modal wrapper hands the body a bounded `flex: 1` frame and
+ * (with the default `hostScroll: false`) no scroller, so this section must fill
+ * that frame: without `flex: 1` / `minHeight: 0` the section sizes to its
+ * content and the child `HostScroll` is never given a viewport to scroll in
+ * (xpufx-org/paseo#975).
+ */
 export function HostModalSection({ children, style }: HostModalSectionProps) {
-  return <View style={[styles.fluid, style]}>{children}</View>;
+  return <View style={[styles.fluid, styles.modalSection, style]}>{children}</View>;
 }
 
 export interface HostScrollProps {
@@ -1549,6 +1557,7 @@ const justifyMap = {
 
 const styles = {
   fluid: { width: "100%" },
+  modalSection: { flex: 1, minHeight: 0, width: "100%" },
   row: { flexDirection: "row", width: "100%" },
   stack: { flexDirection: "column", width: "100%" },
   grid: { flexDirection: "row", flexWrap: "wrap", width: "100%" },
