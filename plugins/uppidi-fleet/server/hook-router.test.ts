@@ -5481,6 +5481,107 @@ describe("board sweep auto-reconciliation (#794)", () => {
     assert.ok(a && b === a && c === a, "all callers share the coalesced result");
     assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "agent-1");
   });
+
+  it("detects live orchestrators by title/name matching 'Orchestrator · <repo>' without labels (#993)", async () => {
+    const liveMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-title-orch",
+        {
+          id: "agent-title-orch",
+          status: "running",
+          name: "Orchestrator · forge.mrs.uppidi.com/xpufx-org/paseo",
+        },
+      ],
+    ]);
+
+    const active = await router.getActiveOrchestrator("xpufx-org/paseo", liveMap);
+    assert.ok(active, "a live agent with matching Orchestrator title is adopted");
+    assert.equal(active?.agentId, "agent-title-orch");
+
+    const record = router.readOrchestrator("xpufx-org/paseo");
+    assert.equal(record?.agentId, "agent-title-orch");
+  });
+
+  it("performs a pre-spawn check against the latest live agent roster to guarantee no duplicate orchestrator is spawned (#993)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    const liveMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-live-prespawn",
+        {
+          id: "agent-live-prespawn",
+          status: "idle",
+          title: "Orchestrator · xpufx-org/paseo",
+        },
+      ],
+    ]);
+    (router as any).fetchAgentMap = async () => liveMap;
+
+    const result = await router.ensureOrchestrator({ repo: "xpufx-org/paseo" });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "existing");
+    assert.equal(result.agentId, "agent-live-prespawn");
+    assert.equal(spawnedCalls.length, 0, "pre-spawn check prevented duplicate agent spawn");
+  });
+
+  it("enforces singleton invariant by archiving duplicate extras and keeping the newest authoritative agent (#993)", async () => {
+    const archivedIds: string[] = [];
+    (router as any).archiveAgent = async (id: string) => {
+      archivedIds.push(id);
+      return true;
+    };
+
+    const duplicateMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-older",
+        {
+          id: "agent-older",
+          status: "idle",
+          title: "Orchestrator · xpufx-org/paseo",
+          updatedAt: "2026-10-06T10:00:00Z",
+        },
+      ],
+      [
+        "agent-newer",
+        {
+          id: "agent-newer",
+          status: "running",
+          name: "Orchestrator · forge.mrs.uppidi.com/xpufx-org/paseo",
+          updatedAt: "2026-10-06T11:00:00Z",
+        },
+      ],
+    ]);
+
+    const active = await router.getActiveOrchestrator("xpufx-org/paseo", duplicateMap);
+    assert.ok(active);
+    assert.equal(active?.agentId, "agent-newer", "the newest agent must be kept as authoritative");
+    assert.deepEqual(archivedIds, ["agent-older"], "the older duplicate extra must be archived");
+
+    const record = router.readOrchestrator("xpufx-org/paseo");
+    assert.equal(record?.agentId, "agent-newer");
+  });
+
+  it("guards runBoardSweep so concurrent auto-ensures do not spawn duplicate orchestrators (#993)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    (router as any).fetchAgentMap = async () => new Map();
+
+    let sweepCheckCount = 0;
+    const realBoardCheck = (router as any).runBoardCheck.bind(router);
+    (router as any).runBoardCheck = async (repo: string) => {
+      sweepCheckCount++;
+      await new Promise((r) => setTimeout(r, 20));
+      return await realBoardCheck(repo);
+    };
+
+    const [sweep1, sweep2] = await Promise.all([
+      router.runBoardSweep(["xpufx-org/paseo"]),
+      router.runBoardSweep(["xpufx-org/paseo"]),
+    ]);
+
+    assert.equal(sweep1.ok, true);
+    assert.equal(sweep2.ok, true);
+    assert.equal(sweepCheckCount, 1, "concurrent sweeps must coalesce and not duplicate board checks");
+    assert.equal(spawnedCalls.length, 1, "exactly one orchestrator is spawned across concurrent sweeps");
+  });
 });
 
 describe("test isolation & CLI agent execution safety (#814)", () => {

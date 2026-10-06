@@ -209,6 +209,10 @@ export interface HookRouterOptions {
     agentId: string,
     scopePrefixes: readonly string[],
   ) => Promise<{ allowed: boolean; permissionId?: string; scope?: string; reason?: string }>;
+  /**
+   * Injected agent archiver used by deduplication, prune, and tests (#973/#993).
+   */
+  archiveAgent?: (agentId: string) => Promise<boolean>;
 }
 
 export interface EnsureOrchestratorInput {
@@ -1301,52 +1305,161 @@ const PROBE_AGENT_TITLES = new Set([
  * even when the daemon stamps a `paseo.parent-agent-id` on them.
  */
 export function isOrchestratorAgent(
-  agent: Pick<WatchdogAgent, "role" | "labels">,
+  agent: Pick<WatchdogAgent, "role" | "labels"> & { title?: string | null; name?: string | null },
 ): boolean {
   const labels = agent.labels ?? {};
   const role = String(agent.role ?? labels.role ?? "").trim().toLowerCase();
   if (role === "orchestrator") return true;
-  return String(labels.category ?? "").trim().toLowerCase() === "orchestrator";
+  if (String(labels.category ?? "").trim().toLowerCase() === "orchestrator") return true;
+  const title = String(agent.title ?? agent.name ?? "").trim().toLowerCase();
+  if (
+    title.startsWith("orchestrator ·") ||
+    title.startsWith("orchestrator -") ||
+    title.startsWith("orchestrator:") ||
+    title.startsWith("orchestrator.") ||
+    title === "orchestrator"
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
- * Find a live orchestrator agent already running for `repo` (#987). The daemon
- * is the source of truth: a non-dead agent carrying `role=orchestrator` (label
- * or field) whose `repo` label matches is adopted into the registry instead of
- * letting the caller provision a duplicate. Returns the agent id, or null when
- * no matching live agent exists.
+ * Tests whether an agent matches an orchestrator identity for the given repository (#987/#993).
+ * Matches by labels.repo or by title/name matching 'Orchestrator · <repo>' (including forge-qualified repo names).
+ */
+export function isOrchestratorMatchingRepo(
+  agent: Pick<WatchdogAgent, "role" | "labels" | "title" | "name">,
+  repo: string,
+): boolean {
+  if (!agent) return false;
+  const target = String(repo ?? "").trim();
+  if (!target) return false;
+  const canonical = canonicalRepoKey(target) ?? target;
+
+  const candidateMatchesRepo = (cand: string): boolean => {
+    const c = String(cand ?? "").trim();
+    if (!c) return false;
+    if (isRepoMatching(c, target) || isRepoMatching(c, canonical)) return true;
+    const cCanonical = canonicalRepoKey(c);
+    if (cCanonical) {
+      if (
+        cCanonical === canonical ||
+        isRepoMatching(cCanonical, canonical) ||
+        isRepoMatching(cCanonical, target)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // 1. Check labels.repo if it is an orchestrator
+  if (isOrchestratorAgent(agent)) {
+    const agentRepo = String(agent.labels?.repo ?? "").trim();
+    if (agentRepo && candidateMatchesRepo(agentRepo)) {
+      return true;
+    }
+  }
+
+  // 2. Check title / name matching 'Orchestrator · <repo>'
+  for (const raw of [agent.title, agent.name]) {
+    if (!raw || typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    const match = trimmed.match(/^Orchestrator\s*[·\-\:\.]\s*(.+)$/i);
+    if (match) {
+      const rest = match[1].trim();
+      if (candidateMatchesRepo(rest)) return true;
+      const firstWord = rest.split(/\s+/)[0];
+      if (firstWord && candidateMatchesRepo(firstWord)) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Find all live orchestrator agents running for `repo` (#987/#993).
+ * Matches by labels.repo or title/name matching 'Orchestrator · <repo>'.
+ * Enforces singleton invariant by sorting the newest/authoritative agent first.
+ */
+export function findLiveOrchestratorAgents(
+  repo: string,
+  agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
+  registeredAgentId?: string | null,
+): WatchdogAgent[] {
+  if (!agentMap || agentMap.size === 0) return [];
+  const target = String(repo ?? "").trim();
+  if (!target) return [];
+
+  const matched: WatchdogAgent[] = [];
+  const matchedIds = new Set<string>();
+
+  const isLive = (agent: WatchdogAgent | undefined): agent is WatchdogAgent => {
+    if (!agent || Boolean(agent.archivedAt)) return false;
+    const status = String(agent.status ?? "").toLowerCase();
+    return (
+      status !== "closed" &&
+      status !== "archived" &&
+      status !== "terminated" &&
+      status !== "error"
+    );
+  };
+
+  for (const [id, agent] of agentMap) {
+    if (!isLive(agent)) continue;
+
+    if (isOrchestratorMatchingRepo(agent, target)) {
+      matched.push(agent);
+      matchedIds.add(id);
+    }
+  }
+
+  // If a registered agent id is provided and live, include it if not already matched
+  if (registeredAgentId && !matchedIds.has(registeredAgentId)) {
+    const regAgent = agentMap.get(registeredAgentId);
+    if (isLive(regAgent)) {
+      matched.push(regAgent);
+      matchedIds.add(registeredAgentId);
+    }
+  }
+
+  if (matched.length <= 1) return matched;
+
+  // Enforce singleton invariant: sort newest/authoritative first.
+  const getTime = (a: WatchdogAgent): number => {
+    const ts = a.updatedAt || a.lastActivityAt || a.activeTurn?.startedAt;
+    if (!ts) return 0;
+    const parsed = Date.parse(ts);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  matched.sort((a, b) => {
+    const timeDiff = getTime(b) - getTime(a);
+    if (timeDiff !== 0) return timeDiff;
+    // Prefer registered agent if timestamps tie
+    if (registeredAgentId) {
+      if (a.id === registeredAgentId) return -1;
+      if (b.id === registeredAgentId) return 1;
+    }
+    // Tie-breaker: stable sort by ID descending (newer IDs / deterministic)
+    return String(b.id ?? "").localeCompare(String(a.id ?? ""));
+  });
+
+  return matched;
+}
+
+/**
+ * Find a live orchestrator agent already running for `repo` (#987/#993).
+ * Returns the newest/authoritative agent id, or null when no matching live agent exists.
  */
 export function findLiveOrchestratorAgent(
   repo: string,
   agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
+  registeredAgentId?: string | null,
 ): string | null {
-  if (!agentMap || agentMap.size === 0) return null;
-  const target = String(repo ?? "").trim();
-  if (!target) return null;
-  const canonical = canonicalRepoKey(target) ?? target;
-
-  for (const [id, agent] of agentMap) {
-    if (!agent || agent.archivedAt) continue;
-    if (!isOrchestratorAgent(agent)) continue;
-    const agentRepo = String(agent.labels?.repo ?? "").trim();
-    if (!agentRepo) continue;
-    const repoMatches =
-      isRepoMatching(agentRepo, target) ||
-      (canonicalRepoKey(agentRepo) ?? agentRepo) === canonical;
-    if (!repoMatches) continue;
-
-    const status = String(agent.status ?? "").toLowerCase();
-    if (
-      status === "closed" ||
-      status === "archived" ||
-      status === "terminated" ||
-      status === "error"
-    ) {
-      continue;
-    }
-    return id;
-  }
-  return null;
+  const matching = findLiveOrchestratorAgents(repo, agentMap, registeredAgentId);
+  return matching[0]?.id ?? null;
 }
 
 /**
@@ -2514,6 +2627,8 @@ export class HookRouter {
    * and board-sweep passes must not each observe "unstaffed" and spawn one.
    */
   private inFlightUnstaffed = new Map<string, Promise<EnsureOrchestratorResult | null>>();
+  /** Guard runBoardSweep against overlapping concurrent sweeps (#993). */
+  private inFlightBoardSweep = new Map<string, Promise<BoardSweepResult>>();
   /** Direct-action guards (#847). */
   public readonly labelTriageEnabled: boolean;
   public readonly closeGuardEnabled: boolean;
@@ -3967,6 +4082,17 @@ export class HookRouter {
     const id = String(agentId ?? "").trim();
     if (!id) return false;
 
+    if (typeof this.options?.archiveAgent === "function") {
+      try {
+        return await this.options.archiveAgent(id);
+      } catch (err) {
+        this.log(
+          `[warn] Custom archiveAgent failed for ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return false;
+      }
+    }
+
     const paseo = this.getPaseo();
     if (paseo?.agents) {
       try {
@@ -4016,26 +4142,49 @@ export class HookRouter {
       }
     }
 
-    const registeredIsLive = (): boolean => {
-      if (!existing?.agentId || !agentMap) return false;
-      const agent = agentMap.get(existing.agentId);
-      return Boolean(
-        agent &&
-          agent.status !== "closed" &&
-          agent.status !== "archived" &&
-          agent.status !== "terminated" &&
-          agent.status !== "error",
-      );
+    const adoptAndDeduplicate = async (
+      matches: WatchdogAgent[],
+    ): Promise<{ agentId: string; record: OrchestratorRecord }> => {
+      const authoritative = matches[0];
+      const extras = matches.slice(1);
+      for (const extra of extras) {
+        try {
+          await this.archiveAgent(extra.id);
+          this.log(`[info] Deduplication: archived extra orchestrator ${extra.id} for ${repo}`);
+        } catch (err) {
+          this.log(
+            `[warn] Failed to archive duplicate orchestrator ${extra.id}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+      if (!existing?.agentId || existing.agentId !== authoritative.id) {
+        this.writeOrchestrator(
+          repo,
+          authoritative.id,
+          existing?.agentId ? "authoritative" : "recovered",
+        );
+        this.log(
+          `[info] ${existing?.agentId ? "Updated authoritative" : "Recovered lost"} orchestrator registration for ${repo}: ${authoritative.id}`,
+        );
+      }
+      const record = this.readOrchestrator(repo);
+      return {
+        agentId: authoritative.id,
+        record: record ?? { key: repo, agentId: authoritative.id },
+      };
     };
 
-    if (existing?.agentId && registeredIsLive()) {
-      return { agentId: existing.agentId, record: existing };
+    if (agentMap) {
+      const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId);
+      if (matching.length > 0) {
+        return await adoptAndDeduplicate(matching);
+      }
     }
 
     // #987: a cached snapshot can be stale. When a registration exists but the
-    // snapshot omits it, refresh once from the daemon before concluding the
-    // repo is unstaffed.
-    if (hadCachedMap && existing?.agentId) {
+    // snapshot omits it, or no match was found in the cache, refresh once from
+    // the daemon before concluding the repo is unstaffed.
+    if (hadCachedMap) {
       let fresh: Map<string, WatchdogAgent> | null = null;
       try {
         fresh = await this.fetchAgentMap();
@@ -4044,21 +4193,11 @@ export class HookRouter {
       }
       if (fresh) {
         agentMap = fresh;
-        if (registeredIsLive()) {
-          return { agentId: existing.agentId, record: existing };
+        const matching = findLiveOrchestratorAgents(repo, agentMap, existing?.agentId);
+        if (matching.length > 0) {
+          return await adoptAndDeduplicate(matching);
         }
       }
-    }
-
-    // Lost-registration recovery (#987): the daemon may still be running the
-    // orchestrator even though the registry entry is missing or dead. Adopt the
-    // live labelled agent *before* the caller can provision a duplicate.
-    const recoveredId = findLiveOrchestratorAgent(repo, agentMap);
-    if (recoveredId) {
-      this.writeOrchestrator(repo, recoveredId, "recovered");
-      this.log(`[info] Recovered lost orchestrator registration for ${repo}: ${recoveredId}`);
-      const record = this.readOrchestrator(repo);
-      return { agentId: recoveredId, record: record ?? { key: repo, agentId: recoveredId } };
     }
 
     // No roster could be read at all: fall back to the id-only live list.
@@ -4321,6 +4460,51 @@ export class HookRouter {
     let autoAllow:
       | { allowed: boolean; permissionId?: string; scope?: string; reason?: string }
       | undefined;
+
+    // Pre-spawn check against latest live agent roster (#993)
+    let preSpawnAgentMap: Map<string, WatchdogAgent> | null = null;
+    try {
+      preSpawnAgentMap = await this.fetchAgentMap();
+    } catch {
+      preSpawnAgentMap = null;
+    }
+
+    if (preSpawnAgentMap) {
+      const existing = this.readOrchestrator(repo);
+      const matchingLive = findLiveOrchestratorAgents(repo, preSpawnAgentMap, existing?.agentId);
+      if (!input.force) {
+        if (matchingLive.length > 0) {
+          const authoritative = matchingLive[0];
+          const extras = matchingLive.slice(1);
+          for (const extra of extras) {
+            try {
+              await this.archiveAgent(extra.id);
+              this.log(`[info] Pre-spawn deduplication: archived extra orchestrator ${extra.id} for ${repo}`);
+            } catch (err) {
+              this.log(`[warn] Failed to archive duplicate orchestrator ${extra.id}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
+          this.writeOrchestrator(repo, authoritative.id, existing?.agentId ? "authoritative" : "recovered");
+          this.log(`[info] Pre-spawn check adopted live orchestrator for ${repo}: ${authoritative.id}`);
+          return {
+            ok: true,
+            agentId: authoritative.id,
+            status: "existing",
+            repo: canonicalKey,
+          };
+        }
+      } else {
+        // If force is set, archive all existing matching live orchestrators before spawning
+        for (const existingAgent of matchingLive) {
+          try {
+            await this.archiveAgent(existingAgent.id);
+            this.log(`[info] Force provision: archived existing orchestrator ${existingAgent.id} for ${repo}`);
+          } catch (err) {
+            this.log(`[warn] Failed to archive existing orchestrator ${existingAgent.id}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      }
+    }
 
     // Custom test / injection hook
     if (typeof this.options?.spawnAgent === "function") {
@@ -4660,6 +4844,13 @@ export class HookRouter {
       } catch {
         // fall through to CLI
       }
+    }
+    const isTest = this.isTestMode || process.env.NODE_ENV === "test";
+    const hasCliStub =
+      execFileAsync !== defaultExecFileAsync ||
+      Boolean(process.env.PATH?.split(":")[0]?.includes("paseo-stub"));
+    if (!this.options?.allowCliSpawn && isTest && !hasCliStub) {
+      return map.size > 0 ? map : null;
     }
     try {
       const { stdout } = await execFileAsync("paseo", ["ls", "--json", "--global"], { timeout: 5000 });
@@ -5783,91 +5974,106 @@ export class HookRouter {
       return parts.length >= 2;
     });
     const targets = Array.from(new Set(rawTargets.map((k) => canonicalRepoKey(k) ?? k)));
-    const actionable: BoardSweepResult["actionable"] = [];
-    const staleWipRecovered: StaleWipResult[] = [];
-    const errors: Array<{ repo: string; error: string }> = [];
-    const pruneResult = await this.pruneOrchestrators();
-    const prunedCount = pruneResult.prunedCount;
-    if (!pruneResult.ok) {
-      this.log(`[warn] Board sweep could not prune orchestrator records: ${pruneResult.error ?? "unknown error"}`);
-    }
-    for (const repo of targets) {
-      let res: BoardCheckResult;
-      try {
-        res = await this.runBoardCheck(repo, undefined, io);
-      } catch (err) {
-        // A failed check is loud: logged, returned, and reported to Front
-        // Desk, because an unreported failure looks exactly like a clean board.
-        const error = err instanceof Error ? err.message : String(err);
-        errors.push({ repo, error });
-        this.log(`[error] board check failed for ${repo}: ${error}`);
-        continue;
-      }
-      if (res.staleWipRecovery && res.staleWipRecovery.length > 0) {
-        staleWipRecovered.push(...res.staleWipRecovery);
-      }
-      if (!res.ok || res.candidates.length === 0) continue;
-      const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
-      actionable.push({ repo, count: res.candidates.length, dispatchable });
+    const sweepKey = targets.slice().sort().join(",");
+    const inFlight = this.inFlightBoardSweep.get(sweepKey);
+    if (inFlight) {
+      return await inFlight;
     }
 
-    // Self-heal staffing (#889): an enrolled repo with actionable board work but
-    // no active orchestrator gets one provisioned before the notification.
-    const autoEnsured: Array<{ repo: string; agentId?: string; status?: string; error?: string }> = [];
-    for (const item of actionable) {
-      try {
-        const ensured = await this.ensureUnstaffedEnrolledRepo(item.repo, { reason: "board sweep actionable" });
-        if (ensured) {
-          autoEnsured.push({ repo: item.repo, agentId: ensured.agentId, status: ensured.status, error: ensured.error });
+    const promise = (async (): Promise<BoardSweepResult> => {
+      const actionable: BoardSweepResult["actionable"] = [];
+      const staleWipRecovered: StaleWipResult[] = [];
+      const errors: Array<{ repo: string; error: string }> = [];
+      const pruneResult = await this.pruneOrchestrators();
+      const prunedCount = pruneResult.prunedCount;
+      if (!pruneResult.ok) {
+        this.log(`[warn] Board sweep could not prune orchestrator records: ${pruneResult.error ?? "unknown error"}`);
+      }
+      for (const repo of targets) {
+        let res: BoardCheckResult;
+        try {
+          res = await this.runBoardCheck(repo, undefined, io);
+        } catch (err) {
+          // A failed check is loud: logged, returned, and reported to Front
+          // Desk, because an unreported failure looks exactly like a clean board.
+          const error = err instanceof Error ? err.message : String(err);
+          errors.push({ repo, error });
+          this.log(`[error] board check failed for ${repo}: ${error}`);
+          continue;
         }
-      } catch (err) {
-        this.log(`[warn] Auto-ensure failed for ${item.repo}: ${err instanceof Error ? err.message : String(err)}`);
+        if (res.staleWipRecovery && res.staleWipRecovery.length > 0) {
+          staleWipRecovered.push(...res.staleWipRecovery);
+        }
+        if (!res.ok || res.candidates.length === 0) continue;
+        const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
+        actionable.push({ repo, count: res.candidates.length, dispatchable });
       }
-    }
 
-    let notified = 0;
-    const frontDeskId = this.readFrontDesk()?.agentId ?? null;
-    if (frontDeskId && (actionable.length > 0 || errors.length > 0)) {
-      const sections: string[] = [];
-      if (actionable.length > 0) {
-        const lines = actionable.map((a) => {
-          return `- ${a.repo}: ${a.count} actionable (${a.dispatchable} dispatchable)`;
-        });
-        sections.push(`[Fleet Board Sweep] ${actionable.length} repo(s) with actionable tickets:\n${lines.join("\n")}`);
+      // Self-heal staffing (#889): an enrolled repo with actionable board work but
+      // no active orchestrator gets one provisioned before the notification.
+      const autoEnsured: Array<{ repo: string; agentId?: string; status?: string; error?: string }> = [];
+      for (const item of actionable) {
+        try {
+          const ensured = await this.ensureUnstaffedEnrolledRepo(item.repo, { reason: "board sweep actionable" });
+          if (ensured) {
+            autoEnsured.push({ repo: item.repo, agentId: ensured.agentId, status: ensured.status, error: ensured.error });
+          }
+        } catch (err) {
+          this.log(`[warn] Auto-ensure failed for ${item.repo}: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
-      if (errors.length > 0) {
-        const failureLines = errors.map((e) => `- ${e.repo}: check failed (${e.error})`);
-        sections.push(
-          `[Fleet Board Sweep] ${errors.length} repo(s) FAILED board check - actionable tickets may be missed:\n${failureLines.join("\n")}`,
-        );
-      }
-      const alertMsg = sections.join("\n\n");
-      const isBusy = this.isAgentBusy(frontDeskId);
-      if (isBusy) {
-        this.log(`[info] Front Desk ${frontDeskId} is busy; queueing board sweep notification`);
-        this.enqueue("frontdesk", alertMsg, false);
-        notified = 1;
-      } else {
-        const ok = await this.deliverMessage(frontDeskId, alertMsg, { noWait: true, steer: false });
-        if (ok) {
-          this.lastDeliveryTimes.set(frontDeskId, Date.now());
+
+      let notified = 0;
+      const frontDeskId = this.readFrontDesk()?.agentId ?? null;
+      if (frontDeskId && (actionable.length > 0 || errors.length > 0)) {
+        const sections: string[] = [];
+        if (actionable.length > 0) {
+          const lines = actionable.map((a) => {
+            return `- ${a.repo}: ${a.count} actionable (${a.dispatchable} dispatchable)`;
+          });
+          sections.push(`[Fleet Board Sweep] ${actionable.length} repo(s) with actionable tickets:\n${lines.join("\n")}`);
+        }
+        if (errors.length > 0) {
+          const failureLines = errors.map((e) => `- ${e.repo}: check failed (${e.error})`);
+          sections.push(
+            `[Fleet Board Sweep] ${errors.length} repo(s) FAILED board check - actionable tickets may be missed:\n${failureLines.join("\n")}`,
+          );
+        }
+        const alertMsg = sections.join("\n\n");
+        const isBusy = this.isAgentBusy(frontDeskId);
+        if (isBusy) {
+          this.log(`[info] Front Desk ${frontDeskId} is busy; queueing board sweep notification`);
+          this.enqueue("frontdesk", alertMsg, false);
           notified = 1;
+        } else {
+          const ok = await this.deliverMessage(frontDeskId, alertMsg, { noWait: true, steer: false });
+          if (ok) {
+            this.lastDeliveryTimes.set(frontDeskId, Date.now());
+            notified = 1;
+          }
         }
       }
+      this.log(
+        `[info] Board sweep complete: ${targets.length} repo(s) swept, ${actionable.length} actionable, ${prunedCount} orchestrator record(s) pruned, ${autoEnsured.length} auto-staffed, ${errors.length} failed`,
+      );
+      return {
+        ok: true,
+        swept: targets.length,
+        actionable,
+        ...(staleWipRecovered.length > 0 ? { staleWipRecovered } : {}),
+        notified,
+        prunedCount,
+        ...(errors.length > 0 ? { errors } : {}),
+        ...(autoEnsured.length > 0 ? { autoEnsured } : {}),
+      };
+    })();
+
+    this.inFlightBoardSweep.set(sweepKey, promise);
+    try {
+      return await promise;
+    } finally {
+      this.inFlightBoardSweep.delete(sweepKey);
     }
-    this.log(
-      `[info] Board sweep complete: ${targets.length} repo(s) swept, ${actionable.length} actionable, ${prunedCount} orchestrator record(s) pruned, ${autoEnsured.length} auto-staffed, ${errors.length} failed`,
-    );
-    return {
-      ok: true,
-      swept: targets.length,
-      actionable,
-      ...(staleWipRecovered.length > 0 ? { staleWipRecovered } : {}),
-      notified,
-      prunedCount,
-      ...(errors.length > 0 ? { errors } : {}),
-      ...(autoEnsured.length > 0 ? { autoEnsured } : {}),
-    };
   }
 
   public startBackgroundLoops(): void {
