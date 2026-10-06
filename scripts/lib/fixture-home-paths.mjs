@@ -1,5 +1,6 @@
-// Detector for the authoring-time leak: a committed test or fixture file that
-// carries an absolute home path belonging to a real person.
+// Detector for the authoring-time leak: a committed test, fixture or
+// publish-surface doc file that carries an absolute home path belonging to a
+// real person.
 //
 // The case for a second gate, in front of the PII preflight, is in #627. The
 // preflight is a backstop -- it answers "is this safe to publish" and fires on
@@ -20,12 +21,18 @@
 //     home directory" is the leak this one exists to catch and the preflight's
 //     list can only ever name the few users it was told about.
 //
-//   * Scope is test and fixture files, not the published tree. A committed
-//     fixture is where a real path gets pasted (you copy a worktree path out of
-//     your own terminal into a payload), and it is also the only place the
-//     author can fix the mistake by editing one line. Flagging application code
-//     here would put a second, differently-worded PII rule in front of the
-//     preflight on the same paths, and the first one to cry wolf gets deleted.
+//   * Scope is test and fixture files plus the committed docs on the publish
+//     surface (a `.md` under `packages/<name>/docs` or `plugins/<name>/docs`, or
+//     the top-level README of a package or plugin). A committed fixture is where
+//     a real path gets pasted (you copy a worktree path out of your own terminal
+//     into a payload); a committed doc is the other place, and the #1057 audit
+//     pasted one there that this guard's fixture-only scope walked past (#1062).
+//     Both are the only places the author can fix the mistake by editing one
+//     line. Flagging application code here would put a second, differently-worded
+//     PII rule in front of the preflight on the same paths, and the first one to
+//     cry wolf gets deleted. Root `docs/` is outside the preflight's
+//     `packages/*`/`plugins/*` publish surface and carries host-absolute
+//     reference links on purpose, so it stays out.
 //
 //   * Generated trees are skipped. `dist` and `vendor/` hold copies of files
 //     that are themselves scanned, so a finding there is a stale-build bug whose
@@ -226,6 +233,33 @@ export function isFixturePath(relPath) {
   );
 }
 
+/**
+ * True when a repo-relative, slash-separated path is a committed doc on the
+ * publish surface: a `.md` under a `packages/<name>/docs` or
+ * `plugins/<name>/docs` tree, or the top-level README of a package or plugin.
+ *
+ * #1062: the #1057 audit pasted a real `/home/<user>` path into
+ * `packages/paseo-plugin-helper/docs/plugin-api-usage-audit.md`, and the
+ * fixture-only guard walked past it because a doc is not a fixture. Docs are
+ * the other place an author pastes a terminal path, and these are exactly the
+ * trees the preflight scans as `--path 'plugins/*' --path 'packages/*'`, so
+ * checking them here catches the leak at authoring time instead of in a red job
+ * after the merge (#1060).
+ *
+ * Deliberately not every `.md`: root `docs/` is outside the preflight's publish
+ * surface and carries host-absolute reference links on purpose, and a nested
+ * example README is not the plugin's README. Widening to those would add
+ * findings whose fix is not "edit this line", which is how a guard gets
+ * disabled.
+ */
+export function isDocPath(relPath) {
+  const segments = relPath.split("/");
+  if (!segments[segments.length - 1].endsWith(".md")) return false;
+  if (segments[0] !== "packages" && segments[0] !== "plugins") return false;
+  if (segments.length === 3 && segments[2] === "README.md") return true;
+  return segments.length > 3 && segments[2] === "docs";
+}
+
 function walk(dir, acc) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     // `plugins/uppidi-forge` is a committed alias symlink to `uppidi-fleet`.
@@ -255,15 +289,26 @@ export function fixtureFiles(root) {
 }
 
 /**
+ * Every committed publish-surface doc under `root`, as repo-relative
+ * slash-separated paths, sorted so a finding list is stable between runs.
+ */
+export function docFiles(root) {
+  return walk(root, [])
+    .map((abs) => relative(root, abs).split(sep).join("/"))
+    .filter(isDocPath)
+    .sort();
+}
+
+/**
  * The guard itself: read every fixture file under `root` and return the
  * real-home-path findings in it, each labelled with its repo-relative path and
  * line. An unreadable or non-UTF-8 file is a finding of its own rather than a
  * skipped file -- a guard that quietly ignores a file it cannot read is a guard
  * with a hole in exactly the place it cannot report.
  */
-export function scanFixtureTree(root) {
+function scanFiles(root, files) {
   const findings = [];
-  for (const rel of fixtureFiles(root)) {
+  for (const rel of files) {
     let text;
     try {
       text = readFileSync(join(root, rel), "utf8");
@@ -274,6 +319,15 @@ export function scanFixtureTree(root) {
     findings.push(...findRealHomePaths(text, rel));
   }
   return findings;
+}
+
+export function scanFixtureTree(root) {
+  return scanFiles(root, fixtureFiles(root));
+}
+
+/** The doc half of the guard: committed docs and READMEs on the publish surface. */
+export function scanDocTree(root) {
+  return scanFiles(root, docFiles(root));
 }
 
 /** One line per finding, naming the file, the line, and the path. */

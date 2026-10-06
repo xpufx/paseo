@@ -35,12 +35,15 @@
  * of a redundant guard is not that it misses a leak -- it is that somebody
  * deletes the slower one and then this one quietly stops running.
  *
- * Scope is test and fixture files, not the published tree. A committed fixture
- * is where a real path gets pasted, and it is the only such file the author can
- * fix by editing one line. The reasoning is spelled out in
- * scripts/lib/fixture-home-paths.mjs; the short version is that a second PII
- * rule reading the same paths as the preflight, with different wording, is a
- * rule that trains people to disable it.
+ * Scope is test and fixture files plus the committed docs on the publish
+ * surface (a `.md` under `packages/<name>/docs` or `plugins/<name>/docs`, or the
+ * top-level README of a package or plugin). A committed fixture is where a real
+ * path gets pasted, and a committed doc is the other place -- the #1057 audit
+ * pasted one there that the fixture-only guard walked past (#1062). Both are the
+ * only such files the author can fix by editing one line. The reasoning is
+ * spelled out in scripts/lib/fixture-home-paths.mjs; the short version is that a
+ * second PII rule reading the same paths as the preflight, with different
+ * wording, is a rule that trains people to disable it.
  *
  * This file is itself in the guard's scope, so the sample paths below are
  * assembled from a split root prefix rather than written out -- a literal
@@ -61,9 +64,12 @@ import { fileURLToPath } from "node:url";
 import {
   GENERIC_HOME_SEGMENTS,
   describeFinding,
+  docFiles,
   findRealHomePaths,
   fixtureFiles,
+  isDocPath,
   isFixturePath,
+  scanDocTree,
   scanFixtureTree,
 } from "./lib/fixture-home-paths.mjs";
 
@@ -75,6 +81,7 @@ const INSTALL_SMOKE = readFileSync(
 );
 
 const FIXTURE_FILES = fixtureFiles(REPO_ROOT);
+const DOC_FILES = docFiles(REPO_ROOT);
 
 /** The two absolute home roots, split so this file does not carry the shape. */
 const LINUX_ROOT = ["/hom", "e/"].join("");
@@ -221,6 +228,73 @@ test("the guard fires on a planted violation and reports where it is", () => {
   );
 });
 
+test("the guard fires on a planted doc violation and reports where it is", () => {
+  // #1062: the same paste happens in a committed doc -- the #1057 audit did
+  // exactly that and the fixture-only guard walked past it. The doc scope is
+  // separate, so it gets its own proof rather than riding on the fixture one.
+  const findings = withScratchTree(
+    (root) => {
+      const dir = join(root, "packages", "paseo-plugin-helper", "docs");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "plugin-api-usage-audit.md"),
+        [
+          "# Plugin API usage audit",
+          "",
+          "Read from the primary checkout:",
+          `  "${home(LINUX_ROOT, REAL_ACCOUNT, "/code/paseo/node_modules/@getpaseo/plugin")}"`,
+          "",
+        ].join("\n"),
+      );
+    },
+    (root) => scanDocTree(root),
+  );
+  assert.deepEqual(
+    findings.map((f) => [f.file, f.line, f.column, f.segment]),
+    [[
+      "packages/paseo-plugin-helper/docs/plugin-api-usage-audit.md",
+      4,
+      4,
+      REAL_ACCOUNT,
+    ]],
+    "a real home path pasted into a committed doc is reported with its file, line and column",
+  );
+});
+
+test("the doc scan covers docs trees and top-level package/plugin READMEs, and nothing else", () => {
+  const findings = withScratchTree(
+    (root) => {
+      const leak = (label) => `> ${label} ${home(LINUX_ROOT, REAL_ACCOUNT, "/code/paseo")}\n`;
+      mkdirSync(join(root, "packages", "helper", "docs", "nested"), { recursive: true });
+      mkdirSync(join(root, "packages", "helper", "src"), { recursive: true });
+      mkdirSync(join(root, "plugins", "probe", "docs"), { recursive: true });
+      mkdirSync(join(root, "plugins", "probe", "examples", "tools"), { recursive: true });
+      mkdirSync(join(root, "docs"), { recursive: true });
+      writeFileSync(join(root, "packages", "helper", "docs", "nested", "audit.md"), leak("pkg docs"));
+      writeFileSync(join(root, "plugins", "probe", "docs", "usage.md"), leak("plugin docs"));
+      writeFileSync(join(root, "packages", "helper", "README.md"), leak("package readme"));
+      writeFileSync(join(root, "plugins", "probe", "README.md"), leak("plugin readme"));
+      // Out of scope: a nested example README, a changelog, application docs,
+      // and root docs (outside the preflight's publish surface).
+      writeFileSync(join(root, "plugins", "probe", "examples", "tools", "README.md"), leak("nested readme"));
+      writeFileSync(join(root, "plugins", "probe", "CHANGELOG.md"), leak("changelog"));
+      writeFileSync(join(root, "packages", "helper", "src", "notes.md"), leak("src notes"));
+      writeFileSync(join(root, "docs", "plugins.md"), leak("root docs"));
+    },
+    (root) => scanDocTree(root),
+  );
+  assert.deepEqual(
+    findings.map((f) => f.file),
+    [
+      "packages/helper/README.md",
+      "packages/helper/docs/nested/audit.md",
+      "plugins/probe/README.md",
+      "plugins/probe/docs/usage.md",
+    ],
+    "docs trees and top-level READMEs are in scope; nested READMEs, changelogs, application docs and root docs are not",
+  );
+});
+
 test("the guard reads test and fixture files only", () => {
   // The scope boundary, asserted rather than assumed. A fixture is what the
   // author pastes into; `server/agents.ts` is a doc example the preflight already
@@ -289,6 +363,40 @@ test("fixture discovery is not vacuous: the leak sites from #621 and #624 are in
   }
 });
 
+test("the doc classifier reads the names it claims to read", () => {
+  const cases = [
+    ["packages/paseo-plugin-helper/docs/server.md", true],
+    ["packages/paseo-plugin-helper/docs/nested/audit.md", true],
+    ["plugins/uppidi-fleet/docs/router-architecture.md", true],
+    ["packages/paseo-plugin-helper/README.md", true],
+    ["plugins/uppidi-fleet/README.md", true],
+    ["plugins/forges/examples/tools/README.md", false],
+    ["plugins/uppidi-fleet/CHANGELOG.md", false],
+    ["packages/paseo-plugin-helper/src/notes.md", false],
+    ["docs/plugins.md", false],
+    ["README.md", false],
+    ["plugins/uppidi-fleet/server/agents.ts", false],
+  ];
+  for (const [path, want] of cases) {
+    assert.equal(isDocPath(path), want, `${path} classification`);
+  }
+});
+
+test("doc discovery is not vacuous: the publish-surface docs are in scope", () => {
+  assert.ok(
+    DOC_FILES.length > 20,
+    `expected the committed doc surface to be broad, found ${DOC_FILES.length} files`,
+  );
+  for (const known of [
+    "packages/paseo-plugin-helper/docs/plugin-api-usage-audit.md", // the #1057/#1060 leak site
+    "packages/paseo-plugin-helper/docs/server.md",
+    "plugins/uppidi-fleet/README.md",
+    "plugins/x-comms/docs/contract-drift.md",
+  ]) {
+    assert.ok(DOC_FILES.includes(known), `${known} must be scanned by the doc guard`);
+  }
+});
+
 test("the classifier reads the names it claims to read", () => {
   const cases = [
     ["plugins/uppidi-fleet/client/testing/fleet-fixtures.ts", true],
@@ -307,6 +415,18 @@ test("the classifier reads the names it claims to read", () => {
 });
 
 // ------------------------------------------------------------------ the tree
+
+test("no committed doc or README carries a real home path (#1062)", () => {
+  const offenders = scanDocTree(REPO_ROOT).map(
+    (f) =>
+      `${describeFinding(f)}\n         a committed doc on the publish surface must not carry a real home directory. ` +
+      `Replace the account with one of the generic placeholders in ` +
+      `scripts/lib/fixture-home-paths.mjs (GENERIC_HOME_SEGMENTS) and keep the rest of the ` +
+      `path, including its length. See #1060 for the audit doc that got through because ` +
+      `this guard only scanned fixtures.`,
+  );
+  assert.deepEqual(offenders, []);
+});
 
 test("no committed test or fixture file carries a real home path (#627)", () => {
   const offenders = scanFixtureTree(REPO_ROOT).map(
