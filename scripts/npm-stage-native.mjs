@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** npm-native staged publishing with a notify-only 2fado follow-up. */
+/** npm-native staged publishing; 2fado notification is opt-in and decoupled from staging. */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -97,9 +97,11 @@ export function localTarballPath(tarball, baseDir) {
 
 /**
  * Probe for the notify-only daemon. By default, an unavailable CLI or unreachable
- * daemon causes a hard failure (throws an Error). Staging without notification
- * requires an explicit opt-out via `allowNoNotify: true`, `notify: false`, or
- * the `TWOFADO_NOTIFY_OPTIONAL=1` environment variable.
+ * daemon causes a hard failure (throws an Error). This primitive is not part of
+ * the staging path: staging runs without notification by default, so a missing
+ * daemon can never fail a stage. It is only consulted when a caller explicitly
+ * opts into notification via `notify: true`, and then with `allowNoNotify: true`
+ * so the best-effort probe cannot hard-fail either.
  */
 export function preflightNotifyDaemon({ run = commandResult, notifyBin = "2fado", allowNoNotify = false, env = process.env } = {}) {
   const isOptional = allowNoNotify || env?.TWOFADO_NOTIFY_OPTIONAL === "1";
@@ -111,7 +113,7 @@ export function preflightNotifyDaemon({ run = commandResult, notifyBin = "2fado"
       console.warn(`[npm-stage] 2fado notify CLI/daemon unavailable (${err.message}); staging without notification (opt-out enabled).`);
       return false;
     }
-    throw new Error(`[npm-stage] 2fado notify CLI/daemon unavailable (${err.message}). Set TWOFADO_NOTIFY_OPTIONAL=1 or pass --skip-notify to stage without notification.`);
+    throw new Error(`[npm-stage] 2fado notify CLI/daemon unavailable (${err.message}). Staging is unaffected; opt into notification only when the 2fado daemon is reachable.`);
   }
 }
 
@@ -211,7 +213,12 @@ export function stagePackage(entry, { run = commandResult, npmBin = "npm", notif
  */
 export function stagePackages(manifest, options) {
   if (!Array.isArray(manifest?.packages)) throw new Error("manifest packages must be an array");
-  const notify = options?.notify ?? preflightNotifyDaemon(options ?? {});
+  // Notification is decoupled from staging: a missing 2fado daemon must never
+  // fail a stage. Callers opt in with `notify: true`; even then the preflight is
+  // best-effort and only warns.
+  const notify = options?.notify === true
+    ? preflightNotifyDaemon({ ...options, allowNoNotify: true })
+    : false;
   return manifest.packages.map((entry) => {
     try {
       return stagePackage(entry, { ...options, notify });
@@ -281,9 +288,11 @@ function reportOutcomes(results, env = process.env) {
 
 function parseArgs(argv) {
   const manifestArg = argv.find((arg) => arg.startsWith("--manifest="));
-  if (!manifestArg) throw new Error("usage: node scripts/npm-stage-native.mjs --manifest=publish-stage/manifest.json [--skip-notify]");
-  const skipNotify = argv.includes("--skip-notify") || argv.includes("--allow-no-notify");
-  return { manifestPath: manifestArg.slice("--manifest=".length), skipNotify };
+  if (!manifestArg) throw new Error("usage: node scripts/npm-stage-native.mjs --manifest=publish-stage/manifest.json [--notify]");
+  // Staging never notifies by default: notification belongs to the publish
+  // handoff, not the stage run. `--notify` opts into the best-effort follow-up.
+  const notify = argv.includes("--notify") && !argv.includes("--skip-notify") && !argv.includes("--allow-no-notify");
+  return { manifestPath: manifestArg.slice("--manifest=".length), notify };
 }
 
 function workflowRunLink(env) {
@@ -293,15 +302,15 @@ function workflowRunLink(env) {
 }
 
 export function main(argv = process.argv.slice(2), env = process.env) {
-  const { manifestPath, skipNotify } = parseArgs(argv);
+  const { manifestPath, notify } = parseArgs(argv);
   const resolved = path.resolve(manifestPath);
   const manifest = JSON.parse(fs.readFileSync(resolved, "utf8"));
   const results = stagePackages(manifest, {
     npmBin: env.NPM_STAGE_NPM_BIN || "npm",
     notifyBin: env.TWOFADO_NOTIFY_BIN || "2fado",
-    link: workflowRunLink(env),
+    link: notify ? workflowRunLink(env) : undefined,
     baseDir: path.dirname(resolved),
-    allowNoNotify: skipNotify,
+    notify,
     env,
   });
   reportOutcomes(results, env);

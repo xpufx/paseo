@@ -133,6 +133,33 @@ function fakeNpm({ stageLists = [[]], published = [notFound()], publishError, no
 }
 
 {
+  // Decoupled by default: staging never probes the notify daemon, so a missing
+  // 2fado CLI cannot fail the stage even without an explicit opt-out (#990).
+  const { run, calls } = fakeNpm({
+    stageLists: [[], [{ packageName: entry.publishAs, version: entry.version, id: "stage-1" }]],
+    published: [notFound()],
+    preflightError: new Error("2fado daemon unavailable"),
+  });
+  let result;
+  quiet(() => { result = stagePackages({ packages: [entry] }, { run, link: "https://forge.example/runs/42" }); });
+  check("staging succeeds without notify by default", result?.[0]?.outcome === "staged");
+  check("staging never probes 2fado by default", !calls.some(([command]) => command === "2fado"));
+}
+
+{
+  // Opt-in notification is best-effort: an unreachable daemon warns but the
+  // stage still succeeds.
+  const { run } = fakeNpm({
+    stageLists: [[], [{ packageName: entry.publishAs, version: entry.version, id: "stage-1" }]],
+    published: [notFound()],
+    preflightError: new Error("2fado daemon unavailable"),
+  });
+  let result;
+  quiet(() => { result = stagePackages({ packages: [entry] }, { run, notify: true, link: "https://forge.example/runs/42" }); });
+  check("opt-in notify with missing daemon still stages", result?.[0]?.outcome === "staged");
+}
+
+{
   // Genuine stage: the intended version shows up in the staging area after publish.
   const { run, calls } = fakeNpm({
     stageLists: [[], [{ packageName: entry.publishAs, version: entry.version, id: "stage-1" }]],

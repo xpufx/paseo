@@ -111,27 +111,9 @@ jobs:
           npm stage --help >/dev/null || { echo "::error::npm stage not available after upgrade"; exit 1; }
           # Authenticate for `npm stage publish` (any token type works, no 2FA).
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NPM_TOKEN" > "$HOME/.npmrc"
-          export TWOFADO_NOTIFY_BIN="${TWOFADO_NOTIFY_BIN:-2fado}"
-          # Notify daemon is required by default; fail loudly if unavailable unless TWOFADO_NOTIFY_OPTIONAL=1
-          if ! command -v "$TWOFADO_NOTIFY_BIN" >/dev/null 2>&1; then
-            if [ "${TWOFADO_NOTIFY_OPTIONAL:-0}" = "1" ]; then
-              echo "::warning::2fado notify CLI is unavailable; continuing because TWOFADO_NOTIFY_OPTIONAL=1"
-            else
-              echo "::error::2fado notify CLI is unavailable ($TWOFADO_NOTIFY_BIN); daemon preflight failed"
-              exit 1
-            fi
-          else
-            echo "2fado notify CLI found at $(command -v "$TWOFADO_NOTIFY_BIN"); checking daemon..."
-            if ! "$TWOFADO_NOTIFY_BIN" list >/dev/null 2>&1; then
-              if [ "${TWOFADO_NOTIFY_OPTIONAL:-0}" = "1" ]; then
-                echo "::warning::2fado daemon unreachable; continuing because TWOFADO_NOTIFY_OPTIONAL=1"
-              else
-                echo "::error::2fado notify daemon unreachable; preflight failed"
-                exit 1
-              fi
-            fi
-          fi
-          # Stage all packages and notify
+          # Staging is decoupled from the notify-only 2fado daemon. A missing
+          # CLI/daemon must never fail this step, and notification belongs to the
+          # human publish/approve handoff rather than the staging run.
           node scripts/npm-stage-native.mjs --manifest=publish-stage/manifest.json
 
       - name: Post-stage verification (verify staged packages in npm registry)
