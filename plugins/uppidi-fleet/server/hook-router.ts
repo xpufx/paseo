@@ -2812,6 +2812,17 @@ export function countActiveWorkers(
 /** Consecutive sweeps an absent orchestrator must stay missing before pruning (#889). */
 export const ORCHESTRATOR_PRUNE_GRACE_SWEEPS = 3;
 
+/**
+ * Rosters assembled without the global `paseo ls --global` source are marked
+ * partial: they can omit live agents in other workspaces, so destructive
+ * callers must not treat a missing entry as proof of absence (#1068).
+ */
+const partialAgentMaps = new WeakSet<Map<string, WatchdogAgent>>();
+
+export function isPartialAgentMap(map: Map<string, WatchdogAgent> | null | undefined): boolean {
+  return Boolean(map && partialAgentMaps.has(map));
+}
+
 export interface StaleOrchestratorMark {
   key: string;
   agentId: string;
@@ -4154,13 +4165,34 @@ export class HookRouter {
     return this.activePaseo ?? (this.server as any)?.paseo ?? null;
   }
 
-  public readFrontDesk(): FrontDeskRecord | null {
+  /**
+   * Every path a `frontdesk.json` may live at, writer targets first. `writeFrontDesk`
+   * writes `dirname(stateDir)/frontdesk.json`, while `writePersistedFrontDesk`
+   * (agents.ts) uses the persisted hook state dir, which can differ from this
+   * router's dirs in another process. Reading both keeps a written file visible (#1068).
+   */
+  private frontDeskCandidatePaths(): string[] {
     const parentDir = dirname(this.stateDir);
-    const candidates = [
-      join(this.stateDir, "frontdesk.json"),
-      join(parentDir, "frontdesk.json"),
-      join(this.queueDir, "frontdesk.json"),
+    const custom = process.env.HOOK_STATE_DIR;
+    const persistedDir =
+      custom && custom.trim().length > 0
+        ? custom.trim()
+        : process.env.NODE_ENV === "test"
+          ? join(os.tmpdir(), `paseo-uppidi-fleet-state-${process.pid}`)
+          : join(process.env.HOME ?? os.homedir(), ".paseo", "forgejo-hook");
+    return [
+      ...new Set([
+        join(parentDir, "frontdesk.json"),
+        join(this.stateDir, "frontdesk.json"),
+        join(this.queueDir, "frontdesk.json"),
+        join(persistedDir, "frontdesk.json"),
+        join(dirname(persistedDir), "frontdesk.json"),
+      ]),
     ];
+  }
+
+  public readFrontDesk(): FrontDeskRecord | null {
+    const candidates = this.frontDeskCandidatePaths();
 
     for (const path of candidates) {
       if (existsSync(path)) {
@@ -5475,7 +5507,6 @@ export class HookRouter {
             const a: any = entry?.agent ?? entry;
             if (a?.id) map.set(a.id, a);
           }
-          if (map.size > 0) return map;
         }
       } catch {
         // fall through to CLI
@@ -5486,6 +5517,8 @@ export class HookRouter {
       execFileAsync !== defaultExecFileAsync ||
       Boolean(process.env.PATH?.split(":")[0]?.includes("paseo-stub"));
     if (!this.options?.allowCliSpawn && isTest && !hasCliStub) {
+      // Hermetic tests have no global roster; an SDK-only map is partial.
+      if (map.size > 0) partialAgentMaps.add(map);
       return map.size > 0 ? map : null;
     }
     try {
@@ -5498,6 +5531,12 @@ export class HookRouter {
       }
       return map;
     } catch {
+      // The global roster is the only completeness guarantee. Without it the
+      // SDK-derived entries are partial, so callers must avoid hard pruning.
+      if (map.size > 0) {
+        partialAgentMaps.add(map);
+        return map;
+      }
       return null;
     }
   }
@@ -6089,6 +6128,7 @@ export class HookRouter {
     if (!agentMap) {
       return { ok: false, error: "daemon unreachable", prunedCount: 0, pruned: [] };
     }
+    const agentMapPartial = isPartialAgentMap(agentMap);
 
     const graceSweeps = Math.max(1, opts.graceSweeps ?? ORCHESTRATOR_PRUNE_GRACE_SWEEPS);
     const nowIso = new Date(opts.now ?? Date.now()).toISOString();
@@ -6178,6 +6218,24 @@ export class HookRouter {
         };
         this.persistOrchestratorRecord(updated);
         markedStale.push({ key, agentId, missCount, reason: updated.staleReason! });
+        continue;
+      }
+
+      if (agentMapPartial) {
+        // The roster lacks the global `paseo ls --global` source, so a missing
+        // entry is not proof of absence: an orchestrator in another workspace
+        // can be omitted. Never verify or unlink from a partial roster; keep
+        // the registration stale until a complete sweep confirms (#1068).
+        const updated: OrchestratorRecord = {
+          ...record,
+          missCount: graceSweeps,
+          firstMissAt: record.firstMissAt ?? nowIso,
+          stale: true,
+          staleSince: record.staleSince ?? nowIso,
+          staleReason: "agent absent from partial daemon roster (verification skipped)",
+        };
+        this.persistOrchestratorRecord(updated);
+        markedStale.push({ key, agentId, missCount: graceSweeps, reason: updated.staleReason! });
         continue;
       }
 
@@ -7429,12 +7487,7 @@ export class HookRouter {
 
   public clearFrontDesk(): number {
     let count = 0;
-    const parentDir = dirname(this.stateDir);
-    const candidates = [
-      join(this.stateDir, "frontdesk.json"),
-      join(parentDir, "frontdesk.json"),
-      join(this.queueDir, "frontdesk.json"),
-    ];
+    const candidates = this.frontDeskCandidatePaths();
 
     for (const p of candidates) {
       if (existsSync(p)) {

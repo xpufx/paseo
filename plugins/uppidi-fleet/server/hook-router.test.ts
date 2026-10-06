@@ -2615,6 +2615,66 @@ describe("hook-router orchestrator pruning (#458)", () => {
     assert.equal(record?.missCount, 3);
   });
 
+  it("never unlinks a registration from a partial (SDK-only) roster (#1068)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-other-workspace", "agent-other-ws");
+    // The SDK list is workspace-scoped: it returns this workspace's agents but
+    // omits a live orchestrator registered in another workspace. The global CLI
+    // roster is unavailable, so the merged map is only partial (#1068).
+    (router as any).activePaseo = {
+      agents: {
+        list: async () => ({ entries: [{ id: "agent-in-this-workspace", status: "idle" }] }),
+      },
+    };
+    const calls: string[][] = [];
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      calls.push([...args]);
+      if (args[0] === "ls") throw new Error("global roster unavailable");
+      if (args[0] === "agent" && args[1] === "inspect") {
+        // A scoped inspect cannot see the agent in the other workspace.
+        return { stdout: JSON.stringify({ error: { code: "AGENT_NOT_FOUND" } }) };
+      }
+      return { stdout: "" };
+    });
+    try {
+      for (let i = 0; i < 5; i++) {
+        await router.pruneOrchestrators({ orchestratorRecords: router.listOrchestratorRecords() });
+      }
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+
+    const record = router.readOrchestrator("repo-other-workspace");
+    assert.equal(record?.agentId, "agent-other-ws", "a partial roster must never unlink a live orchestrator");
+    assert.equal(record?.stale, true);
+    assert.equal(
+      calls.some((c) => c[0] === "agent" && c[1] === "inspect"),
+      false,
+      "a partial roster must not trigger destructive verification",
+    );
+  });
+
+  it("unions the SDK list with the global CLI roster (#1068)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    (router as any).activePaseo = {
+      agents: {
+        list: async () => ({ entries: [{ id: "sdk-only", status: "idle" }] }),
+      },
+    };
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      if (args[0] === "ls") return { stdout: JSON.stringify([{ id: "cli-global", status: "idle" }]) };
+      return { stdout: "" };
+    });
+    try {
+      const map = await router.fetchAgentMap();
+      assert.ok(map);
+      assert.equal(map!.has("sdk-only"), true, "SDK entries must survive the CLI merge");
+      assert.equal(map!.has("cli-global"), true, "the global CLI roster must always be consulted");
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+  });
+
   it("deleteOrchestrator reports not found on a repeat delete", () => {
     const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
     router.writeOrchestrator("repo-del", "agent-del");
@@ -4329,6 +4389,23 @@ describe("hook-router teardown cleanup methods (#774)", () => {
     assert.ok(cleared >= 1);
     assert.equal(router.readFrontDesk(), null);
     assert.equal(router.getQueue("frontdesk").length, 0);
+  });
+
+  it("reads a frontdesk.json written to the persisted hook state dir by another process (#1068)", () => {
+    const persistedDir = join(tempDir, "persisted", "orchestrators");
+    const prevHookStateDir = process.env.HOOK_STATE_DIR;
+    mkdirSync(persistedDir, { recursive: true });
+    process.env.HOOK_STATE_DIR = persistedDir;
+    try {
+      writeFileSync(
+        join(persistedDir, "frontdesk.json"),
+        JSON.stringify({ version: 1, agentId: "fd-persisted", updatedAt: null, by: "frontdesk" }),
+      );
+      assert.equal(router.readFrontDesk()?.agentId, "fd-persisted");
+    } finally {
+      if (prevHookStateDir === undefined) delete process.env.HOOK_STATE_DIR;
+      else process.env.HOOK_STATE_DIR = prevHookStateDir;
+    }
   });
 
   it("clearAllOrchestrators unlinks all orchestrator files but preserves frontdesk", () => {
