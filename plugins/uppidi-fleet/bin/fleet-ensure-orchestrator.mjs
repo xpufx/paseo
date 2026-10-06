@@ -13,6 +13,11 @@ function printHelp() {
 
 Deterministically ensure an active, autonomous orchestrator agent exists for a repository.
 
+Orchestrators are provisioned unattended: the SDK spawn carries
+config.featureValues.auto_accept, and the CLI fallback pre-grants a
+workspace-scoped pending permission after spawn. \`paseo run\` exposes no
+auto-accept/feature flag, so no such flag is passed.
+
 Options:
   --repo <repo>          Target repository slug or key (e.g. 'owner/repo')
   --mode <mode>          Execution permission mode (default: 'yolo')
@@ -63,6 +68,10 @@ async function main() {
 
   try {
     const router = getActiveHookRouter() ?? new HookRouter();
+    // `ensureOrchestrator` applies the unattended pre-grant on both spawn paths
+    // (#974): the SDK create payload carries `featureValues.auto_accept`, and
+    // the CLI fallback (this bin's path, since it has no in-process SDK) falls
+    // back to a workspace-scoped `paseo permit allow` auto-grant.
     const result = await router.ensureOrchestrator({
       repo,
       mode: values.mode,

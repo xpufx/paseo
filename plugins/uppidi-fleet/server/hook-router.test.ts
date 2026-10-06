@@ -4881,6 +4881,68 @@ describe("orchestrator provider mode resolution (#894)", () => {
     assert.ok(modeIdx >= 0, "expected --mode in CLI args");
     assert.equal(capturedRuns[0][modeIdx + 1], "full-access");
   });
+
+  it("forwards auto_accept in the SDK create payload and scopes cwd to the workspace root (#974)", async () => {
+    const payloads: any[] = [];
+    const router = makeRouter({
+      providerModeResolver: async () => ({ modes: [{ id: "yolo", label: "YOLO" }], defaultModeId: "yolo" }),
+    });
+    (router as any).activePaseo = {
+      agents: {
+        create: async (payload: any) => {
+          payloads.push(payload);
+          return { id: "agent-sdk-974" };
+        },
+        ref: (id: string) => ({
+          current: () => ({ id, labels: {} }),
+          setMode: async () => {},
+          update: async () => {},
+        }),
+      },
+    };
+
+    const res = await router.ensureOrchestrator({ repo: "xpufx-org/paseo" });
+    assert.equal(res.ok, true);
+    assert.equal(res.agentId, "agent-sdk-974");
+    assert.equal(res.autoAcceptApplied, true);
+    assert.equal(res.autoAllow, undefined, "the SDK path pre-grants; no CLI auto-allow runs");
+    assert.equal(payloads.length, 1);
+    assert.deepEqual(payloads[0].config.featureValues, { auto_accept: true });
+    assert.equal(payloads[0].config.cwd, tempRepoDir);
+    assert.equal(payloads[0].cwd, tempRepoDir);
+    assert.equal(payloads[0].workspaceId, "ws-paseo-main");
+    assert.equal(payloads[0].workspace, "ws-paseo-main");
+  });
+
+  it("pre-grants a workspace-scoped permission on the CLI fallback and passes no auto-accept flag (#974)", async () => {
+    const grantScopes: Array<{ agentId: string; scopes: readonly string[] }> = [];
+    const router = makeRouter({
+      allowCliSpawn: true,
+      providerModeResolver: async () => ({ modes: [] }),
+      spawnAutoAllow: async (agentId, scopePrefixes) => {
+        grantScopes.push({ agentId, scopes: scopePrefixes });
+        return { allowed: true, permissionId: "perm-974", scope: tempRepoDir };
+      },
+    });
+
+    const res = await router.ensureOrchestrator({ repo: "xpufx-org/paseo" });
+    assert.equal(res.ok, true);
+    assert.equal(res.agentId, "agent-cli");
+    assert.equal(res.autoAcceptApplied, false);
+    assert.deepEqual(res.autoAllow, { allowed: true, permissionId: "perm-974", scope: tempRepoDir });
+    assert.deepEqual(grantScopes, [{ agentId: "agent-cli", scopes: [tempRepoDir] }]);
+
+    assert.equal(capturedRuns.length, 1);
+    const args = capturedRuns[0];
+    assert.equal(args[args.indexOf("--cwd") + 1], tempRepoDir, "CLI spawn scopes execution to the workspace root");
+    assert.equal(
+      args.some(
+        (a) => a === "--auto-accept" || a.startsWith("--auto-accept") || a === "--feature" || a.startsWith("auto_accept"),
+      ),
+      false,
+      "paseo run exposes no auto-accept flag; it must not be passed",
+    );
+  });
 });
 
 describe("board sweep auto-reconciliation (#794)", () => {

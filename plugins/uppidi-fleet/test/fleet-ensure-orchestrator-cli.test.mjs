@@ -18,6 +18,17 @@ describe("bin/fleet-ensure-orchestrator.mjs CLI (#793)", () => {
     assert.match(stdout, /--provider/);
   });
 
+  test("--help documents the unattended pre-grant and advertises no --auto-accept flag (#974)", async () => {
+    const { stdout } = await execFileAsync("node", [cliPath, "--help"]);
+    assert.match(stdout, /auto_accept/);
+    assert.match(stdout, /no\s+auto-accept\/feature flag/);
+    assert.doesNotMatch(
+      stdout,
+      /--auto-accept/,
+      "paseo run exposes no auto-accept flag; the CLI must not offer one",
+    );
+  });
+
   test("missing repo exits with error", async () => {
     await assert.rejects(
       async () => {

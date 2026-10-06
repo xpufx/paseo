@@ -1250,7 +1250,13 @@ fall back to it (e.g. a slash-less provider the SDK cannot express) do not get
 the toggle. `allowPaths` seeds a bounded, best-effort auto-allow:
 after spawn the plugin polls `pendingPermissions` (SDK `ref()`, falling back to
 `paseo permit ls --json`) and allows **exactly one** request whose scope falls
-under a declared prefix, logging the outcome. This is a plugin-surface shim —
+under a declared prefix, logging the outcome. Orchestrator provisioning
+(`POST /orchestrators/spawn`, `fleet-ensure-orchestrator`) carries the same
+unattendedness (#974): the SDK create payload sets
+`config.featureValues.auto_accept`, and the CLI fallback — used when there is no
+in-process SDK, notably the standalone `fleet-ensure-orchestrator` bin — applies
+the workspace-root-scoped auto-allow, because `paseo run` still exposes no
+auto-accept flag. This is a plugin-surface shim —
 **the daemon has no pre-grant/permission-inheritance surface today**, so
 capability inheritance is best-effort, not enforced (daemon-side gap tracked in
 [#537](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/537)). Cross-ref:

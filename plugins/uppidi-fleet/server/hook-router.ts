@@ -179,6 +179,16 @@ export interface HookRouterOptions {
     model?: string;
     labels?: Record<string, string>;
   }) => Promise<{ id: string } | null>;
+  /**
+   * Scoped pre-grant applied after a CLI-spawned orchestrator (#974). Defaults
+   * to `agents.autoAllowScopedPermission` (SDK `respondToPermission`, falling
+   * back to `paseo permit allow`); tests inject a stub to observe the declared
+   * workspace scope without touching the daemon.
+   */
+  spawnAutoAllow?: (
+    agentId: string,
+    scopePrefixes: readonly string[],
+  ) => Promise<{ allowed: boolean; permissionId?: string; scope?: string; reason?: string }>;
 }
 
 export interface EnsureOrchestratorInput {
@@ -198,6 +208,13 @@ export interface EnsureOrchestratorResult {
   cwd?: string;
   /** Machine-readable failure kind so callers can pick an HTTP status (#973). */
   errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled";
+  /** Whether the SDK create payload carried `featureValues.auto_accept` (#974). */
+  autoAcceptApplied?: boolean;
+  /**
+   * Best-effort scoped pre-grant result for a CLI-spawned orchestrator (#974).
+   * `undefined` when no workspace root was known or the grant did not run.
+   */
+  autoAllow?: { allowed: boolean; permissionId?: string; scope?: string; reason?: string };
   error?: string;
 }
 
@@ -4042,6 +4059,10 @@ export class HookRouter {
     };
 
     let agentId: string | null = null;
+    let autoAcceptApplied: boolean | undefined;
+    let autoAllow:
+      | { allowed: boolean; permissionId?: string; scope?: string; reason?: string }
+      | undefined;
 
     // Custom test / injection hook
     if (typeof this.options?.spawnAgent === "function") {
@@ -4061,6 +4082,8 @@ export class HookRouter {
         return { ok: false, errorCode: "spawn_failed", error: err?.message ?? String(err), repo };
       }
     } else {
+      let spawnedViaCli = false;
+
       // Try SDK first
       const sdkPaseo = this.getPaseo();
       if (sdkPaseo?.agents && typeof (sdkPaseo.agents as any).create === "function") {
@@ -4092,6 +4115,7 @@ export class HookRouter {
           }
           const created = await (sdkPaseo.agents as any).create(createPayload);
           agentId = created?.id ?? (typeof created === "string" ? created : null);
+          if (agentId) autoAcceptApplied = true;
         } catch (err) {
           this.log(
             `[warn] SDK agent creation failed for ${repo}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`,
@@ -4111,6 +4135,12 @@ export class HookRouter {
           };
         }
         try {
+          spawnedViaCli = true;
+          // `paseo run` exposes no auto-accept/feature flag (verified against
+          // `paseo run --help`), so the SDK create payload is the only true
+          // pre-grant surface. The CLI fallback pre-grants best-effort after
+          // spawn below by allowing one workspace-scoped pending permission
+          // (#974).
           const args = ["run", "-d", "--title", title];
           if (targetProvider) args.push("--provider", targetProvider);
           if (targetModel) args.push("--model", targetModel);
@@ -4139,6 +4169,11 @@ export class HookRouter {
           this.log(`[error] CLI agent run failed for ${repo}: ${err?.message ?? String(err)}`);
           return { ok: false, errorCode: "spawn_failed", error: err?.message ?? String(err), repo };
         }
+      }
+
+      if (spawnedViaCli && agentId) {
+        autoAcceptApplied = false;
+        autoAllow = await this.autoAllowOrchestratorScope(agentId, resolved.cwd);
       }
     }
 
@@ -4191,7 +4226,42 @@ export class HookRouter {
       repo,
       workspaceId: resolved.workspaceId,
       cwd: resolved.cwd,
+      autoAcceptApplied,
+      autoAllow,
     };
+  }
+
+  /**
+   * Best-effort workspace-scoped pre-grant for a CLI-spawned orchestrator (#974).
+   *
+   * `paseo run` exposes no auto-accept/feature flag, so the SDK create payload
+   * (`config.featureValues.auto_accept`) is the only true pre-grant surface. The
+   * CLI fallback can only allow the first pending permission whose scope falls
+   * under the workspace root, mirroring `spawnPaseoAgent`'s `allowPaths` grant.
+   * Tests stay hermetic: without an injected `spawnAutoAllow`, the grant is a
+   * no-op under test.
+   */
+  private async autoAllowOrchestratorScope(
+    agentId: string,
+    workspaceRoot: string | undefined,
+  ): Promise<{ allowed: boolean; permissionId?: string; scope?: string; reason?: string } | undefined> {
+    const scope = workspaceRoot?.trim();
+    if (!agentId || !scope) return undefined;
+
+    const isTest = this.isTestMode || process.env.NODE_ENV === "test";
+    const injected = this.options?.spawnAutoAllow;
+    if (!injected && isTest) return undefined;
+    try {
+      if (injected) return await injected(agentId, [scope]);
+      const { autoAllowScopedPermission } = await import("./agents.js");
+      const paseo = this.getPaseo();
+      return await autoAllowScopedPermission(agentId, [scope], paseo ? { paseo } : undefined);
+    } catch (err) {
+      this.log(
+        `[warn] scoped auto-allow failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { allowed: false, reason: "auto-allow failed" };
+    }
   }
 
   public async getActiveAgentIds(): Promise<Set<string>> {
