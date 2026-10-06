@@ -1,4 +1,4 @@
-# paseo-plugin-helper
+# paseo-plugin-helper (deprecated)
 
 > Developer toolkit and lifecycle primitives for building high-quality Paseo desktop & mobile plugins.
 
