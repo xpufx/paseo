@@ -1,6 +1,6 @@
 {
   "id": "antigravity-claude",
-  "requirements": { "paseo": ">=0.9.0 },
+  "requirements": { "paseo": ">=0.9.0" },
   "build": [
     ["npm", "install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--no-workspaces"]
   ]
