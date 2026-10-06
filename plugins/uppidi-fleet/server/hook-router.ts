@@ -698,6 +698,86 @@ export function eventHash(repoKey: string, issue: number | null, kind: string, a
 
 export const FORGEJO_DIGEST_PREFIX = "🔔 Forgejo digest";
 
+// Issue #283/#985: fleet-originated prompts carry a hidden JSON signature as an
+// HTML comment so models can route machine turns without cluttering the
+// operator's rendered composer feed. Process-originated messages (router,
+// watchdog) have no agent id, so `sender` carries the process identity.
+export const FLEET_ENVELOPE_VERSION = 1;
+export const ROUTER_SENDER = "forgejo-hook";
+export const WATCHDOG_SENDER = "fleet-watchdog";
+export const FRONT_DESK_REPO = "frontdesk";
+export const FLEET_REPO = "fleet";
+
+export interface FleetEnvelopeFields {
+  origin: string;
+  sender: string;
+  repo: string;
+  kind: string;
+  ref?: number | string | null;
+}
+
+export interface FleetEnvelope {
+  fleet: {
+    v: number;
+    origin: string;
+    sender: string;
+    repo: string;
+    kind: string;
+    ref: number | string | null;
+  };
+}
+
+export function fleetEnvelope({ origin, sender, repo, kind, ref = null }: FleetEnvelopeFields): FleetEnvelope {
+  return {
+    fleet: {
+      v: FLEET_ENVELOPE_VERSION,
+      origin,
+      sender,
+      repo,
+      kind,
+      ref,
+    },
+  };
+}
+
+export function formatFleetEnvelope(fields: FleetEnvelopeFields): string {
+  return `<!-- ${JSON.stringify(fleetEnvelope(fields))} -->`;
+}
+
+/** Prepend the fleet signature to an agent/router prompt body. */
+export function withFleetEnvelope(fields: FleetEnvelopeFields, message: string): string {
+  if (typeof message === "string" && message.startsWith('<!-- {"fleet"')) return message;
+  return `${formatFleetEnvelope(fields)}\n${message}`;
+}
+
+export function routerEnvelope({
+  repo,
+  kind,
+  ref = null,
+}: {
+  repo: string;
+  kind: string;
+  ref?: number | string | null;
+}): FleetEnvelopeFields {
+  return { origin: "router", sender: ROUTER_SENDER, repo, kind, ref };
+}
+
+export function watchdogEnvelope({
+  repo = FLEET_REPO,
+  ref = null,
+}: { repo?: string; ref?: number | string | null } = {}): FleetEnvelopeFields {
+  return { origin: "watchdog", sender: WATCHDOG_SENDER, repo, kind: "alert", ref };
+}
+
+/** Alert repo context for a daemon agent, when resolvable (mirrors the standalone router). */
+export function agentRepoKey(
+  agent: Pick<WatchdogAgent, "id" | "labels"> | null | undefined,
+  orchRecords: ReadonlyArray<Pick<OrchestratorRecord, "agentId" | "key">>,
+): string {
+  const record = orchRecords.find((r) => r.agentId === agent?.id);
+  return record?.key ?? agent?.labels?.repo ?? FLEET_REPO;
+}
+
 export interface CoalesceEvent {
   hash: string;
   kind: string;
@@ -757,7 +837,11 @@ export function formatDigest(repoKey: string, issue: number | null, buffered: Co
   const head = `${FORGEJO_DIGEST_PREFIX} ${repoKey}${line} (${buffered.length} events: ${parts.join(", ")})`;
   const bodyText = latestCommentBody(buffered);
   const withBody = bodyText ? `${head}\nLatest comment: ${bodyText.slice(0, 2000)}` : head;
-  return last?.url && !withBody.includes(last.url) ? `${withBody} ${last.url}` : withBody;
+  const digest = last?.url && !withBody.includes(last.url) ? `${withBody} ${last.url}` : withBody;
+  return withFleetEnvelope(
+    routerEnvelope({ repo: repoKey, kind: "webhook", ref: issue ?? null }),
+    digest,
+  );
 }
 
 export function bufferKey(repoKey: string, issue: number | null): string {
@@ -2259,8 +2343,14 @@ export function summarize(event: string, body: any): string {
 
 export function formatWebhookMessage(event: string, body: any): string {
   const env = forgejoEnvelope(event, body);
-  const sum = summarize(event, body);
-  return `[forgejo-hook] ${JSON.stringify(env)}\n\n${sum}`;
+  const repo = keyFromPayload(body) ?? repositoryFromPayload(body)?.full_name ?? "unknown";
+  // The `[forgejo-hook]` machine line stays first and byte-identical so legacy
+  // parsers keep working; the fleet signature is prepended to the prompt body.
+  const message = withFleetEnvelope(
+    routerEnvelope({ repo, kind: "webhook", ref: issueNumberOf(body) }),
+    summarize(event, body),
+  );
+  return `[forgejo-hook] ${JSON.stringify(env)}\n\n${message}`;
 }
 
 export function stableId(key: string, msg: string): string {
@@ -3519,6 +3609,35 @@ export class HookRouter {
     }
   }
 
+  /**
+   * Stand-down steer for a demoted Front Desk or orchestrator (#283/#985).
+   * Fire-and-forget: a failed steer must never fail the promotion it follows.
+   */
+  public async deliverStandDown(
+    agentId: string,
+    kind: "frontdesk" | "orchestrator",
+    key: string,
+    newAgentId: string,
+  ): Promise<boolean> {
+    const head =
+      kind === "frontdesk"
+        ? "You are no longer Front Desk"
+        : `You are no longer the orchestrator of ${key}`;
+    const body =
+      `${head}; registry authority is now ${newAgentId}. ` +
+      "Stand down: stop sweeping, stop dispatching workers, stop adjudicating permissions for this repo.";
+    const repo = kind === "frontdesk" ? FRONT_DESK_REPO : key;
+    const message = withFleetEnvelope(routerEnvelope({ repo, kind: "handoff" }), body);
+    try {
+      const ok = await this.deliverMessage(agentId, message, { noWait: true, steer: true });
+      if (!ok) throw new Error("paseo send failed (stand-down steer)");
+      return true;
+    } catch (err) {
+      this.log(`[warn] stand-down steer failed for ${agentId.slice(0, 7)} (${key}): ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
   public isAgentBusy(agentId: string, agentMap?: Map<string, WatchdogAgent> | null): boolean {
     if (!agentId) return false;
 
@@ -3596,17 +3715,20 @@ export class HookRouter {
       deliverFn: (id: string, msg: string, o?: any) => Promise<boolean> | void;
       agentMap?: Map<string, WatchdogAgent> | null;
       isSos?: boolean;
+      /** Repo context for the fleet envelope; defaults to the fleet-wide pseudo repo. */
+      repo?: string;
     },
   ): void {
     const isSos = Boolean(opts.isSos);
+    const message = withFleetEnvelope(watchdogEnvelope({ repo: opts.repo ?? FLEET_REPO }), alert);
     const isBusy = !isSos && this.isAgentBusy(frontDeskId, opts.agentMap);
     if (isBusy) {
       this.log(`[info] Front Desk ${frontDeskId} is busy; queueing watchdog alert instead of interrupting active turn`);
-      this.enqueue("frontdesk", alert, false);
+      this.enqueue("frontdesk", message, false);
       return;
     }
     this.lastDeliveryTimes.set(frontDeskId, Date.now());
-    void opts.deliverFn(frontDeskId, alert, { noWait: true, steer: isSos });
+    void opts.deliverFn(frontDeskId, message, { noWait: true, steer: isSos });
   }
 
   public async updateAgentMetadata(
@@ -4326,6 +4448,22 @@ export class HookRouter {
     return Array.from(ids);
   }
 
+  /**
+   * One delivery target per orchestrator agent. A single registration is
+   * persisted under every candidate key (bare + forge-qualified), so records
+   * must be collapsed by agent id before notifying.
+   */
+  private listOrchestratorTargets(): Array<{ agentId: string; key: string }> {
+    const seen = new Set<string>();
+    const targets: Array<{ agentId: string; key: string }> = [];
+    for (const record of this.listOrchestratorRecords()) {
+      if (seen.has(record.agentId)) continue;
+      seen.add(record.agentId);
+      targets.push({ agentId: record.agentId, key: record.key });
+    }
+    return targets;
+  }
+
   public listOrchestratorRecords(): OrchestratorRecord[] {
     const recordsMap = new Map<string, OrchestratorRecord>();
     try {
@@ -4600,7 +4738,12 @@ export class HookRouter {
             this.watchdogAlerts.set(alertKey, now);
             const cmd = reqId ? `paseo permit allow ${agent.id} ${reqId}` : `paseo permit allow ${agent.id}`;
             const alert = `[Fleet Watchdog] Agent ${agent.title || agent.id.slice(0, 7)} (${agent.id.slice(0, 7)}) requires permission: ${action}. Front Desk adjudication command: ${cmd}`;
-            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+            this.deliverWatchdogAlert(frontDeskId, alert, {
+              deliverFn,
+              agentMap,
+              isSos: false,
+              repo: agentRepoKey(agent, orchRecords),
+            });
           }
         } else if (
           agent.requiresAttention === true &&
@@ -4618,7 +4761,12 @@ export class HookRouter {
           if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
             this.watchdogAlerts.set(alertKey, now);
             const alert = `[Fleet Watchdog] Agent ${agent.title || agent.id.slice(0, 7)} (${agent.id.slice(0, 7)}) requires attention (${agent.attentionReason || "stalled"}). Operator or Front Desk triage required.`;
-            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+            this.deliverWatchdogAlert(frontDeskId, alert, {
+              deliverFn,
+              agentMap,
+              isSos: false,
+              repo: agentRepoKey(agent, orchRecords),
+            });
           }
         }
       }
@@ -4715,13 +4863,28 @@ export class HookRouter {
         const label = assessment.name || assessment.agentId.slice(0, 7);
         if (assessment.taxonomy.includes("PROVIDER_QUOTA_EXHAUSTION")) {
           const alert = `[Fleet Watchdog] Agent ${label} (${assessment.agentId.slice(0, 7)}) hit provider/quota exhaustion: "${assessment.lastError}". Circuit-break: no auto-steer; operator required.`;
-          this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+          this.deliverWatchdogAlert(frontDeskId, alert, {
+            deliverFn,
+            agentMap,
+            isSos: false,
+            repo: agentRepoKey(agent, orchRecords),
+          });
         } else if (recovery.steered) {
           const alert = `[Fleet Watchdog] Auto-recovered agent ${label} (${assessment.agentId.slice(0, 7)}) [${assessment.taxonomy.join(", ")}] via ${recovery.actions.join(" -> ")}.`;
-          this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+          this.deliverWatchdogAlert(frontDeskId, alert, {
+            deliverFn,
+            agentMap,
+            isSos: false,
+            repo: agentRepoKey(agent, orchRecords),
+          });
         } else {
           const alert = `[Fleet Watchdog] Agent ${label} (${assessment.agentId.slice(0, 7)}) unhealthy [${assessment.taxonomy.join(", ")}]. Operator attention may be required.`;
-          this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+          this.deliverWatchdogAlert(frontDeskId, alert, {
+            deliverFn,
+            agentMap,
+            isSos: false,
+            repo: agentRepoKey(agent, orchRecords),
+          });
         }
       }
 
@@ -4744,7 +4907,10 @@ export class HookRouter {
           if (!this.canWatchdogAlert(assessment.alertKey, now)) continue;
           this.watchdogAlerts.set(assessment.alertKey, now);
 
-          const message = formatChildWakeupMessage(child, assessment);
+          const message = withFleetEnvelope(
+            routerEnvelope({ repo: agentRepoKey(parent, orchRecords), kind: "steer" }),
+            formatChildWakeupMessage(child, assessment),
+          );
           void deliverFn(parentId, message, { noWait: true, steer: true });
           anomalies.push({
             type: "CHILD_WAKEUP",
@@ -4805,7 +4971,7 @@ export class HookRouter {
           if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
             this.watchdogAlerts.set(alertKey, now);
             const alert = `[Fleet Watchdog] Registered orchestrator for ${key} (${agentId.slice(0, 7)}) was not found on daemon.`;
-            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
           }
           continue;
         }
@@ -4831,7 +4997,7 @@ export class HookRouter {
                 this.watchdogAlerts.set(alertKey, now);
                 const reasonDesc = isTurnLock ? "clearing foreground turn lock" : "reloading agent";
                 const alert = `[Fleet Watchdog] Auto-recovered orchestrator for ${key} (${agentId.slice(0, 7)}) by ${reasonDesc}.`;
-                this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+                this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
               }
               continue;
             }
@@ -4841,7 +5007,7 @@ export class HookRouter {
           if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
             this.watchdogAlerts.set(alertKey, now);
             const alert = `[Fleet Watchdog] Orchestrator for ${key} (${agentId.slice(0, 7)}) is in status error: "${errMsg}". Operator attention may be required.`;
-            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
           }
         }
       }
@@ -4857,7 +5023,7 @@ export class HookRouter {
         if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
           this.watchdogAlerts.set(alertKey, now);
           const alert = `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) but no orchestrator is registered.`;
-          this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+          this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
         }
       }
     }
@@ -4891,7 +5057,7 @@ export class HookRouter {
             const alert = reloaded
               ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${q.length} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`
               : `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) and has failed delivery ${attempts} times.`;
-            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false });
+            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
           }
         }
       }
@@ -5197,23 +5363,27 @@ export class HookRouter {
     await this.updateAgentMetadata(id, "Front Desk", { role: "front-desk" });
     if (previous && previous !== id) {
       await this.updateAgentMetadata(previous, "Front Desk (retired)", { role: "retired-front-desk" });
+      await this.deliverStandDown(previous, "frontdesk", FRONT_DESK_REPO, id);
     }
 
     const updatedAt = new Date().toISOString();
     this.writeFrontDesk(id, "frontdesk-handoff");
     void this.drain("frontdesk");
 
-    const onboarding =
+    const onboarding = withFleetEnvelope(
+      routerEnvelope({ repo: FRONT_DESK_REPO, kind: "handoff" }),
       `You are now the Front Desk agent. Read the active handoff snapshot at ${this.handoffPath()}. ` +
-      `Handoff snapshot:\n${String(snapshot).slice(0, 4000)}`;
+        `Handoff snapshot:\n${String(snapshot).slice(0, 4000)}`,
+    );
     await this.deliverMessage(id, onboarding, { noWait: true, steer: true });
 
-    const orchestrators = this.listOrchestratorAgentIds();
+    const orchestrators = this.listOrchestratorTargets();
     const notice = `Front Desk handover: ${id} is now Front Desk (handoff at ${this.handoffPath()}). Route operator escalations to it via 'paseo send --no-wait ${id} <msg>'.`;
     let notified = 0;
-    for (const orchId of orchestrators) {
-      if (orchId !== id) {
-        const ok = await this.deliverMessage(orchId, notice, { noWait: true, steer: true });
+    for (const target of orchestrators) {
+      if (target.agentId !== id) {
+        const message = withFleetEnvelope(routerEnvelope({ repo: target.key, kind: "handoff" }), notice);
+        const ok = await this.deliverMessage(target.agentId, message, { noWait: true, steer: true });
         if (ok) notified++;
       }
     }
@@ -6862,12 +7032,13 @@ export class HookRouter {
           await this.updateAgentMetadata(previous, "Front Desk (retired)", {
             role: "retired-front-desk",
           });
+          await this.deliverStandDown(previous, "frontdesk", FRONT_DESK_REPO, agentId);
         }
 
-        const orchestrators = this.listOrchestratorAgentIds();
         const activeAgents = await this.getActiveAgentIds();
-        const targetOrchestrators = orchestrators.filter(
-          (id) => id !== agentId && (activeAgents.size === 0 || activeAgents.has(id)),
+        const targetOrchestrators = this.listOrchestratorTargets().filter(
+          (target) =>
+            target.agentId !== agentId && (activeAgents.size === 0 || activeAgents.has(target.agentId)),
         );
 
         const notice =
@@ -6875,8 +7046,9 @@ export class HookRouter {
           `Front Desk registered: ${agentId}. Orchestrators must maintain composer silence and route all operator-escalation requests (attention/2-user) to Front Desk (${agentId}) via 'paseo send --steer --no-wait ${agentId} <msg>'.`;
 
         let notified = 0;
-        for (const orchId of targetOrchestrators) {
-          const ok = await this.deliverMessage(orchId, notice, { noWait: true, steer: true });
+        for (const target of targetOrchestrators) {
+          const message = withFleetEnvelope(routerEnvelope({ repo: target.key, kind: "handoff" }), notice);
+          const ok = await this.deliverMessage(target.agentId, message, { noWait: true, steer: true });
           if (ok) notified++;
         }
 

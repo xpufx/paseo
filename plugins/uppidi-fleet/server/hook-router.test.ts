@@ -14,6 +14,17 @@ import {
   formatWebhookMessage,
   forgejoEnvelope,
   summarize,
+  fleetEnvelope,
+  formatFleetEnvelope,
+  withFleetEnvelope,
+  routerEnvelope,
+  watchdogEnvelope,
+  agentRepoKey,
+  FLEET_ENVELOPE_VERSION,
+  ROUTER_SENDER,
+  WATCHDOG_SENDER,
+  FRONT_DESK_REPO,
+  FLEET_REPO,
   stableId,
   HookRouter,
   startHookRouter,
@@ -95,6 +106,20 @@ import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import { setMetricsFilePathForTest } from "./metrics.js";
 import { STALE_WIP_REMINDER_MARKER, type IssuesCheckIo } from "./issues-check.js";
 import { getUppidiFleetSettingsStorage, resetUppidiFleetSettingsStorageInstance } from "./settings.js";
+
+/** Extract the hidden `<!-- {"fleet": ...} -->` JSON comment from a delivered prompt. */
+function parseFleetComment(text: string | undefined): Record<string, any> | null {
+  if (typeof text !== "string") return null;
+  const start = text.indexOf("<!-- {");
+  if (start < 0) return null;
+  const end = text.indexOf(" -->", start);
+  if (end < 0) return null;
+  try {
+    return JSON.parse(text.slice(start + 5, end)).fleet ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Drop the persisted plugin settings so each test starts from schema defaults. */
 function clearSettingsStorage(): void {
@@ -242,6 +267,117 @@ describe("hook-router payload and key utilities", () => {
     assert.equal(id1, id2);
     assert.notEqual(id1, id3);
     assert.equal(id1.length, 16);
+  });
+});
+
+describe("fleet JSON envelope (#283/#985)", () => {
+  it("nests the envelope under `fleet` with v1 and defaults ref to null", () => {
+    const direct = fleetEnvelope({
+      origin: "orchestrator",
+      sender: "525721aa",
+      repo: "forge/o/r",
+      kind: "escalation",
+      ref: 38,
+    });
+    assert.deepEqual(Object.keys(direct), ["fleet"]);
+    assert.equal(direct.fleet.v, FLEET_ENVELOPE_VERSION);
+    assert.equal(direct.fleet.origin, "orchestrator");
+    assert.equal(direct.fleet.sender, "525721aa");
+    assert.equal(direct.fleet.repo, "forge/o/r");
+    assert.equal(direct.fleet.kind, "escalation");
+    assert.equal(direct.fleet.ref, 38);
+    assert.equal(
+      fleetEnvelope({ origin: "worker", sender: "w", repo: "forge/o/r", kind: "escalation" }).fleet.ref,
+      null,
+    );
+  });
+
+  it("formats a hidden HTML comment that round-trips", () => {
+    const formatted = formatFleetEnvelope({
+      origin: "frontdesk",
+      sender: "fd-1",
+      repo: "forge/o/r",
+      kind: "steer",
+    });
+    assert.ok(formatted.startsWith("<!-- {"));
+    assert.ok(formatted.endsWith("} -->"));
+    assert.equal(parseFleetComment(formatted)?.sender, "fd-1");
+  });
+
+  it("prepends the signature line and leaves an already-signed body untouched", () => {
+    const wrapped = withFleetEnvelope(routerEnvelope({ repo: "forge/o/r", kind: "steer" }), "body");
+    assert.ok(wrapped.startsWith("<!-- {"));
+    assert.ok(wrapped.split("\n")[0].endsWith("} -->"));
+    assert.ok(wrapped.endsWith("\nbody"));
+
+    const formatted = formatFleetEnvelope(routerEnvelope({ repo: "forge/o/r", kind: "steer" }));
+    assert.equal(withFleetEnvelope(routerEnvelope({ repo: "forge/o/r", kind: "steer" }), formatted), formatted);
+  });
+
+  it("stamps router and watchdog senders with the canonical origins", () => {
+    const routerFields = routerEnvelope({ repo: "forge/o/r", kind: "webhook", ref: 7 });
+    assert.equal(routerFields.origin, "router");
+    assert.equal(routerFields.sender, ROUTER_SENDER);
+    assert.equal(routerFields.ref, 7);
+
+    const watchdogFields = watchdogEnvelope({ repo: "forge/o/r" });
+    assert.equal(watchdogFields.origin, "watchdog");
+    assert.equal(watchdogFields.sender, WATCHDOG_SENDER);
+    assert.equal(watchdogFields.kind, "alert");
+    assert.equal(watchdogFields.ref, null);
+    assert.equal(watchdogEnvelope().repo, FLEET_REPO);
+    assert.equal(FRONT_DESK_REPO, "frontdesk");
+  });
+
+  it("resolves alert repo context from the registry, labels, then the fleet fallback", () => {
+    const records = [{ key: "forge/o/registered", agentId: "agent-1" }];
+    assert.equal(agentRepoKey({ id: "agent-1", labels: { repo: "forge/o/labelled" } }, records), "forge/o/registered");
+    assert.equal(agentRepoKey({ id: "agent-2", labels: { repo: "forge/o/labelled" } }, records), "forge/o/labelled");
+    assert.equal(agentRepoKey({ id: "agent-3", labels: {} }, records), FLEET_REPO);
+  });
+
+  it("keeps the webhook machine line first and puts the envelope before the human summary", () => {
+    const payload = {
+      repository: { full_name: "xpufx-org/paseo", html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo" },
+      sender: { login: "testuser" },
+      issue: { number: 380, title: "Test issue", html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/380" },
+      action: "opened",
+    };
+    const message = formatWebhookMessage("issues", payload);
+    const lines = message.split("\n");
+    assert.ok(lines[0].startsWith("[forgejo-hook] {"));
+    assert.equal(
+      JSON.stringify(JSON.parse(lines[0].slice("[forgejo-hook] ".length))),
+      JSON.stringify(forgejoEnvelope("issues", payload)),
+    );
+    assert.equal(lines[1], "");
+    const fleet = parseFleetComment(lines[2]);
+    assert.equal(fleet?.v, FLEET_ENVELOPE_VERSION);
+    assert.equal(fleet?.origin, "router");
+    assert.equal(fleet?.sender, ROUTER_SENDER);
+    assert.equal(fleet?.repo, "forge.mrs.uppidi.com/xpufx-org/paseo");
+    assert.equal(fleet?.kind, "webhook");
+    assert.equal(fleet?.ref, 380);
+    assert.equal(lines.slice(3).join("\n"), summarize("issues", payload));
+  });
+
+  it("allows a null webhook ref for payloads without an issue number", () => {
+    const push = formatWebhookMessage("push", {
+      repository: { full_name: "xpufx-org/paseo", html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo" },
+      sender: { login: "testuser" },
+      ref: "refs/heads/main",
+      commits: [],
+    });
+    const fleet = parseFleetComment(push.split("\n")[2]);
+    assert.equal(fleet?.kind, "webhook");
+    assert.equal(fleet?.ref, null);
+    assert.ok(push.includes("🔔 Forgejo webhook incoming [push]"));
+  });
+
+  it("leaves legacy senders unchanged (router/watchdog explicit origins)", () => {
+    assert.equal(routerEnvelope({ repo: "x", kind: "webhook" }).sender, "forgejo-hook");
+    assert.equal(watchdogEnvelope({ repo: "x" }).sender, "fleet-watchdog");
+    assert.notEqual(routerEnvelope({ repo: "x", kind: "webhook" }).sender, watchdogEnvelope({ repo: "x" }).sender);
   });
 });
 
@@ -1463,11 +1599,19 @@ describe("hook-router event coalescing and digest (#458)", () => {
       },
     ];
     const digest = formatDigest("forge.mrs.uppidi.com/xpufx-org/paseo", 42, buffered);
-    assert.ok(digest.startsWith(`${FORGEJO_DIGEST_PREFIX} `));
-    assert.match(digest, /#42 Digest test \[state\/2-review\]/);
-    assert.match(digest, /\(2 events: issue_comment:created, state-transition\)/);
-    assert.ok(digest.includes("Latest comment: latest comment body"));
-    assert.ok(digest.endsWith("https://forge.test/xpufx-org/paseo/issues/42"));
+    const digestFleet = parseFleetComment(digest.split("\n")[0]);
+    assert.equal(digestFleet?.v, FLEET_ENVELOPE_VERSION);
+    assert.equal(digestFleet?.origin, "router");
+    assert.equal(digestFleet?.sender, ROUTER_SENDER);
+    assert.equal(digestFleet?.repo, "forge.mrs.uppidi.com/xpufx-org/paseo");
+    assert.equal(digestFleet?.kind, "webhook");
+    assert.equal(digestFleet?.ref, 42);
+    const digestBody = digest.split("\n").slice(1).join("\n");
+    assert.ok(digestBody.startsWith(`${FORGEJO_DIGEST_PREFIX} `));
+    assert.match(digestBody, /#42 Digest test \[state\/2-review\]/);
+    assert.match(digestBody, /\(2 events: issue_comment:created, state-transition\)/);
+    assert.ok(digestBody.includes("Latest comment: latest comment body"));
+    assert.ok(digestBody.endsWith("https://forge.test/xpufx-org/paseo/issues/42"));
   });
 
   it("buffers burst events, dedupes identical deliveries, and flushes one digest", async () => {
@@ -1490,7 +1634,7 @@ describe("hook-router event coalescing and digest (#458)", () => {
 
     const queue = router.getQueue(key);
     assert.equal(queue.length, 1);
-    assert.ok(queue[0].msg.startsWith(FORGEJO_DIGEST_PREFIX));
+    assert.ok(queue[0].msg.startsWith('<!-- {"fleet"'));
     assert.match(queue[0].msg, /2 events/);
   });
 
@@ -1609,6 +1753,25 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     });
     assert.ok(audit.anomalies.some((a) => a.type === "ORCHESTRATOR_MISSING"));
     assert.ok(delivered.some((d) => d.id === frontDeskId && d.msg.includes("was not found on daemon")));
+  });
+
+  it("stamps watchdog alerts with the fleet envelope (#985)", async () => {
+    await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: new Map(),
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    const miss = delivered.find((d) => d.msg.includes("was not found on daemon"));
+    const fleet = parseFleetComment(miss?.msg);
+    assert.equal(fleet?.v, FLEET_ENVELOPE_VERSION);
+    assert.equal(fleet?.origin, "watchdog");
+    assert.equal(fleet?.sender, WATCHDOG_SENDER);
+    assert.equal(fleet?.kind, "alert");
+    assert.equal(fleet?.repo, "test-repo");
+    assert.equal(fleet?.ref, null);
+    assert.ok(miss?.msg.startsWith('<!-- {"fleet"'));
+    assert.ok(miss?.msg.endsWith("was not found on daemon."));
   });
 
   it("recovers a foreground turn lock via the 4-step pipeline and notifies Front Desk", async () => {
@@ -2478,6 +2641,37 @@ describe("hook-router Front Desk handoff (#458)", () => {
     assert.ok(sent.some((s) => s.id === "fd-new" && s.text.includes("handoff snapshot")));
     assert.ok(sent.some((s) => s.id === "orch-agent-1" && s.text.includes("Front Desk handover")));
     assert.equal(out.orchestratorsNotified, 1);
+  });
+
+  it("wraps onboarding, handover, and stand-down notices in fleet envelopes (#985)", async () => {
+    router.writeOrchestrator("forge.test/xpufx-org/paseo", "orch-agent-1");
+    router.writeFrontDesk("fd-old", "test");
+
+    await router.doFrontDeskHandoff({ agentId: "fd-new", handoffText: "# New Front Desk" });
+
+    const onboarding = sent.find((s) => s.id === "fd-new");
+    const onboardingFleet = parseFleetComment(onboarding?.text);
+    assert.equal(onboardingFleet?.origin, "router");
+    assert.equal(onboardingFleet?.sender, ROUTER_SENDER);
+    assert.equal(onboardingFleet?.repo, FRONT_DESK_REPO);
+    assert.equal(onboardingFleet?.kind, "handoff");
+    assert.ok(onboarding?.text.includes("You are now the Front Desk agent"));
+
+    const handover = sent.find((s) => s.id === "orch-agent-1");
+    const handoverFleet = parseFleetComment(handover?.text);
+    assert.equal(handoverFleet?.origin, "router");
+    assert.equal(handoverFleet?.repo, "forge.test/xpufx-org/paseo");
+    assert.equal(handoverFleet?.kind, "handoff");
+    assert.ok(handover?.text.includes("Front Desk handover"));
+
+    const standDown = sent.find((s) => s.id === "fd-old");
+    const standDownFleet = parseFleetComment(standDown?.text);
+    assert.equal(standDownFleet?.origin, "router");
+    assert.equal(standDownFleet?.sender, ROUTER_SENDER);
+    assert.equal(standDownFleet?.repo, FRONT_DESK_REPO);
+    assert.equal(standDownFleet?.kind, "handoff");
+    assert.ok(standDown?.text.includes("You are no longer Front Desk"));
+    assert.ok(standDown?.text.includes("registry authority is now fd-new"));
   });
 
   it("reads the handoff snapshot from a file", async () => {
