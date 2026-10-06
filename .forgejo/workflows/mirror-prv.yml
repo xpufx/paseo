@@ -39,7 +39,10 @@ jobs:
       GIT_COMMITTER_NAME: paseo-mirror
       GIT_COMMITTER_EMAIL: mirror@paseo.invalid
     steps:
-      - uses: actions/checkout@v4
+      # Pin to a full commit SHA: the runner resolves `uses:` refs itself and always
+      # runs `git fetch` for tag refs, which fails without GitHub credentials. A SHA
+      # already in the runner cache resolves offline (paseo#972 / runner-containers#22).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Push scoped tree to paseo-prv
         env:

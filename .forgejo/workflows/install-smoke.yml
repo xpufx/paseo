@@ -132,7 +132,10 @@ jobs:
             printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/checkout@v4
+      # Pin to a full commit SHA: the runner resolves `uses:` refs itself and always
+      # runs `git fetch` for tag refs, which fails without GitHub credentials. A SHA
+      # already in the runner cache resolves offline (paseo#972 / runner-containers#22).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       # Issue #569: the forbidden-pattern list lives in xpufx-org/platform
       # (bin/pii-patterns.txt + bin/pii-preflight.sh), never in this publishable
@@ -140,7 +143,7 @@ jobs:
       # hostnames/users/paths the gate exists to protect. Cross-repo checkout
       # follows the org idiom already used by platform's sync-labels caller.
       - name: Check out platform PII preflight tool
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: xpufx-org/platform
           ref: main

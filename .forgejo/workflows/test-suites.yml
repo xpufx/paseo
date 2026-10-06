@@ -88,7 +88,10 @@ jobs:
       # attribute and reports `unknown` — which is a failure by design. Full
       # history makes this environment match a full local checkout instead of
       # differing from it in a way that only CI sees.
-      - uses: actions/checkout@v4
+      # Pin to a full commit SHA: the runner resolves `uses:` refs itself and always
+      # runs `git fetch` for tag refs, which fails without GitHub credentials. A SHA
+      # already in the runner cache resolves offline (paseo#972 / runner-containers#22).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
 
@@ -216,7 +219,7 @@ jobs:
       # attribute and reports `unknown` — which is a failure by design. Full
       # history makes this environment match a full local checkout instead of
       # differing from it in a way that only CI sees.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
 

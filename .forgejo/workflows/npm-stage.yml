@@ -51,7 +51,10 @@ jobs:
             printf "## Runner diagnostics\n\n- OS: \`%s\`\n- Architecture: \`%s\`\n- Host: \`%s\`\n" "$RUNNER_OS" "$RUNNER_ARCH" "$runner_host" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - uses: actions/checkout@v4
+      # Pin to a full commit SHA: the runner resolves `uses:` refs itself and always
+      # runs `git fetch` for tag refs, which fails without GitHub credentials. A SHA
+      # already in the runner cache resolves offline (paseo#972 / runner-containers#22).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Toolchain
         run: |
