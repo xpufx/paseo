@@ -40,7 +40,7 @@ now import this module.
 | Surface | Invariants checked | Result | Test |
 | --- | --- | --- | --- |
 | `mcp-tools` pill modal | scroll owner, sheet scroller, bounded chain | **defect fixed** — was the host sheet scroller; now a plain RN `ScrollView` | `plugins/mcp-tools/client/pill-modal-scroll.test.tsx` |
-| `top` pill modal | scroll owner, sheet scroller | **open defect** — still the host sheet scroller inside `host-modal-content` | `plugins/top/client/pill-modal-scroll.test.tsx` (pinned) |
+| `top` pill modal | scroll owner, sheet scroller | **defect fixed** — `HostModalScroll` is a plain RN `ScrollView`; page surfaces keep `HostScroll` | `plugins/top/client/pill-modal-scroll.test.tsx` |
 | `top` telemetry card | containment, colors, truncation, sheet, owners | clean at 390px + 1400px | `plugins/top/client/ui-guard.test.tsx` |
 | `top` Fleet tab (`FleetView`) | renders without host multi-host primitives | **defect fixed** — crashed with `useHosts is not a function`; now an unavailable state | `plugins/top/client/fleet-view.test.tsx` |
 | `top` `HostMetricGauge` (native) | value is an arc, not a filled disc | **defect fixed** — drew a solid disc; now a no-SVG ring arc | `plugins/top/client/host-gauge.test.tsx` |
@@ -86,17 +86,47 @@ $ npx vitest run --config client/vitest.config.ts client/pill-modal-scroll.test.
  Tests  2 passed (2)
 ```
 
-### Finding 2 — top pill modal (open, pinned)
+### Finding 2 — top pill modal (fixed)
 
-The same defect is present in `plugins/top/client/host-ui.tsx`: its `HostScroll`
-uses the host SDK `ScrollView`, and `plugins/top/client/pill.tsx` renders it
-inside the host modal body. It is pinned in
-`plugins/top/client/pill-modal-scroll.test.tsx` so it is visible and cannot
-grow. It is **not fixed in this slice** because top's `HostScroll` is shared
-with the full-page `surface.tsx` and `turn-panel.tsx`, where the host sheet
-scroller may be intended; splitting the component (or giving it a plain variant
-for the modal) is a reviewed change, not a mechanical import swap. Follow-up:
-give the top modal a plain RN scroller and flip the pinned census row.
+The same defect was present in `plugins/top/client/host-ui.tsx`: its `HostScroll`
+used the host SDK `ScrollView`, and `plugins/top/client/pill.tsx` rendered it
+inside the host modal body. Unlike mcp-tools, top's `HostScroll` is shared with
+the full-page `surface.tsx` and `turn-panel.tsx`, where the host sheet scroller
+may be intended, so #1043 pinned it as a reviewed split rather than swapping the
+import.
+
+The split gives the modal its own `HostModalScroll` (plain React Native
+`ScrollView`) while `HostScroll` keeps the host sheet-gesture scroller for the
+page surfaces. The pill's modal bodies now call `HostModalScroll`; `surface.tsx`
+and `turn-panel.tsx` are unchanged. Exactly one scroll owner, and the host modal
+content stays `scrollable={false}`.
+
+This necessarily trips the static `no-bare-react-native-ui` rule (it flags a
+bare `ScrollView` import), so `plugins/top/conformance.json` declares that rule
+exempt for `client/host-ui.tsx` — the same exemption `mcp-tools` and `x-comms`
+carry for the identical #219 reason. The layout/scroll invariant is still
+enforced by the render tests, which `conformance.json` cannot switch off.
+
+**Red → green (strict TDD).** With the pre-fix `host-ui.tsx` restored and the
+new test in place:
+
+```
+$ npx vitest run --config client/vitest.config.ts client/pill-modal-scroll.test.tsx
+ × owns the scroll with a plain React Native scroller, not the host sheet
+   → expected [] to have a length of 1 but got +0
+ × carries no host sheet scroller inside the modal body (harness invariant)
+   → expected [ { testID: undefined, …(2) } ] to deeply equal []
+     path: "View/host-modal-content/View/View/View/host-scroll-view"
+ Tests  2 failed (2)
+```
+
+After the modal scroller is split to the plain React Native `ScrollView`:
+
+```
+$ npx vitest run --config client/vitest.config.ts client/pill-modal-scroll.test.tsx
+ ✓ client/pill-modal-scroll.test.tsx (2 tests) 61ms
+ Tests  2 passed (2)
+```
 
 ### Finding 3 — worktree-install color palette (by design)
 

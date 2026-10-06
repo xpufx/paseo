@@ -11,6 +11,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView,
   Text,
   View,
   type StyleProp,
@@ -1555,8 +1556,8 @@ export interface HostModalSectionProps {
  * The host centered-modal wrapper hands the body a bounded `flex: 1` frame and
  * (with the default `hostScroll: false`) no scroller, so this section must fill
  * that frame: without `flex: 1` / `minHeight: 0` the section sizes to its
- * content and the child `HostScroll` is never given a viewport to scroll in
- * (xpufx-org/paseo#975).
+ * content and the child `HostModalScroll` is never given a viewport to scroll
+ * in (xpufx-org/paseo#975).
  */
 export function HostModalSection({ children, style }: HostModalSectionProps) {
   return <View style={[styles.fluid, styles.modalSection, style]}>{children}</View>;
@@ -1568,7 +1569,36 @@ export interface HostScrollProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
-/** Explicit single scroll owner for surfaces where the host supplies none. */
+/**
+ * Inner scroller for pill `renderModal` bodies.
+ *
+ * The host centered-modal wrapper already carries the host's bottom-sheet pan
+ * gestures and renders `<Modal.Content scrollable={false}>`, so the plugin is
+ * the single scroll owner. The host SDK `ScrollView` is deliberately
+ * gesture-aware ("the host's sheet gestures when rendered inside a sheet");
+ * using it here hands the same pan to two recognizers — the
+ * xpufx-org/paseo#219 class the operator hit on the MCP pill (#1043) and the
+ * top pill (#1054). This modal seam therefore uses the plain React Native
+ * `ScrollView`; page surfaces use {@link HostScroll}.
+ */
+export function HostModalScroll({
+  children,
+  style,
+  contentContainerStyle,
+  ...props
+}: HostScrollProps & Record<string, unknown>) {
+  return (
+    <ScrollView
+      {...(props as Record<string, unknown>)}
+      style={[styles.fluid, style]}
+      contentContainerStyle={contentContainerStyle}
+    >
+      {children}
+    </ScrollView>
+  );
+}
+
+/** Explicit single scroll owner for page surfaces where the host supplies none. */
 export function HostScroll({
   children,
   style,

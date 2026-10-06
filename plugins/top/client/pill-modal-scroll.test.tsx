@@ -3,7 +3,7 @@ import React from "react";
 import TestRenderer, { act, type ReactTestInstance } from "react-test-renderer";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { initClientHelpers } from "paseo-plugin-helper/core";
-import { sheetScrollersInsideModal } from "paseo-plugin-ui-testing";
+import { scrollContainers, sheetScrollersInsideModal } from "paseo-plugin-ui-testing";
 import { contributeClient } from "./pill";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -187,19 +187,28 @@ afterEach(() => {
 });
 
 /**
- * Regression for xpufx-org/paseo#975: the top pill modal stopped scrolling.
+ * Regression for xpufx-org/paseo#975 and #1043/#1054: the top pill modal is
+ * the single scroll owner, and its scroller must not carry the host's sheet
+ * gestures.
  *
  * The centered composer-pill wrapper hands `renderModal` a bounded `flex: 1`
  * frame and (with the default `hostScroll: false`) no scroller, so the plugin's
- * `HostScroll` must be the single, bounded scroll owner. When the #847/#957
+ * modal scroller must be the single, bounded owner. When the #847/#957
  * migration replaced `ModalBody`'s `flex: 1`/`minHeight: 0` root with a plain
  * `HostModalSection`, the section sized to its content and the scroller never
  * got a viewport. This pins the single-owner contract: exactly one scroll
  * container, and every flex ancestor above it bounded so content can overflow
  * into a scroll range instead of being clipped.
+ *
+ * The #1043 census then found the same defect mcp-tools had (#219): the owner
+ * used the host SDK `ScrollView`, which wires the host's sheet pan gestures, as
+ * the inner scroller of `<Modal.Content scrollable={false}>`, handing the same
+ * gesture to two recognizers. The modal body must use the plain React Native
+ * `ScrollView`; the full-page surface and turn panel keep the host scroller
+ * (they have no enclosing modal gesture to fight).
  */
-describe("top pill modal scroll ownership (#975)", () => {
-  it("renders exactly one scroll owner inside a fully bounded flex chain", async () => {
+describe("top pill modal scroll ownership (#975/#1054)", () => {
+  it("owns the scroll with a plain React Native scroller, not the host sheet", async () => {
     const pill = registerTopPill();
     await act(async () => {
       await Promise.resolve();
@@ -216,17 +225,11 @@ describe("top pill modal scroll ownership (#975)", () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
 
-    const scrollers = mounted.root.findAll((node) => typeOf(node) === "host-scroll-view");
+    // Exactly one plugin scroller, and it is the plain React Native one.
+    const scrollers = mounted.root.findAll((node) => typeOf(node) === "ScrollView");
     expect(scrollers).toHaveLength(1);
-
-    // Census finding (xpufx-org/paseo#1043): the top pill still uses the host
-    // SDK's sheet-gesture scroller inside the host modal body. mcp-tools was
-    // moved to plain React Native in this slice; top's `HostScroll` is shared
-    // with the full-page surface and turn panel, so swapping it is a separate,
-    // reviewed change. Pinned so the defect stays visible and cannot grow.
-    expect(sheetScrollersInsideModal(mounted.toJSON())).toHaveLength(1);
-    // No second, plain React Native scroller nested under it.
-    expect(mounted.root.findAll((node) => typeOf(node) === "ScrollView")).toHaveLength(0);
+    // The host SDK's sheet-gesture scroller must not appear inside the modal.
+    expect(mounted.root.findAll((node) => typeOf(node) === "host-scroll-view")).toHaveLength(0);
 
     const modalContent = mounted.root.find((node) => typeOf(node) === "host-modal-content");
     expect(modalContent.props.scrollable).toBe(false);
@@ -243,5 +246,24 @@ describe("top pill modal scroll ownership (#975)", () => {
       expect(style.flex, `flex ancestor ${typeOf(view)} must flex-fill`).toBe(1);
       expect(style.minHeight, `flex ancestor ${typeOf(view)} must allow shrink`).toBe(0);
     }
+  });
+
+  it("carries no host sheet scroller inside the modal body (harness invariant)", async () => {
+    const pill = registerTopPill();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const Icon = pill.PillIcon();
+    act(() => pill.open());
+    mounted = renderModal(Icon!);
+    cleanupPill = pill.cleanup;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    const tree = mounted.toJSON();
+    expect(sheetScrollersInsideModal(tree)).toEqual([]);
+    const owners = scrollContainers(tree).filter((container) => !container.hostOwned);
+    expect(owners).toHaveLength(1);
   });
 });

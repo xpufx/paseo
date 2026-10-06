@@ -34,10 +34,10 @@ import {
   HostKeyValue,
   HostLayoutProvider,
   HostMetricGauge,
+  HostModalScroll,
   HostModalSection,
   HostProgressBar,
   HostRow,
-  HostScroll,
   HostStack,
   HostTabs,
   HostThemeProvider,
@@ -1141,7 +1141,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
       <HostModalSection>
         <View style={styles.modalColumn}>
           <View style={navbarStyle}>{navbar}</View>
-          <HostScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+          <HostModalScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
             <HostCard variant="elevated">
               <View style={styles.errorBox}>
                 <Icon name="Ghost" size={24} color={colors.statusDanger} />
@@ -1150,7 +1150,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
                 </Text>
               </View>
             </HostCard>
-          </HostScroll>
+          </HostModalScroll>
         </View>
       </HostModalSection>
     );
@@ -1162,7 +1162,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
     <HostModalSection>
       <View style={styles.modalColumn}>
         <View style={navbarStyle}>{navbar}</View>
-        <HostScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
+        <HostModalScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
           {activeTab === "system" && (
             <>
               {/* Dual Metric Gauges Hero */}
@@ -1753,7 +1753,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
         </Text>
       </View>
     )}
-        </HostScroll>
+        </HostModalScroll>
       </View>
     </HostModalSection>
   );

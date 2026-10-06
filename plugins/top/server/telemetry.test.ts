@@ -512,8 +512,8 @@ test("every top pill variant shares one centered presentation model", () => {
     "main, per-metric, and custom pills must all register through registerTopPill",
   );
   assert.ok(
-    pillSource.includes("HostModalSection") && pillSource.includes("HostScroll"),
-    "ResourceModal must render HostModalSection + HostScroll (no ModalBody)",
+    pillSource.includes("HostModalSection") && pillSource.includes("HostModalScroll"),
+    "ResourceModal must render HostModalSection + HostModalScroll (no ModalBody)",
   );
 });
 
