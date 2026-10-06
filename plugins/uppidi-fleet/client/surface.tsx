@@ -51,6 +51,7 @@ import {
   uppidiAgentsContract,
   uppidiRoleModelsContract,
   uppidiSetRoleModelContract,
+  uppidiFleetAlertsContract,
   uppidiSkillsContract,
   uppidiSetSkillContract,
   uppidiRunnersContract,
@@ -71,6 +72,7 @@ import {
   type KanbanColumnId,
   type AttentionLabel,
   type RoleModelConfig,
+  type FleetModelAlert,
   type FleetSkill,
   type UppidiRunner,
   type UppidiFleetStatus,
@@ -841,6 +843,53 @@ export function HaltedBanner({
   );
 }
 
+// --- Fleet model-resolution alerts (#1011) ---
+
+export interface ModelAlertBannerProps {
+  alerts: FleetModelAlert[];
+}
+
+/**
+ * Persistent banner shown while any repository's configured orchestrator model
+ * chain is fully exhausted (#1011). It names the configured chain, the dead
+ * entries and the live provider set so the operator can see why a spawn failed
+ * loudly instead of a hidden hardcoded model taking over. The banner clears
+ * automatically the next time that repo resolves a satisfiable model.
+ */
+export function ModelAlertBanner({ alerts }: ModelAlertBannerProps) {
+  const { colors, typography } = useFleetTheme();
+  if (!alerts || alerts.length === 0) return null;
+
+  return (
+    <View testID="fleet-model-alert-banner">
+      <Card variant="flat" style={{ borderColor: colors.statusDanger, borderWidth: 1 }}>
+        <Stack gap="xxs">
+          <Row align="center" gap="xs" wrap>
+            <Icon name="AlertTriangle" size={16} color={colors.statusDanger} />
+            <Badge label="MODEL CHAIN EXHAUSTED" variant="danger" size="sm" />
+            <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
+              {alerts.length} repo{alerts.length === 1 ? "" : "s"} cannot provision an orchestrator
+            </Text>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+              No hidden default will be substituted; fix the provider set or the fallback group.
+            </Text>
+          </Row>
+          {alerts.map((alert) => (
+            <Text
+              key={alert.repo}
+              style={{ color: colors.foregroundMuted, ...typography.caption, fontFamily: "monospace" }}
+            >
+              {alert.repo}: chain [{alert.configuredChain.join(", ")}]; dead [
+              {alert.dropped.map((d) => `${d.key} (${d.reason})`).join(", ") || "none"}]; live [
+              {(alert.availableProviders ?? []).join(", ") || "unknown"}]
+            </Text>
+          ))}
+        </Stack>
+      </Card>
+    </View>
+  );
+}
+
 export interface HaltConfirmModalProps {
   visible: boolean;
   onClose: () => void;
@@ -1004,6 +1053,12 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     data: roleModelsData,
     refetch: refetchRoleModels,
   } = useRpcQuery(uppidiRoleModelsContract, {}, { refetchInterval: 10000 });
+
+  // Persistent model-chain exhaustion banners (#1011).
+  const {
+    data: fleetAlertsData,
+    refetch: refetchFleetAlerts,
+  } = useRpcQuery(uppidiFleetAlertsContract, {}, { refetchInterval: 10000 });
 
   const {
     data: skillsData,
@@ -1194,6 +1249,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     void refetchLogTail();
     void refetchAgents();
     void refetchRoleModels();
+    void refetchFleetAlerts();
     void refetchSkills();
     void refetchRunners();
     void refetchMetrics();
@@ -1238,12 +1294,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   };
 
 
-  const handleRoleModelChange = async (role: string, primaryModel: string) => {
+  const handleRoleModelChange = async (role: string, primaryModel: string, fallbackGroup?: string[]) => {
     try {
-      const res = await setRoleModelMutation.mutateAsync({ role, primaryModel });
+      const res = await setRoleModelMutation.mutateAsync({ role, primaryModel, fallbackGroup });
       if (res.ok) {
         toast.show(res.message || `Updated model for ${role}`);
         void refetchRoleModels();
+        void refetchFleetAlerts();
       } else {
         toast.error(res.error || "Failed to update role model");
       }
@@ -1655,6 +1712,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             isResuming={isResumingHalt}
             onResume={handleResumeHalt}
           />
+          <ModelAlertBanner alerts={fleetAlertsData?.alerts ?? []} />
           <Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />
         </Stack>
       }
@@ -2178,8 +2236,18 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                   // it rather than dereferencing undefined fields (#510).
                   if (!cfg || typeof cfg !== "object") return null;
                   const fallbackGroup = Array.isArray(cfg.fallbackGroup) ? cfg.fallbackGroup : [];
+                  // Keep an off-list saved model selectable so a dead entry stays
+                  // visible and removable rather than silently blanking out.
+                  const optionsFor = (current?: string): SelectOption[] => {
+                    if (current && !roleModelOptions.some((o) => o.value === current)) {
+                      return [{ label: current, value: current }, ...roleModelOptions];
+                    }
+                    return roleModelOptions;
+                  };
+                  const removableOptions = optionsFor();
                   return (
                   <Card key={roleKey} variant="elevated">
+                    <Stack gap="xs">
                     <Row justify="space-between" align="center" wrap gap="xs">
                       <Stack gap="xxs" style={{ flex: 1 }}>
                         <Row align="center" gap="xs">
@@ -2191,11 +2259,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                         <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                           Primary: <Text style={{ color: colors.foreground, fontFamily: "monospace" }}>{cfg.primaryModel}</Text>
                         </Text>
-                        {fallbackGroup.length > 1 && (
-                          <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
-                            Fallbacks: {fallbackGroup.join(" → ")}
-                          </Text>
-                        )}
                       </Stack>
                       {/* Explicit model selection (#635). This was a
                           "Switch model" button that computed
@@ -2212,7 +2275,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                         options={roleModelOptions}
                         onValueChange={(model) => {
                           if (model !== cfg.primaryModel) {
-                            void handleRoleModelChange(roleKey, model);
+                            void handleRoleModelChange(roleKey, model, fallbackGroup);
                           }
                         }}
                         disabled={roleModelOptions.length < 2}
@@ -2221,6 +2284,76 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                         style={{ minWidth: 180 }}
                       />
                     </Row>
+
+                    {/* Full fallback chain, editable in place (#1011). Before
+                        this the UI only wrote `primaryModel`; the saved
+                        `fallbackGroup` rotted invisibly. */}
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                      Fallback chain (evaluated in order after the primary):
+                    </Text>
+                    {fallbackGroup.length === 0 ? (
+                      <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11 }}>
+                        No fallbacks configured.
+                      </Text>
+                    ) : (
+                      <Stack gap="xxs">
+                        {fallbackGroup.map((model, index) => (
+                          <Row
+                            key={`${roleKey}-fallback-${index}`}
+                            justify="space-between"
+                            align="center"
+                            gap="xs"
+                            wrap
+                          >
+                            <Text style={{ color: colors.foreground, fontFamily: "monospace", ...typography.caption }}>
+                              {index + 1}. {model}
+                            </Text>
+                            <Row gap="xs">
+                              <Button
+                                label="Make primary"
+                                size="sm"
+                                variant="ghost"
+                                onPress={() =>
+                                  void handleRoleModelChange(
+                                    roleKey,
+                                    model,
+                                    fallbackGroup.filter((_, i) => i !== index),
+                                  )
+                                }
+                              />
+                              <Button
+                                label="Remove"
+                                size="sm"
+                                variant="ghost"
+                                onPress={() =>
+                                  void handleRoleModelChange(
+                                    roleKey,
+                                    cfg.primaryModel,
+                                    fallbackGroup.filter((_, i) => i !== index),
+                                  )
+                                }
+                              />
+                            </Row>
+                          </Row>
+                        ))}
+                      </Stack>
+                    )}
+                    <Select
+                      value=""
+                      label={`Add ${roleKey} fallback`}
+                      options={removableOptions.filter(
+                        (o) => o.value !== cfg.primaryModel && !fallbackGroup.includes(o.value),
+                      )}
+                      onValueChange={(model) => {
+                        if (!model || model === cfg.primaryModel || fallbackGroup.includes(model)) return;
+                        void handleRoleModelChange(roleKey, cfg.primaryModel, [...fallbackGroup, model]);
+                      }}
+                      disabled={removableOptions.length === 0}
+                      placeholder="Add a fallback tier"
+                      size="sm"
+                      style={{ minWidth: 180 }}
+                    />
+                    </Stack>
                   </Card>
                   );
                 })}

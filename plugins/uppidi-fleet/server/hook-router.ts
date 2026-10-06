@@ -15,12 +15,16 @@ import type {
   HookServiceConfigInput,
   HookServiceConfigOutput,
   HookInfoOutput,
+  FleetModelAlert,
+  DroppedModelCandidate,
+  UppidiFleetAlertsOutput,
 } from "../shared/contracts.js";
 import { extractPermissionScope } from "../shared/contracts.js";
 import {
   candidateRepoKeys,
   canonicalRepoKey,
   normalizeRepoKey,
+  resolveCanonicalRepo,
 } from "../shared/repo-identity.js";
 import { getUppidiFleetSettingsStorage } from "./settings.js";
 import { forgejoApiGet, forgejoApiRequest, forgejoToken, resolveForgejoHost } from "./forgejo-api.js";
@@ -179,6 +183,14 @@ export interface HookRouterOptions {
   /** Explicit circuit breaker cache path; defaults to ~/.paseo/model-health.json */
   circuitBreakerPath?: string;
   modelHealthPath?: string;
+  /** Persistent model-alert banner path; defaults to the scoped plugin data dir (#1011). */
+  modelAlertsPath?: string;
+  /**
+   * Best-effort board notification for total model-chain exhaustion (#1011).
+   * Defaults to a Forgejo issue/comment on the affected repo; tests inject a
+   * stub so no network is touched.
+   */
+  postModelExhaustionAlert?: (repo: string, alert: FleetModelAlert) => Promise<void>;
   /** Ordered model fallback list for orchestrator provision (#890). */
   orchestratorModelFallback?: string[];
   modelFallbackList?: string[];
@@ -231,7 +243,13 @@ export interface EnsureOrchestratorResult {
   workspaceId?: string;
   cwd?: string;
   /** Machine-readable failure kind so callers can pick an HTTP status (#973). */
-  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled";
+  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted";
+  /** Model the spawn resolved to, surfaced so intent and reality can be compared (#1011). */
+  resolvedModelKey?: string;
+  /** Configured entries skipped as dead before the resolved model (#1011). */
+  droppedModels?: DroppedModelCandidate[];
+  /** Banner record raised on total exhaustion (#1011). */
+  modelAlert?: FleetModelAlert;
   /** Whether the SDK create payload carried `featureValues.auto_accept` (#974). */
   autoAcceptApplied?: boolean;
   /**
@@ -2134,6 +2152,40 @@ export function orchestratorModelCandidates(
  * skipping any candidate currently cooling down in the circuit breaker cache (#890) and
  * any candidate whose provider is disabled on the host (#973).
  */
+export interface ResolvedOrchestratorModel {
+  provider: string;
+  model: string;
+  key: string;
+  /** True when no configured candidate is enabled and healthy (#1011). */
+  exhausted?: boolean;
+  /** Human-readable reason when `exhausted` is set. */
+  error?: string;
+  /** The operator-configured chain that was evaluated, in order. */
+  configuredChain?: string[];
+  /** Configured entries skipped as dead, with the reason (#1011). */
+  dropped?: DroppedModelCandidate[];
+  /** Live enabled provider ids when the host reported them, else null. */
+  availableProviders?: string[] | null;
+}
+
+function formatModelResolutionFailure(
+  configuredChain: readonly string[],
+  dropped: readonly DroppedModelCandidate[],
+  availableProviders: ReadonlySet<string> | null | undefined,
+): string {
+  const dead = dropped.map((d) => `${d.key} (${d.reason})`).join(", ") || "none";
+  const live = availableProviders
+    ? [...availableProviders].sort().join(", ") || "none"
+    : "unknown";
+  return (
+    "No orchestrator model is satisfiable. " +
+    `Configured chain: [${configuredChain.join(", ") || "empty"}]. ` +
+    `Dead entries: ${dead}. ` +
+    `Live enabled providers: ${live}. ` +
+    "Fix the provider set or the configured fallback group; the fleet will not substitute a hidden default (#1011)."
+  );
+}
+
 export function resolveOrchestratorModel(
   options: {
     requestedProvider?: string;
@@ -2144,7 +2196,7 @@ export function resolveOrchestratorModel(
     /** When provided, candidates whose provider is absent are skipped (#973). */
     availableProviders?: ReadonlySet<string> | null;
   } = {},
-): { provider: string; model: string; key: string } {
+): ResolvedOrchestratorModel {
   const circuitBreakerPath =
     options.circuitBreakerPath !== undefined
       ? options.circuitBreakerPath
@@ -2156,54 +2208,195 @@ export function resolveOrchestratorModel(
   const candidates = orchestratorModelCandidates(options);
   const isAvailable = (provider: string): boolean =>
     !options.availableProviders || options.availableProviders.has(provider);
+  const availableProviders = options.availableProviders
+    ? [...options.availableProviders].sort()
+    : null;
+  const dropped: DroppedModelCandidate[] = [];
 
-  // #987: when every configured candidate points at a disabled provider (a
-  // stale saved `~/.paseo/plugin-data/xpufx/uppidi-fleet/role-models.json`, or
-  // a pinned fallback list), append the built-in orchestrator defaults, which
-  // track enabled host providers, so resolution lands on something spawnable
-  // instead of keeping the disabled primary.
-  if (
-    options.availableProviders &&
-    candidates.length > 0 &&
-    candidates.every((candidate) => !isAvailable(parseModelKey(candidate).provider))
-  ) {
-    const defaultRole = DEFAULT_ROLE_MODELS.orchestrator;
-    const seen = new Set(candidates);
-    for (const candidate of [defaultRole.primaryModel, ...(defaultRole.fallbackGroup ?? [])]) {
-      const trimmed = candidate.trim();
-      if (trimmed && !seen.has(trimmed)) {
-        seen.add(trimmed);
-        candidates.push(trimmed);
-      }
-    }
-  }
-
-  // 1. Prefer the first candidate whose provider is enabled and not cooling down.
+  // #1011: walk the configured primary + fallbackGroup in order and skip every
+  // entry that is dead on this host (provider disabled, or circuit-broken by
+  // the shared model-health cache). The skipped entries are returned so the
+  // spawn path can drop them *visibly*. A hidden default is never appended.
   for (const candidate of candidates) {
     const parsed = parseModelKey(candidate);
-    if (!isAvailable(parsed.provider)) continue;
-    const health = circuitBreakerPath ? getCachedModelHealth(candidate, circuitBreakerPath, nowSec) : null;
-    if (!health || health.status !== "quota_exhausted") {
-      return {
+    if (!isAvailable(parsed.provider)) {
+      dropped.push({
         key: candidate,
         provider: parsed.provider,
         model: parsed.model,
-      };
+        reason: "provider_disabled",
+      });
+      continue;
     }
+    const health = circuitBreakerPath
+      ? getCachedModelHealth(candidate, circuitBreakerPath, nowSec)
+      : null;
+    if (health && health.status === "quota_exhausted") {
+      dropped.push({
+        key: candidate,
+        provider: parsed.provider,
+        model: parsed.model,
+        reason: "quota_exhausted",
+      });
+      continue;
+    }
+    return {
+      key: candidate,
+      provider: parsed.provider,
+      model: parsed.model,
+      configuredChain: candidates,
+      dropped,
+      availableProviders,
+    };
   }
 
-  // 2. No enabled, healthy candidate: prefer the first enabled candidate, else
-  // the configured primary so an explicit operator request is never dropped.
-  const fallback =
-    candidates.find((candidate) => isAvailable(parseModelKey(candidate).provider)) ??
-    candidates[0] ??
-    "pi/commandcode/deepseek/deepseek-v4-flash";
-  const parsed = parseModelKey(fallback);
+  // Total exhaustion: fail loud. Appending DEFAULT_ROLE_MODELS here was the
+  // silent substitution #1011 is fixing, so the resolver returns an explicit
+  // failure the spawn path must handle.
   return {
-    key: fallback,
-    provider: parsed.provider,
-    model: parsed.model,
+    provider: "",
+    model: "",
+    key: "",
+    exhausted: true,
+    error: formatModelResolutionFailure(candidates, dropped, options.availableProviders),
+    configuredChain: candidates,
+    dropped,
+    availableProviders,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Fleet model-resolution alerts (#1011)
+//
+// Total chain exhaustion is an operator decision, not a silent fallback: the
+// spawn fails loud and the resolver's failure is persisted here as a banner the
+// cockpit reads, plus a board issue/comment on the affected repository.
+// ---------------------------------------------------------------------------
+
+/** Title of the per-repo issue raised when orchestrator model resolution is stuck (#1011). */
+export const MODEL_EXHAUSTION_ALERT_TITLE = "[Fleet Alert] No orchestrator model available";
+
+/** Labels carried by the model-exhaustion issue (#1011). */
+export const MODEL_EXHAUSTION_ALERT_LABELS: readonly string[] = [
+  ORCHESTRATOR_ATTENTION_LABEL,
+  "priority/high",
+];
+
+/** Scoped path of the persistent model-alert banner store (#1011). */
+export function defaultModelAlertsPath(home: string = resolveHostHome()): string {
+  const override = process.env.UPPIDI_FLEET_ALERTS_PATH?.trim();
+  if (override) return override;
+  return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "model-alerts.json");
+}
+
+export function readModelAlerts(
+  path: string = defaultModelAlertsPath(),
+): Record<string, FleetModelAlert> {
+  try {
+    if (!existsSync(path)) return {};
+    const parsed = JSON.parse(readFileSync(path, "utf8") || "{}");
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, FleetModelAlert>;
+    }
+  } catch {
+    // Ignore unreadable/corrupt banner state.
+  }
+  return {};
+}
+
+export function writeModelAlerts(
+  data: Record<string, FleetModelAlert>,
+  path: string = defaultModelAlertsPath(),
+): void {
+  try {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const tempPath = `${path}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`;
+    writeFileSync(tempPath, JSON.stringify(data, null, 2), "utf8");
+    try {
+      renameSync(tempPath, path);
+    } catch {
+      writeFileSync(path, JSON.stringify(data, null, 2), "utf8");
+      try {
+        unlinkSync(tempPath);
+      } catch {}
+    }
+  } catch {
+    // A banner write must never fail a spawn.
+  }
+}
+
+/** Upsert the persistent banner record for `repo` (#1011). */
+export function recordModelAlert(
+  alert: FleetModelAlert,
+  path: string = defaultModelAlertsPath(),
+): FleetModelAlert {
+  const alerts = readModelAlerts(path);
+  alerts[alert.repo] = alert;
+  writeModelAlerts(alerts, path);
+  return alert;
+}
+
+/** Clear the banner for `repo` once its chain resolves again (#1011). */
+export function clearModelAlert(
+  repo: string,
+  path: string = defaultModelAlertsPath(),
+): boolean {
+  const alerts = readModelAlerts(path);
+  const key = canonicalRepoKey(repo) ?? repo;
+  if (!alerts[key]) return false;
+  delete alerts[key];
+  writeModelAlerts(alerts, path);
+  return true;
+}
+
+/** Render the issue/comment body naming chain, dead entries and live providers (#1011). */
+export function formatModelExhaustionAlertBody(alert: FleetModelAlert): string {
+  const dead =
+    alert.dropped.length > 0
+      ? alert.dropped.map((d) => `- \`${d.key}\` — ${d.reason}`).join("\n")
+      : "- (none recorded)";
+  const live =
+    alert.availableProviders && alert.availableProviders.length > 0
+      ? alert.availableProviders.map((p) => `\`${p}\``).join(", ")
+      : "unknown";
+  return [
+    "The fleet could not provision an orchestrator because **no configured model is satisfiable**.",
+    "",
+    `Repository: \`${alert.repo}\``,
+    `Role: \`${alert.role}\``,
+    `Detected: ${alert.createdAt}`,
+    "",
+    "**Configured chain (in order):**",
+    ...(alert.configuredChain.length > 0
+      ? alert.configuredChain.map((c) => `- \`${c}\``)
+      : ["- (empty)"]),
+    "",
+    "**Dead entries:**",
+    dead,
+    "",
+    `**Live enabled providers:** ${live}`,
+    "",
+    `> ${alert.message}`,
+    "",
+    "The fleet will not substitute a hidden default. Fix the provider set or the configured fallback group, then the next spawn will re-check the primary.",
+    "",
+    "---",
+    "_Raised automatically by the fleet hook router (#1011)._ ",
+  ].join("\n");
+}
+
+/** RPC handler for the persistent model-alert banner (#1011). */
+export async function handleUppidiFleetAlerts(): Promise<UppidiFleetAlertsOutput> {
+  try {
+    return { ok: true, alerts: Object.values(readModelAlerts()) };
+  } catch (err) {
+    return {
+      ok: false,
+      alerts: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
 }
 
 export interface ProviderModeInfo {
@@ -4502,6 +4695,87 @@ export class HookRouter {
     }
   }
 
+  /**
+   * Best-effort board notification for total chain exhaustion (#1011): comment
+   * on the repo's open fleet-alert issue, or open one. Any failure is logged
+   * and never blocks the spawn failure from propagating.
+   */
+  private async postModelExhaustionBoardComment(
+    repo: string,
+    alert: FleetModelAlert,
+  ): Promise<void> {
+    const compact = resolveCanonicalRepo(repo)?.compact;
+    if (!compact) {
+      this.log(`[warn] model alert: cannot resolve ${repo} to owner/repo for board notification`);
+      return;
+    }
+    const host = resolveForgejoHost();
+    const token = await this.resolveApiToken(host);
+    const body = formatModelExhaustionAlertBody(alert);
+
+    const existing = await forgejoApiGet<Array<{ number: number; title: string }>>(
+      `/api/v1/repos/${compact}/issues?state=open&limit=50`,
+      { host, token },
+    );
+    const open = existing.outcome === "ok" ? existing.data ?? [] : [];
+    const match = open.find((issue) => issue.title === MODEL_EXHAUSTION_ALERT_TITLE);
+    if (match) {
+      const comment = await forgejoApiRequest<any>(
+        "POST",
+        `/api/v1/repos/${compact}/issues/${match.number}/comments`,
+        { body },
+        { host, token },
+      );
+      if (comment.outcome !== "ok") {
+        this.log(`[warn] model alert: comment on ${compact}#${match.number} failed: ${comment.error}`);
+      }
+      return;
+    }
+    const created = await forgejoApiRequest<any>(
+      "POST",
+      `/api/v1/repos/${compact}/issues`,
+      { title: MODEL_EXHAUSTION_ALERT_TITLE, body, labels: [...MODEL_EXHAUSTION_ALERT_LABELS] },
+      { host, token },
+    );
+    if (created.outcome !== "ok") {
+      this.log(`[warn] model alert: issue create in ${compact} failed: ${created.error}`);
+    }
+  }
+
+  /**
+   * Persist the model-exhaustion banner and post the board alert (#1011). The
+   * spawn path calls this instead of falling back to a hidden default.
+   */
+  public async raiseModelExhaustionAlert(
+    repo: string,
+    resolution: ResolvedOrchestratorModel,
+  ): Promise<FleetModelAlert> {
+    const key = canonicalRepoKey(repo) ?? repo;
+    const alert: FleetModelAlert = {
+      repo: key,
+      role: "orchestrator",
+      message: resolution.error ?? `No orchestrator model is satisfiable for ${key}`,
+      configuredChain: resolution.configuredChain ?? [],
+      dropped: resolution.dropped ?? [],
+      availableProviders: resolution.availableProviders ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    recordModelAlert(alert, this.options?.modelAlertsPath ?? defaultModelAlertsPath());
+    this.log(`[error] model exhaustion for ${key}: ${alert.message}`);
+    try {
+      if (this.options?.postModelExhaustionAlert) {
+        await this.options.postModelExhaustionAlert(key, alert);
+      } else if (!this.isTestMode) {
+        await this.postModelExhaustionBoardComment(key, alert);
+      }
+    } catch (err) {
+      this.log(
+        `[warn] model alert: board notification failed for ${key}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return alert;
+  }
+
   public async ensureOrchestrator(
     input: EnsureOrchestratorInput,
   ): Promise<EnsureOrchestratorResult> {
@@ -4581,9 +4855,21 @@ export class HookRouter {
       circuitBreakerPath,
       availableProviders,
     });
-    if (availableProviders && !availableProviders.has(resolvedModel.provider)) {
+    if (resolvedModel.exhausted) {
+      const alert = await this.raiseModelExhaustionAlert(repo, resolvedModel);
+      return {
+        ok: false,
+        errorCode: "model_exhausted",
+        error: resolvedModel.error ?? `No orchestrator model is satisfiable for ${repo}`,
+        repo,
+        droppedModels: resolvedModel.dropped ?? [],
+        modelAlert: alert,
+      };
+    }
+    if (resolvedModel.dropped && resolvedModel.dropped.length > 0) {
       this.log(
-        `[warn] no configured orchestrator provider is enabled on the host; keeping ${resolvedModel.key}`,
+        `[warn] dropping dead orchestrator model entries for ${repo}: ` +
+          resolvedModel.dropped.map((d) => `${d.key} (${d.reason})`).join(", "),
       );
     }
     const targetProvider = resolvedModel.provider;
@@ -4807,8 +5093,12 @@ export class HookRouter {
     }
 
     this.log(
-      `[info] Orchestrator provisioned for ${repo}: ${agentId} (workspace=${resolved.workspaceId ?? resolved.cwd}, mode=${targetMode ?? "none"})`,
+      `[info] Orchestrator provisioned for ${repo}: ${agentId} (workspace=${resolved.workspaceId ?? resolved.cwd}, mode=${targetMode ?? "none"}, model=${resolvedModel.key})`,
     );
+
+    // A successful spawn on the configured chain clears any stale exhaustion
+    // banner for this repo (#1011).
+    clearModelAlert(repo, this.options?.modelAlertsPath ?? defaultModelAlertsPath());
 
     return {
       ok: true,
@@ -4819,6 +5109,8 @@ export class HookRouter {
       cwd: resolved.cwd,
       autoAcceptApplied,
       autoAllow,
+      resolvedModelKey: resolvedModel.key,
+      droppedModels: resolvedModel.dropped ?? [],
     };
   }
 

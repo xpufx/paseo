@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   DEFAULT_ROLE_MODELS,
   defaultRoleModelsConfigPath,
+  handleUppidiSetRoleModel,
   legacyRoleModelsConfigPaths,
   loadSavedRoleModels,
   migrateLegacyRoleModelsConfig,
@@ -136,5 +137,50 @@ describe("role-models legacy migration (#1012)", () => {
     assert.equal(fs.existsSync(target), true);
     assert.equal(JSON.parse(fs.readFileSync(target, "utf8")).orchestrator.primaryModel, "override/model");
     assert.equal(loadSavedRoleModels().orchestrator.primaryModel, "override/model");
+  });
+});
+
+describe("role-model fallback round-trip (#1011)", () => {
+  it("persists the primary and the full fallbackGroup, and clears it when emptied", async () => {
+    const dir = makeTempDir("paseo-role-models-roundtrip-");
+    const target = path.join(dir, "role-models.json");
+    process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = target;
+    const ctx = {} as never;
+
+    const set = await handleUppidiSetRoleModel(
+      {
+        role: "orchestrator",
+        primaryModel: "pi/commandcode/deepseek/deepseek-v4-flash",
+        fallbackGroup: [
+          "pi/commandcode/deepseek/deepseek-v4-flash",
+          "antigravity/gemini-3.8-flash-low",
+        ],
+      },
+      ctx,
+    );
+    assert.equal(set.ok, true);
+    assert.deepEqual(loadSavedRoleModels().orchestrator.fallbackGroup, [
+      "pi/commandcode/deepseek/deepseek-v4-flash",
+      "antigravity/gemini-3.8-flash-low",
+    ]);
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(target, "utf8")).orchestrator.fallbackGroup,
+      [
+        "pi/commandcode/deepseek/deepseek-v4-flash",
+        "antigravity/gemini-3.8-flash-low",
+      ],
+    );
+
+    // Removing the last fallback persists an empty group, not the stale one.
+    const cleared = await handleUppidiSetRoleModel(
+      {
+        role: "orchestrator",
+        primaryModel: "antigravity/gemini-3.8-flash-low",
+        fallbackGroup: [],
+      },
+      ctx,
+    );
+    assert.equal(cleared.ok, true);
+    assert.deepEqual(loadSavedRoleModels().orchestrator.fallbackGroup, []);
   });
 });

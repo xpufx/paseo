@@ -908,6 +908,43 @@ export const uppidiSetRoleModelContract = defineContract({
   output: UppidiSetRoleModelOutputSchema,
 });
 
+// Fleet model-resolution alerts (#1011). A persistent record raised when the
+// configured orchestrator chain cannot be satisfied by any live enabled
+// provider: the spawn fails loud and the operator sees this banner instead of a
+// silent hardcoded substitution.
+export const DroppedModelCandidateSchema = z.object({
+  key: z.string(),
+  provider: z.string(),
+  model: z.string(),
+  reason: z.enum(["provider_disabled", "quota_exhausted"]),
+});
+export type DroppedModelCandidate = z.infer<typeof DroppedModelCandidateSchema>;
+
+export const FleetModelAlertSchema = z.object({
+  repo: z.string(),
+  role: z.string().default("orchestrator"),
+  message: z.string(),
+  configuredChain: z.array(z.string()).default([]),
+  dropped: z.array(DroppedModelCandidateSchema).default([]),
+  availableProviders: z.array(z.string()).nullable().default(null),
+  createdAt: z.string(),
+});
+export type FleetModelAlert = z.infer<typeof FleetModelAlertSchema>;
+
+export const UppidiFleetAlertsOutputSchema = z.object({
+  ok: z.boolean(),
+  alerts: z.array(FleetModelAlertSchema).default([]),
+  error: z.string().optional(),
+});
+export type UppidiFleetAlertsOutput = z.infer<typeof UppidiFleetAlertsOutputSchema>;
+
+export const uppidiFleetAlertsContract = defineContract({
+  name: "uppidi-fleet.model-alerts",
+  description: "List persistent fleet model-resolution alerts raised on total chain exhaustion (#1011)",
+  input: z.object({}),
+  output: UppidiFleetAlertsOutputSchema,
+});
+
 // Fleet Skills (Issue #883)
 export const FleetSkillIdSchema = z.enum(["orchestrator", "front-desk", "coding-agent"]);
 export type FleetSkillId = z.infer<typeof FleetSkillIdSchema>;

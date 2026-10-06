@@ -57,6 +57,11 @@ import {
   recordModelQuotaFailure,
   getCachedModelHealth,
   resolveOrchestratorModel,
+  readModelAlerts,
+  recordModelAlert,
+  clearModelAlert,
+  defaultModelAlertsPath,
+  handleUppidiFleetAlerts,
   QUOTA_MARKERS,
   assessAgentHealth,
   planWatchdogRecovery,
@@ -3452,27 +3457,137 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     });
     assert.equal(resolved.key, "antigravity/gemini-3.8-flash-low");
     assert.equal(resolved.provider, "antigravity");
+    assert.deepEqual(
+      (resolved.dropped ?? []).map((d) => [d.key, d.reason]),
+      [
+        ["antigravity-acp/gemini-3.8-flash-low", "provider_disabled"],
+        ["codex/gpt-5.6-luna", "provider_disabled"],
+      ],
+    );
   });
 
-  it("resolveOrchestratorModel keeps the configured primary when no provider is enabled (#973)", () => {
+  it("resolveOrchestratorModel drops dead entries visibly and names the live provider set (#1011)", () => {
     const resolved = resolveOrchestratorModel({
-      fallbackList: ["antigravity-acp/gemini-3.8-flash-low", "codex/gpt-5.6-luna"],
-      availableProviders: new Set<string>(),
+      fallbackList: [
+        "antigravity-acp/gemini-3.8-flash-low",
+        "codex/gpt-5.6-luna",
+        "pi/commandcode/deepseek/deepseek-v4-flash",
+      ],
+      availableProviders: new Set(["pi"]),
     });
-    assert.equal(resolved.provider, "antigravity-acp");
+    assert.equal(resolved.key, "pi/commandcode/deepseek/deepseek-v4-flash");
+    assert.deepEqual(resolved.availableProviders, ["pi"]);
+    assert.deepEqual(
+      (resolved.dropped ?? []).map((d) => [d.key, d.reason]),
+      [
+        ["antigravity-acp/gemini-3.8-flash-low", "provider_disabled"],
+        ["codex/gpt-5.6-luna", "provider_disabled"],
+      ],
+    );
   });
 
-  it("resolveOrchestratorModel falls back to an enabled default provider when every configured candidate is disabled (#987)", () => {
+  it("resolveOrchestratorModel fails loud instead of appending DEFAULT_ROLE_MODELS when every configured candidate is disabled (#1011)", () => {
     const resolved = resolveOrchestratorModel({
       fallbackList: ["antigravity-acp/gemini-3.8-flash-low", "codex/gpt-5.6-luna"],
       availableProviders: new Set(["pi"]),
     });
-    assert.equal(resolved.provider, "pi");
-    assert.equal(resolved.key, "pi/commandcode/deepseek/deepseek-v4-flash");
-    assert.equal(resolved.model, "commandcode/deepseek/deepseek-v4-flash");
+    assert.equal(resolved.exhausted, true);
+    assert.equal(resolved.provider, "");
+    assert.equal(resolved.key, "");
+    assert.match(resolved.error ?? "", /No orchestrator model is satisfiable/);
+    assert.match(resolved.error ?? "", /Live enabled providers: pi/);
+    assert.doesNotMatch(resolved.error ?? "", /commandcode/, "a hidden default must never be substituted");
+    assert.deepEqual(resolved.configuredChain, [
+      "antigravity-acp/gemini-3.8-flash-low",
+      "codex/gpt-5.6-luna",
+    ]);
+    assert.equal(resolved.dropped?.length, 2);
   });
 
-  it("resolveOrchestratorModel recovers a stale saved config of disabled providers (#987)", () => {
+  it("resolveOrchestratorModel fails loud when no provider is enabled at all (#1011)", () => {
+    const resolved = resolveOrchestratorModel({
+      fallbackList: ["antigravity-acp/gemini-3.8-flash-low", "codex/gpt-5.6-luna"],
+      availableProviders: new Set<string>(),
+    });
+    assert.equal(resolved.exhausted, true);
+    assert.equal(resolved.provider, "");
+    assert.match(resolved.error ?? "", /Live enabled providers: none/);
+  });
+
+  it("resolveOrchestratorModel re-checks the configured primary and recovers after a transient outage (#1011)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-primary-recovery-"));
+    try {
+      const cbPath = join(dir, "model-health.json");
+      recordModelQuotaFailure(
+        "pi",
+        "commandcode/deepseek/deepseek-v4-flash",
+        "429 quota",
+        cbPath,
+        3600,
+        1000,
+      );
+      const chain = [
+        "pi/commandcode/deepseek/deepseek-v4-flash",
+        "antigravity/gemini-3.8-flash-low",
+      ];
+      const cooling = resolveOrchestratorModel({
+        fallbackList: chain,
+        circuitBreakerPath: cbPath,
+        availableProviders: new Set(["pi", "antigravity"]),
+        nowSec: 1500,
+      });
+      assert.equal(cooling.key, "antigravity/gemini-3.8-flash-low");
+      assert.deepEqual(
+        (cooling.dropped ?? []).map((d) => [d.key, d.reason]),
+        [["pi/commandcode/deepseek/deepseek-v4-flash", "quota_exhausted"]],
+      );
+
+      // Cooldown expires: the next spawn re-checks the primary and wins again.
+      const recovered = resolveOrchestratorModel({
+        fallbackList: chain,
+        circuitBreakerPath: cbPath,
+        availableProviders: new Set(["pi", "antigravity"]),
+        nowSec: 5000,
+      });
+      assert.equal(recovered.key, "pi/commandcode/deepseek/deepseek-v4-flash");
+      assert.deepEqual(recovered.dropped, []);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("handleUppidiFleetAlerts returns persisted banners and honors the scoped override (#1011)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-fleet-alerts-"));
+    const alertsPath = join(dir, "model-alerts.json");
+    const previous = process.env.UPPIDI_FLEET_ALERTS_PATH;
+    process.env.UPPIDI_FLEET_ALERTS_PATH = alertsPath;
+    try {
+      assert.equal(defaultModelAlertsPath(), alertsPath);
+      recordModelAlert(
+        {
+          repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
+          role: "orchestrator",
+          message: "boom",
+          configuredChain: ["a/b"],
+          dropped: [{ key: "a/b", provider: "a", model: "b", reason: "provider_disabled" }],
+          availableProviders: ["pi"],
+          createdAt: new Date().toISOString(),
+        },
+        alertsPath,
+      );
+      const out = await handleUppidiFleetAlerts();
+      assert.equal(out.ok, true);
+      assert.equal(out.alerts.length, 1);
+      assert.equal(out.alerts[0].message, "boom");
+      assert.equal(out.alerts[0].dropped[0].reason, "provider_disabled");
+    } finally {
+      if (previous === undefined) delete process.env.UPPIDI_FLEET_ALERTS_PATH;
+      else process.env.UPPIDI_FLEET_ALERTS_PATH = previous;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveOrchestratorModel fails loud for a stale saved config of disabled providers (#987/#1011)", () => {
     const dir = mkdtempSync(join(tmpdir(), "paseo-role-models-stale-"));
     const configPath = join(dir, "uppidi-fleet-role-models.json");
     writeFileSync(
@@ -3489,8 +3604,9 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = configPath;
     try {
       const resolved = resolveOrchestratorModel({ availableProviders: new Set(["pi"]) });
-      assert.equal(resolved.provider, "pi");
-      assert.equal(resolved.key, "pi/commandcode/deepseek/deepseek-v4-flash");
+      assert.equal(resolved.exhausted, true);
+      assert.equal(resolved.provider, "");
+      assert.match(resolved.error ?? "", /Live enabled providers: pi/);
     } finally {
       if (previous === undefined) delete process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG;
       else process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = previous;
@@ -4874,6 +4990,115 @@ describe("hook-router ensure-orchestrator deterministic resolution and idempoten
     assert.equal(fallbackSpawns.length, 1);
     assert.equal(fallbackSpawns[0].provider, "antigravity");
     assert.equal(fallbackSpawns[0].model, "gemini-3.8-flash-low");
+    assert.equal(res.resolvedModelKey, "antigravity/gemini-3.8-flash-low");
+    assert.deepEqual(
+      (res.droppedModels ?? []).map((d) => [d.key, d.reason]),
+      [["antigravity-acp/gemini-3.8-flash-low", "provider_disabled"]],
+    );
+    await fallbackRouter.stop();
+  });
+
+  it("fails loud, persists a banner, and posts the board alert when the chain is exhausted (#1011)", async () => {
+    const alertsPath = join(tempDir, "model-alerts.json");
+    const posted: Array<{ repo: string; alert: any }> = [];
+    const exhaustedRouter = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      workspacesData: [
+        {
+          workspaceId: "ws-paseo-main",
+          cwd: tempRepoDir,
+          displayName: "Paseo",
+          isolation: "local",
+          projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo",
+        },
+      ],
+      orchestratorModelFallback: [
+        "antigravity-acp/gemini-3.8-flash-low",
+        "codex/gpt-5.6-luna",
+      ],
+      circuitBreakerPath: join(tempDir, "model-health-exhausted.json"),
+      modelAlertsPath: alertsPath,
+      availableProvidersData: ["pi"],
+      providerModeResolver: async () => ({ modes: [] }),
+      postModelExhaustionAlert: async (repo, alert) => {
+        posted.push({ repo, alert });
+      },
+      spawnAgent: async () => {
+        throw new Error("must not spawn on total exhaustion");
+      },
+    });
+
+    const res = await exhaustedRouter.ensureOrchestrator({ repo: "xpufx-org/paseo" });
+    assert.equal(res.ok, false);
+    assert.equal(res.errorCode, "model_exhausted");
+    assert.match(res.error ?? "", /No orchestrator model is satisfiable/);
+    assert.deepEqual(
+      (res.droppedModels ?? []).map((d) => [d.key, d.reason]),
+      [
+        ["antigravity-acp/gemini-3.8-flash-low", "provider_disabled"],
+        ["codex/gpt-5.6-luna", "provider_disabled"],
+      ],
+    );
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].repo, "forge.mrs.uppidi.com/xpufx-org/paseo");
+    assert.match(posted[0].alert.message, /Live enabled providers: pi/);
+
+    // Persistent banner survives for the dashboard to read.
+    const persisted = readModelAlerts(alertsPath);
+    const key = "forge.mrs.uppidi.com/xpufx-org/paseo";
+    assert.ok(persisted[key], "the exhaustion banner must be persisted");
+    assert.deepEqual(persisted[key].configuredChain, [
+      "antigravity-acp/gemini-3.8-flash-low",
+      "codex/gpt-5.6-luna",
+    ]);
+    assert.equal(persisted[key].dropped.length, 2);
+    await exhaustedRouter.stop();
+  });
+
+  it("clears a stale exhaustion banner once a spawn resolves again (#1011)", async () => {
+    const alertsPath = join(tempDir, "model-alerts-clear.json");
+    const key = "forge.mrs.uppidi.com/xpufx-org/paseo";
+    recordModelAlert(
+      {
+        repo: key,
+        role: "orchestrator",
+        message: "stale",
+        configuredChain: ["antigravity-acp/gemini-3.8-flash-low"],
+        dropped: [],
+        availableProviders: ["pi"],
+        createdAt: new Date().toISOString(),
+      },
+      alertsPath,
+    );
+    assert.ok(readModelAlerts(alertsPath)[key]);
+
+    const recoveryRouter = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      workspacesData: [
+        {
+          workspaceId: "ws-paseo-main",
+          cwd: tempRepoDir,
+          displayName: "Paseo",
+          isolation: "local",
+          projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo",
+        },
+      ],
+      orchestratorModelFallback: ["antigravity/gemini-3.8-flash-low"],
+      circuitBreakerPath: join(tempDir, "model-health-recovery.json"),
+      modelAlertsPath: alertsPath,
+      availableProvidersData: ["antigravity"],
+      providerModeResolver: async () => ({ modes: [] }),
+      spawnAgent: async () => ({ id: "agent-recovered" }),
+    });
+    (recoveryRouter as any).hasParentAgentLabel = async () => false;
+    const res = await recoveryRouter.ensureOrchestrator({ repo: "xpufx-org/paseo" });
+    assert.equal(res.ok, true);
+    assert.equal(readModelAlerts(alertsPath)[key], undefined, "recovery must clear the banner");
+    await recoveryRouter.stop();
   });
 
   it("is idempotent: returns existing active orchestrator without duplicate spawns", async () => {
