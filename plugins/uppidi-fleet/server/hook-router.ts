@@ -26,6 +26,7 @@ import type {
   UppidiRotationStatusOutput,
   UppidiSetRotationPolicyInput,
   UppidiSetRotationPolicyOutput,
+  MergeEventHook,
 } from "../shared/contracts.js";
 import { extractPermissionScope } from "../shared/contracts.js";
 import {
@@ -87,6 +88,8 @@ export interface RouterConfig {
   port?: number;
   pausedRepos?: string[];
   enrolledRepos?: string[];
+  /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
+  mergeEventHooks?: Record<string, MergeEventHook>;
 }
 
 export function getAvailableNetworkInterfaces(): string[] {
@@ -119,6 +122,7 @@ export function loadRouterConfig(): RouterConfig {
       port: settings.hookPort,
       pausedRepos: mergePausedRepos(settings.pausedRepos, settings.mutedRepos),
       enrolledRepos: settings.enrolledRepos,
+      mergeEventHooks: settings.mergeEventHooks,
     };
   } catch {
     return {};
@@ -152,6 +156,9 @@ export function saveRouterConfig(config: RouterConfig): void {
       // Clearing the pre-#984 key keeps a stale entry from resurrecting a repo
       // the operator just unpaused via the merged read above.
       updateData.mutedRepos = undefined;
+    }
+    if (config.mergeEventHooks !== undefined) {
+      updateData.mergeEventHooks = config.mergeEventHooks;
     }
     if (Object.keys(updateData).length > 0) {
       storage.update((prev) => ({ ...prev, ...updateData }));
@@ -206,6 +213,10 @@ export interface HookRouterOptions {
   modelHealthPath?: string;
   /** Persistent model-alert banner path; defaults to the scoped plugin data dir (#1011). */
   modelAlertsPath?: string;
+  /** Explicit merge-event log path; defaults to the scoped plugin data dir (#1076). */
+  mergeEventLogPath?: string;
+  /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
+  mergeEventHooks?: Record<string, MergeEventHook>;
   /**
    * Best-effort board notification for total model-chain exhaustion (#1011).
    * Defaults to a Forgejo issue/comment on the affected repo; tests inject a
@@ -718,6 +729,140 @@ export interface DirectActionResult {
   notified?: boolean;
   /** Issue number created by the handler, when it creates one (#865). */
   createdIssue?: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Merge-event hook (#1076)
+//
+// Merges land on `origin/main` only; the primary checkout does not track the
+// remote, so a merged plugin fix stays inert until the checkout advances and
+// the directory-installed plugin reloads. On a merged `pull_request.closed`
+// event the router fast-forwards the mapped checkout, reloads its plugin, and
+// announces what changed to Front Desk, the repo orchestrator and a durable log.
+// ---------------------------------------------------------------------------
+
+/** Rolling cap on stored merge-event records. */
+export const MERGE_EVENT_LOG_MAX = 200;
+
+export interface MergeEventRecord {
+  repo: string;
+  checkoutPath: string;
+  pluginId: string | null;
+  timestamp: string;
+  fromSha: string;
+  toSha: string;
+  /** Commit subjects applied across `from..to` (PR/squash titles). */
+  titles: string[];
+  fastForwarded: boolean;
+  alreadyCurrent: boolean;
+  reloaded: boolean;
+  reloadReason: string;
+  newRevision: string;
+  status: "fast-forwarded" | "already-current" | "skipped";
+  reason: string;
+}
+
+export interface MergeEventResult extends DirectActionResult {
+  repo?: string;
+  checkoutPath?: string;
+  status?: MergeEventRecord["status"];
+  fromSha?: string;
+  toSha?: string;
+  titles?: string[];
+  fastForwarded?: boolean;
+  alreadyCurrent?: boolean;
+  reloaded?: boolean;
+  record?: MergeEventRecord;
+}
+
+/** Read the durable merge-event log; missing or corrupt reads as empty. */
+export function readMergeEventRecords(path: string): MergeEventRecord[] {
+  try {
+    if (!existsSync(path)) return [];
+    const parsed = JSON.parse(readFileSync(path, "utf8") || "[]");
+    return Array.isArray(parsed) ? (parsed as MergeEventRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Append one record to the durable merge-event log, capped oldest-first. */
+export function appendMergeEventRecord(record: MergeEventRecord, path: string): MergeEventRecord[] {
+  const records = readMergeEventRecords(path);
+  records.push(record);
+  const capped = records.slice(-MERGE_EVENT_LOG_MAX);
+  try {
+    const dir = dirname(path);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const tempPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(tempPath, JSON.stringify(capped, null, 2), "utf8");
+    try {
+      renameSync(tempPath, path);
+    } catch {
+      writeFileSync(path, JSON.stringify(capped, null, 2), "utf8");
+      try {
+        unlinkSync(tempPath);
+      } catch {}
+    }
+  } catch {
+    // A merge-event write must never fail the fast-forward it records.
+  }
+  return capped;
+}
+
+/**
+ * Resolve the opt-in binding for a payload repo. Both the payload and the
+ * configured keys accept `host/owner/repo`, `owner/repo`, URLs and `.git`.
+ */
+export function resolveMergeEventHook(
+  repo: string | null | undefined,
+  hooks: Record<string, MergeEventHook> | null | undefined,
+): MergeEventHook | null {
+  if (!repo || !hooks) return null;
+  const wanted = new Set(candidateRepoKeys(repo).map((k) => k.toLowerCase()));
+  if (wanted.size === 0) return null;
+  for (const [key, hook] of Object.entries(hooks)) {
+    if (!hook || typeof hook.checkoutPath !== "string" || !hook.checkoutPath.trim()) continue;
+    for (const candidate of candidateRepoKeys(key)) {
+      if (wanted.has(candidate.toLowerCase())) return hook;
+    }
+  }
+  return null;
+}
+
+/** Fleet-envelope body announcing one merge-event outcome. Pure. */
+export function formatMergeEventNotice(record: MergeEventRecord): string {
+  const plugin = record.pluginId ? `plugin \`${record.pluginId}\`` : "no plugin bound";
+  const lines: string[] = [];
+  if (record.status === "already-current") {
+    lines.push(`[Merge Event] ${record.repo} already current`);
+    lines.push(`- Checkout: \`${record.checkoutPath}\` (${plugin})`);
+    lines.push(`- Time: ${record.timestamp}`);
+    lines.push(`- Revision: \`${record.fromSha}\` (nothing new to pull)`);
+    return lines.join("\n");
+  }
+  if (record.status === "skipped") {
+    lines.push(`[Merge Event] ${record.repo} checkout not updated`);
+    lines.push(`- Checkout: \`${record.checkoutPath}\` (${plugin})`);
+    lines.push(`- Time: ${record.timestamp}`);
+    lines.push(`- Revision: \`${record.fromSha}\``);
+    lines.push(`- Skipped: ${record.reason}`);
+    return lines.join("\n");
+  }
+  const count = record.titles.length;
+  lines.push(`[Merge Event] ${record.repo} fast-forwarded`);
+  lines.push(`- Checkout: \`${record.checkoutPath}\` (${plugin})`);
+  lines.push(`- Time: ${record.timestamp}`);
+  lines.push(
+    `- Revision: \`${record.fromSha}\` -> \`${record.toSha}\` (${count} commit${count === 1 ? "" : "s"})`,
+  );
+  lines.push(`- Fast-forward: ${record.fastForwarded ? "ok" : "failed"}`);
+  lines.push(`- Plugin reload: ${record.reloaded ? "ok" : record.reloadReason}`);
+  if (count > 0) {
+    lines.push("- Applied:");
+    for (const title of record.titles) lines.push(`  - ${title}`);
+  }
+  return lines.join("\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -3145,6 +3290,12 @@ export class HookRouter {
   private readonly closeGuardTargetActors: string[];
   private readonly closeGuardAcceptedLabels: string[];
   private readonly sharedAgentActor: string;
+  /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
+  private mergeEventHooks: Record<string, MergeEventHook>;
+  /** Durable append-only merge-event log path (#1076). */
+  private readonly mergeEventLogPath: string;
+  /** One fast-forward per checkout at a time; guards the primary checkout (#1076). */
+  private readonly mergeEventLocks = new Set<string>();
 
   constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
     this.server = server ?? null;
@@ -3182,6 +3333,7 @@ export class HookRouter {
         ? options.closeGuardAcceptedLabels.map(normalizeLabelName)
         : [...CLOSE_GUARD_ACCEPTED_LABELS];
     this.sharedAgentActor = options?.sharedActor ?? SHARED_AGENT_ACTOR;
+    this.mergeEventHooks = options?.mergeEventHooks ?? persisted.mergeEventHooks ?? {};
 
     this.configuredPort =
       options?.port !== undefined
@@ -3224,6 +3376,10 @@ export class HookRouter {
     this.queueDir = options?.queueDir ?? process.env.HOOK_QUEUE_DIR ?? join(scopedRoot, "queues");
     this.stateDir =
       options?.stateDir ?? process.env.HOOK_STATE_DIR ?? join(scopedRoot, "orchestrators");
+    this.mergeEventLogPath =
+      options?.mergeEventLogPath ??
+      process.env.HOOK_MERGE_EVENT_LOG ??
+      join(scopedRoot, "merge-events.json");
 
     this.coalesceDisable =
       options?.coalesceDisable ??
@@ -3436,6 +3592,8 @@ export class HookRouter {
         await this.runCiFailure(body);
       } else if (ev === "repository" && action === "created") {
         await this.runRepoOnboarding(body);
+      } else if (ev === "pull_request" && action === "closed" && body?.pull_request?.merged === true) {
+        await this.runMergeEvent(body);
       }
     } catch (err) {
       this.log(
@@ -3459,6 +3617,356 @@ export class HookRouter {
     const sender = senderFromPayload(body);
     const login = sender?.login ?? sender?.username;
     return typeof login === "string" ? login : "";
+  }
+
+  // -------------------------------------------------------------------------
+  // Merge-event hook (#1076)
+  // -------------------------------------------------------------------------
+
+  /** Configured merge-event bindings (copy). Empty means disabled. */
+  public getMergeEventHooks(): Record<string, MergeEventHook> {
+    return { ...this.mergeEventHooks };
+  }
+
+  /** Persist an opt-in checkout/plugin binding for `repo`. */
+  public setMergeEventHook(repo: string, hook: MergeEventHook): Record<string, MergeEventHook> {
+    const key = canonicalRepoKey(repo) ?? repo.trim();
+    this.mergeEventHooks = { ...this.mergeEventHooks, [key]: hook };
+    saveRouterConfig({ mergeEventHooks: this.mergeEventHooks });
+    return this.getMergeEventHooks();
+  }
+
+  /** Remove any binding that resolves to `repo`. */
+  public removeMergeEventHook(repo: string): Record<string, MergeEventHook> {
+    const wanted = new Set(candidateRepoKeys(repo).map((k) => k.toLowerCase()));
+    const next: Record<string, MergeEventHook> = {};
+    for (const [key, hook] of Object.entries(this.mergeEventHooks)) {
+      const matches = candidateRepoKeys(key).some((candidate) => wanted.has(candidate.toLowerCase()));
+      if (!matches) next[key] = hook;
+    }
+    this.mergeEventHooks = next;
+    saveRouterConfig({ mergeEventHooks: this.mergeEventHooks });
+    return this.getMergeEventHooks();
+  }
+
+  /** Expand `~` and resolve a configured checkout path. */
+  private resolveCheckoutPath(raw: string): string {
+    const trimmed = raw.trim();
+    if (trimmed === "~") return resolveHostHome();
+    if (trimmed.startsWith("~/")) return join(resolveHostHome(), trimmed.slice(2));
+    return resolve(trimmed);
+  }
+
+  private async gitExec(
+    args: string[],
+    cwd: string,
+  ): Promise<{ ok: boolean; code: number; stdout: string; stderr: string }> {
+    try {
+      const res = await execFileAsync("git", args, { cwd, timeout: 60000, maxBuffer: 10 * 1024 * 1024 });
+      return { ok: true, code: 0, stdout: String(res.stdout ?? ""), stderr: String(res.stderr ?? "") };
+    } catch (err: any) {
+      return {
+        ok: false,
+        code: typeof err?.code === "number" ? err.code : 1,
+        stdout: String(err?.stdout ?? ""),
+        stderr: String(err?.stderr ?? err?.message ?? err),
+      };
+    }
+  }
+
+  private async gitIsAncestor(ancestor: string, descendant: string, cwd: string): Promise<boolean | null> {
+    const res = await this.gitExec(["merge-base", "--is-ancestor", ancestor, descendant], cwd);
+    if (res.ok) return true;
+    if (res.code === 1) return false;
+    return null;
+  }
+
+  private async reloadMergeEventPlugin(pluginId: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await execFileAsync("paseo", ["plugin", "reload", pluginId], { timeout: 30000 });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** Fleet-envelope notice to Front Desk and the repo orchestrator, plus queue durability. */
+  private async announceMergeEvent(repo: string, record: MergeEventRecord): Promise<void> {
+    const message = withFleetEnvelope(
+      routerEnvelope({ repo, kind: "merge-event" }),
+      formatMergeEventNotice(record),
+    );
+    const targets: Array<{ key: string; agentId: string | null }> = [
+      { key: "frontdesk", agentId: this.readFrontDesk()?.agentId ?? null },
+    ];
+    const orch = this.readOrchestrator(repo);
+    targets.push(
+      orch?.agentId
+        ? { key: orch.key ?? repo, agentId: orch.agentId }
+        : { key: canonicalRepoKey(repo) ?? repo, agentId: null },
+    );
+    for (const target of targets) {
+      try {
+        this.enqueue(target.key, message, false);
+      } catch (err) {
+        this.log(
+          `[warn] merge-event notice enqueue failed for ${target.key}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (target.agentId) {
+        try {
+          await this.deliverMessage(target.agentId, message, { noWait: true, steer: true });
+        } catch (err) {
+          this.log(
+            `[warn] merge-event notice delivery failed for ${target.agentId.slice(0, 7)}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+  }
+
+  private skipMergeEventRecord(
+    repo: string,
+    checkoutPath: string,
+    pluginId: string | null,
+    timestamp: string,
+    fromSha: string,
+    reason: string,
+  ): MergeEventRecord {
+    return {
+      repo,
+      checkoutPath,
+      pluginId,
+      timestamp,
+      fromSha,
+      toSha: fromSha,
+      titles: [],
+      fastForwarded: false,
+      alreadyCurrent: false,
+      reloaded: false,
+      reloadReason: reason,
+      newRevision: fromSha,
+      status: "skipped",
+      reason,
+    };
+  }
+
+  /**
+   * Fast-forward a mapped checkout on a merged pull request, reload its plugin,
+   * and announce the result. Skips (and reports) a dirty, divergent or
+   * unreachable checkout; never rewrites history (`--ff-only`).
+   */
+  public async runMergeEvent(body: any): Promise<MergeEventResult> {
+    const repo = keyFromPayload(body) ?? this.bareRepoFromPayload(body);
+    if (!repo) return { acted: false, reason: "missing repository in payload" };
+    const hook = resolveMergeEventHook(repo, this.mergeEventHooks);
+    if (!hook) return { acted: false, reason: `no merge-event mapping for ${repo}` };
+    const checkoutPath = this.resolveCheckoutPath(hook.checkoutPath);
+    if (this.mergeEventLocks.has(checkoutPath)) {
+      return { acted: false, reason: `merge event already in progress for ${checkoutPath}` };
+    }
+    this.mergeEventLocks.add(checkoutPath);
+    try {
+      return await this.executeMergeEvent(repo, checkoutPath, hook);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      this.log(`[warn] merge event failed for ${repo} (${checkoutPath}): ${reason}`);
+      return { acted: false, reason: `merge event failed: ${reason}` };
+    } finally {
+      this.mergeEventLocks.delete(checkoutPath);
+    }
+  }
+
+  private async executeMergeEvent(
+    repo: string,
+    checkoutPath: string,
+    hook: MergeEventHook,
+  ): Promise<MergeEventResult> {
+    const pluginId = hook.pluginId?.trim() || null;
+    const timestamp = new Date().toISOString();
+    const repoKey = canonicalRepoKey(repo) ?? repo;
+
+    const finish = async (record: MergeEventRecord, acted: boolean): Promise<MergeEventResult> => {
+      appendMergeEventRecord(record, this.mergeEventLogPath);
+      await this.announceMergeEvent(repoKey, record);
+      this.log(
+        `[info] merge event ${record.status} for ${repoKey}: ${record.fromSha} -> ${record.toSha} (${record.reason})`,
+      );
+      return {
+        acted,
+        reason: record.reason,
+        repo: repoKey,
+        checkoutPath,
+        status: record.status,
+        fromSha: record.fromSha,
+        toSha: record.toSha,
+        titles: record.titles,
+        fastForwarded: record.fastForwarded,
+        alreadyCurrent: record.alreadyCurrent,
+        reloaded: record.reloaded,
+        record,
+      };
+    };
+
+    const head = await this.gitExec(["rev-parse", "HEAD"], checkoutPath);
+    if (!head.ok || !head.stdout.trim()) {
+      const detail = head.stderr.trim() || `exit ${head.code}`;
+      return finish(
+        this.skipMergeEventRecord(repoKey, checkoutPath, pluginId, timestamp, "", `git rev-parse HEAD failed: ${detail}`),
+        false,
+      );
+    }
+    const fromFull = head.stdout.trim();
+    const shortFrom = fromFull.slice(0, 7);
+
+    const status = await this.gitExec(["status", "--porcelain"], checkoutPath);
+    if (!status.ok) {
+      const detail = status.stderr.trim() || `exit ${status.code}`;
+      return finish(
+        this.skipMergeEventRecord(repoKey, checkoutPath, pluginId, timestamp, shortFrom, `git status failed: ${detail}`),
+        false,
+      );
+    }
+    if (status.stdout.trim()) {
+      const files = status.stdout.trim().split("\n").slice(0, 5).join(", ");
+      return finish(
+        this.skipMergeEventRecord(
+          repoKey,
+          checkoutPath,
+          pluginId,
+          timestamp,
+          shortFrom,
+          `working tree dirty; refusing to fast-forward (${files})`,
+        ),
+        false,
+      );
+    }
+
+    const fetch = await this.gitExec(["fetch", "origin"], checkoutPath);
+    if (!fetch.ok) {
+      const detail = fetch.stderr.trim() || `exit ${fetch.code}`;
+      return finish(
+        this.skipMergeEventRecord(
+          repoKey,
+          checkoutPath,
+          pluginId,
+          timestamp,
+          shortFrom,
+          `git fetch failed: ${detail}`,
+        ),
+        false,
+      );
+    }
+
+    const canFastForward = await this.gitIsAncestor("HEAD", "origin/main", checkoutPath);
+    const remoteAncestor = await this.gitIsAncestor("origin/main", "HEAD", checkoutPath);
+    if (canFastForward === null || remoteAncestor === null) {
+      return finish(
+        this.skipMergeEventRecord(
+          repoKey,
+          checkoutPath,
+          pluginId,
+          timestamp,
+          shortFrom,
+          "could not compare HEAD with origin/main",
+        ),
+        false,
+      );
+    }
+    if (!canFastForward && remoteAncestor) {
+      const record: MergeEventRecord = {
+        repo: repoKey,
+        checkoutPath,
+        pluginId,
+        timestamp,
+        fromSha: shortFrom,
+        toSha: shortFrom,
+        titles: [],
+        fastForwarded: false,
+        alreadyCurrent: true,
+        reloaded: false,
+        reloadReason: "already current",
+        newRevision: shortFrom,
+        status: "already-current",
+        reason: "already current",
+      };
+      return finish(record, false);
+    }
+    if (!canFastForward && !remoteAncestor) {
+      return finish(
+        this.skipMergeEventRecord(
+          repoKey,
+          checkoutPath,
+          pluginId,
+          timestamp,
+          shortFrom,
+          "checkout has diverged from origin/main; refusing to merge",
+        ),
+        false,
+      );
+    }
+
+    const merge = await this.gitExec(["merge", "--ff-only", "origin/main"], checkoutPath);
+    if (!merge.ok) {
+      const detail = merge.stderr.trim() || `exit ${merge.code}`;
+      return finish(
+        this.skipMergeEventRecord(
+          repoKey,
+          checkoutPath,
+          pluginId,
+          timestamp,
+          shortFrom,
+          `git merge --ff-only failed: ${detail}`,
+        ),
+        false,
+      );
+    }
+
+    const newHead = await this.gitExec(["rev-parse", "HEAD"], checkoutPath);
+    const toFull = newHead.ok && newHead.stdout.trim() ? newHead.stdout.trim() : fromFull;
+    const shortTo = toFull.slice(0, 7);
+    const alreadyCurrent = fromFull === toFull;
+
+    let titles: string[] = [];
+    if (!alreadyCurrent) {
+      const log = await this.gitExec(["log", "--reverse", "--format=%s", `${fromFull}..${toFull}`], checkoutPath);
+      titles = log.ok
+        ? log.stdout
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+        : [];
+    }
+
+    let reloaded = false;
+    let reloadReason = pluginId ? "not run" : "no plugin bound";
+    if (alreadyCurrent) {
+      reloadReason = "already current";
+    } else if (pluginId) {
+      const reload = await this.reloadMergeEventPlugin(pluginId);
+      reloaded = reload.ok;
+      reloadReason = reload.ok ? "ok" : `failed: ${reload.error}`;
+    }
+
+    const record: MergeEventRecord = {
+      repo: repoKey,
+      checkoutPath,
+      pluginId,
+      timestamp,
+      fromSha: shortFrom,
+      toSha: shortTo,
+      titles,
+      fastForwarded: !alreadyCurrent,
+      alreadyCurrent,
+      reloaded,
+      reloadReason,
+      newRevision: shortTo,
+      status: alreadyCurrent ? "already-current" : "fast-forwarded",
+      reason: alreadyCurrent
+        ? "already current"
+        : `${titles.length} commit(s) applied; reload ${reloadReason}`,
+    };
+    return finish(record, true);
   }
 
   /**

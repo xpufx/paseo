@@ -1688,6 +1688,18 @@ export const uppidiSetRotationPolicyContract = defineContract({
   output: UppidiSetRotationPolicyOutputSchema,
 });
 
+/** Opt-in checkout/plugin binding for the merge-event hook (#1076). */
+export const MergeEventHookSchema = z.object({
+  /** Absolute or `~`-relative path to the primary checkout to fast-forward. */
+  checkoutPath: z.string().min(1),
+  /** Directory-installed plugin to reload after the checkout advances. */
+  pluginId: z.string().min(1).optional(),
+});
+export type MergeEventHook = z.infer<typeof MergeEventHookSchema>;
+
+/** Repo key (`host/owner/repo`, `owner/repo`, or a URL) -> merge-event binding. */
+export const MergeEventHooksSchema = z.record(z.string(), MergeEventHookSchema);
+
 // Uppidi Fleet Plugin Settings Contract (Issue #444)
 export const uppidiFleetSettingsSchema = z.object({
   hookHost: z.string().default("127.0.0.1"),
@@ -1701,6 +1713,8 @@ export const uppidiFleetSettingsSchema = z.object({
   mutedRepos: z.array(z.string()).optional(),
   /** Agent rotation policy (#1019). Omitted means built-in defaults. */
   rotationPolicy: RotationPolicySchema.optional(),
+  /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
+  mergeEventHooks: MergeEventHooksSchema.default({}),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import {
   normalizeRepoKey,
@@ -107,6 +109,9 @@ import {
   REPO_ONBOARDING_ISSUE_LABELS,
   REPO_ONBOARDING_ISSUE_BODY,
   resolveProviderSpawnMode,
+  resolveMergeEventHook,
+  formatMergeEventNotice,
+  readMergeEventRecords,
   setExecFileAsyncForTest,
   type CoalesceEvent,
   type WatchdogAgent,
@@ -7668,5 +7673,282 @@ describe("HookRouter role rotation (#1019)", () => {
     // A second evaluation within the cooldown window must not rotate again.
     const second = await router.evaluateAutomaticRotations();
     assert.equal(second.some((r) => r.ok), false, "cooldown suppresses a second automatic rotation");
+  });
+});
+
+describe("merge-event hook (#1076)", () => {
+  const REPO = "xpufx-org/paseo";
+  const REPO_URL = "https://forge.mrs.uppidi.com/xpufx-org/paseo";
+  const REPO_KEY = "forge.mrs.uppidi.com/xpufx-org/paseo";
+  const realExecFile = promisify(execFile);
+
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let mergeEventLogPath: string;
+  let remoteDir: string;
+  let checkoutDir: string;
+  let workDir: string;
+  let paseoCalls: string[][];
+
+  function git(cwd: string, ...args: string[]): string {
+    return execFileSync(
+      "git",
+      ["-c", "user.email=test@example.com", "-c", "user.name=Fleet Test", ...args],
+      { cwd, encoding: "utf8" },
+    ).trim();
+  }
+
+  function initRepo(): void {
+    remoteDir = join(tempDir, "remote.git");
+    checkoutDir = join(tempDir, "checkout");
+    workDir = join(tempDir, "work");
+    execFileSync("git", ["init", "--bare", "--initial-branch=main", remoteDir]);
+    execFileSync("git", ["clone", remoteDir, checkoutDir]);
+    execFileSync("git", ["clone", remoteDir, workDir]);
+    writeFileSync(join(workDir, "README.md"), "one\n");
+    git(workDir, "add", "README.md");
+    git(workDir, "commit", "-m", "init: seed repo");
+    git(workDir, "push", "origin", "main");
+    git(checkoutDir, "fetch", "origin");
+    git(checkoutDir, "merge", "--ff-only", "origin/main");
+  }
+
+  function pushCommit(file: string, body: string, message: string): void {
+    writeFileSync(join(workDir, file), body);
+    git(workDir, "add", file);
+    git(workDir, "commit", "-m", message);
+    git(workDir, "push", "origin", "main");
+  }
+
+  function headOf(dir: string): string {
+    return git(dir, "rev-parse", "HEAD");
+  }
+
+  function makeRouter(overrides: Partial<HookRouterOptions> = {}): HookRouter {
+    return new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      mergeEventLogPath,
+      ...overrides,
+    });
+  }
+
+  function mergedPrBody(): any {
+    return {
+      action: "closed",
+      repository: { full_name: REPO, html_url: REPO_URL, clone_url: `${REPO_URL}.git` },
+      pull_request: { number: 7, title: "fix: merged", merged: true, html_url: `${REPO_URL}/pulls/7` },
+      sender: { login: "xpufx" },
+    };
+  }
+
+  function reloadCalls(): string[][] {
+    return paseoCalls.filter((args) => args[0] === "plugin" && args[1] === "reload");
+  }
+
+  function sentMessages(agentId: string): string[] {
+    return paseoCalls
+      .filter((args) => args[0] === "send" && args.includes(agentId))
+      .map((args) => String(args[args.length - 1]));
+  }
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-merge-event-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    mergeEventLogPath = join(tempDir, "merge-events.json");
+    paseoCalls = [];
+    initRepo();
+    // Real git in the throwaway repos; the `paseo` client is stubbed so no live
+    // plugin reload or agent delivery ever runs in the test.
+    setExecFileAsyncForTest(async (file: string, args: readonly string[], opts?: unknown) => {
+      if (file === "paseo") {
+        paseoCalls.push([...args]);
+        return { stdout: "", stderr: "" };
+      }
+      return (await realExecFile(file, args as string[], opts as any)) as any;
+    });
+  });
+
+  afterEach(() => {
+    setExecFileAsyncForTest(null);
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("fast-forwards a merged repo, reloads the plugin, and announces from->to with the applied titles", async () => {
+    const router = makeRouter({
+      mergeEventHooks: { [REPO]: { checkoutPath: checkoutDir, pluginId: "uppidi-fleet" } },
+    });
+    router.writeFrontDesk("frontdesk-agent");
+    router.writeOrchestrator(REPO, "orchestrator-agent");
+    const before = headOf(checkoutDir);
+    pushCommit("fix-a.txt", "a\n", "fix(uppidi-fleet): first merged fix (#1068)");
+    pushCommit("fix-b.txt", "b\n", "fix(uppidi-fleet): second merged fix (#1072)");
+
+    const res = await router.runMergeEvent(mergedPrBody());
+
+    assert.equal(res.status, "fast-forwarded");
+    assert.equal(res.fastForwarded, true);
+    assert.equal(res.reloaded, true);
+    const after = headOf(checkoutDir);
+    assert.notEqual(after, before);
+    assert.equal(res.fromSha, before.slice(0, 7));
+    assert.equal(res.toSha, after.slice(0, 7));
+    assert.deepEqual(res.titles, [
+      "fix(uppidi-fleet): first merged fix (#1068)",
+      "fix(uppidi-fleet): second merged fix (#1072)",
+    ]);
+    assert.deepEqual(reloadCalls(), [["plugin", "reload", "uppidi-fleet"]]);
+
+    const frontDesk = sentMessages("frontdesk-agent").join("\n");
+    const orchestrator = sentMessages("orchestrator-agent").join("\n");
+    assert.match(frontDesk, /Merge Event/);
+    assert.match(frontDesk, /first merged fix/);
+    assert.match(orchestrator, /Merge Event/);
+    assert.match(orchestrator, /second merged fix/);
+
+    const records = readMergeEventRecords(mergeEventLogPath);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].repo, REPO_KEY);
+    assert.equal(records[0].fromSha, before.slice(0, 7));
+    assert.equal(records[0].toSha, after.slice(0, 7));
+    assert.equal(records[0].status, "fast-forwarded");
+    assert.equal(records[0].reloaded, true);
+  });
+
+  it("skips a dirty checkout and reports exactly why", async () => {
+    const router = makeRouter({
+      mergeEventHooks: { [REPO]: { checkoutPath: checkoutDir, pluginId: "uppidi-fleet" } },
+    });
+    writeFileSync(join(checkoutDir, "README.md"), "dirty local edit\n");
+    const before = headOf(checkoutDir);
+    pushCommit("fix.txt", "x\n", "fix: remote change");
+
+    const res = await router.runMergeEvent(mergedPrBody());
+
+    assert.equal(res.status, "skipped");
+    assert.match(res.reason, /dirty/);
+    assert.match(res.reason, /README\.md/);
+    assert.equal(headOf(checkoutDir), before);
+    assert.equal(reloadCalls().length, 0);
+    const records = readMergeEventRecords(mergeEventLogPath);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].status, "skipped");
+  });
+
+  it("skips a divergent checkout without merging and reports the divergence", async () => {
+    const router = makeRouter({
+      mergeEventHooks: { [REPO]: { checkoutPath: checkoutDir, pluginId: "uppidi-fleet" } },
+    });
+    writeFileSync(join(checkoutDir, "local.txt"), "local\n");
+    git(checkoutDir, "add", "local.txt");
+    git(checkoutDir, "commit", "-m", "local: diverging commit");
+    const localHead = headOf(checkoutDir);
+    pushCommit("remote.txt", "remote\n", "fix: remote commit");
+
+    const res = await router.runMergeEvent(mergedPrBody());
+
+    assert.equal(res.status, "skipped");
+    assert.match(res.reason, /diverged/);
+    assert.equal(headOf(checkoutDir), localHead);
+    assert.equal(reloadCalls().length, 0);
+  });
+
+  it("fast-forwards without reloading when no plugin is bound", async () => {
+    const router = makeRouter({
+      mergeEventHooks: { [REPO]: { checkoutPath: checkoutDir } },
+    });
+    pushCommit("fix.txt", "x\n", "fix: no plugin bound");
+
+    const res = await router.runMergeEvent(mergedPrBody());
+
+    assert.equal(res.status, "fast-forwarded");
+    assert.equal(res.reloaded, false);
+    assert.match(res.record!.reloadReason, /no plugin bound/);
+    assert.equal(reloadCalls().length, 0);
+  });
+
+  it("is a no-op for a repo with no merge-event mapping", async () => {
+    const router = makeRouter({ mergeEventHooks: {} });
+    const before = headOf(checkoutDir);
+    pushCommit("fix.txt", "x\n", "fix: unmapped");
+
+    const res = await router.runMergeEvent(mergedPrBody());
+
+    assert.equal(res.acted, false);
+    assert.match(res.reason, /no merge-event mapping/);
+    assert.equal(headOf(checkoutDir), before);
+    assert.equal(readMergeEventRecords(mergeEventLogPath).length, 0);
+  });
+
+  it("is idempotent: a merge with nothing new announces already current", async () => {
+    const router = makeRouter({
+      mergeEventHooks: { [REPO]: { checkoutPath: checkoutDir, pluginId: "uppidi-fleet" } },
+    });
+    router.writeFrontDesk("frontdesk-agent");
+    pushCommit("fix.txt", "x\n", "fix: only merge");
+    await router.runMergeEvent(mergedPrBody());
+    paseoCalls = [];
+
+    const res = await router.runMergeEvent(mergedPrBody());
+
+    assert.equal(res.status, "already-current");
+    assert.equal(res.alreadyCurrent, true);
+    assert.match(res.reason, /already current/);
+    assert.match(sentMessages("frontdesk-agent").join("\n"), /already current/);
+    assert.equal(reloadCalls().length, 0);
+  });
+
+  it("resolves a binding across bare and forge-qualified repo keys", () => {
+    assert.deepEqual(
+      resolveMergeEventHook(REPO_KEY, { [REPO]: { checkoutPath: "/tmp/x" } }),
+      { checkoutPath: "/tmp/x" },
+    );
+    assert.deepEqual(
+      resolveMergeEventHook(REPO, { [REPO_KEY]: { checkoutPath: "/tmp/y", pluginId: "p" } }),
+      { checkoutPath: "/tmp/y", pluginId: "p" },
+    );
+    assert.equal(resolveMergeEventHook(REPO, {}), null);
+  });
+
+  it("formats the applied commit titles into the notice body", () => {
+    const body = formatMergeEventNotice({
+      repo: REPO_KEY,
+      checkoutPath: "/tmp/checkout",
+      pluginId: "uppidi-fleet",
+      timestamp: "2026-10-07T00:00:00.000Z",
+      fromSha: "aaaaaaa",
+      toSha: "bbbbbbb",
+      titles: ["fix: one", "fix: two"],
+      fastForwarded: true,
+      alreadyCurrent: false,
+      reloaded: true,
+      reloadReason: "ok",
+      newRevision: "bbbbbbb",
+      status: "fast-forwarded",
+      reason: "2 commit(s) applied; reload ok",
+    });
+    assert.match(body, /aaaaaaa.*bbbbbbb/);
+    assert.match(body, /fix: one/);
+    assert.match(body, /fix: two/);
+  });
+
+  it("dispatches a merged pull_request.closed event to the merge-event handler", async () => {
+    const router = makeRouter();
+    const seen: any[] = [];
+    (router as any).runMergeEvent = async (body: any) => {
+      seen.push(body);
+      return { acted: true, reason: "stub" };
+    };
+
+    await router.runDirectActions("pull_request", { action: "closed", pull_request: { merged: true } });
+    await router.runDirectActions("pull_request", { action: "closed", pull_request: { merged: false } });
+    await router.runDirectActions("pull_request", { action: "opened", pull_request: { merged: true } });
+
+    assert.equal(seen.length, 1);
   });
 });
