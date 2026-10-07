@@ -1,5 +1,7 @@
 # Uppidi Fleet
 
+> Fleetception warning: Fleet is building itself live inside Fleet. Some features may be more fictional than functional.
+
 **An opinionated, full-lifecycle autonomous engineering fleet for Paseo, driven by a Forgejo/Gitea-family board.**
 
 `uppidi-fleet` turns a Forgejo issue tracker into the control plane for a small
