@@ -20,6 +20,7 @@ describe("handleListOperations", () => {
   it("includes agent-mux and identity operations in allowed operations", async () => {
     const ops = await allowedOperations();
     expect(ops).toContain("slash.agent.identity");
+    expect(ops).toContain("slash.agent-mux");
     expect(ops).toContain("slash.agent-mux.status");
     expect(ops).toContain("slash.agent-mux.probe");
     expect(ops).toContain("slash.agent-mux.cooldowns");
@@ -141,6 +142,18 @@ describe("handleRunCommand", () => {
     expect(body).toContain("Provider: antigravity");
     expect(body).toContain("Model: claude-3-7-sonnet");
     expect(body).toContain("Working Directory: /home/xpufx/code/test");
+  });
+});
+
+describe("tokenizeArgs", () => {
+  it("splits arguments safely respecting quotes", async () => {
+    const { tokenizeArgs } = await import("./resources");
+    expect(tokenizeArgs("")).toEqual([]);
+    expect(tokenizeArgs("   ")).toEqual([]);
+    expect(tokenizeArgs("status")).toEqual(["status"]);
+    expect(tokenizeArgs("probe antigravity")).toEqual(["probe", "antigravity"]);
+    expect(tokenizeArgs('probe "Google Antigravity" --dry-run')).toEqual(["probe", "Google Antigravity", "--dry-run"]);
+    expect(tokenizeArgs("probe 'Google Antigravity'")).toEqual(["probe", "Google Antigravity"]);
   });
 });
 

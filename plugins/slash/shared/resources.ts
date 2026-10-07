@@ -183,6 +183,13 @@ export const SEED_COMMANDS: SlashCommand[] = [
     action: { verb: "rpc", operation: "slash.ping", params: {} },
   },
   {
+    name: "agent-mux",
+    title: "Agent-Mux",
+    description: "Execute agent-mux commands or view help (requires agent-mux CLI installed)",
+    enabled: true,
+    action: { verb: "rpc", operation: "slash.agent-mux", params: {} },
+  },
+  {
     name: "agent-mux-status",
     title: "Agent-Mux Status",
     description: "View live quota and auth status (requires agent-mux CLI installed)",
@@ -257,6 +264,13 @@ export const SEED_OPERATION_BINDINGS: RpcOperationBinding[] = [
     kind: "primitive",
     primitive: "slash.agent.identity",
     description: "Queries deterministic caller agent identity, model, and workspace details",
+    params: {},
+  },
+  {
+    name: "slash.agent-mux",
+    kind: "primitive",
+    primitive: "slash.agent-mux",
+    description: "Invokes agent-mux CLI directly with optional arguments or displays help (requires agent-mux CLI)",
     params: {},
   },
   {

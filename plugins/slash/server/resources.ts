@@ -82,6 +82,7 @@ export async function handleListOperations(): Promise<{
 
 export interface OperationContext {
   agentId?: string;
+  args?: string;
   paseo?: any;
 }
 
@@ -233,6 +234,21 @@ async function readCappedText(response: Response): Promise<{ text: string; trunc
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Splits a command argument string into tokens safely respecting quotes.
+ */
+export function tokenizeArgs(raw?: string): string[] {
+  if (!raw || !raw.trim()) return [];
+  const matches = raw.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g);
+  if (!matches) return [];
+  return matches.map((arg) => {
+    if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
+      return arg.slice(1, -1);
+    }
+    return arg;
+  });
+}
+
 async function runAgentMux(args: string[], timeoutMs = 15_000): Promise<{ output: string }> {
   try {
     const { stdout, stderr } = await execFileAsync("agent-mux", args, {
@@ -311,11 +327,30 @@ const PRIMITIVES: Record<string, OperationPrimitive> = {
       thinkingOptionId,
     };
   },
-  "slash.agent-mux.status": async (params) => {
+  "slash.agent-mux": async (params, context) => {
+    // If explicit subcommand / args provided in params or via chat {args}, split into tokens safely
+    const extraArgs = tokenizeArgs(context.args);
+    const paramArgs = Array.isArray(params.args)
+      ? params.args.map(String)
+      : typeof params.args === "string"
+        ? tokenizeArgs(params.args)
+        : [];
+    const finalArgs = [...paramArgs, ...extraArgs];
+    return runAgentMux(finalArgs.length > 0 ? finalArgs : ["--help"], 30_000);
+  },
+  "slash.agent-mux.status": async (params, context) => {
+    const extra = tokenizeArgs(context.args);
+    if (extra.length > 0) {
+      return runAgentMux(["status", ...extra]);
+    }
     const provider = typeof params.provider === "string" && params.provider.trim() ? [params.provider.trim()] : [];
     return runAgentMux(["status", ...provider]);
   },
-  "slash.agent-mux.probe": async (params) => {
+  "slash.agent-mux.probe": async (params, context) => {
+    const extra = tokenizeArgs(context.args);
+    if (extra.length > 0) {
+      return runAgentMux(["probe", ...extra], 25_000);
+    }
     const args: string[] = ["probe"];
     if (typeof params.provider === "string" && params.provider.trim()) {
       args.push(params.provider.trim());
@@ -330,8 +365,9 @@ const PRIMITIVES: Record<string, OperationPrimitive> = {
     }
     return runAgentMux(args, 25_000);
   },
-  "slash.agent-mux.cooldowns": async () => {
-    return runAgentMux(["cooldowns"]);
+  "slash.agent-mux.cooldowns": async (_params, context) => {
+    const extra = tokenizeArgs(context.args);
+    return runAgentMux(["cooldowns", ...extra]);
   },
   // One generic handler backs every `kind: "http"` binding.
   http: (params, _context, binding) => {
@@ -389,6 +425,7 @@ export async function handleRunCommand(
   try {
     const result = await runOperation(command.action.operation, command.action.params ?? {}, {
       agentId: input.agentId,
+      args: input.args,
       paseo: context?.paseo,
     });
 
