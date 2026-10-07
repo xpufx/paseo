@@ -228,8 +228,12 @@ function ForgeIssuesViewInner({
 
   const repoOptions = useMemo<SelectOption[]>(() => [
     { label: "All Enrolled Repositories", value: "all" },
-    ...reposList.map((r) => ({ label: r, value: r })),
-  ], [reposList]);
+    ...reposList.map((r) => ({
+      label: r,
+      value: r,
+      display: resolveForgeSelection(r, rawRepos)?.compact ?? r,
+    })),
+  ], [reposList, rawRepos]);
 
   const issuesQuery = useRpcQuery(forgeOpenIssuesContract, {
     workspaceId: workspaceId || undefined,

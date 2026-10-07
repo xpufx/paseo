@@ -1433,7 +1433,11 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
 
   const repoOptions = useMemo<SelectOption[]>(() => [
     { label: "All Repositories", value: "all" },
-    ...availableRepos.map((r) => ({ label: r, value: r })),
+    ...availableRepos.map((r) => ({
+      label: r,
+      value: r,
+      display: resolveForgeSelection(r, availableRepos)?.compact ?? r,
+    })),
   ], [availableRepos]);
 
   const rawIssues = useMemo(() => {

@@ -13,6 +13,7 @@ import {
   Easing,
   Image,
   Linking,
+  Modal,
   Platform,
   Pressable,
   ScrollView as RNScrollView,
@@ -807,9 +808,40 @@ export function SearchInput({
 // --- select ----------------------------------------------------------------
 
 export interface SelectOption {
+  /** Full value. Also the accessibility label and hover/focus tooltip. */
   label: string;
   value: string;
+  /**
+   * Optional shorter, distinguishable text for the trigger and option row.
+   * When omitted, the label is middle-truncated so a long shared prefix (the
+   * forge host) never makes every option look identical.
+   */
+  display?: string;
 }
+
+/**
+ * Keeps both ends of a long value when the available width cannot show it all.
+ * The fleet repo keys all start with the same forge host, so a plain tail
+ * truncation erases the only part that distinguishes one option from another.
+ */
+export function middleTruncate(text: string, maxLength = 34): string {
+  if (text.length <= maxLength) return text;
+  const ellipsis = "…";
+  const keep = Math.max(1, maxLength - ellipsis.length);
+  const front = Math.ceil(keep / 2);
+  const back = keep - front;
+  return `${text.slice(0, front)}${ellipsis}${text.slice(text.length - back)}`;
+}
+
+interface SelectTriggerCoords {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+const FALLBACK_SELECT_COORDS: SelectTriggerCoords = { x: 0, y: 0, width: 0, height: 0 };
+const SELECT_OPTION_LIST_MAX_HEIGHT = 216;
 
 export interface SelectProps {
   value: string;
@@ -834,18 +866,48 @@ export function Select({
 }: SelectProps) {
   const { colors, alpha } = useFleetTheme();
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<SelectTriggerCoords | null>(null);
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const triggerRef = useRef<View>(null);
   const selected = options.find((option) => option.value === value);
-  const display = selected?.label ?? (value || placeholder);
+  const display = selected
+    ? selected.display ?? middleTruncate(selected.label)
+    : value || placeholder;
   const canOpen = !disabled && options.length > 0;
   const isOpen = open && canOpen;
+
+  const openAt = (next: SelectTriggerCoords) => {
+    setRevealed(null);
+    setCoords(next);
+    setOpen(true);
+  };
+
+  const handleToggle = () => {
+    if (isOpen) {
+      setOpen(false);
+      setRevealed(null);
+      return;
+    }
+    const node = triggerRef.current;
+    if (!node || typeof node.measureInWindow !== "function") {
+      openAt(FALLBACK_SELECT_COORDS);
+      return;
+    }
+    node.measureInWindow((x, y, width, height) => {
+      openAt({ x, y, width, height });
+    });
+  };
+
   return (
-    <View style={[{ width: "100%" }, style]}>
+    <View testID="fleet-select-root" style={[{ width: "100%" }, style]}>
       <Pressable
+        ref={triggerRef}
+        testID="fleet-select-trigger"
         accessibilityRole="button"
         accessibilityLabel={label ? `${label}: ${display}` : display}
         accessibilityState={{ expanded: isOpen, disabled }}
         disabled={!canOpen}
-        onPress={() => setOpen((prev) => !prev)}
+        onPress={handleToggle}
         style={({ pressed }) => [
           {
             flexDirection: "row",
@@ -876,47 +938,94 @@ export function Select({
         </Text>
         <Icon name={isOpen ? "ChevronUp" : "ChevronDown"} size={size === "sm" ? 12 : 14} color={colors.foregroundMuted} />
       </Pressable>
-      {isOpen ? (
-        <View
-          style={{
-            marginTop: 4,
-            borderWidth: 1,
-            borderColor: colors.border,
-            borderRadius: 8,
-            backgroundColor: colors.surface0,
-            overflow: "hidden",
-          }}
-        >
-          {options.map((option) => {
-            const isSelected = option.value === value;
-            return (
-              <Pressable
-                key={option.value}
-                accessibilityRole="button"
-                accessibilityLabel={option.label}
-                accessibilityState={{ selected: isSelected }}
-                onPress={() => {
-                  onValueChange(option.value);
-                  setOpen(false);
-                }}
-                style={({ pressed }) => [
-                  {
-                    paddingVertical: 6,
-                    paddingHorizontal: 10,
-                    backgroundColor: isSelected ? colors.surface2 : pressed ? alpha(colors.surface2, 0.5) : "transparent",
-                  },
-                ]}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={{ color: isSelected ? colors.foreground : colors.foregroundMuted, fontSize: 13, fontWeight: isSelected ? "600" : "400" }}
-                >
-                  {option.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+      {isOpen && coords ? (
+        // The option list portals into a transparent Modal so it paints above
+        // later siblings without contributing to the trigger's parent layout.
+        <Modal transparent visible={isOpen} animationType="none" onRequestClose={() => setOpen(false)}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss options"
+            onPress={() => setOpen(false)}
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+          />
+          <View
+            testID="fleet-select-overlay"
+            style={{
+              position: "absolute",
+              top: coords.y + coords.height + 4,
+              left: coords.x,
+              minWidth: coords.width,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 8,
+              backgroundColor: colors.surface0,
+              overflow: "hidden",
+              zIndex: 1000,
+              elevation: 20,
+            }}
+          >
+            <RNScrollView
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: SELECT_OPTION_LIST_MAX_HEIGHT }}
+            >
+              {options.map((option) => {
+                const isSelected = option.value === value;
+                const primary = option.display ?? middleTruncate(option.label);
+                const hasMore = primary !== option.label;
+                const revealProps = hasMore
+                  ? ({
+                      onMouseEnter: () => setRevealed(option.value),
+                      onMouseLeave: () =>
+                        setRevealed((prev) => (prev === option.value ? null : prev)),
+                      onFocus: () => setRevealed(option.value),
+                      onBlur: () =>
+                        setRevealed((prev) => (prev === option.value ? null : prev)),
+                    } as any)
+                  : {};
+                return (
+                  <Pressable
+                    {...revealProps}
+                    key={option.value}
+                    testID={`fleet-select-option-${option.value}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={option.label}
+                    accessibilityHint={hasMore ? option.label : undefined}
+                    accessibilityState={{ selected: isSelected }}
+                    onPress={() => {
+                      onValueChange(option.value);
+                      setOpen(false);
+                      setRevealed(null);
+                    }}
+                    style={({ pressed }) => [
+                      {
+                        paddingVertical: 6,
+                        paddingHorizontal: 10,
+                        backgroundColor: isSelected ? colors.surface2 : pressed ? alpha(colors.surface2, 0.5) : "transparent",
+                      },
+                    ]}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={{ color: isSelected ? colors.foreground : colors.foregroundMuted, fontSize: 13, fontWeight: isSelected ? "600" : "400" }}
+                    >
+                      {primary}
+                    </Text>
+                    {hasMore && revealed === option.value ? (
+                      <Text
+                        testID={`fleet-select-option-full-${option.value}`}
+                        selectable
+                        style={{ color: colors.foreground, fontSize: 11, marginTop: 2 }}
+                      >
+                        {option.label}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+            </RNScrollView>
+          </View>
+        </Modal>
       ) : null}
     </View>
   );
