@@ -280,6 +280,8 @@ export interface RotationBriefInput {
   previousAgentId?: string | null;
   generatedAt: string;
   skillPath?: string | null;
+  /** Effective skill text, inlined so the replacement never needs a file read (#1080). */
+  skillText?: string | null;
   activeTickets?: RotationBriefTicket[];
   pendingAttention?: RotationBriefTicket[];
   queueDepth?: number | null;
@@ -314,6 +316,9 @@ export function buildRotationBrief(input: RotationBriefInput): string {
   ];
   if (input.skillPath) {
     lines.push(`- Skill to follow: \`${input.skillPath}\``);
+  }
+  if (input.skillText?.trim()) {
+    lines.push("", "## Effective Skill (inlined)", input.skillText.trim());
   }
   lines.push("", "## Board");
   lines.push(...renderTickets("Active tickets", input.activeTickets));

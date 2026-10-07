@@ -21,6 +21,11 @@ const BUNDLED_SKILLS_DIR = path.join("examples", "skills");
 export interface PluginRootOptions {
   /** Explicit plugin root; callers that already know it skip discovery. */
   rootDir?: string;
+  /**
+   * Explicit canonical `platform/skills` root. When set it is authoritative and
+   * suppresses sibling/env discovery, so callers can pin the source.
+   */
+  canonicalSkillsRoot?: string;
   env?: NodeJS.ProcessEnv;
   home?: string;
   cwd?: string;
@@ -135,6 +140,46 @@ export function resolvePluginRoot(options: PluginRootOptions = {}): string | nul
     if (fs.existsSync(path.join(root, BUNDLED_SKILLS_DIR))) return root;
   }
   return null;
+}
+
+/**
+ * Env override for hosts whose `platform` checkout is not a sibling of the
+ * plugin checkout (packaged apps, managed installs).
+ */
+export const CANONICAL_SKILLS_ROOT_ENV = "PASEO_UPPIDI_FLEET_CANONICAL_SKILLS_ROOT";
+
+/**
+ * Canonical skills live under `platform/skills/<id>/SKILL.md`, so the platform
+ * root is three levels above the plugin dir (`<code>/platform` beside
+ * `<code>/paseo/plugins/uppidi-fleet`).
+ */
+const PLATFORM_SKILLS_REL = path.join("..", "..", "..", "platform", "skills");
+
+function absolutise(root: string, cwd: string): string {
+  return path.isAbsolute(root) ? root : path.join(cwd, root);
+}
+
+/**
+ * Roots that may hold canonical `platform/skills/<id>/SKILL.md` copies.
+ *
+ * An explicit `canonicalSkillsRoot` is authoritative and suppresses discovery
+ * (tests and operators pin it). Otherwise the env override is consulted first,
+ * then the sibling `platform` checkout of every plugin root candidate, so the
+ * dev layout resolves without configuration.
+ */
+export function canonicalSkillsRootCandidates(options: PluginRootOptions = {}): string[] {
+  const cwd = options.cwd ?? process.cwd();
+  const explicit = options.canonicalSkillsRoot?.trim();
+  if (explicit) return [absolutise(explicit, cwd)];
+
+  const env = options.env ?? process.env;
+  const out: string[] = [];
+  const envRoot = env[CANONICAL_SKILLS_ROOT_ENV]?.trim();
+  if (envRoot) out.push(absolutise(envRoot, cwd));
+  for (const root of pluginRootCandidates(options)) {
+    out.push(path.resolve(root, PLATFORM_SKILLS_REL));
+  }
+  return [...new Set(out)];
 }
 
 export interface FleetSkillDefinition {
@@ -252,21 +297,64 @@ export function readBundledSkillContent(
   }
 }
 
+/**
+ * First canonical root that holds at least one managed skill, or null when no
+ * platform checkout is reachable. Never throws; the bundled fallback covers it.
+ */
+export function resolveCanonicalSkillsRoot(options: PluginRootOptions = {}): string | null {
+  for (const root of canonicalSkillsRootCandidates(options)) {
+    for (const def of FLEET_SKILL_DEFINITIONS) {
+      if (fs.existsSync(path.join(root, def.id, "SKILL.md"))) return root;
+    }
+  }
+  return null;
+}
+
+/**
+ * Absolute path of a canonical `platform/skills/<id>/SKILL.md`, or null when the
+ * platform checkout (or this skill) is unavailable.
+ */
+export function getCanonicalSkillPath(
+  skillId: string,
+  options: PluginRootOptions = {},
+): string | null {
+  getDefinition(skillId);
+  for (const root of canonicalSkillsRootCandidates(options)) {
+    const candidate = path.join(root, skillId, "SKILL.md");
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/** Canonical skill text, or an empty string when the platform copy is absent. */
+export function readCanonicalSkillContent(
+  skillId: string,
+  options: PluginRootOptions = {},
+): string {
+  const canonicalPath = getCanonicalSkillPath(skillId, options);
+  if (!canonicalPath) return "";
+  try {
+    return fs.readFileSync(canonicalPath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 export interface EffectiveSkill {
   id: FleetSkillId;
   title: string;
   description: string;
   content: string;
-  origin: "override" | "bundled";
+  origin: "override" | "canonical" | "bundled";
   updatedAt?: string;
-  /** Filesystem path a spawned agent should read (override file or bundled copy). */
+  /** Filesystem path the effective text was read from (override, canonical, or bundled). */
   effectivePath: string;
 }
 
 /**
- * Resolves the effective skill text: the saved override when one exists,
- * otherwise the bundled default. Never reads or writes the repo checkout or
- * `~/.agents`.
+ * Resolves the effective skill text: the saved override when one exists, else
+ * the canonical `platform/skills` copy, else the bundled default. Never reads
+ * or writes the repo checkout or `~/.agents`.
  */
 export function resolveEffectiveSkill(
   skillId: string,
@@ -287,7 +375,21 @@ export function resolveEffectiveSkill(
         effectivePath: storage.filePath,
       };
     } catch {
-      // Unreadable override falls back to the bundled copy below.
+      // Unreadable override falls back to the canonical/bundled copy below.
+    }
+  }
+
+  const canonicalPath = getCanonicalSkillPath(skillId, options);
+  if (canonicalPath) {
+    try {
+      return {
+        ...def,
+        content: fs.readFileSync(canonicalPath, "utf8"),
+        origin: "canonical",
+        effectivePath: canonicalPath,
+      };
+    } catch {
+      // Unreadable canonical copy falls back to the bundled fallback below.
     }
   }
 
@@ -303,9 +405,37 @@ export function resolveEffectiveSkill(
 /**
  * Path a spawn prompt should point at for a role's skill. Resolves the override
  * when the operator saved one, so spawned agents read the effective text.
+ * Prefer {@link renderSkillDirective} so the agent never has to read the path.
  */
 export function getEffectiveSkillPath(skillId: string): string {
   return resolveEffectiveSkill(skillId).effectivePath;
+}
+
+/** Effective skill text (override, else canonical, else bundled). */
+export function getEffectiveSkillContent(
+  skillId: string,
+  options?: SkillStorageOptions,
+): string {
+  return resolveEffectiveSkill(skillId, options).content;
+}
+
+/**
+ * Renders the effective skill inline for a spawn prompt. Inlining content — not
+ * a path — keeps the text current and avoids a permission-gated agent read of a
+ * checkout outside the worker's workspace (#1080). Falls back to a path
+ * directive only when no content resolves at all.
+ */
+export function renderSkillDirective(
+  skillId: string,
+  options?: SkillStorageOptions,
+): string {
+  const skill = resolveEffectiveSkill(skillId, options);
+  if (!skill.content.trim()) {
+    return skill.effectivePath
+      ? `Follow the ${skill.title} at ${skill.effectivePath}.`
+      : `Follow the ${skill.title} conventions.`;
+  }
+  return `### ${skill.title} (effective)\n\n${skill.content.trim()}`;
 }
 
 function toFleetSkill(skill: EffectiveSkill): FleetSkill {

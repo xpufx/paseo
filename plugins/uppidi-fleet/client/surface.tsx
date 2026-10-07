@@ -2429,6 +2429,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     const isDirty = draft !== skill.content;
                     const isSaving = savingSkillId === skill.id;
                     const wasSaved = skillSaved[skill.id] === true && !isDirty;
+                    const originLabel =
+                      skill.origin === "override"
+                        ? "Override"
+                        : skill.origin === "canonical"
+                          ? "Canonical"
+                          : "Bundled";
+                    const originVariant =
+                      skill.origin === "override" ? "warning" : skill.origin === "canonical" ? "info" : "neutral";
                     return (
                       <Card key={skill.id} variant="elevated">
                         <Stack gap="xs">
@@ -2439,8 +2447,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                                   {skill.title}
                                 </Text>
                                 <Badge
-                                  label={skill.origin === "override" ? "Override" : "Bundled"}
-                                  variant={skill.origin === "override" ? "warning" : "neutral"}
+                                  label={originLabel}
+                                  variant={originVariant}
                                   size="sm"
                                 />
                                 {isDirty && <Badge label="Unsaved" variant="info" size="sm" />}
@@ -2471,7 +2479,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                                 label="Reset"
                                 size="sm"
                                 variant="secondary"
-                                disabled={isSaving || skill.origin === "bundled"}
+                                disabled={isSaving || skill.origin !== "override"}
                                 onPress={() => void handleResetSkill(skill)}
                               />
                             </Row>

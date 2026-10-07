@@ -297,6 +297,16 @@ and adapt for your own environment:
 | `orchestrator` | orchestrator — triage, decompose, dispatch, pre-flight PRs | [`examples/skills/orchestrator/SKILL.md`](./examples/skills/orchestrator/SKILL.md) |
 | `front-desk` | Front Desk — operator-facing liaison and triage intake | [`examples/skills/front-desk/SKILL.md`](./examples/skills/front-desk/SKILL.md) |
 
+### 6.0 Canonical skills and the bundled fallback
+
+The effective skill text resolves in this order:
+
+1. **Operator override** — `~/.paseo/plugin-data/xpufx/uppidi-fleet/skills/<id>.md` (Settings → Fleet Skills).
+2. **Canonical `platform/skills/<id>/SKILL.md`** — the single source of truth. The root is configurable via `PASEO_UPPIDI_FLEET_CANONICAL_SKILLS_ROOT` (or the `canonicalSkillsRoot` option); otherwise the sibling `platform` checkout of the plugin root is probed (`<code>/platform/skills` beside `<code>/paseo/plugins/uppidi-fleet`).
+3. **Bundled fallback** — `examples/skills/<id>/SKILL.md`, kept in sync with the canonical copy by a drift test so the fleet works without a `platform` checkout.
+
+The resolved **content** is inlined into the spawn prompt (not a path), so a spawned agent never needs a permission-gated tool read of a checkout outside its workspace, and the text is always the current effective copy. A platform/bundled drift test skips (with an explicit message) on hosts where no `platform` checkout is reachable.
+
 > [!NOTE]
 > **CLI tooling ships `teax` (over `tea`).** The fleet's rich CLI variant drives
 > the board through **`teax`**, an enhanced wrapper around the Gitea/Forgejo
@@ -930,7 +940,7 @@ these gaps yourself.
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/role-models.json` | Per-role primary model + fallback group (scoped storage; migrates legacy `~/.paseo/uppidi-fleet-role-models.json` and `$HOME/uppidi-fleet-role-models.json` on first read). |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/metrics.json` | Fleet capability metrics (scoped storage; fallback/migration from legacy `~/.paseo/uppidi-fleet-metrics.json`). |
 | `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json` | Plugin settings (`hookHost`, `hookPort`, `enrolledRepos`, `pausedRepos`; the pre-#984 `mutedRepos` key is still read and migrated). |
-| `~/.paseo/plugin-data/xpufx/uppidi-fleet/skills/<id>.md` | Operator overrides for the fleet skills (Settings → Fleet Skills). Absent means the bundled `examples/skills/<id>/SKILL.md` is effective. |
+| `~/.paseo/plugin-data/xpufx/uppidi-fleet/skills/<id>.md` | Operator overrides for the fleet skills (Settings → Fleet Skills). Absent means the canonical `platform/skills/<id>/SKILL.md` (when a checkout is reachable) is effective, else the bundled `examples/skills/<id>/SKILL.md`. |
 | `<repo-root>/.agents/skills/` | The fleet's operational skills, at the repository root (outside the plugin package). |
 
 Environment variables: `FORGE_HOOK_HOST`, `FORGE_HOOK_PORT`/`HOOK_PORT`,
@@ -940,7 +950,8 @@ Environment variables: `FORGE_HOOK_HOST`, `FORGE_HOOK_PORT`/`HOOK_PORT`,
 `HOOK_COALESCE_MAX`, `HOOK_COALESCE_WINDOW_MAX_MS`, `WATCHDOG_INTERVAL_MS`,
 `WATCHDOG_BUSY_THRESHOLD`, `WATCHDOG_ALERT_COOLDOWN_MS`,
 `BOARD_SWEEP_INTERVAL_MS` (a non-empty `FORGEJO_ISSUES_CHECK` enables the
-debug-only external-checker override).
+debug-only external-checker override), and `PASEO_UPPIDI_FLEET_CANONICAL_SKILLS_ROOT`
+(pins the canonical `platform/skills` root used to resolve and inline fleet skills).
 
 ---
 

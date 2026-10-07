@@ -984,8 +984,8 @@ export const uppidiFleetAlertsContract = defineContract({
 export const FleetSkillIdSchema = z.enum(["orchestrator", "front-desk", "coding-agent"]);
 export type FleetSkillId = z.infer<typeof FleetSkillIdSchema>;
 
-/** Where the effective skill text was read from: a saved override or the bundled default. */
-export const SkillOriginSchema = z.enum(["override", "bundled"]);
+/** Where the effective skill text was read from: a saved override, the canonical `platform/skills` copy, or the bundled fallback. */
+export const SkillOriginSchema = z.enum(["override", "canonical", "bundled"]);
 export type SkillOrigin = z.infer<typeof SkillOriginSchema>;
 
 export const FleetSkillSchema = z.object({
@@ -1007,7 +1007,7 @@ export type UppidiSkillsOutput = z.infer<typeof UppidiSkillsOutputSchema>;
 
 export const uppidiSkillsContract = defineContract({
   name: "uppidi-fleet.skills",
-  description: "Get every fleet skill with its effective content and origin (override or bundled)",
+  description: "Get every fleet skill with its effective content and origin (override, canonical, or bundled)",
   input: z.object({}),
   output: UppidiSkillsOutputSchema,
 });

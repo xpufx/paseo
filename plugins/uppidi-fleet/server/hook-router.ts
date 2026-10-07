@@ -53,7 +53,7 @@ import {
   loadSavedRoleModels,
   resolveHostHome,
 } from "./role-models.js";
-import { getEffectiveSkillPath } from "./skills.js";
+import { getEffectiveSkillContent, getEffectiveSkillPath, renderSkillDirective } from "./skills.js";
 import {
   DEFAULT_ROTATION_POLICY,
   RotationLock,
@@ -5663,7 +5663,7 @@ export class HookRouter {
     const providerModeInfo = await this.getProviderModeInfo(targetProvider);
     const targetMode = resolveProviderSpawnMode(providerModeInfo, requestedMode);
     const title = `Orchestrator · ${canonicalKey}`;
-    const prompt = `You are the project orchestrator for ${repo}. Follow the orchestrator skill at ${getEffectiveSkillPath("orchestrator")} to coordinate tasks, supervise worker agents, and manage pull requests and issues.`;
+    const prompt = `You are the project orchestrator for ${repo}. Coordinate tasks, supervise worker agents, and manage pull requests and issues.\n\n${renderSkillDirective("orchestrator")}`;
     const labels: Record<string, string> = {
       role: "orchestrator",
       category: "orchestrator",
@@ -7445,6 +7445,7 @@ export class HookRouter {
       previousAgentId: opts.previousAgentId ?? null,
       generatedAt: new Date().toISOString(),
       skillPath: getEffectiveSkillPath(role === "orchestrator" ? "orchestrator" : role === "front-desk" ? "front-desk" : "coding-agent"),
+      skillText: getEffectiveSkillContent(role === "orchestrator" ? "orchestrator" : role === "front-desk" ? "front-desk" : "coding-agent"),
       activeTickets,
       pendingAttention,
       queueDepth,

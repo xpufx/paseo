@@ -1140,13 +1140,14 @@ describe("orchestrator workspace resolution and state isolation (#485, #486)", (
       assert.equal(capturedPayload.workspaceId, "wks_sample_repo");
       assert.equal(capturedPayload.cwd, "/home/user/code/sample-repo");
       const orchestratorBundledPath = getBundledSkillPath("orchestrator");
-      const codingAgentBundledPath = getBundledSkillPath("coding-agent");
+      assert.ok(orchestratorBundledPath !== null);
       assert.ok(
-        orchestratorBundledPath !== null &&
-          capturedPayload.prompt.includes(orchestratorBundledPath)
+        capturedPayload.prompt.includes("<workspace>/.tmp/"),
+        "prompt inlines the effective orchestrator + coding-agent scratch rule",
       );
       assert.ok(
-        codingAgentBundledPath !== null && capturedPayload.prompt.includes(codingAgentBundledPath)
+        !capturedPayload.prompt.includes(orchestratorBundledPath),
+        "prompt must inline skill content rather than point at a permission-gated path",
       );
       assert.ok(capturedPayload.prompt.includes("teax"));
     } finally {

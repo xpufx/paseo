@@ -20,6 +20,10 @@ This skill defines the operational workflow, tool usage, issue conventions, and 
 > **Plugin Storage Isolation**:
 > When implementing, modifying, or refactoring Paseo plugins, persistent data, configuration, queues, and state must **NEVER** be stored in arbitrary locations under `~/.paseo/` (e.g. `~/.paseo/logs`, `~/.paseo/queues`) or under `~/.config/<plugin>`. All plugin persistent state must be scoped strictly under `~/.paseo/plugin-data/<namespace>/<pluginId>/` via `PluginStorage`.
 
+> [!IMPORTANT]
+> **Workspace Scratch Isolation (`.tmp/`)**:
+> Never write temporary files, test scripts, downloaded keys, or scratch artifacts to global `/tmp` or paths outside your assigned workspace directory. Always use the workspace-scoped `<workspace>/.tmp/` directory (which is gitignored). Touching global `/tmp` violates workspace containment and triggers interactive permission stalls.
+
 ---
 
 ## 1. Primary Tool: `teax`

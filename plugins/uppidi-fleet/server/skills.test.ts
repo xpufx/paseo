@@ -16,12 +16,18 @@ if (!process.env.HOOK_STATE_DIR) {
 
 import {
   FLEET_SKILL_DEFINITIONS,
+  canonicalSkillsRootCandidates,
   getBundledSkillPath,
+  getCanonicalSkillPath,
+  getEffectiveSkillContent,
   getEffectiveSkillPath,
   handleUppidiSetSkill,
   handleUppidiSkills,
   pluginRootCandidates,
   readBundledSkillContent,
+  readCanonicalSkillContent,
+  renderSkillDirective,
+  resolveCanonicalSkillsRoot,
   resolveEffectiveSkill,
   resolvePluginRoot,
   setSkillContent,
@@ -31,6 +37,10 @@ import { handleUppidiAddOrchestrator, setExecFileAsyncForTest } from "./agents.j
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 
 const NO_CONTEXT = {} as PluginHandlerContext;
+
+/** The checkout under test; keep bundled reads off the daemon's installed copy. */
+const PLUGIN_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const bundledOptions = { rootDir: PLUGIN_ROOT };
 
 function makeBaseDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), "paseo-fleet-skills-"));
@@ -49,12 +59,16 @@ describe("fleet skills effective resolution & overrides (#883)", () => {
     fs.rmSync(baseDir, { recursive: true, force: true });
   });
 
-  it("lists every bundled skill with bundled origin by default", () => {
+  it("lists every bundled skill with bundled origin when no canonical root resolves", () => {
+    const options = {
+      canonicalSkillsRoot: path.join(baseDir, "no-canonical"),
+      rootDir: PLUGIN_ROOT,
+    };
     for (const def of FLEET_SKILL_DEFINITIONS) {
-      const resolved = resolveEffectiveSkill(def.id);
+      const resolved = resolveEffectiveSkill(def.id, options);
       assert.equal(resolved.origin, "bundled");
-      assert.equal(resolved.content, readBundledSkillContent(def.id));
-      assert.equal(resolved.effectivePath, getBundledSkillPath(def.id));
+      assert.equal(resolved.content, readBundledSkillContent(def.id, options));
+      assert.equal(resolved.effectivePath, getBundledSkillPath(def.id, options));
       assert.ok(resolved.content.length > 0);
     }
   });
@@ -66,7 +80,11 @@ describe("fleet skills effective resolution & overrides (#883)", () => {
       res.skills.map((s) => s.id),
       FLEET_SKILL_DEFINITIONS.map((d) => d.id),
     );
-    assert.ok(res.skills.every((s) => s.origin === "bundled"));
+    assert.ok(
+      res.skills.every((s) =>
+        ["override", "canonical", "bundled"].includes(s.origin),
+      ),
+    );
     assert.ok(res.skills.every((s) => s.content.length > 0));
     assert.ok(res.skills.every((s) => s.title.length > 0));
   });
@@ -109,8 +127,8 @@ describe("fleet skills effective resolution & overrides (#883)", () => {
 
     const resetRes = await handleUppidiSetSkill({ id: "front-desk", content: null }, NO_CONTEXT);
     assert.equal(resetRes.ok, true);
-    assert.equal(resetRes.skill?.origin, "bundled");
-    assert.equal(resetRes.skill?.content, readBundledSkillContent("front-desk"));
+    assert.notEqual(resetRes.skill?.origin, "override");
+    assert.equal(resetRes.skill?.content, resolveEffectiveSkill("front-desk").content);
     assert.equal(fs.existsSync(overridePath), false, "override file should be removed");
   });
 
@@ -188,26 +206,19 @@ describe("spawned agents use the effective skill (#883)", () => {
 
       const overridePath = path.join(baseDir, "uppidi-fleet", "skills", "orchestrator.md");
       assert.ok(
-        capturedPayload.prompt.includes(overridePath),
-        "orchestrator prompt must point at the override file",
+        capturedPayload.prompt.includes("only-override-body-883"),
+        "orchestrator prompt must inline the override content",
       );
       assert.ok(
         !capturedPayload.prompt.includes("examples/skills/orchestrator/SKILL.md"),
         "orchestrator prompt must not fall back to the bundled path when an override exists",
       );
       assert.equal(fs.readFileSync(overridePath, "utf8"), sentinel);
-      // Workers are pointed at the effective coding-agent skill too.
-      const codingAgentOverridePath = path.join(
-        baseDir,
-        "uppidi-fleet",
-        "skills",
-        "coding-agent.md",
-      );
-      const codingAgentBundledPath = getBundledSkillPath("coding-agent");
+      // Workers are handed the coding-agent skill inline; the scratch rule must
+      // survive whatever source (override, canonical, or bundled) wins.
       assert.ok(
-        capturedPayload.prompt.includes(codingAgentOverridePath) ||
-          (codingAgentBundledPath !== null &&
-            capturedPayload.prompt.includes(codingAgentBundledPath)),
+        capturedPayload.prompt.includes("<workspace>/.tmp/"),
+        "orchestrator prompt must inline the coding-agent .tmp scratch rule",
       );
     } finally {
       setExecFileAsyncForTest(null);
@@ -323,6 +334,178 @@ describe("bundle-safe plugin root resolution (#926)", () => {
     } finally {
       fs.rmSync(scratch, { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Extract the "Workspace Scratch Isolation (`.tmp/`)" blockquote so the drift
+ * check can compare the canonical and bundled copies without tripping over the
+ * host/identity sanitization the bundled fallback deliberately carries (#717).
+ */
+function extractScratchRule(text: string): string | null {
+  const lines = text.split("\n");
+  const start = lines.findIndex((line) => line.includes("Workspace Scratch Isolation"));
+  if (start === -1) return null;
+  const block: string[] = [];
+  for (let i = start; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.trimStart().startsWith(">")) break;
+    block.push(line.trim());
+  }
+  return block.join("\n");
+}
+
+describe("canonical platform skill resolution (#1080)", () => {
+  function writeSkill(root: string, id: string, body: string): string {
+    const dir = path.join(root, id);
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "SKILL.md");
+    fs.writeFileSync(file, body, "utf8");
+    return file;
+  }
+
+  it("prefers the canonical copy and inlines its content into spawn prompts", () => {
+    const canonicalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-canonical-"));
+    const baseDir = makeBaseDir();
+    try {
+      const body =
+        "# Orchestrator canonical\n\n" +
+        "Workspace Scratch Isolation (`.tmp/`): always use `<workspace>/.tmp/`.\n";
+      const canonicalFile = writeSkill(canonicalRoot, "orchestrator", body);
+      const options = { canonicalSkillsRoot: canonicalRoot, baseDir };
+
+      assert.deepEqual(canonicalSkillsRootCandidates(options), [canonicalRoot]);
+      assert.equal(resolveCanonicalSkillsRoot(options), canonicalRoot);
+      assert.equal(getCanonicalSkillPath("orchestrator", options), canonicalFile);
+      assert.equal(readCanonicalSkillContent("orchestrator", options), body);
+
+      const resolved = resolveEffectiveSkill("orchestrator", options);
+      assert.equal(resolved.origin, "canonical");
+      assert.equal(resolved.content, body);
+      assert.equal(resolved.effectivePath, canonicalFile);
+      assert.equal(getEffectiveSkillContent("orchestrator", options), body);
+
+      const directive = renderSkillDirective("orchestrator", options);
+      assert.ok(directive.includes("<workspace>/.tmp/"), "inlined text carries the scratch rule");
+      assert.ok(
+        !directive.includes("examples/skills/orchestrator/SKILL.md"),
+        "inlining must not point the agent back at a permission-gated path",
+      );
+    } finally {
+      fs.rmSync(canonicalRoot, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back to the bundled copy when the canonical root is absent", () => {
+    const baseDir = makeBaseDir();
+    const options = {
+      canonicalSkillsRoot: path.join(baseDir, "missing"),
+      baseDir,
+      rootDir: PLUGIN_ROOT,
+    };
+    try {
+      assert.equal(resolveCanonicalSkillsRoot(options), null);
+      assert.equal(getCanonicalSkillPath("orchestrator", options), null);
+      assert.equal(readCanonicalSkillContent("orchestrator", options), "");
+
+      const resolved = resolveEffectiveSkill("orchestrator", options);
+      assert.equal(resolved.origin, "bundled");
+      assert.equal(resolved.content, readBundledSkillContent("orchestrator", options));
+      assert.ok(resolved.content.length > 0);
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the operator override ahead of the canonical copy", async () => {
+    const canonicalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-canonical-"));
+    const baseDir = makeBaseDir();
+    setSkillsBaseDirForTest(baseDir);
+    try {
+      writeSkill(canonicalRoot, "orchestrator", "# canonical copy\n");
+      const sentinel = "# operator override wins\n";
+      await handleUppidiSetSkill({ id: "orchestrator", content: sentinel }, NO_CONTEXT);
+
+      const resolved = resolveEffectiveSkill("orchestrator", {
+        canonicalSkillsRoot: canonicalRoot,
+        baseDir,
+      });
+      assert.equal(resolved.origin, "override");
+      assert.equal(resolved.content, sentinel);
+    } finally {
+      setSkillsBaseDirForTest(null);
+      fs.rmSync(canonicalRoot, { recursive: true, force: true });
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("carries the .tmp rule through the effective text from either source", () => {
+    const canonicalRoot = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-canonical-"));
+    const baseDir = makeBaseDir();
+    try {
+      for (const id of ["orchestrator", "coding-agent"] as const) {
+        writeSkill(
+          canonicalRoot,
+          id,
+          `# ${id}\n\nWorkspace Scratch Isolation (\`.tmp/\`): use \`<workspace>/.tmp/\`.\n`,
+        );
+
+        const canonical = resolveEffectiveSkill(id, { canonicalSkillsRoot: canonicalRoot, baseDir });
+        assert.equal(canonical.origin, "canonical");
+        assert.ok(canonical.content.includes("<workspace>/.tmp/"));
+        assert.ok(renderSkillDirective(id, { canonicalSkillsRoot: canonicalRoot, baseDir }).includes("<workspace>/.tmp/"));
+
+        const bundled = resolveEffectiveSkill(id, {
+          canonicalSkillsRoot: path.join(baseDir, "missing"),
+          baseDir,
+          rootDir: PLUGIN_ROOT,
+        });
+        assert.equal(bundled.origin, "bundled");
+        assert.ok(
+          bundled.content.includes("<workspace>/.tmp/"),
+          `${id} bundled fallback must carry the .tmp rule`,
+        );
+        assert.ok(
+          renderSkillDirective(id, {
+            canonicalSkillsRoot: path.join(baseDir, "missing"),
+            baseDir,
+            rootDir: PLUGIN_ROOT,
+          }).includes("<workspace>/.tmp/"),
+        );
+      }
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+      fs.rmSync(canonicalRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("platform canonical vs bundled skill drift (#1080)", () => {
+  it("keeps the .tmp scratch rule byte-identical across both copies", (t) => {
+    const canonicalRoot = resolveCanonicalSkillsRoot();
+    if (!canonicalRoot) {
+      t.skip("platform checkout unavailable; drift check skipped (bundled fallback is in use)");
+      return;
+    }
+
+    for (const id of ["orchestrator", "coding-agent"] as const) {
+      assert.ok(
+        getCanonicalSkillPath(id),
+        `canonical ${id} SKILL.md must resolve under ${canonicalRoot}`,
+      );
+      const bundledPath = getBundledSkillPath(id, bundledOptions);
+      assert.ok(bundledPath, `bundled ${id} SKILL.md fallback must resolve`);
+
+      const canonicalRule = extractScratchRule(readCanonicalSkillContent(id));
+      const bundledRule = extractScratchRule(readBundledSkillContent(id, bundledOptions));
+      assert.ok(canonicalRule, `canonical ${id} must carry the .tmp scratch rule`);
+      assert.equal(
+        bundledRule,
+        canonicalRule,
+        `bundled ${id} drifted from the canonical .tmp scratch rule`,
+      );
     }
   });
 });

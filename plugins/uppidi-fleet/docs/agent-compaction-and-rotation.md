@@ -24,20 +24,21 @@ would actually make it forget its skills."
 
 The constraints are real and are visible in the code:
 
-1. **Role orientation is a file pointer, not provider state.** The orchestrator
-   is spawned with a prompt that names an absolute skill path:
-   `You are the project orchestrator for ${repo}. Follow the orchestrator skill
-   at ${getEffectiveSkillPath("orchestrator")} …`
-   (`plugins/uppidi-fleet/server/hook-router.ts:4549`), and the Front
-   Desk/Orchestrator add path adds the coding-agent skill path too
-   (`plugins/uppidi-fleet/server/agents.ts:2650-2654`). The effective path is
-   the operator override under
+1. **Role orientation is inlined into the spawn prompt (#1080).** The
+   orchestrator is spawned with a prompt that carries the effective skill
+   **content**, not a path: `renderSkillDirective("orchestrator")`
+   (`plugins/uppidi-fleet/server/hook-router.ts`), and the Front
+   Desk/Orchestrator add path inlines the coding-agent skill too
+   (`plugins/uppidi-fleet/server/agents.ts`). The effective text is the
+   operator override under
    `~/.paseo/plugin-data/xpufx/uppidi-fleet/skills/<id>.md` when present, else
-   the bundled `plugins/uppidi-fleet/examples/skills/<id>/SKILL.md`
-   (`plugins/uppidi-fleet/server/skills.ts`, `getEffectiveSkillPath`; README
+   the canonical `platform/skills/<id>/SKILL.md` when a `platform` checkout is
+   reachable, else the bundled
+   `plugins/uppidi-fleet/examples/skills/<id>/SKILL.md`
+   (`plugins/uppidi-fleet/server/skills.ts`, `resolveEffectiveSkill`; README
    §6). A provider `/clear` therefore matters not because it drops
    "skills" from a provider store, but because it drops the conversation
-   *turn that named the skill file*.
+   *turn that carried the skill text*.
 
 2. **Durable state already lives outside the agent.** The Forgejo board is the
    source of truth (orchestrator skill §12), workspaces are Paseo-owned, and

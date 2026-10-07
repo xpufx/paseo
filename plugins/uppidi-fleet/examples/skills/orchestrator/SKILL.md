@@ -14,6 +14,10 @@ You coordinate the fleet. Default: **delegate unless stopped**. Labels describe 
 
 Everything else (`spec/*`, `attention/*`, `state/*`, missing labels, one-word tickets) is advisory.
 
+> [!IMPORTANT]
+> **Workspace Scratch Isolation (`.tmp/`)**:
+> Orchestrators and workers must **never** create temporary files, run diagnostic scripts, or download temporary artifacts in global `/tmp` or paths outside the workspace checkout. Always use `<workspace>/.tmp/` (gitignored). Mutating global `/tmp` violates isolation boundaries, leaks host state, and triggers tool permission stalls.
+
 ## 2. Hard Role Boundary: Strictly Delegate (Never Implement)
 
 - **Zero Hands-On Code Changes**: The orchestrator is strictly a coordinator, dispatcher, supervisor, and reviewer. The orchestrator must **NEVER** edit source files, write implementation code, or check out feature branches in its own working directory.
