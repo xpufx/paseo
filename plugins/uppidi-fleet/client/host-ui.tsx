@@ -842,6 +842,12 @@ interface SelectTriggerCoords {
 
 const FALLBACK_SELECT_COORDS: SelectTriggerCoords = { x: 0, y: 0, width: 0, height: 0 };
 const SELECT_OPTION_LIST_MAX_HEIGHT = 216;
+/**
+ * Fixed minimum row height for the two-line Select option rows (#1074 rework).
+ * Every row always renders both lines, so hovered and idle rows measure the
+ * same and the open dropdown never jumps.
+ */
+const SELECT_OPTION_ROW_MIN_HEIGHT = 46;
 
 export interface SelectProps {
   value: string;
@@ -867,7 +873,6 @@ export function Select({
   const { colors, alpha } = useFleetTheme();
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<SelectTriggerCoords | null>(null);
-  const [revealed, setRevealed] = useState<string | null>(null);
   const triggerRef = useRef<View>(null);
   const selected = options.find((option) => option.value === value);
   const display = selected
@@ -877,7 +882,6 @@ export function Select({
   const isOpen = open && canOpen;
 
   const openAt = (next: SelectTriggerCoords) => {
-    setRevealed(null);
     setCoords(next);
     setOpen(true);
   };
@@ -885,7 +889,6 @@ export function Select({
   const handleToggle = () => {
     if (isOpen) {
       setOpen(false);
-      setRevealed(null);
       return;
     }
     const node = triggerRef.current;
@@ -973,19 +976,8 @@ export function Select({
                 const isSelected = option.value === value;
                 const primary = option.display ?? middleTruncate(option.label);
                 const hasMore = primary !== option.label;
-                const revealProps = hasMore
-                  ? ({
-                      onMouseEnter: () => setRevealed(option.value),
-                      onMouseLeave: () =>
-                        setRevealed((prev) => (prev === option.value ? null : prev)),
-                      onFocus: () => setRevealed(option.value),
-                      onBlur: () =>
-                        setRevealed((prev) => (prev === option.value ? null : prev)),
-                    } as any)
-                  : {};
                 return (
                   <Pressable
-                    {...revealProps}
                     key={option.value}
                     testID={`fleet-select-option-${option.value}`}
                     accessibilityRole="button"
@@ -995,31 +987,36 @@ export function Select({
                     onPress={() => {
                       onValueChange(option.value);
                       setOpen(false);
-                      setRevealed(null);
                     }}
                     style={({ pressed }) => [
                       {
                         paddingVertical: 6,
                         paddingHorizontal: 10,
+                        minHeight: SELECT_OPTION_ROW_MIN_HEIGHT,
+                        justifyContent: "center",
                         backgroundColor: isSelected ? colors.surface2 : pressed ? alpha(colors.surface2, 0.5) : "transparent",
                       },
                     ]}
                   >
                     <Text
                       numberOfLines={1}
+                      ellipsizeMode="tail"
                       style={{ color: isSelected ? colors.foreground : colors.foregroundMuted, fontSize: 13, fontWeight: isSelected ? "600" : "400" }}
                     >
                       {primary}
                     </Text>
-                    {hasMore && revealed === option.value ? (
-                      <Text
-                        testID={`fleet-select-option-full-${option.value}`}
-                        selectable
-                        style={{ color: colors.foreground, fontSize: 11, marginTop: 2 }}
-                      >
-                        {option.label}
-                      </Text>
-                    ) : null}
+                    {/* Always-visible smaller second line: every row keeps the
+                        same two-line height so hover/focus never resizes the
+                        open dropdown (#1074 rework). */}
+                    <Text
+                      testID={`fleet-select-option-full-${option.value}`}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      selectable
+                      style={{ color: colors.foregroundMuted, fontSize: 11, marginTop: 2 }}
+                    >
+                      {option.label}
+                    </Text>
                   </Pressable>
                 );
               })}

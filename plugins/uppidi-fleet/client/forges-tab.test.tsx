@@ -377,15 +377,11 @@ describe("Issue #791: Uppidi Fleet sidebar issues tab and repo dropdown", () => 
       void root;
     });
 
-    it("shows distinguishable short labels and reveals the full value on hover/focus", async () => {
+    it("shows distinguishable short labels with the full value always visible as a smaller second line", async () => {
       const { root, renderer } = await openSelect();
       const initialText = renderedText(renderer.toJSON() as RenderedNode | null);
       assert.ok(initialText.includes("xpufx-org/paseo"), "the paseo option must show its repo tail");
       assert.ok(initialText.includes("xpufx-org/2fado"), "the 2fado option must show its repo tail");
-      assert.ok(
-        !initialText.includes(FULL_A) && !initialText.includes(FULL_B),
-        "the open rows must not render the identical truncated forge host",
-      );
 
       const option = root.find(
         (n: any) => n.props?.testID === `fleet-select-option-${FULL_A}`,
@@ -397,18 +393,28 @@ describe("Issue #791: Uppidi Fleet sidebar issues tab and repo dropdown", () => 
         "the option must expose its full label to assistive tech",
       );
 
-      await (await getFleetHarness()).TestRenderer.act(async () => {
-        option.props.onMouseEnter();
-      });
-      const revealed = flatten(renderer.toJSON() as RenderedNode | null).find(
+      // #1074 rework: the full value is always visible as a second, smaller
+      // line so every row has a fixed height and the dropdown never jumps.
+      // No hover/focus is required, and hovering must not change the layout.
+      const second = flatten(renderer.toJSON() as RenderedNode | null).find(
         (n) => n.props?.testID === `fleet-select-option-full-${FULL_A}`,
       );
-      assert.ok(revealed, "hovering an option must reveal its full value");
+      assert.ok(second, "the full value must render unconditionally as a second line");
       assert.match(
-        renderedText(revealed!),
+        renderedText(second!),
         new RegExp(FULL_A.replace(/\./g, "\\.")),
-        "the revealed text must be the full repo value",
+        "the second line must be the full repo value",
       );
+      const before = JSON.stringify(renderer.toJSON());
+      await (await getFleetHarness()).TestRenderer.act(async () => {
+        if (typeof option.props.onMouseEnter === "function") option.props.onMouseEnter();
+        if (typeof option.props.onFocus === "function") option.props.onFocus();
+      });
+      const after = flatten(renderer.toJSON() as RenderedNode | null).filter(
+        (n) => typeof n.props?.testID === "string" && n.props.testID.startsWith("fleet-select-option-full-"),
+      );
+      assert.equal(after.length, OPTIONS.length, "hover/focus must not add or remove second lines");
+      void before;
     });
 
     it("middle-truncates a long shared prefix so the repo tail stays visible", async () => {

@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 91 |
+| `deterministic` | 92 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **95** |
+| **total** | **96** |
 
-Inventory: 87 tracked source files in scope — 54 described above as source (46 files, some carrying several parts) and 41 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 88 tracked source files in scope — 54 described above as source (46 files, some carrying several parts) and 42 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -126,7 +126,7 @@ See *What this table does not cover* below for the sessions themselves.
 | Agent tree rendering: status lights, health gauges, metrics cards, rows, project groups | `client/tree-view.tsx` | 38 | 3463 | `deterministic` | `UppidiFleetTreeView`, `AgentStatusLight`, `AgentStateDot`, `AgentHealthGauge`, `AgentMetricsCard`, `OrchestratorRow`, +3 more | tree-view.tsx:387-403 — relative time is arithmetic on a timestamp<br>tree-view.tsx:450 — health gauge reads thresholds computed server-side<br>tree-view.tsx:2042 — the tree view is a pure function of the agents array |
 | Shared metrics bar: chip anatomy, selection, zero-count hiding, theme-driven colors | `client/metrics-bar.tsx` | 3 | 108 | `deterministic` | `MetricsBar`, `MetricsBarChip`, `MetricsBarProps` | metrics-bar.tsx:55-66 — container fill, border, radius and padding from theme colors<br>metrics-bar.tsx:69-74 — zero-count hide, selection and tone derivation are boolean arithmetic<br>metrics-bar.tsx:92-98 — icon/label/count render from props, no model call |
 | Fleet theme accessor: host theme colors and helpers plus plugin typography scale | `client/theme.ts` | 5 | 62 | `deterministic` | `FleetTheme`, `useFleetTheme` | theme.ts:50-60 — colors, alpha and status helpers come from the host theme; typography is a fixed local scale<br>theme.ts:7-13 — no computed-style scraping, no client provider |
-| Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle | `client/host-ui.tsx` | 78 | 2226 | `deterministic` | `Card`, `Button`, `Badge`, `DataTable`, `ModalBody`, `ForgeIcon`, +2 more | host-ui.tsx:1-20 — component library over the host theme, host Icon and plain react-native; no model call<br>host-ui.tsx:100-200 — Row/Stack/Grid and Card/Tabs compose host theme colors only<br>host-ui.tsx:2000-2112 — ticket lifecycle view renders RPC payloads; it does not produce model output |
+| Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle | `client/host-ui.tsx` | 78 | 2223 | `deterministic` | `Card`, `Button`, `Badge`, `DataTable`, `ModalBody`, `ForgeIcon`, +2 more | host-ui.tsx:1-20 — component library over the host theme, host Icon and plain react-native; no model call<br>host-ui.tsx:100-200 — Row/Stack/Grid and Card/Tabs compose host theme colors only<br>host-ui.tsx:2000-2112 — ticket lifecycle view renders RPC payloads; it does not produce model output |
 | Static fleet fixtures for client tests | `client/testing/fleet-fixtures.ts` | 9 | 422 | `deterministic` | `agentsPayload`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `hookQueuesPayload` | fleet-fixtures.ts:222-370 — seven payload builders returning fixed records<br>fleet-fixtures.ts:32 — one wide-worktree geometry constant |
 | Render harness: host element stubs, rpc stubs, provider wrapper | `client/testing/fleet-harness.ts` | 36 | 280 | `deterministic` | `getFleetHarness`, `useToast`, `Icon`, `useRevealedText` | fleet-harness.ts:28-58 — host components stubbed to inert React elements<br>fleet-harness.ts:70-80 — toast, icon, scroll/flatlist and copyText stubs<br>fleet-harness.ts:111 — the harness is assembled once and awaited |
 
@@ -197,7 +197,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `client/cross-repo-issues.test.ts` | client/cross-repo-issues | `test:tsx` | 277 | `deterministic` |
 | `client/entry.test.ts` | Surface/panel registration and teardown | `test:tsx` | 1465 | `deterministic` |
 | `client/fleet-state-filter-row.test.ts` | Fleet state filter row rendering | `test:node` | 49 | `deterministic` |
-| `client/forges-tab.test.tsx` | client/forges-tab | `test:tsx` | 423 | `deterministic` |
+| `client/forges-tab.test.tsx` | client/forges-tab | `test:tsx` | 429 | `deterministic` |
 | `client/frontdesk-follow-scroll.test.tsx` | client/frontdesk-follow-scroll | `test:tsx` | 316 | `deterministic` |
 | `client/issue-metrics-bar.test.ts` | Issue metrics bar rendering | `test:node` | 64 | `deterministic` |
 | `client/kanban-board.test.tsx` | client/kanban-board | `test:tsx` | 842 | `deterministic` |
@@ -206,6 +206,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `client/repo-enrollment.test.ts` | client/repo-enrollment | `test:tsx` | 131 | `deterministic` |
 | `client/role-model-picker.test.ts` | Role-model picker interaction | `test:node` | 62 | `deterministic` |
 | `client/search-height.test.ts` | client/search-height | `test:tsx` | 166 | `deterministic` |
+| `client/select-stable-rows.test.tsx` | client/select-stable-rows | `test:tsx` | 176 | `deterministic` |
 | `client/surface-halt.test.tsx` | client/surface-halt | `test:tsx` | 173 | `deterministic` |
 | `client/tree-zebra.test.tsx` | Tree zebra striping | `test:tsx` | 47 | `deterministic` |
 | `client/ui-guard.test.ts` | client/ui-guard | `test:tsx` | 155 | `deterministic` |
@@ -269,10 +270,10 @@ matrix above is the judgement half.
 | `client/cross-repo-issues.test.ts` | client | 277 | 0 | — |
 | `client/entry.test.ts` | client | 1465 | 0 | — |
 | `client/fleet-state-filter-row.test.ts` | client | 49 | 0 | — |
-| `client/forges-tab.test.tsx` | client | 423 | 0 | — |
+| `client/forges-tab.test.tsx` | client | 429 | 0 | — |
 | `client/forges-tab.tsx` | client | 536 | 13 | `AgentEnvelopeCard`, `CommentCard`, `ForgeIssuesView`, `ForgeIssuesViewProps`, `ForgesTabView`, `MarkdownLite`, `NewIssueComposer`, `ScopedLabelGroup`, `TicketLifecycleView`, `canonicalForgeUrl`, `forgeContextContract`, `forgeOpenIssuesContract` …+1 more |
 | `client/frontdesk-follow-scroll.test.tsx` | client | 316 | 0 | — |
-| `client/host-ui.tsx` | client | 2226 | 78 | `ActionBar`, `ActionBarProps`, `AgentEnvelopeCard`, `AttentionBeacon`, `AttentionBeaconMode`, `AttentionBeaconProps`, `AttentionBeaconTone`, `Badge`, `BadgeProps`, `BadgeSize`, `BadgeStyle`, `Button` …+66 more |
+| `client/host-ui.tsx` | client | 2223 | 78 | `ActionBar`, `ActionBarProps`, `AgentEnvelopeCard`, `AttentionBeacon`, `AttentionBeaconMode`, `AttentionBeaconProps`, `AttentionBeaconTone`, `Badge`, `BadgeProps`, `BadgeSize`, `BadgeStyle`, `Button` …+66 more |
 | `client/index.ts` | client | 8 | 0 | — |
 | `client/issue-metrics-bar.test.ts` | client | 64 | 0 | — |
 | `client/kanban-board.test.tsx` | client | 842 | 0 | — |
@@ -284,6 +285,7 @@ matrix above is the judgement half.
 | `client/repo-enrollment.test.ts` | client | 131 | 0 | — |
 | `client/role-model-picker.test.ts` | client | 62 | 0 | — |
 | `client/search-height.test.ts` | client | 166 | 0 | — |
+| `client/select-stable-rows.test.tsx` | client | 176 | 0 | — |
 | `client/surface-halt.test.tsx` | client | 173 | 0 | — |
 | `client/surface.tsx` | client | 3219 | 19 | `AttentionAgentCard`, `AttentionAgentCardProps`, `HaltConfirmModal`, `HaltConfirmModalProps`, `HaltedBanner`, `HaltedBannerProps`, `ModelAlertBanner`, `ModelAlertBannerProps`, `ResetStateModal`, `ResetStateModalProps`, `RouterStatusBadge`, `SurfaceTab` …+7 more |
 | `client/testing/fleet-fixtures.ts` | client | 422 | 9 | `WIDE_WORKTREE`, `agentsPayload`, `agentsPayloadNoFrontDesk`, `hookQueuesPayload`, `installPayloads`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `skillsPayload` |
