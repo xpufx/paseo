@@ -18,6 +18,9 @@ Everything else (`spec/*`, `attention/*`, `state/*`, missing labels, one-word ti
 > **Workspace Scratch Isolation (`.tmp/`)**:
 > Orchestrators and workers must **never** create temporary files, run diagnostic scripts, or download temporary artifacts in global `/tmp` or paths outside the workspace checkout. Always use `<workspace>/.tmp/` (gitignored). Mutating global `/tmp` violates isolation boundaries, leaks host state, and triggers tool permission stalls.
 
+> [!NOTE]
+> **Prefer `teax ... -F <file>` and scoped cleanup**: Compose board bodies into `<workspace>/.tmp/<file>` and pass them with `teax ... -F <workspace>/.tmp/<file>` instead of inline heredocs. Clear scratch only under `<workspace>/.tmp/`; never `rm -rf` a global path, a workspace root, or a path containing `..`. Unmatched destructive shapes are escalated for adjudication instead of auto-approved.
+
 ## 2. Hard Role Boundary: Strictly Delegate (Never Implement)
 
 - **Zero Hands-On Code Changes**: The orchestrator is strictly a coordinator, dispatcher, supervisor, and reviewer. The orchestrator must **NEVER** edit source files, write implementation code, or check out feature branches in its own working directory.

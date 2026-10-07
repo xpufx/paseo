@@ -565,7 +565,8 @@ Legacy (pre-taxonomy) findings are still raised alongside:
 
 | Type | Trigger |
 | --- | --- |
-| `AGENT_PERMISSION_REQUIRED` | Agent has `pendingPermissions`. |
+| `AGENT_PERMISSION_REQUIRED` | Agent has `pendingPermissions` and did not match the safe-pattern allowlist. |
+| `AGENT_PERMISSION_AUTO_ALLOWED` | Fleet agent pending permission matched the safe-pattern allowlist and was auto-allowed (#1084). |
 | `AGENT_ATTENTION_REQUIRED` | `requiresAttention` with a reason other than `error`/`finished` (which the taxonomy owns). |
 | `AGENT_ERROR` | Registered orchestrator is `status: error` and the taxonomy pass did not already handle it. |
 | `ORCHESTRATOR_MISSING` | A `<key>.json` state file references an agent id that no longer exists on the daemon. |
@@ -580,7 +581,7 @@ the agent id, `<key>` is the enrolled repo key:
 
 | Anomaly | Alert string |
 | --- | --- |
-| `AGENT_PERMISSION_REQUIRED` | `[Fleet Watchdog] Agent <name> (<id7>) requires permission: <action>. Front Desk adjudication command: paseo permit allow <agentId> <requestId>` — `<action>` is the pending permission's title/tool; the command drops `<requestId>` when the request carries none. |
+| `AGENT_PERMISSION_REQUIRED` | `[Fleet Watchdog] Agent <name> (<id7>) requires permission: <action> tool=<tool>. command=<json command> Front Desk adjudication command: paseo permit allow <agentId> <requestId>` — `<action>` is the pending permission's title/tool, `tool`/`command` are omitted when absent; the command drops `<requestId>` when the request carries none. |
 | `AGENT_ATTENTION_REQUIRED` | `[Fleet Watchdog] Agent <name> (<id7>) requires attention (<attentionReason \| "stalled">). Operator or Front Desk triage required.` |
 | Quota circuit-break | `[Fleet Watchdog] Agent <name> (<id7>) hit provider/quota exhaustion: "<lastError>". Circuit-break: no auto-steer; operator required.` |
 | Taxonomy auto-recovered | `[Fleet Watchdog] Auto-recovered agent <name> (<id7>) [<TYPE, TYPE>] via <actions joined by " -> ">.` — actions read `stop:ok`, `clear_error:ok`, `clear_attention:noop`, `steer:ok`. |
@@ -631,7 +632,50 @@ wedged agent is not stop/steered on every tick. The taxonomy key embeds the
 full type list, so a materially different finding re-keys (and re-alerts)
 immediately.
 
-#### 7.7.5 Operator runbook
+#### 7.7.5 Permission auto-adjudication allowlist (#1084)
+
+Orchestrators and workers wedge on `pi` "dangerous command" prompts for routine
+safe commands — a heredoc composing a `teax issue comment` body, a scoped
+`.tmp` cleanup, or a read-only repo probe — because nothing answers the prompt
+and their queue stops draining. Watchdog reloads do not help: the agent is
+blocked on a prompt, not wedged.
+
+On every pending permission the watchdog first classifies the *requested
+command* against a conservative, documented allowlist. A fleet agent (a
+label-identified orchestrator/worker, a labelled child, or a registered Front
+Desk/orchestrator) whose command matches is auto-allowed through the existing
+seam (`respondToPermission`, falling back to
+`paseo permit allow <agentId> <permissionId>`), allowing exactly that one
+request. Anything else — a non-fleet agent, an unmatched or ambiguous command,
+a missing request id, or an unavailable seam — is **not** auto-allowed and
+escalates to Front Desk with the agent id, permission id, tool, and full
+command.
+
+Documented rules (`server/permission-adjudication.ts`):
+
+| Rule | Shape |
+| --- | --- |
+| `teax-board` | `teax ...` board composition/read commands, including quoted heredocs. |
+| `paseo-send` | `paseo send ...` |
+| `paseo-permit-ls` | `paseo permit ls` |
+| `paseo-plugin-reload` | `paseo plugin reload <id>` |
+| `scratch-cleanup` | `rm -rf` scoped to `./.tmp`, `<workspace>/.tmp`, or `~/.cache/...`, with no `..` escape. |
+| `read-only-probe` | `git status/rev-parse/fetch/log/diff/show`, `ls`, `cat`, `pwd`. |
+
+Conservative by construction: the command must be composed entirely of
+recognized safe shell segments. An unquoted heredoc delimiter, an output
+redirection, an unknown command head, or a command substitution that is not
+itself safe disqualifies the whole request. A destructive command
+(`rm -rf /`, `git push --force`, `git reset --hard`, `git branch -D`) is never
+auto-allowed and always escalates.
+
+Every decision appends one JSONL record to
+`<stateDir>/permission-decisions.jsonl` (default
+`~/.paseo/forgejo-hook/permission-decisions.jsonl`) with the timestamp, action,
+agent id/name, permission id, tool, full command, matched rule, scope, and
+reason. Query it after the fact with `jq` or `readAdjudicationDecisions`.
+
+#### 7.7.6 Operator runbook
 
 **Reading watchdog logs.** The router keeps a 1000-line in-memory ring buffer;
 tail it with the `uppidi-fleet.hook-log-tail` plugin tool. Watchdog lines:

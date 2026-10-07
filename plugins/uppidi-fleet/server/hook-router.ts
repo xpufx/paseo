@@ -46,6 +46,7 @@ import {
   type StaleWipResult,
 } from "./issues-check.js";
 import { resolveWorkspaceForRepo, workspaceRegistryPaths, type ResolvedWorkspace, type WorkspaceLookupOptions } from "./workspace-lookup.js";
+import { adjudicatePermission } from "./permission-adjudication.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
 import {
   DEFAULT_ROLE_MODELS,
@@ -1332,6 +1333,14 @@ export interface WatchdogAuditOptions {
    */
   childWakeups?: boolean;
   /**
+   * Injected allow seam for fleet permission auto-adjudication (#1084).
+   * Defaults to `agents.allowPermission` (SDK `respondToPermission`, falling
+   * back to `paseo permit allow`); tests inject a stub so no real permit is run.
+   */
+  allowFleetPermission?: (agentId: string, permissionId: string) => Promise<boolean>;
+  /** Durable auto-adjudication JSONL path; defaults to `<stateDir>/permission-decisions.jsonl`. */
+  adjudicationLogPath?: string;
+  /**
    * Persist per-provider/model rollup receipts on this tick (#560). Defaults to
    * `true` in production and `false` for injected fixtures, so unit tests never
    * touch scoped storage (`~/.paseo/plugin-data/xpufx/uppidi-fleet/metrics.json`).
@@ -1369,6 +1378,7 @@ export type WatchdogSeverity = "high" | "medium";
 
 export type WatchdogAnomalyType =
   | "AGENT_PERMISSION_REQUIRED"
+  | "AGENT_PERMISSION_AUTO_ALLOWED"
   | "AGENT_ATTENTION_REQUIRED"
   | "AGENT_ERROR"
   | "ORCHESTRATOR_MISSING"
@@ -6361,6 +6371,22 @@ export class HookRouter {
     const frontDeskId = opts.frontDeskId ?? this.readFrontDesk()?.agentId ?? null;
     const orchRecords = opts.orchestratorRecords ?? this.listOrchestratorRecords();
 
+    // Fleet permission auto-adjudication (#1084): only registered fleet agents
+    // are eligible, and the default allow seam is skipped under test so the
+    // suites never shell out to `paseo permit allow`.
+    const isTestEnv = this.isTestMode || process.env.NODE_ENV === "test";
+    const fleetAgentIds = new Set(orchRecords.map((r) => r.agentId).filter((id): id is string => Boolean(id)));
+    const allowFleetPermission =
+      opts.allowFleetPermission ??
+      (isTestEnv
+        ? undefined
+        : async (agentId: string, permissionId: string) => {
+            const { allowPermission } = await import("./agents.js");
+            const paseo = this.getPaseo();
+            return allowPermission(agentId, permissionId, paseo ? { paseo } : undefined);
+          });
+    const adjudicationLogPath = opts.adjudicationLogPath ?? join(this.stateDir, "permission-decisions.jsonl");
+
     if (agentMap) {
       for (const agent of agentMap.values()) {
         // Legitimate teardown must not raise amnesia/lock/permission alerts
@@ -6371,23 +6397,58 @@ export class HookRouter {
           const perm = agent.pendingPermissions[0] || {};
           const reqId = perm.id || perm.requestId;
           const action = perm.title || perm.tool || perm.name || "tool permission";
-          anomalies.push({
-            type: "AGENT_PERMISSION_REQUIRED",
-            agentId: agent.id,
-            title: agent.title || agent.name,
-            permissions: agent.pendingPermissions,
-          });
-          const alertKey = `permission:${agent.id}:${reqId || "pending"}`;
-          if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
-            this.watchdogAlerts.set(alertKey, now);
-            const cmd = reqId ? `paseo permit allow ${agent.id} ${reqId}` : `paseo permit allow ${agent.id}`;
-            const alert = `[Fleet Watchdog] Agent ${agent.title || agent.id.slice(0, 7)} (${agent.id.slice(0, 7)}) requires permission: ${action}. Front Desk adjudication command: ${cmd}`;
-            this.deliverWatchdogAlert(frontDeskId, alert, {
-              deliverFn,
-              agentMap,
-              isSos: false,
-              repo: agentRepoKey(agent, orchRecords),
+
+          // Classify against the conservative allowlist once per permission (the
+          // cooldown bounds the durable log). A match is auto-allowed through
+          // the narrowest scope the seam supports (this one request); anything
+          // else falls through to the Front Desk escalation below with the full
+          // command so the prompt is never left invisible.
+          const adjudicationKey = `permission-adjudicate:${agent.id}:${reqId || "pending"}`;
+          let adjudication: Awaited<ReturnType<typeof adjudicatePermission>> | undefined;
+          if (this.canWatchdogAlert(adjudicationKey, now)) {
+            this.watchdogAlerts.set(adjudicationKey, now);
+            adjudication = await adjudicatePermission({
+              agent,
+              permission: perm,
+              context: { orchestratorAgentIds: fleetAgentIds, frontDeskId },
+              allow: allowFleetPermission,
+              logPath: adjudicationLogPath,
             });
+          }
+
+          if (adjudication?.action === "auto-allow") {
+            anomalies.push({
+              type: "AGENT_PERMISSION_AUTO_ALLOWED",
+              agentId: agent.id,
+              title: agent.title || agent.name,
+              reason: adjudication.ruleId,
+              permissions: agent.pendingPermissions,
+            });
+            this.log(
+              `[info] permission auto-allow: ${agent.id} ${reqId} rule=${adjudication.ruleId} scope=${adjudication.scope ?? "n/a"}`,
+            );
+          } else {
+            anomalies.push({
+              type: "AGENT_PERMISSION_REQUIRED",
+              agentId: agent.id,
+              title: agent.title || agent.name,
+              reason: adjudication?.reason,
+              permissions: agent.pendingPermissions,
+            });
+            const alertKey = `permission:${agent.id}:${reqId || "pending"}`;
+            if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+              this.watchdogAlerts.set(alertKey, now);
+              const cmd = reqId ? `paseo permit allow ${agent.id} ${reqId}` : `paseo permit allow ${agent.id}`;
+              const toolText = perm.tool ? ` tool=${perm.tool}` : "";
+              const commandText = adjudication?.command ? ` command=${JSON.stringify(adjudication.command)}` : "";
+              const alert = `[Fleet Watchdog] Agent ${agent.title || agent.id.slice(0, 7)} (${agent.id.slice(0, 7)}) requires permission: ${action}${toolText}.${commandText} Front Desk adjudication command: ${cmd}`;
+              this.deliverWatchdogAlert(frontDeskId, alert, {
+                deliverFn,
+                agentMap,
+                isSos: false,
+                repo: agentRepoKey(agent, orchRecords),
+              });
+            }
           }
         } else if (
           agent.requiresAttention === true &&

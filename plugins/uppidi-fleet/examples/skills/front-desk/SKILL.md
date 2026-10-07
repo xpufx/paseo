@@ -23,6 +23,9 @@ The operator interacts with you directly in chat. Orchestrators and coding worke
 - **Front Desk MUST NOT spawn workers**: worker spawning is orchestrator-exclusive. Dispatch implementation work by steering the registered orchestrator (`paseo send --steer --no-wait <orchId>`), via the router API (`POST /orchestrator`), or by escalating to the operator.
 - **No orchestrator for urgent work? Escalate — do not spawn.**
 
+> [!IMPORTANT]
+> **Scoped scratch and board bodies**: Compose long board comments into `<workspace>/.tmp/<file>` and pass them with `teax ... -F <workspace>/.tmp/<file>` rather than inline heredocs. Never write scratch to global `/tmp`, and never `rm -rf` a global path, a workspace root, or a path containing `..`. Destructive shapes are not auto-approved and are routed for adjudication instead.
+
 ---
 
 ## 2. The First Five Minutes

@@ -119,6 +119,7 @@ import {
   type HookRouterOptions,
   type ProviderModeInfo,
 } from "./hook-router.js";
+import { readAdjudicationDecisions } from "./permission-adjudication.js";
 import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import { setMetricsFilePathForTest } from "./metrics.js";
 import { STALE_WIP_REMINDER_MARKER, type IssuesCheckIo } from "./issues-check.js";
@@ -2112,6 +2113,119 @@ describe("hook-router fleet watchdog audit (#458)", () => {
           d.msg.includes("paseo permit allow agent-perm-1 perm-req-42"),
       ),
     );
+  });
+
+  it("auto-allows a safe fleet heredoc permission instead of wedging (#1084)", async () => {
+    const logPath = join(tempDir, "permission-decisions.jsonl");
+    const allowed: Array<[string, string]> = [];
+    const heredoc =
+      "teax issue comment 1084 --hostname forge.example.com -R owner/repo --envelope " +
+      "-b \"$(cat <<'EOF'\nbody\nEOF\n)\"";
+    const map = new Map<string, WatchdogAgent>([
+      [
+        "orch-1",
+        {
+          id: "orch-1",
+          title: "Orchestrator · test-repo",
+          status: "running",
+          labels: { role: "orchestrator" },
+          pendingPermissions: [{ id: "perm-hd", tool: "run_command", input: { command: heredoc } }],
+        },
+      ],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "orch-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+      allowFleetPermission: async (agentId, permissionId) => {
+        allowed.push([agentId, permissionId]);
+        return true;
+      },
+      adjudicationLogPath: logPath,
+    });
+    assert.ok(
+      audit.anomalies.some((a) => a.type === "AGENT_PERMISSION_AUTO_ALLOWED" && a.agentId === "orch-1"),
+    );
+    assert.equal(
+      audit.anomalies.some((a) => a.type === "AGENT_PERMISSION_REQUIRED"),
+      false,
+      "an auto-allowed permission must not also escalate",
+    );
+    assert.deepEqual(allowed, [["orch-1", "perm-hd"]]);
+    assert.equal(delivered.length, 0, "auto-allowed permission does not page Front Desk");
+    const records = readAdjudicationDecisions({ logPath });
+    assert.equal(records.length, 1);
+    assert.equal(records[0]!.action, "auto-allow");
+    assert.equal(records[0]!.ruleId, "teax-board");
+  });
+
+  it("escalates a destructive fleet command to Front Desk with the full command (#1084)", async () => {
+    const logPath = join(tempDir, "permission-decisions.jsonl");
+    const destructive = "rm -rf " + "/";
+    const allowed: Array<[string, string]> = [];
+    const map = new Map<string, WatchdogAgent>([
+      [
+        "worker-1",
+        {
+          id: "worker-1",
+          title: "Worker One",
+          status: "running",
+          labels: { category: "worker" },
+          pendingPermissions: [{ id: "perm-destr", tool: "run_command", input: { command: destructive } }],
+        },
+      ],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "worker-1" }],
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+      allowFleetPermission: async (agentId, permissionId) => {
+        allowed.push([agentId, permissionId]);
+        return true;
+      },
+      adjudicationLogPath: logPath,
+    });
+    assert.ok(audit.anomalies.some((a) => a.type === "AGENT_PERMISSION_REQUIRED" && a.agentId === "worker-1"));
+    assert.equal(allowed.length, 0, "destructive command must not reach the allow seam");
+    assert.ok(
+      delivered.some(
+        (d) =>
+          d.msg.includes("paseo permit allow worker-1 perm-destr") &&
+          d.msg.includes(JSON.stringify(destructive)),
+      ),
+      "escalation carries the full command",
+    );
+    const records = readAdjudicationDecisions({ logPath });
+    assert.equal(records.length, 1);
+    assert.equal(records[0]!.action, "escalate");
+  });
+
+  it("never auto-allows a non-fleet agent's pending permission (#1084)", async () => {
+    const allowed: Array<[string, string]> = [];
+    const map = new Map<string, WatchdogAgent>([
+      [
+        "adhoc-1",
+        {
+          id: "adhoc-1",
+          name: "my scratch session",
+          status: "running",
+          pendingPermissions: [{ id: "perm-adhoc", input: { command: "git status" } }],
+        },
+      ],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      agentMap: map,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+      allowFleetPermission: async (agentId, permissionId) => {
+        allowed.push([agentId, permissionId]);
+        return true;
+      },
+    });
+    assert.equal(allowed.length, 0);
+    assert.ok(audit.anomalies.some((a) => a.type === "AGENT_PERMISSION_REQUIRED" && a.agentId === "adhoc-1"));
   });
 
   it("detects non-error attention stalls and alerts Front Desk", async () => {

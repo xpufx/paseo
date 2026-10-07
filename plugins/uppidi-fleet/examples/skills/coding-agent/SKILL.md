@@ -24,6 +24,9 @@ This skill defines the operational workflow, tool usage, issue conventions, and 
 > **Workspace Scratch Isolation (`.tmp/`)**:
 > Never write temporary files, test scripts, downloaded keys, or scratch artifacts to global `/tmp` or paths outside your assigned workspace directory. Always use the workspace-scoped `<workspace>/.tmp/` directory (which is gitignored). Touching global `/tmp` violates workspace containment and triggers interactive permission stalls.
 
+> [!NOTE]
+> **Prefer `teax ... -F <file>` over inline heredocs**: Compose comment/PR bodies into `<workspace>/.tmp/<file>` and pass them with `teax issue comment ... -F <workspace>/.tmp/<file>`. The inline `-b "$(cat <<'EOF' ...)"` shape is the command that `pi` most often flags as dangerous. When clearing scratch, delete only inside `<workspace>/.tmp/` (for example `rm -rf <workspace>/.tmp/dist`). Never `rm -rf` a global path, a workspace root, or a path containing `..`: those shapes are destructive, are not auto-approved, and will stall the turn.
+
 ---
 
 ## 1. Primary Tool: `teax`
@@ -53,7 +56,7 @@ teax api repos/owner/repo/issues/<NUMBER> --hostname forge.example.com
 ```
 
 > [!IMPORTANT]
-> **Clean Markdown & Backticks**: When posting comments via shell or heredocs, do NOT double-escape backticks with backslashes (e.g. avoid `\`\`\`` or `\`code\``). Backslashes display literally on the Forgejo web UI. Use unescaped single quotes, heredocs (`cat << 'EOF'`), or raw file input (`-F file` or python) to preserve clean triple backticks (` ``` `).
+> **Clean Markdown & Backticks**: Prefer composing the body into a scoped scratch file and passing it with `-F <workspace>/.tmp/<file>` — the inline-heredoc command shape is what `pi` flags. When you do compose in-shell, do NOT double-escape backticks with backslashes (e.g. avoid `\`\`\`` or `\`code\``). Backslashes display literally on the Forgejo web UI. Use unescaped single quotes, quoted heredocs (`cat << 'EOF'`), or raw file input (`-F file` or python) to preserve clean triple backticks (` ``` `).
 
 > [!NOTE]
 > Forgejo (`forge.example.com`) is the **primary git remote (`origin`) and issues tracker**. All agent code pushes go to `origin` on Forgejo. Pushes to public GitHub are strictly manual and gated by human review.
