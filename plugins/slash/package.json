@@ -2,7 +2,7 @@
   "name": "@xpufx/paseo-slash",
   "private": false,
   "license": "MIT",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "scripts": {
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit",
@@ -21,6 +21,7 @@
   "files": [
     "paseo-plugin.json",
     "README.md",
+    "OVERVIEW.md",
     "LICENSE",
     "index.client.tsx",
     "index.server.ts",
