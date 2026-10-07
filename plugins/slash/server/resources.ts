@@ -67,6 +67,7 @@ export async function handleListOperations(): Promise<{ rpc: string[]; open: str
 
 export interface OperationContext {
   agentId?: string;
+  paseo?: any;
 }
 
 /** A primitive is a built-in code handler; operation bindings are the data that name it. */
@@ -242,6 +243,54 @@ const PRIMITIVES: Record<string, OperationPrimitive> = {
     if (!context.agentId) throw new Error("orchestrate requires a caller agent id");
     return orchestrateHandover(context.agentId, binding.target);
   },
+  "slash.agent.identity": async (_params, context) => {
+    if (!context.agentId) {
+      throw new Error("agent identity requires a caller agent id");
+    }
+    const paseo = context.paseo;
+    const agentRef = paseo?.agents?.ref ? paseo.agents.ref(context.agentId) : null;
+    let agentSnapshot: any = null;
+    if (agentRef) {
+      try {
+        const refetched = await agentRef.refresh();
+        agentSnapshot = refetched?.agent ?? agentRef.current();
+      } catch (err) {
+        log.warn("Failed to refresh agent snapshot for identity", { error: String(err) });
+        agentSnapshot = agentRef.current();
+      }
+    }
+
+    const title = agentSnapshot?.title || "Agent";
+    const provider = agentSnapshot?.provider || "unknown";
+    const model = agentSnapshot?.model || "unknown";
+    const status = agentSnapshot?.status || "active";
+    const cwd = agentSnapshot?.cwd || process.cwd();
+    const workspaceId = agentSnapshot?.workspaceId || "none";
+    const thinkingOptionId = agentSnapshot?.thinkingOptionId ?? agentSnapshot?.effectiveThinkingOptionId ?? "auto";
+
+    const lines = [
+      `Agent ID: ${context.agentId}`,
+      `Title: ${title}`,
+      `Provider: ${provider}`,
+      `Model: ${model}`,
+      `Status: ${status}`,
+      `Thinking Mode: ${thinkingOptionId}`,
+      `Workspace ID: ${workspaceId}`,
+      `Working Directory: ${cwd}`,
+    ];
+
+    return {
+      output: lines.join("\n"),
+      agentId: context.agentId,
+      title,
+      provider,
+      model,
+      status,
+      cwd,
+      workspaceId,
+      thinkingOptionId,
+    };
+  },
   "slash.agent-mux.status": async (params) => {
     const provider = typeof params.provider === "string" && params.provider.trim() ? [params.provider.trim()] : [];
     return runAgentMux(["status", ...provider]);
@@ -320,6 +369,7 @@ export async function handleRunCommand(
   try {
     const result = await runOperation(command.action.operation, command.action.params ?? {}, {
       agentId: input.agentId,
+      paseo: context?.paseo,
     });
 
     if (input.agentId && context?.paseo?.agents?.ref) {

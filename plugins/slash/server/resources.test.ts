@@ -15,8 +15,9 @@ describe("handleListOperations", () => {
     expect(result.open).not.toBe(KNOWN_OPEN_TARGETS);
   });
 
-  it("includes agent-mux operations in allowed operations", async () => {
+  it("includes agent-mux and identity operations in allowed operations", async () => {
     const ops = await allowedOperations();
+    expect(ops).toContain("slash.agent.identity");
     expect(ops).toContain("slash.agent-mux.status");
     expect(ops).toContain("slash.agent-mux.probe");
     expect(ops).toContain("slash.agent-mux.cooldowns");
@@ -89,6 +90,55 @@ describe("handleRunCommand", () => {
         }),
       }),
     );
+  });
+
+  it("resolves slash.agent.identity and appends agent metadata to timeline", async () => {
+    const timelineAppend = vi.fn().mockResolvedValue(undefined);
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          ref: vi.fn().mockReturnValue({
+            timeline: { append: timelineAppend },
+            refresh: vi.fn().mockResolvedValue({
+              agent: {
+                title: "Test Worker",
+                provider: "antigravity",
+                model: "claude-3-7-sonnet",
+                status: "running",
+                cwd: "/home/xpufx/code/test",
+                workspaceId: "wks_test123",
+                thinkingOptionId: "deep",
+              },
+            }),
+            current: vi.fn().mockReturnValue(null),
+          }),
+        },
+      },
+    };
+
+    const result = await handleRunCommand(
+      { name: "who-are-you", args: "", agentId: "agent-identity-test" },
+      mockContext,
+    );
+
+    expect(result.verb).toBe("rpc");
+    expect(timelineAppend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "plugin",
+        kind: "slash-command-result",
+        version: 1,
+        data: expect.objectContaining({
+          command: "who-are-you",
+          status: "ok",
+          body: expect.stringContaining("Agent ID: agent-identity-test"),
+        }),
+      }),
+    );
+    const body = timelineAppend.mock.calls[0][0].data.body;
+    expect(body).toContain("Title: Test Worker");
+    expect(body).toContain("Provider: antigravity");
+    expect(body).toContain("Model: claude-3-7-sonnet");
+    expect(body).toContain("Working Directory: /home/xpufx/code/test");
   });
 });
 

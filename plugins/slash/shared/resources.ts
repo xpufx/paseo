@@ -208,6 +208,20 @@ export const SEED_COMMANDS: SlashCommand[] = [
     enabled: true,
     action: { verb: "rpc", operation: "slash.orchestrate", params: {} },
   },
+  {
+    name: "who-are-you",
+    title: "Who Are You",
+    description: "Display deterministic agent identity and session details",
+    enabled: true,
+    action: { verb: "rpc", operation: "slash.agent.identity", params: {} },
+  },
+  {
+    name: "whoami",
+    title: "Whoami",
+    description: "Display deterministic agent identity and session details",
+    enabled: true,
+    action: { verb: "rpc", operation: "slash.agent.identity", params: {} },
+  },
 ];
 
 // Built-in primitive handlers are code; these are the seed bindings (data) that
@@ -218,6 +232,7 @@ export const SEED_OPERATION_BINDINGS: RpcOperationBinding[] = [
   { name: "slash.ping", kind: "primitive", primitive: "slash.ping", params: {} },
   { name: "slash.echo", kind: "primitive", primitive: "slash.echo", params: {} },
   { name: "slash.orchestrate", kind: "primitive", primitive: "slash.orchestrate", params: {} },
+  { name: "slash.agent.identity", kind: "primitive", primitive: "slash.agent.identity", params: {} },
   { name: "slash.agent-mux.status", kind: "primitive", primitive: "slash.agent-mux.status", params: {} },
   { name: "slash.agent-mux.probe", kind: "primitive", primitive: "slash.agent-mux.probe", params: {} },
   { name: "slash.agent-mux.cooldowns", kind: "primitive", primitive: "slash.agent-mux.cooldowns", params: {} },
