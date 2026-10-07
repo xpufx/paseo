@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { createPluginLogger } from "paseo-plugin-helper/server";
 import {
   KNOWN_OPEN_TARGETS,
@@ -212,12 +214,54 @@ async function readCappedText(response: Response): Promise<{ text: string; trunc
   return { text, truncated };
 }
 
+const execFileAsync = promisify(execFile);
+
+async function runAgentMux(args: string[], timeoutMs = 15_000): Promise<{ output: string }> {
+  try {
+    const { stdout, stderr } = await execFileAsync("agent-mux", args, {
+      timeout: timeoutMs,
+      env: { ...process.env, PATH: `${process.env.HOME}/.local/bin:${process.env.PATH ?? ""}` },
+      maxBuffer: 1024 * 1024,
+    });
+    return { output: stdout || stderr };
+  } catch (err: unknown) {
+    const execErr = err as { stdout?: string; stderr?: string; message?: string };
+    const output = (execErr.stdout ?? "") + (execErr.stderr ?? "");
+    if (output.trim()) {
+      return { output: output.trim() };
+    }
+    throw new Error(`agent-mux failed: ${execErr.message ?? String(err)}`);
+  }
+}
+
 const PRIMITIVES: Record<string, OperationPrimitive> = {
   "slash.ping": () => ({ ok: true, version: SLASH_PLUGIN_VERSION }),
   "slash.echo": (params) => ({ echo: params }),
   "slash.orchestrate": (_params, context, binding) => {
     if (!context.agentId) throw new Error("orchestrate requires a caller agent id");
     return orchestrateHandover(context.agentId, binding.target);
+  },
+  "slash.agent-mux.status": async (params) => {
+    const provider = typeof params.provider === "string" && params.provider.trim() ? [params.provider.trim()] : [];
+    return runAgentMux(["status", ...provider]);
+  },
+  "slash.agent-mux.probe": async (params) => {
+    const args: string[] = ["probe"];
+    if (typeof params.provider === "string" && params.provider.trim()) {
+      args.push(params.provider.trim());
+      if (typeof params.profile === "string" && params.profile.trim()) {
+        args.push(params.profile.trim());
+        if (typeof params.pool === "string" && params.pool.trim()) {
+          args.push(params.pool.trim());
+        }
+      }
+    } else {
+      args.push("antigravity");
+    }
+    return runAgentMux(args, 25_000);
+  },
+  "slash.agent-mux.cooldowns": async () => {
+    return runAgentMux(["cooldowns"]);
   },
   // One generic handler backs every `kind: "http"` binding.
   http: (params, _context, binding) => {

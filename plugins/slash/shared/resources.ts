@@ -181,6 +181,27 @@ export const SEED_COMMANDS: SlashCommand[] = [
     action: { verb: "rpc", operation: "slash.ping", params: {} },
   },
   {
+    name: "status",
+    title: "Status",
+    description: "View live quota and auth status from agent-mux",
+    enabled: true,
+    action: { verb: "rpc", operation: "slash.agent-mux.status", params: {} },
+  },
+  {
+    name: "probe",
+    title: "Probe",
+    description: "Actively test live model/server access and refresh quotas",
+    enabled: true,
+    action: { verb: "rpc", operation: "slash.agent-mux.probe", params: {} },
+  },
+  {
+    name: "cooldowns",
+    title: "Cooldowns",
+    description: "View active rate-limit locks and countdowns from agent-mux",
+    enabled: true,
+    action: { verb: "rpc", operation: "slash.agent-mux.cooldowns", params: {} },
+  },
+  {
     name: "orchestrate",
     title: "Orchestrate",
     description: "Hand the orchestrator role to this agent via the forgejo hook",
@@ -197,6 +218,9 @@ export const SEED_OPERATION_BINDINGS: RpcOperationBinding[] = [
   { name: "slash.ping", kind: "primitive", primitive: "slash.ping", params: {} },
   { name: "slash.echo", kind: "primitive", primitive: "slash.echo", params: {} },
   { name: "slash.orchestrate", kind: "primitive", primitive: "slash.orchestrate", params: {} },
+  { name: "slash.agent-mux.status", kind: "primitive", primitive: "slash.agent-mux.status", params: {} },
+  { name: "slash.agent-mux.probe", kind: "primitive", primitive: "slash.agent-mux.probe", params: {} },
+  { name: "slash.agent-mux.cooldowns", kind: "primitive", primitive: "slash.agent-mux.cooldowns", params: {} },
 ];
 
 /** Merges custom bindings over the seed defaults; a custom name wins outright. */
