@@ -14,4 +14,12 @@ describe("handleListOperations", () => {
     const result = await handleListOperations();
     expect(result.open).not.toBe(KNOWN_OPEN_TARGETS);
   });
+
+  it("includes agent-mux operations in allowed operations", async () => {
+    const ops = await allowedOperations();
+    expect(ops).toContain("slash.agent-mux.status");
+    expect(ops).toContain("slash.agent-mux.probe");
+    expect(ops).toContain("slash.agent-mux.cooldowns");
+  });
 });
+
