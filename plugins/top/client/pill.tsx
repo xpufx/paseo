@@ -1137,7 +1137,10 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
     paddingHorizontal: padding.horizontal,
     paddingTop: padding.vertical,
     paddingBottom: Math.round(padding.gap / 2),
-  };
+    position: "sticky" as const,
+    top: 0,
+    zIndex: 10,
+  } as any;
 
   if (isError && !data) {
     return (

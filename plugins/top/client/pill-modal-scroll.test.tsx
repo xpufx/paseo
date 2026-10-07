@@ -9,7 +9,7 @@ import {
   sheetScrollersInsideModal,
 } from "paseo-plugin-ui-testing";
 import { contributeClient } from "./pill";
-import { HostModalSection } from "./host-ui";
+import { HostModalSection, HostTabs } from "./host-ui";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -255,5 +255,23 @@ describe("top pill modal scroll ownership (#975/#1054)", () => {
   it("renders no height-clamped boxes in the host-scrolled body (#975/#1054)", async () => {
     const renderer = await openTopPill();
     expect(heightClamps(renderer.toJSON())).toEqual([]);
+  });
+
+  it("pins the top navigation bar with sticky positioning at the top of the modal (#1101)", async () => {
+    const renderer = await openTopPill();
+
+    // Find the HostTabs instance in the rendered modal
+    const tabs = renderer.root.findByType(HostTabs);
+    expect(tabs).toBeDefined();
+
+    // The navbar wrapper View enclosing the tabs must be sticky pinned to the top
+    const navbarWrapper = tabs.parent;
+    expect(navbarWrapper).not.toBeNull();
+    const style = flattenStyle(navbarWrapper!.props.style);
+
+    expect(style.position, "modal navbar must be sticky so it remains pinned when body scrolls").toBe("sticky");
+    expect(style.top, "modal navbar must stick to the top of the viewport").toBe(0);
+    expect(style.zIndex, "modal navbar must layer above scrolling body content").toBe(10);
+    expect(style.backgroundColor, "modal navbar must have solid background to obscure scrolling content").toBe((theme as any).colors.surface0);
   });
 });
