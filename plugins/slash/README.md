@@ -1,6 +1,14 @@
-# s/ash
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/slash-logo-for-dark-bg.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/slash-logo-for-light-bg.svg">
+    <img alt="S/ash Logo" src="docs/screenshots/slash-logo-adaptive.svg" width="360">
+  </picture>
+</p>
 
-Slash-command console for [Paseo](https://github.com/getpaseo/paseo).
+<p align="center">
+  <strong>Slash-command console for <a href="https://github.com/getpaseo/paseo">Paseo</a>.</strong>
+</p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/slash/docs/screenshots/slash-console.jpg" alt="S/ash console — command repository, prefix, and shipped catalog" width="380">
@@ -29,7 +37,7 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 
 - **Command repository.** The console lists enabled commands with their action
   summary and supports add / edit / remove through helper form primitives.
-- **Shipped catalog.** The seed commands (`review`, `console`, `ping`) are
+- **Shipped catalog.** The seed commands (`review`, `console`, `ping`, `agent-mux`, `whoami`, `who-are-you`, etc.) are
   listed separately so a missing one can be added back with one tap.
 - **Prefix.** An optional shared prefix (default `slash-`, clearable to render
   bare command names) is applied to every command name.
@@ -45,7 +53,7 @@ Built on [paseo-plugin-helper](https://github.com/xpufx/paseo/tree/main/packages
 - `slash.operations.list`: the allowlisted rpc operation names and known
   open-surface ids.
 - `slash.commands.run`: run one command by name; `send`/`open` resolve
-  client-side, `rpc` executes daemon-side.
+  client-side, `rpc` executes daemon-side with output forwarded to the agent timeline.
 - `slash.bundle.export` / `slash.bundle.import`: share command sets as a
   versioned bundle.
 
@@ -55,7 +63,7 @@ The **catalog is data**. An operation binding is either a named built-in
 primitive (`kind: "primitive"`) or an arbitrary HTTP request (`kind: "http"`):
 
 - `kind: "primitive"` — names a built-in code handler: `slash.ping`, `slash.echo`,
-  `slash.orchestrate`. Use this only for operations that need code semantics.
+  `slash.agent.identity`, `slash.agent-mux`, `slash.orchestrate`. Use this only for operations that need code semantics.
 - `kind: "http"` — declares `method` (`GET`/`POST`), `path`, optional static
   `headers`, and the names of call-time `bodyParams` allowed into a POST body.
   Every http binding runs through one generic handler, so adding a callable rpc
