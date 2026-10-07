@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
-import { createPluginLogger } from "paseo-plugin-helper/server";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import { createPluginLogger } from "./vendor/paseo-plugin-helper";
 import {
   KNOWN_OPEN_TARGETS,
   SEED_COMMANDS,

@@ -261,13 +261,11 @@ test("a committed vendored tree is the publish artifact, not the runtime resolut
     );
   }
 
-  // slash used to import the helper's vendored `host` from one file, which made
-  // it the one mixed-resolution plugin. The vendored client tree it reached into
-  // was removed in #938, so the whole plugin now resolves the bare specifier.
+  // slash serves its vendored helper copies directly (xpufx-org/paseo#1100).
   const slash = resolveServedFrom(path.join(REPO_ROOT, "plugins", "slash"));
-  assert.equal(slash.servedFrom, "checkout");
-  assert.deepEqual(slash.vendoredSources, []);
-  assert.ok(slash.bareSources.length > 1);
+  assert.equal(slash.servedFrom, "vendored");
+  assert.deepEqual(slash.bareSources, []);
+  assert.ok(slash.vendoredSources.length > 1);
 });
 
 test("the gate reports drift instead of passing vacuously", () => {

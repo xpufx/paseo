@@ -12,8 +12,8 @@ import {
   ScrollView as HostScrollView,
   TextInput as HostTextInputPrimitive,
 } from "@getpaseo/plugin/client/react-native";
-import { useHostTheme } from "paseo-plugin-helper/lifecycle";
-import type { StatusVariant } from "paseo-plugin-helper/shared";
+import { useHostTheme } from "./vendor/paseo-plugin-helper/lifecycle";
+import type { StatusVariant } from "../shared/vendor/paseo-plugin-helper";
 
 /**
  * Plugin-local presentation layer for `plugins/slash`.

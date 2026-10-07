@@ -1,6 +1,6 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PluginStorage, type PluginStorageOptions } from "paseo-plugin-helper/server";
+import { PluginStorage, type PluginStorageOptions } from "./vendor/paseo-plugin-helper";
 import {
   SEED_COMMANDS,
   SEED_OPERATION_BINDINGS,

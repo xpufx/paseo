@@ -6,7 +6,7 @@ A configurable command prefix (defaulting to `slash-`, or empty for bare command
 
 - The plugin runs on the Paseo daemon and requires Paseo 0.8.0 or later.
 - Commands utilizing `agent-mux` (`/agent-mux`, `/agent-mux-status`, `/agent-mux-probe`, `/agent-mux-cooldowns`) require the [agent-mux](https://github.com/xpufx/agent-mux) executable installed on the daemon machine, either in `~/.local/bin` or available on `PATH`.
-- For `slash.orchestrate`, the plugin communicates with a local or remote hook server such as [Uppidi Fleet](https://fleet.uppidi.com/). The endpoint URL can be set in plugin settings, through `PASEO_FORGEJO_HOOK_URL`, or defaults to `http://127.0.0.1:8099`. An optional bearer secret can be provided via a secret file path in settings, `PASEO_FORGEJO_HOOK_SECRET_FILE`, or `~/.paseo/forgejo-hook.secret`.
+- For `slash.orchestrate`, the plugin communicates with a local or remote hook server such as [Uppidi Fleet](https://fleet.uppidi.com/). The endpoint URL can be set in plugin settings, through `PASEO_FORGEJO_HOOK_URL`, or defaults to `http://127.0.0.1:8099`. An optional bearer secret can be provided via a secret file path in settings, `PASEO_FORGEJO_HOOK_SECRET_FILE`, `~/.paseo/forgejo-hook.secret`, or the `FORGEJO_WEBHOOK_SECRET` environment variable as a fallback.
 
 ## Capabilities and Data Access
 

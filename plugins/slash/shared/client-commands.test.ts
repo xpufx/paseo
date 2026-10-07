@@ -135,7 +135,7 @@ describe("registerSlashCommands rpc wiring", () => {
     const errorMock = vi.fn();
 
     // Mock client host helper deps with a toast API
-    const { initClientHelpers } = await import("paseo-plugin-helper/core");
+    const { initClientHelpers } = await import("../client/vendor/paseo-plugin-helper/core");
     initClientHelpers({
       Icon: (() => null) as any,
       Modal: (() => null) as any,

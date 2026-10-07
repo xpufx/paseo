@@ -20,7 +20,7 @@ import {
   spacing,
   type HostTabItem,
 } from "./host-ui";
-import { usePluginSettings, useRpcMutation, useRpcQuery } from "paseo-plugin-helper/core";
+import { usePluginSettings, useRpcMutation, useRpcQuery } from "./vendor/paseo-plugin-helper/core";
 import {
   COMMAND_NAME_HINT,
   SUGGESTED_PREFIX,

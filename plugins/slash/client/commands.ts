@@ -1,5 +1,5 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { getOptionalClientHost } from "paseo-plugin-helper/core";
+import { getOptionalClientHost } from "./vendor/paseo-plugin-helper/core";
 import {
   interpolateTemplate,
   listCommandsRpc,
