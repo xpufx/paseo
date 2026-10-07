@@ -2,6 +2,36 @@ import { describe, expect, it, vi } from "vitest";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { createMcpSlashHandler } from "./mcp";
 
+vi.mock("./providers/catalog", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./providers/catalog")>();
+  return {
+    ...actual,
+    paseo: {
+      ...actual.paseo,
+      probe: vi.fn().mockResolvedValue({
+        servers: [
+          {
+            id: "session:paseo",
+            name: "Paseo (Builtin)",
+            transport: "http",
+            source: {
+              kind: "paseo",
+              label: "Paseo · Built-in",
+              path: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+            },
+            command: null,
+            url: "http://127.0.0.1:6767/mcp/agents?callerAgentId=agent-1",
+            description: "Paseo control plane, agent automation & browser tools",
+            hasSecrets: false,
+            configPreview: "{}",
+          },
+        ],
+        steps: [],
+      }),
+    },
+  };
+});
+
 describe("createMcpSlashHandler", () => {
   function makeMockContext(options?: { appendError?: boolean; refreshError?: boolean }) {
     const timelineAppend = vi.fn().mockImplementation(async () => {
