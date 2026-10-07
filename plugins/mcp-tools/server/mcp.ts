@@ -345,3 +345,130 @@ export function createDiagnoseMcpHandler() {
     };
   };
 }
+
+function truncate(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}... (truncated)`;
+}
+
+export function createMcpSlashHandler() {
+  const listHandler = createListMcpHandler();
+  const healthHandler = createHealthHandler();
+  const callToolHandler = createCallMcpToolHandler();
+
+  return async (input: { agentId: string; args: string }, context: PluginHandlerContext) => {
+    const { agentId, args } = input;
+    const [sub, ...rest] = args.trim().split(/\s+/);
+
+    const appendResult = async (title: string, body: string) => {
+      try {
+        await context.paseo.agents.ref(agentId).timeline.append({
+          type: "plugin",
+          id: `mcp-slash-${Date.now()}`,
+          kind: "mcp-slash-result",
+          version: 1,
+          data: { title, body: truncate(body, 4000) },
+        });
+      } catch (appendErr) {
+        log.warn("Failed to append slash result to timeline", {
+          agentId,
+          error: appendErr instanceof Error ? appendErr.message : String(appendErr),
+        });
+      }
+    };
+
+    try {
+      if (!sub || sub === "probe") {
+        const res = await listHandler({ agentId }, context);
+        const title = "MCP probe";
+        const body = `${res.servers.length} server(s) via ${res.provider}: ${res.servers.map((s) => s.name).join(", ") || "none"}`;
+        await appendResult(title, body);
+        return { ok: true, title, body };
+      }
+
+      if (sub === "health") {
+        const filter = rest[0]?.toLowerCase();
+        const res = await healthHandler({ agentId }, context);
+        const rows = filter
+          ? res.results.filter((r) => r.name.toLowerCase().includes(filter))
+          : res.results;
+        const counts = {
+          healthy: rows.filter((r) => r.status === "healthy").length,
+          degraded: rows.filter((r) => r.status === "degraded").length,
+          down: rows.filter((r) => r.status === "down").length,
+          total: rows.length,
+        };
+
+        try {
+          await context.paseo.agents.ref(agentId).timeline.append({
+            type: "plugin",
+            id: `mcp-health-${Date.now()}`,
+            kind: "mcp-health-digest",
+            version: 1,
+            data: buildHealthDigest(counts),
+          });
+        } catch (appendErr) {
+          log.warn("Failed to append health digest to timeline", {
+            agentId,
+            error: appendErr instanceof Error ? appendErr.message : String(appendErr),
+          });
+        }
+
+        const summary = `${counts.healthy} healthy / ${counts.degraded} degraded / ${counts.down} down of ${counts.total}`;
+        return { ok: true, title: "MCP health", body: summary };
+      }
+
+      if (sub === "run") {
+        const [serverRef, toolName, ...argParts] = rest;
+        const list = await listHandler({ agentId }, context);
+        const server = list.servers.find((s) => s.id === serverRef || s.name === serverRef);
+        if (!server || !toolName) {
+          const title = "MCP run";
+          const body = "Usage: /mcp run <server> <tool> [json-args]";
+          await appendResult(title, body);
+          return { ok: false, title, body, error: "invalid_usage" };
+        }
+
+        let parsed: Record<string, unknown> = {};
+        if (argParts.length > 0) {
+          try {
+            parsed = JSON.parse(argParts.join(" ")) as Record<string, unknown>;
+          } catch {
+            const title = "MCP run";
+            const body = "Arguments must be a JSON object.";
+            await appendResult(title, body);
+            return { ok: false, title, body, error: "invalid_json_args" };
+          }
+        }
+
+        const out = await callToolHandler(
+          {
+            agentId,
+            serverId: server.id,
+            toolName,
+            arguments: parsed,
+          },
+          context,
+        );
+
+        const text = out.content
+          .map((c) => String((c as { text?: unknown }).text ?? JSON.stringify(c)))
+          .join("\n\n");
+        const title = `MCP run ${toolName}`;
+        const body = out.isError ? `Error:\n${text}` : text || "(empty result)";
+        await appendResult(title, body);
+        return { ok: !out.isError, title, body, error: out.error ?? (out.isError ? body : null) };
+      }
+
+      const title = "MCP";
+      const body = "Usage: /mcp [probe|health [server]|run server tool [json-args]]";
+      await appendResult(title, body);
+      return { ok: false, title, body, error: "invalid_usage" };
+    } catch (e) {
+      const errMessage = e instanceof Error ? e.message : String(e);
+      const title = "MCP error";
+      await appendResult(title, errMessage);
+      return { ok: false, title, body: errMessage, error: errMessage };
+    }
+  };
+}

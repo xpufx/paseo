@@ -171,6 +171,21 @@ export const mcpToolsSettingsContract = defineSettingsContract({
   description: "mcp-tools cache and polling settings",
 });
 
+export const runMcpSlash = defineContract({
+  name: "mcp.slash_command",
+  description: "Executes an /mcp slash command sub-action on behalf of an agent and appends result to timeline",
+  input: z.object({
+    agentId: z.string(),
+    args: z.string(),
+  }),
+  output: z.object({
+    ok: z.boolean(),
+    title: z.string(),
+    body: z.string(),
+    error: z.string().nullable().optional(),
+  }),
+});
+
 // Short source label rendered on everything this plugin puts into
 // shared Paseo surfaces, so plugin output is never mistaken for core.
 export const PLUGIN_ATTRIBUTION = "via mcp-tools";
