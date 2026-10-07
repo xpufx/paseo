@@ -28,7 +28,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(listCommandsRpc, handleListCommands);
   server.handle(catalogRpc, handleListCatalog);
   server.handle(operationsListRpc, handleListOperations);
-  server.handle(runCommandRpc, handleRunCommand);
+  server.handle(runCommandRpc, (input) => handleRunCommand(input, server));
   server.handle(exportBundleRpc, handleExportBundle);
   server.handle(importBundleRpc, handleImportBundle);
   log.info("slash plugin contributed: send/open/rpc verbs over settings-doc storage");
