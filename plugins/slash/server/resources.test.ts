@@ -108,7 +108,7 @@ describe("handleRunCommand", () => {
                 provider: "antigravity",
                 model: "claude-3-7-sonnet",
                 status: "running",
-                cwd: "/home/xpufx/code/test",
+                cwd: "/home/user/code/test",
                 workspaceId: "wks_test123",
                 thinkingOptionId: "deep",
               },
@@ -141,7 +141,7 @@ describe("handleRunCommand", () => {
     expect(body).toContain("Title: Test Worker");
     expect(body).toContain("Provider: antigravity");
     expect(body).toContain("Model: claude-3-7-sonnet");
-    expect(body).toContain("Working Directory: /home/xpufx/code/test");
+    expect(body).toContain("Working Directory: /home/user/code/test");
   });
 });
 
