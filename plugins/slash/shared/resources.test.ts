@@ -260,6 +260,7 @@ describe("slash.operations.list contract", () => {
     expect(operationsListRpc.output.parse({ rpc: ["slash.ping"], open: ["slash-console"] })).toEqual({
       rpc: ["slash.ping"],
       open: ["slash-console"],
+      descriptions: {},
     });
     expect(KNOWN_OPEN_TARGETS).toContain("slash-console");
   });

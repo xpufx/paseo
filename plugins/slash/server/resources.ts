@@ -61,8 +61,23 @@ export function handleListCatalog(): { commands: SlashCommand[] } {
   return { commands: SEED_COMMANDS };
 }
 
-export async function handleListOperations(): Promise<{ rpc: string[]; open: string[] }> {
-  return { rpc: await allowedOperations(), open: [...KNOWN_OPEN_TARGETS] };
+export async function handleListOperations(): Promise<{
+  rpc: string[];
+  open: string[];
+  descriptions: Record<string, string>;
+}> {
+  const bindings = await resolveOperationBindings();
+  const descriptions: Record<string, string> = {};
+  for (const b of bindings) {
+    if (b.description) {
+      descriptions[b.name] = b.description;
+    }
+  }
+  return {
+    rpc: bindings.map((b) => b.name),
+    open: [...KNOWN_OPEN_TARGETS],
+    descriptions,
+  };
 }
 
 export interface OperationContext {

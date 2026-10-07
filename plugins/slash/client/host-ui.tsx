@@ -600,6 +600,7 @@ export function HostTextInput({
 export interface HostSelectOption {
   label: string;
   value: string;
+  description?: string;
 }
 
 export interface HostSelectProps {
@@ -681,6 +682,18 @@ export function HostSelect({ value, options, onValueChange, placeholder = "Selec
                 >
                   {option.label}
                 </Text>
+                {option.description ? (
+                  <Text
+                    numberOfLines={2}
+                    style={{
+                      fontSize: 11,
+                      color: colors.foregroundMuted,
+                      marginTop: 2,
+                    }}
+                  >
+                    {option.description}
+                  </Text>
+                ) : null}
               </Pressable>
             );
           })

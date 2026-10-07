@@ -133,9 +133,15 @@ interface CommandFormProps {
 
 function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandFormProps) {
   const rpcOptions = catalog.rpc ?? [];
+  const rpcDescriptions = catalog.descriptions ?? {};
   const openOptions = catalog.open ?? [];
-  const rpcChoices = rpcOptions.map((operation) => ({ label: operation, value: operation }));
+  const rpcChoices = rpcOptions.map((operation) => ({
+    label: operation,
+    value: operation,
+    description: rpcDescriptions[operation],
+  }));
   const openChoices = openOptions.map((target) => ({ label: target, value: target }));
+  const selectedRpcDesc = rpcDescriptions[draft.operation];
 
   return (
     <HostStack gap="sm">
@@ -217,7 +223,7 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
             <HostTextInput
               value={draft.operation}
               errorText={errors.action}
-              helperText={warnings.action}
+              helperText={selectedRpcDesc || warnings.action}
               placeholder="slash.ping"
               mono
               onChangeText={(operation) => onChange({ operation })}

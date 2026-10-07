@@ -7,6 +7,8 @@ describe("handleListOperations", () => {
     const result = await handleListOperations();
     expect(result.rpc).toEqual(await allowedOperations());
     expect(result.open).toEqual(KNOWN_OPEN_TARGETS);
+    expect(result.descriptions).toBeDefined();
+    expect(result.descriptions["slash.agent-mux.status"]).toContain("agent-mux");
     expect(operationsListRpc.output.parse(result)).toEqual(result);
   });
 

@@ -75,6 +75,7 @@ export const RpcPrimitiveOperationBindingSchema = z.object({
   name: z.string().min(1).max(200),
   kind: RpcPrimitiveKindSchema,
   primitive: z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
   params: z.record(z.string(), z.unknown()).default({}),
   target: z.string().max(2000).optional(),
 });
@@ -83,6 +84,7 @@ export const RpcHttpOperationBindingSchema = z.object({
   name: z.string().min(1).max(200),
   kind: RpcHttpKindSchema,
   http: RpcHttpOperationSchema,
+  description: z.string().max(500).optional(),
   // Attach the hook bearer secret (from resolveSecretFile) to the request.
   auth: z.boolean().default(false),
   params: z.record(z.string(), z.unknown()).default({}),
@@ -229,13 +231,55 @@ export const SEED_COMMANDS: SlashCommand[] = [
 // existing settings documents and commands that already reference it. Every other
 // callable operation is expected to be a `kind: "http"` binding in settings.
 export const SEED_OPERATION_BINDINGS: RpcOperationBinding[] = [
-  { name: "slash.ping", kind: "primitive", primitive: "slash.ping", params: {} },
-  { name: "slash.echo", kind: "primitive", primitive: "slash.echo", params: {} },
-  { name: "slash.orchestrate", kind: "primitive", primitive: "slash.orchestrate", params: {} },
-  { name: "slash.agent.identity", kind: "primitive", primitive: "slash.agent.identity", params: {} },
-  { name: "slash.agent-mux.status", kind: "primitive", primitive: "slash.agent-mux.status", params: {} },
-  { name: "slash.agent-mux.probe", kind: "primitive", primitive: "slash.agent-mux.probe", params: {} },
-  { name: "slash.agent-mux.cooldowns", kind: "primitive", primitive: "slash.agent-mux.cooldowns", params: {} },
+  {
+    name: "slash.ping",
+    kind: "primitive",
+    primitive: "slash.ping",
+    description: "Safe no-op ping proving backend RPC execution and returning plugin version",
+    params: {},
+  },
+  {
+    name: "slash.echo",
+    kind: "primitive",
+    primitive: "slash.echo",
+    description: "Echoes input parameters back in the RPC response",
+    params: {},
+  },
+  {
+    name: "slash.orchestrate",
+    kind: "primitive",
+    primitive: "slash.orchestrate",
+    description: "Hands orchestrator role to the caller agent via the forgejo hook",
+    params: {},
+  },
+  {
+    name: "slash.agent.identity",
+    kind: "primitive",
+    primitive: "slash.agent.identity",
+    description: "Queries deterministic caller agent identity, model, and workspace details",
+    params: {},
+  },
+  {
+    name: "slash.agent-mux.status",
+    kind: "primitive",
+    primitive: "slash.agent-mux.status",
+    description: "Queries agent-mux for provider quotas, model limits, and auth status (requires agent-mux CLI)",
+    params: {},
+  },
+  {
+    name: "slash.agent-mux.probe",
+    kind: "primitive",
+    primitive: "slash.agent-mux.probe",
+    description: "Actively probes model endpoints via agent-mux and refreshes quotas (requires agent-mux CLI)",
+    params: {},
+  },
+  {
+    name: "slash.agent-mux.cooldowns",
+    kind: "primitive",
+    primitive: "slash.agent-mux.cooldowns",
+    description: "Inspects active rate-limit locks and cooldown timers from agent-mux (requires agent-mux CLI)",
+    params: {},
+  },
 ];
 
 /** Merges custom bindings over the seed defaults; a custom name wins outright. */
@@ -272,6 +316,7 @@ export type CommandDraftWarnings = Partial<Record<CommandDraftWarningField, stri
 export interface OperationCatalog {
   rpc?: readonly string[];
   open?: readonly string[];
+  descriptions?: Record<string, string>;
 }
 
 export function emptyCommandDraft(): SlashCommandDraft {
@@ -393,7 +438,11 @@ export const operationsListRpc = defineContract({
   name: "slash.operations.list",
   description: "List allowlisted rpc operations and the curated known open-surface ids",
   input: z.object({}).default({}),
-  output: z.object({ rpc: z.array(z.string()), open: z.array(z.string()) }),
+  output: z.object({
+    rpc: z.array(z.string()),
+    open: z.array(z.string()),
+    descriptions: z.record(z.string(), z.string()).default({}),
+  }),
 });
 
 export const runCommandRpc = defineContract({
