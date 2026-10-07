@@ -1514,3 +1514,120 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
     assert.equal(router.isHalted(), false);
   });
 });
+
+describe("canonical fleet roles from the hook router registry (#1078)", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "uppidi-fleet-canonical-1078-"));
+  });
+
+  afterEach(() => {
+    setActiveHookRouter(null);
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  function makeRouter(): HookRouter {
+    const router = new HookRouter(null, {
+      stateDir: path.join(tmpDir, "orchestrators"),
+      queueDir: path.join(tmpDir, "queues"),
+      port: 0,
+    });
+    setActiveHookRouter(router);
+    return router;
+  }
+
+  function contextFor(entries: any[]): any {
+    return { paseo: { agents: { list: async () => ({ entries }) } } };
+  }
+
+  it("does not promote an agent named 'Front Desk' when the registry names no desk", async () => {
+    makeRouter();
+
+    const res = await handleUppidiAgents(
+      {},
+      contextFor([{ id: "phantom-desk", name: "Front Desk", status: "idle" }])
+    );
+
+    assert.equal(res.registryAuthoritative, true);
+    assert.equal(res.frontDesk.length, 0, "no registered desk means no canonical Front Desk");
+
+    const phantom = res.workers.find((a) => a.id === "phantom-desk");
+    assert.ok(phantom, "the name-only desk must fall through to workers");
+    assert.equal(phantom?.category, "worker");
+    assert.equal(phantom?.nameCategory, "front-desk");
+    assert.equal(phantom?.roleSource, "registry");
+    assert.equal(phantom?.roleDivergent, true);
+
+    const divergence = res.roleDivergences.find((d) => d.agentId === "phantom-desk");
+    assert.ok(divergence, "the registry/name mismatch must be surfaced");
+    assert.equal(divergence?.nameCategory, "front-desk");
+    assert.equal(divergence?.registryRole, "worker");
+    assert.match(divergence?.reason ?? "", /registry says "worker"/i);
+  });
+
+  it("promotes only the registered Front Desk id, regardless of its display name", async () => {
+    const router = makeRouter();
+    router.writeFrontDesk("real-desk");
+
+    const res = await handleUppidiAgents(
+      {},
+      contextFor([
+        { id: "real-desk", name: "Some Session Title", status: "idle" },
+        { id: "phantom-desk", name: "Front Desk", status: "idle" },
+      ])
+    );
+
+    assert.equal(res.frontDesk.length, 1);
+    assert.equal(res.frontDesk[0]?.id, "real-desk");
+    assert.equal(res.frontDesk[0]?.category, "front-desk");
+    assert.equal(res.frontDesk[0]?.roleSource, "registry");
+
+    const phantom = res.workers.find((a) => a.id === "phantom-desk");
+    assert.ok(phantom);
+    assert.equal(phantom?.category, "worker");
+  });
+
+  it("classifies orchestrators from GET /orchestrators and carries the canonical repo key", async () => {
+    const router = makeRouter();
+    router.writeOrchestrator("forge.example.com/org/repo", "orch-1");
+
+    const res = await handleUppidiAgents(
+      {},
+      contextFor([
+        { id: "orch-1", name: "Agent With No Role In Its Name", status: "idle" },
+        { id: "fake-orch", name: "Orchestrator · repo", status: "idle" },
+      ])
+    );
+
+    assert.equal(res.orchestrators.length, 1);
+    assert.equal(res.orchestrators[0]?.id, "orch-1");
+    assert.equal(res.orchestrators[0]?.category, "orchestrator");
+    assert.equal(res.orchestrators[0]?.registryRepoKey, "forge.example.com/org/repo");
+    assert.equal(res.orchestrators[0]?.roleDivergent, false, "a generic name is not a divergence");
+
+    const fake = res.workers.find((a) => a.id === "fake-orch");
+    assert.ok(fake);
+    assert.equal(fake?.category, "worker");
+    assert.equal(fake?.nameCategory, "orchestrator");
+    assert.equal(fake?.roleDivergent, true);
+  });
+
+  it("marks name-derived roles display-only when no router registry is reachable", async () => {
+    setActiveHookRouter(null);
+
+    const res = await handleUppidiAgents(
+      {},
+      contextFor([{ id: "desk-no-router", name: "Front Desk", status: "idle" }])
+    );
+
+    assert.equal(res.registryAuthoritative, false);
+    const desk = res.frontDesk.find((a) => a.id === "desk-no-router");
+    assert.ok(desk);
+    assert.equal(desk?.roleSource, "name-heuristic");
+    assert.equal(desk?.roleDivergent, false);
+    assert.equal(res.roleDivergences.length, 0);
+  });
+});

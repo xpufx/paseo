@@ -29,6 +29,7 @@ import {
   type DeterministicAgentState,
   type UppidiAgentsOutput,
   type DeterministicStateConfig,
+  type AgentRoleDivergence,
   type UppidiFrontDeskActivityItem,
   getAgentCategoryIcon,
   getDeterministicStateConfig,
@@ -81,6 +82,75 @@ export {
  */
 function toAgentArray(value: unknown): UppidiAgent[] {
   return Array.isArray(value) ? (value.filter(Boolean) as UppidiAgent[]) : [];
+}
+
+/**
+ * Surfaces registry-vs-name divergence instead of hiding it (#1078). When the
+ * hook router registry is authoritative any agent whose display name disagrees
+ * with its registry role is listed; when the registry is unreachable the whole
+ * name-derived roster is explicitly marked display-only.
+ */
+export function RoleDivergenceBanner({
+  registryAuthoritative,
+  divergences,
+  colors,
+  typography,
+}: {
+  registryAuthoritative: boolean;
+  divergences: AgentRoleDivergence[];
+  colors: any;
+  typography: any;
+}) {
+  const items = Array.isArray(divergences) ? divergences : [];
+  if (registryAuthoritative && items.length === 0) return null;
+
+  const title = registryAuthoritative
+    ? `Registry / display-name mismatch (${items.length})`
+    : "Agent roles are display-only (registry unreachable)";
+  const description = registryAuthoritative
+    ? "The hook router registry is authoritative. These agent names disagree with it:"
+    : "The hook router registry could not be read, so roles below are inferred from agent names and are not authoritative.";
+
+  return (
+    <Card
+      variant="flat"
+      style={{
+        borderColor: colors.statusWarning,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+      }}
+    >
+      <Stack gap={4}>
+        <Row align="center" gap="xs">
+          <Icon name="AlertTriangle" size={14} color={colors.statusWarning} />
+          <Text
+            style={{ color: colors.statusWarning, ...typography.bodyStrong, flexShrink: 1 }}
+            numberOfLines={2}
+          >
+            {title}
+          </Text>
+        </Row>
+        <Text
+          style={{ color: colors.foregroundMuted, ...typography.caption, flexShrink: 1 }}
+          numberOfLines={3}
+        >
+          {description}
+        </Text>
+        {registryAuthoritative &&
+          items.map((d) => (
+            <Text
+              key={d.agentId}
+              style={{ color: colors.foregroundMuted, ...typography.caption, flexShrink: 1 }}
+              numberOfLines={2}
+            >
+              <Text style={{ color: colors.foreground, fontWeight: "600" }}>{d.agentName}</Text>
+              {` — name implies "${d.nameCategory}", registry says "${d.registryRole}"`}
+            </Text>
+          ))}
+      </Stack>
+    </Card>
+  );
 }
 
 export interface UppidiFleetTreeViewProps {
@@ -2917,6 +2987,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
       pausedRepos: agentsData?.pausedRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
       registeredFrontDeskAgentId,
+      registryAuthoritative: agentsData?.registryAuthoritative ?? false,
       sortField: repoSortField,
       sortDirection: repoSortDir,
     });
@@ -2929,6 +3000,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
       pausedRepos: agentsData?.pausedRepos,
       repoQueuedHooks: agentsData?.repoQueuedHooks,
       registeredFrontDeskAgentId,
+      registryAuthoritative: agentsData?.registryAuthoritative ?? false,
       sortField: repoSortField,
       sortDirection: repoSortDir,
     });
@@ -3193,6 +3265,12 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
       </MetricsBar>
 
       {/* 1. Fleet Front Desk Hero (Elevated at Top of All) — singleton (#470) */}
+      <RoleDivergenceBanner
+        registryAuthoritative={agentsData?.registryAuthoritative ?? false}
+        divergences={agentsData?.roleDivergences ?? []}
+        colors={colors}
+        typography={typography}
+      />
       <FrontDeskHero
         node={displayFrontDeskNode}
         orchestrators={displayOrchestrators}

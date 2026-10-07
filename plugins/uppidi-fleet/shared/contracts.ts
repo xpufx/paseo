@@ -763,7 +763,23 @@ export const UppidiAgentSchema = z.object({
   id: z.string(),
   shortId: z.string(),
   name: z.string(),
+  /**
+   * Canonical role. When the hook router registry is reachable this is resolved
+   * from `GET /frontdesk` / `GET /orchestrators`, never from the agent name;
+   * otherwise it falls back to the name heuristic (#1078).
+   */
   category: UppidiAgentCategorySchema,
+  /**
+   * Where `category` came from: the router registry or the display-name
+   * heuristic. `name-heuristic` is display-only and not authoritative (#1078).
+   */
+  roleSource: z.enum(["registry", "name-heuristic"]).optional(),
+  /** Name-derived category retained for divergence display; never authoritative (#1078). */
+  nameCategory: UppidiAgentCategorySchema.optional(),
+  /** True when the name heuristic disagrees with the registry role (#1078). */
+  roleDivergent: z.boolean().optional(),
+  /** Registry repo key this agent is the orchestrator for, from `GET /orchestrators` (#1078). */
+  registryRepoKey: z.string().optional(),
   provider: z.string().optional(),
   model: z.string().nullable().optional(),
   status: z.string(),
@@ -840,8 +856,27 @@ export const UppidiAgentTreeNodeSchema: z.ZodType<UppidiAgentTreeNode> = z.lazy(
   })
 );
 
+export const AgentRoleDivergenceSchema = z.object({
+  agentId: z.string(),
+  agentName: z.string(),
+  /** Category implied by the display name only. */
+  nameCategory: UppidiAgentCategorySchema,
+  /** Role the canonical registry actually assigns. */
+  registryRole: UppidiAgentCategorySchema,
+  reason: z.string(),
+});
+export type AgentRoleDivergence = z.infer<typeof AgentRoleDivergenceSchema>;
+
 export const UppidiAgentsOutputSchema = z.object({
   ok: z.boolean(),
+  /**
+   * True when the hook router registry was reachable, so `category`, `frontDesk`
+   * and `orchestrators` are registry-backed. False means they are the
+   * display-name heuristic and must be shown as display-only (#1078).
+   */
+  registryAuthoritative: z.boolean().default(false),
+  /** Agents whose display name contradicts their registry role (#1078). */
+  roleDivergences: z.array(AgentRoleDivergenceSchema).default([]),
   frontDesk: z.array(UppidiAgentSchema).default([]),
   orchestrators: z.array(UppidiAgentSchema).default([]),
   workers: z.array(UppidiAgentSchema).default([]),

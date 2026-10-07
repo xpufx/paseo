@@ -15,6 +15,7 @@ import type {
   AgentAttentionReason,
   AgentBlockDetail,
   AgentLifecycleState,
+  AgentRoleDivergence,
   UppidiArchiveAgentInput,
   UppidiArchiveAgentOutput,
   UppidiArchiveInactiveAgentsInput,
@@ -870,12 +871,126 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
   return agents;
 }
 
+export interface CanonicalFleetRegistry {
+  /** True when the active hook router was reachable and its registry is authoritative. */
+  available: boolean;
+  frontDeskAgentId: string | null;
+  /** Live registered orchestrator agent id -> canonical repo key from `GET /orchestrators`. */
+  orchestratorAgentIdToRepo: Map<string, string>;
+}
+
+/**
+ * Reads the canonical fleet registry (#1078): the Front Desk identity from
+ * `GET /frontdesk` and the repo -> orchestrator mapping from `GET /orchestrators`.
+ * Returns `available: false` when no router is active so callers can mark the
+ * name-heuristic fallback display-only instead of pretending it is canonical.
+ */
+export function readCanonicalFleetRegistry(): CanonicalFleetRegistry {
+  const router = getActiveHookRouter();
+  if (!router) {
+    return { available: false, frontDeskAgentId: null, orchestratorAgentIdToRepo: new Map() };
+  }
+
+  const orchestratorAgentIdToRepo = new Map<string, string>();
+  for (const record of router.listOrchestratorRecords()) {
+    if (record?.agentId && !orchestratorAgentIdToRepo.has(record.agentId)) {
+      orchestratorAgentIdToRepo.set(record.agentId, record.key);
+    }
+  }
+
+  return {
+    available: true,
+    frontDeskAgentId: router.readFrontDesk()?.agentId ?? null,
+    orchestratorAgentIdToRepo,
+  };
+}
+
+/**
+ * Resolves an agent's canonical role from the registry (#1078). The registry is
+ * the only source of truth for Front Desk and orchestrator identity; anything
+ * not registered is a worker regardless of its display name.
+ */
+export function resolveCanonicalRole(
+  agentId: string,
+  registry: CanonicalFleetRegistry
+): { role: "front-desk" | "orchestrator" | "worker"; registryRepoKey?: string } {
+  if (registry.frontDeskAgentId && agentId === registry.frontDeskAgentId) {
+    return { role: "front-desk" };
+  }
+  const registryRepoKey = registry.orchestratorAgentIdToRepo.get(agentId);
+  if (registryRepoKey) {
+    return { role: "orchestrator", registryRepoKey };
+  }
+  return { role: "worker" };
+}
+
+function describeRoleDivergence(
+  nameCategory: "front-desk" | "orchestrator" | "worker",
+  registryRole: "front-desk" | "orchestrator" | "worker"
+): string {
+  if (nameCategory === "front-desk") {
+    return `Agent name implies Front Desk but the router registry says "${registryRole}"`;
+  }
+  return `Agent name implies orchestrator but the router registry says "${registryRole}"`;
+}
+
+/**
+ * Projects the canonical registry role onto every agent (#1078). When the
+ * registry is reachable `category` is overwritten with the registry role and
+ * the name heuristic is preserved as `nameCategory`; divergences are collected
+ * so the surface can show the mismatch instead of hiding it. When the registry
+ * is unreachable the name heuristic is kept and marked display-only.
+ */
+export function applyCanonicalRoles(
+  agents: UppidiAgent[],
+  registry: CanonicalFleetRegistry
+): AgentRoleDivergence[] {
+  const divergences: AgentRoleDivergence[] = [];
+
+  for (const agent of agents) {
+    const nameCategory = agent.category;
+    agent.nameCategory = nameCategory;
+
+    if (!registry.available) {
+      agent.roleSource = "name-heuristic";
+      agent.roleDivergent = false;
+      continue;
+    }
+
+    const canonical = resolveCanonicalRole(agent.id, registry);
+    agent.category = canonical.role;
+    agent.roleSource = "registry";
+    // Only a name that *claims* a role the registry does not grant is a lie.
+    // A generic display name under a registry-backed role is just a title.
+    agent.roleDivergent = nameCategory !== "worker" && canonical.role !== nameCategory;
+    if (canonical.registryRepoKey) {
+      agent.registryRepoKey = canonical.registryRepoKey;
+    }
+
+    if (agent.roleDivergent) {
+      divergences.push({
+        agentId: agent.id,
+        agentName: agent.name,
+        nameCategory,
+        registryRole: canonical.role,
+        reason: describeRoleDivergence(nameCategory, canonical.role),
+      });
+    }
+  }
+
+  return divergences;
+}
+
 export async function handleUppidiAgents(
   _input: Record<string, never>,
   context: PluginHandlerContext
 ): Promise<UppidiAgentsOutput> {
   try {
     const agents = await fetchPaseoAgents(context);
+
+    // Identity comes from the router registry, never from agent names (#1078).
+    const registry = readCanonicalFleetRegistry();
+    const roleDivergences = applyCanonicalRoles(agents, registry);
 
     const frontDesk: UppidiAgent[] = [];
     const orchestrators: UppidiAgent[] = [];
@@ -930,6 +1045,8 @@ export async function handleUppidiAgents(
 
     return {
       ok: true,
+      registryAuthoritative: registry.available,
+      roleDivergences,
       frontDesk,
       orchestrators,
       workers,
@@ -945,6 +1062,8 @@ export async function handleUppidiAgents(
   } catch (err: any) {
     return {
       ok: false,
+      registryAuthoritative: getActiveHookRouter() !== null,
+      roleDivergences: [],
       frontDesk: [],
       orchestrators: [],
       workers: [],

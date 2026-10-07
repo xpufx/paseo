@@ -776,6 +776,12 @@ export interface BuildProjectGroupsOptions {
    */
   registeredFrontDeskAgentId?: string | null;
   /**
+   * True when the hook router registry was reachable, so only a registered
+   * Front Desk may be elevated. A name-derived front-desk session is then not
+   * canonical and moves to the orphaned list instead (#1078).
+   */
+  registryAuthoritative?: boolean;
+  /**
    * Field to sort repository/project groups by (#796).
    * Defaults to 'alphabetical' for a stable presentation order across polling refreshes.
    */
@@ -864,7 +870,8 @@ function isFrontDeskAgentActive(agent: UppidiAgent): boolean {
  */
 export function selectPrimaryFrontDeskNode(
   frontDeskNodes: UppidiAgentTreeNode[],
-  registeredAgentId?: string | null
+  registeredAgentId?: string | null,
+  registryAuthoritative?: boolean
 ): { primary: UppidiAgentTreeNode | null; stale: UppidiAgentTreeNode[] } {
   const nodes = (Array.isArray(frontDeskNodes) ? frontDeskNodes : []).filter((n) => n?.agent);
   if (nodes.length === 0) {
@@ -879,6 +886,13 @@ export function selectPrimaryFrontDeskNode(
         stale: nodes.filter((n) => n !== registered),
       };
     }
+  }
+
+  // When the registry is authoritative but names no registered desk (or names a
+  // different one), nothing here is canonical. Never promote a name heuristic
+  // to the Front Desk card; route every candidate to the orphaned list (#1078).
+  if (registryAuthoritative) {
+    return { primary: null, stale: nodes };
   }
 
   if (nodes.length === 1) {
@@ -1075,7 +1089,8 @@ export function buildProjectGroups(
 
   const { primary, stale } = selectPrimaryFrontDeskNode(
     frontDeskCandidates,
-    options?.registeredFrontDeskAgentId
+    options?.registeredFrontDeskAgentId,
+    options?.registryAuthoritative
   );
 
   return {

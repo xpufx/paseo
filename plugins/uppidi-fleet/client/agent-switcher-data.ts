@@ -33,6 +33,7 @@ export function mapAgentSwitcherData(agentsOutput?: {
 
   for (const orch of rawOrchestrators) {
     const repoKey =
+      orch.registryRepoKey ||
       orch.project ||
       orch.attributedWork?.repo ||
       orch.labels?.["repo"] ||

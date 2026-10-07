@@ -824,6 +824,46 @@ describe("Uppidi Fleet sort & filter predicates", () => {
       assert.equal(result.frontDeskNodes.length, 1);
     });
 
+    it("never promotes a name-only Front Desk when the registry is authoritative (#1078)", () => {
+      const phantom: UppidiAgentTreeNode = {
+        agent: {
+          id: "phantom-desk",
+          shortId: "phantom",
+          name: "Front Desk",
+          category: "front-desk",
+          nameCategory: "front-desk",
+          roleSource: "registry",
+          roleDivergent: true,
+          status: "running",
+          deterministicState: "running",
+        },
+        depth: 0,
+        children: [],
+      };
+
+      // Registry authoritative and naming no desk: the name-only session is not canonical.
+      const result = buildProjectGroups([phantom], {
+        registryAuthoritative: true,
+        registeredFrontDeskAgentId: null,
+      });
+      assert.equal(result.frontDeskNodes.length, 0);
+      assert.deepEqual(
+        result.staleFrontDeskNodes.map((n) => n.agent.id),
+        ["phantom-desk"]
+      );
+
+      // The direct selector agrees: no registration, no primary.
+      assert.equal(
+        selectPrimaryFrontDeskNode([phantom], null, true).primary,
+        null
+      );
+
+      // Without registry authority the name heuristic may elevate it display-only.
+      const legacy = buildProjectGroups([phantom], { registeredFrontDeskAgentId: null });
+      assert.equal(legacy.frontDeskNodes.length, 1);
+      assert.equal(legacy.frontDeskNodes[0].agent.id, "phantom-desk");
+    });
+
     it("selects a single active front desk when none is registered (#470)", () => {
       const makeFd = (
         id: string,

@@ -120,6 +120,21 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
       assert.equal(res.orchestratorsByRepo[0]!.repo, "xpufx-org/attr-repo");
       assert.equal(res.orchestratorsByRepo[1]!.repo, "xpufx-org/label-repo");
     });
+
+    it("prefers the registry repo key over display-derived project and labels (#1078)", () => {
+      const orch = makeAgent({
+        id: "orch-registry",
+        category: "orchestrator",
+        name: "Orchestrator · paseo",
+        project: "stale/display-project",
+        labels: { repo: "stale/label-repo" },
+        registryRepoKey: "forge.example.com/xpufx-org/paseo",
+      });
+
+      const res = mapAgentSwitcherData({ frontDesk: [], orchestrators: [orch] });
+      assert.equal(res.orchestratorsByRepo.length, 1);
+      assert.equal(res.orchestratorsByRepo[0]!.repo, "forge.example.com/xpufx-org/paseo");
+    });
   });
 
   describe("AgentSwitcherDropdown UI rendering", () => {
