@@ -2723,25 +2723,31 @@ describe("hook-router orchestrator pruning (#458)", () => {
     assert.equal(second.error, "not found");
   });
 
-  it("archives a closed orchestrator session and unlinks its registration (#973)", async () => {
+  it("archives a closed orchestrator session and unlinks it only after the grace window (#973/#1077)", async () => {
     const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
     router.writeOrchestrator("repo-closed", "agent-closed");
     const archivedIds: string[] = [];
-
-    const result = await router.pruneOrchestrators({
-      orchestratorRecords: router.listOrchestratorRecords(),
+    const opts = {
       agentMap: new Map([["agent-closed", { id: "agent-closed", status: "closed" }]]),
-      archiveAgent: async (id) => {
+      archiveAgent: async (id: string) => {
         archivedIds.push(id);
         return true;
       },
-    });
+    };
 
-    assert.equal(result.ok, true);
+    const first = await router.pruneOrchestrators({ ...opts, orchestratorRecords: router.listOrchestratorRecords() });
+    const second = await router.pruneOrchestrators({ ...opts, orchestratorRecords: router.listOrchestratorRecords() });
+    assert.equal(first.prunedCount, 0, "a single closed observation must not unlink");
+    assert.equal(second.prunedCount, 0);
+    assert.deepEqual(archivedIds, []);
+    assert.equal(router.readOrchestrator("repo-closed")?.agentId, "agent-closed");
+
+    const third = await router.pruneOrchestrators({ ...opts, orchestratorRecords: router.listOrchestratorRecords() });
+    assert.equal(third.ok, true);
     assert.deepEqual(archivedIds, ["agent-closed"]);
-    assert.equal(result.prunedCount, 1);
-    assert.equal(result.pruned[0].key, "repo-closed");
-    assert.deepEqual(result.archived, [
+    assert.equal(third.prunedCount, 1);
+    assert.equal(third.pruned[0].key, "repo-closed");
+    assert.deepEqual(third.archived, [
       { key: "repo-closed", agentId: "agent-closed", reason: "closed session archived and unlinked" },
     ]);
     assert.equal(router.readOrchestrator("repo-closed"), null);
@@ -2755,6 +2761,7 @@ describe("hook-router orchestrator pruning (#458)", () => {
       orchestratorRecords: router.listOrchestratorRecords(),
       agentMap: new Map([["agent-closed", { id: "agent-closed", status: "closed" }]]),
       archiveAgent: async () => false,
+      graceSweeps: 1,
     });
 
     assert.equal(result.ok, true);
@@ -2818,6 +2825,141 @@ describe("hook-router orchestrator pruning (#458)", () => {
     assert.deepEqual(archivedIds, []);
     assert.equal(result.dryRun, true);
     assert.equal(router.readOrchestrator("repo-closed")?.agentId, "agent-closed");
+  });
+
+  it("keeps a live registration when a partial roster reports it closed (#1077)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-other-workspace", "agent-other-ws");
+    // The workspace-scoped SDK list sees a stale closed session, while the
+    // global CLI roster (the completeness guarantee) is unavailable.
+    (router as any).activePaseo = {
+      agents: {
+        list: async () => ({ entries: [{ id: "agent-other-ws", status: "closed" }] }),
+        ref: () => ({ archive: async () => {} }),
+      },
+    };
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      if (args[0] === "ls") throw new Error("global roster unavailable");
+      return { stdout: "" };
+    });
+    try {
+      for (let i = 0; i < 5; i++) {
+        await router.pruneOrchestrators({ orchestratorRecords: router.listOrchestratorRecords() });
+      }
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+
+    const record = router.readOrchestrator("repo-other-workspace");
+    assert.equal(record?.agentId, "agent-other-ws", "a partial roster must never unlink a registration");
+    assert.equal(record?.stale, true);
+  });
+
+  it("requires consecutive closed sweeps before archiving a live orchestrator (#1077)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-flap", "agent-flap");
+    const archivedIds: string[] = [];
+    const opts = {
+      agentMap: new Map([["agent-flap", { id: "agent-flap", status: "closed" }]]),
+      archiveAgent: async (id: string) => {
+        archivedIds.push(id);
+        return true;
+      },
+    };
+
+    const first = await router.pruneOrchestrators({ ...opts, orchestratorRecords: router.listOrchestratorRecords() });
+    assert.equal(first.prunedCount, 0, "a momentary close must not unlink");
+    assert.equal(router.readOrchestrator("repo-flap")?.closedSweeps, 1);
+    const second = await router.pruneOrchestrators({ ...opts, orchestratorRecords: router.listOrchestratorRecords() });
+    assert.equal(second.prunedCount, 0);
+    assert.equal(router.readOrchestrator("repo-flap")?.agentId, "agent-flap");
+
+    const third = await router.pruneOrchestrators({ ...opts, orchestratorRecords: router.listOrchestratorRecords() });
+    assert.equal(third.prunedCount, 1);
+    assert.deepEqual(archivedIds, ["agent-flap"]);
+    assert.equal(router.readOrchestrator("repo-flap"), null);
+  });
+
+  it("appends durable actor records for every deleteOrchestrator and front-desk clear (#1077)", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator("repo-audit", "agent-audit");
+    const del = router.deleteOrchestrator("repo-audit", {
+      source: "unit:delete",
+      reason: "test delete",
+      actor: "agent-actor",
+    });
+    assert.equal(del.ok, true);
+
+    router.writeFrontDesk("fd-audit", "operator");
+    const cleared = router.clearFrontDesk({ source: "unit:clear-frontdesk", reason: "test clear" });
+    assert.ok(cleared >= 1);
+
+    assert.equal(existsSync(router.stateMutationLogPath()), true);
+    const log = router.readStateMutations(10);
+    const delEntry = log.find((e) => e.action === "deleteOrchestrator");
+    assert.equal(delEntry?.source, "unit:delete");
+    assert.equal(delEntry?.actor, "agent-actor");
+    assert.equal(delEntry?.reason, "test delete");
+    assert.equal(delEntry?.key, "repo-audit");
+    assert.match(String(delEntry?.stack), /deleteOrchestrator/);
+    const removed = (delEntry?.priorValue as Array<{ record: { agentId: string } | null }>)[0];
+    assert.equal(removed?.record?.agentId, "agent-audit");
+
+    const fdEntry = log.find((e) => e.action === "clearFrontDesk");
+    assert.equal(fdEntry?.source, "unit:clear-frontdesk");
+    assert.equal((fdEntry?.priorValue as any)?.record?.agentId, "fd-audit");
+  });
+
+  it("keeps the desk and registry across partial/closed prune sweeps and teardown reconciliation (#1077)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    for (let i = 0; i < 4; i++) {
+      router.writeOrchestrator(`repo-${i}`, `agent-${i}`);
+    }
+    router.writeFrontDesk("fd-survivor", "operator");
+    assert.equal(router.listOrchestratorRecords().length, 4);
+
+    (router as any).activePaseo = {
+      agents: {
+        list: async () => ({ entries: [{ id: "agent-0", status: "closed" }] }),
+        ref: () => ({ archive: async () => {} }),
+      },
+    };
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      if (args[0] === "ls") throw new Error("global roster unavailable");
+      return { stdout: "" };
+    });
+    try {
+      for (let i = 0; i < 4; i++) {
+        await router.pruneOrchestrators();
+      }
+      assert.equal(router.listOrchestratorRecords().length, 4, "partial/closed sweeps must not drop the registry");
+
+      // Tombstone/teardown reconciliation for workers must not touch either scope.
+      (router as any).markFleetTeardown(["workers"], []);
+      assert.equal(router.listOrchestratorRecords().length, 4);
+      assert.equal(router.readFrontDesk()?.agentId, "fd-survivor");
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+  });
+
+  it("reads frontdesk.json from the persisted orchestrators dir (#1077)", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const persistedRoot = join(tempDir, "persisted");
+    const persistedOrch = join(persistedRoot, "orchestrators");
+    const prev = process.env.HOOK_STATE_DIR;
+    mkdirSync(persistedOrch, { recursive: true });
+    process.env.HOOK_STATE_DIR = persistedRoot;
+    try {
+      writeFileSync(
+        join(persistedOrch, "frontdesk.json"),
+        JSON.stringify({ version: 1, agentId: "fd-nested", updatedAt: null, by: "frontdesk" }),
+      );
+      assert.equal(router.readFrontDesk()?.agentId, "fd-nested", "a present frontdesk.json must never read as null");
+    } finally {
+      if (prev === undefined) delete process.env.HOOK_STATE_DIR;
+      else process.env.HOOK_STATE_DIR = prev;
+    }
   });
 });
 

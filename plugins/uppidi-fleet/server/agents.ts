@@ -1250,20 +1250,34 @@ export async function handleFleetTeardown(
         fdCandidates.add(join(router.queueDir, "frontdesk.json"));
       }
 
+      const removedFrontDeskFiles: string[] = [];
       for (const file of fdCandidates) {
         try {
           if (fs.existsSync(file)) {
             fs.unlinkSync(file);
+            removedFrontDeskFiles.push(file);
           }
         } catch (err: any) {
           errors.push(`Failed to delete frontdesk state file ${file}: ${err?.message || String(err)}`);
         }
       }
+      if (removedFrontDeskFiles.length > 0 && router && typeof (router as any).recordStateMutation === "function") {
+        try {
+          (router as any).recordStateMutation({
+            action: "clearFrontDesk",
+            source: "fleet-teardown:frontdesk",
+            actor: null,
+            reason: `fleet teardown targets=${input.targets.join(",")}`,
+            key: "frontdesk",
+            priorValue: { paths: removedFrontDeskFiles },
+          });
+        } catch {}
+      }
 
       if (router) {
         try {
           if (typeof (router as any).clearFrontDesk === "function") {
-            (router as any).clearFrontDesk();
+            (router as any).clearFrontDesk({ source: "fleet-teardown:frontdesk", reason: `targets=${input.targets.join(",")}` });
           } else if (typeof (router as any).clearQueue === "function") {
             (router as any).clearQueue("frontdesk");
           }
@@ -1284,6 +1298,7 @@ export async function handleFleetTeardown(
         orchDirs.add(router.stateDir);
       }
 
+      const removedOrchestratorFiles: string[] = [];
       for (const dir of orchDirs) {
         try {
           if (fs.existsSync(dir)) {
@@ -1295,6 +1310,7 @@ export async function handleFleetTeardown(
                 }
                 try {
                   fs.unlinkSync(join(dir, file));
+                  removedOrchestratorFiles.push(join(dir, file));
                 } catch (err: any) {
                   errors.push(`Failed to delete orchestrator file ${file}: ${err?.message || String(err)}`);
                 }
@@ -1305,11 +1321,30 @@ export async function handleFleetTeardown(
           errors.push(`Failed to read orchestrators dir ${dir}: ${err?.message || String(err)}`);
         }
       }
+      if (
+        removedOrchestratorFiles.length > 0 &&
+        router &&
+        typeof (router as any).recordStateMutation === "function"
+      ) {
+        try {
+          (router as any).recordStateMutation({
+            action: "clearAllOrchestrators",
+            source: "fleet-teardown:orchestrators",
+            actor: null,
+            reason: `fleet teardown targets=${input.targets.join(",")}`,
+            key: null,
+            priorValue: { paths: removedOrchestratorFiles },
+          });
+        } catch {}
+      }
 
       if (router) {
         try {
           if (typeof (router as any).clearAllOrchestrators === "function") {
-            (router as any).clearAllOrchestrators();
+            (router as any).clearAllOrchestrators({
+              source: "fleet-teardown:orchestrators",
+              reason: `targets=${input.targets.join(",")}`,
+            });
           }
         } catch (err: any) {
           errors.push(`Failed to clear router orchestrator mappings: ${err?.message || String(err)}`);

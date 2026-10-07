@@ -1,6 +1,6 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, renameSync, readdirSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, appendFileSync, renameSync, readdirSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import os from "node:os";
 import { execFile } from "node:child_process";
@@ -332,6 +332,53 @@ export interface OrchestratorRecord {
   staleSince?: string | null;
   /** Human-readable reason for the stale marker (#889). */
   staleReason?: string | null;
+  /** Consecutive board sweeps where a complete roster reported the session closed (#1077). */
+  closedSweeps?: number;
+  /** ISO timestamp of the first closed observation in the current streak (#1077). */
+  firstClosedAt?: string | null;
+}
+
+/**
+ * A destructive fleet-state mutation. Every registration unlink and every
+ * front-desk clear appends one of these to a durable JSONL log so the actor
+ * can be identified after the fact (#1077).
+ */
+export type StateMutationAction = "deleteOrchestrator" | "clearAllOrchestrators" | "clearFrontDesk";
+
+export interface StateMutationRecord {
+  version: 1;
+  /** ISO timestamp the mutation was applied. */
+  ts: string;
+  action: StateMutationAction;
+  /** Explicit call-site label supplied by the caller. */
+  source: string;
+  /** Agent id attributed to the mutation when known. */
+  actor: string | null;
+  reason: string | null;
+  /** Repo/key targeted, or null for a bulk clear. */
+  key: string | null;
+  /** Value(s) removed by the mutation, captured before unlink. */
+  priorValue: unknown;
+  /** Captured call stack; identifies the caller when no explicit actor exists. */
+  stack: string | null;
+}
+
+/** Options describing who triggered a destructive state mutation (#1077). */
+export interface StateMutationOptions {
+  source?: string;
+  actor?: string | null;
+  reason?: string;
+}
+
+/**
+ * A bounded call-site stack for the audit log. The first two frames are the
+ * capture helper and the mutation method itself, so they are dropped.
+ */
+function captureMutationStack(): string | null {
+  const raw = new Error("state-mutation").stack;
+  if (!raw) return null;
+  const frames = raw.split("\n").slice(2, 8).join("\n").trim();
+  return frames || null;
 }
 
 export interface FrontDeskRecord {
@@ -4694,6 +4741,7 @@ export class HookRouter {
         join(this.stateDir, "frontdesk.json"),
         join(this.queueDir, "frontdesk.json"),
         join(persistedDir, "frontdesk.json"),
+        join(persistedDir, "orchestrators", "frontdesk.json"),
         join(dirname(persistedDir), "frontdesk.json"),
       ]),
     ];
@@ -4744,6 +4792,8 @@ export class HookRouter {
               stale: Boolean(parsed.stale),
               staleSince: parsed.staleSince ?? null,
               staleReason: parsed.staleReason ?? null,
+              closedSweeps: typeof parsed.closedSweeps === "number" ? parsed.closedSweeps : 0,
+              firstClosedAt: parsed.firstClosedAt ?? null,
             };
           }
         } catch {
@@ -5962,6 +6012,8 @@ export class HookRouter {
                 stale: Boolean(parsed.stale),
                 staleSince: parsed.staleSince ?? null,
                 staleReason: parsed.staleReason ?? null,
+                closedSweeps: typeof parsed.closedSweeps === "number" ? parsed.closedSweeps : 0,
+                firstClosedAt: parsed.firstClosedAt ?? null,
               };
               const canonical = canonicalRepoKey(rec.key) ?? rec.key;
               const existing = recordsMap.get(canonical);
@@ -5980,16 +6032,92 @@ export class HookRouter {
     return Array.from(recordsMap.values()).sort((a, b) => a.key.localeCompare(b.key));
   }
 
-  public deleteOrchestrator(repoOrKey: string): { ok: boolean; key?: string; error?: string; path?: string } {
+  /**
+   * Durable JSONL log for destructive state mutations (#1077). Defaults to a
+   * sibling of the router state dir so it lives inside plugin storage and is
+   * isolated by the same temp dir in tests. Override with HOOK_STATE_AUDIT_LOG.
+   */
+  public stateMutationLogPath(): string {
+    const override = process.env.HOOK_STATE_AUDIT_LOG?.trim();
+    if (override) return override;
+    return join(dirname(this.stateDir), "state-mutations.jsonl");
+  }
+
+  /** Append one mutation record; never throws, because auditing must not block a clear. */
+  private appendStateMutation(
+    entry: Omit<StateMutationRecord, "version" | "ts" | "stack"> & { stack?: string | null },
+  ): void {
+    const record: StateMutationRecord = {
+      version: 1,
+      ts: new Date().toISOString(),
+      stack: entry.stack ?? captureMutationStack(),
+      ...entry,
+    };
+    try {
+      const target = this.stateMutationLogPath();
+      mkdirSync(dirname(target), { recursive: true });
+      appendFileSync(target, `${JSON.stringify(record)}\n`, "utf8");
+    } catch (err) {
+      this.log(`[warn] state mutation audit append failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    this.log(
+      `[audit] ${record.action} source=${record.source} key=${record.key ?? "-"} actor=${record.actor ?? "-"} reason=${record.reason ?? "-"}`,
+    );
+  }
+
+  /**
+   * Public audit hook for destructive mutations performed outside this class
+   * (e.g. the fleet-teardown file cleanup in agents.ts) (#1077).
+   */
+  public recordStateMutation(
+    entry: Omit<StateMutationRecord, "version" | "ts" | "stack"> & { stack?: string | null },
+  ): void {
+    this.appendStateMutation(entry);
+  }
+
+  /** Read back the durable mutation log (most recent last). Best-effort. */
+  public readStateMutations(limit = 100): StateMutationRecord[] {
+    const target = this.stateMutationLogPath();
+    if (!existsSync(target)) return [];
+    const out: StateMutationRecord[] = [];
+    try {
+      const lines = readFileSync(target, "utf8").split("\n");
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          out.push(JSON.parse(trimmed) as StateMutationRecord);
+        } catch {
+          // skip a torn write rather than fail the whole audit read
+        }
+      }
+    } catch {
+      return [];
+    }
+    return limit > 0 ? out.slice(-limit) : out;
+  }
+
+  public deleteOrchestrator(
+    repoOrKey: string,
+    opts: StateMutationOptions = {},
+  ): { ok: boolean; key?: string; error?: string; path?: string } {
     const candidates = candidateRepoKeys(repoOrKey);
     if (candidates.length === 0) return { ok: false, error: "invalid repo key" };
     let deletedCount = 0;
     let lastPath = "";
+    const removed: Array<{ key: string; path: string; record: OrchestratorRecord | null }> = [];
     for (const cand of candidates) {
       const target = join(this.stateDir, `${sanitizeKey(cand)}.json`);
       if (existsSync(target)) {
+        let prior: OrchestratorRecord | null = null;
+        try {
+          prior = JSON.parse(readFileSync(target, "utf8")) as OrchestratorRecord;
+        } catch {
+          prior = null;
+        }
         try {
           unlinkSync(target);
+          removed.push({ key: cand, path: target, record: prior });
           deletedCount++;
           lastPath = target;
         } catch (err) {
@@ -5998,8 +6126,26 @@ export class HookRouter {
       }
     }
     if (deletedCount > 0) {
+      this.appendStateMutation({
+        action: "deleteOrchestrator",
+        source: opts.source ?? "unspecified",
+        actor: opts.actor ?? null,
+        reason: opts.reason ?? null,
+        key: repoOrKey,
+        priorValue: removed,
+      });
       return { ok: true, key: repoOrKey, path: lastPath };
     }
+    // Record the attempted unlink too: an actor that repeatedly probes a key is
+    // part of the investigation trail even when nothing was present (#1077).
+    this.appendStateMutation({
+      action: "deleteOrchestrator",
+      source: opts.source ?? "unspecified",
+      actor: opts.actor ?? null,
+      reason: opts.reason ?? "not found",
+      key: repoOrKey,
+      priorValue: [],
+    });
     return { ok: false, error: "not found", key: repoOrKey };
   }
 
@@ -6662,43 +6808,108 @@ export class HookRouter {
       if (agentMap.has(agentId)) {
         const agent = agentMap.get(agentId)!;
         const status = String(agent.status ?? "").toLowerCase();
-        const isClosed = status === "closed" || status === "terminated";
-        const alreadyArchived = Boolean(agent.archivedAt) || status === "archived";
+        const isClosed = status === "closed" || status === "terminated" || status === "archived";
+        const hasArchivedEvidence = Boolean(agent.archivedAt);
 
         // A closed orchestrator session is dead but still listed by the daemon,
         // so it never reaches the absent-agent path. Archive it and unlink the
-        // registration here so duplicate closed records stop accumulating (#973).
-        if (isClosed || alreadyArchived) {
+        // registration once the closure is sticky or has persisted across the
+        // grace window (#973, #1077).
+        if (isClosed || hasArchivedEvidence) {
           if (opts.dryRun) {
             pruned.push({ key, agentId, reason: "closed session (dry-run)" });
             continue;
           }
-          let didArchive = alreadyArchived;
-          if (isClosed && !alreadyArchived) {
-            const archive = opts.archiveAgent ?? ((id: string) => this.archiveAgent(id));
-            try {
-              didArchive = await archive(agentId);
-            } catch (err) {
-              this.log(
-                `[warn] prune archive failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
-              );
-              didArchive = false;
-            }
+
+          // A partial roster omits live agents in other workspaces, and a stale
+          // workspace-scoped record can misreport one as closed. Never archive
+          // or unlink from a partial roster unless disk carries an archivedAt
+          // marker (#1068/#1077).
+          if (agentMapPartial && !hasArchivedEvidence) {
+            const updated: OrchestratorRecord = {
+              ...record,
+              stale: true,
+              staleSince: record.staleSince ?? nowIso,
+              staleReason: "session reported closed on a partial daemon roster (verification skipped)",
+            };
+            this.persistOrchestratorRecord(updated);
+            markedStale.push({ key, agentId, missCount: record.missCount ?? 0, reason: updated.staleReason! });
+            continue;
           }
-          if (didArchive) {
-            const res = this.deleteOrchestrator(key);
+
+          // `archivedAt` is durable evidence on disk: unlink immediately.
+          if (hasArchivedEvidence) {
+            const res = this.deleteOrchestrator(key, {
+              source: "prune:archived-session",
+              reason: "archived session unlinked",
+              actor: "pruneOrchestrators",
+            });
             if (res.ok) {
-              const reason = alreadyArchived ? "archived session unlinked" : "closed session archived and unlinked";
+              const reason = "archived session unlinked";
               archived.push({ key, agentId, reason });
               pruned.push({ key, agentId, reason });
             }
+            continue;
+          }
+
+          // Ephemeral `closed`/`terminated` status can flap at a turn boundary.
+          // Require it to persist across `graceSweeps` sweeps before unlinking.
+          const closedSweeps = (record.closedSweeps ?? 0) + 1;
+          if (closedSweeps < graceSweeps) {
+            const updated: OrchestratorRecord = {
+              ...record,
+              closedSweeps,
+              firstClosedAt: record.firstClosedAt ?? nowIso,
+              stale: true,
+              staleSince: record.staleSince ?? nowIso,
+              staleReason: `session closed (grace ${closedSweeps}/${graceSweeps})`,
+            };
+            this.persistOrchestratorRecord(updated);
+            markedStale.push({ key, agentId, missCount: closedSweeps, reason: updated.staleReason! });
+            continue;
+          }
+
+          let didArchive = false;
+          const archive = opts.archiveAgent ?? ((id: string) => this.archiveAgent(id));
+          try {
+            didArchive = await archive(agentId);
+          } catch (err) {
+            this.log(
+              `[warn] prune archive failed for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            didArchive = false;
+          }
+          if (didArchive) {
+            const res = this.deleteOrchestrator(key, {
+              source: "prune:closed-session",
+              reason: "closed session archived and unlinked",
+              actor: "pruneOrchestrators",
+            });
+            if (res.ok) {
+              const reason = "closed session archived and unlinked";
+              archived.push({ key, agentId, reason });
+              pruned.push({ key, agentId, reason });
+            }
+          } else {
+            // Archival failed: keep the record and retry on a later sweep (#973).
+            const updated: OrchestratorRecord = {
+              ...record,
+              closedSweeps,
+              firstClosedAt: record.firstClosedAt ?? nowIso,
+              stale: true,
+              staleSince: record.staleSince ?? nowIso,
+              staleReason: "closed session archival failed (retry pending)",
+            };
+            this.persistOrchestratorRecord(updated);
+            markedStale.push({ key, agentId, missCount: closedSweeps, reason: updated.staleReason! });
           }
           continue;
         }
 
-        // The agent is back: clear the stale bookkeeping so a transient outage
-        // never accumulates toward a prune (#889).
-        if ((record.missCount ?? 0) > 0 || record.stale) {
+        // The agent is back: clear the stale/closed bookkeeping so a transient
+        // outage or turn-boundary close never accumulates toward a prune
+        // (#889/#1077).
+        if ((record.missCount ?? 0) > 0 || record.stale || (record.closedSweeps ?? 0) > 0) {
           if (!opts.dryRun) {
             this.persistOrchestratorRecord({
               ...record,
@@ -6708,6 +6919,8 @@ export class HookRouter {
               stale: false,
               staleSince: null,
               staleReason: null,
+              closedSweeps: 0,
+              firstClosedAt: null,
             });
           }
           recovered.push(key);
@@ -6763,7 +6976,11 @@ export class HookRouter {
       }
 
       if (absent) {
-        const res = this.deleteOrchestrator(key);
+        const res = this.deleteOrchestrator(key, {
+          source: "prune:verified-absent",
+          reason: "agent verified absent on daemon",
+          actor: "pruneOrchestrators",
+        });
         if (res.ok) {
           pruned.push({ key, agentId, reason: "agent verified absent on daemon" });
         }
@@ -7999,14 +8216,19 @@ export class HookRouter {
     return count;
   }
 
-  public clearFrontDesk(): number {
+  public clearFrontDesk(opts: StateMutationOptions = {}): number {
     let count = 0;
     const candidates = this.frontDeskCandidatePaths();
+    // Capture the registration before unlinking so the audit log records the
+    // prior value and the in-memory delivery state is released (#1077).
+    const frontDesk = this.readFrontDesk();
+    const removedPaths: string[] = [];
 
     for (const p of candidates) {
       if (existsSync(p)) {
         try {
           unlinkSync(p);
+          removedPaths.push(p);
           count++;
         } catch (err) {
           this.log(`[warn] file purge/delete failed (hook-router.ts:4151): ${err}`);
@@ -8014,7 +8236,6 @@ export class HookRouter {
       }
     }
 
-    const frontDesk = this.readFrontDesk();
     if (frontDesk?.agentId) {
       this.lastDeliveryTimes.delete(frontDesk.agentId);
     }
@@ -8022,18 +8243,41 @@ export class HookRouter {
     count += this.clearQueue("frontdesk");
     this.coalesceBuffers.delete("frontdesk");
     this.sosStates.delete("frontdesk");
+    if (removedPaths.length > 0 || frontDesk?.agentId) {
+      this.appendStateMutation({
+        action: "clearFrontDesk",
+        source: opts.source ?? "unspecified",
+        actor: opts.actor ?? null,
+        reason: opts.reason ?? null,
+        key: FRONT_DESK_REPO,
+        priorValue: { record: frontDesk, paths: removedPaths },
+      });
+    } else {
+      // A deliberate clear attempt with no registration is still an actor event.
+      this.appendStateMutation({
+        action: "clearFrontDesk",
+        source: opts.source ?? "unspecified",
+        actor: opts.actor ?? null,
+        reason: opts.reason ?? "no registration present",
+        key: FRONT_DESK_REPO,
+        priorValue: null,
+      });
+    }
     this.log(`[info] Cleared frontdesk registration and queues (${count} state file(s) removed)`);
     return count;
   }
 
-  public clearAllOrchestrators(): number {
+  public clearAllOrchestrators(opts: StateMutationOptions = {}): number {
     let count = 0;
-    // Capture registered keys before unlinking so in-memory locks for those
-    // scopes can be released as well (#872: no stale locks).
+    // Capture registered records before unlinking so the audit log records the
+    // prior values and in-memory locks for those scopes can be released (#872/#1077).
     let registeredKeys: string[] = [];
+    let priorRecords: OrchestratorRecord[] = [];
     try {
-      registeredKeys = this.listOrchestratorRecords().map((r) => r.key);
+      priorRecords = this.listOrchestratorRecords();
+      registeredKeys = priorRecords.map((r) => r.key);
     } catch {}
+    const removedFiles: string[] = [];
     try {
       if (existsSync(this.stateDir)) {
         const files = readdirSync(this.stateDir);
@@ -8041,6 +8285,7 @@ export class HookRouter {
           if (!file.endsWith(".json") || file === "frontdesk.json") continue;
           try {
             unlinkSync(join(this.stateDir, file));
+            removedFiles.push(file);
             count++;
           } catch (err) {
             this.log(`[warn] file purge/delete failed (hook-router.ts:4177): ${err}`);
@@ -8073,6 +8318,16 @@ export class HookRouter {
           this.sosStates.delete(skey);
         }
       }
+    }
+    if (count > 0) {
+      this.appendStateMutation({
+        action: "clearAllOrchestrators",
+        source: opts.source ?? "unspecified",
+        actor: opts.actor ?? null,
+        reason: opts.reason ?? null,
+        key: null,
+        priorValue: { records: priorRecords, files: removedFiles },
+      });
     }
     this.log(`[info] Purged all orchestrators (${count} file(s) removed)`);
     return count;
