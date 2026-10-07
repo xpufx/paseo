@@ -6053,36 +6053,42 @@ export class HookRouter {
     }
 
     for (const [key, attempts] of this.busyAttempts.entries()) {
+      const q = this.queues.get(key) ?? [];
+      // A drained queue is not wedged. Clear the stale attempt counter so it
+      // cannot re-accumulate to the threshold and trigger a spurious reload when
+      // fresh work arrives (#1072).
+      if (q.length === 0) {
+        this.busyAttempts.delete(key);
+        this.busyQueues.delete(key);
+        continue;
+      }
       if (attempts >= this.watchdogBusyThreshold) {
-        const q = this.queues.get(key) ?? [];
-        if (q.length > 0) {
-          anomalies.push({ type: "QUEUE_WEDGED", key, attempts, queueDepth: q.length });
-          const orchId = orchRecords.find((r) => r.key === key)?.agentId;
-          let reloaded = false;
-          if (orchId && reloadFn) {
-            this.log(`[info] watchdog: attempting auto-recovery reload for wedged orchestrator ${orchId.slice(0, 7)} (${key})`);
-            const reloadRes = await reloadFn(orchId);
-            if (reloadRes.ok) {
-              this.busyAttempts.delete(key);
-              this.busyQueues.delete(key);
-              const timer = this.backoffTimers.get(key);
-              if (timer) {
-                clearTimeout(timer);
-                this.backoffTimers.delete(key);
-              }
-              reloaded = true;
-              void this.drain(key);
+        anomalies.push({ type: "QUEUE_WEDGED", key, attempts, queueDepth: q.length });
+        const orchId = orchRecords.find((r) => r.key === key)?.agentId;
+        let reloaded = false;
+        if (orchId && reloadFn) {
+          this.log(`[info] watchdog: attempting auto-recovery reload for wedged orchestrator ${orchId.slice(0, 7)} (${key})`);
+          const reloadRes = await reloadFn(orchId);
+          if (reloadRes.ok) {
+            this.busyAttempts.delete(key);
+            this.busyQueues.delete(key);
+            const timer = this.backoffTimers.get(key);
+            if (timer) {
+              clearTimeout(timer);
+              this.backoffTimers.delete(key);
             }
+            reloaded = true;
+            void this.drain(key);
           }
+        }
 
-          const alertKey = `queue_wedged:${key}`;
-          if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
-            this.watchdogAlerts.set(alertKey, now);
-            const alert = reloaded
-              ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${q.length} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`
-              : `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) and has failed delivery ${attempts} times.`;
-            this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
-          }
+        const alertKey = `queue_wedged:${key}`;
+        if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+          this.watchdogAlerts.set(alertKey, now);
+          const alert = reloaded
+            ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${q.length} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`
+            : `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) and has failed delivery ${attempts} times.`;
+          this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
         }
       }
     }
@@ -7985,7 +7991,13 @@ export class HookRouter {
     if (this.draining.has(key)) return;
 
     const list = this.queues.get(key);
-    if (!list || list.length === 0) return;
+    if (!list || list.length === 0) {
+      // No pending work: drop any stale busy counter so it cannot leak into the
+      // next burst of traffic and look like a wedged queue (#1072).
+      this.busyAttempts.delete(key);
+      this.busyQueues.delete(key);
+      return;
+    }
 
     this.draining.add(key);
 

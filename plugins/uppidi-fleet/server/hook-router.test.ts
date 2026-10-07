@@ -2162,6 +2162,40 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.ok(delivered.some((d) => d.msg.includes("Auto-recovered wedged queue for wedged-with-orch")));
   });
 
+  it("never reloads a wedged orchestrator when the queue is empty even past the busy threshold (#1072)", async () => {
+    (router as any).busyAttempts.set("drained-with-orch", 12);
+    (router as any).queues.set("drained-with-orch", []);
+
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "drained-with-orch", agentId: "agent-drained" }],
+      agentMap: new Map([["agent-drained", { id: "agent-drained", status: "idle" }]]),
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(
+      audit.anomalies.some((a) => a.type === "QUEUE_WEDGED" && a.key === "drained-with-orch"),
+      false,
+    );
+    assert.equal(reloaded.includes("agent-drained"), false);
+    assert.equal(delivered.some((d) => d.msg.includes("Auto-recovered wedged queue for drained-with-orch")), false);
+  });
+
+  it("clears stale busy attempts once a queue has drained (#1072)", async () => {
+    (router as any).busyAttempts.set("drained-with-orch", 5);
+    (router as any).busyQueues.add("drained-with-orch");
+    (router as any).queues.set("drained-with-orch", []);
+
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "drained-with-orch", agentId: "agent-drained" }],
+      agentMap: new Map([["agent-drained", { id: "agent-drained", status: "idle" }]]),
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal((router as any).busyAttempts.has("drained-with-orch"), false);
+    assert.equal((router as any).busyQueues.has("drained-with-orch"), false);
+    assert.equal(audit.audited.queues, 0);
+  });
+
   it("flags un-orchestrated queues with pending messages and alerts Front Desk (#752)", async () => {
     (router as any).queues.set("forge.mrs.uppidi.com/xpufx-org/pending-repo", [
       { id: "m1", key: "forge.mrs.uppidi.com/xpufx-org/pending-repo", msg: "pending 1", ts: Date.now() },
