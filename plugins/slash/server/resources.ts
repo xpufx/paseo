@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createPluginLogger } from "paseo-plugin-helper/server";
 import {
   KNOWN_OPEN_TARGETS,
@@ -301,7 +302,10 @@ export async function runOperation(
   return primitive({ ...binding.params, ...params }, context, binding);
 }
 
-export async function handleRunCommand(input: { name: string; args: string; agentId?: string }) {
+export async function handleRunCommand(
+  input: { name: string; args: string; agentId?: string },
+  server?: PluginServerContext,
+) {
   const settings = await readSettings();
   const command = settings.commands.find((c) => c.enabled && c.name === input.name);
   if (!command) {
@@ -313,10 +317,58 @@ export async function handleRunCommand(input: { name: string; args: string; agen
   if (command.action.verb === "open") {
     return { verb: "open" as const, target: command.action.target };
   }
-  const result = await runOperation(command.action.operation, command.action.params ?? {}, {
-    agentId: input.agentId,
-  });
-  return { verb: "rpc" as const, result };
+  try {
+    const result = await runOperation(command.action.operation, command.action.params ?? {}, {
+      agentId: input.agentId,
+    });
+
+    const serverAny = server as any;
+    if (input.agentId && serverAny?.paseo?.agents?.ref) {
+      try {
+        const bodyText =
+          typeof result === "object" && result && "output" in result
+            ? String((result as { output: unknown }).output)
+            : typeof result === "string"
+              ? result
+              : JSON.stringify(result, null, 2);
+
+        await serverAny.paseo.agents.ref(input.agentId).timeline.append({
+          type: "plugin",
+          id: `slash-${command.name}-${Date.now()}`,
+          kind: "slash-command-result",
+          version: 1,
+          data: {
+            command: command.name,
+            status: "ok",
+            body: bodyText,
+          },
+        });
+      } catch (tlErr) {
+        log.warn("Failed to append slash result to timeline", { error: String(tlErr) });
+      }
+    }
+
+    return { verb: "rpc" as const, result };
+  } catch (err: unknown) {
+    const errMessage = err instanceof Error ? err.message : String(err);
+    const serverAny = server as any;
+    if (input.agentId && serverAny?.paseo?.agents?.ref) {
+      try {
+        await serverAny.paseo.agents.ref(input.agentId).timeline.append({
+          type: "plugin",
+          id: `slash-${command.name}-${Date.now()}`,
+          kind: "slash-command-result",
+          version: 1,
+          data: {
+            command: command.name,
+            status: "error",
+            body: errMessage,
+          },
+        });
+      } catch {}
+    }
+    throw err;
+  }
 }
 
 export async function handleExportBundle(): Promise<{ bundle: CommandBundle }> {

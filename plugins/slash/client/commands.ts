@@ -116,6 +116,8 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
                   { name: command.name, args: ctx.args, agentId: ctx.agent.id },
                 );
                 showFeedback(`/${command.name} executed`);
+                // Note: The server handles timeline.append with authorized plugin session.
+                // In local mocked tests or standalone client sessions, fallback here if available:
                 if (agentRef.timeline && typeof agentRef.timeline.append === "function") {
                   try {
                     await agentRef.timeline.append({
@@ -126,7 +128,12 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
                       data: {
                         command: command.name,
                         status: "ok",
-                        body: out.result !== undefined ? JSON.stringify(out.result, null, 2) : "Success",
+                        body:
+                          typeof out.result === "object" && out.result && "output" in out.result
+                            ? String((out.result as { output: unknown }).output)
+                            : typeof out.result === "string"
+                              ? out.result
+                              : JSON.stringify(out.result ?? "Success", null, 2),
                       },
                     });
                   } catch (tlErr) {
