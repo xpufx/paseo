@@ -227,7 +227,12 @@ async function runAgentMux(args: string[], timeoutMs = 15_000): Promise<{ output
     });
     return { output: stdout || stderr };
   } catch (err: unknown) {
-    const execErr = err as { stdout?: string; stderr?: string; message?: string };
+    const execErr = err as { stdout?: string; stderr?: string; message?: string; code?: string };
+    if (execErr.code === "ENOENT") {
+      throw new Error(
+        "agent-mux CLI is not installed or not found in PATH (~/.local/bin). Please install agent-mux to use this command.",
+      );
+    }
     const output = (execErr.stdout ?? "") + (execErr.stderr ?? "");
     if (output.trim()) {
       return { output: output.trim() };
