@@ -19,7 +19,7 @@ import {
 } from "./host-ui";
 import { usePluginSettings } from "paseo-plugin-helper/core";
 import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
-import { PermissionAuditView } from "permission-audit/client";
+import { PermissionAuditView } from "./vendor/permission-audit";
 import {
   topSettingsContract,
   checkboxesFromTarget,

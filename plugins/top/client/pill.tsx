@@ -52,7 +52,7 @@ import {
   type MetricThresholds,
   type ThemeColors,
 } from "paseo-plugin-helper/shared";
-import { PermissionAuditView } from "permission-audit/client";
+import { PermissionAuditView } from "./vendor/permission-audit";
 import {
   getSystemResourcesRpc,
   topSettingsContract,

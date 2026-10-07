@@ -3,9 +3,6 @@
   "private": false,
   "license": "MIT",
   "version": "0.4.4",
-  "dependencies": {
-    "permission-audit": "*"
-  },
   "scripts": {
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
     "typecheck": "tsc --noEmit",

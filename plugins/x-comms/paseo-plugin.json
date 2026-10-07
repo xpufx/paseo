@@ -1,7 +1,5 @@
 {
   "id": "x-comms",
-  "requirements": { "paseo": ">=0.9.0" },
-  "build": [
-    ["npm", "install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--no-workspaces"]
-  ]
+  "requirements": { "paseo": ">=0.9.0" }
 }
+

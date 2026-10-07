@@ -1,6 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { guardRpcHandler } from "paseo-plugin-helper/server";
-import { registerPermissionAuditServer } from "permission-audit/server";
+import { registerPermissionAuditServer } from "./server/vendor/permission-audit";
 import {
   getSystemResourcesRpc,
   getCustomPillsRpc,
