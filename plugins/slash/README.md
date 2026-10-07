@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/slash-logo-for-dark-bg.svg">
-    <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/slash-logo-for-light-bg.svg">
-    <img alt="S/ash Logo" src="docs/screenshots/slash-logo-adaptive.svg" width="360">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/slash/docs/screenshots/slash-logo-for-dark-bg.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/slash/docs/screenshots/slash-logo-for-light-bg.png">
+    <img alt="S/ash Logo" src="https://raw.githubusercontent.com/xpufx/paseo/main/plugins/slash/docs/screenshots/slash-logo-for-dark-bg.png" width="360">
   </picture>
 </p>
 
