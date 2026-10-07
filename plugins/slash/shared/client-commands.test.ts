@@ -54,8 +54,8 @@ function harness() {
 }
 
 describe("registerSlashCommands rpc wiring", () => {
-  it("sends the caller agent id with the run-command input and appends to timeline without prompting", async () => {
-    const { client, rpcCalls, contributions, sent, timelineAppended, agentRef } = harness();
+  it("sends the caller agent id with the run-command input and delegates execution without prompting", async () => {
+    const { client, rpcCalls, contributions, sent, agentRef } = harness();
     const dispose = registerSlashCommands(client);
 
     await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
@@ -75,23 +75,14 @@ describe("registerSlashCommands rpc wiring", () => {
     expect(agentRef.send).not.toHaveBeenCalled();
     expect(sent).toHaveLength(0);
 
-    // Must append non-prompting UI feedback to agent timeline
-    expect(agentRef.timeline.append).toHaveBeenCalledTimes(1);
-    expect(timelineAppended[0]).toMatchObject({
-      type: "plugin",
-      kind: "slash-command-result",
-      version: 1,
-      data: {
-        command: "orchestrate",
-        status: "ok",
-      },
-    });
+    // Client session must NOT attempt timeline.append (server plugin session handles this)
+    expect(agentRef.timeline.append).not.toHaveBeenCalled();
 
     dispose();
   });
 
-  it("handles rpc failures by appending error card to timeline without calling agent.send()", async () => {
-    const { client, contributions, sent, timelineAppended, agentRef } = harness();
+  it("handles rpc failures gracefully without calling agent.send()", async () => {
+    const { client, contributions, sent, agentRef } = harness();
     client.rpc = vi.fn(async (contract: unknown) => {
       if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
       if (contract === slashSettingsContract.get) return { prefix: "slash-" };
@@ -112,17 +103,7 @@ describe("registerSlashCommands rpc wiring", () => {
 
     expect(agentRef.send).not.toHaveBeenCalled();
     expect(sent).toHaveLength(0);
-    expect(agentRef.timeline.append).toHaveBeenCalledTimes(1);
-    expect(timelineAppended[0]).toMatchObject({
-      type: "plugin",
-      kind: "slash-command-result",
-      version: 1,
-      data: {
-        command: "ping",
-        status: "error",
-        body: "network partition",
-      },
-    });
+    expect(agentRef.timeline.append).not.toHaveBeenCalled();
 
     dispose();
   });
@@ -148,8 +129,8 @@ describe("registerSlashCommands rpc wiring", () => {
     dispose();
   });
 
-  it("triggers toast notification and tolerates timeline.append rejection", async () => {
-    const { client, contributions, agentRef } = harness();
+  it("triggers toast notification on execution and failure", async () => {
+    const { client, contributions } = harness();
     const showMock = vi.fn();
     const errorMock = vi.fn();
 
@@ -162,24 +143,16 @@ describe("registerSlashCommands rpc wiring", () => {
       useToast: () => ({ show: showMock, error: errorMock }),
     });
 
-    // Simulate timeline.append throwing handler_error (as experienced by operator)
-    agentRef.timeline.append = vi.fn(async () => {
-      throw new Error("Only plugin sessions can append plugin timeline items requestType=agent.timeline.append.request code=handler_error");
-    });
-
     const dispose = registerSlashCommands(client);
     await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
     const ping = contributions.find((c) => c.name === "slash-ping");
     expect(ping).toBeDefined();
 
-    // Must not throw when timeline.append rejects
-    await expect(
-      ping?.onSubmit({
-        args: "",
-        agent: { id: "agent-77" },
-        paseo: client.paseo,
-      }),
-    ).resolves.not.toThrow();
+    await ping?.onSubmit({
+      args: "",
+      agent: { id: "agent-77" },
+      paseo: client.paseo,
+    });
 
     // Verify toast notification was triggered
     expect(showMock).toHaveBeenCalledWith("/ping executed", undefined);

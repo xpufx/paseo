@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
 import { createPluginLogger } from "paseo-plugin-helper/server";
 import {
   KNOWN_OPEN_TARGETS,
@@ -304,7 +304,7 @@ export async function runOperation(
 
 export async function handleRunCommand(
   input: { name: string; args: string; agentId?: string },
-  server?: PluginServerContext,
+  context?: PluginHandlerContext,
 ) {
   const settings = await readSettings();
   const command = settings.commands.find((c) => c.enabled && c.name === input.name);
@@ -322,8 +322,7 @@ export async function handleRunCommand(
       agentId: input.agentId,
     });
 
-    const serverAny = server as any;
-    if (input.agentId && serverAny?.paseo?.agents?.ref) {
+    if (input.agentId && context?.paseo?.agents?.ref) {
       try {
         const bodyText =
           typeof result === "object" && result && "output" in result
@@ -332,7 +331,7 @@ export async function handleRunCommand(
               ? result
               : JSON.stringify(result, null, 2);
 
-        await serverAny.paseo.agents.ref(input.agentId).timeline.append({
+        await context.paseo.agents.ref(input.agentId).timeline.append({
           type: "plugin",
           id: `slash-${command.name}-${Date.now()}`,
           kind: "slash-command-result",
@@ -351,10 +350,9 @@ export async function handleRunCommand(
     return { verb: "rpc" as const, result };
   } catch (err: unknown) {
     const errMessage = err instanceof Error ? err.message : String(err);
-    const serverAny = server as any;
-    if (input.agentId && serverAny?.paseo?.agents?.ref) {
+    if (input.agentId && context?.paseo?.agents?.ref) {
       try {
-        await serverAny.paseo.agents.ref(input.agentId).timeline.append({
+        await context.paseo.agents.ref(input.agentId).timeline.append({
           type: "plugin",
           id: `slash-${command.name}-${Date.now()}`,
           kind: "slash-command-result",

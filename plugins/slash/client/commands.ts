@@ -109,58 +109,16 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
             argumentHint: "[args]",
             context: "agent",
             async onSubmit(ctx) {
-              const agentRef = ctx.paseo.agents.ref(ctx.agent.id);
               try {
-                const out = await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<{ result?: unknown }>)(
+                await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<{ result?: unknown }>)(
                   runCommandRpc as unknown,
                   { name: command.name, args: ctx.args, agentId: ctx.agent.id },
                 );
                 showFeedback(`/${command.name} executed`);
-                // Note: The server handles timeline.append with authorized plugin session.
-                // In local mocked tests or standalone client sessions, fallback here if available:
-                if (agentRef.timeline && typeof agentRef.timeline.append === "function") {
-                  try {
-                    await agentRef.timeline.append({
-                      type: "plugin",
-                      id: `slash-${command.name}-${Date.now()}`,
-                      kind: "slash-command-result",
-                      version: 1,
-                      data: {
-                        command: command.name,
-                        status: "ok",
-                        body:
-                          typeof out.result === "object" && out.result && "output" in out.result
-                            ? String((out.result as { output: unknown }).output)
-                            : typeof out.result === "string"
-                              ? out.result
-                              : JSON.stringify(out.result ?? "Success", null, 2),
-                      },
-                    });
-                  } catch (tlErr) {
-                    report(`timeline.append:${command.name}`, tlErr);
-                  }
-                }
               } catch (e) {
                 const errMessage = e instanceof Error ? e.message : String(e);
                 report(`run-command:${command.name}`, errMessage);
                 showFeedback(`/${command.name} failed: ${errMessage}`, true);
-                if (agentRef.timeline && typeof agentRef.timeline.append === "function") {
-                  try {
-                    await agentRef.timeline.append({
-                      type: "plugin",
-                      id: `slash-${command.name}-${Date.now()}`,
-                      kind: "slash-command-result",
-                      version: 1,
-                      data: {
-                        command: command.name,
-                        status: "error",
-                        body: errMessage,
-                      },
-                    });
-                  } catch (tlErr) {
-                    report(`timeline.append:${command.name}`, tlErr);
-                  }
-                }
               }
             },
           }),
