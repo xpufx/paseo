@@ -1,5 +1,6 @@
-import type { PaseoApi } from "@getpaseo/client";
-import type { PluginHostSummary } from "@getpaseo/plugin/client";
+import type { PluginHostSummary, usePaseo } from "@getpaseo/plugin/client";
+
+type PaseoApi = ReturnType<typeof usePaseo>;
 
 export interface ConfiguredHostAgent {
   serverId: string;

@@ -38,7 +38,6 @@
     "@tanstack/react-query": "^5.90.11",
     "@types/react": "^19.0.10",
     "esbuild": "0.27.7",
-    "paseo-plugin-ui-testing": "*",
     "react": "19.1.0",
     "react-native": "0.81.5",
     "react-test-renderer": "19.1.0",

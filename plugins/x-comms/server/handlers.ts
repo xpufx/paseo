@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createPeriodicTask, createPluginLogger, safeSpawn } from "paseo-plugin-helper/server";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { withTimeout } from "paseo-plugin-helper/shared";
+
+type PaseoApi = PluginHandlerContext["paseo"];
 import { getSnapshotFresh, agentCountFor, refreshSnapshot, initializeSnapshot } from "./snapshot";
 import {
   registryReadRpc,
@@ -984,7 +986,6 @@ export async function handleDaemonDump(input: { daemon: string }) {
 }
 
 import { randomUUID } from "node:crypto";
-import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import {
   applyAnnounce,
   applyRetract,

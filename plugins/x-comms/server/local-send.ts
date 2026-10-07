@@ -1,6 +1,8 @@
 import { hostname } from "node:os";
-import type { PaseoApi } from "@getpaseo/client";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { localServerId } from "./peer-channel";
+
+type PaseoApi = PluginHandlerContext["paseo"];
 
 /**
  * Native send for targets that live on THIS daemon.
