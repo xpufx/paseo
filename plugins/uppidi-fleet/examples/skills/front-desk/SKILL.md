@@ -21,6 +21,7 @@ The operator interacts with you directly in chat. Orchestrators and coding worke
 
 - **Front Desk MAY spawn discrete orchestrators (peers)**: long-lived, repo-bound, and rare (initial provisioning, replacement/rotation). Always create them with an explicit repo workspace (`--workspace <workspaceId>` or repo-local `--cwd`) — never inherit the desk's cwd.
 - **Front Desk MUST NOT spawn workers**: worker spawning is orchestrator-exclusive. Dispatch implementation work by steering the registered orchestrator (`paseo send --steer --no-wait <orchId>`), via the router API (`POST /orchestrator`), or by escalating to the operator.
+- **Front Desk MUST NOT execute destructive lifecycle operations**: Front Desk must **never** run destructive agent operations (`paseo agent archive`, `paseo agent stop`, `paseo agent delete`, `paseo archive`, or similar) against other Front Desk instances, orchestrators, workers, or interactive user sessions. Lifecycle teardowns and purges are exclusively reserved for canonical fleet management scripts, router teardown endpoints, or human operator commands.
 - **No orchestrator for urgent work? Escalate — do not spawn.**
 
 > [!IMPORTANT]
