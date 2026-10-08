@@ -8088,6 +8088,22 @@ export class HookRouter {
     return [...(this.queues.get(key) ?? [])];
   }
 
+  /**
+   * Remove a specific queue entry by id and persist the updated queue.
+   * Returns true if an entry was found and removed (#1118).
+   */
+  public removeQueueEntry(key: string, entryId: string): boolean {
+    const list = this.queues.get(key);
+    if (!list || list.length === 0) return false;
+    const idx = list.findIndex((e) => e.id === entryId);
+    if (idx === -1) return false;
+    list.splice(idx, 1);
+    this.persistQueue(key);
+    this.log(`[info] Removed message ${entryId} from queue ${key} (remaining depth: ${list.length})`);
+    return true;
+  }
+
+
   public pause(key?: string): string[] {
     if (!key || key === "all") {
       this.allQueuesPaused = true;
@@ -8551,25 +8567,39 @@ export class HookRouter {
     const includeFrontDesk = !targetSet.has("frontdesk");
     const includeOrchestrators = !targetSet.has("orchestrators");
     if (includeFrontDesk && frontDesk?.agentId) {
+      let entryId: string | null = null;
       try {
-        this.enqueue("frontdesk", notice, true);
+        const entry = this.enqueue("frontdesk", notice, true);
+        entryId = entry.id;
         if (!queuedKeys.includes("frontdesk")) queuedKeys.push("frontdesk");
       } catch {}
       try {
         const ok = await this.deliverMessage(frontDesk.agentId, notice, { noWait: true, steer: true });
-        if (ok) delivered++;
+        if (ok) {
+          delivered++;
+          if (entryId) {
+            this.removeQueueEntry("frontdesk", entryId);
+          }
+        }
       } catch {}
     }
     if (includeOrchestrators) {
       for (const rec of orchestrators) {
         if (!rec.agentId || !rec.key) continue;
+        let entryId: string | null = null;
         try {
-          this.enqueue(rec.key, notice, true);
+          const entry = this.enqueue(rec.key, notice, true);
+          entryId = entry.id;
           if (!queuedKeys.includes(rec.key)) queuedKeys.push(rec.key);
         } catch {}
         try {
           const ok = await this.deliverMessage(rec.agentId, notice, { noWait: true, steer: true });
-          if (ok) delivered++;
+          if (ok) {
+            delivered++;
+            if (entryId) {
+              this.removeQueueEntry(rec.key, entryId);
+            }
+          }
         } catch {}
       }
     }

@@ -4727,6 +4727,75 @@ describe("hook-router teardown cleanup methods (#774)", () => {
     assert.ok(cleared >= 1);
     assert.equal(router.getQueue("test-repo").length, 0);
   });
+
+  it("broadcastTeardownNotice delivers notice exactly once across simulated pause+resume drain cycle (#1118)", async () => {
+    const deliveries: Array<{ agentId: string; msg: string; steer: boolean }> = [];
+    (router as any).deliverMessage = async (agentId: string, msg: string, options?: any) => {
+      deliveries.push({ agentId, msg, steer: Boolean(options?.steer) });
+      return true;
+    };
+
+    router.writeFrontDesk("fd-survivor");
+    router.writeOrchestrator("repo-survivor", "orch-survivor");
+
+    // Pause all queues as happens during fleet teardown / halt
+    router.pause("all");
+
+    // Broadcast teardown notice for worker teardown (Front Desk and Orchestrator survive)
+    const notice = "[Fleet Teardown] Workers culled";
+    const res = await router.broadcastTeardownNotice(notice, { targets: ["workers"] });
+
+    assert.equal(res.delivered, 2, "immediate delivery should succeed for both survivors");
+    assert.equal(deliveries.length, 2, "both surviving agents received immediate steer delivery");
+    assert.equal(deliveries[0].agentId, "fd-survivor");
+    assert.equal(deliveries[0].steer, true);
+    assert.equal(deliveries[1].agentId, "orch-survivor");
+    assert.equal(deliveries[1].steer, true);
+
+    // Queues must be clean: immediate delivery succeeded so no queued entry should remain
+    assert.equal(router.getQueue("frontdesk").length, 0, "frontdesk queue should not retain entry");
+    assert.equal(router.getQueue("repo-survivor").length, 0, "orchestrator queue should not retain entry");
+
+    // Clear recorded deliveries and simulate fleet resume / drain
+    deliveries.length = 0;
+    router.resume("all");
+
+    // Allow any pending async drain to complete
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(
+      deliveries.length,
+      0,
+      "resume drain must not deliver duplicate teardown notice when immediate steer delivery succeeded",
+    );
+  });
+
+  it("broadcastTeardownNotice leaves notice queued for retry when immediate delivery fails (#1118)", async () => {
+    const deliveries: Array<{ agentId: string; msg: string }> = [];
+    let deliverShouldFail = true;
+    (router as any).deliverMessage = async (agentId: string, msg: string) => {
+      deliveries.push({ agentId, msg });
+      return !deliverShouldFail;
+    };
+
+    router.writeFrontDesk("fd-agent");
+    router.pause("all");
+
+    const notice = "[Fleet Teardown] Notice for retry";
+    const res = await router.broadcastTeardownNotice(notice, { targets: ["workers"] });
+
+    assert.equal(res.delivered, 0, "immediate delivery failed");
+    assert.equal(router.getQueue("frontdesk").length, 1, "notice must remain queued for retry");
+
+    // Now allow delivery to succeed and unpause
+    deliverShouldFail = false;
+    router.resume("all");
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    assert.equal(deliveries.length, 2, "1 failed initial delivery + 1 successful drain delivery");
+    assert.equal(router.getQueue("frontdesk").length, 0, "queue drained after resume");
+  });
 });
 
 describe("hook-router Front Desk non-interrupting delivery and watchdog alerts (#780)", () => {
