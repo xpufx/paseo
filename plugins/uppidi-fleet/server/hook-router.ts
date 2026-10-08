@@ -6,8 +6,11 @@ import os from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { PluginServerContext } from "@getpaseo/plugin/server";
-import type { PaseoApi, PaseoAgentSendOptions } from "@getpaseo/client";
+import type { PluginHandlerContext, PluginServerContext } from "@getpaseo/plugin/server";
+
+export type PaseoApi = PluginHandlerContext["paseo"];
+export type PaseoAgentHandle = ReturnType<PaseoApi["agents"]["ref"]>;
+export type PaseoAgentSendOptions = NonNullable<Parameters<PaseoAgentHandle["send"]>[1]>;
 import type {
   HookServiceStatusOutput,
   HookServiceActionOutput,
