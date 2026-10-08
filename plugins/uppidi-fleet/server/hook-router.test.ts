@@ -83,6 +83,7 @@ import {
   isFrontDeskAgent,
   isOrchestratorMatchingRepo,
   findLiveOrchestratorAgents,
+  findLiveFrontDeskAgents,
   isProbeAgent,
   isChildWakeupCandidate,
   CHILD_WAKEUP_EVENTS,
@@ -1453,6 +1454,46 @@ describe("hook-router bundled service lifecycle and log buffer", () => {
 
     clearHookLogs();
     assert.deepEqual(getHookLogs(), []);
+  });
+
+  it("recovers the newest live Front Desk after a restart with missing disk state", async () => {
+    const liveAgents = {
+      agents: {
+        list: async () => ({
+          entries: [
+            {
+              id: "fd-older",
+              title: "Front Desk",
+              status: "idle",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+            {
+              id: "fd-newer",
+              labels: { role: "front-desk" },
+              status: "running",
+              updatedAt: "2026-01-02T00:00:00.000Z",
+            },
+          ],
+        }),
+      },
+    } as any;
+    const first = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    first.writeFrontDesk("fd-retired");
+    rmSync(join(tempDir, "frontdesk.json"), { force: true });
+
+    const recovered = new HookRouter(null, { queueDir, stateDir, port: 0, paseo: liveAgents });
+    (recovered as any).updateAgentMetadata = async () => {};
+    await recovered.start();
+
+    assert.equal(recovered.readFrontDesk()?.agentId, "fd-newer");
+    const ordered = findLiveFrontDeskAgents(
+      new Map([
+        ["fd-older", { id: "fd-older", title: "Front Desk", status: "idle", updatedAt: "2026-01-01T00:00:00.000Z" }],
+        ["fd-newer", { id: "fd-newer", labels: { role: "front-desk" }, status: "running", updatedAt: "2026-01-02T00:00:00.000Z" }],
+      ] as any),
+    );
+    assert.deepEqual(ordered.map((agent) => agent.id), ["fd-newer", "fd-older"]);
+    await recovered.stop();
   });
 });
 

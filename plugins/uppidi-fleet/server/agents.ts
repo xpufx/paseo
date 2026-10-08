@@ -2630,7 +2630,9 @@ export function getPersistedStateDir(): string {
     return join(tmpdir(), `paseo-uppidi-fleet-state-${process.pid}`);
   }
   const home = process.env.HOME ?? os.homedir();
-  return join(home, ".paseo", "forgejo-hook");
+  // Keep Front Desk state beside the router's orchestrator registry so writes
+  // from the handler and router resolve to the same durable location.
+  return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet");
 }
 
 function writePersistedFrontDesk(agentId: string): void {
@@ -3342,4 +3344,3 @@ export async function handleUppidiFrontDeskPrompt(
     };
   }
 }
-

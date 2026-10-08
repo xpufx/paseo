@@ -1905,6 +1905,29 @@ export function findLiveOrchestratorAgent(
   return matching[0]?.id ?? null;
 }
 
+/** Find active Front Desk agents, newest first, for registry recovery. */
+export function findLiveFrontDeskAgents(
+  agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
+): WatchdogAgent[] {
+  if (!agentMap || agentMap.size === 0) return [];
+  const isLive = (agent: WatchdogAgent): boolean => {
+    if (agent.archivedAt) return false;
+    const status = String(agent.status ?? "").toLowerCase();
+    return !["closed", "archived", "terminated", "error", "failed"].includes(status);
+  };
+  const matches = Array.from(agentMap.values()).filter((agent) => isLive(agent) && isFrontDeskAgent(agent));
+  const getTime = (agent: WatchdogAgent): number => {
+    const ts = agent.updatedAt || agent.lastActivityAt || agent.activeTurn?.startedAt;
+    if (!ts) return 0;
+    const parsed = Date.parse(ts);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return matches.sort((a, b) => {
+    const timeDiff = getTime(b) - getTime(a);
+    return timeDiff !== 0 ? timeDiff : String(b.id).localeCompare(String(a.id));
+  });
+}
+
 /**
  * True when the agent is a model health canary rather than a worker (#891).
  * Probes run `paseo run ... ping` with no labels, so the derived `ping` title
@@ -4748,8 +4771,11 @@ export class HookRouter {
         : process.env.NODE_ENV === "test"
           ? join(os.tmpdir(), `paseo-uppidi-fleet-state-${process.pid}`)
           : join(process.env.HOME ?? os.homedir(), ".paseo", "forgejo-hook");
+    const preferred = custom && custom.trim().length > 0 ? [join(persistedDir, "frontdesk.json")] : [join(parentDir, "frontdesk.json")];
     return [
       ...new Set([
+        ...preferred,
+        join(persistedDir, "frontdesk.json"),
         join(parentDir, "frontdesk.json"),
         join(this.stateDir, "frontdesk.json"),
         join(this.queueDir, "frontdesk.json"),
@@ -4860,16 +4886,22 @@ export class HookRouter {
   public writeFrontDesk(agentId: string, by = "frontdesk"): void {
     const parentDir = dirname(this.stateDir);
     mkdirSync(parentDir, { recursive: true });
-    const target = join(parentDir, "frontdesk.json");
     const record: FrontDeskRecord = {
       version: 1,
       agentId,
       updatedAt: new Date().toISOString(),
       by,
     };
-    const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(record, null, 2), "utf8");
-    renameSync(tmp, target);
+    const targets = new Set<string>([join(parentDir, "frontdesk.json")]);
+    if (process.env.HOOK_STATE_DIR?.trim()) {
+      targets.add(join(process.env.HOOK_STATE_DIR.trim(), "frontdesk.json"));
+    }
+    for (const target of targets) {
+      mkdirSync(dirname(target), { recursive: true });
+      const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
+      writeFileSync(tmp, JSON.stringify(record, null, 2), "utf8");
+      renameSync(tmp, target);
+    }
   }
 
   public async deliverMessage(
@@ -6206,6 +6238,39 @@ export class HookRouter {
       }
       return null;
     }
+  }
+
+  /**
+   * Reconcile a missing Front Desk registration from the live daemon roster.
+   * This mirrors orchestrator adoption and intentionally does not replace a
+   * persisted registration, even when another Front Desk-shaped agent exists.
+   */
+  public async reconcileFrontDesk(
+    agentMap?: Map<string, WatchdogAgent> | null,
+  ): Promise<{ ok: boolean; agentId?: string; recovered: boolean; error?: string }> {
+    if (this.readFrontDesk()?.agentId) {
+      return { ok: true, recovered: false };
+    }
+    let live = agentMap;
+    if (live === undefined) {
+      try {
+        live = await this.fetchAgentMap();
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        this.log(`[warn] Front Desk live reconciliation failed: ${error}`);
+        return { ok: false, recovered: false, error };
+      }
+    }
+    const candidate = findLiveFrontDeskAgents(live)[0];
+    if (!candidate?.id) return { ok: true, recovered: false };
+
+    this.writeFrontDesk(candidate.id, "recovered");
+    await this.updateAgentMetadata(candidate.id, "Front Desk", {
+      role: "front-desk",
+      category: "front-desk",
+    });
+    this.log(`[info] Recovered lost Front Desk registration from live agent roster: ${candidate.id}`);
+    return { ok: true, agentId: candidate.id, recovered: true };
   }
 
   public canWatchdogAlert(alertKey: string, now = Date.now()): boolean {
@@ -7838,6 +7903,8 @@ export class HookRouter {
     if (this.isHaltedState) {
       return { ok: true, swept: 0, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
     }
+    const liveAgentMap = await this.fetchAgentMap().catch(() => null);
+    await this.reconcileFrontDesk(liveAgentMap);
     const rawTargets = (repos ?? this.getEnrolledRepos()).filter((k) => {
       if (!k || k === "frontdesk") return false;
       const parts = k.split("/").filter(Boolean);
@@ -9177,7 +9244,12 @@ export class HookRouter {
     };
   }
 
-  public start(): Promise<void> {
+  public async start(): Promise<void> {
+    try {
+      await this.reconcileFrontDesk();
+    } catch (err) {
+      this.log(`[warn] Front Desk startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     return new Promise((resolve, reject) => {
       this.isClosed = false;
       this.bindLifecycleEvents();
