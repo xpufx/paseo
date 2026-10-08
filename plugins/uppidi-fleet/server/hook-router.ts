@@ -71,6 +71,7 @@ import {
   type RotationObservation,
   type RotationTriggerReason,
 } from "./rotation.js";
+import { DiskLogger } from "./disk-logger.js";
 
 const defaultExecFileAsync = promisify(execFile);
 let execFileAsync = defaultExecFileAsync;
@@ -219,6 +220,14 @@ export interface HookRouterOptions {
   modelAlertsPath?: string;
   /** Explicit merge-event log path; defaults to the scoped plugin data dir (#1076). */
   mergeEventLogPath?: string;
+  /** Explicit log directory path for hook router disk logging (#1115). */
+  logDir?: string;
+  /** Explicit hook log file path (#1115). */
+  logFilePath?: string;
+  /** Maximum bytes before rotating the hook log file. Defaults to 5MB (#1115). */
+  logMaxBytes?: number;
+  /** Maximum number of rotated hook log files to retain. Defaults to 3 (#1115). */
+  logMaxFiles?: number;
   /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
   mergeEventHooks?: Record<string, MergeEventHook>;
   /**
@@ -3281,11 +3290,24 @@ export function formatFleetTeardownNotice(
 const MAX_LOG_LINES = 1000;
 const logBuffer: string[] = [];
 
+let activeDiskLogger: DiskLogger | null = null;
+
+export function getActiveDiskLogger(): DiskLogger | null {
+  return activeDiskLogger;
+}
+
+export function setActiveDiskLogger(logger: DiskLogger | null): void {
+  activeDiskLogger = logger;
+}
+
 export function appendHookLog(message: string): void {
   const line = `[${new Date().toISOString()}] ${message}`;
   logBuffer.push(line);
   if (logBuffer.length > MAX_LOG_LINES) {
     logBuffer.splice(0, logBuffer.length - MAX_LOG_LINES);
+  }
+  if (activeDiskLogger) {
+    activeDiskLogger.log(line);
   }
 }
 
@@ -3379,6 +3401,10 @@ export class HookRouter {
   private readonly mergeEventLogPath: string;
   /** One fast-forward per checkout at a time; guards the primary checkout (#1076). */
   private readonly mergeEventLocks = new Set<string>();
+  /** Scoped rotating disk logger (#1115). */
+  public readonly diskLogger: DiskLogger;
+  public readonly logDir: string;
+  public readonly logFilePath: string;
 
   constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
     this.server = server ?? null;
@@ -3464,6 +3490,24 @@ export class HookRouter {
       process.env.HOOK_MERGE_EVENT_LOG ??
       join(scopedRoot, "merge-events.json");
 
+    const explicitLogDir = options?.logDir;
+    const explicitLogFilePath = options?.logFilePath;
+    this.diskLogger = new DiskLogger({
+      ...(explicitLogDir ? { logDir: explicitLogDir } : {}),
+      ...(explicitLogFilePath ? { filePath: explicitLogFilePath } : {}),
+      maxBytes: options?.logMaxBytes,
+      maxFiles: options?.logMaxFiles,
+      echoToConsole: true,
+      ...(!explicitLogDir && !explicitLogFilePath && this.isTestMode
+        ? { storageBaseDir: scopedRoot }
+        : {}),
+    });
+    this.logDir = this.diskLogger.logDir;
+    this.logFilePath = this.diskLogger.logFilePath;
+    if (!getActiveDiskLogger()) {
+      setActiveDiskLogger(this.diskLogger);
+    }
+
     this.coalesceDisable =
       options?.coalesceDisable ??
       (isTestMode ? true : (process.env.HOOK_COALESCE_DISABLE ?? "") === "1");
@@ -3486,6 +3530,7 @@ export class HookRouter {
           : Number(process.env.HOOK_FRONTDESK_THROTTLE_MS ?? 2000);
     mkdirSync(this.queueDir, { recursive: true });
     mkdirSync(this.stateDir, { recursive: true });
+    mkdirSync(this.logDir, { recursive: true });
 
     this.loadPersistedQueues();
     this.bindLifecycleEvents();
@@ -9791,6 +9836,11 @@ export function getActiveHookRouter(): HookRouter | null {
 
 export function setActiveHookRouter(router: HookRouter | null): void {
   activeRouter = router;
+  if (router) {
+    setActiveDiskLogger(router.diskLogger);
+  } else {
+    setActiveDiskLogger(null);
+  }
 }
 
 export function getOrCreateHookRouter(

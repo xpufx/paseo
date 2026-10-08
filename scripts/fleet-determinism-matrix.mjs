@@ -205,6 +205,26 @@ const PARTS = [
     note: "Binds contracts to handlers and owns load/unload. Every handler it registers is classified on its own row below.",
   },
   {
+    file: `${PLUGIN}/server/disk-logger.ts`,
+    part: "Persistent rotating hook log writer in plugin storage (#1115)",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "DEFAULT_LOG_FILE_NAME",
+        "DEFAULT_MAX_LOG_BYTES",
+        "DEFAULT_MAX_LOG_FILES",
+        "DiskLogger",
+        "defaultScopedLogDir",
+      ],
+    },
+    evidence: [
+      [`disk-logger.ts:50-80`, "pure file append and size-bounded rename rotation"],
+      [`disk-logger.ts:90-120`, "deterministic rotation index shifting without external models"],
+    ],
+    note: "Durable hook-router log appender writing to scoped plugin storage with bounded log rotation.",
+  },
+  {
     file: `${PLUGIN}/server/agents.ts`,
     part: "Agent record normalisation, metrics projection, deterministic-state derivation",
     layer: "server",

@@ -37,6 +37,8 @@ import {
   appendHookLog,
   getHookLogs,
   clearHookLogs,
+  getActiveDiskLogger,
+  setActiveDiskLogger,
   getActiveHookRouter,
   setActiveHookRouter,
   getAvailableNetworkInterfaces,
@@ -1494,6 +1496,48 @@ describe("hook-router bundled service lifecycle and log buffer", () => {
     );
     assert.deepEqual(ordered.map((agent) => agent.id), ["fd-newer", "fd-older"]);
     await recovered.stop();
+  });
+
+  it("persists hook logs to scoped disk storage and rotates when bounded (#1115)", () => {
+    clearHookLogs();
+    const logDir = join(tempDir, "logs");
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      logDir,
+      logMaxBytes: 150,
+      logMaxFiles: 2,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    // Initial log file path verification
+    assert.equal(router.logDir, logDir);
+    assert.equal(router.logFilePath, join(logDir, "hook.log"));
+    assert.ok(existsSync(logDir), "scoped logs/ directory must exist");
+    assert.ok(!router.logDir.includes(".paseo/logs"), "must never write to ~/.paseo/logs");
+
+    // Write log lines via appendHookLog
+    appendHookLog("[info] first message to disk");
+    appendHookLog("[warn] second message to disk");
+
+    const hookLogFile = join(logDir, "hook.log");
+    assert.ok(existsSync(hookLogFile), "hook.log should be created on write");
+    const content = readFileSync(hookLogFile, "utf8");
+    assert.match(content, /first message to disk/);
+    assert.match(content, /second message to disk/);
+
+    // Verify bounded rotation: trigger rotation by appending lines past 150 bytes
+    for (let i = 1; i <= 10; i++) {
+      appendHookLog(`[info] rotation test line ${i} with long descriptive text to exceed threshold`);
+    }
+
+    assert.ok(existsSync(join(logDir, "hook.log")));
+    assert.ok(existsSync(join(logDir, "hook.log.1")));
+    assert.ok(existsSync(join(logDir, "hook.log.2")));
+    assert.ok(!existsSync(join(logDir, "hook.log.3")), "hook.log.3 must not exist when maxFiles is 2");
+
+    setActiveHookRouter(null);
   });
 });
 
