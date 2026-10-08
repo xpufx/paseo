@@ -39,6 +39,8 @@ import {
   getPersistedStateDir,
   resolveRegisteredFrontDeskAgentId,
   checkRepoMainDirty,
+  isFleetWorker,
+  resolveTeardownAgents,
 } from "./agents.js";
 import { HookRouter, setActiveHookRouter } from "./hook-router.js";
 import { DEFAULT_PROJECT } from "../shared/contracts.js";
@@ -1224,6 +1226,141 @@ describe("Fleet teardown state cleanup (#774)", () => {
     assert.ok(elapsed >= 250, "must wait for drain interval before timeout");
     assert.equal(res.tornDown.workers, 1, "archives remaining running agents after timeout");
     assert.deepEqual(archivedAgents, ["agent-running-forever"]);
+  });
+
+  it("archives fleet workers and does NOT archive ad-hoc or detached user agents (#1121)", async () => {
+    const router = new HookRouter(null, {
+      stateDir: path.join(tmpDir, "orchestrators"),
+      queueDir: path.join(tmpDir, "queues"),
+      port: 0,
+    });
+    router.writeFrontDesk("fd-1");
+    router.writeOrchestrator("xpufx-org/paseo", "orch-paseo");
+    setActiveHookRouter(router);
+
+    const archivedAgents: string[] = [];
+    const mockContext = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              // 1. Registered Front Desk
+              { id: "fd-1", name: "Front Desk", status: "idle" },
+              // 2. Registered Orchestrator
+              { id: "orch-paseo", name: "Orchestrator · xpufx-org/paseo", status: "idle" },
+              // 3. Genuine fleet worker spawned by orch-paseo (parentId)
+              {
+                id: "worker-fleet-child",
+                name: "paseo#1121 teardown ownership",
+                status: "idle",
+                parentId: "orch-paseo",
+              },
+              // 4. Fleet worker with explicit label role: worker
+              {
+                id: "worker-fleet-labeled",
+                name: "some task",
+                status: "idle",
+                labels: { role: "worker" },
+              },
+              // 5. Fleet worker with attributed issue work
+              {
+                id: "worker-fleet-issue",
+                name: "fix bug",
+                status: "idle",
+                labels: { "forgejo.issue": "1121", repo: "xpufx-org/paseo" },
+              },
+              // 6. Ad-hoc user session (arbitrary title, no parent, no fleet labels, no enrolled repo)
+              {
+                id: "user-adhoc-scratch",
+                name: "my scratch exploration session",
+                status: "idle",
+              },
+              // 7. Detached user agent working on local notes (no fleet labels, no fleet parent)
+              {
+                id: "user-detached-notes",
+                name: "notes and experiments",
+                status: "idle",
+                labels: { purpose: "personal-notes" },
+              },
+            ],
+          }),
+          ref: (id: string) => ({
+            archive: async () => {
+              archivedAgents.push(id);
+              return { ok: true };
+            },
+          }),
+        },
+      },
+    } as any;
+
+    // Teardown targeting ONLY workers
+    const resWorkersOnly = await handleFleetTeardown(
+      { targets: ["workers"], confirm: true },
+      mockContext
+    );
+
+    assert.equal(resWorkersOnly.ok, true);
+    assert.equal(resWorkersOnly.tornDown.workers, 3);
+    assert.equal(resWorkersOnly.tornDown.orchestrators, 0);
+    assert.equal(resWorkersOnly.tornDown.frontdesk, 0);
+    // Must contain ONLY the 3 fleet workers
+    assert.deepEqual(
+      archivedAgents.sort(),
+      ["worker-fleet-child", "worker-fleet-labeled", "worker-fleet-issue"].sort()
+    );
+    // Must NOT contain ad-hoc or detached user agents
+    assert.equal(archivedAgents.includes("user-adhoc-scratch"), false);
+    assert.equal(archivedAgents.includes("user-detached-notes"), false);
+    // Must NOT contain frontdesk or orchestrator when not targeted
+    assert.equal(archivedAgents.includes("fd-1"), false);
+    assert.equal(archivedAgents.includes("orch-paseo"), false);
+  });
+
+  it("isFleetWorker predicate accurately distinguishes fleet workers from ad-hoc agents (#1121)", () => {
+    const orchestratorIds = new Set(["orch-1"]);
+
+    // Fleet worker via parentId
+    assert.equal(
+      isFleetWorker({ id: "w1", shortId: "w1", name: "Worker", category: "worker", status: "idle", parentId: "orch-1" }, { orchestratorIds }),
+      true
+    );
+    // Fleet worker via parentCategory
+    assert.equal(
+      isFleetWorker({ id: "w2", shortId: "w2", name: "Worker", category: "worker", status: "idle", parentId: "unknown", parentCategory: "orchestrator" }),
+      true
+    );
+    // Fleet worker via label role
+    assert.equal(
+      isFleetWorker({ id: "w3", shortId: "w3", name: "Worker", category: "worker", status: "idle", labels: { role: "worker" } }),
+      true
+    );
+    // Fleet worker via paseo.parent-agent-id label
+    assert.equal(
+      isFleetWorker({ id: "w4", shortId: "w4", name: "Worker", category: "worker", status: "idle", labels: { "paseo.parent-agent-id": "orch-1" } }),
+      true
+    );
+    // Fleet worker via attributed work issue
+    assert.equal(
+      isFleetWorker({ id: "w5", shortId: "w5", name: "Worker", category: "worker", status: "idle", attributedWork: { issue: 1121, repo: "xpufx-org/paseo" } }),
+      true
+    );
+    // Fleet worker via enrolled repo
+    assert.equal(
+      isFleetWorker({ id: "w6", shortId: "w6", name: "Worker", category: "worker", status: "idle", project: "xpufx-org/paseo" }, { enrolledRepos: ["xpufx-org/paseo"] }),
+      true
+    );
+
+    // Ad-hoc user session (no parent, no fleet labels, no enrolled repo)
+    assert.equal(
+      isFleetWorker({ id: "u1", shortId: "u1", name: "scratch session", category: "worker", status: "idle" }),
+      false
+    );
+    // Detached user session on an unenrolled repo
+    assert.equal(
+      isFleetWorker({ id: "u2", shortId: "u2", name: "my app", category: "worker", status: "idle", project: "personal/app" }, { enrolledRepos: ["xpufx-org/paseo"] }),
+      false
+    );
   });
 });
 

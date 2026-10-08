@@ -1218,6 +1218,98 @@ function teardownTargetToCategory(target: string): "front-desk" | "orchestrator"
 }
 
 /**
+ * Determines whether a worker agent belongs to the fleet (#1121).
+ * Ad-hoc or detached user sessions that were not created by or attributed to
+ * the fleet are preserved and skipped during fleet teardown.
+ */
+export function isFleetWorker(
+  agent: Partial<UppidiAgent> | UppidiAgent | null | undefined,
+  context: {
+    orchestratorIds?: Set<string>;
+    enrolledRepos?: string[];
+  } = {}
+): boolean {
+  if (!agent) return false;
+
+  // 1. Parentage check: agent's parent is a registered or known orchestrator / front-desk
+  if (agent.parentId) {
+    if (context.orchestratorIds?.has(agent.parentId)) return true;
+    if (agent.parentCategory === "orchestrator" || agent.parentCategory === "front-desk") return true;
+    const parentName = agent.parentName?.toLowerCase() ?? "";
+    if (parentName.includes("orchestrator") || parentName.includes("front desk") || parentName === "frontdesk") {
+      return true;
+    }
+  }
+
+  // 2. Explicit fleet / worker role labels
+  const labels = agent.labels ?? {};
+  const roleLabel = String(labels.role ?? labels.category ?? "").trim().toLowerCase();
+  if (roleLabel === "worker" || roleLabel === "orchestrator" || roleLabel === "front-desk") {
+    return true;
+  }
+  if (labels["paseo.parent-agent-id"]?.trim()) {
+    return true;
+  }
+
+  // 3. Fleet issue or repo attribution
+  if (labels["forgejo.issue"]?.trim() || labels.issue?.trim() || labels.repo?.trim()) {
+    return true;
+  }
+  if (agent.attributedWork?.issue !== undefined || agent.attributedWork?.repo) {
+    return true;
+  }
+
+  // 4. Enrolled repository membership (not detached / ad-hoc)
+  if (context.enrolledRepos && context.enrolledRepos.length > 0) {
+    const proj = agent.project || DEFAULT_PROJECT;
+    if (context.enrolledRepos.some((r) => isRepoMatching(r, proj))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Filters the list of candidates to archive during fleet teardown (#1121).
+ * For worker targets, only fleet-owned workers are included; ad-hoc or detached
+ * user agents are safely skipped.
+ */
+export function resolveTeardownAgents(
+  agents: UppidiAgent[],
+  targetCategories: Set<"front-desk" | "orchestrator" | "worker">,
+  registry: CanonicalFleetRegistry = { available: false, frontDeskAgentId: null, orchestratorAgentIdToRepo: new Map() }
+): UppidiAgent[] {
+  const orchestratorIds = new Set<string>();
+  if (registry.frontDeskAgentId) {
+    orchestratorIds.add(registry.frontDeskAgentId);
+  }
+  for (const id of registry.orchestratorAgentIdToRepo.keys()) {
+    orchestratorIds.add(id);
+  }
+  // Also collect any live orchestrators/frontdesk from the snapshot
+  for (const a of agents) {
+    if (a.category === "orchestrator" || a.category === "front-desk") {
+      orchestratorIds.add(a.id);
+    }
+  }
+
+  const { enrolledRepos } = getFleetRosterInfo();
+
+  return agents.filter((agent) => {
+    if (!targetCategories.has(agent.category)) {
+      return false;
+    }
+    // Front Desk and Orchestrators are matched directly by target category
+    if (agent.category === "front-desk" || agent.category === "orchestrator") {
+      return true;
+    }
+    // For workers, ensure the fleet actually owns the worker
+    return isFleetWorker(agent, { orchestratorIds, enrolledRepos });
+  });
+}
+
+/**
  * Archives a single agent by id, trying SDK first and falling back to CLI.
  * Returns true on success, false on failure.
  */
@@ -1249,9 +1341,9 @@ async function archiveAgentById(
 }
 
 /**
- * Fleet teardown handler (#742). Archives all agents matching the requested
- * target categories. Returns structured counts of torn-down agents per
- * category and any errors encountered.
+ * Fleet teardown handler (#742, #1121). Archives all agents matching the requested
+ * target categories that are fleet-owned. Returns structured counts of torn-down
+ * agents per category and any errors encountered.
  */
 export async function handleFleetTeardown(
   input: FleetTeardownInput,
@@ -1267,6 +1359,8 @@ export async function handleFleetTeardown(
       input.targets.map((t) => teardownTargetToCategory(t))
     );
 
+    const registry = readCanonicalFleetRegistry();
+
     let agents: UppidiAgent[] = [];
     try {
       agents = await fetchPaseoAgents(context);
@@ -1274,7 +1368,7 @@ export async function handleFleetTeardown(
       // If fetching fails, proceed with state cleanup
     }
 
-    let agentsToTeardown = agents.filter((a) => targetCategories.has(a.category));
+    let agentsToTeardown = resolveTeardownAgents(agents, targetCategories, registry);
 
     const tornDown = { workers: 0, orchestrators: 0, frontdesk: 0 };
     const errors: string[] = [];
@@ -1298,8 +1392,8 @@ export async function handleFleetTeardown(
         } catch {
           break;
         }
-        const activeRemaining = currentAgents.filter(
-          (a) => targetCategories.has(a.category) && a.status === "running"
+        const activeRemaining = resolveTeardownAgents(currentAgents, targetCategories, registry).filter(
+          (a) => a.status === "running"
         );
         if (activeRemaining.length === 0) {
           break;
@@ -1309,7 +1403,7 @@ export async function handleFleetTeardown(
       // Refresh agents to teardown after draining
       try {
         const refreshed = await fetchPaseoAgents(context);
-        agentsToTeardown = refreshed.filter((a) => targetCategories.has(a.category));
+        agentsToTeardown = resolveTeardownAgents(refreshed, targetCategories, registry);
       } catch {}
     }
 
