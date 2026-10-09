@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import os from "node:os";
+import { basename, dirname, resolve } from "node:path";
 import { promisify } from "node:util";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import { canonicalDescriptorsToRegistry } from "./workspace-lookup.js";
+
+type PaseoApi = PluginHandlerContext["paseo"];
 
 /**
  * Worktree-only dispatch guard (#918).
@@ -225,39 +227,32 @@ export interface DaemonWorkspaceRegistry {
   projects: Array<{ projectId?: string; rootPath?: string }>;
 }
 
-function resolvePaseoDir(): string {
-  const override = process.env.PASEO_DIR?.trim();
-  if (override) return override;
-  if (process.env.NODE_ENV === "test") {
-    return join(os.tmpdir(), `paseo-test-isolated-workspace-${process.pid}`);
-  }
-  return join(process.env.HOME || os.homedir(), ".paseo");
-}
-
-function readJsonArray<T>(path: string): T[] {
-  try {
-    if (!existsSync(path)) return [];
-    const parsed = JSON.parse(readFileSync(path, "utf-8"));
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function loadDaemonWorkspaceRegistry(override?: Partial<DaemonWorkspaceRegistry>): DaemonWorkspaceRegistry {
+/**
+ * Loads the workspace/project records the guard reasons over. Production reads
+ * them from the daemon RPC (canonical authority); tests may inject records
+ * directly. There is no fallback to scraping the on-disk registry.
+ */
+async function loadDaemonWorkspaceRegistry(
+  paseo: PaseoApi | undefined,
+  override?: Partial<DaemonWorkspaceRegistry>,
+): Promise<DaemonWorkspaceRegistry> {
   if (override?.workspaces || override?.projects) {
     return {
       workspaces: override.workspaces ?? [],
       projects: override.projects ?? [],
     };
   }
-  const projectsDir = join(resolvePaseoDir(), "projects");
-  const workspacesPath = process.env.PASEO_WORKSPACES_PATH || join(projectsDir, "workspaces.json");
-  const projectsPath = process.env.PASEO_PROJECTS_PATH || join(projectsDir, "projects.json");
-  return {
-    workspaces: readJsonArray(workspacesPath),
-    projects: readJsonArray(projectsPath),
-  };
+  if (typeof paseo?.workspaces?.list === "function") {
+    try {
+      const listed = await paseo.workspaces.list({});
+      return canonicalDescriptorsToRegistry(listed?.entries);
+    } catch {
+      // Abstain rather than crash the spawn: the guard refuses only on
+      // positive evidence, and a failed probe is not evidence.
+      return { workspaces: [], projects: [] };
+    }
+  }
+  return { workspaces: [], projects: [] };
 }
 
 /**
@@ -268,7 +263,8 @@ function loadDaemonWorkspaceRegistry(override?: Partial<DaemonWorkspaceRegistry>
  */
 export async function resolveWorkerWorkspaceContext(
   options: { cwd?: string; workspaceId?: string },
-  registryOverride?: Partial<DaemonWorkspaceRegistry>
+  registryOverride?: Partial<DaemonWorkspaceRegistry>,
+  paseo?: PaseoApi,
 ): Promise<{
   cwd?: string;
   workspaceId?: string;
@@ -281,7 +277,7 @@ export async function resolveWorkerWorkspaceContext(
   let projectRootPath: string | undefined;
 
   if (options.workspaceId) {
-    const registry = loadDaemonWorkspaceRegistry(registryOverride);
+    const registry = await loadDaemonWorkspaceRegistry(paseo, registryOverride);
     workspaceRecord = registry.workspaces.find(
       (w) => w.workspaceId === options.workspaceId
     );
@@ -310,14 +306,16 @@ export async function resolveWorkerWorkspaceContext(
  */
 export async function evaluateWorkerSpawnWorkspace(
   options: { category?: "front-desk" | "orchestrator" | "worker"; cwd?: string; workspaceId?: string },
-  registryOverride?: Partial<DaemonWorkspaceRegistry>
+  registryOverride?: Partial<DaemonWorkspaceRegistry>,
+  paseo?: PaseoApi,
 ): Promise<WorkerWorkspaceGuardDecision> {
   if (options.category !== "worker") {
     return { allowed: true, reason: "worktree-only dispatch guard applies to worker spawns only" };
   }
   const context = await resolveWorkerWorkspaceContext(
     { cwd: options.cwd, workspaceId: options.workspaceId },
-    registryOverride
+    registryOverride,
+    paseo,
   );
   return evaluateWorkerWorkspaceGuard({ ...options, ...context });
 }

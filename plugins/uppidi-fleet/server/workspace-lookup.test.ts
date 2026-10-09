@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveWorkspaceForRepo, type WorkspaceRecord, type ProjectRecord } from "./workspace-lookup.js";
+import { resolveWorkspaceForRepo, resolveWorkspaceForRepoViaDaemon, WorkspaceResolutionError, type WorkspaceRecord, type ProjectRecord } from "./workspace-lookup.js";
 import { resolveHostHome } from "./role-models.js";
 
 describe("workspace-lookup deterministic resolution (#793)", () => {
@@ -90,23 +90,29 @@ describe("workspace-lookup deterministic resolution (#793)", () => {
     assert.equal(res.workspaceId, "wks_paseo_main");
   });
 
-  it("penalizes archived workspaces heavily", () => {
-    const onlyArchived: WorkspaceRecord[] = [
+  it("still resolves an archived-only match but prefers a live match when present", () => {
+    const archived: WorkspaceRecord[] = [
       {
         workspaceId: "wks_archived",
         projectId: "prj_paseo",
-        cwd: "/home/user/code/old-paseo",
+        cwd: "/home/user/code/paseo-old",
+        displayName: "paseo",
         archivedAt: "2026-01-01T00:00:00Z",
       },
     ];
-    const res = resolveWorkspaceForRepo("xpufx-org/paseo", {
-      workspacesData: onlyArchived,
+    const only = resolveWorkspaceForRepo("xpufx-org/paseo", {
+      workspacesData: archived,
       projectsData: sampleProjects,
     });
-    // Still resolves if it's the only match, but score is penalized
-    assert.ok(res);
-    assert.equal(res.workspaceId, "wks_archived");
-    assert.ok((res.score ?? 0) < 600);
+    assert.ok(only);
+    assert.equal(only.workspaceId, "wks_archived");
+
+    const withLive = resolveWorkspaceForRepo("xpufx-org/paseo", {
+      workspacesData: [...sampleWorkspaces, ...archived],
+      projectsData: sampleProjects,
+    });
+    assert.ok(withLive);
+    assert.equal(withLive.workspaceId, "wks_paseo_main");
   });
 
   it("matches repo basename to project displayName", () => {
@@ -164,73 +170,131 @@ describe("host home resolution under agent-mux profiles (#973)", () => {
     delete process.env.REAL_HOME;
     assert.equal(resolveHostHome(), "/home/user");
   });
+});
 
-  it("reads the host ~/.paseo registry when HOME is a profile directory (#973)", () => {
-    const realHome = mkdtempSync(join(tmpdir(), "paseo-host-home-"));
+describe("canonical daemon workspace resolution (#1159)", () => {
+  const originalEnv = {
+    HOME: process.env.HOME,
+    REAL_HOME: process.env.REAL_HOME,
+    NODE_ENV: process.env.NODE_ENV,
+  };
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const paseoWith = (
+    entries: any[],
+    openImpl?: (input: { cwd: string }) => Promise<any>,
+  ): any => ({
+    workspaces: {
+      list: async () => ({ entries }),
+      open:
+        openImpl ??
+        (async ({ cwd }: { cwd: string }) => ({ id: "wks_opened", directory: cwd, projectId: "prj_opened" })),
+    },
+  });
+
+  const paseoKey = "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo";
+
+  it("matches the root checkout from the daemon RPC deterministically", async () => {
+    const res = await resolveWorkspaceForRepoViaDaemon(
+      "forge.mrs.uppidi.com/xpufx-org/paseo",
+      paseoWith([
+        {
+          id: "wks_worktree",
+          projectId: "prj_paseo",
+          projectRootPath: "/home/user/code/paseo",
+          workspaceDirectory: "/home/user/.paseo/worktrees/abc/feat-1",
+          workspaceKind: "worktree",
+          name: "feat-1",
+          gitRuntime: { isPaseoOwnedWorktree: true },
+          project: { projectKey: paseoKey },
+        },
+        {
+          id: "wks_main",
+          projectId: "prj_paseo",
+          projectRootPath: "/home/user/code/paseo",
+          workspaceDirectory: "/home/user/code/paseo",
+          workspaceKind: "checkout",
+          name: "main",
+          gitRuntime: { isPaseoOwnedWorktree: false },
+          project: { projectKey: paseoKey },
+        },
+      ]),
+      { candidateDir: () => undefined },
+    );
+    assert.ok(res);
+    assert.equal(res?.workspaceId, "wks_main");
+    assert.equal(res?.cwd, "/home/user/code/paseo");
+  });
+
+  it("provisions the ambient workspace through workspaces.open when nothing matches", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "paseo-ambient-"));
+    try {
+      let openedCwd: string | undefined;
+      const res = await resolveWorkspaceForRepoViaDaemon(
+        "xpufx-org/paseo",
+        paseoWith([], async ({ cwd }: { cwd: string }) => {
+          openedCwd = cwd;
+          return { id: "wks_ambient", directory: cwd, projectId: "prj_ambient" };
+        }),
+        { candidateDir: () => repoDir },
+      );
+      assert.equal(openedCwd, repoDir);
+      assert.equal(res?.workspaceId, "wks_ambient");
+      assert.equal(res?.cwd, repoDir);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  });
+
+  it("returns null (fail fast) when neither the daemon nor a host checkout has the workspace", async () => {
+    const res = await resolveWorkspaceForRepoViaDaemon(
+      "xpufx-org/does-not-exist",
+      paseoWith([]),
+      { candidateDir: () => undefined },
+    );
+    assert.equal(res, null);
+  });
+
+  it("never parses ~/.paseo/projects/workspaces.json", async () => {
+    const realHome = mkdtempSync(join(tmpdir(), "paseo-no-registry-"));
     const repoDir = join(realHome, "code", "paseo");
     mkdirSync(repoDir, { recursive: true });
     mkdirSync(join(realHome, ".paseo", "projects"), { recursive: true });
     writeFileSync(
       join(realHome, ".paseo", "projects", "workspaces.json"),
-      JSON.stringify([{ workspaceId: "ws-host", cwd: repoDir, displayName: "main" }]),
+      JSON.stringify([{ workspaceId: "ws-on-disk", cwd: repoDir, displayName: "main" }]),
     );
-
-    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/test-profile";
     process.env.REAL_HOME = realHome;
-    delete process.env.PASEO_DIR;
-    delete process.env.PASEO_WORKSPACES_PATH;
+    process.env.HOME = realHome;
     process.env.NODE_ENV = "production";
     try {
-      const res = resolveWorkspaceForRepo("xpufx-org/paseo");
-      assert.ok(res);
-      assert.equal(res.workspaceId, "ws-host");
-      assert.equal(res.cwd, repoDir);
+      const res = await resolveWorkspaceForRepoViaDaemon("xpufx-org/paseo", paseoWith([]), {
+        candidateDir: () => undefined,
+      });
+      assert.equal(res, null, "an on-disk workspaces.json must not be consulted");
     } finally {
       rmSync(realHome, { recursive: true, force: true });
     }
   });
 
-  it("falls back to the host ~/code/<basename> checkout in a profile session (#987)", () => {
-    const realHome = mkdtempSync(join(tmpdir(), "paseo-host-fallback-"));
-    const repoDir = join(realHome, "code", "paseo");
-    mkdirSync(repoDir, { recursive: true });
-
-    process.env.HOME = "/home/user/.agent-mux/profiles/opencode/test-profile";
-    process.env.REAL_HOME = realHome;
-    delete process.env.PASEO_DIR;
-    delete process.env.PASEO_WORKSPACES_PATH;
-    process.env.NODE_ENV = "production";
-    try {
-      const res = resolveWorkspaceForRepo("xpufx-org/paseo");
-      assert.ok(res, "the host checkout must resolve when no registry exists");
-      assert.equal(res.cwd, repoDir);
-      assert.equal(res.workspaceId, undefined);
-    } finally {
-      rmSync(realHome, { recursive: true, force: true });
-    }
-  });
-
-  it("honors PASEO_DIR as the workspace registry root in CLI contexts (#987)", () => {
-    const paseoDir = mkdtempSync(join(tmpdir(), "paseo-dir-override-"));
-    const repoDir = join(paseoDir, "code", "paseo");
-    mkdirSync(repoDir, { recursive: true });
-    writeFileSync(
-      join(paseoDir, "workspaces.json"),
-      JSON.stringify([{ workspaceId: "ws-paseo-dir", cwd: repoDir, displayName: "paseo" }]),
+  it("surfaces a daemon list failure as an actionable WorkspaceResolutionError", async () => {
+    const paseo: any = {
+      workspaces: {
+        list: async () => {
+          throw new Error("daemon offline");
+        },
+        open: async () => ({ id: "x" }),
+      },
+    };
+    await assert.rejects(
+      () => resolveWorkspaceForRepoViaDaemon("xpufx-org/paseo", paseo, { candidateDir: () => undefined }),
+      (err: any) => err instanceof WorkspaceResolutionError && /daemon offline/.test(err.message),
     );
-
-    const previousPaseoDir = process.env.PASEO_DIR;
-    process.env.PASEO_DIR = paseoDir;
-    delete process.env.PASEO_WORKSPACES_PATH;
-    try {
-      const res = resolveWorkspaceForRepo("xpufx-org/paseo");
-      assert.ok(res);
-      assert.equal(res.workspaceId, "ws-paseo-dir");
-      assert.equal(res.cwd, repoDir);
-    } finally {
-      if (previousPaseoDir === undefined) delete process.env.PASEO_DIR;
-      else process.env.PASEO_DIR = previousPaseoDir;
-      rmSync(paseoDir, { recursive: true, force: true });
-    }
   });
 });

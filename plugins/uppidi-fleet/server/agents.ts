@@ -67,7 +67,13 @@ import {
   saveRouterConfig,
 } from "./hook-router.js";
 import { resolveHookAuthPosture, resolveHookEndpoint } from "./hook.js";
-import { resolveWorkspaceForRepo } from "./workspace-lookup.js";
+import {
+  candidateHostCheckoutDir,
+  resolveWorkspaceForRepo,
+  resolveWorkspaceForRepoViaDaemon,
+  workspaceNotFoundError,
+  type ResolvedWorkspace,
+} from "./workspace-lookup.js";
 import {
   evaluateWorkerSpawnWorkspace,
   WORKER_PRIMARY_CHECKOUT_ERROR,
@@ -2465,6 +2471,8 @@ export async function spawnPaseoAgent(
     model?: string;
     cwd?: string;
     workspaceId?: string;
+    /** Repository slug, used to make workspace fail-fast errors actionable. */
+    repo?: string;
     labels?: Record<string, string>;
     /** Declarative capability grant applied at/after spawn (#537). */
     capabilities?: SpawnCapabilities;
@@ -2483,17 +2491,30 @@ export async function spawnPaseoAgent(
 
   // Worktree-only dispatch (#918): a worker must never be handed the primary
   // checkout. Refuse before any SDK/CLI call so the invalid spawn cannot start.
-  const workspaceGuard = await evaluateWorkerSpawnWorkspace({
-    category: options.category,
-    cwd: options.cwd,
-    workspaceId: options.workspaceId,
-  });
+  const workspaceGuard = await evaluateWorkerSpawnWorkspace(
+    {
+      category: options.category,
+      cwd: options.cwd,
+      workspaceId: options.workspaceId,
+    },
+    undefined,
+    context?.paseo,
+  );
   if (!workspaceGuard.allowed) {
     appendHookLog(`[warn] worktree-only-dispatch: rejected: ${workspaceGuard.reason}`);
     console.warn(`[uppidi-fleet:agents] worktree-only-dispatch rejected: ${workspaceGuard.reason}`);
     return { ok: false, error: workspaceGuard.error || WORKER_PRIMARY_CHECKOUT_ERROR };
   }
   appendHookLog(`[info] worktree-only-dispatch: allowed: ${workspaceGuard.reason}`);
+
+  // Canonical workspace requirement (#1159): an orchestrator must be placed in
+  // a concrete workspace. If neither a cwd nor a workspaceId resolved, fail
+  // fast instead of letting the daemon fall back to an arbitrary default.
+  if (options.category === "orchestrator" && !options.cwd && !options.workspaceId) {
+    const error = workspaceNotFoundError(options.repo ?? "unknown").message;
+    appendHookLog(`[warn] workspace-resolution: rejected: ${error}`);
+    return { ok: false, error };
+  }
 
   const categoryKey = options.category === "front-desk" ? "front-desk" : "orchestrator";
   let resolvedModel = options.model?.trim();
@@ -2592,10 +2613,13 @@ export async function spawnPaseoAgent(
     if (spawnMode) {
       args.push("--mode", spawnMode);
     }
-    if (options.workspaceId) {
-      args.push("--workspace", options.workspaceId);
-    } else if (options.cwd) {
+    // Canonical ambient resolution: `--cwd` lets the daemon attach or create
+    // the workspace deterministically. A raw `--workspace` id can be stale
+    // (tombstoned worktree), so only fall back to it when no cwd is known.
+    if (options.cwd) {
       args.push("--cwd", options.cwd);
+    } else if (options.workspaceId) {
+      args.push("--workspace", options.workspaceId);
     }
     if (options.labels) {
       for (const [k, v] of Object.entries(options.labels)) {
@@ -2828,65 +2852,42 @@ export async function resolveRepoWorkspace(
   repo: string,
   context?: PluginHandlerContext
 ): Promise<{ cwd?: string; workspaceId?: string }> {
-  // 0. Deterministically match repository against daemon workspaces.json (#793)
-  // When execFileAsync is mocked in tests, prefer the mock to preserve test isolation.
-  if (execFileAsync === defaultExecFileAsync) {
-    const deterministicMatch = resolveWorkspaceForRepo(repo);
-    if (deterministicMatch?.cwd || deterministicMatch?.workspaceId) {
-      return {
-        cwd: deterministicMatch.cwd,
-        workspaceId: deterministicMatch.workspaceId,
-      };
-    }
-  }
+  const raw = repo?.trim();
+  if (!raw) return {};
 
-  const parts = repo.split("/");
-  const repoBasename = parts[parts.length - 1] || repo;
-
-  // 1. Try querying Paseo workspaces via CLI
-  try {
-    const { stdout } = await execFileAsync("paseo", ["workspace", "ls", "--json"], { timeout: 5000 });
-    const list = JSON.parse(stdout);
-    if (Array.isArray(list)) {
-      const matches = list.filter((w: any) => {
-        const proj = String(w.project || "").toLowerCase();
-        const name = String(w.name || "").toLowerCase();
-        const base = repoBasename.toLowerCase();
-        return isRepoMatching(proj, repo) || proj === base || name === base;
-      });
-      // Prefer local workspace over ephemeral worktree
-      const match = matches.find((w: any) => w.isolation === "local") || matches[0];
-      const resolvedWorkspaceId = match?.workspaceId || match?.id;
-      if (resolvedWorkspaceId) {
-        return { cwd: match.cwd || match.path, workspaceId: resolvedWorkspaceId };
-      }
-    }
-  } catch (err) {
-    console.warn(`[uppidi-fleet:agents] workspace resolution failed:`, err);
-  }
-
-  // 2. Try matching against existing agents
-  if (context) {
+  // 0. Canonical daemon resolution (#1159): read the daemon workspace list over
+  // RPC, then let the daemon attach/create the ambient workspace from a host
+  // checkout via `workspaces.open`. No `workspaces.json` scraping.
+  const paseo = context?.paseo;
+  if (typeof paseo?.workspaces?.list === "function") {
     try {
-      const agents = await fetchPaseoAgents(context).catch(() => []);
-      const matching = agents.find(
-        (a) => a.cwd && isRepoMatching(a.project || extractAgentProject(a, undefined, getWorkspaceProjectMap()), repo)
-      );
-      if (matching?.cwd && fs.existsSync(matching.cwd)) {
-        return { cwd: matching.cwd, workspaceId: (matching as any).workspaceId };
+      const canonical = await resolveWorkspaceForRepoViaDaemon(raw, paseo);
+      if (canonical?.cwd || canonical?.workspaceId) {
+        return { cwd: canonical.cwd, workspaceId: canonical.workspaceId };
       }
     } catch (err) {
-      console.warn(`[uppidi-fleet:agents] live agent fetch failed:`, err);
+      console.warn(`[uppidi-fleet:agents] canonical workspace resolution failed:`, err);
+      throw err;
     }
   }
 
-  // 3. Fall back to standard ~/code/<repoBasename> path if it exists
-  const home = resolveHostHome();
-  if (home) {
-    const candidate = join(home, "code", repoBasename);
-    if (fs.existsSync(candidate)) {
-      return { cwd: candidate };
+  // 1. Deterministic in-memory match, for injected/test records only.
+  const injected = (context as any)?.workspacesData as any[] | undefined;
+  if (Array.isArray(injected)) {
+    const deterministicMatch: ResolvedWorkspace | null = resolveWorkspaceForRepo(raw, {
+      workspacesData: injected,
+      projectsData: (context as any)?.projectsData,
+    });
+    if (deterministicMatch?.cwd || deterministicMatch?.workspaceId) {
+      return { cwd: deterministicMatch.cwd, workspaceId: deterministicMatch.workspaceId };
     }
+  }
+
+  // 2. Deterministic host checkout path. The daemon attaches/creates the
+  //    workspace when the spawn passes `--cwd` (CLI) or `config.cwd` (SDK).
+  const candidate = candidateHostCheckoutDir(raw);
+  if (candidate && fs.existsSync(candidate)) {
+    return { cwd: candidate };
   }
 
   return {};
@@ -2921,11 +2922,11 @@ export async function handleUppidiAddOrchestrator(
 
     let cwd = input.workspacePath?.trim();
     let workspaceId: string | undefined;
-    const resolved = await resolveRepoWorkspace(repo, context);
     if (!cwd) {
+      const resolved = await resolveRepoWorkspace(repo, context);
       cwd = resolved.cwd;
+      workspaceId = resolved.workspaceId;
     }
-    workspaceId = resolved.workspaceId;
 
     const spawnRes = await spawnPaseoAgent(
       {
@@ -2935,6 +2936,7 @@ export async function handleUppidiAddOrchestrator(
         model: input.model,
         cwd,
         workspaceId,
+        repo,
         callerAgentId: input.callerAgentId,
         labels: {
           role: "orchestrator",

@@ -48,7 +48,7 @@ import {
   type IssuesCheckIo,
   type StaleWipResult,
 } from "./issues-check.js";
-import { resolveWorkspaceForRepo, workspaceRegistryPaths, type ResolvedWorkspace, type WorkspaceLookupOptions } from "./workspace-lookup.js";
+import { resolveWorkspaceForRepo, resolveWorkspaceForRepoViaDaemon, type ResolvedWorkspace, type WorkspaceLookupOptions } from "./workspace-lookup.js";
 import { adjudicatePermission } from "./permission-adjudication.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
 import {
@@ -4797,7 +4797,7 @@ export class HookRouter {
     appendHookLog(message);
   }
 
-  private getPaseo(): PaseoApi | null {
+  public getPaseo(): PaseoApi | null {
     return this.activePaseo ?? (this.server as any)?.paseo ?? null;
   }
 
@@ -5377,7 +5377,7 @@ export class HookRouter {
 
     let repoWorkspaceCwd: string | null = null;
     try {
-      repoWorkspaceCwd = this.resolveWorkspace(repo)?.cwd ?? null;
+      repoWorkspaceCwd = (await this.resolveWorkspaceCanonical(repo))?.cwd ?? null;
     } catch {
       repoWorkspaceCwd = null;
     }
@@ -5427,16 +5427,25 @@ export class HookRouter {
     return {
       workspacesData: this.options?.workspacesData,
       projectsData: this.options?.projectsData,
-      workspacesPath: this.options?.workspacesPath,
-      projectsPath: this.options?.projectsPath,
-      paseoDir:
-        this.options?.paseoDir ||
-        (this.isTestMode ? join(os.tmpdir(), `paseo-test-isolated-${process.pid}`) : undefined),
     };
   }
 
   public resolveWorkspace(repo: string): ResolvedWorkspace | null {
     return resolveWorkspaceForRepo(repo, this.workspaceLookupOptions());
+  }
+
+  /**
+   * Canonical resolver used by daemon-aware async paths: injected records first
+   * (tests), then the daemon RPC (`workspaces.list` / `workspaces.open`).
+   */
+  private async resolveWorkspaceCanonical(repo: string): Promise<ResolvedWorkspace | null> {
+    const injected = this.resolveWorkspace(repo);
+    if (injected) return injected;
+    const paseo = this.getPaseo();
+    if (typeof paseo?.workspaces?.list === "function") {
+      return resolveWorkspaceForRepoViaDaemon(repo, paseo);
+    }
+    return null;
   }
 
   private async getProviderModeInfo(provider: string): Promise<ProviderModeInfo | null> {
@@ -5702,15 +5711,19 @@ export class HookRouter {
   ): Promise<EnsureOrchestratorResult> {
     const canonicalKey = canonicalRepoKey(repo) ?? repo;
 
-    // A. Resolve workspace deterministically
-    const resolved = this.resolveWorkspace(repo);
+    // A. Resolve workspace canonically: daemon RPC is the sole authority.
+    let resolved: ResolvedWorkspace | null = null;
+    try {
+      resolved = await this.resolveWorkspaceCanonical(repo);
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      this.log(`[warn] ${error}`);
+      return { ok: false, errorCode: "workspace_not_found", error, repo };
+    }
     if (!resolved || (!resolved.cwd && !resolved.workspaceId)) {
-      const searched = workspaceRegistryPaths(this.workspaceLookupOptions());
-      const registryHint = searched.length > 0 ? searched.join(", ") : "(no registry path configured)";
       const error =
-        `No workspace found for repository "${repo}": no matching root/workspace in the workspace registry ` +
-        `(${registryHint}). Remediation: open/register the repository in Paseo so a workspace is persisted, ` +
-        `or set PASEO_DIR/PASEO_WORKSPACES_PATH to the registry that contains it, then retry.`;
+        `No workspace found for repository "${repo}". Remediation: open/register the repository in Paseo ` +
+        `(e.g. \`paseo workspace open --cwd <repo_dir>\`), then retry.`;
       this.log(`[warn] ${error}`);
       return {
         ok: false,
@@ -5897,8 +5910,10 @@ export class HookRouter {
           if (targetProvider) args.push("--provider", targetProvider);
           if (targetModel) args.push("--model", targetModel);
           if (targetMode) args.push("--mode", targetMode);
-          if (resolved.workspaceId) args.push("--workspace", resolved.workspaceId);
+          // `--cwd` is the canonical placement: it lets the daemon attach or
+          // create the ambient workspace and avoids stale `--workspace` ids.
           if (resolved.cwd) args.push("--cwd", resolved.cwd);
+          else if (resolved.workspaceId) args.push("--workspace", resolved.workspaceId);
           for (const [k, v] of Object.entries(labels)) {
             args.push("--label", `${k}=${v}`);
           }

@@ -842,11 +842,15 @@ export async function executeFleetValidateWorkspace(
     };
   }
 
-  const decision = await evaluateWorkerSpawnWorkspace({
-    category: "worker",
-    cwd: pathArg || undefined,
-    workspaceId: workspaceId || undefined,
-  });
+  const decision = await evaluateWorkerSpawnWorkspace(
+    {
+      category: "worker",
+      cwd: pathArg || undefined,
+      workspaceId: workspaceId || undefined,
+    },
+    undefined,
+    getActiveHookRouter()?.getPaseo() ?? undefined,
+  );
   const payload = {
     ok: decision.allowed,
     path: pathArg || undefined,

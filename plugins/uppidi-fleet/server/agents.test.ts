@@ -43,6 +43,7 @@ import {
   checkRepoMainDirty,
   isFleetWorker,
   resolveTeardownAgents,
+  handleUppidiAddOrchestrator,
 } from "./agents.js";
 import { HookRouter, setActiveHookRouter } from "./hook-router.js";
 import { DEFAULT_PROJECT } from "../shared/contracts.js";
@@ -1895,5 +1896,32 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
     assert.equal(desk?.roleSource, "name-heuristic");
     assert.equal(desk?.roleDivergent, false);
     assert.equal(res.roleDivergences.length, 0);
+  });
+});
+
+describe("canonical orchestrator spawn resolution (#1159)", () => {
+  const originalHome = process.env.HOME;
+  const originalRealHome = process.env.REAL_HOME;
+
+  afterEach(() => {
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalRealHome === undefined) delete process.env.REAL_HOME;
+    else process.env.REAL_HOME = originalRealHome;
+  });
+
+  it("fails fast with an actionable error when no workspace resolves", async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-add-orch-"));
+    process.env.HOME = home;
+    process.env.REAL_HOME = home;
+    try {
+      const context: any = { paseo: { workspaces: { list: async () => ({ entries: [] }) } } };
+      const res = await handleUppidiAddOrchestrator({ repo: "unknown-org/no-such-repo-xyz" }, context);
+      assert.equal(res.ok, false);
+      assert.match(res.error ?? "", /No workspace found/);
+      assert.match(res.error ?? "", /workspace open --cwd/);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });

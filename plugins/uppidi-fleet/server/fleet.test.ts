@@ -725,6 +725,21 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
     let createdPayload: any = null;
     const mockContext: any = {
       paseo: {
+        workspaces: {
+          list: async () => ({
+            entries: [
+              {
+                id: "wks_aur_main",
+                projectId: "prj_aur",
+                projectRootPath: "/home/user/code/aur-automation",
+                workspaceDirectory: "/home/user/code/aur-automation",
+                workspaceKind: "checkout",
+                name: "main",
+                project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/aur-automation" },
+              },
+            ],
+          }),
+        },
         agents: {
           create: async (opts: any) => {
             createdPayload = opts;
@@ -749,6 +764,8 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
     assert.equal(res.repo, "xpufx-org/aur-automation");
     assert.equal(res.agentId, "agent-orch-created");
     assert.equal(createdPayload?.role, "orchestrator");
+    assert.equal(createdPayload?.cwd, "/home/user/code/aur-automation");
+    assert.equal(createdPayload?.workspaceId, "wks_aur_main");
     assert.ok(createdPayload?.title?.includes("xpufx-org/aur-automation"));
   });
 
@@ -758,6 +775,21 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
 
     const mockContext: any = {
       paseo: {
+        workspaces: {
+          list: async () => ({
+            entries: [
+              {
+                id: "wks_paseo_main",
+                projectId: "prj_paseo",
+                projectRootPath: "/home/user/code/paseo",
+                workspaceDirectory: "/home/user/code/paseo",
+                workspaceKind: "checkout",
+                name: "main",
+                project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo" },
+              },
+            ],
+          }),
+        },
         agents: {
           create: async (opts: any) => {
             createdAgent = opts;
@@ -853,6 +885,21 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
     let createdPayload: any = null;
     const mockContext: any = {
       paseo: {
+        workspaces: {
+          list: async () => ({
+            entries: [
+              {
+                id: "wks_runner_containers",
+                projectId: "prj_runner_containers",
+                projectRootPath: "/home/user/code/runner-containers",
+                workspaceDirectory: "/home/user/code/runner-containers",
+                workspaceKind: "checkout",
+                name: "main",
+                project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/runner-containers" },
+              },
+            ],
+          }),
+        },
         agents: {
           create: async (opts: any) => {
             createdPayload = opts;
@@ -1006,6 +1053,7 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
           prompt: "Supervising workers",
           category: "orchestrator",
           model: "codex/gpt-5.6-luna",
+          cwd: "/home/user/code/paseo",
         },
         {} as any
       );
@@ -1014,6 +1062,7 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
       assert.equal(capturedArgs[capturedArgs.indexOf("--provider") + 1], "codex");
       assert.equal(capturedArgs[capturedArgs.indexOf("--model") + 1], "gpt-5.6-luna");
       assert.equal(capturedArgs.includes("--mode"), false);
+      assert.equal(capturedArgs[capturedArgs.indexOf("--cwd") + 1], "/home/user/code/paseo");
 
       // 3. Explicit provider without model slash
       const resProviderOnly = await spawnPaseoAgent(
@@ -1058,44 +1107,62 @@ describe("fleet roster lifecycle actions and per-repo pause RPCs (#426)", () => 
 });
 
 describe("orchestrator workspace resolution and state isolation (#485, #486)", () => {
-  it("resolveRepoWorkspace extracts workspaceId and prefers local workspace over worktrees", async () => {
-    setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
-      if (cmd === "paseo" && args[0] === "workspace" && args[1] === "ls") {
-        return {
-          stdout: JSON.stringify([
-            {
-              workspaceId: "wks_worktree_1",
-              project: "paseo",
-              name: "fix-branch",
-              isolation: "worktree",
-              cwd: "/home/user/.paseo/worktrees/fix-branch",
-            },
-            {
-              workspaceId: "wks_local_main",
-              project: "paseo",
-              name: "Paseo",
-              isolation: "local",
-              cwd: "/home/user/code/paseo",
-            },
-          ]),
-        };
-      }
-      return { stdout: "[]" };
-    });
+  it("resolveRepoWorkspace resolves workspaceId and prefers the checkout over a worktree", async () => {
+    const context: any = {
+      paseo: {
+        workspaces: {
+          list: async () => ({
+            entries: [
+              {
+                id: "wks_worktree_1",
+                projectId: "prj_paseo",
+                projectRootPath: "/home/user/code/paseo",
+                workspaceDirectory: "/home/user/.paseo/worktrees/fix-branch",
+                workspaceKind: "worktree",
+                name: "fix-branch",
+                gitRuntime: { isPaseoOwnedWorktree: true },
+                project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo" },
+              },
+              {
+                id: "wks_local_main",
+                projectId: "prj_paseo",
+                projectRootPath: "/home/user/code/paseo",
+                workspaceDirectory: "/home/user/code/paseo",
+                workspaceKind: "checkout",
+                name: "Paseo",
+                gitRuntime: { isPaseoOwnedWorktree: false },
+                project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo" },
+              },
+            ],
+          }),
+        },
+      },
+    };
 
-    try {
-      const res = await resolveRepoWorkspace("xpufx-org/paseo");
-      assert.equal(res.workspaceId, "wks_local_main");
-      assert.equal(res.cwd, "/home/user/code/paseo");
-    } finally {
-      setExecFileAsyncForTest(null);
-    }
+    const res = await resolveRepoWorkspace("xpufx-org/paseo", context);
+    assert.equal(res.workspaceId, "wks_local_main");
+    assert.equal(res.cwd, "/home/user/code/paseo");
   });
 
   it("handleUppidiAddOrchestrator supplies workspaceId and default orchestrator skill prompt", async () => {
     let capturedPayload: any = null;
     const mockContext: any = {
       paseo: {
+        workspaces: {
+          list: async () => ({
+            entries: [
+              {
+                id: "wks_sample_repo",
+                projectId: "prj_sample_repo",
+                projectRootPath: "/home/user/code/sample-repo",
+                workspaceDirectory: "/home/user/code/sample-repo",
+                workspaceKind: "checkout",
+                name: "Main",
+                project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/sample-repo" },
+              },
+            ],
+          }),
+        },
         agents: {
           create: async (opts: any) => {
             capturedPayload = opts;
@@ -1112,47 +1179,26 @@ describe("orchestrator workspace resolution and state isolation (#485, #486)", (
       },
     };
 
-    setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
-      if (cmd === "paseo" && args[0] === "workspace" && args[1] === "ls") {
-        return {
-          stdout: JSON.stringify([
-            {
-              workspaceId: "wks_sample_repo",
-              project: "sample-repo",
-              name: "Main",
-              isolation: "local",
-              cwd: "/home/user/code/sample-repo",
-            },
-          ]),
-        };
-      }
-      return { stdout: "[]" };
-    });
+    const res = await handleUppidiAddOrchestrator(
+      { repo: "xpufx-org/sample-repo" },
+      mockContext
+    );
 
-    try {
-      const res = await handleUppidiAddOrchestrator(
-        { repo: "xpufx-org/sample-repo" },
-        mockContext
-      );
-
-      assert.equal(res.ok, true);
-      assert.equal(res.agentId, "agent-orch-skill-test");
-      assert.equal(capturedPayload.workspaceId, "wks_sample_repo");
-      assert.equal(capturedPayload.cwd, "/home/user/code/sample-repo");
-      const orchestratorBundledPath = getBundledSkillPath("orchestrator");
-      assert.ok(orchestratorBundledPath !== null);
-      assert.ok(
-        capturedPayload.prompt.includes("<workspace>/.tmp/"),
-        "prompt inlines the effective orchestrator + coding-agent scratch rule",
-      );
-      assert.ok(
-        !capturedPayload.prompt.includes(orchestratorBundledPath),
-        "prompt must inline skill content rather than point at a permission-gated path",
-      );
-      assert.ok(capturedPayload.prompt.includes("teax"));
-    } finally {
-      setExecFileAsyncForTest(null);
-    }
+    assert.equal(res.ok, true);
+    assert.equal(res.agentId, "agent-orch-skill-test");
+    assert.equal(capturedPayload.workspaceId, "wks_sample_repo");
+    assert.equal(capturedPayload.cwd, "/home/user/code/sample-repo");
+    const orchestratorBundledPath = getBundledSkillPath("orchestrator");
+    assert.ok(orchestratorBundledPath !== null);
+    assert.ok(
+      capturedPayload.prompt.includes("<workspace>/.tmp/"),
+      "prompt inlines the effective orchestrator + coding-agent scratch rule",
+    );
+    assert.ok(
+      !capturedPayload.prompt.includes(orchestratorBundledPath),
+      "prompt must inline skill content rather than point at a permission-gated path",
+    );
+    assert.ok(capturedPayload.prompt.includes("teax"));
   });
 
   it("getPersistedStateDir isolates test state and respects HOOK_STATE_DIR", () => {
@@ -1231,6 +1277,21 @@ describe("two-tier spawn authority guard (#573)", () => {
       let createdPayload: any = null;
       const mockContext: any = {
         paseo: {
+          workspaces: {
+            list: async () => ({
+              entries: [
+                {
+                  id: "wks_paseo_573",
+                  projectId: "prj_paseo_573",
+                  projectRootPath: "/home/user/code/paseo",
+                  workspaceDirectory: "/home/user/code/paseo",
+                  workspaceKind: "checkout",
+                  name: "Paseo",
+                  project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo" },
+                },
+              ],
+            }),
+          },
           agents: {
             create: async (opts: any) => {
               createdPayload = opts;
@@ -1240,34 +1301,13 @@ describe("two-tier spawn authority guard (#573)", () => {
         },
       };
 
-      setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
-        if (cmd === "paseo" && args[0] === "workspace" && args[1] === "ls") {
-          return {
-            stdout: JSON.stringify([
-              {
-                workspaceId: "wks_paseo_573",
-                project: "paseo",
-                name: "Paseo",
-                isolation: "local",
-                cwd: "/home/user/code/paseo",
-              },
-            ]),
-          };
-        }
-        return { stdout: "[]" };
-      });
-
-      try {
-        const res = await handleUppidiAddOrchestrator(
-          { repo: "xpufx-org/paseo", callerAgentId: DESK },
-          mockContext
-        );
-        assert.equal(res.ok, true);
-        assert.equal(res.agentId, "orch-desk-573");
-        assert.equal(createdPayload.workspaceId, "wks_paseo_573");
-      } finally {
-        setExecFileAsyncForTest(null);
-      }
+      const res = await handleUppidiAddOrchestrator(
+        { repo: "xpufx-org/paseo", callerAgentId: DESK },
+        mockContext
+      );
+      assert.equal(res.ok, true);
+      assert.equal(res.agentId, "orch-desk-573");
+      assert.equal(createdPayload.workspaceId, "wks_paseo_573");
     });
   });
 
@@ -1275,6 +1315,21 @@ describe("two-tier spawn authority guard (#573)", () => {
     await withPersistedFrontDesk(async () => {
       const mockContext: any = {
         paseo: {
+          workspaces: {
+            list: async () => ({
+              entries: [
+                {
+                  id: "wks_aur_573",
+                  projectId: "prj_aur_573",
+                  projectRootPath: "/home/user/code/aur-automation",
+                  workspaceDirectory: "/home/user/code/aur-automation",
+                  workspaceKind: "checkout",
+                  name: "main",
+                  project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/aur-automation" },
+                },
+              ],
+            }),
+          },
           agents: {
             list: async () => ({ entries: [] }),
             create: async () => ({ agent: { id: "orch-self-573" } }),
@@ -1282,17 +1337,12 @@ describe("two-tier spawn authority guard (#573)", () => {
         },
       };
 
-      setExecFileAsyncForTest(async () => ({ stdout: "[]" }));
-      try {
-        const res = await handleUppidiAddOrchestrator(
-          { repo: "xpufx-org/aur-automation" },
-          mockContext
-        );
-        assert.equal(res.ok, true);
-        assert.equal(res.agentId, "orch-self-573");
-      } finally {
-        setExecFileAsyncForTest(null);
-      }
+      const res = await handleUppidiAddOrchestrator(
+        { repo: "xpufx-org/aur-automation" },
+        mockContext
+      );
+      assert.equal(res.ok, true);
+      assert.equal(res.agentId, "orch-self-573");
     });
   });
 

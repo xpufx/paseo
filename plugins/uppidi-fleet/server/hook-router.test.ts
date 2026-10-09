@@ -5872,8 +5872,8 @@ describe("hook-router ensure-orchestrator deterministic resolution and idempoten
     assert.equal(notFoundBody.ok, false);
     assert.equal(notFoundBody.errorCode, "workspace_not_found");
     assert.match(notFoundBody.error, /No workspace found for repository "unknown\/repo"/);
-    assert.match(notFoundBody.error, /workspaces\.json/);
     assert.match(notFoundBody.error, /Remediation:/);
+    assert.match(notFoundBody.error, /workspace open --cwd/);
     assert.equal(
       router.readOrchestrator("unknown/repo"),
       null,

@@ -1,9 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
-import os from "node:os";
-import { candidateRepoKeys, canonicalRepoKey, normalizeRepoKey } from "./hook-router.js";
+import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import { candidateRepoKeys, canonicalRepoKey, normalizeRepoKey } from "../shared/repo-identity.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
 import { resolveHostHome } from "./role-models.js";
+
+type PaseoApi = PluginHandlerContext["paseo"];
 
 export interface WorkspaceRecord {
   workspaceId: string;
@@ -42,55 +44,146 @@ export interface ResolvedWorkspace {
 }
 
 export interface WorkspaceLookupOptions {
-  workspacesPath?: string;
-  projectsPath?: string;
-  paseoDir?: string;
   workspacesData?: WorkspaceRecord[];
   projectsData?: ProjectRecord[];
+  /** Canonical daemon client; used by the async daemon-backed resolver. */
+  paseo?: PaseoApi;
+}
+
+/** Shape of a daemon `workspaces.list()` entry (canonical authority). */
+export interface CanonicalWorkspaceDescriptor {
+  id?: string;
+  workspaceId?: string;
+  projectId?: string | null;
+  projectDisplayName?: string | null;
+  projectRootPath?: string | null;
+  workspaceDirectory?: string | null;
+  cwd?: string | null;
+  workspaceKind?: string | null;
+  kind?: string | null;
+  name?: string | null;
+  title?: string | null;
+  archivingAt?: string | null;
+  archivedAt?: string | null;
+  gitRuntime?: { isPaseoOwnedWorktree?: boolean | null; remoteUrl?: string | null } | null;
+  project?: {
+    projectKey?: string | null;
+    projectName?: string | null;
+    workspaceName?: string | null;
+  } | null;
+  [key: string]: any;
 }
 
 /**
- * The Paseo data directory the lookup reads from. Under an agent-mux profile
- * `HOME` is the profile directory, so this must resolve against the host home
- * (`REAL_HOME`) to find the live `~/.paseo` (#973).
+ * Raised when workspace resolution goes through the daemon and no usable
+ * workspace exists. Callers must surface this to the operator instead of
+ * silently degrading to a speculative path.
  */
-export function resolvePaseoDir(options?: WorkspaceLookupOptions): string {
-  if (options?.paseoDir) return options.paseoDir;
-  if (process.env.PASEO_DIR) return process.env.PASEO_DIR;
-  if (process.env.NODE_ENV === "test") {
-    return join(os.tmpdir(), `paseo-test-isolated-workspace-${process.pid}`);
+export class WorkspaceResolutionError extends Error {
+  readonly repo: string;
+  constructor(repo: string, message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "WorkspaceResolutionError";
+    this.repo = repo;
   }
-  return join(resolveHostHome(), ".paseo");
 }
 
-/** Ordered workspace-registry paths probed by the lookup, exposed for diagnostics (#973). */
-export function workspaceRegistryPaths(options?: WorkspaceLookupOptions): string[] {
-  const paseoDir = resolvePaseoDir(options);
-  return [
-    options?.workspacesPath,
-    process.env.PASEO_WORKSPACES_PATH,
-    join(paseoDir, "projects", "workspaces.json"),
-    join(paseoDir, "workspaces.json"),
-  ].filter(Boolean) as string[];
-}
+/** Remediation text shared by every fail-fast workspace error. */
+export const WORKSPACE_NOT_FOUND_REMEDIATION =
+  "open/register the repository in Paseo (e.g. `paseo workspace create` for an isolated worktree, or `paseo workspace open --cwd <repo_dir>`), then retry";
 
-/** Ordered project-registry paths probed by the lookup, exposed for diagnostics (#973). */
-export function projectRegistryPaths(options?: WorkspaceLookupOptions): string[] {
-  const paseoDir = resolvePaseoDir(options);
-  return [
-    options?.projectsPath,
-    process.env.PASEO_PROJECTS_PATH,
-    join(paseoDir, "projects", "projects.json"),
-    join(paseoDir, "projects.json"),
-  ].filter(Boolean) as string[];
+export function workspaceNotFoundError(repo: string): WorkspaceResolutionError {
+  return new WorkspaceResolutionError(
+    repo,
+    `No workspace found for repository "${repo}": the daemon has no matching workspace and no host checkout ` +
+      `at ~/code/<repo>. ${WORKSPACE_NOT_FOUND_REMEDIATION}.`,
+  );
 }
 
 /**
- * Deterministically resolves a repository slug to a daemon workspace.
- *
- * Inspects `~/.paseo/projects/workspaces.json` and `projects.json`, ranking
- * candidates by slug match accuracy, unarchived status, and root workspace role
- * (prioritizing primary repository checkouts over ephemeral issue worktrees).
+ * Normalizes canonical daemon workspace descriptors into the record shape used
+ * by the pure matcher. This is the only translation between RPC payloads and
+ * the resolver, so it is the single place a daemon schema change lands.
+ */
+export function canonicalDescriptorsToRegistry(
+  entries: readonly CanonicalWorkspaceDescriptor[] | null | undefined,
+): { workspaces: WorkspaceRecord[]; projects: ProjectRecord[] } {
+  const workspaces: WorkspaceRecord[] = [];
+  const projectsById = new Map<string, ProjectRecord>();
+
+  for (const entry of entries ?? []) {
+    if (!entry) continue;
+    const workspaceId = entry.id ?? entry.workspaceId;
+    const cwd = entry.workspaceDirectory ?? entry.cwd ?? entry.projectRootPath;
+    if (!workspaceId || !cwd) continue;
+
+    const projectId = entry.projectId ?? undefined;
+    const isWorktree = entry.gitRuntime?.isPaseoOwnedWorktree === true;
+
+    workspaces.push({
+      workspaceId,
+      projectId,
+      cwd,
+      mainRepoRoot: isWorktree ? entry.projectRootPath ?? null : null,
+      worktreeRoot: isWorktree ? cwd : null,
+      displayName: entry.title ?? entry.name ?? entry.project?.workspaceName ?? null,
+      archivedAt: entry.archivingAt ?? entry.archivedAt ?? null,
+      kind: entry.workspaceKind ?? entry.kind ?? undefined,
+      isPaseoOwnedWorktree: entry.gitRuntime?.isPaseoOwnedWorktree ?? undefined,
+    });
+
+    if (projectId && !projectsById.has(projectId)) {
+      projectsById.set(projectId, {
+        projectId,
+        displayName: entry.projectDisplayName ?? entry.project?.projectName ?? undefined,
+        projectKey: entry.project?.projectKey ?? undefined,
+        rootPath: entry.projectRootPath ?? undefined,
+        archivedAt: null,
+      });
+    }
+  }
+
+  return { workspaces, projects: [...projectsById.values()] };
+}
+
+function isWorktreeRecord(workspace: WorkspaceRecord): boolean {
+  return Boolean(
+    workspace.isPaseoOwnedWorktree ||
+      workspace.mainRepoRoot ||
+      workspace.isolation === "worktree" ||
+      workspace.kind === "worktree" ||
+      workspace.cwd.includes("/.paseo/worktrees/"),
+  );
+}
+
+function workspaceCandidateKeys(workspace: WorkspaceRecord, project?: ProjectRecord): string[] {
+  const keys = new Set<string>();
+  const add = (value?: string | null): void => {
+    if (!value) return;
+    const normalized = normalizeRepoKey(value);
+    if (normalized) keys.add(normalized.toLowerCase());
+    const canonical = canonicalRepoKey(value);
+    if (canonical) keys.add(canonical.toLowerCase());
+  };
+
+  add(project?.projectKey ?? undefined);
+  if (typeof workspace.projectId === "string" && workspace.projectId.startsWith("remote:")) {
+    add(workspace.projectId);
+  }
+  add(workspace.mainRepoRoot);
+  add(project?.rootPath);
+  add(workspace.cwd);
+  add(workspace.displayName);
+  add(project?.displayName);
+
+  return [...keys];
+}
+
+/**
+ * Deterministic matcher over already-resolved daemon records. There is no
+ * point scoring and no tombstone guessing: candidates are ordered by explicit
+ * precedence (live before archived, root checkout before worktree, newest
+ * first) and the first match wins.
  */
 export function resolveWorkspaceForRepo(
   rawRepo: string,
@@ -101,222 +194,136 @@ export function resolveWorkspaceForRepo(
   }
 
   const repo = rawRepo.trim();
-  const repoCandidates = candidateRepoKeys(repo).map((s) => s.toLowerCase());
-  const norm = (normalizeRepoKey(repo) ?? repo).toLowerCase();
-  const repoBasename = basename(repo).replace(/\.git$/, "").toLowerCase();
-
-  let workspaces: WorkspaceRecord[] = [];
-  if (Array.isArray(options?.workspacesData)) {
-    workspaces = options.workspacesData;
-  } else {
-    const candidatePaths = workspaceRegistryPaths(options);
-
-    for (const p of candidatePaths) {
-      if (existsSync(p)) {
-        try {
-          const raw = readFileSync(p, "utf-8");
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            workspaces = parsed;
-            break;
-          }
-        } catch {
-          // ignore corrupted or unreadable workspace files
-        }
-      }
-    }
+  const workspaces = Array.isArray(options?.workspacesData) ? options.workspacesData : [];
+  if (workspaces.length === 0) {
+    return null;
   }
-
-  let projects: ProjectRecord[] = [];
-  if (Array.isArray(options?.projectsData)) {
-    projects = options.projectsData;
-  } else {
-    const candidatePaths = projectRegistryPaths(options);
-
-    for (const p of candidatePaths) {
-      if (existsSync(p)) {
-        try {
-          const raw = readFileSync(p, "utf-8");
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) {
-            projects = parsed;
-            break;
-          }
-        } catch {
-          // ignore corrupted or unreadable project files
-        }
-      }
-    }
-  }
-
+  const projects = Array.isArray(options?.projectsData) ? options.projectsData : [];
   const projectsById = new Map<string, ProjectRecord>();
-  for (const proj of projects) {
-    if (proj?.projectId) {
-      projectsById.set(proj.projectId, proj);
-    }
+  for (const project of projects) {
+    if (project?.projectId) projectsById.set(project.projectId, project);
   }
 
-  interface ScoredCandidate {
-    workspace: WorkspaceRecord;
-    project?: ProjectRecord;
-    score: number;
+  const targetKeys = new Set<string>();
+  for (const candidate of candidateRepoKeys(repo)) {
+    const normalized = normalizeRepoKey(candidate);
+    if (normalized) targetKeys.add(normalized.toLowerCase());
+    const canonical = canonicalRepoKey(candidate);
+    if (canonical) targetKeys.add(canonical.toLowerCase());
   }
+  const repoBasename = basename(repo.replace(/\.git$/, "")).toLowerCase();
 
-  const scoredCandidates: ScoredCandidate[] = [];
-
-  for (const w of workspaces) {
-    if (!w || !w.workspaceId || !w.cwd) continue;
-    const project = w.projectId ? projectsById.get(w.projectId) : undefined;
-
-    let score = 0;
-
-    // 1. Match against projectKey if available
-    if (project?.projectKey) {
-      const rawPk = project.projectKey.trim();
-      const cleanPk = rawPk
-        .replace(/^remote:/, "")
-        .replace(/:\d+\//, "/")
-        .replace(/\.git$/, "")
-        .toLowerCase();
-      const pkSlug = cleanPk.includes("/")
-        ? cleanPk.split("/").slice(1).join("/") || cleanPk
-        : cleanPk;
-
-      if (cleanPk === norm || cleanPk === repo.toLowerCase()) {
-        score = Math.max(score, 1000);
-      } else if (pkSlug === norm || pkSlug === repo.toLowerCase()) {
-        score = Math.max(score, 950);
-      } else if (repoCandidates.includes(cleanPk) || repoCandidates.includes(pkSlug)) {
-        score = Math.max(score, 850);
-      } else if (isRepoMatching(repo, rawPk) || isRepoMatching(repo, cleanPk)) {
-        score = Math.max(score, 750);
-      }
-    }
-
-    // 2. Match against w.projectId if remote URL string
-    if (typeof w.projectId === "string" && w.projectId.startsWith("remote:")) {
-      const cleanWp = w.projectId
-        .replace(/^remote:/, "")
-        .replace(/:\d+\//, "/")
-        .replace(/\.git$/, "")
-        .toLowerCase();
-      if (cleanWp === norm || cleanWp.includes(norm)) {
-        score = Math.max(score, 700);
-      } else if (isRepoMatching(repo, w.projectId)) {
-        score = Math.max(score, 650);
-      }
-    }
-
-    // 3. Match against project displayName
-    if (project?.displayName) {
-      const projName = project.displayName.trim().toLowerCase();
-      if (projName === repo.toLowerCase() || projName === norm) {
-        score = Math.max(score, 600);
-      } else if (projName === repoBasename) {
-        score = Math.max(score, 450);
-      }
-    }
-
-    // 4. Match against rootPath or mainRepoRoot basename
-    const rootBase = basename(w.mainRepoRoot || project?.rootPath || "").toLowerCase();
-    if (rootBase && (rootBase === repoBasename || rootBase === norm)) {
-      score = Math.max(score, 400);
-    }
-
-    // 5. Match against workspace cwd basename
-    const cwdBase = basename(w.cwd).toLowerCase();
-    if (cwdBase === repoBasename) {
-      score = Math.max(score, 300);
-    }
-
-    // 6. Match against workspace displayName
-    if (w.displayName) {
-      const wName = w.displayName.trim().toLowerCase();
-      if (wName === repoBasename || wName === norm) {
-        score = Math.max(score, 200);
-      }
-    }
-
-    if (score === 0) {
-      continue;
-    }
-
-    // Modifiers:
-    // Non-archived preference
-    const isArchived = Boolean(w.archivedAt || project?.archivedAt);
-    if (isArchived) {
-      score -= 500;
-    } else {
-      score += 100;
-    }
-
-    // Prefer main repository workspace over ephemeral worktree
-    const isWorktree = Boolean(
-      w.isPaseoOwnedWorktree ||
-      w.mainRepoRoot ||
-      w.isolation === "worktree" ||
-      w.cwd.includes("/.paseo/worktrees/") ||
-      (w.displayName &&
-        (w.displayName.startsWith("feat-") ||
-          w.displayName.startsWith("fix-") ||
-          w.displayName.startsWith("worktree-")))
+  const matches: Array<{ workspace: WorkspaceRecord; project?: ProjectRecord }> = [];
+  for (const workspace of workspaces) {
+    if (!workspace?.workspaceId || !workspace.cwd) continue;
+    const project = workspace.projectId ? projectsById.get(workspace.projectId) : undefined;
+    const keys = workspaceCandidateKeys(workspace, project);
+    const hit = keys.some(
+      (key) =>
+        targetKeys.has(key) ||
+        key === repoBasename ||
+        key.endsWith(`/${repoBasename}`) ||
+        isRepoMatching(repo, key),
     );
-
-    if (isWorktree) {
-      score -= 100;
-    } else {
-      score += 50;
-      if (w.displayName === "main" || w.displayName === "master") {
-        score += 25;
-      }
-    }
-
-    // Disk existence
-    try {
-      if (existsSync(w.cwd)) {
-        score += 10;
-      }
-    } catch (err) {
-      console.warn(`[uppidi-fleet:workspace-lookup] disk existence check failed:`, err);
-    }
-
-    scoredCandidates.push({
-      workspace: w,
-      project,
-      score,
-    });
+    if (hit) matches.push({ workspace, project });
   }
 
-  if (scoredCandidates.length > 0) {
-    scoredCandidates.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      const timeA = String(a.workspace.updatedAt || a.workspace.createdAt || "");
-      const timeB = String(b.workspace.updatedAt || b.workspace.createdAt || "");
-      if (timeB !== timeA) return timeB.localeCompare(timeA);
-      return a.workspace.workspaceId.localeCompare(b.workspace.workspaceId);
-    });
+  if (matches.length === 0) return null;
 
-    const best = scoredCandidates[0];
-    return {
-      workspaceId: best.workspace.workspaceId,
-      cwd: best.workspace.cwd,
-      projectId: best.workspace.projectId,
-      displayName: best.workspace.displayName ?? best.project?.displayName ?? undefined,
-      repo: canonicalRepoKey(repo) ?? repo,
-      score: best.score,
-    };
+  matches.sort((a, b) => {
+    const archivedDelta = Number(Boolean(a.workspace.archivedAt)) - Number(Boolean(b.workspace.archivedAt));
+    if (archivedDelta !== 0) return archivedDelta;
+    const worktreeDelta = Number(isWorktreeRecord(a.workspace)) - Number(isWorktreeRecord(b.workspace));
+    if (worktreeDelta !== 0) return worktreeDelta;
+    const timeA = String(a.workspace.updatedAt ?? a.workspace.createdAt ?? "");
+    const timeB = String(b.workspace.updatedAt ?? b.workspace.createdAt ?? "");
+    if (timeA !== timeB) return timeB.localeCompare(timeA);
+    return a.workspace.workspaceId.localeCompare(b.workspace.workspaceId);
+  });
+
+  const best = matches[0];
+  return {
+    workspaceId: best.workspace.workspaceId,
+    cwd: best.workspace.cwd,
+    projectId: best.workspace.projectId,
+    displayName: best.workspace.displayName ?? best.project?.displayName ?? undefined,
+    repo: canonicalRepoKey(repo) ?? repo,
+  };
+}
+
+/** Deterministic host checkout path for a repo slug, if a host home is known. */
+export function candidateHostCheckoutDir(repo: string): string | undefined {
+  const repoBasename = basename(repo.replace(/\.git$/, "")).trim();
+  if (!repoBasename) return undefined;
+  const home = resolveHostHome();
+  if (!home) return undefined;
+  return join(home, "code", repoBasename);
+}
+
+/**
+ * Canonical resolution path. The daemon is the sole authority:
+ *   1. read the daemon's workspace list through RPC and match deterministically;
+ *   2. otherwise ask the daemon to attach/create the ambient workspace for the
+ *      host checkout (`workspaces.open`), which is exactly what `--cwd` does on
+ *      the CLI.
+ *
+ * Returns `null` when neither finds a workspace; callers must fail fast with
+ * {@link workspaceNotFoundError} rather than fall through a speculative ladder.
+ */
+export async function resolveWorkspaceForRepoViaDaemon(
+  rawRepo: string,
+  paseo: PaseoApi,
+  options?: { candidateDir?: (repo: string) => string | undefined },
+): Promise<ResolvedWorkspace | null> {
+  if (!rawRepo || typeof rawRepo !== "string" || !rawRepo.trim()) {
+    return null;
+  }
+  const repo = rawRepo.trim();
+
+  const list = paseo?.workspaces?.list;
+  if (typeof list !== "function") {
+    return null;
   }
 
-  // Fallback: Check local filesystem ~/code/<repoBasename>, resolved against
-  // the host home so an agent-mux profile HOME does not miss the checkout (#973).
-  const codeHome = join(resolveHostHome(), "code", repoBasename);
-  if (existsSync(codeHome)) {
-    return {
-      cwd: codeHome,
-      repo: canonicalRepoKey(repo) ?? repo,
-      score: 50,
-    };
+  let entries: CanonicalWorkspaceDescriptor[] = [];
+  try {
+    const listed = await list.call(paseo.workspaces, {});
+    entries = Array.isArray(listed?.entries) ? listed.entries : [];
+  } catch (err) {
+    throw new WorkspaceResolutionError(
+      repo,
+      `Failed to read workspaces from the Paseo daemon for "${repo}": ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
   }
 
-  return null;
+  const { workspaces, projects } = canonicalDescriptorsToRegistry(entries);
+  const matched = resolveWorkspaceForRepo(repo, { workspacesData: workspaces, projectsData: projects });
+  if (matched) return matched;
+
+  const dir = (options?.candidateDir ?? candidateHostCheckoutDir)(repo);
+  if (!dir || !existsSync(dir)) {
+    return null;
+  }
+
+  const open = paseo.workspaces.open;
+  if (typeof open !== "function") {
+    return null;
+  }
+
+  const handle = await open.call(paseo.workspaces, { cwd: dir });
+  const workspaceId = handle?.id ?? (handle as any)?.workspaceId;
+  if (!workspaceId) {
+    throw new WorkspaceResolutionError(
+      repo,
+      `The Paseo daemon opened ${dir} but returned no workspace id for "${repo}".`,
+    );
+  }
+
+  return {
+    workspaceId,
+    cwd: handle.directory ?? dir,
+    projectId: handle.projectId ?? undefined,
+    repo: canonicalRepoKey(repo) ?? repo,
+  };
 }

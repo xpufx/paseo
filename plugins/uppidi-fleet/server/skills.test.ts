@@ -163,6 +163,21 @@ describe("spawned agents use the effective skill (#883)", () => {
     let capturedPayload: any = null;
     const mockContext: any = {
       paseo: {
+        workspaces: {
+          list: async () => ({
+            entries: [
+              {
+                id: "wks_883",
+                projectId: "prj_sample_883",
+                projectRootPath: "/home/user/code/sample-883",
+                workspaceDirectory: "/home/user/code/sample-883",
+                workspaceKind: "checkout",
+                name: "Main",
+                project: { projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/sample-883" },
+              },
+            ],
+          }),
+        },
         agents: {
           create: async (opts: any) => {
             capturedPayload = opts;
@@ -178,23 +193,6 @@ describe("spawned agents use the effective skill (#883)", () => {
         },
       },
     };
-
-    setExecFileAsyncForTest(async (cmd: string, args: readonly string[]) => {
-      if (cmd === "paseo" && args[0] === "workspace" && args[1] === "ls") {
-        return {
-          stdout: JSON.stringify([
-            {
-              workspaceId: "wks_883",
-              project: "sample-883",
-              name: "Main",
-              isolation: "local",
-              cwd: "/home/user/code/sample-883",
-            },
-          ]),
-        };
-      }
-      return { stdout: "[]" };
-    });
 
     try {
       const res = await handleUppidiAddOrchestrator(
