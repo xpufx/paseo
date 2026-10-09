@@ -102,6 +102,19 @@ describe("stale WIP sweep (ported from forgejo-issues-check.test.py)", () => {
     assert.ok(!labelsCommand.includes("priority/2-normal"));
   });
 
+  it("comment command pipes JSON body through the teax api stdin sentinel", async () => {
+    const { io, calls } = fakeIo([]);
+    const result = await recoverStaleWipIssue(io, "host", "org/repo", issue());
+    assert.equal(result.recovered, true);
+    const commentCmd = calls[0].command;
+    assert.equal(commentCmd[0], "teax");
+    assert.equal(commentCmd[1], "api");
+    assert.ok(commentCmd.includes("repos/org/repo/issues/1/comments"));
+    assert.ok(commentCmd.includes("--data"));
+    assert.ok(commentCmd.includes("@-"));
+    assert.ok(!commentCmd.includes("--input"));
+  });
+
   it("existing marker retries labels without duplicate comment", async () => {
     const { io, calls } = fakeIo([{ body: STALE_WIP_REMINDER_MARKER }]);
     const result = await recoverStaleWipIssue(io, "host", "org/repo", issue());

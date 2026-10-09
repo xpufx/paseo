@@ -371,8 +371,8 @@ export async function recoverStaleWipIssue(
         `repos/${repo}/issues/${number}/comments`,
         "--hostname",
         hostname,
-        "--input",
-        "-",
+        "--data",
+        "@-",
       ],
       JSON.stringify({ body: reminder }),
     );
