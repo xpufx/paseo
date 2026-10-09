@@ -51,7 +51,6 @@ import {
   type StaleWipResult,
 } from "./issues-check.js";
 import {
-  candidateHostCheckoutDir,
   resolveWorkspaceForRepo,
   resolveWorkspaceForRepoViaDaemon,
   type ResolvedWorkspace,
@@ -5554,10 +5553,6 @@ export class HookRouter {
     if (typeof paseo?.workspaces?.list === "function") {
       const canonical = await resolveWorkspaceForRepoViaDaemon(repo, paseo);
       if (canonical) return canonical;
-    }
-    const candidate = candidateHostCheckoutDir(repo);
-    if (candidate && existsSync(candidate)) {
-      return { cwd: candidate };
     }
     return null;
   }

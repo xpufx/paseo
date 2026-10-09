@@ -8576,7 +8576,7 @@ describe("HookRouter Paseo SDK capture and host checkout fallback (#1170)", () =
     assert.equal(router2.getPaseo(), mockPaseo1);
   });
 
-  it("resolveWorkspaceCanonical falls back to candidateHostCheckoutDir when daemon list has no match", async () => {
+  it("resolveWorkspaceCanonical returns null when daemon list has no match and does not fall back to host checkout", async () => {
     const fakeHome = mkdtempSync(join(tempDir, "fake-home-"));
     const origHome = process.env.HOME;
     process.env.HOME = fakeHome;
@@ -8589,7 +8589,6 @@ describe("HookRouter Paseo SDK capture and host checkout fallback (#1170)", () =
       const mockPaseo = {
         workspaces: {
           list: async () => ({ entries: [] }),
-          open: async ({ cwd }: { cwd: string }) => ({ id: "wks_opened", directory: cwd }),
         },
       } as any;
 
@@ -8597,45 +8596,42 @@ describe("HookRouter Paseo SDK capture and host checkout fallback (#1170)", () =
       router.setActivePaseo(mockPaseo);
 
       const resolved = await (router as any).resolveWorkspaceCanonical(repoName);
-      assert.deepEqual(resolved, {
-        workspaceId: "wks_opened",
-        cwd: checkoutDir,
-        projectId: undefined,
-        repo: repoName,
-      });
+      assert.equal(resolved, null);
     } finally {
       process.env.HOME = origHome;
     }
   });
 
-  it("resolveWorkspaceCanonical falls back to candidateHostCheckoutDir when daemon cannot open or list has no match", async () => {
-    const fakeHome = mkdtempSync(join(tempDir, "fake-home-"));
-    const origHome = process.env.HOME;
-    process.env.HOME = fakeHome;
+  it("resolveWorkspaceCanonical resolves when daemon list matches registered workspace", async () => {
+    const repoName = "test-repo-registered";
+    const mockPaseo = {
+      workspaces: {
+        list: async () => ({
+          entries: [
+            {
+              workspaceId: "wks_registered",
+              cwd: "/some/path/to/test-repo-registered",
+              repo: repoName,
+            },
+          ],
+        }),
+      },
+    } as any;
 
-    try {
-      const repoName = "test-repo-fallback-no-open";
-      const checkoutDir = join(fakeHome, "code", repoName);
-      mkdirSync(checkoutDir, { recursive: true });
+    const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+    router.setActivePaseo(mockPaseo);
 
-      // workspaces has list, but not open (or list returns empty and open returns null / fails)
-      const mockPaseo = {
-        workspaces: {
-          list: async () => ({ entries: [] }),
-        },
-      } as any;
-
-      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
-      router.setActivePaseo(mockPaseo);
-
-      const resolved = await (router as any).resolveWorkspaceCanonical(repoName);
-      assert.deepEqual(resolved, { cwd: checkoutDir });
-    } finally {
-      process.env.HOME = origHome;
-    }
+    const resolved = await (router as any).resolveWorkspaceCanonical(repoName);
+    assert.deepEqual(resolved, {
+      workspaceId: "wks_registered",
+      cwd: "/some/path/to/test-repo-registered",
+      projectId: undefined,
+      displayName: undefined,
+      repo: repoName,
+    });
   });
 
-  it("resolveWorkspaceCanonical falls back to candidateHostCheckoutDir when paseo is null", async () => {
+  it("resolveWorkspaceCanonical returns null when paseo is null", async () => {
     const fakeHome = mkdtempSync(join(tempDir, "fake-home-"));
     const origHome = process.env.HOME;
     process.env.HOME = fakeHome;
@@ -8649,7 +8645,7 @@ describe("HookRouter Paseo SDK capture and host checkout fallback (#1170)", () =
       assert.equal(router.getPaseo(), null);
 
       const resolved = await (router as any).resolveWorkspaceCanonical(repoName);
-      assert.deepEqual(resolved, { cwd: checkoutDir });
+      assert.equal(resolved, null);
     } finally {
       process.env.HOME = origHome;
     }

@@ -95,8 +95,8 @@ export const WORKSPACE_NOT_FOUND_REMEDIATION =
 export function workspaceNotFoundError(repo: string): WorkspaceResolutionError {
   return new WorkspaceResolutionError(
     repo,
-    `No workspace found for repository "${repo}": the daemon has no matching workspace and no host checkout ` +
-      `at ~/code/<repo>. ${WORKSPACE_NOT_FOUND_REMEDIATION}.`,
+    `No workspace found for repository "${repo}": the daemon has no matching workspace. ` +
+      `${WORKSPACE_NOT_FOUND_REMEDIATION}.`,
   );
 }
 
@@ -262,12 +262,9 @@ export function candidateHostCheckoutDir(repo: string): string | undefined {
 
 /**
  * Canonical resolution path. The daemon is the sole authority:
- *   1. read the daemon's workspace list through RPC and match deterministically;
- *   2. otherwise ask the daemon to attach/create the ambient workspace for the
- *      host checkout (`workspaces.open`), which is exactly what `--cwd` does on
- *      the CLI.
+ * reads the daemon's workspace list through RPC and matches deterministically.
  *
- * Returns `null` when neither finds a workspace; callers must fail fast with
+ * Returns `null` when no registered workspace matches; callers must fail fast with
  * {@link workspaceNotFoundError} rather than fall through a speculative ladder.
  */
 export async function resolveWorkspaceForRepoViaDaemon(
@@ -301,8 +298,8 @@ export async function resolveWorkspaceForRepoViaDaemon(
   const matched = resolveWorkspaceForRepo(repo, { workspacesData: workspaces, projectsData: projects });
   if (matched) return matched;
 
-  const dir = (options?.candidateDir ?? candidateHostCheckoutDir)(repo);
-  if (!dir || !existsSync(dir)) {
+  const candidateDir = options?.candidateDir?.(repo);
+  if (!candidateDir || !existsSync(candidateDir)) {
     return null;
   }
 
@@ -311,18 +308,18 @@ export async function resolveWorkspaceForRepoViaDaemon(
     return null;
   }
 
-  const handle = await open.call(paseo.workspaces, { cwd: dir });
+  const handle = await open.call(paseo.workspaces, { cwd: candidateDir });
   const workspaceId = handle?.id ?? (handle as any)?.workspaceId;
   if (!workspaceId) {
     throw new WorkspaceResolutionError(
       repo,
-      `The Paseo daemon opened ${dir} but returned no workspace id for "${repo}".`,
+      `The Paseo daemon opened ${candidateDir} but returned no workspace id for "${repo}".`,
     );
   }
 
   return {
     workspaceId,
-    cwd: handle.directory ?? dir,
+    cwd: handle.directory ?? candidateDir,
     projectId: handle.projectId ?? undefined,
     repo: canonicalRepoKey(repo) ?? repo,
   };

@@ -252,11 +252,10 @@ describe("canonical daemon workspace resolution (#1159)", () => {
     }
   });
 
-  it("returns null (fail fast) when neither the daemon nor a host checkout has the workspace", async () => {
+  it("returns null (fail fast) when the daemon has no matching workspace", async () => {
     const res = await resolveWorkspaceForRepoViaDaemon(
       "xpufx-org/does-not-exist",
       paseoWith([]),
-      { candidateDir: () => undefined },
     );
     assert.equal(res, null);
   });
