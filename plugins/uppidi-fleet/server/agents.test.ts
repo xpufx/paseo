@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "test";
@@ -34,6 +35,7 @@ import {
   handleUppidiFrontDeskPrompt,
   handleUppidiCreateFrontDesk,
   handleFleetTeardown,
+  assertSafeTeardownPath,
   handleFleetHalt,
   handleFleetResume,
   getPersistedStateDir,
@@ -903,11 +905,16 @@ describe("Fleet teardown state cleanup (#774)", () => {
   let tmpDir: string;
   let prevHookStateDir: string | undefined;
   let prevHookQueueDir: string | undefined;
+  let prevHome: string | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "uppidi-fleet-teardown-test-"));
     prevHookStateDir = process.env.HOOK_STATE_DIR;
     prevHookQueueDir = process.env.HOOK_QUEUE_DIR;
+    prevHome = process.env.HOME;
+    // Isolate HOME as well as the hook state/queue dirs so every teardown
+    // candidate resolves inside the per-test temp dir (#1160).
+    process.env.HOME = tmpDir;
     process.env.HOOK_STATE_DIR = tmpDir;
     process.env.HOOK_QUEUE_DIR = path.join(tmpDir, "queues");
     setExecFileAsyncForTest(async () => ({ stdout: "[]", stderr: "" }));
@@ -916,6 +923,8 @@ describe("Fleet teardown state cleanup (#774)", () => {
   afterEach(() => {
     setExecFileAsyncForTest(null);
     setActiveHookRouter(null);
+    if (prevHome !== undefined) process.env.HOME = prevHome;
+    else delete process.env.HOME;
     if (prevHookStateDir !== undefined) process.env.HOOK_STATE_DIR = prevHookStateDir;
     else delete process.env.HOOK_STATE_DIR;
     if (prevHookQueueDir !== undefined) process.env.HOOK_QUEUE_DIR = prevHookQueueDir;
@@ -923,6 +932,126 @@ describe("Fleet teardown state cleanup (#774)", () => {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     } catch {}
+  });
+
+  it("refuses to delete a host path outside os.tmpdir() under NODE_ENV=test (#1160)", () => {
+    const root = path.parse(os.tmpdir()).root;
+    const hostPath = path.join(
+      root,
+      "home",
+      "user",
+      ".paseo",
+      "plugin-data",
+      "xpufx",
+      "uppidi-fleet",
+      "frontdesk.json",
+    );
+    assert.throws(() => assertSafeTeardownPath(hostPath), /outside os\.tmpdir/);
+    assert.doesNotThrow(() => assertSafeTeardownPath(path.join(tmpDir, "frontdesk.json")));
+  });
+
+  it("never targets a path outside os.tmpdir() when HOME is isolated (#1160)", async () => {
+    const fdFile = path.join(tmpDir, "frontdesk.json");
+    const orchDir = path.join(tmpDir, "orchestrators");
+    const queueDir = path.join(tmpDir, "queues");
+    fs.mkdirSync(orchDir, { recursive: true });
+    fs.mkdirSync(queueDir, { recursive: true });
+    fs.writeFileSync(fdFile, JSON.stringify({ agentId: "agent-fd" }), "utf8");
+    fs.writeFileSync(path.join(orchDir, "repo.json"), JSON.stringify({ agentId: "agent-orch" }), "utf8");
+    fs.writeFileSync(path.join(queueDir, "worker.json"), JSON.stringify([{ id: "w1" }]), "utf8");
+
+    const deleted: string[] = [];
+    const originalUnlink = fs.unlinkSync;
+    (fs as any).unlinkSync = (target: string) => {
+      deleted.push(path.resolve(String(target)));
+      return originalUnlink(target);
+    };
+
+    try {
+      const mockContext = {
+        paseo: {
+          agents: {
+            list: async () => ({ entries: [] }),
+            ref: () => ({ archive: async () => ({ ok: true }) }),
+          },
+        },
+      } as any;
+
+      const res = await handleFleetTeardown(
+        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true },
+        mockContext,
+      );
+
+      assert.equal(res.ok, true);
+      assert.ok(deleted.length > 0, "teardown must delete the isolated state files");
+      const tmpRoot = path.resolve(os.tmpdir());
+      for (const target of deleted) {
+        const rel = path.relative(tmpRoot, target);
+        assert.ok(
+          rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel),
+          `teardown deleted a path outside os.tmpdir(): ${target}`,
+        );
+      }
+    } finally {
+      (fs as any).unlinkSync = originalUnlink;
+    }
+  });
+
+  it("does not reach into an unisolated host HOME when teardown state is isolated (#1160)", async () => {
+    const isolatedHome = process.env.HOME;
+    const scratchRoot = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+      "..",
+      ".tmp",
+    );
+    fs.mkdirSync(scratchRoot, { recursive: true });
+    const decoyHome = fs.mkdtempSync(path.join(scratchRoot, "teardown-host-home-"));
+    process.env.HOME = decoyHome;
+
+    // Simulate the operator's live host state, deliberately outside os.tmpdir().
+    const decoyData = path.join(
+      decoyHome,
+      ".paseo",
+      "plugin-data",
+      "xpufx",
+      "uppidi-fleet",
+    );
+    const decoyOrchDir = path.join(decoyData, "orchestrators");
+    const decoyQueueDir = path.join(decoyData, "queues");
+    fs.mkdirSync(decoyOrchDir, { recursive: true });
+    fs.mkdirSync(decoyQueueDir, { recursive: true });
+    const decoyFrontDesk = path.join(decoyData, "frontdesk.json");
+    const decoyOrchestrator = path.join(decoyOrchDir, "repo.json");
+    const decoyQueue = path.join(decoyQueueDir, "worker.json");
+    fs.writeFileSync(decoyFrontDesk, JSON.stringify({ agentId: "host-fd" }), "utf8");
+    fs.writeFileSync(decoyOrchestrator, JSON.stringify({ agentId: "host-orch" }), "utf8");
+    fs.writeFileSync(decoyQueue, JSON.stringify([{ id: "host" }]), "utf8");
+
+    try {
+      const mockContext = {
+        paseo: {
+          agents: {
+            list: async () => ({ entries: [] }),
+            ref: () => ({ archive: async () => ({ ok: true }) }),
+          },
+        },
+      } as any;
+
+      const res = await handleFleetTeardown(
+        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true },
+        mockContext,
+      );
+
+      assert.equal(res.ok, true);
+      assert.equal(fs.existsSync(decoyFrontDesk), true, "host frontdesk.json must survive");
+      assert.equal(fs.existsSync(decoyOrchestrator), true, "host orchestrator file must survive");
+      assert.equal(fs.existsSync(decoyQueue), true, "host queue file must survive");
+    } finally {
+      process.env.HOME = isolatedHome;
+      fs.rmSync(decoyHome, { recursive: true, force: true });
+    }
   });
 
   it("deletes frontdesk.json and clears active router when frontdesk is targeted", async () => {

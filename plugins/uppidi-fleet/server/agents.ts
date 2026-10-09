@@ -1341,6 +1341,26 @@ async function archiveAgentById(
 }
 
 /**
+ * Refuse to delete teardown state outside the OS temp dir while running under
+ * test (#1160). Caller isolation must keep every candidate inside `tmpdir()`;
+ * reaching the operator's live host state from a test is always a bug.
+ */
+export function assertSafeTeardownPath(target: string): void {
+  if (process.env.NODE_ENV !== "test") return;
+  const resolved = path.resolve(target);
+  const tmpRoot = path.resolve(tmpdir());
+  const rel = path.relative(tmpRoot, resolved);
+  if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) return;
+  throw new Error(
+    `Refusing teardown state deletion outside os.tmpdir() under NODE_ENV=test: ${resolved}`
+  );
+}
+
+function assertSafeTeardownPaths(targets: Iterable<string>): void {
+  for (const target of targets) assertSafeTeardownPath(target);
+}
+
+/**
  * Fleet teardown handler (#742, #1121). Archives all agents matching the requested
  * target categories that are fleet-owned. Returns structured counts of torn-down
  * agents per category and any errors encountered.
@@ -1440,28 +1460,35 @@ export async function handleFleetTeardown(
         errors.push(`Failed to archive agent ${agent.id} (${agent.name})`);
       }
     }
-    const home = process.env.HOME ?? os.homedir();
     const persistedDir = getPersistedStateDir();
-    const pluginDataDir = join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet");
+    const frontDeskDirs = new Set<string>([persistedDir]);
+    if (router?.stateDir) {
+      frontDeskDirs.add(router.stateDir);
+    }
+    const orchestratorDirs = new Set<string>([join(persistedDir, "orchestrators")]);
+    if (router?.stateDir) {
+      orchestratorDirs.add(router.stateDir);
+    }
+    const queueDirs = new Set<string>([join(persistedDir, "queues")]);
+    const hookQueueDir = process.env.HOOK_QUEUE_DIR?.trim();
+    if (hookQueueDir) {
+      queueDirs.add(hookQueueDir);
+    }
+    if (router?.queueDir) {
+      queueDirs.add(router.queueDir);
+    }
 
     // Clean up Front Desk state if targeted (#774)
     if (targetSet.has("frontdesk")) {
-      const fdCandidates = new Set<string>([
-        join(persistedDir, "frontdesk.json"),
-        join(path.dirname(persistedDir), "frontdesk.json"),
-        join(persistedDir, "orchestrators", "frontdesk.json"),
-        join(pluginDataDir, "frontdesk.json"),
-        join(pluginDataDir, "orchestrators", "frontdesk.json"),
-        join(home, ".paseo", "forgejo-hook", "frontdesk.json"),
-        join(home, ".paseo", "forgejo-hook", "orchestrators", "frontdesk.json"),
-      ]);
-      if (router?.stateDir) {
-        fdCandidates.add(join(router.stateDir, "frontdesk.json"));
-        fdCandidates.add(join(path.dirname(router.stateDir), "frontdesk.json"));
+      const fdCandidates = new Set<string>();
+      for (const dir of frontDeskDirs) {
+        fdCandidates.add(join(dir, "frontdesk.json"));
+        fdCandidates.add(join(dir, "orchestrators", "frontdesk.json"));
       }
-      if (router?.queueDir) {
-        fdCandidates.add(join(router.queueDir, "frontdesk.json"));
+      for (const dir of queueDirs) {
+        fdCandidates.add(join(dir, "frontdesk.json"));
       }
+      assertSafeTeardownPaths(fdCandidates);
 
       const removedFrontDeskFiles: string[] = [];
       for (const file of fdCandidates) {
@@ -1502,14 +1529,8 @@ export async function handleFleetTeardown(
 
     // Clean up Orchestrators state if targeted (#774)
     if (targetSet.has("orchestrators")) {
-      const orchDirs = new Set<string>([
-        join(persistedDir, "orchestrators"),
-        join(pluginDataDir, "orchestrators"),
-        join(home, ".paseo", "forgejo-hook", "orchestrators"),
-      ]);
-      if (router?.stateDir) {
-        orchDirs.add(router.stateDir);
-      }
+      const orchDirs = orchestratorDirs;
+      assertSafeTeardownPaths(orchDirs);
 
       const removedOrchestratorFiles: string[] = [];
       for (const dir of orchDirs) {
@@ -1587,16 +1608,7 @@ export async function handleFleetTeardown(
         }
       }
 
-      const queueDirs = new Set<string>([
-        join(pluginDataDir, "queues"),
-        join(home, ".paseo", "forgejo-hook", "queues"),
-      ]);
-      if (process.env.HOOK_QUEUE_DIR) {
-        queueDirs.add(process.env.HOOK_QUEUE_DIR);
-      }
-      if (router?.queueDir) {
-        queueDirs.add(router.queueDir);
-      }
+      assertSafeTeardownPaths(queueDirs);
 
       for (const qDir of queueDirs) {
         try {
