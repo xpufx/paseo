@@ -41,6 +41,7 @@ import {
   setActiveDiskLogger,
   getActiveHookRouter,
   setActiveHookRouter,
+  setActivePaseo,
   getAvailableNetworkInterfaces,
   loadRouterConfig,
   saveRouterConfig,
@@ -8394,3 +8395,133 @@ describe("merge-event hook (#1076)", () => {
     assert.equal(seen.length, 1);
   });
 });
+
+describe("HookRouter Paseo SDK capture and host checkout fallback (#1170)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-sdk-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    clearHookLogs();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+    setActivePaseo(null);
+    setActiveHookRouter(null);
+  });
+
+  it("retains active Paseo SDK instance across setActivePaseo and assigns to active and new routers", () => {
+    const mockPaseo1 = { workspaces: { list: async () => ({ entries: [] }) } } as any;
+    const mockPaseo2 = { workspaces: { list: async () => ({ entries: [] }) } } as any;
+
+    const router1 = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+    assert.equal(router1.getPaseo(), null);
+
+    // Set globally via module function
+    setActivePaseo(mockPaseo1);
+
+    // Active router registered via setActiveHookRouter picks up activePaseoInstance
+    setActiveHookRouter(router1);
+    assert.equal(router1.getPaseo(), mockPaseo1);
+    assert.equal(getActiveHookRouter(), router1);
+
+    // HookRouter.setActivePaseo updates active router
+    HookRouter.setActivePaseo(mockPaseo2);
+    assert.equal(router1.getPaseo(), mockPaseo2);
+
+    // New router registered gets active Paseo
+    const router2 = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+    setActiveHookRouter(router2);
+    assert.equal(router2.getPaseo(), mockPaseo2);
+
+    // Direct instance method works as well
+    router2.setActivePaseo(mockPaseo1);
+    assert.equal(router2.getPaseo(), mockPaseo1);
+  });
+
+  it("resolveWorkspaceCanonical falls back to candidateHostCheckoutDir when daemon list has no match", async () => {
+    const fakeHome = mkdtempSync(join(tempDir, "fake-home-"));
+    const origHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      const repoName = "test-repo-fallback";
+      const checkoutDir = join(fakeHome, "code", repoName);
+      mkdirSync(checkoutDir, { recursive: true });
+
+      const mockPaseo = {
+        workspaces: {
+          list: async () => ({ entries: [] }),
+          open: async ({ cwd }: { cwd: string }) => ({ id: "wks_opened", directory: cwd }),
+        },
+      } as any;
+
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      router.setActivePaseo(mockPaseo);
+
+      const resolved = await (router as any).resolveWorkspaceCanonical(repoName);
+      assert.deepEqual(resolved, {
+        workspaceId: "wks_opened",
+        cwd: checkoutDir,
+        projectId: undefined,
+        repo: repoName,
+      });
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
+
+  it("resolveWorkspaceCanonical falls back to candidateHostCheckoutDir when daemon cannot open or list has no match", async () => {
+    const fakeHome = mkdtempSync(join(tempDir, "fake-home-"));
+    const origHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      const repoName = "test-repo-fallback-no-open";
+      const checkoutDir = join(fakeHome, "code", repoName);
+      mkdirSync(checkoutDir, { recursive: true });
+
+      // workspaces has list, but not open (or list returns empty and open returns null / fails)
+      const mockPaseo = {
+        workspaces: {
+          list: async () => ({ entries: [] }),
+        },
+      } as any;
+
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      router.setActivePaseo(mockPaseo);
+
+      const resolved = await (router as any).resolveWorkspaceCanonical(repoName);
+      assert.deepEqual(resolved, { cwd: checkoutDir });
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
+
+  it("resolveWorkspaceCanonical falls back to candidateHostCheckoutDir when paseo is null", async () => {
+    const fakeHome = mkdtempSync(join(tempDir, "fake-home-"));
+    const origHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    try {
+      const repoName = "test-repo-no-paseo";
+      const checkoutDir = join(fakeHome, "code", repoName);
+      mkdirSync(checkoutDir, { recursive: true });
+
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      assert.equal(router.getPaseo(), null);
+
+      const resolved = await (router as any).resolveWorkspaceCanonical(repoName);
+      assert.deepEqual(resolved, { cwd: checkoutDir });
+    } finally {
+      process.env.HOME = origHome;
+    }
+  });
+});
+

@@ -83,7 +83,16 @@ import { handleUppidiSkills, handleUppidiSetSkill } from "./server/skills.js";
 import { handleUppidiRunners } from "./server/runners.js";
 import { handleUppidiFleetMetrics } from "./server/metrics.js";
 import { handleFleetToolList, handleFleetToolExecute } from "./server/mcp-tools.js";
-import { startHookRouter, getActiveHookRouter, handleUppidiFleetAlerts, handleUppidiRotateRole, handleUppidiRotationStatus, handleUppidiSetRotationPolicy } from "./server/hook-router.js";
+import {
+  HookRouter,
+  startHookRouter,
+  getActiveHookRouter,
+  setActivePaseo,
+  handleUppidiFleetAlerts,
+  handleUppidiRotateRole,
+  handleUppidiRotationStatus,
+  handleUppidiSetRotationPolicy,
+} from "./server/hook-router.js";
 import { createPluginLogger, registerSettingsRpc, registerTicketHandlers } from "paseo-plugin-helper/server";
 import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 import { PLUGIN_VERSION } from "./shared/version.js";
@@ -109,6 +118,22 @@ const log = createPluginLogger("uppidi-fleet", {
 });
 
 export default function contribute(server: PluginServerContext) {
+  if ((server as any)?.paseo) {
+    HookRouter.setActivePaseo((server as any).paseo);
+  }
+
+  // Intercept RPC execution to ensure context.paseo is captured immediately
+  // and forwarded to HookRouter.setActivePaseo (#1170).
+  const origHandle = server.handle.bind(server);
+  server.handle = ((contract: any, handler: any) => {
+    return origHandle(contract, async (input: any, context: any) => {
+      if (context?.paseo) {
+        HookRouter.setActivePaseo(context.paseo);
+      }
+      return handler(input, context);
+    });
+  }) as any;
+
   registerTicketHandlers(server);
   server.handle(uppidiIssuesContract, handleUppidiIssues);
   server.handle(uppidiTransitionIssueContract, handleUppidiTransitionIssue);

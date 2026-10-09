@@ -48,7 +48,13 @@ import {
   type IssuesCheckIo,
   type StaleWipResult,
 } from "./issues-check.js";
-import { resolveWorkspaceForRepo, resolveWorkspaceForRepoViaDaemon, type ResolvedWorkspace, type WorkspaceLookupOptions } from "./workspace-lookup.js";
+import {
+  candidateHostCheckoutDir,
+  resolveWorkspaceForRepo,
+  resolveWorkspaceForRepoViaDaemon,
+  type ResolvedWorkspace,
+  type WorkspaceLookupOptions,
+} from "./workspace-lookup.js";
 import { adjudicatePermission } from "./permission-adjudication.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
 import {
@@ -4803,6 +4809,14 @@ export class HookRouter {
     appendHookLog(message);
   }
 
+  public setActivePaseo(paseo: PaseoApi | null): void {
+    this.activePaseo = paseo;
+  }
+
+  public static setActivePaseo(paseo: PaseoApi | null): void {
+    setActivePaseo(paseo);
+  }
+
   public getPaseo(): PaseoApi | null {
     return this.activePaseo ?? (this.server as any)?.paseo ?? null;
   }
@@ -5449,7 +5463,12 @@ export class HookRouter {
     if (injected) return injected;
     const paseo = this.getPaseo();
     if (typeof paseo?.workspaces?.list === "function") {
-      return resolveWorkspaceForRepoViaDaemon(repo, paseo);
+      const canonical = await resolveWorkspaceForRepoViaDaemon(repo, paseo);
+      if (canonical) return canonical;
+    }
+    const candidate = candidateHostCheckoutDir(repo);
+    if (candidate && existsSync(candidate)) {
+      return { cwd: candidate };
     }
     return null;
   }
@@ -9855,12 +9874,25 @@ export function getActiveHookRouter(): HookRouter | null {
   return activeRouter;
 }
 
+let activePaseoInstance: PaseoApi | null = null;
+
 export function setActiveHookRouter(router: HookRouter | null): void {
   activeRouter = router;
   if (router) {
+    if (activePaseoInstance && !router.getPaseo()) {
+      router.setActivePaseo(activePaseoInstance);
+    }
     setActiveDiskLogger(router.diskLogger);
   } else {
     setActiveDiskLogger(null);
+  }
+}
+
+export function setActivePaseo(paseo: PaseoApi | null): void {
+  activePaseoInstance = paseo;
+  const router = getActiveHookRouter();
+  if (router) {
+    router.setActivePaseo(paseo);
   }
 }
 
