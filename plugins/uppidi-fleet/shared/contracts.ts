@@ -1927,6 +1927,145 @@ export const uppidiFleetToolExecuteContract = defineContract({
   output: UppidiFleetToolExecuteOutputSchema,
 });
 
+// --- Audit Receipts & Quality RPC (platform#348 Phase A / #1172) ---
+
+export const UppidiAuditVerdictSchema = z.enum([
+  "approved",
+  "changes_requested",
+  "rejected_duplicate",
+  "rejected_spec_flaw",
+  "adhoc_bypass",
+]);
+export type UppidiAuditVerdict = z.infer<typeof UppidiAuditVerdictSchema>;
+
+export const UppidiAuditTaxonomySchema = z.enum([
+  "test_failure",
+  "typecheck_failure",
+  "runtime_boundary_leak",
+  "test_isolation_leak",
+  "spec_mismatch",
+  "scope_creep",
+  "false_positive_claim",
+  "duplicate",
+  "formatting_cleanliness",
+]);
+export type UppidiAuditTaxonomy = z.infer<typeof UppidiAuditTaxonomySchema>;
+
+export const UppidiFleetAuditReceiptSchema = z.object({
+  v: z.literal(1),
+  auditId: z.string(),
+  timestamp: z.string(),
+  repo: z.string(),
+  pr: z.number(),
+  issue: z.number().nullable().optional(),
+  headCommit: z.string(),
+  iteration: z.number().default(1),
+  actors: z.object({
+    auditor: z.object({
+      agentId: z.string(),
+      role: z.enum(["orchestrator", "reviewer", "operator"]),
+      model: z.string(),
+    }),
+    author: z.object({
+      agentId: z.string().optional(),
+      role: z.enum(["worker", "orchestrator", "operator"]),
+      model: z.string().optional(),
+    }),
+  }),
+  verdict: UppidiAuditVerdictSchema,
+  taxonomy: z.array(UppidiAuditTaxonomySchema).default([]),
+  verification: z.object({
+    workerClaimed: z.enum(["passed", "failed", "unverified"]),
+    auditorVerified: z.enum(["passed", "failed", "skipped"]),
+    checksRun: z.array(z.string()),
+    isolatedEnv: z.boolean(),
+  }),
+  summary: z.string(),
+});
+export type UppidiFleetAuditReceipt = z.infer<typeof UppidiFleetAuditReceiptSchema>;
+
+export const UppidiAuditRecordInputSchema = UppidiFleetAuditReceiptSchema.omit({
+  v: true,
+  auditId: true,
+  timestamp: true,
+});
+export type UppidiAuditRecordInput = z.infer<typeof UppidiAuditRecordInputSchema>;
+
+export const UppidiAuditRecordOutputSchema = z.object({
+  ok: z.boolean(),
+  auditId: z.string(),
+  recordedAt: z.string(),
+  error: z.string().optional(),
+});
+export type UppidiAuditRecordOutput = z.infer<typeof UppidiAuditRecordOutputSchema>;
+
+export const uppidiAuditRecordContract = defineContract({
+  name: "uppidi-fleet.record-audit",
+  description: "Record a pre-flight PR audit receipt",
+  input: UppidiAuditRecordInputSchema,
+  output: UppidiAuditRecordOutputSchema,
+});
+
+export const UppidiAuditCheckOutputSchema = z.object({
+  ok: z.boolean(),
+  audited: z.boolean(),
+  repo: z.string(),
+  pr: z.number(),
+  commit: z.string(),
+  audit: z
+    .object({
+      auditId: z.string(),
+      verdict: UppidiAuditVerdictSchema,
+      timestamp: z.string(),
+      iteration: z.number(),
+    })
+    .nullable()
+    .default(null),
+  error: z.string().optional(),
+});
+export type UppidiAuditCheckOutput = z.infer<typeof UppidiAuditCheckOutputSchema>;
+
+export const uppidiAuditCheckContract = defineContract({
+  name: "uppidi-fleet.audit-check",
+  description: "Check whether an audit receipt exists for a given repo, PR and commit",
+  input: z.object({
+    repo: z.string(),
+    pr: z.number(),
+    commit: z.string(),
+  }),
+  output: UppidiAuditCheckOutputSchema,
+});
+
+export const UppidiAuditSummaryOutputSchema = z.object({
+  ok: z.boolean(),
+  totalAudits: z.number(),
+  auditedMerges: z.number(),
+  unauditedMerges: z.number(),
+  complianceRate: z.number(),
+  firstPassSuccessRate: z.number(),
+  defectTaxonomyCounts: z.record(z.string(), z.number()),
+  modelScorecard: z.array(
+    z.object({
+      model: z.string(),
+      reviewsReceived: z.number(),
+      firstPassApproved: z.number(),
+      changesRequested: z.number(),
+    }),
+  ),
+});
+export type UppidiAuditSummaryOutput = z.infer<typeof UppidiAuditSummaryOutputSchema>;
+
+export const uppidiAuditSummaryContract = defineContract({
+  name: "uppidi-fleet.audit-summary",
+  description: "Query server-projected PR audit telemetry and quality metrics",
+  input: z.object({
+    repo: z.string().optional(),
+    since: z.string().optional(),
+  }),
+  output: UppidiAuditSummaryOutputSchema,
+});
+export type UppidiAuditSummaryInput = { repo?: string; since?: string };
+
 // --- Front Desk Watch Surface & Console Drawer (Issue #710) ---
 
 export const UppidiFrontDeskActivityTypeSchema = z.enum([

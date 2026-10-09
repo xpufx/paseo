@@ -84,6 +84,14 @@ import {
   UppidiTransitionIssueInputSchema,
   UppidiTransitionIssueOutputSchema,
   uppidiTransitionIssueContract,
+  UppidiFleetAuditReceiptSchema,
+  UppidiAuditRecordInputSchema,
+  UppidiAuditRecordOutputSchema,
+  uppidiAuditRecordContract,
+  UppidiAuditCheckOutputSchema,
+  uppidiAuditCheckContract,
+  UppidiAuditSummaryOutputSchema,
+  uppidiAuditSummaryContract,
 } from "./contracts.js";
 
 
@@ -1243,6 +1251,171 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
         "Transition a Forgejo issue between Kanban states",
       );
     });
+  });
+});
+
+describe("audit receipts & quality RPC contracts (#1172)", () => {
+  it("accepts a full audit receipt", () => {
+    const parsed = UppidiFleetAuditReceiptSchema.parse({
+      v: 1,
+      auditId: "aud_1",
+      timestamp: "2026-10-09T00:00:00.000Z",
+      repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
+      pr: 1172,
+      issue: 1172,
+      headCommit: "abc123",
+      iteration: 1,
+      actors: {
+        auditor: { agentId: "aud-g", role: "orchestrator", model: "gemini-3.8-pro" },
+        author: { agentId: "wrk-1", role: "worker", model: "gemini-3.8-flash" },
+      },
+      verdict: "approved",
+      taxonomy: ["runtime_boundary_leak"],
+      verification: {
+        workerClaimed: "passed",
+        auditorVerified: "passed",
+        checksRun: ["typecheck"],
+        isolatedEnv: true,
+      },
+      summary: "clean",
+    });
+    assert.equal(parsed.v, 1);
+    assert.equal(parsed.iteration, 1);
+    assert.deepEqual(parsed.taxonomy, ["runtime_boundary_leak"]);
+  });
+
+  it("defaults iteration and taxonomy on the receipt schema", () => {
+    const parsed = UppidiFleetAuditReceiptSchema.parse({
+      v: 1,
+      auditId: "aud_1",
+      timestamp: "2026-10-09T00:00:00.000Z",
+      repo: "xpufx-org/paseo",
+      pr: 1,
+      headCommit: "deadbeef",
+      actors: {
+        auditor: { agentId: "aud-1", role: "operator", model: "Opus-4.1" },
+        author: { agentId: "wrk-1", role: "worker", model: "gemini-3.8-flash" },
+      },
+      verdict: "changes_requested",
+      verification: {
+        workerClaimed: "failed",
+        auditorVerified: "skipped",
+        checksRun: [],
+        isolatedEnv: true,
+      },
+      summary: "rework requested",
+    });
+    assert.equal(parsed.iteration, 1);
+    assert.deepEqual(parsed.taxonomy, []);
+    assert.equal(parsed.issue, undefined);
+  });
+
+  it("rejects an unknown verdict or taxonomy member", () => {
+    assert.throws(() =>
+      UppidiFleetAuditReceiptSchema.parse({
+        v: 1,
+        auditId: "aud_1",
+        timestamp: "2026-10-09T00:00:00.000Z",
+        repo: "xpufx-org/paseo",
+        pr: 1,
+        headCommit: "deadbeef",
+        actors: {
+          auditor: { agentId: "aud-1", role: "operator", model: "Opus-4.1" },
+          author: {},
+        },
+        verdict: "not-a-verdict",
+        verification: {
+          workerClaimed: "passed",
+          auditorVerified: "skipped",
+          checksRun: [],
+          isolatedEnv: true,
+        },
+        summary: "nope",
+      }),
+    );
+  });
+
+  it("omits the envelope fields from the record contract input", () => {
+    const input = UppidiAuditRecordInputSchema.parse({
+      repo: "xpufx-org/paseo",
+      pr: 42,
+      headCommit: "abc1234",
+      actors: {
+        auditor: { agentId: "aud-1", role: "reviewer", model: "gemini" },
+        author: { agentId: "wrk-2", role: "worker", model: "gemini-flash" },
+      },
+      verdict: "approved",
+      verification: {
+        workerClaimed: "passed",
+        auditorVerified: "passed",
+        checksRun: [],
+        isolatedEnv: false,
+      },
+      summary: "ok",
+    });
+    assert.equal(input.iteration, 1);
+    // The envelope fields are not part of the record contract input.
+    assert.ok(!("v" in input));
+    assert.ok(!("auditId" in input));
+    assert.ok(!("timestamp" in input));
+    assert.equal(uppidiAuditRecordContract.name, "uppidi-fleet.record-audit");
+  });
+
+  it("validates record output against the schema", () => {
+    UppidiAuditRecordOutputSchema.parse({
+      ok: true,
+      auditId: "aud_1",
+      recordedAt: "2026-10-09T00:00:00.000Z",
+    });
+    UppidiAuditRecordOutputSchema.parse({
+      ok: false,
+      auditId: "",
+      recordedAt: "",
+      error: "boom",
+    });
+  });
+
+  it("validates the check output shape", () => {
+    const audited = UppidiAuditCheckOutputSchema.parse({
+      ok: true,
+      audited: true,
+      repo: "xpufx-org/paseo",
+      pr: 7,
+      commit: "abc",
+      audit: { auditId: "aud_1", verdict: "approved", timestamp: "2026-10-09T00:00:00.000Z", iteration: 1 },
+    });
+    assert.ok(audited.audit);
+    assert.equal(audited.audit.verdict, "approved");
+    const bare = UppidiAuditCheckOutputSchema.parse({
+      ok: true,
+      audited: false,
+      repo: "xpufx-org/paseo",
+      pr: 8,
+      commit: "def",
+    });
+    assert.equal(bare.audit, null);
+    assert.equal(uppidiAuditCheckContract.name, "uppidi-fleet.audit-check");
+  });
+
+  it("validates the summary projection shape", () => {
+    const out = UppidiAuditSummaryOutputSchema.parse({
+      ok: true,
+      totalAudits: 2,
+      auditedMerges: 1,
+      unauditedMerges: 1,
+      complianceRate: 50,
+      firstPassSuccessRate: 100,
+      defectTaxonomyCounts: { spec_mismatch: 1 },
+      modelScorecard: [
+        { model: "gemini", reviewsReceived: 2, firstPassApproved: 2, changesRequested: 0 },
+      ],
+    });
+    assert.equal(out.defectTaxonomyCounts.spec_mismatch, 1);
+    assert.equal(uppidiAuditSummaryContract.name, "uppidi-fleet.audit-summary");
+    assert.equal(
+      uppidiAuditSummaryContract.description,
+      "Query server-projected PR audit telemetry and quality metrics",
+    );
   });
 });
 

@@ -29,8 +29,10 @@ import type {
   UppidiRotationStatusOutput,
   UppidiSetRotationPolicyInput,
   UppidiSetRotationPolicyOutput,
+  UppidiAuditSummaryInput,
   MergeEventHook,
 } from "../shared/contracts.js";
+import { UppidiAuditRecordInputSchema } from "../shared/contracts.js";
 import { extractPermissionScope } from "../shared/contracts.js";
 import {
   candidateRepoKeys,
@@ -78,6 +80,14 @@ import {
   type RotationTriggerReason,
 } from "./rotation.js";
 import { DiskLogger } from "./disk-logger.js";
+import {
+  appendAuditReceipt,
+  appendAuditReconciliation,
+  findAuditReceipt,
+  projectAuditSummary,
+  auditCheck,
+  type AuditMergeReconciliation,
+} from "./audit-receipts.js";
 
 const defaultExecFileAsync = promisify(execFile);
 let execFileAsync = defaultExecFileAsync;
@@ -232,6 +242,10 @@ export interface HookRouterOptions {
   modelAlertsPath?: string;
   /** Explicit merge-event log path; defaults to the scoped plugin data dir (#1076). */
   mergeEventLogPath?: string;
+  /** Explicit audit receipt store path (audits.jsonl, platform#348). */
+  auditsFilePath?: string;
+  /** Explicit audit merge-reconciliation log path (platform#348). */
+  auditReconciliationsFilePath?: string;
   /** Explicit log directory path for hook router disk logging (#1115). */
   logDir?: string;
   /** Explicit hook log file path (#1115). */
@@ -3413,6 +3427,10 @@ export class HookRouter {
   private readonly mergeEventLogPath: string;
   /** One fast-forward per checkout at a time; guards the primary checkout (#1076). */
   private readonly mergeEventLocks = new Set<string>();
+  /** Durable append-only audit receipt store (audits.jsonl, platform#348). */
+  public readonly auditsFilePath: string;
+  /** Durable append-only audit merge-reconciliation log (platform#348). */
+  public readonly auditReconciliationsFilePath: string;
   /** Scoped rotating disk logger (#1115). */
   public readonly diskLogger: DiskLogger;
   public readonly logDir: string;
@@ -3501,6 +3519,11 @@ export class HookRouter {
       options?.mergeEventLogPath ??
       process.env.HOOK_MERGE_EVENT_LOG ??
       join(scopedRoot, "merge-events.json");
+    this.auditsFilePath = options?.auditsFilePath ?? process.env.UPPIDI_FLEET_AUDITS_FILE ?? join(dirname(this.stateDir), "audits.jsonl");
+    this.auditReconciliationsFilePath =
+      options?.auditReconciliationsFilePath ??
+      process.env.UPPIDI_FLEET_AUDIT_RECONCILIATIONS_FILE ??
+      join(dirname(this.stateDir), "audit-reconciliations.jsonl");
 
     const explicitLogDir = options?.logDir;
     const explicitLogFilePath = options?.logFilePath;
@@ -3733,6 +3756,7 @@ export class HookRouter {
       } else if (ev === "repository" && action === "created") {
         await this.runRepoOnboarding(body);
       } else if (ev === "pull_request" && action === "closed" && body?.pull_request?.merged === true) {
+        this.reconcileMergeAudit(body);
         await this.runMergeEvent(body);
       }
     } catch (err) {
@@ -3889,6 +3913,71 @@ export class HookRouter {
       status: "skipped",
       reason,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Audit merge reconciliation (platform#348 Phase A / #1172)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Tags an observed `pull_request.closed` merge as `audited` or
+   * `direct_or_adhoc` by matching the merged commit SHA against stored audit
+   * receipts, and appends the reconciliation to the durable log. Never blocks
+   * the merge (advisory by design) and never throws: a failed append must not
+   * take the webhook ack down with it.
+   */
+  public reconcileMergeAudit(body: any): AuditMergeReconciliation {
+    const now = new Date().toISOString();
+    const repo = keyFromPayload(body) ?? this.bareRepoFromPayload(body);
+    const pr = body?.pull_request?.number;
+    const headCommit =
+      body?.pull_request?.merge_commit_sha ||
+      body?.pull_request?.head?.sha ||
+      body?.pull_request?.target_commitish?.sha ||
+      body?.pull_request?.sha;
+
+    if (!repo || typeof pr !== "number" || typeof headCommit !== "string" || !headCommit) {
+      return {
+        v: 1,
+        repo: repo ? canonicalRepoKey(repo) ?? repo : "",
+        pr: typeof pr === "number" ? pr : 0,
+        headCommit: typeof headCommit === "string" ? headCommit : "",
+        mergedAt: now,
+        status: "direct_or_adhoc" as const,
+      };
+    }
+
+    let receipt: Awaited<ReturnType<typeof findAuditReceipt>>;
+    try {
+      receipt = findAuditReceipt(
+        { repo, pr, commit: headCommit },
+        { filePath: this.auditsFilePath },
+      );
+    } catch (err) {
+      // An unreadable store must not take the webhook ack down: fall through
+      // and record the merge as direct_or_adhoc.
+      this.log(`[warn] audit receipt lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+      receipt = undefined;
+    }
+    const status = receipt ? ("audited" as const) : ("direct_or_adhoc" as const);
+    const record: AuditMergeReconciliation = {
+      v: 1,
+      repo: canonicalRepoKey(repo) ?? repo,
+      pr,
+      headCommit,
+      mergedAt: now,
+      status,
+      ...(receipt ? { auditId: receipt.auditId, verdict: receipt.verdict } : {}),
+    };
+    const outcome = appendAuditReconciliation(record, {
+      reconciliationsPath: this.auditReconciliationsFilePath,
+    });
+    this.log(
+      `[info] audit reconciliation ${status} for ${record.repo}#${record.pr} (${headCommit.slice(0, 7)})${
+        outcome.ok ? "" : `, append failed: ${outcome.error}`
+      }`,
+    );
+    return record;
   }
 
   /**
@@ -9792,6 +9881,70 @@ export class HookRouter {
         }
         const outcome = this.purgeQueue(target);
         this.sendJson(res, 200, outcome);
+        return;
+      }
+
+      // Audit receipt gateway (platform#348 Phase A / #1172): append, check
+      // and server-side projection over the durable append-only JSONL store.
+      if (req.method === "POST" && pathname === "/audits") {
+        const body = await this.readJsonBody(req);
+        const parsed = UppidiAuditRecordInputSchema.safeParse(body);
+        if (!parsed.success) {
+          const details = parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+          this.sendJson(res, 400, { ok: false, auditId: "", recordedAt: "", error: details });
+          return;
+        }
+        const result = appendAuditReceipt(parsed.data, { filePath: this.auditsFilePath });
+        if (!result.ok) {
+          this.sendJson(res, 500, {
+            ok: false,
+            auditId: result.receipt.auditId,
+            recordedAt: "",
+            error: result.error,
+          });
+          return;
+        }
+        this.log(
+          `[info] audit receipt recorded ${result.receipt.auditId} for ${result.receipt.repo}#${result.receipt.pr} (${result.receipt.verdict})`,
+        );
+        this.sendJson(res, 201, {
+          ok: true,
+          auditId: result.receipt.auditId,
+          recordedAt: result.receipt.timestamp,
+        });
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/audits/check") {
+        const repo = (url.searchParams.get("repo") ?? "").trim();
+        const prRaw = url.searchParams.get("pr");
+        const commit = (url.searchParams.get("commit") ?? "").trim();
+        const pr = prRaw === null ? Number.NaN : Number(prRaw);
+        if (!repo || !commit || !Number.isInteger(pr) || pr <= 0) {
+          this.sendJson(res, 400, {
+            ok: false,
+            error: "repo, pr (positive integer) and commit query params are required",
+          });
+          return;
+        }
+        const out = auditCheck(
+          { repo, pr, commit },
+          { filePath: this.auditsFilePath },
+        );
+        this.sendJson(res, 200, out);
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/audits/summary") {
+        const input: UppidiAuditSummaryInput = {
+          repo: url.searchParams.get("repo")?.trim() || undefined,
+          since: url.searchParams.get("since")?.trim() || undefined,
+        };
+        const out = projectAuditSummary(input, {
+          filePath: this.auditsFilePath,
+          reconciliationsPath: this.auditReconciliationsFilePath,
+        });
+        this.sendJson(res, 200, out);
         return;
       }
 

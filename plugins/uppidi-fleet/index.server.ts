@@ -42,6 +42,9 @@ import {
   uppidiFrontDeskActivityContract,
   uppidiFrontDeskPromptContract,
   uppidiTransitionIssueContract,
+  uppidiAuditRecordContract,
+  uppidiAuditCheckContract,
+  uppidiAuditSummaryContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues, handleUppidiTransitionIssue } from "./server/issues.js";
 import {
@@ -82,6 +85,11 @@ import { handleUppidiRoleModels, handleUppidiSetRoleModel } from "./server/role-
 import { handleUppidiSkills, handleUppidiSetSkill } from "./server/skills.js";
 import { handleUppidiRunners } from "./server/runners.js";
 import { handleUppidiFleetMetrics } from "./server/metrics.js";
+import {
+  handleUppidiAuditRecord,
+  handleUppidiAuditCheck,
+  handleUppidiAuditSummary,
+} from "./server/audit-receipts.js";
 import { handleFleetToolList, handleFleetToolExecute } from "./server/mcp-tools.js";
 import {
   HookRouter,
@@ -176,6 +184,9 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiFleetToolExecuteContract, handleFleetToolExecute);
   server.handle(uppidiFrontDeskActivityContract, handleUppidiFrontDeskActivity);
   server.handle(uppidiFrontDeskPromptContract, handleUppidiFrontDeskPrompt);
+  server.handle(uppidiAuditRecordContract, handleUppidiAuditRecord);
+  server.handle(uppidiAuditCheckContract, handleUppidiAuditCheck);
+  server.handle(uppidiAuditSummaryContract, handleUppidiAuditSummary);
 
   const settingsStorage = getUppidiFleetSettingsStorage();
   registerSettingsRpc(server, uppidiFleetSettingsContract, settingsStorage, {

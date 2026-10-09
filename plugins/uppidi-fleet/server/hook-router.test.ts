@@ -829,6 +829,137 @@ describe("hook-router HTTP server endpoints", () => {
     assert.ok(Array.isArray(body.queues));
   });
 
+  it("records, checks and summarizes audits over the HTTP gateway (#1172)", async () => {
+    const payload = {
+      repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
+      pr: 1172,
+      headCommit: "gate1111",
+      iteration: 1,
+      taxonomy: [],
+      actors: {
+        auditor: { agentId: "aud-gate", role: "orchestrator", model: "gemini-3.8-pro" },
+        author: { agentId: "wrk-gate", role: "worker", model: "gemini-3.8-flash" },
+      },
+      verdict: "approved",
+      verification: {
+        workerClaimed: "passed",
+        auditorVerified: "passed",
+        checksRun: ["typecheck"],
+        isolatedEnv: true,
+      },
+      summary: "gateway clean",
+    };
+
+    const rec = await fetch(`http://127.0.0.1:${router.port}/audits`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    assert.equal(rec.status, 201);
+    const recBody = await rec.json();
+    assert.equal(recBody.ok, true);
+    assert.match(recBody.auditId, /^aud_/);
+
+    const check = await fetch(
+      `http://127.0.0.1:${router.port}/audits/check?repo=xpufx-org/paseo&pr=1172&commit=gate1111`,
+    );
+    assert.equal(check.status, 200);
+    const checkBody = await check.json();
+    assert.equal(checkBody.audited, true);
+    assert.equal(checkBody.audit.auditId, recBody.auditId);
+
+    const miss = await fetch(
+      `http://127.0.0.1:${router.port}/audits/check?repo=xpufx-org/paseo&pr=9999&commit=nope`,
+    );
+    const missBody = await miss.json();
+    assert.equal(missBody.audited, false);
+
+    const sum = await fetch(`http://127.0.0.1:${router.port}/audits/summary?repo=xpufx-org/paseo`);
+    assert.equal(sum.status, 200);
+    const sumBody = await sum.json();
+    assert.equal(sumBody.totalAudits, 1);
+    assert.equal(sumBody.firstPassSuccessRate, 100);
+    assert.deepEqual(sumBody.defectTaxonomyCounts, {});
+    assert.equal(sumBody.modelScorecard[0].model, "gemini-3.8-flash");
+  });
+
+  it("rejects malformed audit gateway posts with 400 and a zod issue summary", async () => {
+    const res = await fetch(`http://127.0.0.1:${router.port}/audits`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repo: "xpufx-org/paseo", pr: 1 }),
+    });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+    assert.match(body.error, /verdict|actors|summary/);
+  });
+
+  it("validates audit check query parameters", async () => {
+    const res = await fetch(`http://127.0.0.1:${router.port}/audits/check?repo=&pr=1&commit=x`);
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.equal(body.ok, false);
+  });
+
+  it("reconciles a merged PR against the audit store and logs a durable record (#1172)", async () => {
+    const rec = await fetch(`http://127.0.0.1:${router.port}/audits`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
+        pr: 77,
+        headCommit: "rec7777",
+        iteration: 1,
+        taxonomy: [],
+        actors: {
+          auditor: { agentId: "a", role: "orchestrator", model: "m1" },
+          author: { agentId: "w", role: "worker", model: "m2" },
+        },
+        verdict: "approved",
+        verification: {
+          workerClaimed: "passed",
+          auditorVerified: "passed",
+          checksRun: [],
+          isolatedEnv: false,
+        },
+        summary: "reconciled",
+      }),
+    });
+    assert.equal(rec.status, 201);
+    const recBody = await rec.json();
+
+    const audited = router.reconcileMergeAudit({
+      repository: { full_name: "xpufx-org/paseo" },
+      pull_request: {
+        number: 77,
+        merged: true,
+        merge_commit_sha: "rec7777",
+      },
+    });
+    assert.equal(audited.status, "audited");
+    assert.equal(audited.auditId, recBody.auditId);
+    assert.equal(audited.verdict, "approved");
+
+    const unrecorded = router.reconcileMergeAudit({
+      repository: { full_name: "xpufx-org/paseo" },
+      pull_request: {
+        number: 88,
+        merged: true,
+        merge_commit_sha: "not-audited",
+      },
+    });
+    assert.equal(unrecorded.status, "direct_or_adhoc");
+    assert.equal(unrecorded.auditId, undefined);
+
+    // One audited, one direct_or_adhoc merge → 50% compliance.
+    const sum = await fetch(`http://127.0.0.1:${router.port}/audits/summary?repo=xpufx-org/paseo`);
+    const sumBody = await sum.json();
+    assert.equal(sumBody.auditedMerges, 1);
+    assert.equal(sumBody.unauditedMerges, 1);
+    assert.equal(sumBody.complianceRate, 50);
+  });
+
   it("responds to GET /enrolled with canonical enrolled repository keys (#911)", async () => {
     router.enrollRepo("xpufx-org/enrolled-http-repo");
 

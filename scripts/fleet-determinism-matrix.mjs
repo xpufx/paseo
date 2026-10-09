@@ -198,9 +198,9 @@ const PARTS = [
     label: DETERMINISTIC,
     anchors: { symbols: ["server.handle", "startHookRouter", "registerSettingsRpc"] },
     evidence: [
-      [`index.server.ts:81-103`, "23 `server.handle(contract, handler)` bindings, one per RPC contract"],
-      [`index.server.ts:133`, "`startHookRouter(server)` starts the HTTP listener"],
-      [`index.server.ts:142-145`, "teardown returns a disposer, no model call"],
+      [`index.server.ts:146-189`, "44 `server.handle(contract, handler)` bindings, one per RPC contract"],
+      [`index.server.ts:219`, "`startHookRouter(server)` starts the HTTP listener"],
+      [`index.server.ts:228-231`, "teardown returns a disposer, no model call"],
     ],
     note: "Binds contracts to handlers and owns load/unload. Every handler it registers is classified on its own row below.",
   },
@@ -455,6 +455,23 @@ const PARTS = [
     note: "Lifecycle and transport. Deterministic given the same host state.",
   },
   {
+    file: `${PLUGIN}/server/audit-receipts.ts`,
+    part: "Append-only PR audit receipts, merge reconciliation and the summary projection (#1172)",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: ["appendAuditReceipt", "findAuditReceipt", "auditCheck", "projectAuditSummary", "handleUppidiAuditRecord", "handleUppidiAuditSummary"],
+      symbols: ["appendAuditReconciliation", "lineRecords", "resolveStorePaths"],
+    },
+    evidence: [
+      [`audit-receipts.ts:193-215`, "receipts are immutable JSONL lines appended to a scoped plugin-data file"],
+      [`audit-receipts.ts:331-391`, "`projectAuditSummary` is arithmetic over stored receipts and reconciliation records"],
+      [`hook-router.ts:3920-3981`, "`reconcileMergeAudit` tags a merged commit `audited` or `direct_or_adhoc` by SHA match"],
+      [`audit-receipts.ts:420-437`, "the record-audit RPC handler stamps the envelope and appends"],
+    ],
+    note: "Append-only stores and a pure CQRS projection. No input from any live model: the receipts are what the orchestrator reported, read back verbatim.",
+  },
+  {
     file: `${PLUGIN}/server/metrics.ts`,
     part: "Model rollup receipts and candidate derivation from daemon counters",
     layer: "server",
@@ -680,7 +697,7 @@ const PARTS = [
     evidence: [
       [`workspace-guard.ts:62-105`, "`inspectPrimaryCheckout` shells `git rev-parse --path-format=absolute --git-dir`/`--git-common-dir` and treats equality as the primary checkout"],
       [`workspace-guard.ts:149-215`, "`evaluateWorkerWorkspaceGuard` is ordered policy over the inspection, project rootPath and daemon registry record; non-worker categories pass untouched"],
-      [`workspace-guard.ts:269-323`, "resolves the workspace record/project rootPath from the daemon registry and applies the guard to worker spawns"],
+      [`workspace-guard.ts:264-321`, "`resolveWorkerWorkspaceContext`/`evaluateWorkerSpawnWorkspace` resolve the workspace record/project rootPath from the daemon registry and apply the guard to worker spawns"],
     ],
     note: "Enforces #918: a worker is refused the primary checkout before any SDK/CLI spawn. Detection is a fixed git probe, never a model judgement.",
   },
@@ -902,14 +919,14 @@ const PARTS = [
   // ---------------------------------------------------------------- shared ---
   {
     file: `${PLUGIN}/shared/contracts.ts`,
-    part: "26 RPC contracts (zod schemas + input/output types) and the fleet settings contract",
+    part: "45 RPC contracts (zod schemas + input/output types) and the fleet settings contract",
     layer: "shared",
     label: DETERMINISTIC,
     anchors: { exports: ["uppidiFleetSettingsContract", "uppidiFleetSettingsSchema"] },
     evidence: [
-      [`contracts.ts:54-1258`, "26 `defineContract`/`defineSettingsContract` objects across the file"],
-      [`contracts.ts:1250-1256`, "the fleet settings schema is a `z.object`"],
-      [`index.server.ts:81-105`, "every one of them is bound to a handler there"],
+      [`contracts.ts:54-2348`, "45 `defineContract`/`defineSettingsContract` objects across the file"],
+      [`contracts.ts:1739-1754`, "the fleet settings schema is a `z.object`"],
+      [`index.server.ts:135-189`, "every one of them is bound to a handler there"],
     ],
     note: "The wire vocabulary. Schemas describe model-shaped concepts (agent metrics, model candidates) but a schema is a validator, not a model.",
   },
