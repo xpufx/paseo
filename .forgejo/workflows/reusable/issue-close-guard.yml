@@ -277,12 +277,13 @@ jobs:
               *) hook_path="/$hook_path" ;;
             esac
 
-            # Host resolution chain matching scripts/frontdesk-info
+            # Host resolution chain matching scripts/frontdesk-info. Canonical
+            # config is uppidi-fleet plugin settings storage; the legacy
+            # ~/.config/uppidi-fleet/router-config.json mirror is never read (#1164).
             if [ -z "$hook_base" ]; then
               local host=""
               local port=""
               local plugin_settings="${HOME}/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json"
-              local router_config="${HOME}/.config/uppidi-fleet/router-config.json"
 
               if [ -f "$plugin_settings" ]; then
                 if [ "$have_jq" = 1 ]; then
@@ -291,18 +292,6 @@ jobs:
                 elif command -v python3 >/dev/null 2>&1; then
                   host="$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("hookHost",""))' "$plugin_settings" 2>/dev/null || true)"
                   port="$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("hookPort",""))' "$plugin_settings" 2>/dev/null || true)"
-                fi
-              fi
-
-              if [ -z "$host" ] || [ -z "$port" ]; then
-                if [ -f "$router_config" ]; then
-                  if [ "$have_jq" = 1 ]; then
-                    [ -z "$host" ] && host="$(jq -r '.host // empty' "$router_config" 2>/dev/null || true)"
-                    [ -z "$port" ] && port="$(jq -r '.port // empty' "$router_config" 2>/dev/null || true)"
-                  elif command -v python3 >/dev/null 2>&1; then
-                    [ -z "$host" ] && host="$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("host",""))' "$router_config" 2>/dev/null || true)"
-                    [ -z "$port" ] && port="$(python3 -c 'import json, sys; d=json.load(open(sys.argv[1])); print(d.get("port",""))' "$router_config" 2>/dev/null || true)"
-                  fi
                 fi
               fi
 

@@ -129,8 +129,14 @@ export function loadRouterConfig(): RouterConfig {
       enrolledRepos: settings.enrolledRepos,
       mergeEventHooks: settings.mergeEventHooks,
     };
-  } catch {
-    return {};
+  } catch (err) {
+    const cause = err instanceof Error ? err.message : String(err);
+    throw new Error(
+      `uppidi-fleet canonical plugin settings are unavailable; refusing to fall back to the legacy ` +
+        `~/.config/uppidi-fleet/router-config.json mirror. Expected settings at ` +
+        `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json. Restore plugin settings storage and ` +
+        `retry. Cause: ${cause}`,
+    );
   }
 }
 

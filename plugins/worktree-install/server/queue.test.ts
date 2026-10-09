@@ -1,6 +1,6 @@
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readQueues, readRouterStatus, resolveRouterUrl } from "./queue.js";
@@ -11,9 +11,9 @@ const realEnv = process.env.FORGE_HOOK_URL;
 /** Serve a fixed JSON body for `/status`, `/health`, and `/queues`. */
 function stubRouter(routes: Record<string, unknown | "down">) {
   // Pin the endpoint so these tests do not resolve the developer's real
-  // ~/.config/uppidi-fleet/router-config.json. The URL is asserted directly in
-  // its own test; every other assertion is about the projection, not the host.
-  process.env.FORGE_HOOK_CONFIG = "/nonexistent/router-config.json";
+  // uppidi-fleet plugin settings. The URL is asserted directly in its own
+  // tests; every other assertion is about the projection, not the host.
+  process.env.FORGE_HOOK_URL = "http://127.0.0.1:8099";
   const calls: string[] = [];
   globalThis.fetch = (async (url: string) => {
     const path = new URL(String(url)).pathname;
@@ -33,62 +33,87 @@ afterEach(() => {
   else process.env.FORGE_HOOK_URL = realEnv;
 });
 
-afterEach(() => {
-  delete process.env.FORGE_HOOK_CONFIG;
-});
-
 describe("router url resolution", () => {
-  it("reads the hook server address from the router config, not just loopback", () => {
+  const realHome = process.env.HOME;
+
+  afterEach(() => {
+    if (realHome === undefined) delete process.env.HOME;
+    else process.env.HOME = realHome;
+    delete process.env.FORGE_HOOK_URL;
+  });
+
+  function writePluginSettings(home: string, settings: Record<string, unknown>): void {
+    const dir = join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "settings.json"), JSON.stringify(settings));
+  }
+
+  function writeLegacyRouterConfig(home: string, settings: Record<string, unknown>): void {
+    const dir = join(home, ".config", "uppidi-fleet");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "router-config.json"), JSON.stringify(settings));
+  }
+
+  it("reads the hook server address from uppidi-fleet plugin settings, not just loopback", () => {
     // The bug this fixes: the daemon is persisted at a LAN address, and falling
     // straight through to 127.0.0.1 made the surfaces report "cannot see the
     // router" on every machine that is not running it locally.
     delete process.env.FORGE_HOOK_URL;
-    const dir = mkdtempSync(join(tmpdir(), "router-config-"));
-    const file = join(dir, "router-config.json");
-    writeFileSync(file, JSON.stringify({ host: "10.20.30.24", port: 8099 }));
-    process.env.FORGE_HOOK_CONFIG = file;
+    const home = mkdtempSync(join(tmpdir(), "router-home-"));
+    writePluginSettings(home, { hookHost: "10.20.30.24", hookPort: 8099 });
+    process.env.HOME = home;
     try {
       assert.equal(resolveRouterUrl(), "http://10.20.30.24:8099");
     } finally {
-      delete process.env.FORGE_HOOK_CONFIG;
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
   it("maps a wildcard bind to loopback rather than dialling 0.0.0.0", () => {
     delete process.env.FORGE_HOOK_URL;
-    const dir = mkdtempSync(join(tmpdir(), "router-config-"));
-    const file = join(dir, "router-config.json");
-    writeFileSync(file, JSON.stringify({ host: "0.0.0.0", port: 8099 }));
-    process.env.FORGE_HOOK_CONFIG = file;
+    const home = mkdtempSync(join(tmpdir(), "router-home-"));
+    writePluginSettings(home, { hookHost: "0.0.0.0", hookPort: 8099 });
+    process.env.HOME = home;
     try {
       assert.equal(resolveRouterUrl(), "http://127.0.0.1:8099");
     } finally {
-      delete process.env.FORGE_HOOK_CONFIG;
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it("falls back to loopback when the config is unreadable, and not to a hang", () => {
+  it("never consults the legacy ~/.config/uppidi-fleet/router-config.json mirror (#1164)", () => {
     delete process.env.FORGE_HOOK_URL;
-    process.env.FORGE_HOOK_CONFIG = "/nonexistent/router-config.json";
+    const home = mkdtempSync(join(tmpdir(), "router-home-"));
+    writeLegacyRouterConfig(home, { host: "10.20.30.24", port: 8099 });
+    process.env.HOME = home;
     try {
       assert.equal(resolveRouterUrl(), "http://127.0.0.1:8099");
     } finally {
-      delete process.env.FORGE_HOOK_CONFIG;
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
-  it("still prefers an explicit override over the config", () => {
-    const dir = mkdtempSync(join(tmpdir(), "router-config-"));
-    const file = join(dir, "router-config.json");
-    writeFileSync(file, JSON.stringify({ host: "10.20.30.24", port: 8099 }));
-    process.env.FORGE_HOOK_CONFIG = file;
+  it("prefers canonical plugin settings over the legacy mirror when both exist (#1164)", () => {
+    delete process.env.FORGE_HOOK_URL;
+    const home = mkdtempSync(join(tmpdir(), "router-home-"));
+    writePluginSettings(home, { hookHost: "canonical.internal", hookPort: 8200 });
+    writeLegacyRouterConfig(home, { host: "legacy.internal", port: 1111 });
+    process.env.HOME = home;
+    try {
+      assert.equal(resolveRouterUrl(), "http://canonical.internal:8200");
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("still prefers an explicit override over plugin settings", () => {
+    const home = mkdtempSync(join(tmpdir(), "router-home-"));
+    writePluginSettings(home, { hookHost: "10.20.30.24", hookPort: 8099 });
+    process.env.HOME = home;
     try {
       assert.equal(resolveRouterUrl("http://explicit:1234/"), "http://explicit:1234");
     } finally {
-      delete process.env.FORGE_HOOK_CONFIG;
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
@@ -100,16 +125,14 @@ describe("router url resolution", () => {
     assert.equal(resolveRouterUrl("http://explicit:1"), "http://explicit:1");
   });
 
-  it("falls back to loopback only when no config exists", () => {
-    // Pinned to a missing config path: left unset, this test read whatever
-    // ~/.config/uppidi-fleet/router-config.json happened to contain on the
-    // developer's machine, which is exactly why it looked green before.
+  it("falls back to loopback only when no canonical settings exist", () => {
     delete process.env.FORGE_HOOK_URL;
-    process.env.FORGE_HOOK_CONFIG = "/nonexistent/router-config.json";
+    const home = mkdtempSync(join(tmpdir(), "router-home-"));
+    process.env.HOME = home;
     try {
       assert.equal(resolveRouterUrl(), "http://127.0.0.1:8099");
     } finally {
-      delete process.env.FORGE_HOOK_CONFIG;
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });

@@ -110,7 +110,7 @@ nothing inside one that clips its own content.
 | Agents | the daemon's own `context.paseo.agents.list()`, enriched from `~/.paseo/agents/*/*.json` for the fields the listing omits, falling back to `paseo ls --json` |
 | Repository per agent | `~/.paseo/projects/{projects,workspaces}.json`, then agent labels, then parent inheritance. Never from a title or cwd heuristic |
 | Tickets | the Forgejo API |
-| Queues and router health | the Forgejo webhook router over HTTP, endpoint resolved from an explicit override → `FORGE_HOOK_URL` → loopback |
+| Queues and router health | the Forgejo webhook router over HTTP, endpoint resolved from an explicit override → `FORGE_HOOK_URL` → uppidi-fleet plugin settings (`~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json`) → loopback |
 
 The router is a daemon **owned by `uppidi-fleet`**. This plugin is a read-mostly client to
 it: it reads status and queues and sends pause/resume/drain, and it does not start, stop,
@@ -129,7 +129,7 @@ different facts and the surface renders them differently on purpose.
 | `FORGEJO_HOST` | board host | `forge.mrs.uppidi.com` |
 | `FORGEJO_REPO` | board repository | `xpufx-org/paseo` |
 | `FORGEJO_TOKEN` / `GITEA_TOKEN` | board token; falls back to the `tea` CLI config | — |
-| `FORGE_HOOK_URL` | webhook router endpoint | `http://127.0.0.1:8099` |
+| `FORGE_HOOK_URL` | webhook router endpoint override (precedes uppidi-fleet plugin settings) | `http://127.0.0.1:8099` |
 | `WORKTREE_INSTALL_ENROLLED_REPOS` | comma-separated repos to treat as enrolled | discovered from the roster |
 | `WORKTREE_INSTALL_WORKSPACE` | checkout a spawned liaison or orchestrator runs in | — |
 | `WORKTREE_INSTALL_MODEL` | model for a spawned session | — |

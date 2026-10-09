@@ -1568,6 +1568,38 @@ describe("hook-router network interfaces and listen address configuration (#427)
     assert.equal(loaded.port, 9199);
   });
 
+  it("never consults the legacy ~/.config/uppidi-fleet/router-config.json mirror (#1164)", () => {
+    const legacyHome = mkdtempSync(join(tmpdir(), "uppidi-legacy-config-"));
+    const legacyDir = join(legacyHome, ".config", "uppidi-fleet");
+    mkdirSync(legacyDir, { recursive: true });
+    const legacyFile = join(legacyDir, "router-config.json");
+    writeFileSync(legacyFile, JSON.stringify({ host: "10.99.99.99", port: 19999 }));
+
+    const realHome = process.env.HOME;
+    const realConfig = process.env.FORGE_HOOK_CONFIG;
+    process.env.HOME = legacyHome;
+    process.env.FORGE_HOOK_CONFIG = legacyFile;
+    try {
+      // Canonical plugin settings drive resolution; the legacy mirror is ignored.
+      saveRouterConfig({ host: "192.0.2.10", port: 8321 });
+      const loaded = loadRouterConfig();
+      assert.equal(loaded.host, "192.0.2.10");
+      assert.equal(loaded.port, 8321);
+
+      // With canonical settings cleared, schema defaults apply -- not the mirror.
+      clearSettingsStorage();
+      const fallback = loadRouterConfig();
+      assert.equal(fallback.host, "127.0.0.1");
+      assert.equal(fallback.port, 8099);
+    } finally {
+      if (realHome === undefined) delete process.env.HOME;
+      else process.env.HOME = realHome;
+      if (realConfig === undefined) delete process.env.FORGE_HOOK_CONFIG;
+      else process.env.FORGE_HOOK_CONFIG = realConfig;
+      rmSync(legacyHome, { recursive: true, force: true });
+    }
+  });
+
   it("initializes HookRouter with persisted configuration", () => {
     saveRouterConfig({ host: "0.0.0.0", port: 8200 });
 
