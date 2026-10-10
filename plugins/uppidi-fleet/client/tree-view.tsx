@@ -566,10 +566,9 @@ export function AgentHealthGauge({
 
   const gauge: HealthGauge = deriveHealthGauge(agent, DEFAULT_HEALTH_GAUGE_THRESHOLDS, now);
   const toneColor = healthToneColor(gauge.overall, colors);
-  // Muted theme-aware track (#1205): `surface2` is the same token as the
-  // elevated card background, so an empty gauge vanished into its container.
-  // A muted foreground wash keeps the track visible on every surface.
-  const trackColor = alpha(colors.foregroundMuted, 0.3);
+  // Enhanced visibility (#1205): use a semi-opaque surface tone with a
+  // contrasting border so the track is always discernible on light and dark surfaces.
+  const trackColor = alpha(colors.foregroundMuted, 0.5);
   const width = compact ? 28 : 56;
   const height = 4;
   // Three segments with 2px gaps. A non-zero fill below ~2px renders as a
@@ -600,8 +599,8 @@ export function AgentHealthGauge({
         width: compact ? 12 : 14,
         height: compact ? 12 : 14,
         borderRadius: compact ? 6 : 7,
-        borderWidth: 1.5,
-        borderColor: trackColor,
+        borderWidth: 1,
+        borderColor: colors.border,
         alignItems: "center",
         justifyContent: "center",
         position: "relative",
@@ -630,7 +629,7 @@ export function AgentHealthGauge({
     // Thin stacked micro-bar: three side-by-side segments (context / turn / error).
     <View
       testID={`agent-health-gauge-track-${agent.id}`}
-      style={{ width, height, flexDirection: "row", gap: 2 }}
+      style={{ width, height, flexDirection: "row", gap: 2, borderRadius: 4, borderWidth: 1, borderColor: colors.border }}
     >
       {gauge.segments.map((segment: HealthGaugeSegment) => (
         <View
