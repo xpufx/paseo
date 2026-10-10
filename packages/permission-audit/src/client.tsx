@@ -516,7 +516,7 @@ function PermissionAuditViewContent({
           header: "Time",
           flex: 2,
           render: (item) => (
-            <Text numberOfLines={1} ellipsizeMode="middle" style={{ color: colors.foregroundMuted }}>
+            <Text style={{ color: colors.foregroundMuted }}>
               {formatAuditTime(item.timestamp)}
             </Text>
           ),
@@ -528,18 +528,16 @@ function PermissionAuditViewContent({
           render: (item) => (
             <View style={{ gap: 2 }}>
               <Text
-                numberOfLines={1}
-                ellipsizeMode="middle"
                 style={{ color: colors.foreground, fontWeight: "600" }}
               >
                 {item.name}
               </Text>
-              <Text style={{ color: colors.foregroundMuted }} numberOfLines={1}>
+              <Text style={{ color: colors.foregroundMuted }}>
                 {isToolCallEntry(item) ? "tool_call" : item.kind} · {item.agentId}
                 {item.agentModel ? ` · ${item.agentModel}` : ""}
                 {isToolCallEntry(item) && item.turnId ? ` · turn ${item.turnId}` : ""}
               </Text>
-              <Text style={{ color: colors.foregroundMuted }} numberOfLines={1} ellipsizeMode="middle">
+              <Text style={{ color: colors.foregroundMuted }}>
                 {summarizeAuditInput(item.input)}
               </Text>
             </View>
@@ -604,7 +602,7 @@ function createStyleSheet() {
       borderRadius: 3,
     },
     badgeText: {
-      fontSize: 11,
+      fontSize: 10,
       fontWeight: "600" as const,
     },
     button: {
@@ -619,7 +617,7 @@ function createStyleSheet() {
       justifyContent: "center" as const,
     },
     buttonText: {
-      fontSize: 12,
+      fontSize: 11,
       fontWeight: "600" as const,
     },
     filterRow: {
@@ -642,12 +640,12 @@ function createStyleSheet() {
       padding: 24,
     },
     emptyTitle: {
-      fontSize: 14,
+      fontSize: 12,
       fontWeight: "600" as const,
       textAlign: "center" as const,
     },
     emptyDescription: {
-      fontSize: 12,
+      fontSize: 11,
       textAlign: "center" as const,
     },
     compactCard: {
@@ -660,6 +658,7 @@ function createStyleSheet() {
       flexDirection: "row" as const,
       justifyContent: "space-between" as const,
       gap: 8,
+      flexWrap: "wrap" as const,
     },
     compactHeader: {
       fontSize: 11,
@@ -680,6 +679,7 @@ function createStyleSheet() {
     },
     row: {
       flexDirection: "row" as const,
+      flexWrap: "wrap" as const,
     },
     cell: {
       paddingHorizontal: 10,
@@ -697,7 +697,7 @@ function createStyleSheet() {
       alignItems: "flex-end" as const,
     },
     headerText: {
-      fontSize: 11,
+      fontSize: 10,
       fontWeight: "600" as const,
       letterSpacing: 0.3,
       textTransform: "uppercase" as const,
