@@ -559,16 +559,23 @@ export function AgentHealthGauge({
   expanded = false,
   now = Date.now(),
 }: AgentHealthGaugeProps) {
-  const { colors } = useFleetTheme();
+  const { colors, alpha } = useFleetTheme();
   const metrics = agent.metrics;
   // Absent gauge for legacy payloads: no metrics block, nothing rendered.
   if (!metrics) return null;
 
   const gauge: HealthGauge = deriveHealthGauge(agent, DEFAULT_HEALTH_GAUGE_THRESHOLDS, now);
   const toneColor = healthToneColor(gauge.overall, colors);
-  const trackColor = colors.surface2;
+  // Muted theme-aware track (#1205): `surface2` is the same token as the
+  // elevated card background, so an empty gauge vanished into its container.
+  // A muted foreground wash keeps the track visible on every surface.
+  const trackColor = alpha(colors.foregroundMuted, 0.3);
   const width = compact ? 28 : 56;
   const height = 4;
+  // Three segments with 2px gaps. A non-zero fill below ~2px renders as a
+  // stray tick mark rather than a level, so partial fills floor at 2px (#1205).
+  const segmentWidth = (width - 4) / 3;
+  const minFillRatio = Math.min(2, segmentWidth) / segmentWidth;
 
   const isRunning =
     String(agent.status ?? "").toLowerCase() === "running" &&
@@ -639,9 +646,11 @@ export function AgentHealthGauge({
         >
           <View
             style={{
-              width: `${Math.round(segment.ratio * 100)}%`,
+              width: `${Math.round(
+                (segment.ratio > 0 ? Math.max(segment.ratio, minFillRatio) : 0) * 100,
+              )}%`,
               height: "100%",
-              borderRadius: 2,
+              borderRadius: 1,
               backgroundColor: healthToneColor(segment.tone, colors),
             }}
           />
@@ -1007,6 +1016,30 @@ export function FrontDeskHero({
                       colors={colors}
                     />
                   ))}
+                {/* Sub-pills unroll toggle lives beside the agent-name pills (#1205):
+                    next to the archive button it was misclicked for a destructive
+                    action, so it moved to the identity column. */}
+                {policy.subPills.length > 0 && (
+                  <InteractiveRow
+                    accessibilityRole="button"
+                    accessibilityLabel={`${isSubPillsExpanded ? "Collapse" : "Expand"} secondary badges for ${primaryAgent.name}`}
+                    title={isSubPillsExpanded ? "Hide details" : "Show details"}
+                    onPress={() => setIsSubPillsExpanded((prev) => !prev)}
+                    pressedOpacity={0.6}
+                    style={{
+                      padding: 2,
+                      justifyContent: "center",
+                      alignItems: "center",
+                      borderRadius: 4,
+                    }}
+                  >
+                    <Icon
+                      name={isSubPillsExpanded ? "ChevronDown" : "ChevronRight"}
+                      size={13}
+                      color={colors.foregroundMuted}
+                    />
+                  </InteractiveRow>
+                )}
               </Row>
             </Stack>
           </Row>
@@ -1035,28 +1068,6 @@ export function FrontDeskHero({
               >
                 {formatRelativeTime(primaryAgent.lastActivityAt)}
               </Text>
-            )}
-
-            {policy.subPills.length > 0 && (
-              <InteractiveRow
-                accessibilityRole="button"
-                accessibilityLabel={`${isSubPillsExpanded ? "Collapse" : "Expand"} secondary badges for ${primaryAgent.name}`}
-                title={isSubPillsExpanded ? "Hide details" : "Show details"}
-                onPress={() => setIsSubPillsExpanded((prev) => !prev)}
-                pressedOpacity={0.6}
-                style={{
-                  padding: 2,
-                  justifyContent: "center",
-                  alignItems: "center",
-                  borderRadius: 4,
-                }}
-              >
-                <Icon
-                  name={isSubPillsExpanded ? "ChevronDown" : "ChevronRight"}
-                  size={13}
-                  color={colors.foregroundMuted}
-                />
-              </InteractiveRow>
             )}
 
             {onReplaceFrontDesk && (
@@ -2178,6 +2189,30 @@ export function DenseAgentRow({
                   colors={colors}
                 />
               ))}
+            {/* Sub-pills unroll toggle lives beside the agent-name pills (#1205):
+                next to the archive button it was misclicked for a destructive
+                action, so it moved to the identity column. */}
+            {policy.subPills.length > 0 && (
+              <InteractiveRow
+                accessibilityRole="button"
+                accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} secondary badges for ${agent.name}`}
+                title={isExpanded ? "Hide details" : "Show details"}
+                onPress={() => setIsExpanded((prev) => !prev)}
+                pressedOpacity={0.6}
+                style={{
+                  padding: 2,
+                  justifyContent: "center",
+                  alignItems: "center",
+                  borderRadius: 4,
+                }}
+              >
+                <Icon
+                  name={isExpanded ? "ChevronDown" : "ChevronRight"}
+                  size={13}
+                  color={colors.foregroundMuted}
+                />
+              </InteractiveRow>
+            )}
           </Row>
 
           {/* Right side: State badge (if in defaultPills), Time, Expand Toggle, Archive */}
@@ -2205,28 +2240,6 @@ export function DenseAgentRow({
               >
                 {formatRelativeTime(agent.lastActivityAt)}
               </Text>
-            )}
-
-            {policy.subPills.length > 0 && (
-              <InteractiveRow
-                accessibilityRole="button"
-                accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} secondary badges for ${agent.name}`}
-                title={isExpanded ? "Hide details" : "Show details"}
-                onPress={() => setIsExpanded((prev) => !prev)}
-                pressedOpacity={0.6}
-                style={{
-                  padding: 2,
-                  justifyContent: "center",
-                  alignItems: "center",
-                  borderRadius: 4,
-                }}
-              >
-                <Icon
-                  name={isExpanded ? "ChevronDown" : "ChevronRight"}
-                  size={13}
-                  color={colors.foregroundMuted}
-                />
-              </InteractiveRow>
             )}
 
             <Button
@@ -2455,6 +2468,27 @@ export function OrchestratorRow({
               navigation={navigation}
               fontWeight="700"
             />
+            {policy.subPills.length > 0 && (
+              <InteractiveRow
+                accessibilityRole="button"
+                accessibilityLabel={`${isSubPillsExpanded ? "Collapse" : "Expand"} secondary badges for ${agent.name}`}
+                title={isSubPillsExpanded ? "Hide details" : "Show details"}
+                onPress={() => setIsSubPillsExpanded((prev) => !prev)}
+                pressedOpacity={0.6}
+                style={{
+                  padding: 2,
+                  justifyContent: "center",
+                  alignItems: "center",
+                  borderRadius: 4,
+                }}
+              >
+                <Icon
+                  name={isSubPillsExpanded ? "ChevronDown" : "ChevronRight"}
+                  size={13}
+                  color={colors.foregroundMuted}
+                />
+              </InteractiveRow>
+            )}
           </Row>
           {policy.defaultPills
             .filter((id) => id !== "state")
@@ -2512,28 +2546,6 @@ export function OrchestratorRow({
             >
               {formatRelativeTime(agent.lastActivityAt)}
             </Text>
-          )}
-
-          {policy.subPills.length > 0 && (
-            <InteractiveRow
-              accessibilityRole="button"
-              accessibilityLabel={`${isSubPillsExpanded ? "Collapse" : "Expand"} secondary badges for ${agent.name}`}
-              title={isSubPillsExpanded ? "Hide details" : "Show details"}
-              onPress={() => setIsSubPillsExpanded((prev) => !prev)}
-              pressedOpacity={0.6}
-              style={{
-                padding: 2,
-                justifyContent: "center",
-                alignItems: "center",
-                borderRadius: 4,
-              }}
-            >
-              <Icon
-                name={isSubPillsExpanded ? "ChevronDown" : "ChevronRight"}
-                size={13}
-                color={colors.foregroundMuted}
-              />
-            </InteractiveRow>
           )}
 
           <Button
