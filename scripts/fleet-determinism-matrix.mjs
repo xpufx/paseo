@@ -1020,12 +1020,34 @@ const PARTS = [
 
   // ------------------------------------------------- plugin-owned scripts ---
   {
+    file: `${PLUGIN}/test/main-branch-guard.mjs`,
+    part: "Main branch test guard and git branch resolution",
+    layer: "script",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "ALLOW_MAIN_TESTS_ENV",
+        "BLOCKED_BRANCHES",
+        "MAIN_BRANCH_MESSAGE",
+        "assertNotOnMainBranch",
+        "enforceMainBranchGuard",
+        "resolveCurrentBranch",
+      ],
+    },
+    evidence: [
+      [`main-branch-guard.mjs:34-44`, "resolves current branch via git rev-parse with symbolic-ref fallback"],
+      [`main-branch-guard.mjs:50-60`, "asserts branch is not main/master unless ALLOW_MAIN_TESTS=1"],
+      [`main-branch-guard.mjs:63-70`, "fails fast and exits with error code 1 when guard fails"],
+    ],
+    note: "Fail-fast pre-flight check preventing destructive test execution on main/master (#1161).",
+  },
+  {
     file: `${PLUGIN}/test/register-ts-hooks.mjs`,
     part: "ESM resolve-hook registration for `node --test`",
     layer: "script",
     label: DETERMINISTIC,
     anchors: {},
-    evidence: [[`register-ts-hooks.mjs:4-6`, "`register('./resolve-ts-hooks.mjs', import.meta.url)`"]],
+    evidence: [[`register-ts-hooks.mjs:12`, "`register('./resolve-ts-hooks.mjs', import.meta.url)`"]],
     note: "Loaded via `node --import`. A separate file because a hooks module must be registered, not imported.",
   },
   {

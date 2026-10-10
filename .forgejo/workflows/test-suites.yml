@@ -118,6 +118,11 @@ jobs:
 
       - name: Root test suites
         if: always()
+        # The fleet suites refuse to run from a main/master checkout (#1161).
+        # This job is the sanctioned exception: it runs in an ephemeral CI
+        # container with an isolated HOME, not against live operator state.
+        env:
+          ALLOW_MAIN_TESTS: "1"
         run: |
           set -euo pipefail
           if [ "${{ steps.deps.outputs.deps_ready }}" != "true" ]; then

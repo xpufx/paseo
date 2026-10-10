@@ -56,6 +56,8 @@ const AMBIENT_COMMANDS = new Set([
   "security", "sqlite3", "sw_vers", "xattr",
   // python
   "python3",
+  // in-repo test jail wrapper
+  "run-test-jail.sh",
 ]);
 
 /** CLI command -> the package that provides its binary. */
