@@ -7,7 +7,7 @@ export interface PluginStorageOptions<T> {
   defaultData?: T;
   /**
    * Base directory override. When provided, storage is located at path.join(baseDir, pluginId).
-   * When omitted, defaults to path.join(os.homedir(), ".paseo", namespace ?? "plugin-data/xpufx", pluginId).
+   * When omitted, defaults to path.join(resolvePaseoHome(), namespace ?? "plugin-data/xpufx", pluginId).
    */
   baseDir?: string;
   /**
@@ -25,6 +25,40 @@ export interface StorageStats {
   fileCount: number;
   totalBytes: number;
   lastModified: Date | null;
+}
+
+const AGENT_MUX_PROFILE_HOME_RE = /(?:^|[\\/])\.agent-mux[\\/]profiles[\\/]/;
+
+/**
+ * Resolve the real user home even when `HOME` points into an agent-mux profile.
+ * A profile session has `HOME=~/.agent-mux/profiles/<provider>/<profile>` while
+ * the live Paseo state stays on the host home. agent-mux exports `REAL_HOME` for
+ * every profile session, so prefer it; otherwise strip the profile prefix so
+ * paths under `~/.paseo` still resolve to the host (#1158, #973).
+ */
+export function resolveHostHome(env: NodeJS.ProcessEnv = process.env): string {
+  const home = (env.HOME || os.homedir() || "").trim();
+  if (!home || !AGENT_MUX_PROFILE_HOME_RE.test(home)) {
+    return home;
+  }
+  const realHome = (env.REAL_HOME || "").trim();
+  if (realHome) return realHome;
+  const marker = home.match(AGENT_MUX_PROFILE_HOME_RE);
+  if (marker && typeof marker.index === "number" && marker.index > 0) {
+    return home.slice(0, marker.index);
+  }
+  return home;
+}
+
+/**
+ * Resolve the canonical `~/.paseo` directory. `PASEO_HOME` is the daemon's own
+ * declaration of that root, so prefer it; otherwise anchor to the host home
+ * rather than an agent-mux profile (#1158).
+ */
+export function resolvePaseoHome(env: NodeJS.ProcessEnv = process.env): string {
+  const paseoHome = (env.PASEO_HOME || "").trim();
+  if (paseoHome) return paseoHome;
+  return path.join(resolveHostHome(env), ".paseo");
 }
 
 export const DEFAULT_NAMESPACE_README = `# Paseo Plugins Storage (xpufx)
@@ -60,7 +94,7 @@ export class PluginStorage<T extends Record<string, any>> {
       this.namespaceDir = options.baseDir;
       this.pluginDir = path.join(options.baseDir, pluginId);
     } else {
-      this.namespaceDir = path.join(os.homedir(), ".paseo", namespace);
+      this.namespaceDir = path.join(resolvePaseoHome(), namespace);
       this.pluginDir = path.join(this.namespaceDir, pluginId);
     }
 

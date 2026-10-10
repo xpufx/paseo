@@ -1,6 +1,10 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { PluginStorage, type PluginStorageOptions } from "paseo-plugin-helper/server";
+import {
+  PluginStorage,
+  resolvePaseoHome,
+  type PluginStorageOptions,
+} from "paseo-plugin-helper/server";
 import {
   uppidiFleetSettingsContract,
   type UppidiFleetSettings,
@@ -15,7 +19,9 @@ export function getUppidiFleetSettingsStorage(
     const isTestMode = process.env.NODE_ENV === "test";
     const baseDir =
       options?.baseDir ??
-      (isTestMode ? join(tmpdir(), `paseo-uppidi-fleet-test-${process.pid}`) : undefined);
+      (isTestMode
+        ? join(tmpdir(), `paseo-uppidi-fleet-test-${process.pid}`)
+        : join(resolvePaseoHome(), "plugin-data", "xpufx"));
     const storage = new PluginStorage<UppidiFleetSettings>(
       "uppidi-fleet",
       "settings.json",
@@ -23,7 +29,7 @@ export function getUppidiFleetSettingsStorage(
         schema: uppidiFleetSettingsContract.schema,
         defaultData: uppidiFleetSettingsContract.defaultSettings,
         ...options,
-        ...(baseDir ? { baseDir } : {}),
+        baseDir,
       },
     );
     if (!options && !isTestMode) {

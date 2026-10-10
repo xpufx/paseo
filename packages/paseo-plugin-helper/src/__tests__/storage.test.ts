@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { PluginStorage, DEFAULT_NAMESPACE_README } from "../server/storage.js";
+import { PluginStorage, DEFAULT_NAMESPACE_README, resolveHostHome, resolvePaseoHome } from "../server/storage.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -85,5 +85,56 @@ describe("PluginStorage Scoped Namespace and Auditing (#49)", () => {
 
     const data = await storage.readAsync();
     expect(data).toEqual({ asyncVal: 42 });
+  });
+});
+
+describe("PluginStorage host-home resolution (#1158)", () => {
+  const originalEnv = { HOME: process.env.HOME, REAL_HOME: process.env.REAL_HOME, PASEO_HOME: process.env.PASEO_HOME };
+
+  afterEach(() => {
+    if (originalEnv.HOME === undefined) delete process.env.HOME;
+    else process.env.HOME = originalEnv.HOME;
+    if (originalEnv.REAL_HOME === undefined) delete process.env.REAL_HOME;
+    else process.env.REAL_HOME = originalEnv.REAL_HOME;
+    if (originalEnv.PASEO_HOME === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = originalEnv.PASEO_HOME;
+  });
+
+  it("prefers REAL_HOME over an agent-mux profile HOME", () => {
+    expect(
+      resolveHostHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/pufaysokt", REAL_HOME: "/home/user" }),
+    ).toBe("/home/user");
+  });
+
+  it("derives the host home by stripping the agent-mux profile prefix", () => {
+    expect(resolveHostHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/pufaysokt" })).toBe("/home/user");
+  });
+
+  it("passes a normal home through unchanged", () => {
+    expect(resolveHostHome({ HOME: "/home/user" })).toBe("/home/user");
+  });
+
+  it("prefers PASEO_HOME for the canonical paseo root", () => {
+    expect(
+      resolvePaseoHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/pufaysokt", PASEO_HOME: "/srv/paseo/.paseo" }),
+    ).toBe("/srv/paseo/.paseo");
+  });
+
+  it("anchors the default path to the host paseo home, not the agent-mux profile", () => {
+    process.env.HOME = "/home/user/.agent-mux/profiles/antigravity/pufaysokt";
+    process.env.REAL_HOME = "/home/user";
+    delete process.env.PASEO_HOME;
+
+    const storage = new PluginStorage("my-plugin", "settings.json");
+    expect(storage.pluginDir).toBe(
+      path.join("/home/user", ".paseo", "plugin-data", "xpufx", "my-plugin"),
+    );
+  });
+
+  it("honors PASEO_HOME for the default path", () => {
+    process.env.PASEO_HOME = "/srv/paseo/.paseo";
+
+    const storage = new PluginStorage("my-plugin", "settings.json");
+    expect(storage.pluginDir).toBe(path.join("/srv/paseo/.paseo", "plugin-data", "xpufx", "my-plugin"));
   });
 });
