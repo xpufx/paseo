@@ -1985,6 +1985,49 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     assert.deepEqual(info.pausedRepos, ["xpufx-org/aur-automation"]);
     assert.equal(info.repoQueuedHooks["xpufx-org/paseo"], 2);
   });
+
+  it("reports only declared enrollment, not runtime queues or orchestrators (#1165)", () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    router.enqueue("xpufx-org/ghost-repo", "Queued work");
+    router.writeOrchestrator("xpufx-org/ghost-repo", "agent-ghost");
+
+    assert.equal(router.isEnrolledRepo("xpufx-org/ghost-repo"), false);
+    assert.ok(!router.getEnrolledRepos().includes("xpufx-org/ghost-repo"));
+
+    const ghostInfo = getFleetRosterInfo();
+    assert.ok(!ghostInfo.enrolledRepos.includes("xpufx-org/ghost-repo"));
+    assert.equal(ghostInfo.repoQueuedHooks["xpufx-org/ghost-repo"], 1);
+
+    router.enrollRepo("xpufx-org/declared-repo");
+    assert.ok(router.getEnrolledRepos().includes("xpufx-org/declared-repo"));
+    assert.ok(getFleetRosterInfo().enrolledRepos.includes("xpufx-org/declared-repo"));
+  });
+
+  it("stays unenrolled after unenroll even with an active queue and orchestrator (#1154, #1165)", () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    router.enrollRepo("xpufx-org/durable-repo");
+    router.enqueue("xpufx-org/durable-repo", "Queued work");
+    router.writeOrchestrator("xpufx-org/durable-repo", "agent-durable");
+    router.unenrollRepo("xpufx-org/durable-repo");
+
+    assert.ok(!router.getEnrolledRepos().includes("xpufx-org/durable-repo"));
+    assert.ok(!getFleetRosterInfo().enrolledRepos.includes("xpufx-org/durable-repo"));
+    assert.ok(!(loadRouterConfig().enrolledRepos ?? []).includes("xpufx-org/durable-repo"));
+    // Runtime state is still surfaced as queue depth, just not as enrollment.
+    assert.equal(getFleetRosterInfo().repoQueuedHooks["xpufx-org/durable-repo"], 1);
+  });
 });
 
 describe("hook-router event coalescing and digest (#458)", () => {
@@ -6473,6 +6516,7 @@ describe("board sweep auto-reconciliation (#794)", () => {
   });
 
   it("marks an absent orchestrator stale on the first sweep and auto-heals it (#889)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
     router.writeOrchestrator("xpufx-org/paseo", "dead-agent");
     (router as any).fetchAgentMap = async () => new Map();
 

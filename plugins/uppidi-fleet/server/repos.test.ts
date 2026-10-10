@@ -210,6 +210,78 @@ describe("uppidi-fleet repos handler (#867)", () => {
     assert.ok(!router.getEnrolledRepos().includes("forge.mrs.uppidi.com/xpufx-org/paseo"));
   });
 
+  it("reports a runtime queue/orchestrator as not enrolled unless declared (#1165)", async () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    router.enqueue("forge.mrs.uppidi.com/xpufx-org/ghost", "msg1");
+    router.writeOrchestrator("forge.mrs.uppidi.com/xpufx-org/ghost", "agent-ghost");
+
+    setTokenResolverForTest(async () => "test-token");
+    setFetchForTest(async () =>
+      jsonResponse({
+        data: [
+          {
+            name: "ghost",
+            full_name: "xpufx-org/ghost",
+            owner: { login: "xpufx-org" },
+            private: false,
+          },
+        ],
+      }),
+    );
+
+    const res = await handleUppidiRepos({});
+    assert.equal(res.ok, true);
+    const ghost = res.repos.find((r) => r.name === "ghost");
+    assert.ok(ghost);
+    assert.equal(ghost.enrolled, false);
+    assert.equal(ghost.queueDepth, 1);
+    assert.equal(ghost.hasOrchestrator, true);
+
+    router.enrollRepo("forge.mrs.uppidi.com/xpufx-org/ghost");
+    const enrolledRes = await handleUppidiRepos({});
+    assert.equal(enrolledRes.repos.find((r) => r.name === "ghost")?.enrolled, true);
+  });
+
+  it("stays unenrolled after UNENROLL while a queue and orchestrator remain (#1154, #1165)", async () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    router.enrollRepo("forge.mrs.uppidi.com/xpufx-org/durable");
+    router.enqueue("forge.mrs.uppidi.com/xpufx-org/durable", "msg1");
+    router.writeOrchestrator("forge.mrs.uppidi.com/xpufx-org/durable", "agent-durable");
+
+    setTokenResolverForTest(async () => "test-token");
+    setFetchForTest(async () =>
+      jsonResponse({
+        data: [
+          {
+            name: "durable",
+            full_name: "xpufx-org/durable",
+            owner: { login: "xpufx-org" },
+            private: false,
+          },
+        ],
+      }),
+    );
+
+    const unenrollRes = await handleUppidiUnenrollRepo({ repo: "forge.mrs.uppidi.com/xpufx-org/durable" });
+    assert.equal(unenrollRes.ok, true);
+    assert.ok(!unenrollRes.enrolledRepos.includes("forge.mrs.uppidi.com/xpufx-org/durable"));
+
+    const res = await handleUppidiRepos({});
+    assert.equal(res.repos.find((r) => r.name === "durable")?.enrolled, false);
+  });
+
   it("enrolls and unenrolls repositories with config fallback when router is inactive", async () => {
     setActiveHookRouter(null);
 

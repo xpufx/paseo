@@ -4708,35 +4708,14 @@ export class HookRouter {
   }
 
 
+  /**
+   * Declared enrollment only. Runtime artifacts (queues, orchestrator state
+   * records) are surfaced through {@link getQueuesOverview} and
+   * {@link listOrchestratorRecords} instead of being folded into the allowlist,
+   * so an UNENROLL in settings.json is authoritative (#1165, #1154).
+   */
   public getEnrolledRepos(): string[] {
-    const set = new Set<string>(this.enrolledRepos);
-    try {
-      if (existsSync(this.stateDir)) {
-        const files = readdirSync(this.stateDir);
-        for (const file of files) {
-          if (!file.endsWith(".json") || file === "frontdesk.json") continue;
-          try {
-            const raw = readFileSync(join(this.stateDir, file), "utf8");
-            const parsed = JSON.parse(raw);
-            if (parsed && typeof parsed.key === "string" && parsed.key.trim()) {
-              set.add(parsed.key.trim());
-            }
-          } catch (err) {
-            this.log(`[warn] state read/parse failed (hook-router.ts:2259): ${err}`);
-          }
-        }
-      }
-    } catch (err) {
-      this.log(`[warn] state read/parse failed (hook-router.ts:2262): ${err}`);
-    }
-
-    for (const key of this.queues.keys()) {
-      if (key !== "frontdesk") {
-        set.add(key);
-      }
-    }
-
-    return Array.from(set);
+    return Array.from(this.enrolledRepos);
   }
 
   /** Enrolled repository keys in canonical `host/owner/repo` form (#911). */
@@ -10290,27 +10269,6 @@ export function getFleetRosterInfo(): {
 
   const enrolledSet = new Set<string>(router ? router.getEnrolledRepos() : (config.enrolledRepos ?? []));
 
-  const stateDir = process.env.HOOK_STATE_DIR ?? join(home, ".paseo", "forgejo-hook", "orchestrators");
-  if (existsSync(stateDir)) {
-    try {
-      const files = readdirSync(stateDir);
-      for (const f of files) {
-        if (!f.endsWith(".json") || f === "frontdesk.json") continue;
-        try {
-          const raw = readFileSync(join(stateDir, f), "utf8");
-          const parsed = JSON.parse(raw);
-          if (parsed && typeof parsed.key === "string" && parsed.key.trim()) {
-            enrolledSet.add(parsed.key.trim());
-          }
-        } catch (err) {
-          console.warn(`[uppidi-fleet:hook-router] state read/parse failed (hook-router.ts:5516): ${err}`);
-        }
-      }
-    } catch (err) {
-      console.warn(`[uppidi-fleet:hook-router] state read/parse failed (hook-router.ts:5518): ${err}`);
-    }
-  }
-
   const repoQueuedHooks: Record<string, number> = {};
   if (router) {
     const overview = router.getQueuesOverview() as any;
@@ -10334,7 +10292,6 @@ export function getFleetRosterInfo(): {
             if (Array.isArray(parsed)) {
               const key = parsed[0]?.key || f.replace(/\.json$/, "");
               repoQueuedHooks[key] = parsed.length;
-              enrolledSet.add(key);
             }
           } catch (err) {
             console.warn(`[uppidi-fleet:hook-router] state read/parse failed (hook-router.ts:5546): ${err}`);
