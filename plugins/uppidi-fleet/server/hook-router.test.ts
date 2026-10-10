@@ -117,6 +117,9 @@ import {
   formatMergeEventNotice,
   readMergeEventRecords,
   setExecFileAsyncForTest,
+  WAKEUP_RULES,
+  isActionableWakeupEvent,
+  SLASH_SWEEP_RE,
   type CoalesceEvent,
   type WatchdogAgent,
   type WatchdogAgentDisk,
@@ -8693,6 +8696,280 @@ describe("HookRouter Paseo SDK capture and host checkout fallback (#1170)", () =
     } finally {
       process.env.HOME = origHome;
     }
+  });
+});
+
+describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-dormancy-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  describe("WAKEUP_RULES and isActionableWakeupEvent", () => {
+    it("matches operator slash commands in comments and reviews", () => {
+      assert.equal(
+        isActionableWakeupEvent("issue_comment", {
+          comment: { body: "Hey @agent, please /orchestrator inspect this issue" },
+        }),
+        true,
+      );
+      assert.equal(
+        isActionableWakeupEvent("pull_request_review", {
+          review: { body: "Looks solid, /approve" },
+        }),
+        true,
+      );
+      assert.equal(
+        isActionableWakeupEvent("issue_comment", {
+          comment: { body: "/sweep" },
+        }),
+        true,
+      );
+      assert.equal(SLASH_SWEEP_RE.test("/sweep"), true);
+      assert.equal(SLASH_SWEEP_RE.test("please /sweep now"), true);
+      assert.equal(SLASH_SWEEP_RE.test("/sweeper"), false);
+    });
+
+    it("matches action-token label additions", () => {
+      const actionableLabels = [
+        "attention/orchestrator",
+        "attention/frontdesk",
+        "priority/sos",
+        "state/review",
+        "review/needed",
+        "flag/stop-work",
+      ];
+      for (const name of actionableLabels) {
+        assert.equal(
+          isActionableWakeupEvent("issues", {
+            action: "labeled",
+            label: { name },
+          }),
+          true,
+          `expected label ${name} to trigger wakeup`,
+        );
+      }
+      // Unlabeled action-token is passive, not a wakeup
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "unlabeled",
+          label: { name: "attention/orchestrator" },
+        }),
+        false,
+      );
+    });
+
+    it("matches lifecycle advance events", () => {
+      assert.equal(isActionableWakeupEvent("issues", { action: "opened" }), true);
+      assert.equal(isActionableWakeupEvent("issues", { action: "reopened" }), true);
+      assert.equal(isActionableWakeupEvent("pull_request", { action: "opened" }), true);
+      assert.equal(isActionableWakeupEvent("pull_request", { action: "ready_for_review" }), true);
+    });
+
+    it("treats passive noise, self-stamped comments, closed issues, and metadata labels as non-actionable", () => {
+      // Self-stamped comments
+      assert.equal(
+        isActionableWakeupEvent("issue_comment", {
+          action: "created",
+          comment: {
+            body: "Completed task\n\n---\n<sub>🤖 **Worker** (`abc1234`) · `model` · `repo:branch` · _now_</sub>",
+          },
+        }),
+        false,
+      );
+
+      // Issues closed
+      assert.equal(isActionableWakeupEvent("issues", { action: "closed" }), false);
+
+      // Unlabeled
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "unlabeled",
+          label: { name: "state/wip" },
+        }),
+        false,
+      );
+
+      // Cosmetic / metadata labels
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "labeled",
+          label: { name: "format/needed" },
+        }),
+        false,
+      );
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "labeled",
+          label: { name: "size/m" },
+        }),
+        false,
+      );
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "labeled",
+          label: { name: "target/upstream" },
+        }),
+        false,
+      );
+
+      // Unknown / cosmetic edits
+      assert.equal(isActionableWakeupEvent("issues", { action: "edited" }), false);
+      assert.equal(isActionableWakeupEvent("pull_request", { action: "synchronize" }), false);
+    });
+  });
+
+  describe("dormancy state tracking (isDormant, refreshDormancy, exitQuiescence)", () => {
+    it("evaluates isDormant correctly based on queues, unstaffed enrolled queues, and running turns", () => {
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+
+      // Clean empty router with no agent map -> dormant
+      assert.equal(router.isDormant(), true);
+
+      // If there are live running turns in agentMap -> not dormant
+      const runningMap = new Map<string, any>([
+        ["ag-1", { id: "ag-1", status: "running" }],
+      ]);
+      assert.equal(router.isDormant(runningMap), false);
+
+      const busyMap = new Map<string, any>([
+        ["ag-2", { id: "ag-2", status: "idle", activeTurn: { id: "turn-1" } }],
+      ]);
+      assert.equal(router.isDormant(busyMap), false);
+
+      const idleMap = new Map<string, any>([
+        ["ag-3", { id: "ag-3", status: "idle" }],
+      ]);
+      assert.equal(router.isDormant(idleMap), true);
+
+      // If halted -> never dormant
+      router.halt();
+      assert.equal(router.isDormant(), false);
+      router.resume("all");
+      (router as any).isHaltedState = false;
+
+      // If queues have messages -> not dormant
+      router.enqueue("xpufx-org/test", "Hello queue");
+      assert.equal(router.isDormant(), false);
+    });
+
+    it("refreshes dormancy and transitions quiescent state", () => {
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      assert.equal(router.isQuiescent, false);
+
+      // refresh with idle fleet -> enters quiescent
+      const q = router.refreshDormancy(new Map());
+      assert.equal(q, true);
+      assert.equal(router.isQuiescent, true);
+      assert.ok(router.lastQuiescenceChangeAt);
+
+      // explicit exitQuiescence leaves quiescent mode
+      router.exitQuiescence("test wakeup");
+      assert.equal(router.isQuiescent, false);
+    });
+  });
+
+  describe("delta-gated board sweep notification suppression", () => {
+    it("suppresses Front Desk notification when actionable candidates digest is unchanged", async () => {
+      const deliveries: Array<{ agentId: string; prompt: string }> = [];
+      const mockPaseo = {
+        agents: {
+          ref: (id: string) => ({
+            send: async (prompt: string) => {
+              deliveries.push({ agentId: id, prompt });
+              return { ok: true };
+            },
+          }),
+        },
+      } as any;
+
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      router.setActivePaseo(mockPaseo);
+
+      // Register front desk agent so notifications have a target
+      router.writeFrontDesk("fd-1", "operator");
+
+      const candidates = [
+        {
+          number: 101,
+          title: "Fix issue",
+          labels: [{ name: "attention/orchestrator" }],
+          category: "actionable",
+          is_dispatchable: true,
+          created_at: new Date().toISOString(),
+          comments: 2,
+        },
+      ];
+
+      const io: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: candidates as any,
+        }),
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+      };
+
+      // First sweep: actionable work found, candidate digest is recorded, Front Desk is notified
+      const firstSweep = await router.runBoardSweep(["xpufx-org/paseo"], io);
+      assert.equal(firstSweep.ok, true);
+      assert.equal(firstSweep.notified, 1);
+      assert.equal(deliveries.length, 1);
+      assert.ok(deliveries[0].prompt.includes("xpufx-org/paseo: 1 actionable"));
+
+      // Second sweep with identical candidates: suppressed due to delta gating
+      const secondSweep = await router.runBoardSweep(["xpufx-org/paseo"], io);
+      assert.equal(secondSweep.ok, true);
+      assert.equal(secondSweep.notified, 0);
+      assert.equal(deliveries.length, 1, "expected no new notification delivered");
+
+      // Third sweep with explicit: true: delivers despite unchanged digest
+      const explicitSweep = await router.runBoardSweep(["xpufx-org/paseo"], io, { explicit: true });
+      assert.equal(explicitSweep.ok, true);
+      assert.equal(explicitSweep.notified, 1);
+      assert.equal(deliveries.length, 2, "expected explicit sweep to deliver");
+
+      // Fourth sweep with changed candidates: delivers again
+      const changedCandidates = [
+        ...candidates,
+        {
+          number: 102,
+          title: "Another issue",
+          labels: [{ name: "priority/sos" }],
+          category: "actionable",
+          is_dispatchable: true,
+          created_at: new Date().toISOString(),
+          comments: 0,
+        },
+      ];
+      const changedIo: IssuesCheckIo = {
+        ...io,
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: changedCandidates as any,
+        }),
+      };
+      const fourthSweep = await router.runBoardSweep(["xpufx-org/paseo"], changedIo);
+      assert.equal(fourthSweep.ok, true);
+      assert.equal(fourthSweep.notified, 1);
+      assert.equal(deliveries.length, 3, "expected delivery when candidate set changes");
+    });
   });
 });
 

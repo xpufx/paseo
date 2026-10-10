@@ -1005,6 +1005,147 @@ export function eventKind(event: string, body: any): string {
   return `${event}:${action || "event"}`;
 }
 
+// ---------------------------------------------------------------------------
+// Declarative wakeup classifier (#1181)
+//
+// A dormant fleet must not be woken by passive webhook noise: a self-authored
+// comment, a close, an unlabel, or a cosmetic re-tag on `format/*`, `size/*`,
+// `target/*`. Only genuine operator intent -- a slash command, an action-token
+// transfer, or a lifecycle advance -- should break quiescence. WAKEUP_RULES is
+// the single declarative table of those signals; `isActionableWakeupEvent` is
+// the first-match projection over it, so the router never re-implements the
+// policy inline.
+// ---------------------------------------------------------------------------
+
+/** Slash-command verbs a human operator types to direct the fleet. */
+export const SLASH_COMMAND_RE =
+  /(?:^|\s)\/(?:orchestrator|frontdesk|hold|rework|approve|verify|done|close|instruction|agent|sos|stop|sweep|triage|assign|unblock|block)\b/i;
+
+/** The explicit board-sweep request (`/sweep`), which always delivers (#1181). */
+export const SLASH_SWEEP_RE = /(?:^|\s)\/sweep\b/i;
+
+/** Action tokens whose transfer wakes the fleet (canonical, lowercased). */
+export const WAKEUP_ACTION_LABELS: ReadonlySet<string> = new Set([
+  "attention/orchestrator",
+  "attention/frontdesk",
+  "priority/sos",
+  "state/review",
+  "review/needed",
+  "flag/stop-work",
+]);
+
+/** Label namespaces that are cosmetic metadata, never a wakeup. */
+export const PASSIVE_LABEL_PREFIXES: readonly string[] = ["format/", "size/", "target/"];
+
+/** `event:action` lifecycle advances that always wake the fleet. */
+export const WAKEUP_LIFECYCLE_EVENTS: ReadonlySet<string> = new Set([
+  "issues:opened",
+  "issues:reopened",
+  "pull_request:opened",
+  "pull_request:ready_for_review",
+]);
+
+export interface WakeupRule {
+  /** Stable rule id, surfaced in logs and tests. */
+  id: string;
+  /** One-line description of the signal. */
+  description: string;
+  /** True when a match warrants waking a dormant fleet. */
+  actionable: boolean;
+  /** Pure predicate over the lowercased event and the raw webhook body. */
+  matches: (event: string, body: any) => boolean;
+}
+
+/** Comment/review text carried by a webhook body, if any. */
+function wakeupCommentText(body: any): string {
+  const bodyText = body?.comment?.body ?? body?.review?.body;
+  return typeof bodyText === "string" ? bodyText : "";
+}
+
+/** `event:action` key, lowercased, against {@link WAKEUP_LIFECYCLE_EVENTS}. */
+function wakeupEventAction(event: string, body: any): string {
+  return `${event}:${String(body?.action ?? "").toLowerCase()}`;
+}
+
+/**
+ * Declarative wakeup rules, first match wins. Actionable signals come first so
+ * a directive still wakes the fleet even inside an envelope-decorated comment;
+ * the passive rules below make the negative space explicit rather than relying
+ * on an implicit default.
+ */
+export const WAKEUP_RULES: readonly WakeupRule[] = [
+  {
+    id: "operator-slash-command",
+    description: "direct operator slash command in a comment or review body",
+    actionable: true,
+    matches: (_event, body) => SLASH_COMMAND_RE.test(wakeupCommentText(body)),
+  },
+  {
+    id: "action-token-transfer",
+    description:
+      "labeled with attention/orchestrator, attention/frontdesk, priority/sos, state/review, review/needed or flag/stop-work",
+    actionable: true,
+    matches: (_event, body) => {
+      if (String(body?.action ?? "").toLowerCase() !== "labeled") return false;
+      return WAKEUP_ACTION_LABELS.has(canonicalLabelName(body?.label?.name));
+    },
+  },
+  {
+    id: "lifecycle-advance",
+    description: "ticket lifecycle advance (issues opened/reopened, pull_request opened/ready_for_review)",
+    actionable: true,
+    matches: (event, body) => WAKEUP_LIFECYCLE_EVENTS.has(wakeupEventAction(event, body)),
+  },
+  {
+    id: "passive-self-stamped-comment",
+    description: "fleet-originated (self-stamped) comment",
+    actionable: false,
+    matches: (event, body) => event === "issue_comment" && envelopeAgentId(body) !== null,
+  },
+  {
+    id: "passive-issue-closed",
+    description: "issue closed",
+    actionable: false,
+    matches: (event, body) =>
+      event === "issues" && String(body?.action ?? "").toLowerCase() === "closed",
+  },
+  {
+    id: "passive-unlabeled",
+    description: "label removed",
+    actionable: false,
+    matches: (_event, body) => String(body?.action ?? "").toLowerCase() === "unlabeled",
+  },
+  {
+    id: "passive-metadata-label",
+    description: "cosmetic format/*, size/* or target/* relabel",
+    actionable: false,
+    matches: (_event, body) =>
+      PASSIVE_LABEL_PREFIXES.some((prefix) => canonicalLabelName(body?.label?.name).startsWith(prefix)),
+  },
+  {
+    id: "passive-cosmetic-edit",
+    description: "body/description edit or other cosmetic mutation",
+    actionable: false,
+    matches: (_event, body) =>
+      ["edited", "label_updated", "synchronize", "synchronized"].includes(
+        String(body?.action ?? "").toLowerCase(),
+      ),
+  },
+];
+
+/**
+ * Pure wakeup classifier: true when `event`/`body` is an actionable signal that
+ * should break fleet dormancy. Unknown events are non-actionable by default, so
+ * an unmodelled event never wakes a dormant fleet on its own.
+ */
+export function isActionableWakeupEvent(event: string, body: any): boolean {
+  const ev = String(event ?? "").toLowerCase();
+  for (const rule of WAKEUP_RULES) {
+    if (rule.matches(ev, body)) return rule.actionable;
+  }
+  return false;
+}
+
 export function eventHash(repoKey: string, issue: number | null, kind: string, actor: string, bodyText?: string): string {
   return `${repoKey}#${issue}|${kind}|${actor}|${bodyText ?? ""}`;
 }
@@ -3408,6 +3549,18 @@ export class HookRouter {
   private readonly rotationLock = new RotationLock();
   private readonly lastRotationAt = new Map<string, number>();
   private readonly lastSweepDigests = new Map<string, string>();
+  /**
+   * Quiescent/dormant mode (#1181): true when no queue backlog, no unstaffed
+   * enrolled queue, and no live running turn are observed. Passive webhook
+   * noise is dropped while quiescent; an actionable wakeup clears it.
+   */
+  private quiescent = false;
+  /** Last transition in or out of quiescence (#1181). */
+  public lastQuiescenceChangeAt: number | null = null;
+  /** Per-repo SHA256 digest of the last actionable sweep set (#1181). */
+  private readonly lastSweepActionDigests = new Map<string, string>();
+  /** Failure signature of the last sweep, for error-state change detection (#1181). */
+  private lastSweepErrorSignature = "";
   private rotationAutoEnabled: boolean;
   /** Direct-action guards (#847). */
   public readonly labelTriageEnabled: boolean;
@@ -3674,6 +3827,14 @@ export class HookRouter {
       return { key: targetKey, result: "suppressed", frontDesk: isFd, bypass: false };
     }
     const ev = String(event ?? "unknown");
+    // Quiescence (#1181): an actionable wakeup clears dormancy immediately; a
+    // passive event while quiescent must not wake the fleet at all.
+    if (isActionableWakeupEvent(ev, body)) {
+      this.exitQuiescence(`actionable webhook ${ev}`);
+    } else if (this.quiescent && !isFd) {
+      this.log(`[info] Suppressing passive webhook ${ev} for ${targetKey} while fleet is dormant (#1181)`);
+      return { key: targetKey, result: "suppressed", frontDesk: false, bypass: false };
+    }
     const issue = issueNumberOf(body);
     const actor = senderFromPayload(body)?.login ?? "unknown";
     const kind = eventKind(ev, body);
@@ -3690,6 +3851,14 @@ export class HookRouter {
     // acknowledged immediately and the guard acts asynchronously. Both are
     // disabled by default under test so fixtures never touch the network.
     void this.runDirectActions(ev, body);
+
+    // Explicit operator board sweep (`/sweep`) always delivers, bypassing the
+    // delta gate that suppresses unchanged sweeps (#1181).
+    if (SLASH_SWEEP_RE.test(commentBody)) {
+      void this.runBoardSweep(undefined, undefined, { explicit: true }).catch((err) =>
+        this.log(`[warn] Explicit /sweep failed: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    }
 
     const orch = isFd ? null : this.readOrchestrator(repoKey);
     if (!isFd && !bypass && ev === "issue_comment") {
@@ -5187,6 +5356,96 @@ export class HookRouter {
     }
 
     return false;
+  }
+
+  // -------------------------------------------------------------------------
+  // Fleet dormancy and quiescence recognition (#1181)
+  //
+  // The fleet is dormant when there is nothing to do: no queued messages, no
+  // enrolled queue left unstaffed, and no live agent mid-turn. A dormant fleet
+  // enters quiescent mode and stops reacting to passive webhook noise on rigid
+  // intervals; only an actionable wakeup leaves it.
+  // -------------------------------------------------------------------------
+
+  /**
+   * True when the fleet is fully dormant: empty queues, no unstaffed enrolled
+   * queue, and no live running turn. A null/absent roster cannot prove a turn is
+   * running, so it counts as no live turns -- the conservative direction for not
+   * waking. A halted router is never "dormant" (it is deliberately offline).
+   */
+  public isDormant(agentMap?: Map<string, WatchdogAgent> | null): boolean {
+    if (this.isHaltedState) return false;
+    if (this.getTotalQueued() !== 0) return false;
+    if (this.countUnstaffedEnrolledQueues() > 0) return false;
+    if (this.hasLiveRunningTurns(agentMap)) return false;
+    return true;
+  }
+
+  /** Enrolled repos with a queued backlog but no registered orchestrator (#1181). */
+  public countUnstaffedEnrolledQueues(): number {
+    let count = 0;
+    for (const repo of this.getEnrolledRepos()) {
+      const depth = candidateRepoKeys(repo).reduce(
+        (n, key) => n + (this.queues.get(key)?.length ?? 0),
+        0,
+      );
+      if (depth === 0) continue;
+      if (!this.readOrchestrator(repo)?.agentId) count += 1;
+    }
+    return count;
+  }
+
+  /** True when any live agent reports a running/active turn (#1181). */
+  public hasLiveRunningTurns(agentMap?: Map<string, WatchdogAgent> | null): boolean {
+    const map = agentMap ?? this.latestAgentMap;
+    if (!map) return false;
+    for (const agent of map.values()) {
+      const status = String(agent?.status ?? "").toLowerCase();
+      if (
+        status === "running" ||
+        status === "working" ||
+        status === "busy" ||
+        Boolean(agent?.activeTurn)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Recompute dormancy and transition quiescent mode on change. Returns the
+   * current quiescent state. Called from the board sweep, and available to any
+   * other periodic observer holding a fresh roster.
+   */
+  public refreshDormancy(agentMap?: Map<string, WatchdogAgent> | null): boolean {
+    const dormant = this.isDormant(agentMap);
+    if (dormant !== this.quiescent) {
+      this.quiescent = dormant;
+      this.lastQuiescenceChangeAt = Date.now();
+      this.log(
+        dormant
+          ? "[info] Fleet dormant (empty queues, no live turns); entering quiescent mode (#1181)"
+          : "[info] Fleet activity detected; exiting quiescent mode (#1181)",
+      );
+    }
+    return this.quiescent;
+  }
+
+  /** Current quiescent mode (#1181). */
+  public get isQuiescent(): boolean {
+    return this.quiescent;
+  }
+
+  /**
+   * Leave quiescent mode immediately for an actionable wakeup, so the very next
+   * delivery is dispatched rather than suppressed (#1181).
+   */
+  public exitQuiescence(reason = "actionable wakeup"): void {
+    if (!this.quiescent) return;
+    this.quiescent = false;
+    this.lastQuiescenceChangeAt = Date.now();
+    this.log(`[info] Fleet exited quiescence on ${reason}; active dispatch restored (#1181)`);
   }
 
   private deliverWatchdogAlert(
@@ -8047,7 +8306,26 @@ export class HookRouter {
     };
   }
 
-  public async runBoardSweep(repos?: string[], io?: IssuesCheckIo): Promise<BoardSweepResult> {
+  /**
+   * Deterministic SHA256 digest of a repo's actionable candidate set (#1181).
+   * The tuple is sorted and stable so the same board produces the same digest
+   * regardless of API ordering.
+   */
+  private actionableDigest(candidates: readonly BoardCandidate[]): string {
+    const parts = candidates
+      .map(
+        (c) =>
+          `${c.number}|${(c.labels ?? []).slice().sort().join(",")}|${c.is_dispatchable ? 1 : 0}|${c.category ?? ""}`,
+      )
+      .sort();
+    return createHash("sha256").update(parts.join("\n")).digest("hex");
+  }
+
+  public async runBoardSweep(
+    repos?: string[],
+    io?: IssuesCheckIo,
+    opts: { explicit?: boolean } = {},
+  ): Promise<BoardSweepResult> {
     if (this.isHaltedState) {
       return { ok: true, swept: 0, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
     }
@@ -8069,6 +8347,8 @@ export class HookRouter {
       const actionable: BoardSweepResult["actionable"] = [];
       const staleWipRecovered: StaleWipResult[] = [];
       const errors: Array<{ repo: string; error: string }> = [];
+      // Per-repo actionable-set digest for the delta gate (#1181).
+      const sweepDigests = new Map<string, string>();
       const pruneResult = await this.pruneOrchestrators();
       const prunedCount = pruneResult.prunedCount;
       if (!pruneResult.ok) {
@@ -8083,12 +8363,14 @@ export class HookRouter {
           // Desk, because an unreported failure looks exactly like a clean board.
           const error = err instanceof Error ? err.message : String(err);
           errors.push({ repo, error });
+          sweepDigests.set(repo, "#board-check-error");
           this.log(`[error] board check failed for ${repo}: ${error}`);
           continue;
         }
         if (res.staleWipRecovery && res.staleWipRecovery.length > 0) {
           staleWipRecovered.push(...res.staleWipRecovery);
         }
+        sweepDigests.set(repo, res.ok ? this.actionableDigest(res.candidates) : "#board-check-error");
         if (!res.ok || res.candidates.length === 0) continue;
         const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
         actionable.push({ repo, count: res.candidates.length, dispatchable });
@@ -8097,6 +8379,27 @@ export class HookRouter {
           `${res.candidates.length} candidate(s), ${dispatchable} dispatchable at ${new Date().toISOString()}`,
         );
       }
+
+      // Delta gate (#1181): only deliver when the actionable set or the error
+      // state actually changed, or an operator asked explicitly. An unchanged
+      // board must not wake Front Desk on the rigid sweep interval.
+      let actionableChanged = opts.explicit === true;
+      for (const repo of targets) {
+        const digest = sweepDigests.get(repo) ?? "";
+        if (this.lastSweepActionDigests.get(repo) !== digest) actionableChanged = true;
+      }
+      const errorSignature = errors
+        .map((e) => `${e.repo}:${e.error}`)
+        .sort()
+        .join("|");
+      const errorStateChanged = opts.explicit === true || errorSignature !== this.lastSweepErrorSignature;
+      for (const repo of targets) {
+        this.lastSweepActionDigests.set(repo, sweepDigests.get(repo) ?? "");
+      }
+      this.lastSweepErrorSignature = errorSignature;
+      const hasWork = actionable.length > 0 || errors.length > 0;
+      const shouldNotify = hasWork && (actionableChanged || errorStateChanged);
+
 
       // Self-heal staffing (#889): an enrolled repo with actionable board work but
       // no active orchestrator gets one provisioned before the notification.
@@ -8114,7 +8417,7 @@ export class HookRouter {
 
       let notified = 0;
       const frontDeskId = this.readFrontDesk()?.agentId ?? null;
-      if (frontDeskId && (actionable.length > 0 || errors.length > 0)) {
+      if (frontDeskId && shouldNotify) {
         const sections: string[] = [];
         if (actionable.length > 0) {
           const lines = actionable.map((a) => {
@@ -8141,10 +8444,15 @@ export class HookRouter {
             notified = 1;
           }
         }
+      } else if (frontDeskId && hasWork && !shouldNotify) {
+        this.log("Board sweep actionable set unchanged; suppressing Front Desk notification");
       }
       this.log(
         `[info] Board sweep complete: ${targets.length} repo(s) swept, ${actionable.length} actionable, ${prunedCount} orchestrator record(s) pruned, ${autoEnsured.length} auto-staffed, ${errors.length} failed`,
       );
+      // Re-evaluate dormancy with this sweep's roster so a quiet fleet enters
+      // quiescent mode (and an actionable board re-wakes it) (#1181).
+      this.refreshDormancy(liveAgentMap);
       await this.evaluateAutomaticRotations().catch(() => []);
       return {
         ok: true,
@@ -9740,7 +10048,7 @@ export class HookRouter {
           const repos = Array.isArray(body?.repos)
             ? body.repos.filter((r: unknown) => typeof r === "string")
             : undefined;
-          const result = await this.runBoardSweep(repos);
+          const result = await this.runBoardSweep(repos, undefined, { explicit: true });
           this.sendJson(res, 200, result);
         } catch (err: any) {
           this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
