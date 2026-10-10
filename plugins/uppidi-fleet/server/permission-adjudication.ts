@@ -649,7 +649,7 @@ export function extractPermissionCommandText(permission: RawPermissionLike): str
 // Fleet-agent detection
 // ---------------------------------------------------------------------------
 
-const FLEET_ROLE_LABELS = new Set(["front-desk", "orchestrator", "worker"]);
+const FLEET_ROLE_LABELS = new Set(["front-desk", "orchestrator", "coding-agent", "worker"]);
 
 /**
  * True for agents the fleet owns: label-identified orchestrators/workers, their

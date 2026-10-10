@@ -11,6 +11,7 @@ import {
   legacyRoleModelsConfigPaths,
   loadSavedRoleModels,
   migrateLegacyRoleModelsConfig,
+  resolveRoleModelKey,
   saveRoleModels,
 } from "./role-models.js";
 
@@ -140,8 +141,7 @@ describe("role-models legacy migration (#1012)", () => {
   });
 });
 
-describe("role-model fallback round-trip (#1011)", () => {
-  it("persists the primary and the full fallbackGroup, and clears it when emptied", async () => {
+describe("role-model fallback round-trip (#1011)", () => {  it("persists the primary and the full fallbackGroup, and clears it when emptied", async () => {
     const dir = makeTempDir("paseo-role-models-roundtrip-");
     const target = path.join(dir, "role-models.json");
     process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = target;
@@ -182,5 +182,51 @@ describe("role-model fallback round-trip (#1011)", () => {
     );
     assert.equal(cleared.ok, true);
     assert.deepEqual(loadSavedRoleModels().orchestrator.fallbackGroup, []);
+  });
+});
+
+describe("canonical coding-agent role key (#1126)", () => {
+  it("maps front-desk, orchestrator, and coding-agent (legacy worker) onto their role keys", () => {
+    assert.equal(resolveRoleModelKey("front-desk"), "front-desk");
+    assert.equal(resolveRoleModelKey("frontdesk"), "front-desk");
+    assert.equal(resolveRoleModelKey("orchestrator"), "orchestrator");
+    assert.equal(resolveRoleModelKey("coding-agent"), "coding-agent");
+    // The invented legacy name must resolve to the coding-agent role, never
+    // silently fall through to the orchestrator model.
+    assert.equal(resolveRoleModelKey("worker"), "coding-agent");
+    assert.equal(resolveRoleModelKey("coding_worker"), "coding-agent");
+    assert.equal(resolveRoleModelKey("WORKER"), "coding-agent");
+    assert.equal(resolveRoleModelKey(undefined), "coding-agent");
+  });
+
+  it("folds a legacy `worker` entry in role-models.json onto coding-agent", () => {
+    const dir = makeTempDir("paseo-role-models-worker-");
+    const target = path.join(dir, "role-models.json");
+    process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = target;
+    fs.writeFileSync(
+      target,
+      JSON.stringify({
+        worker: { role: "worker", primaryModel: "legacy/worker-model", fallbackGroup: ["legacy/worker-model"] },
+      }),
+    );
+
+    const roles = loadSavedRoleModels();
+    assert.equal(roles["coding-agent"].primaryModel, "legacy/worker-model");
+    assert.equal(roles.worker, undefined);
+  });
+
+  it("prefers the canonical coding-agent entry when both spellings are present", () => {
+    const dir = makeTempDir("paseo-role-models-both-");
+    const target = path.join(dir, "role-models.json");
+    process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = target;
+    fs.writeFileSync(
+      target,
+      JSON.stringify({
+        "coding-agent": { role: "coding-agent", primaryModel: "canonical/model", fallbackGroup: ["canonical/model"] },
+        worker: { role: "worker", primaryModel: "legacy/model", fallbackGroup: ["legacy/model"] },
+      }),
+    );
+
+    assert.equal(loadSavedRoleModels()["coding-agent"].primaryModel, "canonical/model");
   });
 });

@@ -1823,7 +1823,7 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
 
     const phantom = res.workers.find((a) => a.id === "phantom-desk");
     assert.ok(phantom, "the name-only desk must fall through to workers");
-    assert.equal(phantom?.category, "worker");
+    assert.equal(phantom?.category, "coding-agent");
     assert.equal(phantom?.nameCategory, "front-desk");
     assert.equal(phantom?.roleSource, "registry");
     assert.equal(phantom?.roleDivergent, true);
@@ -1831,8 +1831,8 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
     const divergence = res.roleDivergences.find((d) => d.agentId === "phantom-desk");
     assert.ok(divergence, "the registry/name mismatch must be surfaced");
     assert.equal(divergence?.nameCategory, "front-desk");
-    assert.equal(divergence?.registryRole, "worker");
-    assert.match(divergence?.reason ?? "", /registry says "worker"/i);
+    assert.equal(divergence?.registryRole, "coding-agent");
+    assert.match(divergence?.reason ?? "", /registry says "coding-agent"/i);
   });
 
   it("promotes only the registered Front Desk id, regardless of its display name", async () => {
@@ -1854,7 +1854,7 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
 
     const phantom = res.workers.find((a) => a.id === "phantom-desk");
     assert.ok(phantom);
-    assert.equal(phantom?.category, "worker");
+    assert.equal(phantom?.category, "coding-agent");
   });
 
   it("classifies orchestrators from GET /orchestrators and carries the canonical repo key", async () => {
@@ -1877,7 +1877,7 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
 
     const fake = res.workers.find((a) => a.id === "fake-orch");
     assert.ok(fake);
-    assert.equal(fake?.category, "worker");
+    assert.equal(fake?.category, "coding-agent");
     assert.equal(fake?.nameCategory, "orchestrator");
     assert.equal(fake?.roleDivergent, true);
   });
@@ -1922,6 +1922,101 @@ describe("canonical orchestrator spawn resolution (#1159)", () => {
       assert.match(res.error ?? "", /workspace open --cwd/);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("coding-agent role model resolution (#1126)", () => {
+  const originalEnv = {
+    HOME: process.env.HOME,
+    REAL_HOME: process.env.REAL_HOME,
+    UPPIDI_FLEET_ROLE_MODELS_CONFIG: process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG,
+    HOOK_STATE_DIR: process.env.HOOK_STATE_DIR,
+  };
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(originalEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    setExecFileAsyncForTest(null);
+  });
+
+  function writeRoleModels(models: Record<string, unknown>): void {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-1126-"));
+    process.env.HOME = home;
+    process.env.REAL_HOME = home;
+    process.env.HOOK_STATE_DIR = path.join(home, "hook-state");
+    fs.mkdirSync(process.env.HOOK_STATE_DIR, { recursive: true });
+    const target = path.join(home, "role-models.json");
+    fs.writeFileSync(target, JSON.stringify(models));
+    process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG = target;
+  }
+
+  function captureSpawn(): { context: any; payload: () => any } {
+    let captured: any;
+    const context: any = {
+      paseo: {
+        agents: {
+          create: async (payload: any) => {
+            captured = payload;
+            return { agent: { id: "coding-agent-ok" } };
+          },
+        },
+      },
+    };
+    return { context, payload: () => captured };
+  }
+
+  it("uses the coding-agent role model for the legacy `worker` category", async () => {
+    writeRoleModels({
+      orchestrator: { role: "orchestrator", primaryModel: "orch/provider-model", fallbackGroup: ["orch/provider-model"] },
+      "coding-agent": { role: "coding-agent", primaryModel: "coding/provider-model", fallbackGroup: ["coding/provider-model"] },
+    });
+    const { context, payload } = captureSpawn();
+
+    const res = await spawnPaseoAgent(
+      { title: "worker", prompt: "do work", category: "worker", callerAgentId: "orch-1" },
+      context,
+    );
+
+    assert.equal(res.ok, true, res.error ?? "");
+    assert.equal(res.agentId, "coding-agent-ok");
+    assert.equal(payload().provider, "coding");
+    assert.equal(payload().model, "provider-model");
+    assert.equal(payload().config.provider, "coding/provider-model");
+  });
+
+  it("uses the coding-agent role model for the canonical `coding-agent` category", async () => {
+    writeRoleModels({
+      orchestrator: { role: "orchestrator", primaryModel: "orch/provider-model", fallbackGroup: ["orch/provider-model"] },
+      "coding-agent": { role: "coding-agent", primaryModel: "codex/gpt-5.6-terra", fallbackGroup: ["codex/gpt-5.6-terra"] },
+    });
+    const { context, payload } = captureSpawn();
+
+    const res = await spawnPaseoAgent(
+      { title: "coding", prompt: "do work", category: "coding-agent", callerAgentId: "orch-1" },
+      context,
+    );
+
+    assert.equal(res.ok, true, res.error ?? "");
+    assert.equal(payload().provider, "codex");
+    assert.equal(payload().model, "gpt-5.6-terra");
+  });
+
+  it("rejects a front-desk coding-agent spawn for both spellings", () => {
+    const deps = {
+      frontDeskAgentId: () => "desk-1126",
+      deskWorkingDirs: () => new Set<string>(),
+    };
+    for (const category of ["worker", "coding-agent"] as const) {
+      const decision = evaluateSpawnAuthority(
+        { category, callerAgentId: "desk-1126" },
+        undefined,
+        deps,
+      );
+      assert.equal(decision.allowed, false, `category=${category}`);
+      assert.equal(decision.error, SPAWN_AUTHORITY_WORKER_ERROR);
     }
   });
 });

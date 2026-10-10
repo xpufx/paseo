@@ -3,6 +3,7 @@ import { basename, dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { canonicalDescriptorsToRegistry } from "./workspace-lookup.js";
+import { isCodingAgentCategory } from "../shared/contracts.js";
 
 type PaseoApi = PluginHandlerContext["paseo"];
 
@@ -102,7 +103,7 @@ export interface WorkspaceGuardRecord {
 }
 
 export interface WorkerWorkspaceGuardOptions {
-  category?: "front-desk" | "orchestrator" | "worker";
+  category?: "front-desk" | "orchestrator" | "coding-agent" | "worker";
   /** Absolute workspace path requested for the worker, if any. */
   cwd?: string;
   /** Paseo workspace id requested for the worker, if any. */
@@ -143,18 +144,19 @@ function normalizeDir(dir: string | undefined | null): string | undefined {
 /**
  * Pure, deterministic worktree-only dispatch policy (#918).
  *
- * Applies to `category: "worker"` only: the orchestrator is expected to run
- * from the primary checkout on `main`, so its own spawn is not refused. The
- * guard abstains when no path/record evidence exists, because attribution must
- * be positive — a missing probe is not proof of a primary checkout.
+ * Applies to `category: "coding-agent"` (legacy `worker`) only: the orchestrator
+ * is expected to run from the primary checkout on `main`, so its own spawn is
+ * not refused. The guard abstains when no path/record evidence exists, because
+ * attribution must be positive — a missing probe is not proof of a primary
+ * checkout.
  */
 export function evaluateWorkerWorkspaceGuard(
   options: WorkerWorkspaceGuardOptions
 ): WorkerWorkspaceGuardDecision {
-  if (options.category !== "worker") {
+  if (!isCodingAgentCategory(options.category)) {
     return {
       allowed: true,
-      reason: "worktree-only dispatch guard applies to worker spawns only",
+      reason: "worktree-only dispatch guard applies to coding-agent spawns only",
     };
   }
 
@@ -301,16 +303,16 @@ export async function resolveWorkerWorkspaceContext(
 
 /**
  * Async wrapper used by `spawnPaseoAgent`: resolves the daemon context and
- * applies the pure guard. Returns `allowed: true` for non-worker categories
- * without touching the filesystem.
+ * applies the pure guard. Returns `allowed: true` for non-coding-agent
+ * categories without touching the filesystem.
  */
 export async function evaluateWorkerSpawnWorkspace(
-  options: { category?: "front-desk" | "orchestrator" | "worker"; cwd?: string; workspaceId?: string },
+  options: { category?: "front-desk" | "orchestrator" | "coding-agent" | "worker"; cwd?: string; workspaceId?: string },
   registryOverride?: Partial<DaemonWorkspaceRegistry>,
   paseo?: PaseoApi,
 ): Promise<WorkerWorkspaceGuardDecision> {
-  if (options.category !== "worker") {
-    return { allowed: true, reason: "worktree-only dispatch guard applies to worker spawns only" };
+  if (!isCodingAgentCategory(options.category)) {
+    return { allowed: true, reason: "worktree-only dispatch guard applies to coding-agent spawns only" };
   }
   const context = await resolveWorkerWorkspaceContext(
     { cwd: options.cwd, workspaceId: options.workspaceId },

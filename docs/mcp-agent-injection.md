@@ -265,7 +265,7 @@ upstream.**
 
 1. **Do unknown `providerOptions`/`featureValues` keys survive?** The env
    marker avoids this, but if we ever prefer a config channel, run: for each
-   enabled provider, `agents.create({ config: { provider, cwd, providerOptions: { fleetRole: "worker" } } })`
+   enabled provider, `agents.create({ config: { provider, cwd, providerOptions: { fleetRole: "coding-agent" } } })`
    and confirm `session.opened` (not a schema `parse` failure). Provider option
    schemas are zod objects (`PiProviderOptionsSchema.parse`,
    `pi/agent.js:2013`); unknown-key behaviour is not asserted here.

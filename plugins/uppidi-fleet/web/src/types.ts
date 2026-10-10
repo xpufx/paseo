@@ -104,11 +104,20 @@ export function flattenAgents(snapshot: FleetAgentsSnapshot | null): FleetAgent[
 export function isAgentCategory(value: unknown): value is AgentCategory {
   if (typeof value !== "string") return false;
   const normalized = value.trim().toLowerCase().replace(/-/g, "");
-  return normalized === "frontdesk" || normalized === "orchestrator" || normalized === "worker";
+  return (
+    normalized === "frontdesk" ||
+    normalized === "orchestrator" ||
+    normalized === "worker" ||
+    normalized === "codingagent"
+  );
 }
 
 export function normalizeAgentCategory(value: unknown): AgentCategory {
-  if (!isAgentCategory(value)) return "worker";
-  const normalized = String(value).trim().toLowerCase().replace(/-/g, "");
-  return normalized as AgentCategory;
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/-/g, "");
+  if (normalized === "frontdesk" || normalized === "orchestrator" || normalized === "worker") {
+    return normalized;
+  }
+  // Canonical `coding-agent` (and anything unknown) maps onto the legacy
+  // `worker` bucket so the snapshot shape stays stable (#1126).
+  return "worker";
 }

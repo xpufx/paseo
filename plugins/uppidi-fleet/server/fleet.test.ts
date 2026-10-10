@@ -75,8 +75,9 @@ describe("fleet and agents classification", () => {
     assert.equal(categorizeAgent("frontdesk"), "front-desk");
     assert.equal(categorizeAgent("Orchestrator · xpufx-org/paseo"), "orchestrator");
     assert.equal(categorizeAgent("Orchestrator · xpufx/platform"), "orchestrator");
-    assert.equal(categorizeAgent("feat-367-worker"), "worker");
-    assert.equal(categorizeAgent("platform #99 caller"), "worker");
+    // #1126: delegated agents are canonical `coding-agent`, not the legacy `worker`.
+    assert.equal(categorizeAgent("feat-367-worker"), "coding-agent");
+    assert.equal(categorizeAgent("platform #99 caller"), "coding-agent");
   });
 
   it("extracts attributed work from titles, names, branches, and labels", () => {

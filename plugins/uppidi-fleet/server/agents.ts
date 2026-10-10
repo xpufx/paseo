@@ -6,6 +6,7 @@ import path, { join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type {
   UppidiAgent,
+  UppidiAgentCategory,
   UppidiAgentsOutput,
   UppidiAgentTreeNode,
   UppidiAgentWork,
@@ -55,6 +56,8 @@ import {
   deriveLifecycleState,
   normalizeProjectName,
   DEFAULT_PROJECT,
+  isCodingAgentCategory,
+  CODING_AGENT_CATEGORY,
 } from "../shared/contracts.js";
 import type { WorkspaceProjectMap } from "../shared/contracts.js";
 import { isAgentEligibleForBulkArchive, isRepoMatching } from "../shared/sort-filter.js";
@@ -78,7 +81,7 @@ import {
   evaluateWorkerSpawnWorkspace,
   WORKER_PRIMARY_CHECKOUT_ERROR,
 } from "./workspace-guard.js";
-import { loadSavedRoleModels, DEFAULT_ROLE_MODELS, resolveHostHome } from "./role-models.js";
+import { loadSavedRoleModels, DEFAULT_ROLE_MODELS, resolveHostHome, resolveRoleModelKey } from "./role-models.js";
 import { renderSkillDirective } from "./skills.js";
 
 
@@ -129,7 +132,7 @@ export interface RawAgentRecord {
   url?: string;
 }
 
-export function categorizeAgent(name: string): "front-desk" | "orchestrator" | "worker" {
+export function categorizeAgent(name: string): UppidiAgentCategory {
   const lower = (name || "").toLowerCase();
   if (lower.includes("front desk") || lower === "frontdesk") {
     return "front-desk";
@@ -137,7 +140,7 @@ export function categorizeAgent(name: string): "front-desk" | "orchestrator" | "
   if (lower.includes("orchestrator")) {
     return "orchestrator";
   }
-  return "worker";
+  return CODING_AGENT_CATEGORY;
 }
 
 export function extractAttributedWork(raw: RawAgentRecord): UppidiAgentWork | null {
@@ -914,12 +917,12 @@ export function readCanonicalFleetRegistry(): CanonicalFleetRegistry {
 /**
  * Resolves an agent's canonical role from the registry (#1078). The registry is
  * the only source of truth for Front Desk and orchestrator identity; anything
- * not registered is a worker regardless of its display name.
+ * not registered is a coding agent regardless of its display name.
  */
 export function resolveCanonicalRole(
   agentId: string,
   registry: CanonicalFleetRegistry
-): { role: "front-desk" | "orchestrator" | "worker"; registryRepoKey?: string } {
+): { role: "front-desk" | "orchestrator" | "coding-agent"; registryRepoKey?: string } {
   if (registry.frontDeskAgentId && agentId === registry.frontDeskAgentId) {
     return { role: "front-desk" };
   }
@@ -927,12 +930,12 @@ export function resolveCanonicalRole(
   if (registryRepoKey) {
     return { role: "orchestrator", registryRepoKey };
   }
-  return { role: "worker" };
+  return { role: CODING_AGENT_CATEGORY };
 }
 
 function describeRoleDivergence(
-  nameCategory: "front-desk" | "orchestrator" | "worker",
-  registryRole: "front-desk" | "orchestrator" | "worker"
+  nameCategory: UppidiAgentCategory,
+  registryRole: "front-desk" | "orchestrator" | "coding-agent"
 ): string {
   if (nameCategory === "front-desk") {
     return `Agent name implies Front Desk but the router registry says "${registryRole}"`;
@@ -968,7 +971,7 @@ export function applyCanonicalRoles(
     agent.roleSource = "registry";
     // Only a name that *claims* a role the registry does not grant is a lie.
     // A generic display name under a registry-backed role is just a title.
-    agent.roleDivergent = nameCategory !== "worker" && canonical.role !== nameCategory;
+    agent.roleDivergent = !isCodingAgentCategory(nameCategory) && canonical.role !== nameCategory;
     if (canonical.registryRepoKey) {
       agent.registryRepoKey = canonical.registryRepoKey;
     }
@@ -1211,7 +1214,7 @@ export async function handleUppidiArchiveInactiveAgents(
  * Maps a teardown target category to the agent category string used by the
  * daemon's agent categorization.
  */
-function teardownTargetToCategory(target: string): "front-desk" | "orchestrator" | "worker" {
+function teardownTargetToCategory(target: string): UppidiAgentCategory {
   switch (target) {
     case "frontdesk":
       return "front-desk";
@@ -1219,12 +1222,12 @@ function teardownTargetToCategory(target: string): "front-desk" | "orchestrator"
       return "orchestrator";
     case "workers":
     default:
-      return "worker";
+      return CODING_AGENT_CATEGORY;
   }
 }
 
 /**
- * Determines whether a worker agent belongs to the fleet (#1121).
+ * Determines whether a coding-agent belongs to the fleet (#1121).
  * Ad-hoc or detached user sessions that were not created by or attributed to
  * the fleet are preserved and skipped during fleet teardown.
  */
@@ -1247,10 +1250,10 @@ export function isFleetWorker(
     }
   }
 
-  // 2. Explicit fleet / worker role labels
+  // 2. Explicit fleet / coding-agent role labels (legacy `worker` accepted, #1126)
   const labels = agent.labels ?? {};
   const roleLabel = String(labels.role ?? labels.category ?? "").trim().toLowerCase();
-  if (roleLabel === "worker" || roleLabel === "orchestrator" || roleLabel === "front-desk") {
+  if (isCodingAgentCategory(roleLabel) || roleLabel === "orchestrator" || roleLabel === "front-desk") {
     return true;
   }
   if (labels["paseo.parent-agent-id"]?.trim()) {
@@ -1283,7 +1286,7 @@ export function isFleetWorker(
  */
 export function resolveTeardownAgents(
   agents: UppidiAgent[],
-  targetCategories: Set<"front-desk" | "orchestrator" | "worker">,
+  targetCategories: Set<UppidiAgentCategory>,
   registry: CanonicalFleetRegistry = { available: false, frontDeskAgentId: null, orchestratorAgentIdToRepo: new Map() }
 ): UppidiAgent[] {
   const orchestratorIds = new Set<string>();
@@ -1303,14 +1306,17 @@ export function resolveTeardownAgents(
   const { enrolledRepos } = getFleetRosterInfo();
 
   return agents.filter((agent) => {
-    if (!targetCategories.has(agent.category)) {
+    // Normalize a legacy `worker` category onto the canonical `coding-agent`
+    // target so pre-rename snapshots still tear down (#1126).
+    const category = isCodingAgentCategory(agent.category) ? CODING_AGENT_CATEGORY : agent.category;
+    if (!targetCategories.has(category)) {
       return false;
     }
     // Front Desk and Orchestrators are matched directly by target category
-    if (agent.category === "front-desk" || agent.category === "orchestrator") {
+    if (category === "front-desk" || category === "orchestrator") {
       return true;
     }
-    // For workers, ensure the fleet actually owns the worker
+    // For coding agents, ensure the fleet actually owns them
     return isFleetWorker(agent, { orchestratorIds, enrolledRepos });
   });
 }
@@ -1437,7 +1443,7 @@ export async function handleFleetTeardown(
     // Delivered via the hook-router queue so the payload survives teardown.
     // Preview counts are derived from the agents about to be culled.
     const previewCounts = {
-      workers: agentsToTeardown.filter((a) => a.category === "worker").length,
+      workers: agentsToTeardown.filter((a) => isCodingAgentCategory(a.category)).length,
       orchestrators: agentsToTeardown.filter((a) => a.category === "orchestrator").length,
       frontdesk: agentsToTeardown.filter((a) => a.category === "front-desk").length,
     };
@@ -1459,7 +1465,7 @@ export async function handleFleetTeardown(
     for (const agent of agentsToTeardown) {
       const success = await archiveAgentById(agent.id, context);
       if (success) {
-        if (agent.category === "worker") tornDown.workers++;
+        if (isCodingAgentCategory(agent.category)) tornDown.workers++;
         else if (agent.category === "orchestrator") tornDown.orchestrators++;
         else if (agent.category === "front-desk") tornDown.frontdesk++;
       } else {
@@ -2312,9 +2318,9 @@ export async function allowPermission(
 const SPAWN_AUTHORITY_REMEDIATION =
   "steer the registered orchestrator: paseo send --steer --no-wait <orchId>, or self-register via POST <hook-host>:<port>/orchestrator";
 
-/** The front desk may never spawn subagents (workers). */
+/** The front desk may never spawn subagents (coding agents). */
 export const SPAWN_AUTHORITY_WORKER_ERROR =
-  `two-tier spawn authority: the front-desk agent must not spawn workers; ${SPAWN_AUTHORITY_REMEDIATION}`;
+  `two-tier spawn authority: the front-desk agent must not spawn coding agents; ${SPAWN_AUTHORITY_REMEDIATION}`;
 
 /** Desk-spawned orchestrators must bind to an explicit repo workspace, not inherit the desk cwd. */
 export const SPAWN_AUTHORITY_WORKSPACE_ERROR =
@@ -2404,17 +2410,17 @@ export function resolveDeskWorkingDirs(deskAgentId: string | null): Set<string> 
 /**
  * Pure, deterministic two-tier spawn authority check (#573, platform#172).
  *
- * - A front-desk caller may not spawn `category: "worker"`.
+ * - A front-desk caller may not spawn a coding agent.
  * - A front-desk caller spawning `category: "orchestrator"` must supply an
  *   explicit `workspaceId` or a repo-local `cwd` that is not one of the desk's
  *   own working directories.
  *
  * Enforcement is by positive attribution: when no caller id resolves, or the
  * registered desk is unknown, the spawn is allowed so legitimate orchestrator
- * self-registration and worker spawning never regress.
+ * self-registration and coding-agent spawning never regress.
  */
 export function evaluateSpawnAuthority(
-  options: { category?: "front-desk" | "orchestrator" | "worker"; cwd?: string; workspaceId?: string; callerAgentId?: string },
+  options: { category?: UppidiAgentCategory; cwd?: string; workspaceId?: string; callerAgentId?: string },
   context?: PluginHandlerContext,
   deps: { frontDeskAgentId?: () => string | null; deskWorkingDirs?: (id: string | null) => Set<string> } = {},
 ): SpawnAuthorityDecision {
@@ -2431,11 +2437,11 @@ export function evaluateSpawnAuthority(
     };
   }
 
-  if (options.category === "worker") {
+  if (isCodingAgentCategory(options.category)) {
     return {
       allowed: false,
       error: SPAWN_AUTHORITY_WORKER_ERROR,
-      reason: `front desk ${callerAgentId} attempted to spawn a worker`,
+      reason: `front desk ${callerAgentId} attempted to spawn a coding agent`,
     };
   }
 
@@ -2467,7 +2473,7 @@ export async function spawnPaseoAgent(
   options: {
     title: string;
     prompt: string;
-    category?: "front-desk" | "orchestrator" | "worker";
+    category?: UppidiAgentCategory;
     model?: string;
     cwd?: string;
     workspaceId?: string;
@@ -2516,7 +2522,10 @@ export async function spawnPaseoAgent(
     return { ok: false, error };
   }
 
-  const categoryKey = options.category === "front-desk" ? "front-desk" : "orchestrator";
+  // Resolve the role model by canonical role (#1126): front-desk, orchestrator,
+  // or coding-agent (legacy `worker` aliases the coding-agent role instead of
+  // silently falling back to the orchestrator model).
+  const categoryKey = resolveRoleModelKey(options.category);
   let resolvedModel = options.model?.trim();
   if (!resolvedModel) {
     try {
@@ -2914,7 +2923,7 @@ export async function handleUppidiAddOrchestrator(
     const title = input.title?.trim() || `Orchestrator · ${repo}`;
     const defaultPrompt =
       `You are the project orchestrator for ${repo}.\n` +
-      `Coordinate tasks, supervise worker agents, and manage pull requests and issues for this repository using the forge CLI (teax) and Paseo conventions.\n\n` +
+      `Coordinate tasks, supervise coding agents, and manage pull requests and issues for this repository using the forge CLI (teax) and Paseo conventions.\n\n` +
       renderSkillDirective("orchestrator") +
       "\n\n" +
       renderSkillDirective("coding-agent");

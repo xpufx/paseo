@@ -7722,14 +7722,16 @@ export class HookRouter {
       const role = String(agent.role ?? "").toLowerCase();
       const title = String(agent.title ?? "");
       const isWorker =
+        role === "coding-agent" ||
         role === "worker" ||
         role === "coding_worker" ||
+        title.toLowerCase().startsWith("coding-agent:") ||
         title.toLowerCase().startsWith("worker:") ||
         Boolean(agent.labels?.["paseo.parent-agent-id"]);
       if (isWorker) {
         activeWorkers.push({
           id,
-          title: title || "(untitled worker)",
+          title: title || "(untitled coding-agent)",
           status: String(agent.status ?? "unknown"),
           parentAgentId: agent.labels?.["paseo.parent-agent-id"],
         });

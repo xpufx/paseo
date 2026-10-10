@@ -12,6 +12,8 @@ import {
   UppidiAgentsOutputSchema,
   getDeterministicStateConfig,
   getAgentCategoryIcon,
+  isCodingAgentCategory,
+  UppidiAgentCategorySchema,
   getPendingPermissionAction,
   getPermissionAdjudicationCommand,
   getAgentAttentionReason,
@@ -318,8 +320,22 @@ describe("uppidi-fleet shared contracts", () => {
   it("resolves agent category icons accurately", () => {
     assert.equal(getAgentCategoryIcon("front-desk"), "Inbox");
     assert.equal(getAgentCategoryIcon("orchestrator"), "Network");
+    assert.equal(getAgentCategoryIcon("coding-agent"), "Terminal");
     assert.equal(getAgentCategoryIcon("worker"), "Terminal");
     assert.equal(getAgentCategoryIcon(undefined), "Bot");
+  });
+
+  it("treats `coding-agent` as canonical and `worker` as a legacy alias (#1126)", () => {
+    assert.equal(UppidiAgentCategorySchema.parse("coding-agent"), "coding-agent");
+    assert.equal(UppidiAgentCategorySchema.parse("worker"), "worker");
+    assert.equal(UppidiAgentCategorySchema.safeParse("sidecar").success, false);
+
+    assert.equal(isCodingAgentCategory("coding-agent"), true);
+    assert.equal(isCodingAgentCategory("worker"), true);
+    assert.equal(isCodingAgentCategory("WORKER"), true);
+    assert.equal(isCodingAgentCategory("orchestrator"), false);
+    assert.equal(isCodingAgentCategory("front-desk"), false);
+    assert.equal(isCodingAgentCategory(undefined), false);
   });
 
   it("maps blocked permission and attention states to prominent warning configs (#534)", () => {

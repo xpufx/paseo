@@ -122,6 +122,24 @@ export function migrateLegacyRoleModelsConfig(
   return false;
 }
 
+/** Roles that may be resolved from `role-models.json` (#1126). */
+export type RoleModelKey = "front-desk" | "orchestrator" | "coding-agent";
+
+/**
+ * Maps a spawn/agent category onto its `role-models.json` key (#1126).
+ *
+ * The fleet has a single delegated-coding category, canonicalised to
+ * `coding-agent`; the legacy `worker` spelling (and the TUI-style `coding_worker`
+ * alias) resolve to the same role model instead of silently falling through to
+ * `orchestrator`.
+ */
+export function resolveRoleModelKey(category?: string | null): RoleModelKey {
+  const normalized = String(category ?? "").trim().toLowerCase();
+  if (normalized === "front-desk" || normalized === "frontdesk") return "front-desk";
+  if (normalized === "orchestrator") return "orchestrator";
+  return "coding-agent";
+}
+
 export const DEFAULT_ROLE_MODELS: Record<string, RoleModelConfig> = {
   "front-desk": {
     role: "front-desk",
@@ -175,7 +193,14 @@ export function loadSavedRoleModels(): Record<string, RoleModelConfig> {
       const raw = readFileSync(configPath, "utf-8");
       const parsed = JSON.parse(raw);
       if (typeof parsed === "object" && parsed !== null) {
-        return { ...DEFAULT_ROLE_MODELS, ...parsed };
+        const saved = { ...(parsed as Record<string, RoleModelConfig>) };
+        // #1126: honour a pre-rename `worker` override by folding it onto the
+        // canonical `coding-agent` key, unless the canonical key is present.
+        if (saved.worker && !saved["coding-agent"]) {
+          saved["coding-agent"] = saved.worker;
+          delete saved.worker;
+        }
+        return { ...DEFAULT_ROLE_MODELS, ...saved };
       }
     }
   } catch {

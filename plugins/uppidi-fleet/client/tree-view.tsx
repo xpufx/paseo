@@ -46,6 +46,7 @@ import {
   uppidiFrontDeskActivityContract,
   uppidiFrontDeskPromptContract,
   isSignalActivityItem,
+  isCodingAgentCategory,
   extractAgentWorktree,
   extractAgentProject,
 } from "../shared/contracts.js";
@@ -1918,7 +1919,7 @@ export function DenseAgentRow({
               size="sm"
               textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
             />
-            {agent.category !== "worker" && (
+            {!isCodingAgentCategory(agent.category) && (
               <Badge
                 label={agent.category}
                 variant="neutral"

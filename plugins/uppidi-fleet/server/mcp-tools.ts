@@ -49,7 +49,7 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
         },
         role: {
           type: "string",
-          enum: ["orchestrator", "worker", "coding_worker"],
+          enum: ["orchestrator", "coding-agent", "worker", "coding_worker"],
           description: "Agent role perspective for triage ranking (default: orchestrator)",
           default: "orchestrator",
         },
@@ -209,7 +209,7 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
   {
     name: "fleet_handoff_generate",
     description:
-      "Generate a fleet shift handoff report (latest-handoff.md) capturing active worker assignments, open PRs, and blocking state across enrolled repositories.",
+      "Generate a fleet shift handoff report (latest-handoff.md) capturing active coding-agent assignments, open PRs, and blocking state across enrolled repositories.",
     inputSchema: {
       type: "object",
       properties: {
@@ -291,13 +291,13 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
   {
     name: "fleet_validate_workspace",
     description:
-      "Worktree-only dispatch validator (#918). Refuses a worker workspace that resolves to the repository primary checkout (git-dir == git-common-dir) or a local/isolation:local workspace. Call before dispatching a worker; a refusal is hard and names the provisioning action.",
+      "Worktree-only dispatch validator (#918). Refuses a coding-agent workspace that resolves to the repository primary checkout (git-dir == git-common-dir) or a local/isolation:local workspace. Call before dispatching a coding agent; a refusal is hard and names the provisioning action.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Absolute workspace_path to validate (the worker cwd)",
+          description: "Absolute workspace_path to validate (the coding-agent cwd)",
         },
         workspaceId: {
           type: "string",
@@ -325,14 +325,15 @@ export async function executeFleetCheckBoard(args: Record<string, unknown> = {})
   const hostname = typeof args.hostname === "string" && args.hostname.trim() ? args.hostname.trim() : ISSUES_CHECK_DEFAULT_HOSTNAME;
   const repo = typeof args.repo === "string" && args.repo.trim() ? args.repo.trim() : ISSUES_CHECK_DEFAULT_REPO;
   const rawRole = typeof args.role === "string" ? args.role.trim() : "orchestrator";
-  const validRoles = ["orchestrator", "worker", "coding_worker"] as const;
+  const validRoles = ["orchestrator", "coding-agent", "worker", "coding_worker"] as const;
   if (!validRoles.includes(rawRole as (typeof validRoles)[number])) {
     return {
       content: [{ type: "text", text: `Invalid role "${rawRole}". Must be one of: ${validRoles.join(", ")}` }],
       isError: true,
     };
   }
-  const role: IssuesCheckRole = rawRole === "worker" || rawRole === "coding_worker" ? "worker" : "orchestrator";
+  // `coding-agent` is canonical; `worker`/`coding_worker` are legacy aliases (#1126).
+  const role: IssuesCheckRole = rawRole === "orchestrator" ? "orchestrator" : "worker";
   const force = Boolean(args.force);
   const all = Boolean(args.all);
   const staleWipHours = typeof args.staleWipHours === "number" ? args.staleWipHours : ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS;
@@ -824,9 +825,10 @@ export async function executeFleetEnsureOrchestrator(
 /**
  * Execute fleet_validate_workspace with validated parameters.
  *
- * The Orchestrator launch contract calls this before dispatching a worker. A
- * refusal is hard: `isError` is true and the text names the provisioning
- * action, so an unmodified caller cannot treat a refusal as a green light.
+ * The Orchestrator launch contract calls this before dispatching a coding
+ * agent. A refusal is hard: `isError` is true and the text names the
+ * provisioning action, so an unmodified caller cannot treat a refusal as a
+ * green light.
  */
 export async function executeFleetValidateWorkspace(
   args: Record<string, unknown> = {},
@@ -844,7 +846,7 @@ export async function executeFleetValidateWorkspace(
 
   const decision = await evaluateWorkerSpawnWorkspace(
     {
-      category: "worker",
+      category: "coding-agent",
       cwd: pathArg || undefined,
       workspaceId: workspaceId || undefined,
     },

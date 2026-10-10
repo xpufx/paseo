@@ -330,8 +330,27 @@ export const uppidiHookLogTailContract = defineContract({
 });
 
 // Agents & Fleet Tree View (Issue #367, Issue #385)
-export const UppidiAgentCategorySchema = z.enum(["front-desk", "orchestrator", "worker"]);
+//
+// `coding-agent` is the canonical delegated-worker category (#1126). `worker`
+// is retained as a legacy alias so older payloads, saved state and external
+// callers keep validating; use `isCodingAgentCategory` to match either spelling.
+export const CODING_AGENT_CATEGORY = "coding-agent" as const;
+export const UppidiAgentCategorySchema = z.enum([
+  "front-desk",
+  "orchestrator",
+  "coding-agent",
+  "worker",
+]);
 export type UppidiAgentCategory = z.infer<typeof UppidiAgentCategorySchema>;
+
+/**
+ * True for the canonical `coding-agent` category or its legacy `worker` alias
+ * (#1126). Accepts any casing/whitespace so label-derived values match too.
+ */
+export function isCodingAgentCategory(category?: string | null): boolean {
+  const normalized = String(category ?? "").trim().toLowerCase();
+  return normalized === CODING_AGENT_CATEGORY || normalized === "worker";
+}
 
 export const DeterministicAgentStateSchema = z.enum([
   "working",                // Running with attributed work: e.g. #385
@@ -424,6 +443,7 @@ export function getAgentCategoryIcon(category?: UppidiAgentCategory | string): s
       return "Inbox";
     case "orchestrator":
       return "Network";
+    case "coding-agent":
     case "worker":
       return "Terminal";
     default:
@@ -1968,7 +1988,7 @@ export const UppidiFleetAuditReceiptSchema = z.object({
     }),
     author: z.object({
       agentId: z.string().optional(),
-      role: z.enum(["worker", "orchestrator", "operator"]),
+      role: z.enum(["coding-agent", "worker", "orchestrator", "operator"]),
       model: z.string().optional(),
     }),
   }),
