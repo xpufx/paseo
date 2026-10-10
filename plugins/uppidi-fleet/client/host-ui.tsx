@@ -13,7 +13,7 @@ import {
   Easing,
   Image,
   Linking,
-  Modal,
+  Modal as RNModal,
   Platform,
   Pressable,
   ScrollView as RNScrollView,
@@ -27,7 +27,49 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { Icon as RawHostIcon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
+
+export interface SafeToast {
+  show: (message?: string, options?: any) => void;
+  copied: (label?: string) => void;
+  error: (message?: string) => void;
+}
+
+export function useToast(): SafeToast {
+  const host = getOptionalClientHost();
+  let toast: any = null;
+  if (typeof host?.useToast === "function") {
+    try {
+      toast = host.useToast();
+    } catch {}
+  }
+  return {
+    show: (msg?: string, opts?: any) => {
+      if (typeof toast?.show === "function") {
+        toast.show(msg ?? "", opts);
+      }
+    },
+    copied: (label?: string) => {
+      if (typeof toast?.copied === "function") {
+        toast.copied(label);
+      }
+    },
+    error: (msg?: string) => {
+      if (typeof toast?.error === "function") {
+        toast.error(msg ?? "");
+      }
+    },
+  };
+}
+
+export async function copyText(text: string): Promise<void> {
+  const host = getOptionalClientHost();
+  if (typeof host?.copyText === "function") {
+    try {
+      await host.copyText(text);
+      return;
+    } catch {}
+  }
+}
 import {
   ATTENTION_LABELS,
   PRIORITY_ORDER,
@@ -92,12 +134,16 @@ export function SafeIcon({ name, size = 14, color, style }: SafeIconProps) {
     return <View style={style} />;
   }
   const host = getOptionalClientHost();
-  const IconComponent = (RawHostIcon as any) ?? host?.Icon;
+  const IconComponent = host?.Icon;
   if (!IconComponent || (typeof IconComponent !== "function" && typeof IconComponent !== "object")) {
     return <View style={style} />;
   }
   try {
-    return <IconComponent name={name} size={size} color={color} style={style} />;
+    return (
+      <View style={style}>
+        <IconComponent name={name} size={size} color={color} />
+      </View>
+    );
   } catch {
     return <View style={style} />;
   }
@@ -979,7 +1025,7 @@ export function Select({
       {isOpen && coords ? (
         // The option list portals into a transparent Modal so it paints above
         // later siblings without contributing to the trigger's parent layout.
-        <Modal transparent visible={isOpen} animationType="none" onRequestClose={() => setOpen(false)}>
+        <RNModal transparent visible={isOpen} animationType="none" onRequestClose={() => setOpen(false)}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Dismiss options"
@@ -1057,7 +1103,7 @@ export function Select({
               })}
             </RNScrollView>
           </View>
-        </Modal>
+        </RNModal>
       ) : null}
     </View>
   );
@@ -1791,6 +1837,27 @@ export function ModalContent({ children, scrollable = true, ...bodyProps }: Moda
   if (!Content) return inner;
   return <Content scrollable={scrollable}>{inner}</Content>;
 }
+
+export interface SafeModalProps {
+  title?: string;
+  icon?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  children: ReactNode;
+}
+
+export function HostModalWrapper(props: SafeModalProps) {
+  const host = getOptionalClientHost();
+  const HostModalComponent = host?.Modal;
+  if (!HostModalComponent) {
+    if (props.open === false) return null;
+    return <View>{props.children}</View>;
+  }
+  return <HostModalComponent {...(props as any)} />;
+}
+HostModalWrapper.Content = ModalContent;
+
+export const Modal = HostModalWrapper;
 
 // --- forge icon ------------------------------------------------------------
 

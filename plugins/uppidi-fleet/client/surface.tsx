@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Linking, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   ActionBar,
   AttentionBeacon,
@@ -20,8 +19,10 @@ import {
   InteractiveRow,
   KeyValue,
   KeyValueGroup,
+  Modal,
   ModalBody,
   ModalContent,
+  useToast,
   Row,
   SearchInput,
   Select,

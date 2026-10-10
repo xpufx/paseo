@@ -1,7 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { View, Text } from "react-native";
-import { ScrollView } from "@getpaseo/plugin/client/react-native";
-import { useToast } from "@getpaseo/plugin/client/react-native";
+import { View, Text, ScrollView } from "react-native";
 import {
   Badge,
   Button,
@@ -13,6 +11,7 @@ import {
   type SelectOption,
   Stack,
   TextInput,
+  useToast,
 } from "./host-ui.js";
 import { useRpcQuery, useRpcMutation } from "paseo-plugin-helper/core";
 import { useFleetTheme } from "./theme.js";

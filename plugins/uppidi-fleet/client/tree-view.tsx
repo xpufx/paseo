@@ -17,6 +17,7 @@ import {
   Stack,
   StatusDot,
   TextInput,
+  useToast,
 } from "./host-ui.js";
 import {
   FLEET_PILL_POLICY,
@@ -28,7 +29,6 @@ import { copyToClipboard, HOST_SHADOW_COLOR } from "paseo-plugin-helper/lifecycl
 import { useRpcMutation, useRpcQuery } from "paseo-plugin-helper/core";
 import { useFleetTheme } from "./theme.js";
 import { MetricsBar } from "./metrics-bar.js";
-import { useToast } from "@getpaseo/plugin/client/react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import {
   type UppidiAgent,
