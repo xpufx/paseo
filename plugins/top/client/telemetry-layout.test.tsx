@@ -141,12 +141,18 @@ function styleOf(child: unknown): Record<string, unknown> {
 
 function renderCard(
   layout: { compact: boolean; platform: string } = { compact: false, platform: "web" },
+  dataOverrides: Partial<TopTimelineTelemetryData> = {},
 ) {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
     renderer = TestRenderer.create(
       <TopTimelineTelemetryCard
-        item={{ type: "plugin", kind: "top-turn-telemetry", version: 1, data: DATA }}
+        item={{
+          type: "plugin",
+          kind: "top-turn-telemetry",
+          version: 1,
+          data: { ...DATA, ...dataOverrides },
+        }}
         agentId={DATA.agentId}
         host={{ id: "h", label: "Host" }}
         theme={LIGHT as never}
@@ -301,5 +307,54 @@ describe("TopTimelineTelemetryCard compact layout (#1010 mobile)", () => {
 
     expect(compactPaddings.has(10)).toBe(true);
     expect(desktopPaddings.has(10)).toBe(false);
+  });
+});
+
+describe("TopTimelineTelemetryCard turn throughput badge (#1141)", () => {
+  it("renders the throughput badge next to duration with valid tokens and duration", () => {
+    // 1140 output tokens in 30000ms (30s) = 38 tok/s
+    const renderer = renderCard(undefined, {
+      durationMs: 30000,
+      outputTokens: 1140,
+    });
+    const text = textOf(renderer.toJSON());
+    expect(text).toContain("30.0s");
+    expect(text).toContain("38 tok/s");
+  });
+
+  it("omits the badge when durationMs is missing or <= 0", () => {
+    const missingDuration = renderCard(undefined, {
+      durationMs: undefined,
+      outputTokens: 500,
+    });
+    expect(textOf(missingDuration.toJSON())).not.toContain("tok/s");
+
+    const zeroDuration = renderCard(undefined, {
+      durationMs: 0,
+      outputTokens: 500,
+    });
+    expect(textOf(zeroDuration.toJSON())).not.toContain("tok/s");
+
+    const negativeDuration = renderCard(undefined, {
+      durationMs: -500,
+      outputTokens: 500,
+    });
+    expect(textOf(negativeDuration.toJSON())).not.toContain("tok/s");
+  });
+
+  it("omits the badge when outputTokens is absent or zero", () => {
+    const missingTokens = renderCard(undefined, {
+      durationMs: 5000,
+      outputTokens: undefined,
+    });
+    expect(textOf(missingTokens.toJSON())).toContain("5.0s");
+    expect(textOf(missingTokens.toJSON())).not.toContain("tok/s");
+
+    const zeroTokens = renderCard(undefined, {
+      durationMs: 5000,
+      outputTokens: 0,
+    });
+    expect(textOf(zeroTokens.toJSON())).toContain("5.0s");
+    expect(textOf(zeroTokens.toJSON())).not.toContain("tok/s");
   });
 });
