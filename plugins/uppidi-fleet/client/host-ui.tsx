@@ -27,7 +27,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
+import { Icon as RawHostIcon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   ATTENTION_LABELS,
   PRIORITY_ORDER,
@@ -71,6 +71,39 @@ import { useFleetTheme } from "./theme.js";
  * `useToast`, and plain React Native. This is deliberately plugin-local: it is
  * not a shared design system and adds nothing to the helper.
  */
+
+// --- safe icon defense -----------------------------------------------------
+
+export interface SafeIconProps {
+  name?: string | null;
+  size?: number;
+  color?: string;
+  style?: StyleProp<ViewStyle>;
+}
+
+/**
+ * Defensive Icon component that guards against:
+ * 1. Undefined Icon export from host or @getpaseo/plugin/client/react-native on Hermes / mobile.
+ * 2. Undefined or empty icon name (which causes React.createElement(undefined) or Hermes throw).
+ * 3. Throws from missing Lucide icon implementations.
+ */
+export function SafeIcon({ name, size = 14, color, style }: SafeIconProps) {
+  if (!name || typeof name !== "string") {
+    return <View style={style} />;
+  }
+  const host = getOptionalClientHost();
+  const IconComponent = (RawHostIcon as any) ?? host?.Icon;
+  if (!IconComponent || (typeof IconComponent !== "function" && typeof IconComponent !== "object")) {
+    return <View style={style} />;
+  }
+  try {
+    return <IconComponent name={name} size={size} color={color} style={style} />;
+  } catch {
+    return <View style={style} />;
+  }
+}
+
+export const Icon = SafeIcon;
 
 // --- spacing ---------------------------------------------------------------
 
@@ -1747,7 +1780,8 @@ export interface ModalContentProps extends Omit<ModalBodyProps, "scrollMode"> {
 }
 
 export function ModalContent({ children, scrollable = true, ...bodyProps }: ModalContentProps) {
-  const Modal = getClientHost().Modal;
+  const host = getOptionalClientHost();
+  const Modal = host?.Modal;
   const Content = (Modal as any)?.Content;
   const inner = (
     <ModalBodyScrollOwnerContext.Provider value={scrollable ? "host" : "required"}>

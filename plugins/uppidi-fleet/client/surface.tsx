@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Linking, Text, View } from "react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
-import { Modal, useToast, Icon } from "@getpaseo/plugin/client/react-native";
+import { Modal, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   ActionBar,
   AttentionBeacon,
@@ -16,6 +16,7 @@ import {
   EmptyState,
   Grid,
   ForgeIcon,
+  Icon,
   InteractiveRow,
   KeyValue,
   KeyValueGroup,

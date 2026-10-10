@@ -1224,6 +1224,10 @@ describe("uppidi-fleet client entry contract", () => {
         path.resolve(__dirname, "surface.tsx"),
         path.resolve(__dirname, "tree-view.tsx"),
         path.resolve(__dirname, "panel.tsx"),
+        path.resolve(__dirname, "forges-tab.tsx"),
+        path.resolve(__dirname, "host-ui.tsx"),
+        path.resolve(__dirname, "metrics-bar.tsx"),
+        path.resolve(__dirname, "agent-switcher.tsx"),
         path.resolve(__dirname, "../shared/sort-filter.ts"),
         path.resolve(__dirname, "../shared/contracts.ts"),
       ];

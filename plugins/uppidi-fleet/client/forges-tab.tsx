@@ -20,8 +20,9 @@ import {
   AgentEnvelopeCard,
   ScopedLabelGroup,
   InteractiveRow,
+  Icon,
 } from "./host-ui.js";
-import { useRpcQuery, getClientHost } from "paseo-plugin-helper/core";
+import { useRpcQuery, getClientHost, getOptionalClientHost } from "paseo-plugin-helper/core";
 import { useFleetTheme } from "./theme.js";
 import { defineContract } from "paseo-plugin-helper/shared";
 import { z } from "zod";
@@ -107,26 +108,33 @@ export function resolveForgeSelection(
   return resolveCanonicalRepo(value, { knownRepos });
 }
 
-class SafeWorkspaceBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // The boundary renders null on failure, so without this log a broken
-    // workspace watcher would blank the directory with no trace at all.
-    console.error(
-      `[uppidi-fleet] SafeWorkspaceBoundary caught an error (componentStack: ${errorInfo?.componentStack ?? "n/a"}): ${error?.message ?? String(error)}`,
-    );
-  }
-  render() {
-    if (this.state.hasError) return null;
-    return this.props.children;
-  }
-}
+// In Hermes / React Native bundles, if React.Component is missing or Babel loose
+// inheritance is applied on an undefined superclass, `class ... extends React.Component`
+// throws `TypeError: Cannot read properties of undefined (reading 'prototype')`.
+// Provide a safe fallback boundary that verifies React?.Component before extending it.
+const SafeWorkspaceBoundary: React.ComponentType<{ children: React.ReactNode }> =
+  typeof (React as any)?.Component === "function"
+    ? class SafeWorkspaceBoundaryInner extends React.Component<
+        { children: React.ReactNode },
+        { hasError: boolean }
+      > {
+        state = { hasError: false };
+        static getDerivedStateFromError() {
+          return { hasError: true };
+        }
+        componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+          console.error(
+            `[uppidi-fleet] SafeWorkspaceBoundary caught an error (componentStack: ${errorInfo?.componentStack ?? "n/a"}): ${error?.message ?? String(error)}`,
+          );
+        }
+        render() {
+          if (this.state.hasError) return null;
+          return this.props.children;
+        }
+      }
+    : function FallbackWorkspaceBoundary({ children }: { children: React.ReactNode }) {
+        return <>{children}</>;
+      };
 
 function WorkspaceDirectoryWatcher({
   workspaceId,
@@ -169,7 +177,6 @@ function ForgeIssuesViewInner({
   onSelectRepo,
 }: ForgeIssuesViewProps) {
   const { colors } = useFleetTheme();
-  const { Icon } = getClientHost();
   const [searchQuery, setSearchQuery] = useState("");
 
   const [watchedDirectory, setWatchedDirectory] = useState<string | undefined>();

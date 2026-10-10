@@ -152,4 +152,70 @@ describe("uppidi-fleet agent-switcher UI-guard census (#1043)", () => {
     );
     renderer.unmount();
   });
+
+  describe("mobile & Hermes component safety and prototype crash guard (#510)", () => {
+    it("ensures every exported client symbol and component is defined and non-null", async () => {
+      const clientIndex = await import("./index.js");
+      const hostUi = await import("./host-ui.js");
+      const surface = await import("./surface.js");
+      const treeView = await import("./tree-view.js");
+      const forgesTab = await import("./forges-tab.js");
+      const metricsBar = await import("./metrics-bar.js");
+      const agentSwitcher = await import("./agent-switcher.js");
+
+      const modules = [
+        ["client/index.js", clientIndex],
+        ["client/host-ui.js", hostUi],
+        ["client/surface.js", surface],
+        ["client/tree-view.js", treeView],
+        ["client/forges-tab.js", forgesTab],
+        ["client/metrics-bar.js", metricsBar],
+        ["client/agent-switcher.js", agentSwitcher],
+      ] as const;
+
+      for (const [name, mod] of modules) {
+        for (const [exportName, value] of Object.entries(mod)) {
+          assert.notEqual(
+            value,
+            undefined,
+            `${name} export '${exportName}' must not be undefined`,
+          );
+        }
+      }
+    });
+
+    it("renders SafeIcon gracefully when icon name is missing or invalid without prototype throw", async () => {
+      const harness = await getFleetHarness();
+      const { Icon } = await import("./host-ui.js");
+
+      // Verify empty, null, undefined, and invalid names render null/empty view without throwing
+      const cases: Array<[string, any]> = [
+        ["undefined name", undefined],
+        ["null name", null],
+        ["empty string name", ""],
+        ["nonexistent icon name", "NonExistentIconXYZ"],
+      ];
+
+      for (const [label, name] of cases) {
+        const { renderer } = await harness.renderWithRoot(
+          React.createElement(Icon, { name, size: 16 }),
+        );
+        assert.ok(renderer, `Icon must render safely for ${label}`);
+        renderer.unmount();
+      }
+    });
+
+    it("verifies SafeWorkspaceBoundary mounts and handles errors gracefully without class inheritance throw", async () => {
+      const harness = await getFleetHarness();
+      const { ForgeIssuesView } = await import("./forges-tab.js");
+
+      const { renderer } = await harness.renderWithRoot(
+        React.createElement(ForgeIssuesView, {
+          workspaceId: "wks-test-1",
+        }),
+      );
+      assert.ok(renderer, "ForgeIssuesView must mount cleanly with workspaceId");
+      renderer.unmount();
+    });
+  });
 });

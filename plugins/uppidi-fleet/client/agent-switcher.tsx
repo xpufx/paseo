@@ -7,8 +7,8 @@ import type {
 } from "@getpaseo/plugin/client";
 import { SidebarRow } from "@getpaseo/plugin/client/ui";
 
-import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
+  Icon,
   StatusDot,
   InteractiveRow,
   Responsive,
