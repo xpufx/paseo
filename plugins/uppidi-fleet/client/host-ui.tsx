@@ -461,6 +461,7 @@ export function Badge({
           borderRadius: 9999,
           gap: 4,
           flexShrink: 1,
+          minWidth: 0,
           maxWidth: "100%",
           backgroundColor,
           borderColor,
@@ -481,7 +482,7 @@ export function Badge({
         accessibilityLabel={label}
         numberOfLines={1}
         ellipsizeMode="tail"
-        style={[{ color: textColor, fontSize, lineHeight, fontWeight: "600", flexShrink: 1 }, textStyle]}
+        style={[{ color: textColor, fontSize, lineHeight, fontWeight: "600", flexShrink: 1, minWidth: 0 }, textStyle]}
       >
         {highlightQuery ? (
           <HighlightedText
@@ -600,6 +601,7 @@ export function Button({
           justifyContent: "center",
           gap: 6,
           flexShrink: 1,
+          minWidth: 0,
           maxWidth: "100%",
           backgroundColor: pressed && !disabled ? alpha(backgroundColor, 0.8) : backgroundColor,
           borderColor,
@@ -621,7 +623,7 @@ export function Button({
             <Text
               numberOfLines={1}
               ellipsizeMode="tail"
-              style={[{ color: textColor, fontSize, fontWeight: "600", textAlign: "center", flexShrink: 1 }, textStyle]}
+              style={[{ color: textColor, fontSize, fontWeight: "600", textAlign: "center", flexShrink: 1, minWidth: 0 }, textStyle]}
             >
               {children ?? label}
             </Text>

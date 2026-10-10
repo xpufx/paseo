@@ -447,7 +447,7 @@ export function AgentTitleLink({
       onPress={handlePress}
       onHoverChange={setHovered}
       pressedOpacity={0.75}
-      style={{ flexShrink: 1 }}
+      style={{ flexShrink: 1, minWidth: 0 }}
     >
       <Text
         style={{
@@ -456,6 +456,8 @@ export function AgentTitleLink({
           fontSize: size === "sm" ? 12 : 13,
           fontWeight: "600",
           textDecorationLine: hovered ? "underline" : "none",
+          flexShrink: 1,
+          minWidth: 0,
         }}
         numberOfLines={1}
       >
@@ -830,7 +832,7 @@ export function FrontDeskHero({
       >
         <Stack gap={8} style={{ overflow: "visible" }}>
           <Row justify="space-between" align="center" wrap gap="sm" style={{ overflow: "visible" }}>
-            <Row align="center" gap="sm">
+            <Row align="center" gap="sm" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
               <Icon name="Inbox" size={18} color={colors.foregroundMuted} />
               <Stack gap={2}>
                 <Row align="center" gap="xs">
@@ -861,7 +863,7 @@ export function FrontDeskHero({
                 </Text>
               </Stack>
             </Row>
-            <Row align="center" gap="xs">
+            <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0 }}>
               <Badge label="Standby" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
               {onCreateFrontDesk && (
                 <Button
@@ -892,7 +894,7 @@ export function FrontDeskHero({
                 overflow: "visible",
               }}
             >
-              <Row align="center" gap="xs" style={{ overflow: "visible" }}>
+<Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
                 <Icon name="Network" size={13} color={colors.foregroundMuted} />
                 <Text
                   numberOfLines={1}
@@ -942,14 +944,14 @@ export function FrontDeskHero({
       <Stack gap={10} style={{ overflow: "visible" }}>
         <Row justify="space-between" align="center" wrap gap="sm" style={{ overflow: "visible" }}>
           {/* Left: Status Light, Icon, Titles & Worktree */}
-          <Row align="center" gap="sm" style={{ flexShrink: 1, overflow: "visible" }}>
+          <Row align="center" gap="sm" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
             <AgentStatusLight
               agent={primaryAgent}
               navigation={navigation}
               size={10}
             />
             <Icon name="Inbox" size={18} color={primaryStateConfig.color} />
-            <Stack gap={2} style={{ flexShrink: 1 }}>
+            <Stack gap={2} style={{ flexShrink: 1, minWidth: 0 }}>
               <Row align="center" gap="xs" wrap>
                 <Text
                   numberOfLines={1}
@@ -966,7 +968,7 @@ export function FrontDeskHero({
                 </Text>
                 <Badge label="Liaison" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
               </Row>
-              <Row align="center" gap="xs" wrap style={{ flexShrink: 1 }}>
+              <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0 }}>
                 <AgentTitleLink
                   agent={primaryAgent}
                   colors={colors}
@@ -993,7 +995,7 @@ export function FrontDeskHero({
           </Row>
 
           {/* Right: State, Model, Timing, Archive */}
-          <Row align="center" wrap gap="xs">
+          <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
             <Badge
               label={`${primaryAgent.deterministicState}${
                 primaryAgent.stateDetail ? `: ${primaryAgent.stateDetail}` : ""
@@ -1017,6 +1019,7 @@ export function FrontDeskHero({
                   ...typography.caption,
                   fontSize: 11,
                   flexShrink: 1,
+                  minWidth: 0,
                 }}
               >
                 {formatRelativeTime(primaryAgent.lastActivityAt)}
@@ -1098,7 +1101,7 @@ export function FrontDeskHero({
               overflow: "visible",
             }}
           >
-            <Row align="center" gap="xs" style={{ overflow: "visible" }}>
+            <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
               <Icon name="Network" size={13} color={colors.foregroundMuted} />
               <Text
                 numberOfLines={1}
@@ -1880,7 +1883,7 @@ export function DenseAgentRow({
       >
         <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
           {/* Left side: Guide connector, status dot, icon, title, shortId */}
-          <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200, overflow: "visible" }}>
+          <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
             <View
               style={{
                 width: 18,
@@ -1929,7 +1932,7 @@ export function DenseAgentRow({
           </Row>
 
           {/* Right side: State badge, Model, Issue, Worktree, Time, Archive */}
-          <Row align="center" wrap gap="xs">
+          <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
             <Badge
               label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
               variant={stateConfig.badgeVariant}
@@ -1970,6 +1973,7 @@ export function DenseAgentRow({
                   fontSize: 11,
                   lineHeight: 14,
                   flexShrink: 1,
+                  minWidth: 0,
                 }}
               >
                 {formatRelativeTime(agent.lastActivityAt)}
@@ -2116,7 +2120,7 @@ export function OrchestratorRow({
     >
       <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
         {/* Left: Guide connector, Expand toggle, Indicator, Icon, Title Link, Badges */}
-        <Row align="center" gap="xs" style={{ flexShrink: 1, minWidth: 200, overflow: "visible" }}>
+        <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
           <View
             style={{
               width: 18,
@@ -2236,7 +2240,7 @@ export function OrchestratorRow({
 
           {/* Child agent status lights side by side (#410) */}
           {childAgents.length > 0 && (
-            <Row align="center" gap="xs" style={{ marginLeft: 4, alignItems: "center", overflow: "visible" }}>
+            <Row align="center" gap="xs" wrap style={{ marginLeft: 4, flexShrink: 1, minWidth: 0, overflow: "visible" }}>
               <AgentStatusLightsRow
                 agents={childAgents}
                 navigation={navigation}
@@ -2247,7 +2251,7 @@ export function OrchestratorRow({
         </Row>
 
         {/* Right: State, Model, Worktree, Activity, Archive */}
-        <Row align="center" wrap gap="xs">
+        <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
           <Badge
             label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
             variant={stateConfig.badgeVariant}
@@ -2278,6 +2282,7 @@ export function OrchestratorRow({
                 ...typography.caption,
                 fontSize: 11,
                 flexShrink: 1,
+                minWidth: 0,
               }}
             >
               {formatRelativeTime(agent.lastActivityAt)}
@@ -2400,7 +2405,7 @@ export function ProjectGroupCard({
           accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} project group ${group.projectName}`}
         >
           <Row justify="space-between" align="center" wrap gap="xs">
-            <Row align="center" gap="xs">
+            <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0 }}>
               {onToggleExpand && (
                 <Icon
                   name={isExpanded ? "ChevronDown" : "ChevronRight"}
@@ -2417,6 +2422,7 @@ export function ProjectGroupCard({
                   fontWeight: "700",
                   fontSize: 14,
                   flexShrink: 1,
+                  minWidth: 0,
                 }}
               >
                 {group.projectName}
@@ -2474,7 +2480,7 @@ export function ProjectGroupCard({
               )}
             </Row>
 
-            <Row align="center" gap="xs">
+            <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0 }}>
               {/* Lifecycle & Pausing Action Buttons (#426) */}
               {group.isEnrolled && onTogglePause && (
                 <Button

@@ -38,6 +38,17 @@ import {
  */
 const GLYPH_ESTIMATE_BAND_PX = 6;
 
+/**
+ * A cluster under a `space-between` row that floors itself this wide cannot
+ * shrink below the floor on a phone. The #1191 rows pinned their left cluster
+ * at `minWidth: 200`, which is exactly the "collapses or overlaps" the ticket
+ * reports: Yoga gives the cluster its 200px, the chips inside it are squeezed
+ * into the leftover sliver (or wrap across the tree connector), and the right
+ * side goes off-screen. Anything at or past a small-half-screen floor is a
+ * regression; clusters are for reflowing, not for demanding pixels.
+ */
+const CLUSTER_MINWIDTH_FLOOR_PX = 150;
+
 /** Phone-class widths: the narrowest common phone through a large one. */
 const PHONE_WIDTHS = [320, 360, 390, 430];
 
@@ -215,6 +226,96 @@ describe("uppidi-fleet mobile layout (#621)", () => {
     }
 
     sweep.assertClean();
+  });
+
+  it("lets the tree rows' left/right clusters reflow instead of flooring a rigid minWidth (#1191)", async () => {
+    // #1191: on phone widths the 'Agents & Fleet' tree rows (project group
+    // header, OrchestratorRow, DenseAgentRow) pinned their left cluster at
+    // `minWidth: 200`. Yoga cannot shrink a flex item past its minWidth floor,
+    // so on a 320–430px viewport the cluster held its 200px, the chips inside
+    // were crushed into the leftover sliver or wrapped across the guide
+    // connector, and the right-hand badges/content were pushed off-screen or
+    // into the sibling group. `findHorizontalOverflows` cannot see this class
+    // (a `numberOfLines` chip still measures compressible), so this guard pins
+    // the structural fix: every `space-between … wrap` row in the tree tab puts
+    // its clusters below the viewport by letting each one reflow or shrink,
+    // never by flooring a wide minimum.
+    const h = await getFleetHarness();
+    installPayloads(h.payloads);
+
+    const childrenOf = (node: any): any[] =>
+      Array.isArray(node?.children) ? node.children : [];
+
+    const toStyle = (node: any): Record<string, any> => {
+      const style: Record<string, any> = {};
+      for (const s of [].concat(node?.props?.style ?? [])) Object.assign(style, s);
+      return style;
+    };
+    const nearestText = (node: any): string => {
+      if (!node || typeof node !== "object") return "";
+      const own = childrenOf(node)
+        .filter((c: unknown) => typeof c === "string")
+        .map(String)
+        .join("");
+      if (own) return own.slice(0, 60);
+      const found = childrenOf(node).map(nearestText).find(Boolean);
+      return found ?? "";
+    };
+    const collect = (node: any, out: any[]): void => {
+      if (!node || typeof node !== "object") return;
+      if (Array.isArray(node)) {
+        for (const n of node) collect(n, out);
+        return;
+      }
+      const style = toStyle(node);
+      if (
+        style.flexDirection === "row" &&
+        style.justifyContent === "space-between" &&
+        (style.flexWrap === "wrap" || style.flexWrap === "wrap-reverse")
+      ) {
+        out.push(node);
+      }
+      collect(childrenOf(node), out);
+    };
+
+    for (const [label, fleet] of FLEET_STATES) {
+      installPayloads(h.payloads, fleet());
+      const { tree } = await h.renderPanelAtWidth(360, 0);
+      const rows: unknown[] = [];
+      collect(tree, rows);
+
+      assert.ok(
+        rows.length > 0,
+        `[${label}] the tree tab must render space-between wrapping rows to guard`,
+      );
+
+      for (const row of rows) {
+        for (const child of childrenOf(row)) {
+          if (!child || typeof child !== "object") continue;
+          const style = toStyle(child);
+          // An unstyled leaf (icon, spacer) is never the culprit.
+          if (Object.keys(style).length === 0) continue;
+          const floor = typeof style.minWidth === "number" ? (style.minWidth as number) : 0;
+          assert.ok(
+            floor < CLUSTER_MINWIDTH_FLOOR_PX,
+            `[${label}] a tree row cluster floors minWidth:${floor} ` +
+              `near "${nearestText(child)}". A cluster with a ` +
+              `${CLUSTER_MINWIDTH_FLOOR_PX}+px floor cannot reflow below it on a phone (#1191).`,
+          );
+          const canReflow =
+            (style.flexShrink ?? 0) >= 1 ||
+            (typeof style.flex === "number" && style.flex > 0) ||
+            style.flexWrap === "wrap" ||
+            style.flexWrap === "wrap-reverse";
+          assert.ok(
+            canReflow,
+            `[${label}] a tree row cluster neither reflows (flexWrap) nor shrinks ` +
+              `(flexShrink/flex) near "${nearestText(child)}". Rigid clusters push ` +
+              `off-screen at phone widths (#1191).`,
+          );
+        }
+      }
+    }
   });
 
   it("keeps exactly one scroll owner so the surface stays reachable (#326 class)", async () => {
