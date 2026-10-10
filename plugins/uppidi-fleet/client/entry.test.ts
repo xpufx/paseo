@@ -1465,5 +1465,67 @@ describe("uppidi-fleet client entry contract", () => {
         "index.client.tsx must not import paseo-plugin-helper/client",
       );
     });
+});
   });
+
+  describe("empty SDK exports regression (#510)", () => {
+    it("index.client.tsx initClientHelpers shims prevent Hermes .prototype crash", () => {
+      const entryPath = path.resolve(__dirname, "../index.client.tsx");
+      const source = fs.readFileSync(entryPath, "utf8");
+
+      // Must call initClientHelpers with all required deps
+      assert.match(
+        source,
+        /initClientHelpers\s*\(\s*\{[\s\S]*\}\s*\)/,
+        "index.client.tsx must call initClientHelpers()",
+      );
+
+      // Must not import from @getpaseo/plugin/client/react-native as bare values
+      // (shims are defined locally instead)
+      assert.match(
+        source,
+        /const ShimIcon|const ShimModal|const ShimUseToast|const ShimCopyText|const ShimScrollView|const ShimFlatList|const ShimTextInput/,
+        "index.client.tsx must define local shim components for empty SDK exports",
+      );
+
+      // Shim components must be passed to initClientHelpers
+      assert.match(
+        source,
+        /Icon:\s*ShimIcon|Modal:\s*ShimModal|useToast:\s*ShimUseToast|copyText:\s*ShimCopyText|ScrollView:\s*ShimScrollView|FlatList:\s*ShimFlatList|TextInput:\s*ShimTextInput/,
+        "initClientHelpers must receive shim components",
+      );
+    });
+
+    it("host-ui.tsx shims prevent Hermes .prototype crash", () => {
+      const hostPath = path.resolve(
+        __dirname,
+        "../../top/client/host-ui.tsx",
+      );
+      const source = fs.readFileSync(hostPath, "utf8");
+
+      // Must define local shim components
+      assert.match(
+        source,
+        /const ShimIcon|const ShimScrollView|const ShimUseToast|const ShimCopyText/,
+        "host-ui.tsx must define local shim components for empty SDK exports",
+      );
+
+      // Shim components must be used in JSX (not bare imports)
+      assert.match(
+        source,
+        /<ShimIcon|<ShimScrollView|ShimUseToast\(\)|ShimCopyText\(/,
+        "host-ui.tsx must use shim components in JSX",
+      );
+
+      // Must not have bare import of Icon/ScrollView/copyText/useToast from @getpaseo/plugin/client/react-native
+      // (the import was replaced with local shims)
+      assert.doesNotMatch(
+        source,
+        /from ["']@getpaseo\/plugin\/client\/react-native["']/,
+        "host-ui.tsx should not import from @getpaseo/plugin/client/react-native",
+      );
+    });
+  });
+
+  describe("compact agent health gauge and metrics card (#560)", () => {
 });

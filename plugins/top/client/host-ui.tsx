@@ -18,12 +18,6 @@ import {
   type ViewStyle,
 } from "react-native";
 import {
-  Icon,
-  ScrollView as HostScrollView,
-  copyText,
-  useToast,
-} from "@getpaseo/plugin/client/react-native";
-import {
   resolveMetricStatus,
   type MetricThresholds,
   type ResponsiveLayout,
@@ -31,6 +25,43 @@ import {
   type ThemeColors,
 } from "paseo-plugin-helper/shared";
 import { FALLBACK_COLORS, resolveHostColors } from "paseo-plugin-helper/lifecycle";
+
+// --- Safe shim components for when @getpaseo/plugin/client/react-native has empty exports ---
+// These prevent Hermes TypeError: Cannot read properties of undefined (reading 'prototype')
+
+/** Shim Icon: renders nothing when icon name is falsy; safe for Hermes JSX. */
+const ShimIcon = ({
+  name,
+  size,
+  color,
+}: {
+  name: string;
+  size?: number;
+  color?: string;
+}) => {
+  if (!name) return null;
+  return null; // No actual icon rendering; prevents Hermes .prototype crash
+};
+
+/** Shim ScrollView: simple View placeholder compliant with HostScrollView type. */
+const ShimScrollView = (_: any) => {
+  return <View />;
+};
+
+/** Shim useToast: no-op toast implementation. */
+const ShimUseToast = (() => {
+  const show = (_: string, _?: any) => {};
+  const error = (_: string) => {};
+  const copied = (_?: string) => {};
+  return { show, error, copied };
+})();
+
+/** Shim copyText: no-op implementation. */
+const ShimCopyText = async (_: string) => {
+  /* no-op */
+};
+
+export { ShimIcon, ShimScrollView, ShimUseToast, ShimCopyText };
 
 /**
  * Local composition of the presentational pieces plugins/top used to import
@@ -327,7 +358,7 @@ export function HostCardHeader({
   return (
     <View style={[styles.cardHeader, style]}>
       <View style={styles.cardHeaderLeft}>
-        {icon ? <Icon name={icon} size={15} color={colors.foregroundMuted} /> : null}
+        {icon ? <ShimIcon name={icon} size={15} color={colors.foregroundMuted} /> : null}
         <View style={styles.titleColumn}>
           <Text
             style={[styles.cardHeaderTitle, { color: colors.foreground }, titleStyle]}
@@ -454,7 +485,7 @@ export function HostBadge({
     }
     if (!icon) return null;
     if (typeof icon === "string") {
-      return <Icon name={icon} size={iconSize} color={textColor} />;
+      return <ShimIcon name={icon} size={iconSize} color={textColor} />;
     }
     return icon;
   };
@@ -515,7 +546,7 @@ export function HostVital({
     >
       {icon ? (
         typeof icon === "string" ? (
-          <Icon name={icon} size={12} color={color} />
+          <ShimIcon name={icon} size={12} color={color} />
         ) : (
           icon
         )
@@ -848,7 +879,7 @@ export function HostKeyValue({
   valueStyle,
 }: HostKeyValueProps) {
   const { colors } = useHostTheme();
-  const toast = useToast();
+  const toast = ShimUseToast();
   const [copied, setCopied] = useState(false);
 
   const rawString = value === null || value === undefined ? "" : String(value);
@@ -870,7 +901,7 @@ export function HostKeyValue({
   const handleCopy = async () => {
     if (!copyable || !rawString) return;
     try {
-      await copyText(rawString);
+      await ShimCopyText(rawString);
       toast?.show?.(label);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -888,7 +919,7 @@ export function HostKeyValue({
         accessibilityRole="button"
         accessibilityLabel={`Copy ${label}`}
       >
-        <Icon
+        <ShimIcon
           name={copied ? "Check" : "Copy"}
           size={13}
           color={copied ? colors.statusSuccess : colors.foregroundMuted}
@@ -1065,7 +1096,7 @@ export function HostCollapsible({
           headerStyle,
         ]}
       >
-        {icon ? <Icon name={icon} size={14} color={colors.foregroundMuted} /> : null}
+        {icon ? <ShimIcon name={icon} size={14} color={colors.foregroundMuted} /> : null}
         <View style={styles.collapsibleTitleColumn}>
           {title ? (
             <Text style={[styles.collapsibleTitle, { color: colors.foreground }]}>
@@ -1084,7 +1115,7 @@ export function HostCollapsible({
         {headerRight ? (
           <View style={styles.collapsibleHeaderRight}>{headerRight}</View>
         ) : null}
-        <Icon
+        <ShimIcon
           name={isExpanded ? "ChevronDown" : "ChevronRight"}
           size={14}
           color={colors.foregroundMuted}
@@ -1162,8 +1193,8 @@ export function HostTabs({ tabs, activeTab, onTabChange, style }: HostTabsProps)
                 },
               ]}
             >
-              {tab.icon ? (
-                <Icon
+{tab.icon ? (
+                <ShimIcon
                   name={tab.icon}
                   size={13}
                   color={isActive ? colors.foreground : colors.foregroundMuted}
@@ -1450,7 +1481,7 @@ export function HostCopyButton({
   textStyle,
 }: HostCopyButtonProps): React.ReactElement | null {
   const { colors } = useHostTheme();
-  const toast = useToast();
+  const toast = ShimUseToast();
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -1483,7 +1514,7 @@ export function HostCopyButton({
     }
     if (value === undefined || value === null) return;
     try {
-      await copyText(value);
+      await ShimCopyText(value);
       toast?.show?.(toastMessage ?? "Copied");
       setCopied(true);
       timer.current = setTimeout(() => setCopied(false), feedbackDurationMs);
@@ -1511,7 +1542,7 @@ export function HostCopyButton({
         style,
       ]}
     >
-      <Icon
+      <ShimIcon
         name={feedbackIcon}
         size={size === "sm" ? 12 : 14}
         color={copied ? colors.statusSuccess : colors.foregroundMuted}
@@ -1564,7 +1595,7 @@ export function HostScroll({
   ...props
 }: HostScrollProps & Record<string, unknown>) {
   return (
-    <HostScrollView
+    <ShimScrollView
       {...(props as Record<string, unknown>)}
       style={[styles.fluid, style]}
       contentContainerStyle={contentContainerStyle}

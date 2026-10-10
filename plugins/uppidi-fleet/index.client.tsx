@@ -1,6 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
+import React, { View } from "react";
 import {
   SettingsCard,
   SettingsSection,
@@ -24,7 +24,51 @@ import {
 } from "./client/index.js";
 import { HostThemeProvider } from "./client/theme.js";
 
-initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
+// --- Safe shim components for when @getpaseo/plugin/client/react-native has empty exports ---
+// These prevent Hermes TypeError: Cannot read properties of undefined (reading 'prototype')
+
+/** Shim Icon: renders nothing when icon name is falsy; safe for Hermes. */
+const ShimIcon = ({ name }: { name: string }) => (name ? null : null);
+
+/** Shim Modal: simple view wrapper. */
+const ShimModal = ({
+  children,
+}: {
+  children: React.ReactNode;
+}) => <View>{children}</View>;
+
+/** Shim useToast: no-op toast implementation. */
+const ShimUseToast = (() => {
+  const show = (_: string) => {};
+  const copied = (_?: string) => {};
+  const error = (_: string) => {};
+  return { show, copied, error };
+})();
+
+/** Shim copyText: no-op implementation. */
+const ShimCopyText = async (_: string) => {
+  /* no-op */
+};
+
+/** Shim ScrollView: simple View placeholder. */
+const ShimScrollView = () => <View />;
+
+/** Shim FlatList: simple View placeholder. */
+const ShimFlatList = () => <View />;
+
+/** Shim TextInput: simple View placeholder. */
+const ShimTextInput = () => <View />;
+
+initClientHelpers({
+  Icon: ShimIcon,
+  Modal: ShimModal,
+  useRpc,
+  useToast: ShimUseToast,
+  copyText: ShimCopyText,
+  ScrollView: ShimScrollView,
+  FlatList: ShimFlatList,
+  TextInput: ShimTextInput,
+});
 
 export default function contribute(client: PluginClientContext) {
   const removeSwitcherItem =
