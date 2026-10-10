@@ -18,6 +18,7 @@ import {
   STALE_WIP_LABEL,
   STALE_WIP_REMINDER_MARKER,
   STALE_WIP_SKIP_LABELS,
+  createDefaultIssuesCheckIo,
   recoverStaleWipIssue,
   sweepStaleWipIssues,
   staleWipAge,
@@ -128,6 +129,80 @@ describe("stale WIP sweep (ported from forgejo-issues-check.test.py)", () => {
     const result = await recoverStaleWipIssue(io, "host", "org/repo", issue(), { dryRun: true });
     assert.equal(result.dry_run, true);
     assert.deepEqual(calls, []);
+  });
+});
+
+describe("getOpenIssues pagination (#1195)", () => {
+  it("paginates across multiple pages until a partial page is returned", async () => {
+    const requestedUrls: string[] = [];
+    const page1Issues = Array.from({ length: 50 }, (_, i) => issue(i + 1));
+    const page2Issues = Array.from({ length: 15 }, (_, i) => issue(i + 51));
+
+    const runner = async (args: string[]) => {
+      const url = args[1];
+      requestedUrls.push(url);
+      if (url.includes("page=1")) {
+        return { code: 0, stdout: JSON.stringify(page1Issues), stderr: "" };
+      }
+      if (url.includes("page=2")) {
+        return { code: 0, stdout: JSON.stringify(page2Issues), stderr: "" };
+      }
+      return { code: 0, stdout: "[]", stderr: "" };
+    };
+
+    const io = createDefaultIssuesCheckIo(runner);
+    const result = await io.getOpenIssues("forge.example.com", "org/repo");
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.issues.length, 65);
+    assert.equal(requestedUrls.length, 2);
+    assert.ok(requestedUrls[0].includes("limit=50&page=1"));
+    assert.ok(requestedUrls[1].includes("limit=50&page=2"));
+  });
+
+  it("stops immediately if the first page has fewer than limit items", async () => {
+    const requestedUrls: string[] = [];
+    const page1Issues = Array.from({ length: 10 }, (_, i) => issue(i + 1));
+
+    const runner = async (args: string[]) => {
+      requestedUrls.push(args[1]);
+      return { code: 0, stdout: JSON.stringify(page1Issues), stderr: "" };
+    };
+
+    const io = createDefaultIssuesCheckIo(runner);
+    const result = await io.getOpenIssues("forge.example.com", "org/repo");
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.issues.length, 10);
+    assert.equal(requestedUrls.length, 1);
+  });
+
+  it("handles empty issues list gracefully", async () => {
+    const runner = async () => ({ code: 0, stdout: "[]", stderr: "" });
+    const io = createDefaultIssuesCheckIo(runner);
+    const result = await io.getOpenIssues("forge.example.com", "org/repo");
+
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.issues.length, 0);
+  });
+
+  it("surfaces transport failure during pagination", async () => {
+    const runner = async (args: string[]) => {
+      if (args[1].includes("page=1")) {
+        return { code: 0, stdout: JSON.stringify(Array.from({ length: 50 }, (_, i) => issue(i + 1))), stderr: "" };
+      }
+      return { code: 1, stdout: "", stderr: "network timeout" };
+    };
+
+    const io = createDefaultIssuesCheckIo(runner);
+    const result = await io.getOpenIssues("forge.example.com", "org/repo");
+
+    assert.equal(result.ok, false);
+    if (result.ok) return;
+    assert.ok(result.error.includes("failed on page 2"));
   });
 });
 

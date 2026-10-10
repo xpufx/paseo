@@ -692,34 +692,46 @@ function parseJsonList<T>(stdout: string): T[] | null {
   }
 }
 
+export type TeaxRunner = (args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
+
 /**
  * Default IO: `teax` as the Forgejo transport and `~/.cache` for board state —
  * the same plumbing the Python original used, minus the Python interpreter.
  * Unlike the original, a failing issues query is an error, not an empty board:
  * that conflation was the silent degradation #733 removes.
  */
-export function createDefaultIssuesCheckIo(): IssuesCheckIo {
+export function createDefaultIssuesCheckIo(runner: TeaxRunner = teaxRun): IssuesCheckIo {
   return {
     async getOpenIssues(hostname, repo) {
-      const res = await teaxRun([
-        "api",
-        `repos/${repo}/issues?state=open&sort=updated&order=desc`,
-        "--hostname",
-        hostname,
-      ]);
-      if (res.code !== 0) {
-        return {
-          ok: false,
-          error: `teax issues query failed (rc=${res.code}): ${res.stderr.trim() || "no output"}`,
-        };
+      const allIssues: ForgejoIssue[] = [];
+      const limit = 50;
+      const maxPages = 20;
+
+      for (let page = 1; page <= maxPages; page++) {
+        const res = await runner([
+          "api",
+          `repos/${repo}/issues?state=open&sort=updated&order=desc&limit=${limit}&page=${page}`,
+          "--hostname",
+          hostname,
+        ]);
+        if (res.code !== 0) {
+          return {
+            ok: false,
+            error: `teax issues query failed on page ${page} (rc=${res.code}): ${res.stderr.trim() || "no output"}`,
+          };
+        }
+        const out = res.stdout.trim();
+        if (!out) break;
+        const pageIssues = parseJsonList<ForgejoIssue>(out);
+        if (!pageIssues) {
+          return { ok: false, error: `teax issues query returned non-list output on page ${page}` };
+        }
+        if (pageIssues.length === 0) break;
+        allIssues.push(...pageIssues);
+        if (pageIssues.length < limit) break;
       }
-      const out = res.stdout.trim();
-      if (!out) return { ok: true, issues: [] };
-      const issues = parseJsonList<ForgejoIssue>(out);
-      if (!issues) {
-        return { ok: false, error: "teax issues query returned non-list output" };
-      }
-      return { ok: true, issues };
+
+      return { ok: true, issues: allIssues };
     },
 
     // Comment reads stay best-effort ([] on failure), as in the original:
