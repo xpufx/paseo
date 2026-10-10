@@ -44,15 +44,15 @@ const ShimIcon = ({
 };
 
 /** Shim ScrollView: simple View placeholder compliant with HostScrollView type. */
-const ShimScrollView = (_: any) => {
-  return <View />;
+const ShimScrollView = ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => {
+  return <View {...props}>{children}</View>;
 };
 
 /** Shim useToast: no-op toast implementation. */
 const ShimUseToast = (() => {
-  const show = (_: string, _?: any) => {};
-  const error = (_: string) => {};
-  const copied = (_?: string) => {};
+  const show = (_message: string, _options?: any) => {};
+  const error = (_message: string) => {};
+  const copied = (_label?: string) => {};
   return { show, error, copied };
 })();
 
@@ -879,7 +879,7 @@ export function HostKeyValue({
   valueStyle,
 }: HostKeyValueProps) {
   const { colors } = useHostTheme();
-  const toast = ShimUseToast();
+  const toast = ShimUseToast;
   const [copied, setCopied] = useState(false);
 
   const rawString = value === null || value === undefined ? "" : String(value);
@@ -1005,7 +1005,7 @@ export function HostEmptyState({
       {icon ? (
         typeof icon === "string" ? (
           <View style={[styles.emptyIconWrapper, { backgroundColor: colors.surface1 }]}>
-            <Icon name={icon} size={32} color={colors.foregroundMuted} />
+            <ShimIcon name={icon} size={32} color={colors.foregroundMuted} />
           </View>
         ) : (
           icon
@@ -1313,7 +1313,7 @@ export function HostButton({
   const renderIcon = () => {
     if (!icon) return null;
     if (typeof icon === "string") {
-      return <Icon name={icon} size={iconSize} color={textColor} />;
+      return <ShimIcon name={icon} size={iconSize} color={textColor} />;
     }
     return icon;
   };
@@ -1481,7 +1481,7 @@ export function HostCopyButton({
   textStyle,
 }: HostCopyButtonProps): React.ReactElement | null {
   const { colors } = useHostTheme();
-  const toast = ShimUseToast();
+  const toast = ShimUseToast;
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -1601,7 +1601,7 @@ export function HostScroll({
       contentContainerStyle={contentContainerStyle}
     >
       {children}
-    </HostScrollView>
+    </ShimScrollView>
   );
 }
 

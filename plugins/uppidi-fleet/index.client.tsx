@@ -1,6 +1,8 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import React, { View } from "react";
+import React, { type ComponentType, type ForwardRefExoticComponent, type ReactElement, type ReactNode, type Ref, type RefAttributes, forwardRef } from "react";
+import { View, type ScrollViewProps, type FlatListProps, type TextInputProps } from "react-native";
+import type { FlatList as RNFlatList, ScrollView as RNScrollView, TextInput as RNTextInput } from "react-native";
 import {
   SettingsCard,
   SettingsSection,
@@ -24,40 +26,51 @@ import {
 } from "./client/index.js";
 import { HostThemeProvider } from "./client/theme.js";
 
-// --- Safe shim components for when @getpaseo/plugin/client/react-native has empty exports ---
+// --- Safe shim components matching ClientHostDeps from paseo-plugin-helper/core/host.ts ---
 // These prevent Hermes TypeError: Cannot read properties of undefined (reading 'prototype')
 
-/** Shim Icon: renders nothing when icon name is falsy; safe for Hermes. */
-const ShimIcon = ({ name }: { name: string }) => (name ? null : null);
+/** Shim Icon: matches HostIcon = ComponentType<{ name: string; size?: number; color?: string }> */
+const ShimIcon: ComponentType<{ name: string; size?: number; color?: string }> = ({ name, size, color }) => {
+  if (!name) return null;
+  return null;
+};
 
-/** Shim Modal: simple view wrapper. */
-const ShimModal = ({
-  children,
-}: {
-  children: React.ReactNode;
-}) => <View>{children}</View>;
+/** Shim Modal: matches HostModal = ComponentType<HostModalProps> & { Content: ComponentType<HostModalContentProps> } */
+const ShimModalContent = ({ children }: { children: ReactNode; scrollable?: boolean }) => <View>{children}</View>;
+const ShimModal = Object.assign(
+  ({ title, icon, open, onOpenChange, children }: { title: string; icon?: ReactNode; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) => (
+    <View>{children}</View>
+  ),
+  { Content: ShimModalContent }
+);
 
-/** Shim useToast: no-op toast implementation. */
-const ShimUseToast = (() => {
-  const show = (_: string) => {};
-  const copied = (_?: string) => {};
-  const error = (_: string) => {};
-  return { show, copied, error };
-})();
+/** Shim useToast: matches HostUseToast = () => HostToast */
+const ShimUseToast = () => ({
+  show: (_: string, _options?: unknown) => {},
+  copied: (_?: string) => {},
+  error: (_: string) => {},
+});
 
-/** Shim copyText: no-op implementation. */
-const ShimCopyText = async (_: string) => {
+/** Shim copyText: matches HostCopyText = (text: string) => Promise<void> */
+const ShimCopyText = async (_: string): Promise<void> => {
   /* no-op */
 };
 
-/** Shim ScrollView: simple View placeholder. */
-const ShimScrollView = () => <View />;
+/** Shim ScrollView: matches HostScrollView = ForwardRefExoticComponent<ScrollViewProps & RefAttributes<RNScrollView>> */
+const ShimScrollView = forwardRef<RNScrollView, ScrollViewProps & { children?: ReactNode }>(
+  ({ children, ...props }, _ref) => <View {...props}>{children}</View>
+) as ForwardRefExoticComponent<ScrollViewProps & RefAttributes<RNScrollView>>;
 
-/** Shim FlatList: simple View placeholder. */
-const ShimFlatList = () => <View />;
+/** Shim FlatList: matches HostFlatList = <ItemT>(props: FlatListProps<ItemT> & { ref?: Ref<RNFlatList<ItemT>> }) => ReactElement */
+const ShimFlatList = ((props: FlatListProps<any> & { ref?: Ref<RNFlatList<any>>; children?: ReactNode }): ReactElement => {
+  const { children, ref, ...rest } = props;
+  return <View {...rest}>{children}</View>;
+}) as <ItemT>(props: FlatListProps<ItemT> & { ref?: Ref<RNFlatList<ItemT>>; children?: ReactNode }) => ReactElement;
 
-/** Shim TextInput: simple View placeholder. */
-const ShimTextInput = () => <View />;
+/** Shim TextInput: matches HostTextInput = ForwardRefExoticComponent<TextInputProps & RefAttributes<RNTextInput>> */
+const ShimTextInput = forwardRef<RNTextInput, TextInputProps & { children?: ReactNode }>(
+  ({ children, ...props }, _ref) => <View {...props}>{children}</View>
+) as ForwardRefExoticComponent<TextInputProps & RefAttributes<RNTextInput>>;
 
 initClientHelpers({
   Icon: ShimIcon,

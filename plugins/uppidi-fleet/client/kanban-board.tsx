@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { View, Text, Platform } from "react-native";
-import { ScrollView } from "@getpaseo/plugin/client/react-native";
+import { View, Text, Platform, ScrollView } from "react-native";
 import {
   Badge,
   Button,

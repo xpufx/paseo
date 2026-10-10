@@ -891,6 +891,17 @@ const PARTS = [
     note: "Replaces the removed frozen helper client kit for uppidi-fleet. Deterministic presentation; model work stays behind the RPCs it renders.",
   },
   {
+    file: `${PLUGIN}/client/pill-policy.ts`,
+    part: "Fleet pill visibility policy",
+    layer: "client",
+    label: DETERMINISTIC,
+    anchors: { exports: ["FLEET_PILL_POLICY"] },
+    evidence: [
+      [`client/pill-policy.ts:1-3`, "FLEET_PILL_POLICY defines pill visibility exports"],
+    ],
+    note: "Static pill visibility policy. No model inference.",
+  },
+  {
     file: `${PLUGIN}/client/testing/fleet-fixtures.ts`,
     part: "Static fleet fixtures for client tests",
     layer: "client",
