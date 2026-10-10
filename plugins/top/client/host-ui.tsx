@@ -44,15 +44,15 @@ const ShimIcon = ({
 };
 
 /** Shim ScrollView: simple View placeholder compliant with HostScrollView type. */
-const ShimScrollView = (_: any) => {
-  return <View />;
+const ShimScrollView = ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => {
+  return <View {...props}>{children}</View>;
 };
 
 /** Shim useToast: no-op toast implementation. */
 const ShimUseToast = (() => {
-  const show = (_: string, _?: any) => {};
-  const error = (_: string) => {};
-  const copied = (_?: string) => {};
+  const show = (_message: string, _options?: any) => {};
+  const error = (_message: string) => {};
+  const copied = (_label?: string) => {};
   return { show, error, copied };
 })();
 
@@ -1601,7 +1601,7 @@ export function HostScroll({
       contentContainerStyle={contentContainerStyle}
     >
       {children}
-    </HostScrollView>
+    </ShimScrollView>
   );
 }
 
