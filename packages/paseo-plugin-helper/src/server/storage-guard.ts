@@ -22,7 +22,6 @@ export interface InstallStorageGuardOptions {
   pluginId: string;
   namespace?: string; // defaults to "plugin-data/xpufx"
   allowTmp?: boolean; // defaults to true
-  allowedExtraRoots?: string[];
   mode?: "enforce" | "warn"; // defaults to "enforce"
   onViolation?: (violation: { path: string; operation: string; allowedRoots: string[] }) => void;
 }
@@ -68,12 +67,6 @@ export function installStorageGuard(options: InstallStorageGuardOptions): () => 
   if (allowTmp) {
     allowedRoots.push(path.resolve(os.tmpdir()));
     allowedRoots.push(path.resolve(process.cwd(), ".tmp"));
-  }
-
-  if (options.allowedExtraRoots && options.allowedExtraRoots.length > 0) {
-    for (const extra of options.allowedExtraRoots) {
-      allowedRoots.push(path.resolve(extra));
-    }
   }
 
   function validateTarget(target: PathLike | number, operation: string): void {
@@ -223,14 +216,14 @@ export function installStorageGuard(options: InstallStorageGuardOptions): () => 
 
   anyFsp.writeFile = async function (file: PathLike | number | fsp.FileHandle, ...args: unknown[]) {
     if (typeof file === "string" || Buffer.isBuffer(file) || file instanceof URL) {
-      validateTarget(file, "fsp.writeFile");
+      validateTarget(file as unknown as PathLike, "fsp.writeFile");
     }
     return Reflect.apply(origPromisesWriteFile, fsp, [file, ...args]);
   };
 
   anyFsp.appendFile = async function (file: PathLike | number | fsp.FileHandle, ...args: unknown[]) {
     if (typeof file === "string" || Buffer.isBuffer(file) || file instanceof URL) {
-      validateTarget(file, "fsp.appendFile");
+      validateTarget(file as unknown as PathLike, "fsp.appendFile");
     }
     return Reflect.apply(origPromisesAppendFile, fsp, [file, ...args]);
   };

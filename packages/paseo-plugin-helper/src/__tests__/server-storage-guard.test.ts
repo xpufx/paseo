@@ -118,29 +118,6 @@ describe("installStorageGuard", () => {
     );
   });
 
-  it("supports allowedExtraRoots option", () => {
-    const extraRoot = path.join(os.tmpdir(), `extra-root-${Date.now()}`);
-    fs.mkdirSync(extraRoot, { recursive: true });
-
-    uninstall = installStorageGuard({
-      pluginId,
-      namespace,
-      allowTmp: false,
-      allowedExtraRoots: [extraRoot],
-    });
-
-    const extraTarget = path.join(extraRoot, "extra.txt");
-    fs.writeFileSync(extraTarget, "extra content");
-    expect(fs.readFileSync(extraTarget, "utf8")).toBe("extra content");
-
-    // Because allowTmp is false, writing to normal tmpdir should fail
-    const targetInTmp = path.join(validTmpDir, "blocked-tmp.txt");
-    expect(() => {
-      fs.writeFileSync(targetInTmp, "should fail");
-    }).toThrow(ScopedStorageViolationError);
-
-    fs.rmSync(extraRoot, { recursive: true, force: true });
-  });
 
   it("supports warn mode without throwing", () => {
     let violationLogged: any = null;

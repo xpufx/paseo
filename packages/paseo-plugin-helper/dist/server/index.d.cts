@@ -1188,7 +1188,6 @@ interface InstallStorageGuardOptions {
     pluginId: string;
     namespace?: string;
     allowTmp?: boolean;
-    allowedExtraRoots?: string[];
     mode?: "enforce" | "warn";
     onViolation?: (violation: {
         path: string;
