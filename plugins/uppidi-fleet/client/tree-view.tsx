@@ -423,6 +423,8 @@ export interface AgentTitleLinkProps {
   typography: any;
   navigation?: PluginSurfaceProps["navigation"];
   size?: "sm" | "md";
+  fontWeight?: any;
+  style?: any;
 }
 
 /**
@@ -434,6 +436,8 @@ export function AgentTitleLink({
   typography,
   navigation,
   size = "md",
+  fontWeight = "600",
+  style,
 }: AgentTitleLinkProps) {
   const [hovered, setHovered] = useState(false);
   const handlePress = () => {
@@ -454,14 +458,14 @@ export function AgentTitleLink({
       onPress={handlePress}
       onHoverChange={setHovered}
       pressedOpacity={0.75}
-      style={{ flexShrink: 1, minWidth: 0 }}
+      style={{ flexShrink: 1, minWidth: 0, ...style }}
     >
       <Text
         style={{
           color: hovered ? colors.accent : colors.foreground,
           ...(size === "sm" ? typography.body : typography.heading),
           fontSize: size === "sm" ? 12 : 13,
-          fontWeight: "600",
+          fontWeight,
           textDecorationLine: hovered ? "underline" : "none",
           flexShrink: 1,
           minWidth: 0,
@@ -2131,34 +2135,37 @@ export function DenseAgentRow({
         <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
           {/* Left side: Guide connector, status dot, icon, title, default left pills */}
           <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
-            <View
-              style={{
-                width: 18,
-                alignItems: "center",
-                justifyContent: "center",
-                marginRight: 2,
-              }}
-            >
-              <Text
+            {/* Identity anchor cluster: never breaks apart on mobile viewports */}
+            <Row align="center" gap="xs" wrap={false} style={{ flexShrink: 1, minWidth: 0 }}>
+              <View
                 style={{
-                  color: colors.foregroundMuted,
-                  fontFamily: "monospace",
-                  fontSize: 11,
-                  opacity: 0.65,
+                  width: 18,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginRight: 2,
                 }}
               >
-                {isLast ? "└─" : "├─"}
-              </Text>
-            </View>
-            <AgentStatusLight agent={agent} navigation={navigation} size={7} />
-            <Icon name={stateConfig.categoryIcon} size={13} color={stateConfig.color} />
-            <AgentTitleLink
-              agent={agent}
-              colors={colors}
-              typography={typography}
-              navigation={navigation}
-              size="sm"
-            />
+                <Text
+                  style={{
+                    color: colors.foregroundMuted,
+                    fontFamily: "monospace",
+                    fontSize: 11,
+                    opacity: 0.65,
+                  }}
+                >
+                  {isLast ? "└─" : "├─"}
+                </Text>
+              </View>
+              <AgentStatusLight agent={agent} navigation={navigation} size={7} />
+              <Icon name={stateConfig.categoryIcon} size={13} color={stateConfig.color} />
+              <AgentTitleLink
+                agent={agent}
+                colors={colors}
+                typography={typography}
+                navigation={navigation}
+                size="sm"
+              />
+            </Row>
             {policy.defaultPills
               .filter((id) => id !== "state")
               .map((id) => (
@@ -2384,62 +2391,70 @@ export function OrchestratorRow({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 4,
-        backgroundColor: isHovered ? alpha(colors.accent, 0.05) : "transparent",
+        // Orchestrator visual distinctiveness without box bloat (#1192).
+        // Default subtle accent tint distinguishes trunk orchestrator nodes from worker subagents.
+        backgroundColor: isHovered
+          ? alpha(colors.accent, 0.08)
+          : alpha(colors.accent, 0.04),
         overflow: "visible",
       }}
     >
       <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
         {/* Left: Guide connector, Expand toggle, Indicator, Icon, Title Link, Badges */}
         <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
-          <View
-            style={{
-              width: 18,
-              alignItems: "center",
-              justifyContent: "center",
-              marginRight: 2,
-            }}
-          >
-            <Text
+          {/* Identity anchor cluster: never breaks apart on mobile viewports */}
+          <Row align="center" gap="xs" wrap={false} style={{ flexShrink: 1, minWidth: 0 }}>
+            <View
               style={{
-                color: colors.foregroundMuted,
-                fontFamily: "monospace",
-                fontSize: 11,
-                opacity: 0.65,
-              }}
-            >
-              {isLast ? "└──" : "├──"}
-            </Text>
-          </View>
-
-          {hasChildren && onToggleExpand ? (
-            <InteractiveRow
-              onPress={onToggleExpand}
-              pressedOpacity={0.6}
-              style={{
-                padding: 2,
+                width: 18,
+                alignItems: "center",
+                justifyContent: "center",
                 marginRight: 2,
               }}
-              accessibilityRole="button"
-              accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} subagents of ${agent.name}`}
             >
-              <Icon
-                name={isExpanded ? "ChevronDown" : "ChevronRight"}
-                size={14}
-                color={colors.foregroundMuted}
-              />
-            </InteractiveRow>
-          ) : (
-            <View style={{ width: 14 }} />
-          )}
+              <Text
+                style={{
+                  color: colors.foregroundMuted,
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  opacity: 0.65,
+                }}
+              >
+                {isLast ? "└──" : "├──"}
+              </Text>
+            </View>
 
-          <AgentStatusLight agent={agent} navigation={navigation} size={8} />
-          <Icon name="Network" size={15} color={stateConfig.color} />
-          <AgentTitleLink
-            agent={agent}
-            colors={colors}
-            typography={typography}
-            navigation={navigation}
-          />
+            {hasChildren && onToggleExpand ? (
+              <InteractiveRow
+                onPress={onToggleExpand}
+                pressedOpacity={0.6}
+                style={{
+                  padding: 2,
+                  marginRight: 2,
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} subagents of ${agent.name}`}
+              >
+                <Icon
+                  name={isExpanded ? "ChevronDown" : "ChevronRight"}
+                  size={14}
+                  color={colors.foregroundMuted}
+                />
+              </InteractiveRow>
+            ) : (
+              <View style={{ width: 14 }} />
+            )}
+
+            <AgentStatusLight agent={agent} navigation={navigation} size={8} />
+            <Icon name="Network" size={15} color={stateConfig.color} />
+            <AgentTitleLink
+              agent={agent}
+              colors={colors}
+              typography={typography}
+              navigation={navigation}
+              fontWeight="700"
+            />
+          </Row>
           {policy.defaultPills
             .filter((id) => id !== "state")
             .map((id) => (

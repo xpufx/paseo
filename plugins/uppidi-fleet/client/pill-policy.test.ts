@@ -280,4 +280,66 @@ describe("Tree View Pill Visibility & Drawer Rendering", () => {
     const expandedShortId = root.findAll((node: any) => node.props.label === sampleFrontDeskAgent.shortId);
     assert.equal(expandedShortId.length, 1, "shortId must be visible after expanding Front Desk drawer");
   });
+
+  it("verifies identity anchor in DenseAgentRow and OrchestratorRow never wraps and truncates safely (#1192)", async () => {
+    const h = await getFleetHarness();
+    const { DenseAgentRow, OrchestratorRow, AgentTitleLink } = await import("./tree-view.js");
+
+    // Check DenseAgentRow identity anchor
+    const { root: workerRoot } = await h.renderWithRoot(
+      h.React.createElement(DenseAgentRow, {
+        node: sampleWorkerNode,
+        colors: { accent: "#3b82f6", surface1: "#1e293b", foregroundMuted: "#94a3b8", foreground: "#f8fafc" },
+        typography: { body: {}, heading: {}, caption: {} },
+        onArchiveAgent: () => {},
+      }),
+    );
+
+    const workerTitle = workerRoot.findByType(AgentTitleLink);
+    assert.ok(workerTitle, "Worker title link component must exist");
+    // Verify parent of AgentTitleLink is the identity anchor cluster with wrap={false} and minWidth: 0
+    const workerAnchor = workerTitle.parent;
+    assert.ok(workerAnchor, "Worker title must be wrapped in anchor cluster");
+    const workerStyle = Array.isArray(workerAnchor.props.style)
+      ? Object.assign({}, ...workerAnchor.props.style.filter(Boolean))
+      : workerAnchor.props.style;
+    assert.equal(workerStyle.flexWrap, undefined, "Worker identity anchor cluster must not wrap");
+    assert.equal(workerStyle.minWidth, 0, "Worker identity anchor must have minWidth: 0");
+    assert.equal(workerStyle.flexShrink, 1, "Worker identity anchor must have flexShrink: 1");
+
+    // Check OrchestratorRow identity anchor and distinct styling
+    const { root: orchRoot } = await h.renderWithRoot(
+      h.React.createElement(OrchestratorRow, {
+        node: sampleOrchNode,
+        colors: { accent: "#3b82f6", surface1: "#1e293b", foregroundMuted: "#94a3b8", foreground: "#f8fafc" },
+        typography: { body: {}, heading: {}, caption: {} },
+        onArchiveAgent: () => {},
+      }),
+    );
+
+    const orchTitle = orchRoot.findByType(AgentTitleLink);
+    assert.ok(orchTitle, "Orchestrator title link component must exist");
+    const orchAnchor = orchTitle.parent;
+    assert.ok(orchAnchor, "Orchestrator title must be wrapped in anchor cluster");
+    const orchStyle = Array.isArray(orchAnchor.props.style)
+      ? Object.assign({}, ...orchAnchor.props.style.filter(Boolean))
+      : orchAnchor.props.style;
+    assert.equal(orchStyle.flexWrap, undefined, "Orchestrator identity anchor cluster must not wrap");
+    assert.equal(orchStyle.minWidth, 0, "Orchestrator identity anchor must have minWidth: 0");
+    assert.equal(orchStyle.flexShrink, 1, "Orchestrator identity anchor must have flexShrink: 1");
+
+    // Title weight must be distinct 700
+    assert.equal(orchTitle.props.fontWeight, "700", "Orchestrator title link must have distinct fontWeight 700");
+
+    // Container row must have subtle background tint applied
+    const orchComp = orchRoot.findByType(OrchestratorRow);
+    const orchContainer = orchComp.children[0] as any;
+    assert.ok(orchContainer.props.style?.backgroundColor, "Orchestrator row must have background tint");
+    assert.notEqual(
+      orchContainer.props.style?.backgroundColor,
+      "transparent",
+      "Orchestrator row must have subtle background tint rather than transparent",
+    );
+  });
 });
+
