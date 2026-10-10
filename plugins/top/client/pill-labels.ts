@@ -93,6 +93,28 @@ export function formatCompactTokens(n: number): string {
   return `${Math.round(n)}`;
 }
 
+export function formatTurnTokensPerSecond(
+  outputTokens: number | undefined,
+  durationMs: number | undefined,
+): string | null {
+  if (
+    outputTokens == null ||
+    durationMs == null ||
+    !Number.isFinite(outputTokens) ||
+    !Number.isFinite(durationMs) ||
+    outputTokens <= 0 ||
+    durationMs <= 0
+  ) {
+    return null;
+  }
+  const rate = outputTokens / (durationMs / 1000);
+  if (!Number.isFinite(rate) || rate <= 0) return null;
+  if (rate < 10) {
+    return `${parseFloat(rate.toFixed(1))} tok/s`;
+  }
+  return `${Math.round(rate)} tok/s`;
+}
+
 export function extractTokenMetrics(snap: SegmentSnapshot): TokenMetrics | null {
   const live = snap.data?.liveUsage;
   const last = snap.data?.lastTurn;

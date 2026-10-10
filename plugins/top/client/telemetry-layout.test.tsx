@@ -20,28 +20,30 @@ vi.mock("@getpaseo/plugin/client/react-native", () => ({
   useToast: () => ({}),
 }));
 
-// Enable every metric on the timeline surface. The real per-metric defaults
-// leave several vitals pill-only, which would hide the density under test.
+let mockPluginSettings: { metricSurfaces?: Record<string, string> } = {
+  metricSurfaces: Object.fromEntries(
+    [
+      "cpu_ram",
+      "branch",
+      "worktree",
+      "agent_id",
+      "load",
+      "uptime",
+      "mcp",
+      "agent_title",
+      "agent",
+      "agent_provider",
+      "agent_activity",
+      "changes",
+      "tokens",
+      "tools",
+      "turns",
+    ].map((id) => [id, "both"]),
+  ),
+};
+
 vi.mock("paseo-plugin-helper/core", () => {
-  const ids = [
-    "cpu_ram",
-    "branch",
-    "worktree",
-    "agent_id",
-    "load",
-    "uptime",
-    "mcp",
-    "agent_title",
-    "agent",
-    "agent_provider",
-    "agent_activity",
-    "changes",
-    "tokens",
-    "tools",
-    "turns",
-  ];
-  const settings = { metricSurfaces: Object.fromEntries(ids.map((id) => [id, "both"])) };
-  return { usePluginSettings: () => ({ settings }) };
+  return { usePluginSettings: () => ({ settings: mockPluginSettings }) };
 });
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -322,6 +324,17 @@ describe("TopTimelineTelemetryCard turn throughput badge (#1141)", () => {
     expect(text).toContain("38 tok/s");
   });
 
+  it("preserves 1 decimal place when rate < 10 tok/s", () => {
+    // 74 output tokens in 10000ms (10s) = 7.4 tok/s
+    const renderer = renderCard(undefined, {
+      durationMs: 10000,
+      outputTokens: 74,
+    });
+    const text = textOf(renderer.toJSON());
+    expect(text).toContain("10.0s");
+    expect(text).toContain("7.4 tok/s");
+  });
+
   it("omits the badge when durationMs is missing or <= 0", () => {
     const missingDuration = renderCard(undefined, {
       durationMs: undefined,
@@ -356,5 +369,53 @@ describe("TopTimelineTelemetryCard turn throughput badge (#1141)", () => {
     });
     expect(textOf(zeroTokens.toJSON())).toContain("5.0s");
     expect(textOf(zeroTokens.toJSON())).not.toContain("tok/s");
+  });
+
+  it("gates throughput badge behind the tokens setting", () => {
+    const orig = mockPluginSettings;
+    try {
+      mockPluginSettings = {
+        metricSurfaces: {
+          ...orig.metricSurfaces,
+          tokens: "none",
+        },
+      };
+      const disabled = renderCard(undefined, {
+        durationMs: 30000,
+        outputTokens: 1140,
+      });
+      const textDisabled = textOf(disabled.toJSON());
+      expect(textDisabled).toContain("30.0s");
+      expect(textDisabled).not.toContain("tok/s");
+
+      mockPluginSettings = {
+        metricSurfaces: {
+          ...orig.metricSurfaces,
+          tokens: "timeline",
+        },
+      };
+      const enabled = renderCard(undefined, {
+        durationMs: 30000,
+        outputTokens: 1140,
+      });
+      const textEnabled = textOf(enabled.toJSON());
+      expect(textEnabled).toContain("30.0s");
+      expect(textEnabled).toContain("38 tok/s");
+    } finally {
+      mockPluginSettings = orig;
+    }
+  });
+
+  it("ensures duration and throughput badges do not collapse on compact/mobile (flexShrink: 0)", () => {
+    const renderer = renderCard(COMPACT, {
+      durationMs: 30000,
+      outputTokens: 1140,
+    });
+    const nodes = styledNodes(renderer.toJSON());
+    // Find badge nodes in the title row
+    const nonShrinkingBadges = nodes.filter(
+      (node) => node.style.flexShrink === 0 && (textOf(node.children).includes("30.0s") || textOf(node.children).includes("38 tok/s")),
+    );
+    expect(nonShrinkingBadges.length).toBe(2);
   });
 });

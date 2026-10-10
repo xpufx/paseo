@@ -119,3 +119,33 @@ test("copy text reports tool calls, turns, duration and changes when present", (
   assert.match(text, /Turns 9/);
   assert.match(text, /Changes ±3 files \+40\/-5/);
 });
+
+test("copy text includes throughput when output tokens and duration are present", () => {
+  const text = buildTelemetryCopyText({
+    data: {
+      ...base,
+      durationMs: 30000,
+      outputTokens: 1140,
+    },
+  });
+  assert.match(text, /Duration 30\.0s/);
+  assert.match(text, /Throughput 38 tok\/s/);
+
+  const textLowRate = buildTelemetryCopyText({
+    data: {
+      ...base,
+      durationMs: 10000,
+      outputTokens: 74,
+    },
+  });
+  assert.match(textLowRate, /Throughput 7\.4 tok\/s/);
+
+  const textNoThroughput = buildTelemetryCopyText({
+    data: {
+      ...base,
+      durationMs: 30000,
+      outputTokens: 0,
+    },
+  });
+  assert.doesNotMatch(textNoThroughput, /Throughput/);
+});

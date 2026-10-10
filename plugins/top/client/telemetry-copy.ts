@@ -1,5 +1,9 @@
 import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
-import { formatCompactTokens, type TopAgentSnapshot } from "./pill-labels";
+import {
+  formatCompactTokens,
+  formatTurnTokensPerSecond,
+  type TopAgentSnapshot,
+} from "./pill-labels";
 import type { TopTimelineTelemetryData } from "../shared/resources";
 
 export interface TelemetryCopyInput {
@@ -101,6 +105,8 @@ export function buildTelemetryCopyText({ data, liveUsage, timeLabel }: Telemetry
   }
 
   if (data.durationMs != null) lines.push(`Duration ${(data.durationMs / 1000).toFixed(1)}s`);
+  const throughput = formatTurnTokensPerSecond(outputTokens, data.durationMs);
+  if (throughput) lines.push(`Throughput ${throughput}`);
   if (data.toolCalls != null) {
     lines.push(`Tools ${data.toolCalls}${data.toolErrors ? ` (${data.toolErrors} err)` : ""}`);
   }

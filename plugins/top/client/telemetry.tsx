@@ -32,7 +32,11 @@ import {
   type MetricId,
   type TopTimelineTelemetryData,
 } from "../shared/resources";
-import { formatCompactTokens, type TopAgentSnapshot } from "./pill-labels";
+import {
+  formatCompactTokens,
+  formatTurnTokensPerSecond,
+  type TopAgentSnapshot,
+} from "./pill-labels";
 
 export { TIMELINE_RENDERED_METRICS };
 
@@ -154,6 +158,11 @@ export function TopTimelineTelemetryCard({
         : (data.outcomeError ?? "Canceled")
       : "";
 
+  const turnThroughput = useMemo(
+    () => formatTurnTokensPerSecond(data.outputTokens, data.durationMs),
+    [data.outputTokens, data.durationMs],
+  );
+
   return (
     <HostThemeProvider theme={theme}>
       <HostLayoutProvider layout={layout}>
@@ -165,19 +174,21 @@ export function TopTimelineTelemetryCard({
           title={
             <HostRow gap={6} align="center" style={styles.headerInlineRow}>
               <Icon name={outcomeConfig.icon} size={14} color={outcomeConfig.color} />
-              <Text style={{ fontSize: 12, fontWeight: "600", color: theme.colors.foreground }}>
+              <Text style={{ fontSize: 12, fontWeight: "600", color: theme.colors.foreground, flexShrink: 0 }}>
                 {outcomeConfig.label}
               </Text>
               {data.durationMs != null ? (
-                <HostBadge label={`${(data.durationMs / 1000).toFixed(1)}s`} variant="neutral" />
-              ) : null}
-              {data.durationMs != null &&
-              data.durationMs > 0 &&
-              data.outputTokens != null &&
-              data.outputTokens > 0 ? (
                 <HostBadge
-                  label={`${Math.round(data.outputTokens / (data.durationMs / 1000))} tok/s`}
+                  label={`${(data.durationMs / 1000).toFixed(1)}s`}
                   variant="neutral"
+                  style={{ flexShrink: 0 }}
+                />
+              ) : null}
+              {show("tokens") && turnThroughput ? (
+                <HostBadge
+                  label={turnThroughput}
+                  variant="neutral"
+                  style={{ flexShrink: 0 }}
                 />
               ) : null}
             </HostRow>

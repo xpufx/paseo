@@ -6,6 +6,7 @@ import {
   enabledItemsForSettings,
   extractTokenMetrics,
   formatCompactTokens,
+  formatTurnTokensPerSecond,
   formatSegmentIcon,
   formatSegmentLabel,
   formatTokensLabel,
@@ -323,5 +324,29 @@ test("describeSegment never emits a blank label when host fields are blank strin
       `${item} flat label must be non-blank for blank host fields`,
     );
   }
+});
+
+test("formatTurnTokensPerSecond calculates rates and omits invalid or non-positive inputs", () => {
+  // Invalid / missing
+  assert.equal(formatTurnTokensPerSecond(undefined, 1000), null);
+  assert.equal(formatTurnTokensPerSecond(100, undefined), null);
+  assert.equal(formatTurnTokensPerSecond(0, 1000), null);
+  assert.equal(formatTurnTokensPerSecond(-50, 1000), null);
+  assert.equal(formatTurnTokensPerSecond(100, 0), null);
+  assert.equal(formatTurnTokensPerSecond(100, -1000), null);
+  assert.equal(formatTurnTokensPerSecond(NaN, 1000), null);
+  assert.equal(formatTurnTokensPerSecond(100, NaN), null);
+
+  // Rate >= 10 tok/s: rounded to nearest integer
+  assert.equal(formatTurnTokensPerSecond(1140, 30000), "38 tok/s");
+  assert.equal(formatTurnTokensPerSecond(100, 10000), "10 tok/s");
+  assert.equal(formatTurnTokensPerSecond(104, 10000), "10 tok/s");
+  assert.equal(formatTurnTokensPerSecond(106, 10000), "11 tok/s");
+
+  // Rate < 10 tok/s: preserves 1 decimal place
+  assert.equal(formatTurnTokensPerSecond(74, 10000), "7.4 tok/s");
+  assert.equal(formatTurnTokensPerSecond(70, 10000), "7 tok/s");
+  assert.equal(formatTurnTokensPerSecond(1, 1000), "1 tok/s");
+  assert.equal(formatTurnTokensPerSecond(15, 10000), "1.5 tok/s");
 });
 
