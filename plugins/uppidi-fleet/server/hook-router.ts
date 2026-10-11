@@ -4877,8 +4877,10 @@ export class HookRouter {
     for (const enrolled of Array.from(this.enrolledRepos)) {
       if (enrolled === repoKey || isRepoMatching(enrolled, repoKey)) {
         this.enrolledRepos.delete(enrolled);
+        this.deleteOrchestrator(enrolled, { source: "unenroll", reason: "repo unenrolled", actor: "unenrollRepo" });
       }
     }
+    this.deleteOrchestrator(repoKey, { source: "unenroll", reason: "repo unenrolled", actor: "unenrollRepo" });
     this.saveConfigState();
     return Array.from(this.enrolledRepos);
   }
@@ -7149,6 +7151,8 @@ export class HookRouter {
       for (const record of orchRecords) {
         const { key, agentId } = record;
         if (!agentId) continue;
+        // Skip orchestrator records for unenrolled repos (#1214)
+        if (!this.isEnrolledRepo(key)) continue;
         // Suppressed when the orchestrator was legitimately culled (#872).
         if (this.isTeardownSuppressedAgent(agentId)) continue;
         const agent = agentMap.get(agentId);
@@ -7347,6 +7351,23 @@ export class HookRouter {
       const { key, agentId } = record;
       if (!key || seen.has(key) || !agentId) continue;
       seen.add(key);
+
+      // Unenrolled repositories: clean up dormant orchestrator records (#1214)
+      if (this.enrolledRepos.size > 0 && !this.isEnrolledRepo(key)) {
+        if (opts.dryRun) {
+          pruned.push({ key, agentId, reason: "unenrolled repo (dry-run)" });
+          continue;
+        }
+        const res = this.deleteOrchestrator(key, {
+          source: "prune:unenrolled-repo",
+          reason: "repo is not enrolled",
+          actor: "pruneOrchestrators",
+        });
+        if (res.ok) {
+          pruned.push({ key, agentId, reason: "unenrolled repo unlinked" });
+        }
+        continue;
+      }
 
       if (agentMap.has(agentId)) {
         const agent = agentMap.get(agentId)!;
