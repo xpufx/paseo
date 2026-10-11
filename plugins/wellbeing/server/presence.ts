@@ -77,10 +77,10 @@ export class PresenceTracker {
           fs.mkdirSync(destDir, { recursive: true });
         }
         fs.copyFileSync(legacyStatePath, canonicalStatePath);
-        this.stateFilePath = canonicalStatePath;
       } catch {
-        this.stateFilePath = legacyStatePath;
+        // Migration failed; canonical path will initialize with defaults
       }
+      this.stateFilePath = canonicalStatePath;
     } else {
       this.stateFilePath = canonicalStatePath;
     }
