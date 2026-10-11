@@ -160,8 +160,8 @@ describe("registerSlashCommands rpc wiring", () => {
     dispose();
   });
 
-  it("logs error and prevents send when agent.send() fails on mobile", async () => {
-    const { client, contributions, sent, agentRef } = harness();
+  it("falls back to runCommandRpc when client-side agent.send() fails on mobile", async () => {
+    const { client, rpcCalls, contributions, sent, agentRef } = harness();
     const showMock = vi.fn();
     const errorMock = vi.fn();
 
@@ -175,7 +175,7 @@ describe("registerSlashCommands rpc wiring", () => {
     });
 
     // Make agent.send() reject on mobile
-    agentRef.send = vi.fn(async (message: string) => {
+    agentRef.send = vi.fn(async (_message: string) => {
       throw new Error("Mobile delivery failed: bridge error");
     });
 
@@ -190,8 +190,56 @@ describe("registerSlashCommands rpc wiring", () => {
       paseo: client.paseo,
     });
 
-    // Error should be logged (report called), sent should be empty (send not called)
-    expect(sent).toHaveLength(0);
+    // Client-side direct send failed, but RPC fallback was called with agentId
+    expect(rpcCalls).toContainEqual({
+      contract: runCommandRpc,
+      input: {
+        name: "review",
+        args: "focus on performance",
+        agentId: "agent-1",
+      },
+    });
+
+    dispose();
+  });
+
+  it("logs error and shows toast when both client agent.send() and server runCommandRpc fail", async () => {
+    const { client, contributions, agentRef } = harness();
+    const showMock = vi.fn();
+    const errorMock = vi.fn();
+
+    const { initClientHelpers } = await import("../client/vendor/paseo-plugin-helper/core");
+    initClientHelpers({
+      Icon: (() => null) as any,
+      Modal: (() => null) as any,
+      useRpc: (() => () => Promise.resolve()) as any,
+      useToast: () => ({ show: showMock, error: errorMock }),
+    });
+
+    agentRef.send = vi.fn(async () => {
+      throw new Error("Mobile delivery failed: bridge error");
+    });
+
+    // Force runCommandRpc to fail too
+    (client.rpc as any).mockImplementation(async (contract: unknown) => {
+      if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
+      if (contract === slashSettingsContract.get) return { prefix: "slash-" };
+      if (contract === runCommandRpc) throw new Error("Server RPC offline");
+      throw new Error("unexpected contract");
+    });
+
+    const dispose = registerSlashCommands(client);
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
+    const review = contributions.find((c) => c.name === "slash-review");
+    expect(review).toBeDefined();
+
+    await review?.onSubmit({
+      args: "focus on performance",
+      agent: { id: "agent-1" },
+      paseo: client.paseo,
+    });
+
+    expect(errorMock).toHaveBeenCalledWith("/review send failed: Server RPC offline");
 
     dispose();
   });

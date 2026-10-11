@@ -87,12 +87,30 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
             context: "agent",
             async onSubmit(ctx) {
               const prompt = interpolateTemplate(command.action.verb === "send" ? command.action.template : "", ctx.args);
-              try {
-                await ctx.paseo.agents.ref(ctx.agent.id).send(prompt);
-              } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                report(`send:${command.name}`, err);
-                showFeedback(`/${command.name} send failed: ${message}`, true);
+              let delivered = false;
+              if (typeof ctx?.paseo?.agents?.ref === "function") {
+                try {
+                  const ref = ctx.paseo.agents.ref(ctx.agent.id);
+                  if (typeof ref?.send === "function") {
+                    await ref.send(prompt);
+                    delivered = true;
+                  }
+                } catch (clientErr) {
+                  report(`send:${command.name}:client-fallback`, clientErr);
+                }
+              }
+              if (!delivered) {
+                try {
+                  await (client.rpc as unknown as (c: unknown, i: unknown) => Promise<unknown>)(
+                    runCommandRpc as unknown,
+                    { name: command.name, args: ctx.args, agentId: ctx.agent.id },
+                  );
+                  delivered = true;
+                } catch (err) {
+                  const message = err instanceof Error ? err.message : String(err);
+                  report(`send:${command.name}`, err);
+                  showFeedback(`/${command.name} send failed: ${message}`, true);
+                }
               }
             },
           }),

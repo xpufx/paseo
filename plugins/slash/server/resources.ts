@@ -417,7 +417,11 @@ export async function handleRunCommand(
     throw new Error(`unknown or disabled command: ${input.name}`);
   }
   if (command.action.verb === "send") {
-    return { verb: "send" as const, prompt: interpolateTemplate(command.action.template, input.args) };
+    const prompt = interpolateTemplate(command.action.template, input.args);
+    if (input.agentId && context?.paseo?.agents?.ref) {
+      await context.paseo.agents.ref(input.agentId).send(prompt);
+    }
+    return { verb: "send" as const, prompt };
   }
   if (command.action.verb === "open") {
     return { verb: "open" as const, target: command.action.target };

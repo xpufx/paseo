@@ -143,6 +143,29 @@ describe("handleRunCommand", () => {
     expect(body).toContain("Model: claude-3-7-sonnet");
     expect(body).toContain("Working Directory: /home/user/code/test");
   });
+
+  it("handles send-verb command by interpolating prompt and delivering via context.paseo", async () => {
+    const send = vi.fn().mockResolvedValue(undefined);
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          ref: vi.fn().mockReturnValue({
+            send,
+          }),
+        },
+      },
+    };
+
+    const result = await handleRunCommand(
+      { name: "review", args: "focus on memory leaks", agentId: "agent-send-1" },
+      mockContext,
+    );
+
+    expect(result.verb).toBe("send");
+    expect(result.prompt).toBe("Review the current changes: focus on memory leaks");
+    expect(mockContext.paseo.agents.ref).toHaveBeenCalledWith("agent-send-1");
+    expect(send).toHaveBeenCalledWith("Review the current changes: focus on memory leaks");
+  });
 });
 
 describe("tokenizeArgs", () => {
