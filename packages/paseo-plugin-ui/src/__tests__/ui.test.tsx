@@ -20,9 +20,6 @@ import {
   ListActionPageTemplate,
   FALLBACK_COLORS,
   resolveHostColors,
-  SafeIcon,
-  copyText,
-  useToast,
   type ThemeColors,
 } from "../index.js";
 
@@ -329,15 +326,6 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(resolved.border).toBe(FALLBACK_COLORS.border);
     expect(resolved.statusSuccess).toBe(FALLBACK_COLORS.statusSuccess);
     expect(resolved.statusDanger).toBe(FALLBACK_COLORS.statusDanger);
-  });
-
-  it("SafeIcon returns null when name is missing or invalid", () => {
-    const renderer = render(
-      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
-        <SafeIcon name="" />
-      </HostThemeProvider>,
-    );
-    expect(renderer.toJSON()).toBeNull();
   });
 });
 

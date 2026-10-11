@@ -7,7 +7,8 @@ import type {
   PluginTimelineRendererContribution,
 } from "@getpaseo/plugin/client";
 import type { PluginTheme } from "@getpaseo/plugin";
-import { Button, CopyButton, ForgeIcon, HostThemeProvider, Icon } from "./host-ui.js";
+import { Icon } from "@getpaseo/plugin/client/react-native";
+import { Button, CopyButton, ForgeIcon, HostThemeProvider } from "./host-ui.js";
 import {
   classifyForgeLink,
   classifyForgeUrl,

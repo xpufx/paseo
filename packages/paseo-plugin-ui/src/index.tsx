@@ -15,7 +15,6 @@ import {
   RefreshControl,
   ScrollView as RNScrollView,
   Text,
-  TextInput as RNTextInput,
   View,
   type RefreshControlProps,
   type ScrollViewProps,
@@ -23,70 +22,13 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import * as PaseoRN from "@getpaseo/plugin/client/react-native";
-
-/**
- * Safe fallbacks for runtime environments where @getpaseo/plugin/client/react-native
- * exports are empty or undefined (e.g. Android / Hermes / Bridgeless).
- * Prevents "Element type is invalid: expected a string or class/function but got: undefined"
- * and prototype read errors.
- */
-export const HostScrollView = ((PaseoRN as any).ScrollView ?? RNScrollView) as typeof RNScrollView;
-export const HostTextInputPrimitive = ((PaseoRN as any).TextInput ?? RNTextInput) as typeof RNTextInput;
-
-export interface SafeIconProps {
-  name?: string;
-  size?: number;
-  color?: string;
-  style?: StyleProp<ViewStyle>;
-}
-
-export function SafeIcon({ name, size = 14, color, style }: SafeIconProps) {
-  if (!name) return null;
-  const HostIcon = (PaseoRN as any).Icon;
-  if (!HostIcon || (typeof HostIcon !== "function" && typeof HostIcon !== "object")) {
-    return null;
-  }
-  try {
-    return <HostIcon name={name} size={size} color={color} style={style} />;
-  } catch {
-    return null;
-  }
-}
-
-export interface SafeToast {
-  show: (message?: string, options?: any) => void;
-  error: (message?: string) => void;
-  copied?: (label?: string) => void;
-}
-
-export function useToast(): SafeToast {
-  try {
-    if (typeof (PaseoRN as any).useToast === "function") {
-      const toast = (PaseoRN as any).useToast();
-      if (toast && typeof toast.show === "function") {
-        return toast;
-      }
-    }
-  } catch {}
-  return {
-    show: (_msg?: string, _opts?: any) => {},
-    error: (_msg?: string) => {},
-    copied: (_label?: string) => {},
-  };
-}
-
-export async function copyText(text: string): Promise<void> {
-  if (typeof (PaseoRN as any).copyText === "function") {
-    try {
-      await (PaseoRN as any).copyText(text);
-      return;
-    } catch {}
-  }
-}
-
-export const Icon = SafeIcon;
-export const HostIcon = SafeIcon;
+import {
+  Icon,
+  ScrollView as HostScrollView,
+  TextInput as HostTextInputPrimitive,
+  copyText,
+  useToast,
+} from "@getpaseo/plugin/client/react-native";
 import { resolveMetricStatus } from "./metrics.js";
 import type {
   MetricThresholds,
@@ -2134,16 +2076,15 @@ export interface HostScrollProps extends ScrollViewProps {
 /** Explicit single scroll owner for surfaces where the host supplies none. */
 export const HostScroll = forwardRef<ScrollViewInstance, HostScrollProps>(
   function HostScroll({ children, style, contentContainerStyle, ...props }, ref) {
-    const Scroller = HostScrollView;
     return (
-      <Scroller
+      <HostScrollView
         ref={ref}
         style={[{ flex: 1, minHeight: 0, width: "100%" }, style]}
         contentContainerStyle={contentContainerStyle}
         {...props}
       >
         {children}
-      </Scroller>
+      </HostScrollView>
     );
   },
 );
