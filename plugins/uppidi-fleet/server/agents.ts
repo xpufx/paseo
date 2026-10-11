@@ -1575,6 +1575,12 @@ export async function handleFleetTeardown(
     // Clean up worker / repo queues if workers is targeted or general teardown (#774)
     const isGeneralTeardown =
       targetSet.has("workers") && targetSet.has("orchestrators") && targetSet.has("frontdesk");
+    const registeredOrchKeys = new Set(
+      router && typeof (router as any).listOrchestratorRecords === "function"
+        ? ((router as any).listOrchestratorRecords() as Array<{ key: string }>).map((r) => r.key)
+        : []
+    );
+
     if (targetSet.has("workers") || isGeneralTeardown) {
       if (router) {
         try {
@@ -1586,6 +1592,7 @@ export async function handleFleetTeardown(
               : [];
             for (const key of queueKeys) {
               if (key === "frontdesk" && !targetSet.has("frontdesk")) continue;
+              if (registeredOrchKeys.has(key) && !targetSet.has("orchestrators")) continue;
               (router as any).clearQueue(key);
             }
           }
@@ -1604,6 +1611,12 @@ export async function handleFleetTeardown(
               if (file.endsWith(".json") || file.endsWith(".jsonl")) {
                 if (file.startsWith("frontdesk") && !targetSet.has("frontdesk")) {
                   continue;
+                }
+                if (!targetSet.has("orchestrators")) {
+                  const baseName = file.replace(/\.(json|jsonl)$/, "");
+                  if (Array.from(registeredOrchKeys).some((k) => baseName.includes(k) || k.includes(baseName))) {
+                    continue;
+                  }
                 }
                 try {
                   fs.unlinkSync(join(qDir, file));
@@ -1627,32 +1640,6 @@ export async function handleFleetTeardown(
         const culledIds = agentsToTeardown.map((a) => a.id);
         if (typeof (router as any).markFleetTeardown === "function") {
           (router as any).markFleetTeardown(input.targets, culledIds);
-        }
-        // Ensure the pre-cull broadcast survives the queue purge above for
-        // remaining groups. `frontdesk` is exempt from QUEUE_UNORCHESTRATED, so
-        // it doubles as the audit trail when everything was culled.
-        const survivingFrontDesk = !targetSet.has("frontdesk") && teardownQueuedKeys.includes("frontdesk");
-        const survivingOrchestrators = !targetSet.has("orchestrators")
-          ? teardownQueuedKeys.filter((k) => k !== "frontdesk")
-          : [];
-        if (survivingFrontDesk || survivingOrchestrators.length > 0) {
-          for (const key of survivingOrchestrators) {
-            try {
-              if ((router as any).getQueue(key).length === 0) {
-                (router as any).enqueue(key, teardownNotice, true);
-              }
-            } catch {}
-          }
-          try {
-            if (survivingFrontDesk && (router as any).getQueue("frontdesk").length === 0) {
-              (router as any).enqueue("frontdesk", teardownNotice, true);
-            }
-          } catch {}
-        } else if (isGeneralTeardown) {
-          try {
-            (router as any).enqueue("frontdesk", teardownNotice, true);
-            teardownQueuedKeys = ["frontdesk"];
-          } catch {}
         }
       } catch (err: any) {
         errors.push(`Failed to reconcile teardown router state: ${err?.message || String(err)}`);
