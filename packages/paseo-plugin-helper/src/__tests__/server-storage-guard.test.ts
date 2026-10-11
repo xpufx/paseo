@@ -12,11 +12,23 @@ describe("installStorageGuard", () => {
   let uninstall: (() => void) | null = null;
   const pluginId = "test-guard-plugin";
   const namespace = "plugin-data/xpufx";
-  const validStorageDir = path.join(os.homedir(), ".paseo", namespace, pluginId);
-  const validTmpDir = path.join(os.tmpdir(), `guard-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const forbiddenDir = path.join(os.homedir(), ".paseo", "logs");
+  let origPaseoHome: string | undefined;
+  let fakeHome: string;
+  let fakePaseoHome: string;
+  let validStorageDir: string;
+  let validTmpDir: string;
+  let forbiddenDir: string;
 
   beforeEach(() => {
+    origPaseoHome = process.env.PASEO_HOME;
+    fakeHome = path.join(os.tmpdir(), `guard-test-home-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    fakePaseoHome = path.join(fakeHome, ".paseo");
+    process.env.PASEO_HOME = fakePaseoHome;
+
+    validStorageDir = path.join(fakePaseoHome, namespace, pluginId);
+    validTmpDir = path.join(os.tmpdir(), `guard-test-tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    forbiddenDir = path.join(path.parse(os.tmpdir()).root, "var", "empty", "fake-forbidden-guard");
+
     fs.mkdirSync(validTmpDir, { recursive: true });
   });
 
@@ -25,19 +37,16 @@ describe("installStorageGuard", () => {
       uninstall();
       uninstall = null;
     }
-    if (fs.existsSync(validTmpDir)) {
+    if (origPaseoHome === undefined) {
+      delete process.env.PASEO_HOME;
+    } else {
+      process.env.PASEO_HOME = origPaseoHome;
+    }
+    if (fakeHome && fs.existsSync(fakeHome)) {
+      fs.rmSync(fakeHome, { recursive: true, force: true });
+    }
+    if (validTmpDir && fs.existsSync(validTmpDir)) {
       fs.rmSync(validTmpDir, { recursive: true, force: true });
-    }
-    if (fs.existsSync(validStorageDir)) {
-      fs.rmSync(validStorageDir, { recursive: true, force: true });
-    }
-    const testFile = path.join(forbiddenDir, "forbidden-file.txt");
-    if (fs.existsSync(testFile)) {
-      try {
-        fs.unlinkSync(testFile);
-      } catch {
-        // ignore
-      }
     }
   });
 
@@ -164,5 +173,36 @@ describe("installStorageGuard", () => {
       fs.writeFileSync(targetInTmp, "succeeds after uninstall");
     }).not.toThrow();
     expect(fs.readFileSync(targetInTmp, "utf8")).toBe("succeeds after uninstall");
+  });
+
+  it("respects explicit baseDir option (#1238)", () => {
+    const customBase = path.join(os.tmpdir(), `custom-base-${Date.now()}`);
+    const customPluginDir = path.join(customBase, pluginId);
+    fs.mkdirSync(customPluginDir, { recursive: true });
+
+    try {
+      uninstall = installStorageGuard({
+        pluginId,
+        baseDir: customBase,
+        allowTmp: false,
+      });
+
+      const allowedFile = path.join(customPluginDir, "allowed.txt");
+      fs.writeFileSync(allowedFile, "ok");
+      expect(fs.readFileSync(allowedFile, "utf8")).toBe("ok");
+
+      const blockedFile = path.join(validStorageDir, "blocked.txt");
+      expect(() => {
+        fs.writeFileSync(blockedFile, "should fail");
+      }).toThrow(ScopedStorageViolationError);
+    } finally {
+      if (uninstall) {
+        uninstall();
+        uninstall = null;
+      }
+      if (fs.existsSync(customBase)) {
+        fs.rmSync(customBase, { recursive: true, force: true });
+      }
+    }
   });
 });

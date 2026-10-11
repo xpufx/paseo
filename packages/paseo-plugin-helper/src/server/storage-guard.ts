@@ -3,6 +3,7 @@ import type { PathLike } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { resolvePaseoHome } from "./storage.js";
 
 export class ScopedStorageViolationError extends Error {
   readonly code = "ERR_SCOPED_STORAGE_VIOLATION";
@@ -64,7 +65,7 @@ export function installStorageGuard(options: InstallStorageGuardOptions): () => 
 
   const pluginStorageDir = options.baseDir
     ? path.resolve(options.baseDir, pluginId)
-    : path.resolve(os.homedir(), ".paseo", namespace, pluginId);
+    : path.resolve(resolvePaseoHome(), namespace, pluginId);
   const allowedRoots: string[] = [pluginStorageDir];
 
   if (allowTmp) {

@@ -1187,6 +1187,7 @@ declare class ScopedStorageViolationError extends Error {
 interface InstallStorageGuardOptions {
     pluginId: string;
     namespace?: string;
+    baseDir?: string;
     allowTmp?: boolean;
     mode?: "enforce" | "warn";
     onViolation?: (violation: {
