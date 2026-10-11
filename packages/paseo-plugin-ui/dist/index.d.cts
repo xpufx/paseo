@@ -38,6 +38,58 @@ interface MetricThresholds {
     invert?: boolean;
 }
 
+interface ListActionHeaderAction {
+    id: string;
+    label: string;
+    icon?: string;
+    variant?: "primary" | "secondary" | "danger" | "ghost";
+    loading?: boolean;
+    disabled?: boolean;
+    onPress: () => void | Promise<void>;
+}
+interface ListActionPageTemplateProps<T> {
+    /** Page or section title. */
+    title: string;
+    /** Subtitle or status summary text. */
+    subtitle?: ReactNode;
+    /** Icon shown next to the title (Lucide icon name). */
+    icon?: string;
+    /** Optional badge or pill rendered beside the title. */
+    badge?: ReactNode;
+    /** Global action buttons in the header row (e.g. Refresh, Update All). */
+    headerActions?: readonly ListActionHeaderAction[];
+    /** Search or filter control slot beneath the header. */
+    filterSlot?: ReactNode;
+    /** Top banner or progress bar slot (e.g. HostProgressBar, error banners). */
+    bannerSlot?: ReactNode;
+    /** Data items for the list. */
+    data: readonly T[];
+    /** Key extractor for list items. */
+    keyExtractor: (item: T, index: number) => string;
+    /** Render function for each item card. */
+    renderItem: (item: T, index: number) => ReactNode;
+    /** Title and description for empty state when data is empty. */
+    emptyState?: {
+        title: string;
+        description?: string;
+        icon?: string;
+    };
+    /** Whether data is currently loading on initial fetch. */
+    isLoading?: boolean;
+    /** Optional supplemental sections rendered after the list (e.g. orphans, audit logs). */
+    footerSlot?: ReactNode;
+    /** Container style overrides. */
+    style?: StyleProp<ViewStyle>;
+    /** Content container style overrides for the scroll view. */
+    contentContainerStyle?: StyleProp<ViewStyle>;
+}
+/**
+ * Standard whole-page template for collection views with global actions,
+ * search filters, and card lists. Enforces responsive mobile reflow and
+ * single scroll ownership.
+ */
+declare function ListActionPageTemplate<T>({ title, subtitle, icon, badge, headerActions, filterSlot, bannerSlot, data, keyExtractor, renderItem, emptyState, isLoading, footerSlot, style, contentContainerStyle, }: ListActionPageTemplateProps<T>): React.JSX.Element;
+
 /**
  * Canonical shared composition of the presentational pieces every plugin used
  * to hand-roll in its local `client/host-ui.tsx` (xpufx-org/paseo#937, #976).
@@ -418,4 +470,4 @@ interface HostAboutSectionProps {
 }
 declare function HostAboutSection({ name, description, version, author, repository, issues, homepage, license, links, extraItems, style, }: HostAboutSectionProps): React.JSX.Element;
 
-export { type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCollapsible, type HostCollapsibleProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostKeyValue, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type MetricThresholds, type PluginUiTheme, type ResponsiveLayout, type StatusVariant, type ThemeColors, alpha, getStatusColor, useHostLayout, useHostTheme };
+export { type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCollapsible, type HostCollapsibleProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostKeyValue, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type PluginUiTheme, type ResponsiveLayout, type StatusVariant, type ThemeColors, alpha, getStatusColor, useHostLayout, useHostTheme };

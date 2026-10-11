@@ -2233,3 +2233,11 @@ const styles = {
   aboutLinks: { flexDirection: "row", flexWrap: "wrap", gap: 4 },
   aboutRepo: { fontSize: 11 },
 } as const;
+
+// --- page templates --------------------------------------------------------
+
+export {
+  ListActionPageTemplate,
+  type ListActionPageTemplateProps,
+  type ListActionHeaderAction,
+} from "./templates/list-action.js";

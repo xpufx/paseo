@@ -12,6 +12,7 @@ import {
   HostTextInput,
   HostThemeProvider,
   HostVital,
+  ListActionPageTemplate,
   type ThemeColors,
 } from "../index.js";
 
@@ -176,5 +177,62 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(renderer.root.findAllByType("ScrollView")).toHaveLength(1);
     const views = renderer.root.findAllByType("View");
     expect(views.length).toBeGreaterThan(0);
+  });
+
+  it("renders ListActionPageTemplate with empty state when data is empty", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <ListActionPageTemplate
+          title="Installed Plugins"
+          subtitle="0 updates available"
+          data={[]}
+          keyExtractor={(item: { id: string }) => item.id}
+          renderItem={(item) => <span>{item.id}</span>}
+          emptyState={{
+            title: "No plugins installed",
+            description: "No managed plugins found.",
+          }}
+        />
+      </HostThemeProvider>,
+    );
+
+    const texts = renderer.root.findAllByType("Text").map((t) => t.props.children);
+    expect(texts).toContain("Installed Plugins");
+    expect(texts).toContain("0 updates available");
+    expect(texts).toContain("No plugins installed");
+    expect(texts).toContain("No managed plugins found.");
+  });
+
+  it("renders ListActionPageTemplate with card items and header actions", () => {
+    const onRefresh = vi.fn();
+    const items = [
+      { id: "plugin-a", name: "Plugin A" },
+      { id: "plugin-b", name: "Plugin B" },
+    ];
+
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <ListActionPageTemplate
+          title="Plugin Updates"
+          headerActions={[
+            { id: "refresh", label: "Refresh", icon: "RefreshCw", onPress: onRefresh },
+          ]}
+          data={items}
+          keyExtractor={(item) => item.id}
+          renderItem={(item) => (
+            <HostButton key={item.id} label={item.name} />
+          )}
+        />
+      </HostThemeProvider>,
+    );
+
+    const texts = renderer.root.findAllByType("Text").map((t) => t.props.children);
+    expect(texts).toContain("Plugin Updates");
+    expect(texts).toContain("Refresh");
+    expect(texts).toContain("Plugin A");
+    expect(texts).toContain("Plugin B");
+
+    // Single outer HostScroll must own the scroll viewport
+    expect(renderer.root.findAllByType("ScrollView")).toHaveLength(1);
   });
 });
