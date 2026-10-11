@@ -481,7 +481,7 @@ interface HostScrollProps extends ScrollViewProps {
 declare const HostScroll: React.ForwardRefExoticComponent<HostScrollProps & React.RefAttributes<ScrollView$1>>;
 interface HostActionBarProps {
     children: ReactNode;
-    align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end";
+    align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end" | "space-between";
     direction?: "row" | "column";
     gap?: number;
     style?: StyleProp<ViewStyle>;
@@ -542,6 +542,9 @@ interface HostSelectProps {
 }
 /** Inline single-choice picker styled for host dark/light theme palettes. */
 declare function HostSelect({ value, options, onValueChange, placeholder, style, }: HostSelectProps): React.JSX.Element;
+type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
+declare const ModalBodyScrollOwnerContext: React.Context<ModalBodyScrollOwner>;
+declare function useModalBodyScrollOwner(): ModalBodyScrollOwner;
 interface HostModalBodyProps {
     children: ReactNode;
     header?: ReactNode;
@@ -553,9 +556,10 @@ interface HostModalBodyProps {
     refreshing?: boolean;
     onRefresh?: () => void | Promise<void>;
     scrollRef?: React.Ref<ScrollViewInstance>;
+    scrollable?: boolean;
 }
-/** Scrollable body for modal dialogues and plugin surfaces. Owns single scroll. */
-declare function HostModalBody({ children, header, headerStyle, style, contentContainerStyle, size, headerMode, refreshing, onRefresh, scrollRef, }: HostModalBodyProps): React.JSX.Element;
+/** Scrollable body for modal dialogues and plugin surfaces. Owns single scroll unless an ancestor scroller is present. */
+declare function HostModalBody({ children, header, headerStyle, style, contentContainerStyle, size, headerMode, refreshing, onRefresh, scrollRef, scrollable, }: HostModalBodyProps): React.JSX.Element;
 interface HostAboutLink {
     label: string;
     url: string;
@@ -570,6 +574,7 @@ interface HostAboutSectionProps {
     issues?: string;
     homepage?: string;
     license?: string;
+    density?: "compact" | "tiny" | "normal";
     links?: HostAboutLink[];
     extraItems?: Array<{
         label: string;
@@ -581,4 +586,4 @@ interface HostAboutSectionProps {
 }
 declare function HostAboutSection({ name, description, version, author, repository, issues, homepage, license, links, extraItems, style, }: HostAboutSectionProps): React.JSX.Element;
 
-export { FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type ScrollViewInstance, type StatusVariant, type ThemeColors, alpha, getStatusColor, resolveHostColors, splitHighlightParts, useHostLayout, useHostTheme };
+export { FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type ScrollViewInstance, type StatusVariant, type ThemeColors, alpha, getStatusColor, resolveHostColors, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };

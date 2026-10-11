@@ -24,6 +24,7 @@ import {
   HostStatusDot,
   HostTabs,
   HostTextInput,
+  HostThemeProvider,
   HostToggle,
   type HostTabItem,
 } from "./host-ui";
@@ -59,7 +60,7 @@ const TABS: HostTabItem[] = [
   { id: "about", label: "About", shortLabel: "About", icon: "Info" },
 ];
 
-function McpModalContent({ agentId, close }: RenderModalProps) {
+function McpModalContent({ agentId, close, theme }: RenderModalProps) {
   const { colors } = useHostTheme();
   const toast = useToast();
   const [activeTab, setActiveTab] = useState("servers");
@@ -730,63 +731,64 @@ function McpModalContent({ agentId, close }: RenderModalProps) {
   );
 
   return (
-    <HostModalSection>
-      <View style={styles.modalColumn}>
-        <HostTabs
-          tabs={TABS}
-          activeTab={activeTab}
-          onTabChange={(tab) => {
-            triggerHaptic("light");
-            setActiveTab(tab);
-          }}
-          mode="auto"
-        />
-        <HostScroll style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
-          {activeTab === "servers" ? renderServers() : null}
-          {activeTab === "diagnostics" ? renderDiagnostics() : null}
-          {activeTab === "settings" ? renderSettings() : null}
-          {activeTab === "about" ? (
-            <HostAboutSection
-              name="MCP Tools"
-              description="Live MCP server inspector, health probes, diagnostics and tool runner for Paseo agents."
-              version={PLUGIN_VERSION}
-              author="xpufx"
-              repository="https://github.com/xpufx/paseo-mcp-tools"
-              issues="https://github.com/xpufx/paseo-mcp-tools/issues"
-              license="MIT"
-              density="tiny"
-              extraItems={[
-                { label: "Servers", value: `${query.data?.servers.length ?? 0}`, copyable: false },
-                { label: "Provider", value: query.data?.provider ?? "unknown", copyable: true },
-                { label: "Health Polling", value: settings.healthPollingRate, copyable: false },
-              ]}
-            />
-          ) : null}
-          <HostActionBar align="flex-end">
-            <HostButton
-              label="Close"
-              variant="ghost"
-              onPress={() => {
-                triggerHaptic("light");
-                close();
-              }}
-            />
-          </HostActionBar>
-          <View style={{ alignItems: "center", paddingVertical: 8 }}>
-            <Text style={{ fontSize: 10, color: colors.foregroundMuted, opacity: 0.7 }}>
-              {PLUGIN_ATTRIBUTION} {PLUGIN_VERSION}
-            </Text>
+    <HostThemeProvider theme={theme}>
+      <HostModalSection>
+        <View style={styles.modalColumn}>
+          <HostTabs
+            tabs={TABS}
+            activeTab={activeTab}
+            onTabChange={(tab) => {
+              triggerHaptic("light");
+              setActiveTab(tab);
+            }}
+            mode="auto"
+          />
+          <View style={styles.modalBodyContent}>
+            {activeTab === "servers" ? renderServers() : null}
+            {activeTab === "diagnostics" ? renderDiagnostics() : null}
+            {activeTab === "settings" ? renderSettings() : null}
+            {activeTab === "about" ? (
+              <HostAboutSection
+                name="MCP Tools"
+                description="Live MCP server inspector, health probes, diagnostics and tool runner for Paseo agents."
+                version={PLUGIN_VERSION}
+                author="xpufx"
+                repository="https://github.com/xpufx/paseo-mcp-tools"
+                issues="https://github.com/xpufx/paseo-mcp-tools/issues"
+                license="MIT"
+                density="tiny"
+                extraItems={[
+                  { label: "Servers", value: `${query.data?.servers.length ?? 0}`, copyable: false },
+                  { label: "Provider", value: query.data?.provider ?? "unknown", copyable: true },
+                  { label: "Health Polling", value: settings.healthPollingRate, copyable: false },
+                ]}
+              />
+            ) : null}
+            <HostActionBar align="flex-end">
+              <HostButton
+                label="Close"
+                variant="ghost"
+                onPress={() => {
+                  triggerHaptic("light");
+                  close();
+                }}
+              />
+            </HostActionBar>
+            <View style={{ alignItems: "center", paddingVertical: 8 }}>
+              <Text style={{ fontSize: 10, color: colors.foregroundMuted, opacity: 0.7 }}>
+                {PLUGIN_ATTRIBUTION} {PLUGIN_VERSION}
+              </Text>
+            </View>
           </View>
-        </HostScroll>
-      </View>
-    </HostModalSection>
+        </View>
+      </HostModalSection>
+    </HostThemeProvider>
   );
 }
 
 const styles = {
   modalColumn: { flex: 1, minHeight: 0 },
-  modalScroll: { flex: 1, minHeight: 0 },
-  modalScrollContent: { gap: 12, paddingBottom: 4 },
+  modalBodyContent: { gap: 12, paddingBottom: 4 },
 } as const;
 
 export function contributeClient(client: ComposerPillRegistrar) {
@@ -796,10 +798,10 @@ export function contributeClient(client: ComposerPillRegistrar) {
     compactTitle: "MCP",
     modalTitle: "MCP Tools",
     icon: "Plug",
-    // Centered modal, matching the top reference: the plugin owns the single
-    // scroller inside the bounded body frame (see `McpModalContent`). A popover
-    // would hand scroll to the host's surface scroller.
+    // Centered modal: the host owns the single scroller (#219, #975, #1054)
+    // and the plugin body renders fluid content with no competing scroller.
     presentation: "centered",
+    hostScroll: true,
     renderModal: (props) => <McpModalContent {...props} />,
   });
 }

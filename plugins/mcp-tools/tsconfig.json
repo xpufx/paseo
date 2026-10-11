@@ -6,7 +6,8 @@
       "paseo-plugin-helper/lifecycle": ["../../packages/paseo-plugin-helper/src/lifecycle/index.ts"],
       "paseo-plugin-helper/server": ["../../packages/paseo-plugin-helper/src/server/index.ts"],
       "paseo-plugin-helper/shared": ["../../packages/paseo-plugin-helper/src/shared/index.ts"],
-      "paseo-plugin-helper/mcp": ["../../packages/paseo-plugin-helper/src/mcp/index.ts"]
+      "paseo-plugin-helper/mcp": ["../../packages/paseo-plugin-helper/src/mcp/index.ts"],
+      "@xpufx/paseo-plugin-ui": ["../../packages/paseo-plugin-ui/src/index.tsx"]
     },
     "target": "ES2020",
     "module": "ESNext",

@@ -470,11 +470,13 @@ export function registerComposerPill<TPayload = any>(
       !props.layout.compact && options.popoverWidth
         ? Math.max(0, Math.min(options.popoverWidth, windowWidth - 24))
         : undefined;
-    // The host remains the scroll owner, but it needs a finite child extent to
-    // establish the popover viewport. Do not add overflow clipping or an inner
-    // ScrollView here: either would compete with the host's popover/sheet
-    // scroller.
-    const frameMaxHeight = Math.max(1, Math.min(560, windowHeight * 0.8));
+    // The host remains the scroll owner, but desktop needs a finite child extent to
+    // establish the popover viewport. Compact mobile presents a full-bleed sheet
+    // whose BottomSheetScrollView dynamically sizes and scrolls, so capping height
+    // here would clip long content instead of scrolling it.
+    const frameMaxHeight = props.layout.compact
+      ? undefined
+      : Math.max(1, Math.min(560, windowHeight * 0.8));
     // Layout effect, not effect: the flag must be set in the same commit the
     // popover mounts, before any label timer can interleave. An effect runs
     // after paint, leaving a window where one tick can still publish and

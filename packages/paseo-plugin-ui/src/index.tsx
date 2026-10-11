@@ -2093,7 +2093,7 @@ export const HostScroll = forwardRef<ScrollViewInstance, HostScrollProps>(
 
 export interface HostActionBarProps {
   children: ReactNode;
-  align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end";
+  align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end" | "space-between";
   direction?: "row" | "column";
   gap?: number;
   style?: StyleProp<ViewStyle>;
@@ -2438,6 +2438,19 @@ export function HostSelect({
   );
 }
 
+// --- modal scroll ownership ------------------------------------------------
+
+export type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
+
+const SCROLL_OWNER_CONTEXT_KEY = Symbol.for("paseo.modalBodyScrollOwnerContext");
+
+export const ModalBodyScrollOwnerContext: React.Context<ModalBodyScrollOwner> =
+  ((globalThis as any)[SCROLL_OWNER_CONTEXT_KEY] ??= createContext<ModalBodyScrollOwner>("helper"));
+
+export function useModalBodyScrollOwner(): ModalBodyScrollOwner {
+  return useContext(ModalBodyScrollOwnerContext);
+}
+
 export interface HostModalBodyProps {
   children: ReactNode;
   header?: ReactNode;
@@ -2449,9 +2462,10 @@ export interface HostModalBodyProps {
   refreshing?: boolean;
   onRefresh?: () => void | Promise<void>;
   scrollRef?: React.Ref<ScrollViewInstance>;
+  scrollable?: boolean;
 }
 
-/** Scrollable body for modal dialogues and plugin surfaces. Owns single scroll. */
+/** Scrollable body for modal dialogues and plugin surfaces. Owns single scroll unless an ancestor scroller is present. */
 export function HostModalBody({
   children,
   header,
@@ -2463,8 +2477,12 @@ export function HostModalBody({
   refreshing = false,
   onRefresh,
   scrollRef,
+  scrollable,
 }: HostModalBodyProps) {
   const { colors } = useHostTheme();
+  const scrollOwner = useContext(ModalBodyScrollOwnerContext);
+  const hostOwnsScroll = scrollOwner === "host" || scrollOwner === "popover";
+  const shouldScroll = scrollable !== undefined ? scrollable : !hostOwnsScroll;
   const isPinned = Boolean(header && headerMode === "pinned");
   const refreshControl = onRefresh ? (
     <RefreshControl
@@ -2474,6 +2492,37 @@ export function HostModalBody({
       colors={[colors.accent]}
     />
   ) : undefined;
+
+  if (!shouldScroll) {
+    return (
+      <View style={[{ width: "100%" }, style]}>
+        {header ? (
+          <View
+            style={[
+              { width: "100%", flexShrink: 0, backgroundColor: colors.surface0 },
+              headerStyle,
+            ]}
+          >
+            {header}
+          </View>
+        ) : null}
+        <View
+          style={[
+            {
+              width: "100%",
+              gap: 12,
+              paddingHorizontal: 12,
+              paddingTop: 8,
+              paddingBottom: 20,
+            },
+            contentContainerStyle,
+          ]}
+        >
+          {children}
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={[{ flex: 1, minHeight: 0, width: "100%" }, style]}>
@@ -2528,6 +2577,7 @@ export interface HostAboutSectionProps {
   issues?: string;
   homepage?: string;
   license?: string;
+  density?: "compact" | "tiny" | "normal";
   links?: HostAboutLink[];
   extraItems?: Array<{
     label: string;
@@ -2619,6 +2669,7 @@ const justifyMap = {
   end: "flex-end",
   "flex-end": "flex-end",
   between: "space-between",
+  "space-between": "space-between",
 } as const;
 
 const styles = {

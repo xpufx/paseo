@@ -18,6 +18,7 @@ import {
   HostThemeProvider,
   HostVital,
   ListActionPageTemplate,
+  ModalBodyScrollOwnerContext,
   FALLBACK_COLORS,
   resolveHostColors,
   type ThemeColors,
@@ -184,6 +185,39 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(renderer.root.findAllByType("ScrollView")).toHaveLength(1);
     const views = renderer.root.findAllByType("View");
     expect(views.length).toBeGreaterThan(0);
+  });
+
+  it("renders HostModalBody fluidly without nested ScrollView when popover owns scroll", () => {
+    const renderer = render(
+      <ModalBodyScrollOwnerContext.Provider value="popover">
+        <HostModalBody header={<HostButton label="Modal Header" />}>
+          <span>Modal Content</span>
+        </HostModalBody>
+      </ModalBodyScrollOwnerContext.Provider>,
+    );
+
+    // Must NOT render nested ScrollView when popover/host owns scroll
+    expect(renderer.root.findAllByType("ScrollView")).toHaveLength(0);
+    const outerView = renderer.root.findAllByType("View")[0];
+    const outerStyle = resolvedStyle(outerView);
+    // Outer view must NOT have flex: 1 / minHeight: 0 which collapses inside BottomSheetScrollView
+    expect(outerStyle.flex).toBeUndefined();
+    expect(outerStyle.minHeight).toBeUndefined();
+    expect(outerStyle.width).toBe("100%");
+  });
+
+  it("renders HostModalBody fluidly when scrollable is explicitly false", () => {
+    const renderer = render(
+      <HostModalBody scrollable={false} header={<HostButton label="Modal Header" />}>
+        <span>Modal Content</span>
+      </HostModalBody>,
+    );
+
+    expect(renderer.root.findAllByType("ScrollView")).toHaveLength(0);
+    const outerView = renderer.root.findAllByType("View")[0];
+    const outerStyle = resolvedStyle(outerView);
+    expect(outerStyle.flex).toBeUndefined();
+    expect(outerStyle.width).toBe("100%");
   });
 
   it("renders ListActionPageTemplate with empty state when data is empty", () => {

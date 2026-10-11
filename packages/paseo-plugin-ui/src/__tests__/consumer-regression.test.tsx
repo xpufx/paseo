@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import React, { useState } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import {
+  HostAboutSection,
   HostActionBar,
   HostAttentionBeacon,
   HostBadge,
@@ -441,6 +442,99 @@ describe("Consumer Regression Harness (xpufx-org/paseo#1221)", () => {
       inlineBtn.props.onPress();
     });
     expect(onSelectIssue).toHaveBeenCalledWith(1143);
+  });
+
+  it("renders mcp-tools inspector fixture with HostTabs, HostCard, HostToggle, HostAboutSection, and HostActionBar (#1254)", () => {
+    const onTabChange = vi.fn();
+    const onToggle = vi.fn();
+    const onClose = vi.fn();
+
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: TEST_THEME_COLORS }}>
+        <HostModalBody
+          scrollable={false}
+          header={
+            <HostTabs
+              tabs={[
+                { id: "servers", label: "Servers", icon: "Server" },
+                { id: "settings", label: "Settings", icon: "Settings" },
+                { id: "about", label: "About", icon: "Info" },
+              ]}
+              activeTab="about"
+              onTabChange={onTabChange}
+            />
+          }
+        >
+          <HostStack gap={12}>
+            <HostCard variant="elevated">
+              <HostCard.Header
+                title="Health Polling"
+                subtitle="Background refresh rate for server health"
+                badge={<HostBadge label="healthy" variant="success" />}
+              />
+              <HostFormRow
+                label="Timeline digest rows"
+                description="Append a health digest row to the agent timeline after each check"
+              >
+                <HostToggle value={true} onValueChange={onToggle} />
+              </HostFormRow>
+            </HostCard>
+
+            <HostAboutSection
+              name="MCP Tools"
+              description="Live MCP server inspector, health probes, diagnostics and tool runner for Paseo agents."
+              version="0.1.7"
+              author="xpufx"
+              repository="https://github.com/xpufx/paseo-mcp-tools"
+              issues="https://github.com/xpufx/paseo-mcp-tools/issues"
+              license="MIT"
+              density="tiny"
+              extraItems={[
+                { label: "Servers", value: "3", copyable: false },
+                { label: "Provider", value: "antigravity", copyable: true },
+              ]}
+            />
+
+            <HostActionBar align="space-between">
+              <HostButton label="Reset Defaults" variant="secondary" size="sm" />
+              <HostButton label="Close" variant="ghost" size="sm" onPress={onClose} />
+            </HostActionBar>
+          </HostStack>
+        </HostModalBody>
+      </HostThemeProvider>,
+    );
+
+    // 1. Fluid modal body renders without inner ScrollView
+    expect(renderer.root.findAllByType("ScrollView")).toHaveLength(0);
+
+    // 2. Tabs rendered
+    const tabs = renderer.root.findByType(HostTabs);
+    expect(tabs).toBeDefined();
+
+    // 3. Card and FormRow rendered
+    const card = renderer.root.findByType(HostCard);
+    expect(card).toBeDefined();
+    const toggle = renderer.root.findByType(HostToggle);
+    expect(toggle.props.value).toBe(true);
+    act(() => {
+      toggle.props.onValueChange(false);
+    });
+    expect(onToggle).toHaveBeenCalledWith(false);
+
+    // 4. AboutSection rendered with metadata
+    const about = renderer.root.findByType(HostAboutSection);
+    expect(about.props.name).toBe("MCP Tools");
+    expect(about.props.version).toBe("0.1.7");
+
+    // 5. Action bar buttons work
+    const closeBtn = renderer.root
+      .findAllByType(HostButton)
+      .find((b) => b.props.label === "Close");
+    expect(closeBtn).toBeDefined();
+    act(() => {
+      closeBtn?.props.onPress?.();
+    });
+    expect(onClose).toHaveBeenCalled();
   });
 });
 

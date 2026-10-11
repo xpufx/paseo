@@ -19,4 +19,8 @@ import { createContext } from "react";
  */
 export type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
 
-export const ModalBodyScrollOwnerContext = createContext<ModalBodyScrollOwner>("helper");
+const SCROLL_OWNER_CONTEXT_KEY = Symbol.for("paseo.modalBodyScrollOwnerContext");
+
+export const ModalBodyScrollOwnerContext: React.Context<ModalBodyScrollOwner> =
+  ((globalThis as any)[SCROLL_OWNER_CONTEXT_KEY] ??= createContext<ModalBodyScrollOwner>("helper"));
+
