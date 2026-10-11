@@ -22,9 +22,14 @@ import {
   recoverStaleWipIssue,
   sweepStaleWipIssues,
   staleWipAge,
+  classifyCandidate,
+  isDispatchableCandidate,
+  isActionable,
+  renderIssuesCheckMarkdown,
   type ForgejoComment,
   type ForgejoIssue,
   type IssuesCheckIo,
+  type IssuesCheckOutcome,
 } from "./issues-check.js";
 
 const NOW = Date.UTC(2026, 8, 20, 12, 0, 0);
@@ -251,3 +256,121 @@ describe("external checker retirement guard (#733)", () => {
     }
   });
 });
+
+describe("state/verify vs state/review separation (#1194)", () => {
+  it("classifyCandidate differentiates state/review (pre-flight PR) from state/verify (merged deliverable)", () => {
+    const testIssue = issue(100);
+
+    // state/review: pre-flight PR verification
+    const reviewResult = classifyCandidate(testIssue, new Set(["state/review", "attention/orchestrator"]));
+    assert.equal(reviewResult.category, "verification");
+    assert.equal(reviewResult.is_dispatchable, false);
+    assert.match(reviewResult.reason, /pre-flight hygiene audit required/i);
+
+    // state/verify with attention/orchestrator: follow-up directed to Orchestrator
+    const verifyOrchResult = classifyCandidate(testIssue, new Set(["state/verify", "attention/orchestrator"]));
+    assert.equal(verifyOrchResult.category, "orchestrator_triage");
+    assert.equal(verifyOrchResult.is_dispatchable, false);
+    assert.match(verifyOrchResult.reason, /Requires Orchestrator triage/i);
+
+    // state/verify with attention/user: awaiting operator verification
+    const verifyUserResult = classifyCandidate(testIssue, new Set(["state/verify", "attention/user"]));
+    assert.equal(verifyUserResult.category, "operator_verify");
+    assert.equal(verifyUserResult.is_dispatchable, false);
+    assert.match(verifyUserResult.reason, /awaiting human operator acceptance/i);
+
+    // state/verify alone: awaiting operator verification
+    const verifyAloneResult = classifyCandidate(testIssue, new Set(["state/verify"]));
+    assert.equal(verifyAloneResult.category, "operator_verify");
+    assert.equal(verifyAloneResult.is_dispatchable, false);
+    assert.match(verifyAloneResult.reason, /awaiting human operator acceptance/i);
+  });
+
+  it("handles priority/sos with state/review vs state/verify", () => {
+    const testIssue = issue(200);
+
+    // SOS with state/review
+    const sosReview = classifyCandidate(testIssue, new Set(["priority/sos", "state/review"]));
+    assert.equal(sosReview.category, "sos");
+    assert.equal(sosReview.is_dispatchable, false);
+    assert.match(sosReview.reason, /pre-flight PR audit required/i);
+
+    // SOS with state/verify and attention/orchestrator
+    const sosVerifyOrch = classifyCandidate(testIssue, new Set(["priority/sos", "state/verify", "attention/orchestrator"]));
+    assert.equal(sosVerifyOrch.category, "sos");
+    assert.equal(sosVerifyOrch.is_dispatchable, false);
+    assert.match(sosVerifyOrch.reason, /Orchestrator triage required/i);
+
+    // SOS with state/verify alone
+    const sosVerify = classifyCandidate(testIssue, new Set(["priority/sos", "state/verify"]));
+    assert.equal(sosVerify.category, "sos");
+    assert.equal(sosVerify.is_dispatchable, false);
+    assert.match(sosVerify.reason, /awaiting operator verification/i);
+  });
+
+  it("isDispatchableCandidate treats both state/verify and state/review as non-dispatchable", () => {
+    assert.equal(isDispatchableCandidate(new Set(["state/review"])), false);
+    assert.equal(isDispatchableCandidate(new Set(["state/verify"])), false);
+    assert.equal(isDispatchableCandidate(new Set(["kind/feature"])), true);
+  });
+
+  it("isActionable treats both state/verify and state/review as actionable for orchestrator but not worker", () => {
+    assert.equal(isActionable(new Set(["state/review"]), "orchestrator"), true);
+    assert.equal(isActionable(new Set(["state/verify"]), "orchestrator"), true);
+    assert.equal(isActionable(new Set(["state/review"]), "worker"), false);
+    assert.equal(isActionable(new Set(["state/verify"]), "worker"), false);
+  });
+
+  it("renderIssuesCheckMarkdown places state/review in pre-flight audit and state/verify in operator acceptance", () => {
+    const outcome: IssuesCheckOutcome = {
+      exitCode: 1,
+      staleWipRecovery: [],
+      savedState: {},
+      rankedCandidates: [
+        {
+          number: 101,
+          title: "PR ready for audit",
+          labels: ["state/review"],
+          priority_tuple: [2, 2, 2, "2026-10-01"],
+          category: "verification",
+          is_dispatchable: false,
+          reason: "Deliverable complete: worker completed implementation; Orchestrator pre-flight hygiene audit required",
+        },
+        {
+          number: 102,
+          title: "Merged deliverable awaiting verification",
+          labels: ["state/verify", "attention/user"],
+          priority_tuple: [2, 2, 2, "2026-10-01"],
+          category: "operator_verify",
+          is_dispatchable: false,
+          reason: "Merged deliverable: awaiting human operator acceptance / live verification",
+        },
+        {
+          number: 103,
+          title: "Merged deliverable needing triage",
+          labels: ["state/verify", "attention/orchestrator"],
+          priority_tuple: [2, 2, 2, "2026-10-01"],
+          category: "orchestrator_triage",
+          is_dispatchable: false,
+          reason: "Requires Orchestrator triage / investigation (state/verify follow-up directed by operator)",
+        },
+      ],
+    };
+
+    const md = renderIssuesCheckMarkdown(outcome, {
+      hostname: "forge.example.com",
+      repo: "org/repo",
+      role: "orchestrator",
+      staleWipHours: 2,
+      dryRun: false,
+    });
+
+    assert.ok(md.includes("## DELIVERABLE VERIFICATION - READY FOR PRE-FLIGHT AUDIT (1)"));
+    assert.ok(md.includes("[#101]"));
+    assert.ok(md.includes("## OPERATOR ACCEPTANCE - AWAITING LIVE VERIFICATION (1)"));
+    assert.ok(md.includes("[#102]"));
+    assert.ok(md.includes("## ORCHESTRATOR REASONING & TRIAGE (1)"));
+    assert.ok(md.includes("[#103]"));
+  });
+});
+

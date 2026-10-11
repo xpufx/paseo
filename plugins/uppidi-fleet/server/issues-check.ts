@@ -515,11 +515,20 @@ export function classifyCandidate(
 
   if (labelSet.has("priority/sos")) {
     const isDisp = isDispatchableCandidate(labelSet);
-    if (labelSet.has("state/verify") || labelSet.has("state/review")) {
+    if (labelSet.has("state/review")) {
       return {
         category: "sos",
         is_dispatchable: false,
-        reason: "Preempt all work (SOS deliverable completed; pre-flight verification required)",
+        reason: "Preempt all work (SOS deliverable completed; pre-flight PR audit required)",
+      };
+    }
+    if (labelSet.has("state/verify")) {
+      return {
+        category: "sos",
+        is_dispatchable: false,
+        reason: labelSet.has("attention/orchestrator")
+          ? "Preempt all work (SOS deliverable in state/verify; Orchestrator triage required)"
+          : "Preempt all work (SOS deliverable merged; awaiting operator verification)",
       };
     }
     return {
@@ -528,6 +537,24 @@ export function classifyCandidate(
       reason: isDisp
         ? "Preempt all work (SOS - Immediate autonomous dispatch)"
         : "Preempt all work (SOS - Orchestrator triage)",
+    };
+  }
+
+  // Follow-up on verified deliverable directed to Orchestrator
+  if (labelSet.has("state/verify") && labelSet.has("attention/orchestrator")) {
+    return {
+      category: "orchestrator_triage",
+      is_dispatchable: false,
+      reason: "Requires Orchestrator triage / investigation (state/verify follow-up directed by operator)",
+    };
+  }
+
+  // Merged deliverable awaiting operator verification
+  if (labelSet.has("state/verify")) {
+    return {
+      category: "operator_verify",
+      is_dispatchable: false,
+      reason: "Merged deliverable: awaiting human operator acceptance / live verification",
     };
   }
 
@@ -540,8 +567,8 @@ export function classifyCandidate(
     };
   }
 
-  // Deliverable verification
-  if (labelSet.has("state/verify") || labelSet.has("state/review")) {
+  // Deliverable PR review
+  if (labelSet.has("state/review")) {
     return {
       category: "verification",
       is_dispatchable: false,
@@ -1085,15 +1112,22 @@ export function renderIssuesCheckMarkdown(
   const byCategory = (category: string) =>
     candidates.map((c, i) => ({ c, i })).filter(({ c }) => c.category === category).map(({ i }) => i);
   const verificationIdx = byCategory("verification");
+  const operatorVerifyIdx = byCategory("operator_verify");
   const shapingIdx = byCategory("shaping");
   const gatedSpecIdx = byCategory("gated_spec");
   const verificationSet = new Set(verificationIdx);
+  const operatorVerifySet = new Set(operatorVerifyIdx);
   const shapingSet = new Set(shapingIdx);
   const gatedSpecSet = new Set(gatedSpecIdx);
   const othersIdx = candidates
     .map((_, i) => i)
     .filter(
-      (i) => !inGroup(i) && !verificationSet.has(i) && !shapingSet.has(i) && !gatedSpecSet.has(i),
+      (i) =>
+        !inGroup(i) &&
+        !verificationSet.has(i) &&
+        !operatorVerifySet.has(i) &&
+        !shapingSet.has(i) &&
+        !gatedSpecSet.has(i),
     );
 
   const printSection = (title: string, idxs: number[]) => {
@@ -1125,6 +1159,7 @@ export function renderIssuesCheckMarkdown(
   printSection("USER ATTENTION REQUIRED (AWAITING OPERATOR INPUT)", [...userAttentionIdx]);
   printSection("DISPATCHABLE TASKS - AUTONOMOUS EXECUTION (NO APPROVAL NEEDED)", [...dispatchableIdx]);
   printSection("DELIVERABLE VERIFICATION - READY FOR PRE-FLIGHT AUDIT", verificationIdx);
+  printSection("OPERATOR ACCEPTANCE - AWAITING LIVE VERIFICATION", operatorVerifyIdx);
   printSection("PRE-CODE SHAPING - ORCHESTRATOR SPECIFICATION REQUIRED", shapingIdx);
   printSection("HOLDING FOR OPERATOR APPROVAL (SPEC CHECKLIST)", gatedSpecIdx);
   printSection("ORCHESTRATOR REASONING & TRIAGE", othersIdx);
