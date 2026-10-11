@@ -37,4 +37,10 @@ describe("slash is off the frozen helper client kit (#937)", () => {
     const consoleSource = readFileSync(path.join(pluginRoot, "client", "console.tsx"), "utf8");
     expect(consoleSource).toContain('from "./host-ui"');
   });
+
+  it("delegates host-ui directly to @xpufx/paseo-plugin-ui with zero bespoke react-native imports (#1233)", () => {
+    const hostUiSource = readFileSync(path.join(pluginRoot, "client", "host-ui.tsx"), "utf8");
+    expect(hostUiSource).toContain('from "@xpufx/paseo-plugin-ui"');
+    expect(hostUiSource).not.toMatch(/from\s+["']react-native["']/);
+  });
 });

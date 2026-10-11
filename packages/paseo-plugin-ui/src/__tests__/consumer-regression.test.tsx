@@ -8,15 +8,20 @@ import {
   HostCard,
   HostCardHeader,
   HostEmptyState,
+  HostFormRow,
   HostKeyValue,
   HostKeyValueGroup,
   HostProgressBar,
   HostRow,
   HostScroll,
   HostSectionHeader,
+  HostSelect,
   HostStack,
   HostStatusDot,
+  HostTabs,
+  HostTextInput,
   HostThemeProvider,
+  HostToggle,
   ListActionPageTemplate,
   type ThemeColors,
 } from "../index.js";
@@ -176,5 +181,57 @@ describe("Consumer Regression Harness (xpufx-org/paseo#1221)", () => {
 
     const texts = renderer.root.findAllByType(HostBadge).map((b) => b.props.label);
     expect(texts).toContain("45%");
+  });
+
+  it("renders slash console command editor fixture with HostFormRow, HostTabs, HostTextInput, and HostActionBar (#1233)", () => {
+    const onTabChange = vi.fn();
+    const onTextChange = vi.fn();
+    const onSave = vi.fn();
+
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: TEST_THEME_COLORS }}>
+        <HostCard variant="elevated">
+          <HostStack gap={8}>
+            <HostFormRow label="Name" description="Unique lowercase command name">
+              <HostTextInput
+                value="review"
+                placeholder="my-command"
+                onChangeText={onTextChange}
+              />
+            </HostFormRow>
+            <HostFormRow label="Action">
+              <HostTabs
+                tabs={[
+                  { id: "send", label: "Send", icon: "Send" },
+                  { id: "open", label: "Open", icon: "ExternalLink" },
+                  { id: "rpc", label: "RPC", icon: "Zap" },
+                ]}
+                activeTab="send"
+                onTabChange={onTabChange}
+              />
+            </HostFormRow>
+            <HostActionBar align="end">
+              <HostButton variant="secondary" label="Cancel" />
+              <HostButton variant="primary" label="Save Command" onPress={onSave} />
+            </HostActionBar>
+          </HostStack>
+        </HostCard>
+      </HostThemeProvider>,
+    );
+
+    const labels = renderer.root.findAllByType("Text").map((t) => t.props.children);
+    expect(labels).toContain("Name");
+    expect(labels).toContain("Unique lowercase command name");
+    expect(labels).toContain("Action");
+
+    const buttons = renderer.root.findAllByType(HostButton);
+    expect(buttons).toHaveLength(2);
+    const saveBtn = buttons.find((b) => b.props.label === "Save Command");
+    expect(saveBtn).toBeDefined();
+
+    act(() => {
+      saveBtn?.props.onPress?.();
+    });
+    expect(onSave).toHaveBeenCalled();
   });
 });

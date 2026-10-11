@@ -89,7 +89,7 @@ function CommandRow({ prefix, command, shipped, onToggle, onEdit, onRemove }: Co
         title={label}
         subtitle={command.description || command.title}
         badge={
-          <HostRow gap="xs" align="center">
+          <HostRow gap={spacing.xs} align="center">
             <HostBadge
               size="sm"
               label={actionSummary(command.action)}
@@ -99,7 +99,7 @@ function CommandRow({ prefix, command, shipped, onToggle, onEdit, onRemove }: Co
           </HostRow>
         }
         action={
-          <HostRow gap="xs" align="center">
+          <HostRow gap={spacing.xs} align="center">
             <HostToggle value={command.enabled} onValueChange={onToggle} />
             <HostButton
               size="sm"
@@ -144,7 +144,7 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
   const selectedRpcDesc = rpcDescriptions[draft.operation];
 
   return (
-    <HostStack gap="sm">
+    <HostStack gap={spacing.sm}>
       <HostFormRow label="Name" description={COMMAND_NAME_HINT}>
         <HostTextInput
           value={draft.name}
@@ -191,7 +191,7 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
         </HostFormRow>
       ) : draft.verb === "open" ? (
         <HostFormRow label="Target surface">
-          <HostStack gap="xs">
+          <HostStack gap={spacing.xs}>
             {openOptions.length > 0 ? (
               <HostSelect
                 value={draft.target}
@@ -211,7 +211,7 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
         </HostFormRow>
       ) : (
         <HostFormRow label="RPC operation">
-          <HostStack gap="xs">
+          <HostStack gap={spacing.xs}>
             {rpcOptions.length > 0 ? (
               <HostSelect
                 value={draft.operation}
@@ -354,7 +354,7 @@ export function SlashConsole() {
             description="Add one above or pick a shipped command from the catalog."
           />
         ) : (
-          <HostStack gap="xs">
+          <HostStack gap={spacing.xs}>
             {commands.map((command) => (
               <CommandRow
                 key={command.name}
@@ -396,7 +396,7 @@ export function SlashConsole() {
               description="The bundled command list could not be loaded."
             />
           ) : (
-            <HostStack gap="xs">
+            <HostStack gap={spacing.xs}>
               {catalogCommands.map((command) => {
                 const added = presentNames.has(command.name);
                 return (
