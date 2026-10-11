@@ -17,6 +17,7 @@ import {
   HostInlineButton,
   HostKeyValue,
   HostKeyValueGroup,
+  HostMetricGauge,
   HostModalBody,
   HostProgressBar,
   HostRow,
@@ -30,6 +31,7 @@ import {
   HostTextInput,
   HostThemeProvider,
   HostToggle,
+  HostVital,
   ListActionPageTemplate,
   type ThemeColors,
 } from "../index.js";
@@ -535,6 +537,121 @@ describe("Consumer Regression Harness (xpufx-org/paseo#1221)", () => {
       closeBtn?.props.onPress?.();
     });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("renders top telemetry and resource monitor fixture with HostMetricGauge, HostVital, HostCard, and HostTabs (#1258)", () => {
+    const onTabChange = vi.fn();
+
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: TEST_THEME_COLORS }}>
+        <HostModalBody
+          scrollable={false}
+          header={
+            <HostTabs
+              tabs={[
+                { id: "system", label: "System", icon: "Cpu" },
+                { id: "fleet", label: "Fleet", icon: "Server" },
+                { id: "audit", label: "Audit", icon: "Shield" },
+                { id: "settings", label: "Settings", icon: "Settings" },
+                { id: "about", label: "About", icon: "Info" },
+              ]}
+              activeTab="system"
+              onTabChange={onTabChange}
+            />
+          }
+        >
+          <HostStack gap={12}>
+            {/* System Resource Gauges */}
+            <HostRow gap={12} justify="center">
+              <HostMetricGauge
+                value={42}
+                label="CPU"
+                showPercent={true}
+                thresholds={{ warning: 70, danger: 90 }}
+                autoStatusColor={true}
+              />
+              <HostMetricGauge
+                value={68}
+                label="Memory"
+                showPercent={true}
+                thresholds={{ warning: 75, danger: 90 }}
+                autoStatusColor={true}
+              />
+            </HostRow>
+
+            {/* Vitals Summary Row */}
+            <HostCard variant="elevated">
+              <HostCard.Header
+                title="Agent Activity"
+                subtitle="Live performance metrics for current turn"
+                badge={<HostBadge label="healthy" variant="success" />}
+              />
+              <HostRow gap={8} wrap={true}>
+                <HostVital color="#22c55e" icon="Zap">
+                  14.2 TPS
+                </HostVital>
+                <HostVital color="#3b82f6" icon="Clock">
+                  3m 24s
+                </HostVital>
+                <HostVital color="#f59e0b" icon="Layers">
+                  1,250 tokens
+                </HostVital>
+              </HostRow>
+              <HostProgressBar
+                value={45}
+                label="Turn Context Pressure"
+                showValueText={true}
+                autoStatusColor={true}
+              />
+            </HostCard>
+
+            {/* About Section */}
+            <HostAboutSection
+              name="Top"
+              description="Real-time system telemetry, process monitor, and resource gauges for Paseo agents."
+              version="0.4.4"
+              author="xpufx"
+              repository="https://github.com/xpufx/paseo-top"
+              issues="https://github.com/xpufx/paseo-top/issues"
+              license="MIT"
+              extraItems={[
+                { label: "Host Uptime", value: "24h 12m", copyable: false },
+                { label: "Platform", value: "Linux x86_64", copyable: true },
+              ]}
+            />
+          </HostStack>
+        </HostModalBody>
+      </HostThemeProvider>,
+    );
+
+    // 1. Fluid modal body renders without inner ScrollView
+    expect(renderer.root.findAllByType("ScrollView")).toHaveLength(0);
+
+    // 2. Tabs rendered with active tab
+    const tabs = renderer.root.findByType(HostTabs);
+    expect(tabs.props.activeTab).toBe("system");
+    expect(tabs.props.tabs).toHaveLength(5);
+
+    // 3. Metric gauges rendered
+    const gauges = renderer.root.findAllByType(HostMetricGauge);
+    expect(gauges).toHaveLength(2);
+    expect(gauges[0].props.label).toBe("CPU");
+    expect(gauges[0].props.value).toBe(42);
+    expect(gauges[1].props.label).toBe("Memory");
+    expect(gauges[1].props.value).toBe(68);
+
+    // 4. Vitals rendered
+    const vitals = renderer.root.findAllByType(HostVital);
+    expect(vitals).toHaveLength(3);
+
+    // 5. Progress bar rendered
+    const progress = renderer.root.findByType(HostProgressBar);
+    expect(progress.props.value).toBe(45);
+
+    // 6. About section metadata
+    const about = renderer.root.findByType(HostAboutSection);
+    expect(about.props.name).toBe("Top");
+    expect(about.props.version).toBe("0.4.4");
   });
 });
 

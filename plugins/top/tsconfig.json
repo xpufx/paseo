@@ -10,7 +10,8 @@
       "paseo-plugin-helper/mcp": ["../../packages/paseo-plugin-helper/src/mcp/index.ts"],
       "permission-audit/shared": ["../../packages/permission-audit/src/shared.ts"],
       "permission-audit/server": ["../../packages/permission-audit/src/server.ts"],
-      "permission-audit/client": ["../../packages/permission-audit/src/client.tsx"]
+      "permission-audit/client": ["../../packages/permission-audit/src/client.tsx"],
+      "@xpufx/paseo-plugin-ui": ["../../packages/paseo-plugin-ui/src/index.tsx"]
     },
     "target": "ES2020",
     "module": "ESNext",
