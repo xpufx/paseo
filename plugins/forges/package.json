@@ -13,6 +13,7 @@
   "devDependencies": {
     "@getpaseo/plugin": "^0.9.0",
     "@types/react": "^19.0.10",
+    "@xpufx/paseo-plugin-ui": "*",
     "paseo-plugin-ui-testing": "*",
     "react": "19.1.0",
     "react-native": "0.81.5",

@@ -1,5 +1,6 @@
 import React, {
   createContext,
+  forwardRef,
   useContext,
   useMemo,
   useRef,
@@ -11,9 +12,12 @@ import {
   Linking,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView as RNScrollView,
   Text,
   View,
+  type RefreshControlProps,
+  type ScrollViewProps,
   type StyleProp,
   type TextStyle,
   type ViewStyle,
@@ -298,6 +302,115 @@ function resolveHostSurface(
   }
 }
 
+export interface HighlightPart {
+  text: string;
+  matched: boolean;
+}
+
+export interface HighlightOptions {
+  fallbackToWholeField?: boolean;
+}
+
+export function splitHighlightParts(
+  text: string,
+  query: string,
+  options: HighlightOptions = {},
+): HighlightPart[] {
+  const needle = query.trim().replace(/^["']|["']$/g, "").toLowerCase();
+  if (!needle || !text) return [{ text, matched: false }];
+  const haystack = text.toLowerCase();
+  if (haystack.includes(needle)) {
+    const parts: HighlightPart[] = [];
+    let cursor = 0;
+    while (cursor < text.length) {
+      const hit = haystack.indexOf(needle, cursor);
+      if (hit === -1) {
+        parts.push({ text: text.slice(cursor), matched: false });
+        break;
+      }
+      if (hit > cursor) parts.push({ text: text.slice(cursor, hit), matched: false });
+      parts.push({ text: text.slice(hit, hit + needle.length), matched: true });
+      cursor = hit + needle.length;
+    }
+    return parts.length > 0 ? parts : [{ text, matched: false }];
+  }
+  const tokens = needle
+    .split(/[\s,./_\\:;-]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+  if (tokens.length) {
+    const sorted = [...tokens].sort((a, b) => b.length - a.length);
+    const parts: HighlightPart[] = [];
+    let matchedAny = false;
+    let cursor = 0;
+    while (cursor < text.length) {
+      let best: { index: number; token: string } | null = null;
+      for (const token of sorted) {
+        let idx = haystack.indexOf(token, cursor);
+        while (idx !== -1) {
+          const atWordBoundary = idx === 0 || !/[a-z0-9]/i.test(haystack[idx - 1] ?? "");
+          if (atWordBoundary) {
+            if (best === null || idx < best.index) best = { index: idx, token };
+            break;
+          }
+          idx = haystack.indexOf(token, idx + 1);
+        }
+      }
+      if (best === null) {
+        parts.push({ text: text.slice(cursor), matched: false });
+        break;
+      }
+      if (best.index > cursor) parts.push({ text: text.slice(cursor, best.index), matched: false });
+      parts.push({ text: text.slice(best.index, best.index + best.token.length), matched: true });
+      matchedAny = true;
+      cursor = best.index + best.token.length;
+    }
+    if (matchedAny) return parts;
+  }
+  return options.fallbackToWholeField ? [{ text, matched: true }] : [{ text, matched: false }];
+}
+
+export interface HostHighlightedTextProps {
+  text: string;
+  query: string;
+  style?: StyleProp<TextStyle>;
+  numberOfLines?: number;
+  selectable?: boolean;
+  fuzzyFallback?: boolean;
+}
+
+/** `<Text>` that paints literal query matches with the accent. */
+export function HostHighlightedText({
+  text,
+  query,
+  style,
+  numberOfLines,
+  selectable,
+  fuzzyFallback = false,
+}: HostHighlightedTextProps) {
+  const { colors } = useHostTheme();
+  const parts = useMemo(
+    () => splitHighlightParts(text, query, { fallbackToWholeField: fuzzyFallback }),
+    [text, query, fuzzyFallback],
+  );
+  return (
+    <Text style={style} numberOfLines={numberOfLines} selectable={selectable}>
+      {parts.map((part, index) =>
+        part.matched ? (
+          <Text
+            key={`m${index}`}
+            style={{ backgroundColor: colors.accent, color: colors.accentForeground }}
+          >
+            {part.text}
+          </Text>
+        ) : (
+          part.text
+        ),
+      )}
+    </Text>
+  );
+}
+
 export interface HostCardProps {
   children: ReactNode;
   variant?: HostSurfaceVariant;
@@ -306,7 +419,7 @@ export interface HostCardProps {
 }
 
 export interface HostCardHeaderProps {
-  title: string;
+  title: string | ReactNode;
   subtitle?: string;
   value?: string | number | ReactNode;
   badge?: ReactNode;
@@ -315,9 +428,10 @@ export interface HostCardHeaderProps {
   style?: StyleProp<ViewStyle>;
   titleStyle?: StyleProp<TextStyle>;
   subtitleStyle?: StyleProp<TextStyle>;
+  highlightQuery?: string;
 }
 
-export function HostCard({ children, variant, style, noPadding = false }: HostCardProps) {
+function HostCardBase({ children, variant, style, noPadding = false }: HostCardProps) {
   const { colors } = useHostTheme();
   const surface = resolveHostSurface(colors, variant);
   return (
@@ -347,19 +461,30 @@ export function HostCardHeader({
   style,
   titleStyle,
   subtitleStyle,
+  highlightQuery,
 }: HostCardHeaderProps) {
   const { colors } = useHostTheme();
+  const renderedTitle =
+    typeof title === "string" && highlightQuery ? (
+      <HostHighlightedText text={title} query={highlightQuery} fuzzyFallback />
+    ) : (
+      title
+    );
   return (
     <View style={[styles.cardHeader, style]}>
       <View style={styles.cardHeaderLeft}>
         {icon ? <Icon name={icon} size={15} color={colors.foregroundMuted} /> : null}
         <View style={styles.titleColumn}>
-          <Text
-            style={[styles.cardHeaderTitle, { color: colors.foreground }, titleStyle]}
-            numberOfLines={1}
-          >
-            {title}
-          </Text>
+          {typeof renderedTitle === "string" ? (
+            <Text
+              style={[styles.cardHeaderTitle, { color: colors.foreground }, titleStyle]}
+              numberOfLines={1}
+            >
+              {renderedTitle}
+            </Text>
+          ) : (
+            renderedTitle
+          )}
           {subtitle ? (
             <Text
               style={[styles.cardHeaderSubtitle, { color: colors.foregroundMuted }, subtitleStyle]}
@@ -382,6 +507,9 @@ export function HostCardHeader({
     </View>
   );
 }
+
+export const HostCard = Object.assign(HostCardBase, { Header: HostCardHeader });
+
 
 // --- section header --------------------------------------------------------
 
@@ -436,6 +564,8 @@ export interface HostBadgeProps {
   dot?: boolean;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
+  highlightQuery?: string;
+  highlightFuzzyFallback?: boolean;
 }
 
 export function HostBadge({
@@ -447,6 +577,8 @@ export function HostBadge({
   dot = false,
   style,
   textStyle,
+  highlightQuery,
+  highlightFuzzyFallback,
 }: HostBadgeProps) {
   const { colors, getVariantPalette, getStatusColor: statusColor } = useHostTheme();
 
@@ -499,7 +631,16 @@ export function HostBadge({
         ellipsizeMode="tail"
         style={[styles.badgeText, { color: textColor, fontSize, lineHeight }, textStyle]}
       >
-        {label}
+        {highlightQuery ? (
+          <HostHighlightedText
+            text={label}
+            query={highlightQuery}
+            fuzzyFallback={highlightFuzzyFallback}
+            numberOfLines={1}
+          />
+        ) : (
+          label
+        )}
       </Text>
     </View>
   );
@@ -1443,6 +1584,68 @@ export function HostButton({
   );
 }
 
+export interface HostInlineButtonProps {
+  label: string;
+  onPress?: () => void | Promise<void>;
+  icon?: string | ReactNode;
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityRole?: "button" | "link";
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
+}
+
+/** Compact text/link action for inline timeline and card content. */
+export function HostInlineButton({
+  label,
+  onPress,
+  icon,
+  disabled = false,
+  accessibilityLabel,
+  accessibilityRole = "button",
+  style,
+  textStyle,
+}: HostInlineButtonProps) {
+  const { colors } = useHostTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole={accessibilityRole}
+      accessibilityLabel={accessibilityLabel || label}
+      style={({ pressed }) => [
+        {
+          alignSelf: "flex-start",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          minHeight: 24,
+          paddingHorizontal: 3,
+          paddingVertical: 2,
+          borderRadius: 4,
+          flexShrink: 1,
+          maxWidth: "100%",
+          opacity: disabled ? 0.45 : 1,
+          backgroundColor: pressed && !disabled ? colors.surface2 : "transparent",
+        },
+        style,
+      ]}
+    >
+      {typeof icon === "string" ? <Icon name={icon} size={13} color={colors.accent} /> : icon}
+      <Text
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        style={[
+          { color: colors.accent, fontSize: 12, fontWeight: "600", flexShrink: 1 },
+          textStyle,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export interface HostToggleProps {
   value: boolean;
   onValueChange: (next: boolean) => void;
@@ -1851,29 +2054,29 @@ export function HostModalSection({ children, style }: HostModalSectionProps) {
   return <View style={[styles.fluid, styles.modalSection, style]}>{children}</View>;
 }
 
-export interface HostScrollProps {
+export type ScrollViewInstance = React.ElementRef<typeof HostScrollView>;
+
+export interface HostScrollProps extends ScrollViewProps {
   children: ReactNode;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
 }
 
 /** Explicit single scroll owner for surfaces where the host supplies none. */
-export function HostScroll({
-  children,
-  style,
-  contentContainerStyle,
-  ...props
-}: HostScrollProps & Record<string, unknown>) {
-  return (
-    <HostScrollView
-      {...(props as Record<string, unknown>)}
-      style={[styles.fluid, style]}
-      contentContainerStyle={contentContainerStyle}
-    >
-      {children}
-    </HostScrollView>
-  );
-}
+export const HostScroll = forwardRef<ScrollViewInstance, HostScrollProps>(
+  function HostScroll({ children, style, contentContainerStyle, ...props }, ref) {
+    return (
+      <HostScrollView
+        ref={ref}
+        style={[styles.fluid, style]}
+        contentContainerStyle={contentContainerStyle}
+        {...props}
+      >
+        {children}
+      </HostScrollView>
+    );
+  },
+);
 
 // --- form & interactive controls -------------------------------------------
 
@@ -1950,6 +2153,7 @@ export function HostFormRow({ label, description, children, layout = "stacked", 
 export interface HostTextInputProps {
   value: string;
   onChangeText: (text: string) => void;
+  label?: string;
   placeholder?: string;
   errorText?: string;
   helperText?: string;
@@ -1969,6 +2173,7 @@ export interface HostTextInputProps {
 export function HostTextInput({
   value,
   onChangeText,
+  label,
   placeholder,
   errorText,
   helperText,
@@ -1990,6 +2195,9 @@ export function HostTextInput({
 
   return (
     <View style={[{ gap: 4, width: "100%" }, style]}>
+      {label ? (
+        <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }}>{label}</Text>
+      ) : null}
       <HostTextInputPrimitive
         value={value}
         onChangeText={onChangeText}
@@ -2028,6 +2236,80 @@ export function HostTextInput({
         <Text style={{ fontSize: 11, color: alphaColor(colors.statusWarning, 1) }}>
           {helperText}
         </Text>
+      ) : null}
+    </View>
+  );
+}
+
+export interface HostSearchInputProps {
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder?: string;
+  onClear?: () => void;
+  height?: number;
+  style?: StyleProp<ViewStyle>;
+  inputStyle?: StyleProp<TextStyle>;
+}
+
+/** Search field with leading icon and clear affordance. */
+export function HostSearchInput({
+  value,
+  onChangeText,
+  placeholder = "Search...",
+  onClear,
+  height = 36,
+  style,
+  inputStyle,
+}: HostSearchInputProps) {
+  const { colors } = useHostTheme();
+  return (
+    <View
+      style={[
+        {
+          flexDirection: "row",
+          alignItems: "center",
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 6,
+          backgroundColor: colors.surface1,
+          height,
+          paddingHorizontal: 10,
+        },
+        style,
+      ]}
+    >
+      <Icon name="Search" size={16} color={colors.foregroundMuted} />
+      <HostTextInputPrimitive
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.foregroundMuted}
+        autoCapitalize="none"
+        autoCorrect={false}
+        returnKeyType="search"
+        style={[
+          {
+            flex: 1,
+            paddingVertical: 0,
+            marginLeft: 8,
+            color: colors.foreground,
+            fontSize: 13,
+          },
+          inputStyle,
+        ]}
+      />
+      {value ? (
+        <Pressable
+          onPress={() => {
+            onChangeText("");
+            onClear?.();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Clear search"
+          hitSlop={8}
+        >
+          <Icon name="X" size={14} color={colors.foregroundMuted} />
+        </Pressable>
       ) : null}
     </View>
   );
@@ -2153,6 +2435,9 @@ export interface HostModalBodyProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   size?: "default" | "large";
   headerMode?: "pinned" | "scroll";
+  refreshing?: boolean;
+  onRefresh?: () => void | Promise<void>;
+  scrollRef?: React.Ref<ScrollViewInstance>;
 }
 
 /** Scrollable body for modal dialogues and plugin surfaces. Owns single scroll. */
@@ -2164,9 +2449,21 @@ export function HostModalBody({
   contentContainerStyle,
   size,
   headerMode = "pinned",
+  refreshing = false,
+  onRefresh,
+  scrollRef,
 }: HostModalBodyProps) {
   const { colors } = useHostTheme();
   const isPinned = Boolean(header && headerMode === "pinned");
+  const refreshControl = onRefresh ? (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+      tintColor={colors.accent}
+      colors={[colors.accent]}
+    />
+  ) : undefined;
+
   return (
     <View style={[{ flex: 1, minHeight: 0, width: "100%" }, style]}>
       {isPinned ? (
@@ -2180,6 +2477,10 @@ export function HostModalBody({
         </View>
       ) : null}
       <HostScroll
+        ref={scrollRef}
+        nestedScrollEnabled
+        keyboardShouldPersistTaps="handled"
+        refreshControl={refreshControl}
         contentContainerStyle={[
           {
             flexGrow: 1,
