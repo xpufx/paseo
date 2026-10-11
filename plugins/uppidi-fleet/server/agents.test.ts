@@ -1219,6 +1219,69 @@ describe("Fleet teardown state cleanup (#774)", () => {
     assert.equal(fs.existsSync(repoFile), false);
   });
 
+  it("does not deliver duplicate teardown notices to surviving Front Desk or leave phantom notices (#1118)", async () => {
+    const queueDir = path.join(tmpDir, "queues");
+    fs.mkdirSync(queueDir, { recursive: true });
+
+    const router = new HookRouter(null, {
+      stateDir: tmpDir,
+      queueDir,
+      port: 0,
+    });
+    router.writeFrontDesk("fd-surviving");
+    router.writeOrchestrator("repo-surviving", "orch-surviving");
+    setActiveHookRouter(router);
+
+    const directDeliveries: Array<{ agentId: string; msg: string }> = [];
+    (router as any).deliverMessage = async (agentId: string, msg: string) => {
+      directDeliveries.push({ agentId, msg });
+      return true;
+    };
+
+    const mockContext = {
+      paseo: {
+        agents: {
+          list: async () => ({
+            entries: [
+              { id: "fd-surviving", name: "Front Desk", category: "front-desk", status: "running" },
+              { id: "orch-surviving", name: "Orchestrator", category: "orchestrator", status: "running" },
+              { id: "worker-dead", name: "Worker", category: "worker", status: "running", labels: { role: "worker" }, parentId: "orch-surviving" },
+            ],
+          }),
+          ref: () => ({ archive: async () => ({ ok: true }) }),
+        },
+      },
+    } as any;
+
+    try {
+      const res = await handleFleetTeardown(
+        { targets: ["workers"], confirm: true },
+        mockContext
+      );
+
+      assert.equal(res.ok, true);
+      assert.equal(res.tornDown.workers, 1);
+      assert.equal(res.tornDown.frontdesk, 0);
+      assert.equal(res.tornDown.orchestrators, 0);
+
+      // Direct deliveries happened for surviving frontdesk and orchestrator
+      assert.equal(directDeliveries.length, 2);
+      // Queues must be empty so resume does not deliver duplicate notices
+      assert.equal(router.getQueue("frontdesk").length, 0, "frontdesk queue must not contain duplicate notice");
+      assert.equal(router.getQueue("repo-surviving").length, 0, "orchestrator queue must not contain duplicate notice");
+
+      // Also verify general teardown leaves no phantom frontdesk notice
+      const generalRes = await handleFleetTeardown(
+        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true },
+        mockContext
+      );
+      assert.equal(generalRes.ok, true);
+      assert.equal(router.getQueue("frontdesk").length, 0, "general teardown must not leave phantom frontdesk notice");
+    } finally {
+      setActiveHookRouter(null);
+    }
+  });
+
   it("engages router.halt() at start of teardown and prevents new agent spawns (#994)", async () => {
     const router = new HookRouter(null, {
       stateDir: tmpDir,
