@@ -336,6 +336,63 @@ interface HostScrollProps {
 }
 /** Explicit single scroll owner for surfaces where the host supplies none. */
 declare function HostScroll({ children, style, contentContainerStyle, ...props }: HostScrollProps & Record<string, unknown>): React.JSX.Element;
+interface HostActionBarProps {
+    children: ReactNode;
+    align?: "start" | "center" | "end" | "between";
+    direction?: "row" | "column";
+    gap?: number;
+    style?: StyleProp<ViewStyle>;
+}
+/** Trailing action row inside a card or dialog footer. */
+declare function HostActionBar({ children, align, direction, gap, style, }: HostActionBarProps): React.JSX.Element;
+interface HostFormRowProps {
+    label: string;
+    description?: string;
+    children: ReactNode;
+    style?: StyleProp<ViewStyle>;
+}
+/** Label and description stacked over a single control. */
+declare function HostFormRow({ label, description, children, style }: HostFormRowProps): React.JSX.Element;
+interface HostTextInputProps {
+    value: string;
+    onChangeText: (text: string) => void;
+    placeholder?: string;
+    errorText?: string;
+    helperText?: string;
+    multiline?: boolean;
+    numberOfLines?: number;
+    mono?: boolean;
+    secureTextEntry?: boolean;
+    autoCapitalize?: "none" | "sentences" | "words" | "characters";
+    autoCorrect?: boolean;
+    style?: StyleProp<ViewStyle>;
+    inputStyle?: StyleProp<TextStyle>;
+}
+/** Single or multi-line text input using host theme and modal-aware primitive. */
+declare function HostTextInput({ value, onChangeText, placeholder, errorText, helperText, multiline, numberOfLines, mono, secureTextEntry, autoCapitalize, autoCorrect, style, inputStyle, }: HostTextInputProps): React.JSX.Element;
+interface HostSelectOption {
+    label: string;
+    value: string;
+    description?: string;
+}
+interface HostSelectProps {
+    value: string;
+    options: readonly HostSelectOption[];
+    onValueChange: (value: string) => void;
+    placeholder?: string;
+    style?: StyleProp<ViewStyle>;
+}
+/** Inline single-choice picker styled for host dark/light theme palettes. */
+declare function HostSelect({ value, options, onValueChange, placeholder, style, }: HostSelectProps): React.JSX.Element;
+interface HostModalBodyProps {
+    children: ReactNode;
+    header?: ReactNode;
+    headerStyle?: StyleProp<ViewStyle>;
+    style?: StyleProp<ViewStyle>;
+    contentContainerStyle?: StyleProp<ViewStyle>;
+}
+/** Pinned-header scrollable body for modal dialogues. Owns single scroll below fixed header. */
+declare function HostModalBody({ children, header, headerStyle, style, contentContainerStyle, }: HostModalBodyProps): React.JSX.Element;
 interface HostAboutLink {
     label: string;
     url: string;
@@ -361,4 +418,4 @@ interface HostAboutSectionProps {
 }
 declare function HostAboutSection({ name, description, version, author, repository, issues, homepage, license, links, extraItems, style, }: HostAboutSectionProps): React.JSX.Element;
 
-export { type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCollapsible, type HostCollapsibleProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostGrid, type HostGridProps, HostKeyValue, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSectionHeader, type HostSectionHeaderProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type MetricThresholds, type PluginUiTheme, type ResponsiveLayout, type StatusVariant, type ThemeColors, alpha, getStatusColor, useHostLayout, useHostTheme };
+export { type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCollapsible, type HostCollapsibleProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostKeyValue, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type MetricThresholds, type PluginUiTheme, type ResponsiveLayout, type StatusVariant, type ThemeColors, alpha, getStatusColor, useHostLayout, useHostTheme };

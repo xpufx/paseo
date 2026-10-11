@@ -2,9 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import {
+  HostActionBar,
   HostButton,
+  HostFormRow,
+  HostModalBody,
   HostModalSection,
   HostScroll,
+  HostSelect,
+  HostTextInput,
   HostThemeProvider,
   HostVital,
   type ThemeColors,
@@ -15,6 +20,7 @@ import {
 vi.mock("@getpaseo/plugin/client/react-native", () => ({
   Icon: () => null,
   ScrollView: "ScrollView",
+  TextInput: "TextInput",
   copyText: async () => {},
   useToast: () => ({ show: () => {}, error: () => {} }),
 }));
@@ -96,5 +102,79 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(style.maxWidth).toBe(110);
     expect(style.flexGrow).toBe(1);
     expect(style.width).toBeUndefined();
+  });
+
+  it("renders HostFormRow with label, description and HostTextInput", () => {
+    const onChange = vi.fn();
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <HostFormRow label="Agent Name" description="Unique agent identifier">
+          <HostTextInput value="Test Agent" onChangeText={onChange} placeholder="Enter name" />
+        </HostFormRow>
+      </HostThemeProvider>,
+    );
+
+    const texts = renderer.root.findAllByType("Text").map((t) => t.props.children);
+    expect(texts).toContain("Agent Name");
+    expect(texts).toContain("Unique agent identifier");
+
+    const input = renderer.root.findByType("TextInput");
+    expect(input.props.value).toBe("Test Agent");
+    expect(input.props.placeholder).toBe("Enter name");
+  });
+
+  it("renders HostSelect and toggles option menu", () => {
+    const onSelect = vi.fn();
+    const options = [
+      { label: "Option 1", value: "opt1" },
+      { label: "Option 2", value: "opt2" },
+    ];
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <HostSelect value="opt1" options={options} onValueChange={onSelect} />
+      </HostThemeProvider>,
+    );
+
+    const trigger = renderer.root.findByType("Pressable");
+    expect(trigger.props.accessibilityState.expanded).toBe(false);
+
+    act(() => {
+      trigger.props.onPress();
+    });
+
+    const pressables = renderer.root.findAllByType("Pressable");
+    expect(pressables.length).toBeGreaterThan(1);
+
+    // Click second option
+    act(() => {
+      pressables[2].props.onPress();
+    });
+    expect(onSelect).toHaveBeenCalledWith("opt2");
+  });
+
+  it("renders HostActionBar with specified alignment and gap", () => {
+    const renderer = render(
+      <HostActionBar align="between" gap={16}>
+        <HostButton label="Cancel" variant="ghost" />
+        <HostButton label="Save" variant="primary" />
+      </HostActionBar>,
+    );
+
+    const view = renderer.root.findAllByType("View")[0];
+    const style = resolvedStyle(view);
+    expect(style.justifyContent).toBe("space-between");
+    expect(style.gap).toBe(16);
+  });
+
+  it("renders HostModalBody with pinned header and single scroll owner", () => {
+    const renderer = render(
+      <HostModalBody header={<HostButton label="Modal Header" />}>
+        <span>Modal Content</span>
+      </HostModalBody>,
+    );
+
+    expect(renderer.root.findAllByType("ScrollView")).toHaveLength(1);
+    const views = renderer.root.findAllByType("View");
+    expect(views.length).toBeGreaterThan(0);
   });
 });

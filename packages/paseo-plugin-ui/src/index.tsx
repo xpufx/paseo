@@ -20,6 +20,7 @@ import {
 import {
   Icon,
   ScrollView as HostScrollView,
+  TextInput as HostTextInputPrimitive,
   copyText,
   useToast,
 } from "@getpaseo/plugin/client/react-native";
@@ -1593,6 +1594,301 @@ export function HostScroll({
     >
       {children}
     </HostScrollView>
+  );
+}
+
+// --- form & interactive controls -------------------------------------------
+
+export interface HostActionBarProps {
+  children: ReactNode;
+  align?: "start" | "center" | "end" | "between";
+  direction?: "row" | "column";
+  gap?: number;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** Trailing action row inside a card or dialog footer. */
+export function HostActionBar({
+  children,
+  align = "end",
+  direction = "row",
+  gap = 8,
+  style,
+}: HostActionBarProps) {
+  return (
+    <View
+      style={[
+        {
+          flexDirection: direction,
+          alignItems: "center",
+          justifyContent: justifyMap[align],
+          gap,
+        },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+export interface HostFormRowProps {
+  label: string;
+  description?: string;
+  children: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** Label and description stacked over a single control. */
+export function HostFormRow({ label, description, children, style }: HostFormRowProps) {
+  const { colors } = useHostTheme();
+  return (
+    <View style={[{ gap: 6, width: "100%" }, style]}>
+      <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>{label}</Text>
+      {description ? (
+        <Text style={{ fontSize: 11, color: colors.foregroundMuted }}>{description}</Text>
+      ) : null}
+      {children}
+    </View>
+  );
+}
+
+export interface HostTextInputProps {
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder?: string;
+  errorText?: string;
+  helperText?: string;
+  multiline?: boolean;
+  numberOfLines?: number;
+  mono?: boolean;
+  secureTextEntry?: boolean;
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  autoCorrect?: boolean;
+  style?: StyleProp<ViewStyle>;
+  inputStyle?: StyleProp<TextStyle>;
+}
+
+/** Single or multi-line text input using host theme and modal-aware primitive. */
+export function HostTextInput({
+  value,
+  onChangeText,
+  placeholder,
+  errorText,
+  helperText,
+  multiline = false,
+  numberOfLines,
+  mono = false,
+  secureTextEntry = false,
+  autoCapitalize = "none",
+  autoCorrect = false,
+  style,
+  inputStyle,
+}: HostTextInputProps) {
+  const { colors, alpha: alphaColor } = useHostTheme();
+  const [focused, setFocused] = useState(false);
+  const borderColor = errorText ? colors.statusDanger : focused ? colors.accent : colors.border;
+
+  return (
+    <View style={[{ gap: 4, width: "100%" }, style]}>
+      <HostTextInputPrimitive
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={colors.foregroundMuted}
+        multiline={multiline}
+        numberOfLines={numberOfLines}
+        secureTextEntry={secureTextEntry}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
+        textAlignVertical={multiline ? "top" : "center"}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        style={[
+          {
+            width: "100%",
+            minHeight: multiline ? 64 : 36,
+            borderWidth: 1,
+            borderRadius: 8,
+            borderColor,
+            backgroundColor: colors.surface1,
+            color: colors.foreground,
+            fontSize: 12,
+            paddingHorizontal: 10,
+            paddingVertical: 8,
+            fontFamily: mono ? "monospace" : undefined,
+          },
+          inputStyle,
+        ]}
+      />
+      {errorText ? (
+        <Text style={{ fontSize: 11, color: colors.statusDanger }}>{errorText}</Text>
+      ) : helperText ? (
+        <Text style={{ fontSize: 11, color: alphaColor(colors.statusWarning, 1) }}>
+          {helperText}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+export interface HostSelectOption {
+  label: string;
+  value: string;
+  description?: string;
+}
+
+export interface HostSelectProps {
+  value: string;
+  options: readonly HostSelectOption[];
+  onValueChange: (value: string) => void;
+  placeholder?: string;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** Inline single-choice picker styled for host dark/light theme palettes. */
+export function HostSelect({
+  value,
+  options,
+  onValueChange,
+  placeholder = "Select…",
+  style,
+}: HostSelectProps) {
+  const { colors } = useHostTheme();
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => option.value === value);
+  const display = selected?.label ?? (value || placeholder);
+  const canOpen = options.length > 0;
+
+  return (
+    <View style={[{ gap: 4, width: "100%" }, style]}>
+      <Pressable
+        onPress={() => {
+          if (canOpen) setOpen((prev) => !prev);
+        }}
+        disabled={!canOpen}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          minHeight: 36,
+          borderWidth: 1,
+          borderColor: colors.border,
+          borderRadius: 8,
+          backgroundColor: colors.surface1,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+          opacity: canOpen ? 1 : 0.5,
+        }}
+      >
+        <Text numberOfLines={1} style={{ fontSize: 12, color: colors.foreground, flexShrink: 1 }}>
+          {display}
+        </Text>
+        <Icon
+          name={open ? "ChevronUp" : "ChevronDown"}
+          size={14}
+          color={colors.foregroundMuted}
+        />
+      </Pressable>
+      {open
+        ? options.map((option) => {
+            const active = option.value === value;
+            return (
+              <Pressable
+                key={option.value}
+                onPress={() => {
+                  onValueChange(option.value);
+                  setOpen(false);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                style={{
+                  borderWidth: 1,
+                  borderColor: active ? colors.accent : colors.border,
+                  borderRadius: 8,
+                  backgroundColor: colors.surface2,
+                  paddingHorizontal: 10,
+                  paddingVertical: 8,
+                }}
+              >
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    fontSize: 12,
+                    fontWeight: active ? "600" : "400",
+                    color: active ? colors.accent : colors.foreground,
+                  }}
+                >
+                  {option.label}
+                </Text>
+                {option.description ? (
+                  <Text
+                    numberOfLines={2}
+                    style={{
+                      fontSize: 11,
+                      color: colors.foregroundMuted,
+                      marginTop: 2,
+                    }}
+                  >
+                    {option.description}
+                  </Text>
+                ) : null}
+              </Pressable>
+            );
+          })
+        : null}
+    </View>
+  );
+}
+
+export interface HostModalBodyProps {
+  children: ReactNode;
+  header?: ReactNode;
+  headerStyle?: StyleProp<ViewStyle>;
+  style?: StyleProp<ViewStyle>;
+  contentContainerStyle?: StyleProp<ViewStyle>;
+}
+
+/** Pinned-header scrollable body for modal dialogues. Owns single scroll below fixed header. */
+export function HostModalBody({
+  children,
+  header,
+  headerStyle,
+  style,
+  contentContainerStyle,
+}: HostModalBodyProps) {
+  const { colors } = useHostTheme();
+  return (
+    <View style={[{ flex: 1, minHeight: 0, width: "100%" }, style]}>
+      {header ? (
+        <View
+          style={[
+            { width: "100%", flexShrink: 0, backgroundColor: colors.surface0 },
+            headerStyle,
+          ]}
+        >
+          {header}
+        </View>
+      ) : null}
+      <HostScroll
+        contentContainerStyle={[
+          {
+            flexGrow: 1,
+            width: "100%",
+            gap: 12,
+            paddingHorizontal: 12,
+            paddingTop: 8,
+            paddingBottom: 20,
+          },
+          contentContainerStyle,
+        ]}
+      >
+        {children}
+      </HostScroll>
+    </View>
   );
 }
 
