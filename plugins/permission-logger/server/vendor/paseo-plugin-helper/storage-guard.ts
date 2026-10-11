@@ -3,6 +3,7 @@ import type { PathLike } from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { resolvePaseoHome } from "./storage";
 
 export class ScopedStorageViolationError extends Error {
   readonly code = "ERR_SCOPED_STORAGE_VIOLATION";
@@ -21,6 +22,7 @@ export class ScopedStorageViolationError extends Error {
 export interface InstallStorageGuardOptions {
   pluginId: string;
   namespace?: string; // defaults to "plugin-data/xpufx"
+  baseDir?: string;
   allowTmp?: boolean; // defaults to true
   mode?: "enforce" | "warn"; // defaults to "enforce"
   onViolation?: (violation: { path: string; operation: string; allowedRoots: string[] }) => void;
@@ -61,7 +63,9 @@ export function installStorageGuard(options: InstallStorageGuardOptions): () => 
   const allowTmp = options.allowTmp ?? true;
   const mode = options.mode ?? "enforce";
 
-  const pluginStorageDir = path.resolve(os.homedir(), ".paseo", namespace, pluginId);
+  const pluginStorageDir = options.baseDir
+    ? path.resolve(options.baseDir, pluginId)
+    : path.resolve(resolvePaseoHome(), namespace, pluginId);
   const allowedRoots: string[] = [pluginStorageDir];
 
   if (allowTmp) {
