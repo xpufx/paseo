@@ -1273,6 +1273,70 @@ export const uppidiFleetMetricsContract = defineContract({
   output: UppidiFleetMetricsOutputSchema,
 });
 
+// In-Process Telemetry & Composite Indices Contracts (#1173 / platform#350)
+export const ModelCompositeIndicesSchema = z.object({
+  fdsi: z.number().default(0),
+  workerRoi: z.number().default(0),
+  orchestratorVigilance: z.number().default(0),
+  toolThrashingIndex: z.number().default(0),
+  contextDecayRisk: z.number().default(0),
+});
+export type ModelCompositeIndices = z.infer<typeof ModelCompositeIndicesSchema>;
+
+export const ModelTelemetrySummarySchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+  role: z.string().optional(),
+  window: z.enum(["7d", "30d", "all"]).default("7d"),
+  turnsCompleted: z.number().default(0),
+  turnsFailed: z.number().default(0),
+  turnsInterrupted: z.number().default(0),
+  totalTokens: z.number().default(0),
+  inputTokens: z.number().default(0),
+  outputTokens: z.number().default(0),
+  cachedTokens: z.number().default(0),
+  reasoningTokens: z.number().default(0),
+  medianTokensPerSecond: z.number().default(0),
+  medianTurnDurationMs: z.number().default(0),
+  medianContextUtilizationPct: z.number().default(0),
+  cacheHitRatioPct: z.number().default(0),
+  costUsd: z.number().default(0),
+  compositeIndices: ModelCompositeIndicesSchema.default({
+    fdsi: 0,
+    workerRoi: 0,
+    orchestratorVigilance: 0,
+    toolThrashingIndex: 0,
+    contextDecayRisk: 0,
+  }),
+  lastTurnAt: z.string().optional(),
+});
+export type ModelTelemetrySummary = z.infer<typeof ModelTelemetrySummarySchema>;
+
+export const UppidiModelTelemetryQueryInputSchema = z.object({
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  window: z.enum(["7d", "30d", "all"]).default("7d"),
+  role: z.string().optional(),
+});
+export type UppidiModelTelemetryQueryInput = z.infer<typeof UppidiModelTelemetryQueryInputSchema>;
+
+export const UppidiModelTelemetryQueryOutputSchema = z.object({
+  ok: z.boolean(),
+  window: z.enum(["7d", "30d", "all"]),
+  models: z.array(ModelTelemetrySummarySchema).default([]),
+  recordsCount: z.number().default(0),
+  updatedAt: z.string(),
+  error: z.string().optional(),
+});
+export type UppidiModelTelemetryQueryOutput = z.infer<typeof UppidiModelTelemetryQueryOutputSchema>;
+
+export const uppidiModelTelemetryQueryContract = defineContract({
+  name: "uppidi-fleet.model-telemetry-query",
+  description: "Query in-process telemetry tap, model profiling matrix, and metrics rollup matching composite index schemas",
+  input: UppidiModelTelemetryQueryInputSchema,
+  output: UppidiModelTelemetryQueryOutputSchema,
+});
+
 // Agent Archive Contracts (Issue #402)
 export const UppidiArchiveAgentInputSchema = z.object({
   agentId: z.string(),

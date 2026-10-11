@@ -45,6 +45,7 @@ import {
   uppidiAuditRecordContract,
   uppidiAuditCheckContract,
   uppidiAuditSummaryContract,
+  uppidiModelTelemetryQueryContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues, handleUppidiTransitionIssue } from "./server/issues.js";
 import {
@@ -90,6 +91,10 @@ import {
   handleUppidiAuditCheck,
   handleUppidiAuditSummary,
 } from "./server/audit-receipts.js";
+import {
+  handleUppidiModelTelemetryQuery,
+  setupTelemetryTap,
+} from "./server/telemetry.js";
 import { handleFleetToolList, handleFleetToolExecute } from "./server/mcp-tools.js";
 import {
   HookRouter,
@@ -187,6 +192,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiAuditRecordContract, handleUppidiAuditRecord);
   server.handle(uppidiAuditCheckContract, handleUppidiAuditCheck);
   server.handle(uppidiAuditSummaryContract, handleUppidiAuditSummary);
+  server.handle(uppidiModelTelemetryQueryContract, handleUppidiModelTelemetryQuery);
 
   const settingsStorage = getUppidiFleetSettingsStorage();
   registerSettingsRpc(server, uppidiFleetSettingsContract, settingsStorage, {
@@ -217,6 +223,7 @@ export default function contribute(server: PluginServerContext) {
   });
 
   const stopHookRouter = startHookRouter(server);
+  const stopTelemetryTap = setupTelemetryTap(server);
 
   log.info("Serving paseo-plugin-helper from the checkout this plugin was installed from", {
     helper: HELPER_VERSION,
@@ -226,7 +233,8 @@ export default function contribute(server: PluginServerContext) {
   });
 
   return () => {
-    log.info("Unloading; disposing hook router");
+    log.info("Unloading; disposing hook router and telemetry tap");
+    void stopTelemetryTap();
     void stopHookRouter();
   };
 }

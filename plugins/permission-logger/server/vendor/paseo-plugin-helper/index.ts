@@ -18,4 +18,5 @@ export * from "./agent";
 export * from "./workspace-beacon";
 export * from "./tickets";
 export * from "./storage-guard";
+export * from "./telemetry";
 
