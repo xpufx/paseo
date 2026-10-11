@@ -72,12 +72,16 @@ const KEY = `${INJECTION_KEY_PREFIX}srv_test123`;
 function withSandboxedHome(fn: (home: string) => void): void {
   const home = mkdtempSync(join(tmpdir(), "xcomms-home-"));
   const prevHome = process.env.HOME;
+  const prevPaseoHome = process.env.PASEO_HOME;
   process.env.HOME = home;
+  delete process.env.PASEO_HOME;
   try {
     fn(home);
   } finally {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevPaseoHome === undefined) delete process.env.PASEO_HOME;
+    else process.env.PASEO_HOME = prevPaseoHome;
     rmSync(home, { recursive: true, force: true });
   }
 }

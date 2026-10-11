@@ -13,7 +13,7 @@ import {
   Easing,
   Image,
   Linking,
-  Modal as RNModal,
+  Modal,
   Platform,
   Pressable,
   ScrollView as RNScrollView,
@@ -27,49 +27,7 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-
-export interface SafeToast {
-  show: (message?: string, options?: any) => void;
-  copied: (label?: string) => void;
-  error: (message?: string) => void;
-}
-
-export function useToast(): SafeToast {
-  const host = getOptionalClientHost();
-  let toast: any = null;
-  if (typeof host?.useToast === "function") {
-    try {
-      toast = host.useToast();
-    } catch {}
-  }
-  return {
-    show: (msg?: string, opts?: any) => {
-      if (typeof toast?.show === "function") {
-        toast.show(msg ?? "", opts);
-      }
-    },
-    copied: (label?: string) => {
-      if (typeof toast?.copied === "function") {
-        toast.copied(label);
-      }
-    },
-    error: (msg?: string) => {
-      if (typeof toast?.error === "function") {
-        toast.error(msg ?? "");
-      }
-    },
-  };
-}
-
-export async function copyText(text: string): Promise<void> {
-  const host = getOptionalClientHost();
-  if (typeof host?.copyText === "function") {
-    try {
-      await host.copyText(text);
-      return;
-    } catch {}
-  }
-}
+import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
 import {
   ATTENTION_LABELS,
   PRIORITY_ORDER,
@@ -113,43 +71,6 @@ import { useFleetTheme } from "./theme.js";
  * `useToast`, and plain React Native. This is deliberately plugin-local: it is
  * not a shared design system and adds nothing to the helper.
  */
-
-// --- safe icon defense -----------------------------------------------------
-
-export interface SafeIconProps {
-  name?: string | null;
-  size?: number;
-  color?: string;
-  style?: StyleProp<ViewStyle>;
-}
-
-/**
- * Defensive Icon component that guards against:
- * 1. Undefined Icon export from host or @getpaseo/plugin/client/react-native on Hermes / mobile.
- * 2. Undefined or empty icon name (which causes React.createElement(undefined) or Hermes throw).
- * 3. Throws from missing Lucide icon implementations.
- */
-export function SafeIcon({ name, size = 14, color, style }: SafeIconProps) {
-  if (!name || typeof name !== "string") {
-    return <View style={style} />;
-  }
-  const host = getOptionalClientHost();
-  const IconComponent = host?.Icon;
-  if (!IconComponent || (typeof IconComponent !== "function" && typeof IconComponent !== "object")) {
-    return <View style={style} />;
-  }
-  try {
-    return (
-      <View style={style}>
-        <IconComponent name={name} size={size} color={color} />
-      </View>
-    );
-  } catch {
-    return <View style={style} />;
-  }
-}
-
-export const Icon = SafeIcon;
 
 // --- spacing ---------------------------------------------------------------
 
@@ -1025,7 +946,7 @@ export function Select({
       {isOpen && coords ? (
         // The option list portals into a transparent Modal so it paints above
         // later siblings without contributing to the trigger's parent layout.
-        <RNModal transparent visible={isOpen} animationType="none" onRequestClose={() => setOpen(false)}>
+        <Modal transparent visible={isOpen} animationType="none" onRequestClose={() => setOpen(false)}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Dismiss options"
@@ -1103,7 +1024,7 @@ export function Select({
               })}
             </RNScrollView>
           </View>
-        </RNModal>
+        </Modal>
       ) : null}
     </View>
   );
@@ -1826,8 +1747,7 @@ export interface ModalContentProps extends Omit<ModalBodyProps, "scrollMode"> {
 }
 
 export function ModalContent({ children, scrollable = true, ...bodyProps }: ModalContentProps) {
-  const host = getOptionalClientHost();
-  const Modal = host?.Modal;
+  const Modal = getClientHost().Modal;
   const Content = (Modal as any)?.Content;
   const inner = (
     <ModalBodyScrollOwnerContext.Provider value={scrollable ? "host" : "required"}>
@@ -1837,27 +1757,6 @@ export function ModalContent({ children, scrollable = true, ...bodyProps }: Moda
   if (!Content) return inner;
   return <Content scrollable={scrollable}>{inner}</Content>;
 }
-
-export interface SafeModalProps {
-  title?: string;
-  icon?: ReactNode;
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-  children: ReactNode;
-}
-
-export function HostModalWrapper(props: SafeModalProps) {
-  const host = getOptionalClientHost();
-  const HostModalComponent = host?.Modal;
-  if (!HostModalComponent) {
-    if (props.open === false) return null;
-    return <View>{props.children}</View>;
-  }
-  return <HostModalComponent {...(props as any)} />;
-}
-HostModalWrapper.Content = ModalContent;
-
-export const Modal = HostModalWrapper;
 
 // --- forge icon ------------------------------------------------------------
 

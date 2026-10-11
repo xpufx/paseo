@@ -7,10 +7,10 @@ import type {
   ProviderPersistence,
   ProviderPrompt,
   ProviderSessionConfig,
-  ProviderLaunch,
   ProviderTimelineItem,
   ProviderUsage,
 } from "@getpaseo/plugin/server/provider";
+import type { ProviderLaunch } from "./types.js";
 import { startDriver, selection, type Driver } from "./process.js";
 import { validateSelection } from "./catalog.js";
 import { PromptFiles } from "./prompt.js";

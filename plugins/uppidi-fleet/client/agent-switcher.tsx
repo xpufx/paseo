@@ -1,14 +1,57 @@
 import React from "react";
 import { View, Text } from "react-native";
-import type {
-  PluginPopoverProps,
-  PluginScreenProps,
-  PluginSidebarItemProps,
-} from "@getpaseo/plugin/client";
-import { SidebarRow } from "@getpaseo/plugin/client/ui";
+export interface PluginSidebarItemProps {
+  theme?: any;
+  openPopover: (Component: React.ComponentType<any>) => void;
+}
 
+export interface PluginPopoverProps {
+  theme?: any;
+  host: { id: string; label?: string };
+  layout: { platform: "ios" | "android" | "web"; compact: boolean };
+  openScreen: (input: { screenId: string; params?: any }) => void;
+  close?: () => void;
+}
+
+export interface PluginScreenProps {
+  theme?: any;
+  host: { id: string; label?: string };
+  params: { agentId?: string; serverId?: string };
+  navigation?: {
+    openAgent?: (input: { agentId: string; serverId?: string }) => void;
+  };
+}
+
+import * as PaseoClientUI from "@getpaseo/plugin/client/ui";
+
+const DefaultSidebarRow: React.ComponentType<{
+  icon: React.ComponentType<{ size: number; color: string }>;
+  label: string;
+  onPress: () => void;
+}> = ({ icon: IconComp, label, onPress }) => {
+  const { colors } = useFleetTheme();
+  return (
+    <InteractiveRow
+      onPress={onPress}
+      style={{
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+      }}
+    >
+      <IconComp size={16} color={colors.foregroundMuted} />
+      <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600" }}>{label}</Text>
+    </InteractiveRow>
+  );
+};
+
+const SidebarRow = (PaseoClientUI as any).SidebarRow ?? DefaultSidebarRow;
+
+
+import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
-  Icon,
   StatusDot,
   InteractiveRow,
   Responsive,

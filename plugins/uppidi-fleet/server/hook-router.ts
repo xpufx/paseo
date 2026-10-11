@@ -10561,8 +10561,11 @@ export function startHookRouter(
 ): () => Promise<void> {
   const router = new HookRouter(server, options);
   setActiveHookRouter(router);
-  void router.start();
+  const startPromise = router.start();
   return async () => {
+    try {
+      await startPromise;
+    } catch {}
     await router.stop();
     if (getActiveHookRouter() === router) {
       setActiveHookRouter(null);

@@ -6,9 +6,9 @@ import {
   type ProviderConnection,
   type ProviderEvent,
   type ProviderInput,
-  type ProviderLaunch,
   type ProviderRegistration,
 } from "@getpaseo/plugin/server/provider";
+import type { ProviderLaunch } from "./internal/types.js";
 import { getCatalog, getStatus } from "./internal/catalog.js";
 import { Session } from "./internal/session.js";
 import { AntigravityError } from "./internal/wire.js";
@@ -21,13 +21,13 @@ const capabilities = [
 ] as const;
 
 export function createAntigravityProvider(): ProviderRegistration {
-  return {
+  const reg: any = {
     id: "antigravity-claude",
     label: "Antigravity Claude",
     icon: "icon.svg",
     command: ["agy"],
     description: "Claude & Partner models via Antigravity with auto-failover",
-    async status({ launch }) {
+    async status({ launch }: { launch?: ProviderLaunch }) {
       if (!launch)
         return {
           available: false,
@@ -39,7 +39,7 @@ export function createAntigravityProvider(): ProviderRegistration {
       };
       return getStatus(claudeLaunch);
     },
-    async getCatalogCacheKey({ launch }) {
+    async getCatalogCacheKey({ launch }: any) {
       if (!launch) return undefined;
       const claudeLaunch = {
         ...launch,
@@ -50,7 +50,7 @@ export function createAntigravityProvider(): ProviderRegistration {
         .update(JSON.stringify([claudeLaunch.command, claudeLaunch.args, env]))
         .digest("hex");
     },
-    async connect(request) {
+    async connect(request: any) {
       if (!request.versions.includes(1))
         throw new AntigravityError("Provider protocol version 1 is required");
       if (!request.launch)
@@ -63,6 +63,7 @@ export function createAntigravityProvider(): ProviderRegistration {
       return createConnection(claudeLaunch, negotiated);
     },
   };
+  return reg;
 }
 
 function createConnection(

@@ -516,7 +516,7 @@ function PermissionAuditViewContent({
           header: "Time",
           flex: 2,
           render: (item) => (
-            <Text style={{ color: colors.foregroundMuted }}>
+            <Text numberOfLines={1} ellipsizeMode="middle" style={{ color: colors.foregroundMuted }}>
               {formatAuditTime(item.timestamp)}
             </Text>
           ),
@@ -528,16 +528,18 @@ function PermissionAuditViewContent({
           render: (item) => (
             <View style={{ gap: 2 }}>
               <Text
+                numberOfLines={1}
+                ellipsizeMode="middle"
                 style={{ color: colors.foreground, fontWeight: "600" }}
               >
                 {item.name}
               </Text>
-              <Text style={{ color: colors.foregroundMuted }}>
+              <Text style={{ color: colors.foregroundMuted }} numberOfLines={1}>
                 {isToolCallEntry(item) ? "tool_call" : item.kind} · {item.agentId}
                 {item.agentModel ? ` · ${item.agentModel}` : ""}
                 {isToolCallEntry(item) && item.turnId ? ` · turn ${item.turnId}` : ""}
               </Text>
-              <Text style={{ color: colors.foregroundMuted }}>
+              <Text style={{ color: colors.foregroundMuted }} numberOfLines={1} ellipsizeMode="middle">
                 {summarizeAuditInput(item.input)}
               </Text>
             </View>

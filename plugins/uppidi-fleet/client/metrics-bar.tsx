@@ -1,6 +1,7 @@
 import React from "react";
 import { Text, View } from "react-native";
-import { Icon, InteractiveRow, Row } from "./host-ui.js";
+import { Icon } from "@getpaseo/plugin/client/react-native";
+import { InteractiveRow, Row } from "./host-ui.js";
 
 export interface MetricsBarChip {
   id: string;

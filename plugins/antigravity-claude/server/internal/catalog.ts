@@ -1,10 +1,9 @@
 import type {
   ProviderCatalog,
-  ProviderLaunch,
   ProviderModel,
   ProviderMode,
-  ProviderStatus,
 } from "@getpaseo/plugin/server/provider";
+import type { ProviderLaunch, ProviderStatus } from "./types.js";
 import { probe } from "./process.js";
 import { AntigravityError } from "./wire.js";
 

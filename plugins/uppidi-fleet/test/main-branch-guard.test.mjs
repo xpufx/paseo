@@ -40,10 +40,14 @@ function withTempRepos(fn) {
 }
 
 function runGuard({ cwd, env = {} }) {
+  const mergedEnv = { ...process.env, ...env };
+  if (!("ALLOW_MAIN_TESTS" in env)) {
+    delete mergedEnv.ALLOW_MAIN_TESTS;
+  }
   return spawnSync(process.execPath, [GUARD], {
     cwd,
     encoding: "utf8",
-    env: { ...process.env, ...env },
+    env: mergedEnv,
   });
 }
 
@@ -56,16 +60,16 @@ test("resolveCurrentBranch reads the current branch and rejects non-repos", () =
 });
 
 test("assertNotOnMainBranch allows non-blocked branches", () => {
-  assert.deepEqual(assertNotOnMainBranch({ branch: "feat/1161-guard" }), {
+  assert.deepEqual(assertNotOnMainBranch({ branch: "feat/1161-guard", env: {} }), {
     branch: "feat/1161-guard",
     bypassed: false,
   });
-  assert.deepEqual(assertNotOnMainBranch({ branch: null }), { branch: null, bypassed: false });
+  assert.deepEqual(assertNotOnMainBranch({ branch: null, env: {} }), { branch: null, bypassed: false });
 });
 
 test("assertNotOnMainBranch throws the actionable message on main and master", () => {
   for (const branch of ["main", "master"]) {
-    assert.throws(() => assertNotOnMainBranch({ branch }), { message: MAIN_BRANCH_MESSAGE });
+    assert.throws(() => assertNotOnMainBranch({ branch, env: {} }), { message: MAIN_BRANCH_MESSAGE });
   }
 });
 

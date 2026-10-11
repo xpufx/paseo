@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { signalProcess } from "./signals.js";
 import { createInterface } from "node:readline";
-import type { ProviderLaunch, ProviderSessionConfig } from "@getpaseo/plugin/server/provider";
+import type { ProviderSessionConfig } from "@getpaseo/plugin/server/provider";
+import type { ProviderLaunch } from "./types.js";
 import {
   AntigravityError,
   decodeFrame,
@@ -95,7 +96,7 @@ export function startDriver(options: DriverOptions): Driver {
     state = "exited";
     resolveExit();
   });
-  lines.on("line", (line) => {
+  lines.on("line", (line: string) => {
     if (!line.trim() || state === "exited" || state === "stopping") return;
     let decoded: Frame;
     try {

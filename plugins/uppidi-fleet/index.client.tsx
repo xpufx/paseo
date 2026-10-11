@@ -1,8 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import React, { type ComponentType, type ForwardRefExoticComponent, type ReactElement, type ReactNode, type Ref, type RefAttributes, forwardRef } from "react";
-import { View, type ScrollViewProps, type FlatListProps, type TextInputProps } from "react-native";
-import type { FlatList as RNFlatList, ScrollView as RNScrollView, TextInput as RNTextInput } from "react-native";
+import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
 import {
   SettingsCard,
   SettingsSection,
@@ -23,67 +21,19 @@ import {
   AgentSwitcherSidebarItem,
   AgentSwitcherJumpScreen,
   AGENT_SWITCHER_JUMP_SCREEN_ID,
+  type PluginScreenProps,
 } from "./client/index.js";
 import { HostThemeProvider } from "./client/theme.js";
 
-// --- Safe shim components matching ClientHostDeps from paseo-plugin-helper/core/host.ts ---
-// These prevent Hermes TypeError: Cannot read properties of undefined (reading 'prototype')
-
-/** Shim Icon: matches HostIcon = ComponentType<{ name: string; size?: number; color?: string }> */
-const ShimIcon: ComponentType<{ name: string; size?: number; color?: string }> = ({ name, size, color }) => {
-  if (!name) return null;
-  return null;
+type CompatibleClientContext = PluginClientContext & {
+  addSidebarHeaderItem?: (item: any) => any;
+  addScreen?: (screen: { id: string; title: string; Component: (props: PluginScreenProps) => any }) => any;
 };
 
-/** Shim Modal: matches HostModal = ComponentType<HostModalProps> & { Content: ComponentType<HostModalContentProps> } */
-const ShimModalContent = ({ children }: { children: ReactNode; scrollable?: boolean }) => <View>{children}</View>;
-const ShimModal = Object.assign(
-  ({ title, icon, open, onOpenChange, children }: { title: string; icon?: ReactNode; open: boolean; onOpenChange: (open: boolean) => void; children: ReactNode }) => (
-    <View>{children}</View>
-  ),
-  { Content: ShimModalContent }
-);
+initClientHelpers({ Icon, Modal, useRpc, useToast, copyText, ScrollView, FlatList, TextInput: HostTextInput });
 
-/** Shim useToast: matches HostUseToast = () => HostToast */
-const ShimUseToast = () => ({
-  show: (_: string, _options?: unknown) => {},
-  copied: (_?: string) => {},
-  error: (_: string) => {},
-});
-
-/** Shim copyText: matches HostCopyText = (text: string) => Promise<void> */
-const ShimCopyText = async (_: string): Promise<void> => {
-  /* no-op */
-};
-
-/** Shim ScrollView: matches HostScrollView = ForwardRefExoticComponent<ScrollViewProps & RefAttributes<RNScrollView>> */
-const ShimScrollView = forwardRef<RNScrollView, ScrollViewProps & { children?: ReactNode }>(
-  ({ children, ...props }, _ref) => <View {...props}>{children}</View>
-) as ForwardRefExoticComponent<ScrollViewProps & RefAttributes<RNScrollView>>;
-
-/** Shim FlatList: matches HostFlatList = <ItemT>(props: FlatListProps<ItemT> & { ref?: Ref<RNFlatList<ItemT>> }) => ReactElement */
-const ShimFlatList = ((props: FlatListProps<any> & { ref?: Ref<RNFlatList<any>>; children?: ReactNode }): ReactElement => {
-  const { children, ref, ...rest } = props;
-  return <View {...rest}>{children}</View>;
-}) as <ItemT>(props: FlatListProps<ItemT> & { ref?: Ref<RNFlatList<ItemT>>; children?: ReactNode }) => ReactElement;
-
-/** Shim TextInput: matches HostTextInput = ForwardRefExoticComponent<TextInputProps & RefAttributes<RNTextInput>> */
-const ShimTextInput = forwardRef<RNTextInput, TextInputProps & { children?: ReactNode }>(
-  ({ children, ...props }, _ref) => <View {...props}>{children}</View>
-) as ForwardRefExoticComponent<TextInputProps & RefAttributes<RNTextInput>>;
-
-initClientHelpers({
-  Icon: ShimIcon,
-  Modal: ShimModal,
-  useRpc,
-  useToast: ShimUseToast,
-  copyText: ShimCopyText,
-  ScrollView: ShimScrollView,
-  FlatList: ShimFlatList,
-  TextInput: ShimTextInput,
-});
-
-export default function contribute(client: PluginClientContext) {
+export default function contribute(rawClient: PluginClientContext) {
+  const client = rawClient as CompatibleClientContext;
   const removeSwitcherItem =
     typeof client.addSidebarHeaderItem === "function"
       ? client.addSidebarHeaderItem({

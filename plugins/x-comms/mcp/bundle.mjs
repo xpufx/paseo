@@ -35,6 +35,7 @@ export const BUNDLE_FLAGS = Object.freeze({
   // `../../node_modules/...` -- ~600 lines of pure cwd churn in the committed
   // artifact. Pinning it makes the output identical from any directory.
   absWorkingDir: PACKAGE_ROOT,
+  preserveSymlinks: true,
 });
 
 /** Build the MCP server bundle to `outfile`, overwriting it. */

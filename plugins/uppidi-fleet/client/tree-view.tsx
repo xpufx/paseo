@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import { Animated, Linking, Platform, Text, View, type NativeSyntheticEvent, type NativeScrollEvent, type ScrollView } from "react-native";
-import { ScrollView as HostScrollView } from "react-native";
+import { ScrollView as HostScrollView, Icon } from "@getpaseo/plugin/client/react-native";
 import {
   AttentionBeacon,
   Badge,
@@ -8,7 +8,6 @@ import {
   Card,
   CommandBox,
   EmptyState,
-  Icon,
   InteractiveRow,
   KeyValue,
   KeyValueGroup,
@@ -17,18 +16,12 @@ import {
   Stack,
   StatusDot,
   TextInput,
-  useToast,
 } from "./host-ui.js";
-import {
-  FLEET_PILL_POLICY,
-  type FleetPillId,
-  type AgentRoleKind,
-  type PillVisibilityPolicy,
-} from "./pill-policy.js";
 import { copyToClipboard, HOST_SHADOW_COLOR } from "paseo-plugin-helper/lifecycle";
 import { useRpcMutation, useRpcQuery } from "paseo-plugin-helper/core";
 import { useFleetTheme } from "./theme.js";
 import { MetricsBar } from "./metrics-bar.js";
+import { useToast } from "@getpaseo/plugin/client/react-native";
 import type { PluginSurfaceProps } from "@getpaseo/plugin/client";
 import {
   type UppidiAgent,
@@ -424,8 +417,6 @@ export interface AgentTitleLinkProps {
   typography: any;
   navigation?: PluginSurfaceProps["navigation"];
   size?: "sm" | "md";
-  fontWeight?: any;
-  style?: any;
 }
 
 /**
@@ -437,8 +428,6 @@ export function AgentTitleLink({
   typography,
   navigation,
   size = "md",
-  fontWeight = "600",
-  style,
 }: AgentTitleLinkProps) {
   const [hovered, setHovered] = useState(false);
   const handlePress = () => {
@@ -459,14 +448,14 @@ export function AgentTitleLink({
       onPress={handlePress}
       onHoverChange={setHovered}
       pressedOpacity={0.75}
-      style={{ flexShrink: 1, minWidth: 0, ...style }}
+      style={{ flexShrink: 1, minWidth: 0 }}
     >
       <Text
         style={{
           color: hovered ? colors.accent : colors.foreground,
           ...(size === "sm" ? typography.body : typography.heading),
           fontSize: size === "sm" ? 12 : 13,
-          fontWeight,
+          fontWeight: "600",
           textDecorationLine: hovered ? "underline" : "none",
           flexShrink: 1,
           minWidth: 0,
@@ -559,22 +548,16 @@ export function AgentHealthGauge({
   expanded = false,
   now = Date.now(),
 }: AgentHealthGaugeProps) {
-  const { colors, alpha } = useFleetTheme();
+  const { colors } = useFleetTheme();
   const metrics = agent.metrics;
   // Absent gauge for legacy payloads: no metrics block, nothing rendered.
   if (!metrics) return null;
 
   const gauge: HealthGauge = deriveHealthGauge(agent, DEFAULT_HEALTH_GAUGE_THRESHOLDS, now);
   const toneColor = healthToneColor(gauge.overall, colors);
-  // Enhanced visibility (#1205): use a semi-opaque surface tone with a
-  // contrasting border so the track is always discernible on light and dark surfaces.
-  const trackColor = alpha(colors.foregroundMuted, 0.5);
+  const trackColor = colors.surface2;
   const width = compact ? 28 : 56;
   const height = 4;
-  // Three segments with 2px gaps. A non-zero fill below ~2px renders as a
-  // stray tick mark rather than a level, so partial fills floor at 2px (#1205).
-  const segmentWidth = (width - 4) / 3;
-  const minFillRatio = Math.min(2, segmentWidth) / segmentWidth;
 
   const isRunning =
     String(agent.status ?? "").toLowerCase() === "running" &&
@@ -599,8 +582,8 @@ export function AgentHealthGauge({
         width: compact ? 12 : 14,
         height: compact ? 12 : 14,
         borderRadius: compact ? 6 : 7,
-        borderWidth: 1,
-        borderColor: colors.border,
+        borderWidth: 1.5,
+        borderColor: trackColor,
         alignItems: "center",
         justifyContent: "center",
         position: "relative",
@@ -629,7 +612,7 @@ export function AgentHealthGauge({
     // Thin stacked micro-bar: three side-by-side segments (context / turn / error).
     <View
       testID={`agent-health-gauge-track-${agent.id}`}
-      style={{ width, height, flexDirection: "row", gap: 2, borderRadius: 4, borderWidth: 1, borderColor: colors.border }}
+      style={{ width, height, flexDirection: "row", gap: 2 }}
     >
       {gauge.segments.map((segment: HealthGaugeSegment) => (
         <View
@@ -645,11 +628,9 @@ export function AgentHealthGauge({
         >
           <View
             style={{
-              width: `${Math.round(
-                (segment.ratio > 0 ? Math.max(segment.ratio, minFillRatio) : 0) * 100,
-              )}%`,
+              width: `${Math.round(segment.ratio * 100)}%`,
               height: "100%",
-              borderRadius: 1,
+              borderRadius: 2,
               backgroundColor: healthToneColor(segment.tone, colors),
             }}
           />
@@ -835,7 +816,6 @@ export function FrontDeskHero({
   onToggleWatch?: () => void;
 }) {
   const [metricsOpen, setMetricsOpen] = useState(false);
-  const [isSubPillsExpanded, setIsSubPillsExpanded] = useState(false);
 
   if (!node) {
     return (
@@ -947,8 +927,7 @@ export function FrontDeskHero({
     primaryAgent.deterministicState,
     primaryAgent.category
   );
-  const roleKind = getAgentRoleKind(primaryAgent);
-  const policy = FLEET_PILL_POLICY[roleKind];
+  const primaryWorktree = primaryAgent.worktree || extractAgentWorktree(primaryAgent);
 
   return (
     <Card
@@ -988,14 +967,7 @@ export function FrontDeskHero({
                 >
                   Fleet Front Desk
                 </Text>
-                {policy.defaultPills.includes("role") && (
-                  <FleetPillRenderer
-                    pillId="role"
-                    agent={primaryAgent}
-                    navigation={navigation}
-                    colors={colors}
-                  />
-                )}
+                <Badge label="Liaison" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
               </Row>
               <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0 }}>
                 <AgentTitleLink
@@ -1004,54 +976,40 @@ export function FrontDeskHero({
                   typography={typography}
                   navigation={navigation}
                 />
-                {policy.defaultPills
-                  .filter((id) => id !== "role" && id !== "state")
-                  .map((id) => (
-                    <FleetPillRenderer
-                      key={id}
-                      pillId={id}
-                      agent={primaryAgent}
-                      navigation={navigation}
-                      colors={colors}
-                    />
-                  ))}
-                {/* Sub-pills unroll toggle lives beside the agent-name pills (#1205):
-                    next to the archive button it was misclicked for a destructive
-                    action, so it moved to the identity column. */}
-                {policy.subPills.length > 0 && (
-                  <InteractiveRow
-                    accessibilityRole="button"
-                    accessibilityLabel={`${isSubPillsExpanded ? "Collapse" : "Expand"} secondary badges for ${primaryAgent.name}`}
-                    title={isSubPillsExpanded ? "Hide details" : "Show details"}
-                    onPress={() => setIsSubPillsExpanded((prev) => !prev)}
-                    pressedOpacity={0.6}
-                    style={{
-                      padding: 2,
-                      justifyContent: "center",
-                      alignItems: "center",
-                      borderRadius: 4,
-                    }}
-                  >
-                    <Icon
-                      name={isSubPillsExpanded ? "ChevronDown" : "ChevronRight"}
-                      size={13}
-                      color={colors.foregroundMuted}
-                    />
-                  </InteractiveRow>
+                <Badge
+                  label={primaryAgent.shortId}
+                  variant="neutral"
+                  size="sm"
+                  textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
+                />
+                {primaryWorktree && (
+                  <Badge
+                    label={primaryWorktree}
+                    variant="neutral"
+                    size="sm"
+                    textStyle={{ fontFamily: "monospace", fontSize: 10 }}
+                  />
                 )}
+                <AgentLabelsRow agent={primaryAgent} />
               </Row>
             </Stack>
           </Row>
 
-          {/* Right: State, Timing, Expand Toggle, Actions, Archive */}
+          {/* Right: State, Model, Timing, Archive */}
           <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
-            {policy.defaultPills.includes("state") && (
-              <FleetPillRenderer
-                pillId="state"
-                agent={primaryAgent}
-                navigation={navigation}
-                colors={colors}
-              />
+            <Badge
+              label={`${primaryAgent.deterministicState}${
+                primaryAgent.stateDetail ? `: ${primaryAgent.stateDetail}` : ""
+              }`}
+              variant={primaryStateConfig.badgeVariant}
+              size="sm"
+              dot
+              style={{ borderColor: primaryStateConfig.color }}
+              textStyle={{ fontSize: 10 }}
+            />
+
+            {primaryAgent.model && (
+              <Badge label={primaryAgent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
             )}
 
             {primaryAgent.lastActivityAt && (
@@ -1120,31 +1078,6 @@ export function FrontDeskHero({
             />
           </Row>
         </Row>
-
-        {/* Collapsible Sub-Row Drawer for secondary pills */}
-        {isSubPillsExpanded && policy.subPills.length > 0 && (
-          <Row
-            wrap
-            gap="xs"
-            align="center"
-            style={{
-              paddingLeft: 38,
-              paddingTop: 4,
-              paddingBottom: 2,
-              overflow: "visible",
-            }}
-          >
-            {policy.subPills.map((id) => (
-              <FleetPillRenderer
-                key={id}
-                pillId={id}
-                agent={primaryAgent}
-                navigation={navigation}
-                colors={colors}
-              />
-            ))}
-          </Row>
-        )}
 
         {/* Expanded metrics card (#560). */}
         {metricsOpen && <AgentMetricsCard agent={primaryAgent} />}
@@ -1881,198 +1814,6 @@ export function AgentAttentionBanner({ agent, compact = false }: AgentAttentionB
   );
 }
 
-export function getAgentRoleKind(agent: UppidiAgent): AgentRoleKind {
-  if (agent.category === "front-desk") return "front-desk";
-  if (agent.category === "orchestrator") return "orchestrator";
-  return "coding-agent";
-}
-
-export interface FleetPillRendererProps {
-  pillId: FleetPillId;
-  agent: UppidiAgent;
-  navigation?: PluginSurfaceProps["navigation"];
-  colors?: any;
-}
-
-export function FleetPillRenderer({ pillId, agent, navigation, colors }: FleetPillRendererProps) {
-  const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
-  const worktree = agent.worktree || extractAgentWorktree(agent);
-
-  switch (pillId) {
-    case "shortId":
-      return (
-        <Badge
-          key="shortId"
-          label={agent.shortId}
-          variant="neutral"
-          size="sm"
-          style={{ maxWidth: 120 }}
-          textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
-        />
-      );
-
-    case "role": {
-      const roleLabel =
-        agent.category === "front-desk"
-          ? "Liaison"
-          : agent.category === "orchestrator"
-            ? "Orchestrator"
-            : !isCodingAgentCategory(agent.category)
-              ? agent.category
-              : null;
-      if (!roleLabel) return null;
-      return (
-        <Badge
-          key="role"
-          label={roleLabel}
-          variant="neutral"
-          size="sm"
-          style={{ maxWidth: 120 }}
-          textStyle={{ fontSize: 10 }}
-        />
-      );
-    }
-
-    case "state":
-      return (
-        <Badge
-          key="state"
-          label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
-          variant={stateConfig.badgeVariant}
-          size="sm"
-          dot
-          style={{ borderColor: stateConfig.color, maxWidth: 180 }}
-          textStyle={{ fontSize: 10 }}
-        />
-      );
-
-    case "issue": {
-      if (!agent.attributedWork?.issue) return null;
-      return (
-        <Badge
-          key="issue"
-          label={`#${agent.attributedWork.issue}`}
-          variant="info"
-          size="sm"
-          style={{ maxWidth: 120 }}
-          textStyle={{ fontFamily: "monospace", fontSize: 10, fontWeight: "600" }}
-        />
-      );
-    }
-
-    case "model": {
-      if (!agent.model) return null;
-      return (
-        <Badge
-          key="model"
-          label={agent.model}
-          variant="neutral"
-          size="sm"
-          style={{ maxWidth: 140 }}
-          textStyle={{ fontSize: 10 }}
-        />
-      );
-    }
-
-    case "worktree": {
-      if (!worktree) return null;
-      return (
-        <Badge
-          key="worktree"
-          label={worktree}
-          variant="neutral"
-          size="sm"
-          style={{ maxWidth: 160 }}
-          textStyle={{ fontFamily: "monospace", fontSize: 10 }}
-        />
-      );
-    }
-
-    case "parentage":
-      return (
-        <ParentAgentPill
-          agent={agent}
-          navigation={navigation}
-        />
-      );
-
-    case "labels":
-      return (
-        <AgentLabelsRow
-          agent={agent}
-        />
-      );
-
-    case "dirtyWarning": {
-      if (!agent.isMainDirty) return null;
-      return (
-        <InteractiveRow
-          key="dirtyWarning"
-          accessibilityRole="button"
-          accessibilityLabel={`Main workspace dirty (${agent.mainDirtySummary || "uncommitted changes"})`}
-          title={`Main workspace has uncommitted changes (${agent.mainDirtySummary || "dirty"}). Click to open orchestrator.`}
-          onPress={(e) => {
-            e?.stopPropagation?.();
-            if (navigation?.openAgent) {
-              navigation.openAgent({ agentId: agent.id });
-            }
-          }}
-          pressedOpacity={0.7}
-          style={{
-            paddingHorizontal: 2,
-            paddingVertical: 1,
-          }}
-        >
-          <Badge
-            label={`● Main Dirty${agent.mainDirtySummary ? `: ${agent.mainDirtySummary}` : ""}`}
-            variant="warning"
-            size="sm"
-            style={{ maxWidth: 180 }}
-            textStyle={{ fontSize: 10, fontWeight: "600" }}
-          />
-        </InteractiveRow>
-      );
-    }
-
-    case "branchWarning": {
-      if (!agent.isRepoRootOffMain) return null;
-      return (
-        <InteractiveRow
-          key="branchWarning"
-          accessibilityRole="button"
-          accessibilityLabel={`Repo root on ${agent.repoHeadBranch || "detached HEAD"}, not main`}
-          title={`Repo root / primary checkout is on ${agent.repoHeadBranch || "detached HEAD"}, not main. Click to open orchestrator.`}
-          onPress={(e) => {
-            e?.stopPropagation?.();
-            if (navigation?.openAgent) {
-              navigation.openAgent({ agentId: agent.id });
-            }
-          }}
-          pressedOpacity={0.7}
-          style={{
-            paddingHorizontal: 2,
-            paddingVertical: 1,
-          }}
-        >
-          <Badge
-            label={`● Not Main${agent.repoHeadBranch ? `: ${agent.repoHeadBranch}` : ""}`}
-            variant="warning"
-            size="sm"
-            style={{ maxWidth: 180 }}
-            textStyle={{ fontSize: 10, fontWeight: "600" }}
-          />
-        </InteractiveRow>
-      );
-    }
-
-    case "queuedHooks":
-    case "orchestratorCount":
-    case "workerCount":
-    default:
-      return null;
-  }
-}
-
 export interface DenseAgentRowProps {
   node: UppidiAgentTreeNode;
   depth?: number;
@@ -2105,11 +1846,9 @@ export function DenseAgentRow({
   const { alpha } = useFleetTheme();
   const [isHovered, setIsHovered] = useState(false);
   const [metricsOpen, setMetricsOpen] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const agent = node.agent;
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
-  const roleKind = getAgentRoleKind(agent);
-  const policy = FLEET_PILL_POLICY[roleKind];
+  const worktree = agent.worktree || extractAgentWorktree(agent);
   const indentPadding = Math.min((depth - 1) * 16, 64);
 
   return (
@@ -2144,84 +1883,85 @@ export function DenseAgentRow({
         }}
       >
         <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
-          {/* Left side: Guide connector, status dot, icon, title, default left pills */}
+          {/* Left side: Guide connector, status dot, icon, title, shortId */}
           <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
-            {/* Identity anchor cluster: never breaks apart on mobile viewports */}
-            <Row align="center" gap="xs" wrap={false} style={{ flexShrink: 1, minWidth: 0 }}>
-              <View
+            <View
+              style={{
+                width: 18,
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 2,
+              }}
+            >
+              <Text
                 style={{
-                  width: 18,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  marginRight: 2,
+                  color: colors.foregroundMuted,
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  opacity: 0.65,
                 }}
               >
-                <Text
-                  style={{
-                    color: colors.foregroundMuted,
-                    fontFamily: "monospace",
-                    fontSize: 11,
-                    opacity: 0.65,
-                  }}
-                >
-                  {isLast ? "└─" : "├─"}
-                </Text>
-              </View>
-              <AgentStatusLight agent={agent} navigation={navigation} size={7} />
-              <Icon name={stateConfig.categoryIcon} size={13} color={stateConfig.color} />
-              <AgentTitleLink
-                agent={agent}
-                colors={colors}
-                typography={typography}
-                navigation={navigation}
+                {isLast ? "└─" : "├─"}
+              </Text>
+            </View>
+            <AgentStatusLight agent={agent} navigation={navigation} size={7} />
+            <Icon name={stateConfig.categoryIcon} size={13} color={stateConfig.color} />
+            <AgentTitleLink
+              agent={agent}
+              colors={colors}
+              typography={typography}
+              navigation={navigation}
+              size="sm"
+            />
+            <Badge
+              label={agent.shortId}
+              variant="neutral"
+              size="sm"
+              textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
+            />
+            {!isCodingAgentCategory(agent.category) && (
+              <Badge
+                label={agent.category}
+                variant="neutral"
                 size="sm"
+                textStyle={{ fontSize: 10 }}
               />
-            </Row>
-            {policy.defaultPills
-              .filter((id) => id !== "state")
-              .map((id) => (
-                <FleetPillRenderer
-                  key={id}
-                  pillId={id}
-                  agent={agent}
-                  navigation={navigation}
-                  colors={colors}
-                />
-              ))}
-            {/* Sub-pills unroll toggle lives beside the agent-name pills (#1205):
-                next to the archive button it was misclicked for a destructive
-                action, so it moved to the identity column. */}
-            {policy.subPills.length > 0 && (
-              <InteractiveRow
-                accessibilityRole="button"
-                accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} secondary badges for ${agent.name}`}
-                title={isExpanded ? "Hide details" : "Show details"}
-                onPress={() => setIsExpanded((prev) => !prev)}
-                pressedOpacity={0.6}
-                style={{
-                  padding: 2,
-                  justifyContent: "center",
-                  alignItems: "center",
-                  borderRadius: 4,
-                }}
-              >
-                <Icon
-                  name={isExpanded ? "ChevronDown" : "ChevronRight"}
-                  size={13}
-                  color={colors.foregroundMuted}
-                />
-              </InteractiveRow>
             )}
+            <ParentAgentPill agent={agent} navigation={navigation} />
+            <AgentLabelsRow agent={agent} />
+
           </Row>
 
-          {/* Right side: State badge (if in defaultPills), Time, Expand Toggle, Archive */}
+          {/* Right side: State badge, Model, Issue, Worktree, Time, Archive */}
           <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
-            {policy.defaultPills.includes("state") && (
-              <FleetPillRenderer
-                pillId="state"
-                agent={agent}
-                navigation={navigation}
-                colors={colors}
+            <Badge
+              label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
+              variant={stateConfig.badgeVariant}
+              size="sm"
+              dot
+              style={{ borderColor: stateConfig.color }}
+              textStyle={{ fontSize: 10 }}
+            />
+
+            {agent.model && (
+              <Badge label={agent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+            )}
+
+            {agent.attributedWork?.issue && (
+              <Badge
+                label={`#${agent.attributedWork.issue}`}
+                variant="info"
+                size="sm"
+                textStyle={{ fontFamily: "monospace", fontSize: 10, fontWeight: "600" }}
+              />
+            )}
+
+            {worktree && (
+              <Badge
+                label={worktree}
+                variant="neutral"
+                size="sm"
+                textStyle={{ fontFamily: "monospace", fontSize: 10 }}
               />
             )}
 
@@ -2270,31 +2010,6 @@ export function DenseAgentRow({
             />
           </Row>
         </Row>
-
-        {/* Collapsible Sub-Row Drawer for secondary pills */}
-        {isExpanded && policy.subPills.length > 0 && (
-          <Row
-            wrap
-            gap="xs"
-            align="center"
-            style={{
-              paddingLeft: 24,
-              paddingTop: 4,
-              paddingBottom: 2,
-              overflow: "visible",
-            }}
-          >
-            {policy.subPills.map((id) => (
-              <FleetPillRenderer
-                key={id}
-                pillId={id}
-                agent={agent}
-                navigation={navigation}
-                colors={colors}
-              />
-            ))}
-          </Row>
-        )}
 
         {/* Prominent permission / attention indicator (#534) */}
         {(agent.pendingPermissions?.length || agent.requiresAttention) && (
@@ -2376,10 +2091,6 @@ export function OrchestratorRow({
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
 
-  const roleKind = getAgentRoleKind(agent);
-  const policy = FLEET_PILL_POLICY[roleKind];
-  const [isSubPillsExpanded, setIsSubPillsExpanded] = useState(false);
-
   // Collect all child agents under this orchestrator (#410)
   const childAgents = useMemo(() => {
     const list: UppidiAgent[] = [];
@@ -2404,102 +2115,121 @@ export function OrchestratorRow({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 4,
-        // Orchestrator visual distinctiveness without box bloat (#1192).
-        // Default subtle accent tint distinguishes trunk orchestrator nodes from worker subagents.
-        backgroundColor: isHovered
-          ? alpha(colors.accent, 0.08)
-          : alpha(colors.accent, 0.04),
+        backgroundColor: isHovered ? alpha(colors.accent, 0.05) : "transparent",
         overflow: "visible",
       }}
     >
       <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
         {/* Left: Guide connector, Expand toggle, Indicator, Icon, Title Link, Badges */}
         <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
-          {/* Identity anchor cluster: never breaks apart on mobile viewports */}
-          <Row align="center" gap="xs" wrap={false} style={{ flexShrink: 1, minWidth: 0 }}>
-            <View
+          <View
+            style={{
+              width: 18,
+              alignItems: "center",
+              justifyContent: "center",
+              marginRight: 2,
+            }}
+          >
+            <Text
               style={{
-                width: 18,
-                alignItems: "center",
-                justifyContent: "center",
-                marginRight: 2,
+                color: colors.foregroundMuted,
+                fontFamily: "monospace",
+                fontSize: 11,
+                opacity: 0.65,
               }}
             >
-              <Text
-                style={{
-                  color: colors.foregroundMuted,
-                  fontFamily: "monospace",
-                  fontSize: 11,
-                  opacity: 0.65,
-                }}
-              >
-                {isLast ? "└──" : "├──"}
-              </Text>
-            </View>
+              {isLast ? "└──" : "├──"}
+            </Text>
+          </View>
 
-            {hasChildren && onToggleExpand ? (
-              <InteractiveRow
-                onPress={onToggleExpand}
-                pressedOpacity={0.6}
-                style={{
-                  padding: 2,
-                  marginRight: 2,
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} subagents of ${agent.name}`}
-              >
-                <Icon
-                  name={isExpanded ? "ChevronDown" : "ChevronRight"}
-                  size={14}
-                  color={colors.foregroundMuted}
-                />
-              </InteractiveRow>
-            ) : (
-              <View style={{ width: 14 }} />
-            )}
-
-            <AgentStatusLight agent={agent} navigation={navigation} size={8} />
-            <Icon name="Network" size={15} color={stateConfig.color} />
-            <AgentTitleLink
-              agent={agent}
-              colors={colors}
-              typography={typography}
-              navigation={navigation}
-              fontWeight="700"
-            />
-            {policy.subPills.length > 0 && (
-              <InteractiveRow
-                accessibilityRole="button"
-                accessibilityLabel={`${isSubPillsExpanded ? "Collapse" : "Expand"} secondary badges for ${agent.name}`}
-                title={isSubPillsExpanded ? "Hide details" : "Show details"}
-                onPress={() => setIsSubPillsExpanded((prev) => !prev)}
-                pressedOpacity={0.6}
-                style={{
-                  padding: 2,
-                  justifyContent: "center",
-                  alignItems: "center",
-                  borderRadius: 4,
-                }}
-              >
-                <Icon
-                  name={isSubPillsExpanded ? "ChevronDown" : "ChevronRight"}
-                  size={13}
-                  color={colors.foregroundMuted}
-                />
-              </InteractiveRow>
-            )}
-          </Row>
-          {policy.defaultPills
-            .filter((id) => id !== "state")
-            .map((id) => (
-              <FleetPillRenderer
-                key={id}
-                pillId={id}
-                agent={agent}
-                navigation={navigation}
-                colors={colors}
+          {hasChildren && onToggleExpand ? (
+            <InteractiveRow
+              onPress={onToggleExpand}
+              pressedOpacity={0.6}
+              style={{
+                padding: 2,
+                marginRight: 2,
+              }}
+              accessibilityRole="button"
+              accessibilityLabel={`${isExpanded ? "Collapse" : "Expand"} subagents of ${agent.name}`}
+            >
+              <Icon
+                name={isExpanded ? "ChevronDown" : "ChevronRight"}
+                size={14}
+                color={colors.foregroundMuted}
               />
-            ))}
+            </InteractiveRow>
+          ) : (
+            <View style={{ width: 14 }} />
+          )}
+
+          <AgentStatusLight agent={agent} navigation={navigation} size={8} />
+          <Icon name="Network" size={15} color={stateConfig.color} />
+          <AgentTitleLink
+            agent={agent}
+            colors={colors}
+            typography={typography}
+            navigation={navigation}
+          />
+          <Badge
+            label={agent.shortId}
+            variant="neutral"
+            size="sm"
+            textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
+          />
+          <Badge label="Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+          <ParentAgentPill agent={agent} navigation={navigation} />
+          <AgentLabelsRow agent={agent} />
+          {agent.isMainDirty && (
+            <InteractiveRow
+              accessibilityRole="button"
+              accessibilityLabel={`Main workspace dirty (${agent.mainDirtySummary || "uncommitted changes"})`}
+              title={`Main workspace has uncommitted changes (${agent.mainDirtySummary || "dirty"}). Click to open orchestrator.`}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                if (navigation?.openAgent) {
+                  navigation.openAgent({ agentId: agent.id });
+                }
+              }}
+              pressedOpacity={0.7}
+              style={{
+                paddingHorizontal: 2,
+                paddingVertical: 1,
+              }}
+            >
+              <Badge
+                label={`● Main Dirty${agent.mainDirtySummary ? `: ${agent.mainDirtySummary}` : ""}`}
+                variant="warning"
+                size="sm"
+                textStyle={{ fontSize: 10, fontWeight: "600" }}
+              />
+            </InteractiveRow>
+          )}
+          {agent.isRepoRootOffMain && (
+            <InteractiveRow
+              accessibilityRole="button"
+              accessibilityLabel={`Repo root on ${agent.repoHeadBranch || "detached HEAD"}, not main`}
+              title={`Repo root / primary checkout is on ${agent.repoHeadBranch || "detached HEAD"}, not main. Click to open orchestrator.`}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                if (navigation?.openAgent) {
+                  navigation.openAgent({ agentId: agent.id });
+                }
+              }}
+              pressedOpacity={0.7}
+              style={{
+                paddingHorizontal: 2,
+                paddingVertical: 1,
+              }}
+            >
+              <Badge
+                label={`● Not Main${agent.repoHeadBranch ? `: ${agent.repoHeadBranch}` : ""}`}
+                variant="warning"
+                size="sm"
+                textStyle={{ fontSize: 10, fontWeight: "600" }}
+              />
+            </InteractiveRow>
+          )}
           {!isExpanded && hasChildren && childCount > 0 && (
             <Badge
               label={`${childCount} subagent${childCount === 1 ? "" : "s"}`}
@@ -2521,14 +2251,27 @@ export function OrchestratorRow({
           )}
         </Row>
 
-        {/* Right: State, Activity, SubPills Toggle, Archive */}
+        {/* Right: State, Model, Worktree, Activity, Archive */}
         <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
-          {policy.defaultPills.includes("state") && (
-            <FleetPillRenderer
-              pillId="state"
-              agent={agent}
-              navigation={navigation}
-              colors={colors}
+          <Badge
+            label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
+            variant={stateConfig.badgeVariant}
+            size="sm"
+            dot
+            style={{ borderColor: stateConfig.color }}
+            textStyle={{ fontSize: 10 }}
+          />
+
+          {agent.model && (
+            <Badge label={agent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+          )}
+
+          {worktree && (
+            <Badge
+              label={worktree}
+              variant="neutral"
+              size="sm"
+              textStyle={{ fontFamily: "monospace", fontSize: 10 }}
             />
           )}
 
@@ -2575,31 +2318,6 @@ export function OrchestratorRow({
           />
         </Row>
       </Row>
-
-      {/* Collapsible Sub-Row Drawer for secondary pills */}
-      {isSubPillsExpanded && policy.subPills.length > 0 && (
-        <Row
-          wrap
-          gap="xs"
-          align="center"
-          style={{
-            paddingLeft: 24,
-            paddingTop: 4,
-            paddingBottom: 2,
-            overflow: "visible",
-          }}
-        >
-          {policy.subPills.map((id) => (
-            <FleetPillRenderer
-              key={id}
-              pillId={id}
-              agent={agent}
-              navigation={navigation}
-              colors={colors}
-            />
-          ))}
-        </Row>
-      )}
 
       {/* Prominent permission / attention indicator (#534) */}
       {(agent.pendingPermissions?.length || agent.requiresAttention) && (
