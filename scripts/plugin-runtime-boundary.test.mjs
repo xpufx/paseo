@@ -129,3 +129,49 @@ test("Paseo server compiler builds uppidi-fleet without runtime boundary errors"
   assert.ok(result.clientBundle, "clientBundle must be produced");
   assert.ok(result.clientBundle.length > 0, "clientBundle must not be empty");
 });
+
+test("plugins adopting @xpufx/paseo-plugin-ui have zero bespoke interaction exemptions and no raw react-native interactions (#1221)", () => {
+  const plugins = readdirSync(PLUGINS_DIR);
+  for (const pluginName of plugins) {
+    const pluginDir = join(PLUGINS_DIR, pluginName);
+    const st = lstatSync(pluginDir);
+    if (!st.isDirectory() || st.isSymbolicLink()) continue;
+
+    const pkgPath = join(pluginDir, "package.json");
+    if (!existsSync(pkgPath)) continue;
+    let pkg = {};
+    try {
+      pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+    } catch {
+      continue;
+    }
+    const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (!deps["@xpufx/paseo-plugin-ui"]) continue;
+
+    // 1. Check conformance.json
+    const confPath = join(pluginDir, "conformance.json");
+    if (existsSync(confPath)) {
+      const conf = JSON.parse(readFileSync(confPath, "utf8"));
+      assert.ok(
+        !conf.exempt?.["no-bespoke-react-native-interactions"],
+        `${pluginName} adopts @xpufx/paseo-plugin-ui but exempts no-bespoke-react-native-interactions in conformance.json`,
+      );
+    }
+
+    // 2. Check client source files for raw Pressable / touchable interactions
+    const clientFiles = findSourceFiles(join(pluginDir, "client"));
+    for (const file of clientFiles) {
+      if (file.includes(".test.") || file.includes("/vendor/")) continue;
+      const content = readFileSync(file, "utf8");
+      const match = content.match(/import\s+(?!type\b)([^;]*?)\s+from\s+["']react-native["']/);
+      if (match) {
+        assert.doesNotMatch(
+          match[1],
+          /\b(Pressable|TouchableOpacity|TouchableHighlight|TouchableWithoutFeedback)\b/,
+          `${file} imports raw React Native pressable/interaction primitive instead of @xpufx/paseo-plugin-ui`,
+        );
+      }
+    }
+  }
+});
+

@@ -467,4 +467,30 @@ describe("conformance exemptions", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-exempt-none-"));
     expect(readPluginConformanceExemptions(root).exemptions.size).toBe(0);
   });
+
+  it("forbids no-bespoke-react-native-interactions exemption when adopting @xpufx/paseo-plugin-ui", () => {
+    const dir = scaffold(BASE, SCROLLVIEW_CLIENT, {
+      "no-bespoke-react-native-interactions": "trying to bypass shared UI",
+    });
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      JSON.stringify({ dependencies: { "@xpufx/paseo-plugin-ui": "*" } }),
+    );
+
+    const report = auditProject(dir);
+    const issue = report.issues.find(
+      (i) => i.ruleId === "no-bespoke-react-native-interactions" && i.file === "conformance.json",
+    );
+    expect(issue).toBeDefined();
+    expect(issue?.severity).toBe("error");
+    expect(issue?.message).toContain("cannot be exempted by plugins adopting @xpufx/paseo-plugin-ui");
+
+    // The code violation also fires because the exemption is disabled
+    const codeIssue = report.issues.find(
+      (i) => i.ruleId === "no-bespoke-react-native-interactions" && i.file !== "conformance.json",
+    );
+    expect(codeIssue).toBeDefined();
+    expect(report.passed).toBe(false);
+  });
 });
+

@@ -163,7 +163,29 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
   // Per-rule opt-outs declared by the plugin itself, resolved before the file
   // loop so every rule check can consult them.
   const { exemptions, unknownExemptions } = readPluginConformanceExemptions(resolvedTarget);
-  const isExempt = (ruleId: string): boolean => exemptions.has(ruleId);
+
+  // xpufx-org/paseo#1221: Plugins that adopt `@xpufx/paseo-plugin-ui` cannot
+  // exempt interaction rules (`no-bespoke-react-native-interactions`). Adopting
+  // the shared UI library guarantees the surface delegates interactive controls
+  // and templates to the host-integrated package instead of monkey-patching local primitives.
+  let adoptsPluginUi = false;
+  try {
+    const pkgPath = path.join(resolvedTarget, "package.json");
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
+      if (deps["@xpufx/paseo-plugin-ui"]) {
+        adoptsPluginUi = true;
+      }
+    }
+  } catch {}
+
+  const isExempt = (ruleId: string): boolean => {
+    if (adoptsPluginUi && ruleId === "no-bespoke-react-native-interactions") {
+      return false;
+    }
+    return exemptions.has(ruleId);
+  };
   const exemptReason = (ruleId: string): string | undefined => exemptions.get(ruleId);
 
   // The appearance module may legitimately hold a local palette. The rule is
@@ -187,6 +209,23 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
       docUrl: rule.docUrl,
     });
   }
+
+  if (adoptsPluginUi && exemptions.has("no-bespoke-react-native-interactions")) {
+    const rule = AUDIT_RULES["no-bespoke-react-native-interactions"];
+    issues.push({
+      ruleId: rule.id,
+      severity: "error",
+      file: "conformance.json",
+      line: 1,
+      column: 0,
+      message:
+        "no-bespoke-react-native-interactions cannot be exempted by plugins adopting @xpufx/paseo-plugin-ui; compose interactions through @xpufx/paseo-plugin-ui instead",
+      codeSnippet: "no-bespoke-react-native-interactions",
+      replacement: rule.replacement,
+      docUrl: rule.docUrl,
+    });
+  }
+
 
   const pushIssue = (
     ruleId: keyof typeof AUDIT_RULES,
