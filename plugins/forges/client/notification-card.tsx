@@ -4,8 +4,7 @@ import type {
   PluginTimelineItemProps,
   PluginTimelineRendererContribution,
 } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/react-native";
-import { Badge, HostThemeProvider } from "./host-ui.js";
+import { Badge, HostThemeProvider, Icon } from "./host-ui.js";
 import {
   forgejoNotificationCardSchema,
   type ForgejoNotificationCardData,

@@ -1,6 +1,5 @@
 import React from "react";
 import { Image, Platform, type ImageStyle, type StyleProp } from "react-native";
-import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
   forgeMarkSource,
   resolveForgeMark,
@@ -56,6 +55,11 @@ import {
   HostThemeProvider,
   HostToggle as Toggle,
   type HostToggleProps as ToggleProps,
+  Icon,
+  copyText,
+  useToast,
+  FALLBACK_COLORS,
+  resolveHostColors,
   type ScrollViewInstance,
   useHostTheme,
 } from "@xpufx/paseo-plugin-ui";
@@ -111,6 +115,11 @@ export {
   type TextInputProps,
   Toggle,
   type ToggleProps,
+  Icon,
+  copyText,
+  useToast,
+  FALLBACK_COLORS,
+  resolveHostColors,
   useHostTheme,
 };
 

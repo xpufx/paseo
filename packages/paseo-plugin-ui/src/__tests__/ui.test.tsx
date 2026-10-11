@@ -18,6 +18,11 @@ import {
   HostThemeProvider,
   HostVital,
   ListActionPageTemplate,
+  FALLBACK_COLORS,
+  resolveHostColors,
+  SafeIcon,
+  copyText,
+  useToast,
   type ThemeColors,
 } from "../index.js";
 
@@ -294,6 +299,45 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
 
     const texts = renderer.root.findAllByType("Text").map((t) => t.props.children);
     expect(texts).toContain("$ npm");
+  });
+
+  it("applies flex: 1 and minHeight: 0 to HostScroll so it fills bounded mobile containers without collapsing", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <HostScroll>
+          <HostButton label="Inside scroll" />
+        </HostScroll>
+      </HostThemeProvider>,
+    );
+
+    const scroller = renderer.root.findByType("ScrollView");
+    const style = flattenStyle(scroller.props.style);
+    expect(style.flex).toBe(1);
+    expect(style.minHeight).toBe(0);
+    expect(style.width).toBe("100%");
+  });
+
+  it("merges partial theme colors with FALLBACK_COLORS in resolveHostColors", () => {
+    const partialColors: Partial<ThemeColors> = {
+      surface0: "#222222",
+      accent: "#ff00ff",
+    };
+    const resolved = resolveHostColors(partialColors);
+    expect(resolved.surface0).toBe("#222222");
+    expect(resolved.accent).toBe("#ff00ff");
+    // Unsupplied fields fall back to FALLBACK_COLORS
+    expect(resolved.border).toBe(FALLBACK_COLORS.border);
+    expect(resolved.statusSuccess).toBe(FALLBACK_COLORS.statusSuccess);
+    expect(resolved.statusDanger).toBe(FALLBACK_COLORS.statusDanger);
+  });
+
+  it("SafeIcon returns null when name is missing or invalid", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <SafeIcon name="" />
+      </HostThemeProvider>,
+    );
+    expect(renderer.toJSON()).toBeNull();
   });
 });
 

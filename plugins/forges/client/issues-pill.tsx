@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { Linking, Text, View, type ScrollView as ScrollViewInstance } from "react-native";
 import { useWorkspace } from "@getpaseo/plugin/client";
-import { useToast } from "@getpaseo/plugin/client/react-native";
 import { SettingsSelect } from "@getpaseo/plugin/client/ui";
 import type { PluginWorkspaceSnapshot } from "@getpaseo/plugin";
 import {
@@ -25,6 +24,7 @@ import {
   Tabs,
   TextInput,
   Toggle,
+  useToast,
   useHostTheme,
 } from "./host-ui.js";
 import { copyToClipboard, type RenderModalProps } from "paseo-plugin-helper/lifecycle";

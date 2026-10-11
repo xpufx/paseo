@@ -15,6 +15,7 @@ import {
   RefreshControl,
   ScrollView as RNScrollView,
   Text,
+  TextInput as RNTextInput,
   View,
   type RefreshControlProps,
   type ScrollViewProps,
@@ -22,13 +23,70 @@ import {
   type TextStyle,
   type ViewStyle,
 } from "react-native";
-import {
-  Icon,
-  ScrollView as HostScrollView,
-  TextInput as HostTextInputPrimitive,
-  copyText,
-  useToast,
-} from "@getpaseo/plugin/client/react-native";
+import * as PaseoRN from "@getpaseo/plugin/client/react-native";
+
+/**
+ * Safe fallbacks for runtime environments where @getpaseo/plugin/client/react-native
+ * exports are empty or undefined (e.g. Android / Hermes / Bridgeless).
+ * Prevents "Element type is invalid: expected a string or class/function but got: undefined"
+ * and prototype read errors.
+ */
+export const HostScrollView = ((PaseoRN as any).ScrollView ?? RNScrollView) as typeof RNScrollView;
+export const HostTextInputPrimitive = ((PaseoRN as any).TextInput ?? RNTextInput) as typeof RNTextInput;
+
+export interface SafeIconProps {
+  name?: string;
+  size?: number;
+  color?: string;
+  style?: StyleProp<ViewStyle>;
+}
+
+export function SafeIcon({ name, size = 14, color, style }: SafeIconProps) {
+  if (!name) return null;
+  const HostIcon = (PaseoRN as any).Icon;
+  if (!HostIcon || (typeof HostIcon !== "function" && typeof HostIcon !== "object")) {
+    return null;
+  }
+  try {
+    return <HostIcon name={name} size={size} color={color} style={style} />;
+  } catch {
+    return null;
+  }
+}
+
+export interface SafeToast {
+  show: (message?: string, options?: any) => void;
+  error: (message?: string) => void;
+  copied?: (label?: string) => void;
+}
+
+export function useToast(): SafeToast {
+  try {
+    if (typeof (PaseoRN as any).useToast === "function") {
+      const toast = (PaseoRN as any).useToast();
+      if (toast && typeof toast.show === "function") {
+        return toast;
+      }
+    }
+  } catch {}
+  return {
+    show: (_msg?: string, _opts?: any) => {},
+    error: (_msg?: string) => {},
+    copied: (_label?: string) => {},
+  };
+}
+
+export async function copyText(text: string): Promise<void> {
+  if (typeof (PaseoRN as any).copyText === "function") {
+    try {
+      await (PaseoRN as any).copyText(text);
+      return;
+    } catch {}
+  }
+}
+
+export const Icon = SafeIcon;
+export const HostIcon = SafeIcon;
 import { resolveMetricStatus } from "./metrics.js";
 import type {
   MetricThresholds,
@@ -126,7 +184,7 @@ export interface PluginUiTheme {
   getVariantPalette: (variant: StatusVariant) => { bg: string; text: string; border: string };
 }
 
-const FALLBACK_COLORS: ThemeColors = {
+export const FALLBACK_COLORS: ThemeColors = {
   surface0: "#18181b",
   surface1: "#27272a",
   surface2: "#3f3f46",
@@ -139,6 +197,14 @@ const FALLBACK_COLORS: ThemeColors = {
   statusWarning: "#eab308",
   statusDanger: "#ef4444",
 };
+
+/**
+ * Fills a possibly-partial host `theme.colors` from FALLBACK_COLORS.
+ * Ensures no color token evaluates to undefined on platforms providing partial palettes.
+ */
+export function resolveHostColors(colors?: Partial<ThemeColors> | null): ThemeColors {
+  return { ...FALLBACK_COLORS, ...(colors ?? {}) };
+}
 
 function createPluginUiTheme(colors: ThemeColors): PluginUiTheme {
   return {
@@ -155,7 +221,7 @@ function createPluginUiTheme(colors: ThemeColors): PluginUiTheme {
 const ThemeContext = createContext<PluginUiTheme>(createPluginUiTheme(FALLBACK_COLORS));
 
 export interface HostThemeProviderProps {
-  theme?: { colors: ThemeColors };
+  theme?: { colors: ThemeColors } | { colors?: Partial<ThemeColors> };
   children: ReactNode;
 }
 
@@ -165,7 +231,10 @@ export interface HostThemeProviderProps {
  * previews) so adapters still render.
  */
 export function HostThemeProvider({ theme, children }: HostThemeProviderProps) {
-  const value = useMemo(() => createPluginUiTheme(theme?.colors ?? FALLBACK_COLORS), [theme?.colors]);
+  const value = useMemo(
+    () => createPluginUiTheme(resolveHostColors(theme?.colors as Partial<ThemeColors> | undefined)),
+    [theme?.colors],
+  );
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
@@ -2065,15 +2134,16 @@ export interface HostScrollProps extends ScrollViewProps {
 /** Explicit single scroll owner for surfaces where the host supplies none. */
 export const HostScroll = forwardRef<ScrollViewInstance, HostScrollProps>(
   function HostScroll({ children, style, contentContainerStyle, ...props }, ref) {
+    const Scroller = HostScrollView;
     return (
-      <HostScrollView
+      <Scroller
         ref={ref}
-        style={[styles.fluid, style]}
+        style={[{ flex: 1, minHeight: 0, width: "100%" }, style]}
         contentContainerStyle={contentContainerStyle}
         {...props}
       >
         {children}
-      </HostScrollView>
+      </Scroller>
     );
   },
 );

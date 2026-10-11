@@ -1,6 +1,5 @@
 import React, { ReactNode } from 'react';
-import { StyleProp, ViewStyle, TextStyle, ScrollViewProps, ScrollView as ScrollView$1 } from 'react-native';
-import { ScrollView } from '@getpaseo/plugin/client/react-native';
+import { StyleProp, ViewStyle, TextStyle, ScrollView, ScrollViewProps, TextInput } from 'react-native';
 
 /**
  * Structural theme/layout types for the shared UI package.
@@ -95,6 +94,31 @@ interface ListActionPageTemplateProps<T> {
 declare function ListActionPageTemplate<T>({ title, subtitle, icon, badge, headerActions, filterSlot, bannerSlot, data, keyExtractor, renderItem, emptyState, isLoading, footerSlot, style, contentContainerStyle, }: ListActionPageTemplateProps<T>): React.JSX.Element;
 
 /**
+ * Safe fallbacks for runtime environments where @getpaseo/plugin/client/react-native
+ * exports are empty or undefined (e.g. Android / Hermes / Bridgeless).
+ * Prevents "Element type is invalid: expected a string or class/function but got: undefined"
+ * and prototype read errors.
+ */
+declare const HostScrollView: typeof ScrollView;
+declare const HostTextInputPrimitive: typeof TextInput;
+interface SafeIconProps {
+    name?: string;
+    size?: number;
+    color?: string;
+    style?: StyleProp<ViewStyle>;
+}
+declare function SafeIcon({ name, size, color, style }: SafeIconProps): React.JSX.Element | null;
+interface SafeToast {
+    show: (message?: string, options?: any) => void;
+    error: (message?: string) => void;
+    copied?: (label?: string) => void;
+}
+declare function useToast(): SafeToast;
+declare function copyText(text: string): Promise<void>;
+declare const Icon: typeof SafeIcon;
+declare const HostIcon: typeof SafeIcon;
+
+/**
  * Canonical shared composition of the presentational pieces every plugin used
  * to hand-roll in its local `client/host-ui.tsx` (xpufx-org/paseo#937, #976).
  *
@@ -128,9 +152,17 @@ interface PluginUiTheme {
         border: string;
     };
 }
+declare const FALLBACK_COLORS: ThemeColors;
+/**
+ * Fills a possibly-partial host `theme.colors` from FALLBACK_COLORS.
+ * Ensures no color token evaluates to undefined on platforms providing partial palettes.
+ */
+declare function resolveHostColors(colors?: Partial<ThemeColors> | null): ThemeColors;
 interface HostThemeProviderProps {
     theme?: {
         colors: ThemeColors;
+    } | {
+        colors?: Partial<ThemeColors>;
     };
     children: ReactNode;
 }
@@ -463,14 +495,14 @@ interface HostModalSectionProps {
  * (xpufx-org/paseo#975).
  */
 declare function HostModalSection({ children, style }: HostModalSectionProps): React.JSX.Element;
-type ScrollViewInstance = React.ElementRef<typeof ScrollView>;
+type ScrollViewInstance = React.ElementRef<typeof HostScrollView>;
 interface HostScrollProps extends ScrollViewProps {
     children: ReactNode;
     style?: StyleProp<ViewStyle>;
     contentContainerStyle?: StyleProp<ViewStyle>;
 }
 /** Explicit single scroll owner for surfaces where the host supplies none. */
-declare const HostScroll: React.ForwardRefExoticComponent<HostScrollProps & React.RefAttributes<ScrollView$1>>;
+declare const HostScroll: React.ForwardRefExoticComponent<HostScrollProps & React.RefAttributes<ScrollView>>;
 interface HostActionBarProps {
     children: ReactNode;
     align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end";
@@ -573,4 +605,4 @@ interface HostAboutSectionProps {
 }
 declare function HostAboutSection({ name, description, version, author, repository, issues, homepage, license, links, extraItems, style, }: HostAboutSectionProps): React.JSX.Element;
 
-export { type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type ScrollViewInstance, type StatusVariant, type ThemeColors, alpha, getStatusColor, splitHighlightParts, useHostLayout, useHostTheme };
+export { FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostIcon, HostInlineButton, type HostInlineButtonProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostScrollView, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, HostTextInputPrimitive, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, Icon, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, SafeIcon, type SafeIconProps, type SafeToast, type ScrollViewInstance, type StatusVariant, type ThemeColors, alpha, copyText, getStatusColor, resolveHostColors, splitHighlightParts, useHostLayout, useHostTheme, useToast };
