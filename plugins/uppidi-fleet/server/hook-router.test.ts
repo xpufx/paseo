@@ -713,6 +713,50 @@ describe("hook-router queue pause-all and turn_ended drain guard (#877)", () => 
     assert.equal(router.getQueue(key).length, 0);
   });
 
+  it("agent.turn_ended suppresses drain log while halted or pause-all for registered, front desk, and unregistered agents (#1116, #1119)", async () => {
+    const { router, sentMessages } = createIdleRouter();
+    const repoKey = "xpufx-org/halted-repo";
+    const orchAgentId = "orch-halted-agent";
+    const frontDeskAgentId = "front-desk-halted-agent";
+    const unregisteredAgentId = "unregistered-worker-agent";
+
+    router.writeOrchestrator(repoKey, orchAgentId);
+    router.writeFrontDesk(frontDeskAgentId);
+
+    // Engage canonical halt before queueing messages
+    router.halt();
+
+    router.enqueue(repoKey, "task for orch");
+    router.enqueue("frontdesk", "task for frontdesk");
+
+    // 1. Front Desk turn ended while halted
+    clearHookLogs();
+    router.handleLifecycleEvent("agent.turn_ended", { agent: { id: frontDeskAgentId } });
+    let logs = getHookLogs(20).join("\n");
+    assert.match(logs, /queue drain suppressed \(paused\)/);
+    assert.doesNotMatch(logs, /triggering queue drain/);
+
+    // 2. Orchestrator turn ended while halted
+    clearHookLogs();
+    router.handleLifecycleEvent("agent.turn_ended", { agent: { id: orchAgentId } });
+    logs = getHookLogs(20).join("\n");
+    assert.match(logs, /queue drain suppressed \(paused\)/);
+    assert.doesNotMatch(logs, /triggering queue drain/);
+
+    // 3. Unregistered / worker / lost-registration agent turn ended while halted (#1119)
+    clearHookLogs();
+    router.handleLifecycleEvent("agent.turn_ended", { agent: { id: unregisteredAgentId } });
+    logs = getHookLogs(20).join("\n");
+    assert.match(logs, /queue drain suppressed \(paused\)/);
+    assert.doesNotMatch(logs, /triggering queue drain/);
+
+    // Ensure no messages were dispatched during halt
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(sentMessages.length, 0);
+    assert.equal(router.getQueue(repoKey).length, 1);
+    assert.equal(router.getQueue("frontdesk").length, 1);
+  });
+
   it("agent.turn_ended still triggers the drain log and drain when unpaused", async () => {
     let busy = true;
     const heldSent: Array<{ id: string; text: string }> = [];

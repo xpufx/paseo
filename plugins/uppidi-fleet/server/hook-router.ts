@@ -8752,11 +8752,14 @@ export class HookRouter {
   }
 
   /**
-   * True when every drain target owned by `agentId` is paused (#877).
-   * A global pause-all suppresses all drains; an agent with no drain targets
-   * is never suppressed so the turn_ended log keeps its existing wording.
+   * True when every drain target owned by `agentId` is paused (#877, #1116).
+   * A global pause-all or halt suppresses all drains globally regardless of whether
+   * the agent has a registered target (#1116, #1119). When not globally paused,
+   * an agent with no drain targets is never suppressed so the turn_ended log keeps
+   * its existing wording.
    */
   private isAgentDrainSuppressed(agentId: string): boolean {
+    if (this.isAllPaused()) return true;
     let hasTarget = false;
     const frontDesk = this.readFrontDesk();
     if (frontDesk?.agentId === agentId) {
