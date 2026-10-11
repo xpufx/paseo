@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { HostThemeProvider } from "paseo-plugin-helper/lifecycle";
 import { colorsOutsidePalette } from "paseo-plugin-ui-testing";
-import { Badge, Button, Card, TextInput } from "./host-ui";
+import { Badge, Button, Card, HostThemeProvider, TextInput } from "./host-ui";
 
 // The real `react-native` entrypoint carries Flow syntax Vite cannot parse.
 // Mirror the helper's own tests and alias it to a stub.

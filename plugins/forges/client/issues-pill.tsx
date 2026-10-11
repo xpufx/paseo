@@ -18,6 +18,7 @@ import {
   FormRow,
   HighlightedText,
   HostModalBody,
+  HostThemeProvider,
   KeyValue,
   KeyValueGroup,
   SearchInput,
@@ -1752,12 +1753,20 @@ export function ForgeIssuesView({
   );
 }
 
-export function ForgeIssuesModal({ agentId, workspaceId, close }: RenderModalProps) {
-  return <ForgeIssuesView agentId={agentId} workspaceId={workspaceId} onClose={close} />;
+export function ForgeIssuesModal({ agentId, workspaceId, close, theme }: RenderModalProps) {
+  return (
+    <HostThemeProvider theme={theme}>
+      <ForgeIssuesView agentId={agentId} workspaceId={workspaceId} onClose={close} />
+    </HostThemeProvider>
+  );
 }
 
-export function ForgeIssuesPanel({ workspaceId }: { workspaceId: string }) {
-  return <ForgeIssuesView workspaceId={workspaceId} />;
+export function ForgeIssuesPanel({ workspaceId, theme }: { workspaceId: string; theme?: any }) {
+  return (
+    <HostThemeProvider theme={theme}>
+      <ForgeIssuesView workspaceId={workspaceId} />
+    </HostThemeProvider>
+  );
 }
 
 const styles = {

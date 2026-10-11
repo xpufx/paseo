@@ -12,12 +12,15 @@ import {
   HostCommandBox,
   HostEmptyState,
   HostFormRow,
+  HostHighlightedText,
+  HostInlineButton,
   HostKeyValue,
   HostKeyValueGroup,
   HostModalBody,
   HostProgressBar,
   HostRow,
   HostScroll,
+  HostSearchInput,
   HostSectionHeader,
   HostSelect,
   HostStack,
@@ -384,5 +387,61 @@ describe("Consumer Regression Harness (xpufx-org/paseo#1221)", () => {
     });
     expect(onApprove).toHaveBeenCalledTimes(1);
   });
+
+  it("renders forges issue browser fixture with search input, highlighted text, and inline actions (#1240)", () => {
+    const onSelectIssue = vi.fn();
+    const onClearSearch = vi.fn();
+
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: TEST_THEME_COLORS }}>
+        <HostModalBody
+          headerMode="pinned"
+          header={
+            <HostSearchInput
+              value="reconcile"
+              placeholder="Search issues..."
+              onChangeText={() => {}}
+              onClear={onClearSearch}
+            />
+          }
+        >
+          <HostCard variant="elevated">
+            <HostCard.Header
+              title="fix(registry): reconcile orchestrators on startup"
+              highlightQuery="reconcile"
+              badge={<HostBadge label="bug" variant="danger" highlightQuery="reconcile" />}
+            />
+            <HostRow align="center" justify="between">
+              <HostHighlightedText
+                text="reconcile orchestrators across the cluster without desyncing state"
+                query="reconcile"
+              />
+              <HostInlineButton label="#1143" onPress={() => onSelectIssue(1143)} />
+            </HostRow>
+          </HostCard>
+        </HostModalBody>
+      </HostThemeProvider>,
+    );
+
+    // 1. Single scroll owner in modal body
+    const scrollViews = renderer.root.findAllByType("ScrollView");
+    expect(scrollViews).toHaveLength(1);
+
+    // 2. Search input renders query and clear affordance
+    const searchInput = renderer.root.findByType(HostSearchInput);
+    expect(searchInput).toBeDefined();
+
+    // 3. Highlighted text renders matching fragments
+    const highlights = renderer.root.findAllByType(HostHighlightedText);
+    expect(highlights.length).toBeGreaterThanOrEqual(1);
+
+    // 4. Inline button click triggers action
+    const inlineBtn = renderer.root.findByType(HostInlineButton);
+    act(() => {
+      inlineBtn.props.onPress();
+    });
+    expect(onSelectIssue).toHaveBeenCalledWith(1143);
+  });
 });
+
 

@@ -1,5 +1,1 @@
-{
-  "exempt": {
-    "no-bespoke-react-native-interactions": "client/host-ui.tsx is the local composition that replaces the deleted paseo-plugin-helper/client and paseo-plugin-helper/ui kits for forges (xpufx-org/paseo#937, #924). The host SDK exposes no button/tab/toggle/copy pressable primitive, so the presentation layer must compose Pressable over react-native. Every other helper/UI rule is followed; this is the single interaction seam."
-  }
-}
+{}
