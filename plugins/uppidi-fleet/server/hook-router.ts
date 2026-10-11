@@ -56,7 +56,7 @@ import {
   type ResolvedWorkspace,
   type WorkspaceLookupOptions,
 } from "./workspace-lookup.js";
-import { adjudicatePermission } from "./permission-adjudication.js";
+import { adjudicatePermission, isFleetAgent } from "./permission-adjudication.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
 import {
   DEFAULT_ROLE_MODELS,
@@ -6887,6 +6887,9 @@ export class HookRouter {
 
     if (agentMap) {
       for (const agent of agentMap.values()) {
+        // Restrict watchdog audits and hook management to fleet-owned agents only.
+        // Ad-hoc/user sessions are excluded.
+        if (!isFleetAgent(agent, { frontDeskId, orchestratorAgentIds: fleetAgentIds })) continue;
         // Legitimate teardown must not raise amnesia/lock/permission alerts
         // (#872): culled agents are suppressed even if a stale snapshot still
         // lists them.
@@ -6979,6 +6982,9 @@ export class HookRouter {
       // contradictory double recovery.
       const taxonomyHandled = new Set<string>();
       for (const agent of agentMap.values()) {
+        // Restrict watchdog audits and hook management to fleet-owned agents only.
+        // Ad-hoc/user sessions are excluded.
+        if (!isFleetAgent(agent, { frontDeskId, orchestratorAgentIds: fleetAgentIds })) continue;
         if (agent.archivedAt) continue;
         if (this.isTeardownSuppressedAgent(agent.id)) continue;
         const assessment = assessAgentHealth(agent.id, agent, diskMetadata?.get(agent.id), now, {

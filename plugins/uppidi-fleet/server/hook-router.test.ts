@@ -2317,6 +2317,71 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.equal(audit.audited.orchestrators, 1);
   });
 
+  it("skips ad-hoc agents without fleet labels from watchdog audit", async () => {
+    const adhocMap = new Map<string, WatchdogAgent>([
+      ["adhoc-1", { id: "adhoc-1", status: "idle", lastError: null, labels: {} }],
+      ["adhoc-2", { id: "adhoc-2", status: "running", lastError: null, labels: {} }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: adhocMap,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(audit.ok, true);
+    assert.equal(audit.anomalies.length, 0);
+    assert.equal(audit.audited.agents, 0, "ad-hoc agents must be excluded from the audit count");
+    assert.equal(audit.audited.orchestrators, 1);
+  });
+
+  it("skips ad-hoc agents with quota errors from triggering Front Desk alerts", async () => {
+    const adhocMap = new Map<string, WatchdogAgent>([
+      ["adhoc-quota", { id: "adhoc-quota", status: "error", lastError: "usage limit exceeded", labels: {} }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: adhocMap,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(audit.ok, true);
+    assert.equal(audit.anomalies.length, 0, "ad-hoc agents must not generate anomalies");
+    assert.equal(delivered.length, 0, "ad-hoc agents must not trigger Front Desk alerts");
+    assert.equal(audit.audited.orchestrators, 1);
+  });
+
+  it("includes fleet-labeled agents in watchdog audit", async () => {
+    const fleetMap = new Map<string, WatchdogAgent>([
+      ["orch-1", { id: "orch-1", status: "idle", lastError: null, role: "orchestrator", labels: { role: "orchestrator" } }],
+      ["worker-1", { id: "worker-1", status: "running", lastError: null, role: "worker", labels: { role: "worker" } }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "orch-1" }],
+      agentMap: fleetMap,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(audit.ok, true);
+    assert.equal(audit.audited.agents, 2, "fleet agents must be included in audit count");
+    assert.equal(audit.audited.orchestrators, 1);
+  });
+
+  it("skips ad-hoc agents with idle turns from triggering alerts", async () => {
+    const adhocMap = new Map<string, WatchdogAgent>([
+      ["adhoc-idle", { id: "adhoc-idle", status: "idle", lastError: null, labels: {} }],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      agentMap: adhocMap,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(audit.ok, true);
+    assert.equal(audit.anomalies.length, 0, "ad-hoc idle agents must not generate anomalies");
+    assert.equal(delivered.length, 0, "ad-hoc idle agents must not trigger Front Desk alerts");
+    assert.equal(audit.audited.orchestrators, 1);
+  });
+
   it("detects missing orchestrators and alerts Front Desk", async () => {
     const audit = await router.runWatchdogAudit({
       orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
