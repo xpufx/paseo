@@ -158,4 +158,12 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
       "Read the host `theme.colors.*` tokens (or a helper color utility) instead; keep literals only in the documented appearance module or an `addTheme` contribution",
     docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/cli.md#no-raw-color-literal",
   },
+  "no-modal-scroll-pinning": {
+    id: "no-modal-scroll-pinning",
+    severity: "warn",
+    description: "Pinned flex: 1 or minHeight: 0 detected on modal container or modalColumn.",
+    replacement:
+      "Use fluid layout (width: '100%') without flex: 1 or minHeight: 0 so host scroller (BottomSheetScrollView) measures full content height",
+    docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/client-migration.md",
+  },
 };

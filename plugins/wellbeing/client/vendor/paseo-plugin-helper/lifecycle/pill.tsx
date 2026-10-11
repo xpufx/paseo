@@ -423,7 +423,11 @@ export function registerComposerPill<TPayload = any>(
                     onStartShouldSetResponder={() => true}
                     onTouchEnd={stopBubbling}
                     {...(eventBoundaryProps as any)}
-                    style={{ flex: 1, minHeight: 0 }}
+                    style={
+                      resolvePillModalScrollable(options.hostScroll)
+                        ? { width: "100%" }
+                        : { flex: 1, minHeight: 0, width: "100%" }
+                    }
                   >
                     <RegistrarThemeScope theme={theme} layout={layout} flair={options.flair}>
                       <ModalBodyScrollOwnerContext.Provider

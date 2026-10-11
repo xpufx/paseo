@@ -492,5 +492,50 @@ describe("conformance exemptions", () => {
     expect(codeIssue).toBeDefined();
     expect(report.passed).toBe(false);
   });
+
+  it("flags modal scroll pinning with flex: 1 and minHeight: 0 under no-modal-scroll-pinning", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-modal-pin-"));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "client"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "pill.tsx"),
+        `
+        import { HostModalSection } from "@xpufx/paseo-plugin-ui";
+        const styles = {
+          modalColumn: { flex: 1, minHeight: 0 },
+        };
+        export const Modal = () => <HostModalSection style={styles.modalColumn}>content</HostModalSection>;
+        `,
+      );
+      const report = auditProject(tmpDir);
+      const issue = report.issues.find((i) => i.ruleId === "no-modal-scroll-pinning");
+      expect(issue).toBeDefined();
+      expect(issue?.message).toContain("Pinned flex: 1 or minHeight: 0");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("passes modal containers using fluid width: 100% under no-modal-scroll-pinning", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-modal-fluid-"));
+    try {
+      fs.mkdirSync(path.join(tmpDir, "client"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "client", "pill.tsx"),
+        `
+        import { HostModalSection } from "@xpufx/paseo-plugin-ui";
+        const styles = {
+          modalColumn: { width: "100%" },
+        };
+        export const Modal = () => <HostModalSection style={styles.modalColumn}>content</HostModalSection>;
+        `,
+      );
+      const report = auditProject(tmpDir);
+      const issue = report.issues.find((i) => i.ruleId === "no-modal-scroll-pinning");
+      expect(issue).toBeUndefined();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 

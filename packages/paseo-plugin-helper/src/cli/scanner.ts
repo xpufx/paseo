@@ -676,6 +676,32 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
       }
     }
 
+    // Rule: no-modal-scroll-pinning (#1054, #1254).
+    // Modal bodies must stay fluid (width: '100%') without pinning flex: 1 or
+    // minHeight: 0, which collapses inside BottomSheetScrollView on mobile.
+    if (isClientFile && !inTest && !inBuildOrTool) {
+      const modalPinRegex = /modal(?:Column|Body|Section|Container|Content)\s*:\s*\{[^}]{0,120}?(?:flex\s*:\s*1|minHeight\s*:\s*0)/gs;
+      let match: RegExpExecArray | null;
+      while ((match = modalPinRegex.exec(content)) !== null) {
+        const matchIndex = match.index;
+        const lineNum = content.slice(0, matchIndex).split("\n").length;
+        const snippetLine = lines[lineNum - 1] ?? "";
+        if (snippetLine.trim().startsWith("//") || snippetLine.trim().startsWith("*")) continue;
+        const rule = AUDIT_RULES["no-modal-scroll-pinning"];
+        issues.push({
+          ruleId: rule.id,
+          severity: rule.severity,
+          file: relPath,
+          line: lineNum,
+          column: Math.max(0, snippetLine.indexOf(snippetLine.trim())),
+          message: rule.description,
+          codeSnippet: snippetLine.trim(),
+          replacement: rule.replacement,
+          docUrl: rule.docUrl,
+        });
+      }
+    }
+
     // Rule: no-raw-color-literal. Host-theme-driven code reads `theme.colors.*`;
     // a quoted hex/rgb/hsl literal is a static color the host cannot retheme.
     // The plugin's declared appearance module and any `addTheme` contribution

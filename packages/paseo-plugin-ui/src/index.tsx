@@ -14,6 +14,7 @@ import {
   Pressable,
   RefreshControl,
   ScrollView as RNScrollView,
+  StyleSheet,
   Text,
   View,
   type RefreshControlProps,
@@ -1863,6 +1864,36 @@ export function HostCopyButton({
   );
 }
 
+// --- modal scroll ownership ------------------------------------------------
+
+export type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
+
+const SCROLL_OWNER_CONTEXT_KEY = Symbol.for("paseo.modalBodyScrollOwnerContext");
+
+export const ModalBodyScrollOwnerContext: React.Context<ModalBodyScrollOwner> =
+  ((globalThis as any)[SCROLL_OWNER_CONTEXT_KEY] ??= createContext<ModalBodyScrollOwner>("helper"));
+
+export function useModalBodyScrollOwner(): ModalBodyScrollOwner {
+  return useContext(ModalBodyScrollOwnerContext);
+}
+
+/**
+ * Defensive layout sanitizer: strips `flex` and `minHeight` when rendered inside
+ * a host-scrolled surface (BottomSheetScrollView), preventing accidental layout
+ * pinning and scroll lock (#1054, #1254).
+ */
+export function sanitizeFluidStyle(
+  style: StyleProp<ViewStyle>,
+  hostOwnsScroll: boolean,
+): StyleProp<ViewStyle> {
+  if (!hostOwnsScroll || !style) return style;
+  const flattened = StyleSheet.flatten(style);
+  if (!flattened) return style;
+  if (flattened.flex === undefined && flattened.minHeight === undefined) return style;
+  const { flex, minHeight, ...rest } = flattened;
+  return rest;
+}
+
 // --- code / command --------------------------------------------------------
 
 export interface HostCodeBlockProps {
@@ -1887,6 +1918,8 @@ export function HostCodeBlock({
   const { colors, alpha } = useHostTheme();
   const toast = useToast();
   const [copied, setCopied] = useState(false);
+  const scrollOwner = useContext(ModalBodyScrollOwnerContext);
+  const hostOwnsScroll = scrollOwner === "host" || scrollOwner === "popover";
   const handleCopy = async () => {
     try {
       await copyText(code);
@@ -1948,17 +1981,35 @@ export function HostCodeBlock({
           ) : null}
         </View>
       ) : null}
-      <RNScrollView style={{ maxHeight }} contentContainerStyle={{ padding: 12 }}>
-        <Text
-          selectable
-          style={[
-            { color: colors.foreground, fontSize: 12, lineHeight: 18, fontFamily: "monospace" },
-            textStyle,
-          ]}
+      {hostOwnsScroll ? (
+        <RNScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ padding: 12, minWidth: "100%" }}
         >
-          {code}
-        </Text>
-      </RNScrollView>
+          <Text
+            selectable
+            style={[
+              { color: colors.foreground, fontSize: 12, lineHeight: 18, fontFamily: "monospace" },
+              textStyle,
+            ]}
+          >
+            {code}
+          </Text>
+        </RNScrollView>
+      ) : (
+        <RNScrollView style={{ maxHeight }} contentContainerStyle={{ padding: 12 }}>
+          <Text
+            selectable
+            style={[
+              { color: colors.foreground, fontSize: 12, lineHeight: 18, fontFamily: "monospace" },
+              textStyle,
+            ]}
+          >
+            {code}
+          </Text>
+        </RNScrollView>
+      )}
     </View>
   );
 }
@@ -2062,7 +2113,13 @@ export interface HostModalSectionProps {
  * (xpufx-org/paseo#975).
  */
 export function HostModalSection({ children, style }: HostModalSectionProps) {
-  return <View style={[styles.fluid, styles.modalSection, style]}>{children}</View>;
+  const scrollOwner = useContext(ModalBodyScrollOwnerContext);
+  const hostOwnsScroll = scrollOwner === "host" || scrollOwner === "popover";
+  const sectionStyle = hostOwnsScroll
+    ? styles.fluid
+    : [styles.fluid, styles.modalSection];
+  const sanitized = sanitizeFluidStyle(style, hostOwnsScroll);
+  return <View style={[sectionStyle, sanitized]}>{children}</View>;
 }
 
 export type ScrollViewInstance = React.ElementRef<typeof HostScrollView>;
@@ -2438,18 +2495,7 @@ export function HostSelect({
   );
 }
 
-// --- modal scroll ownership ------------------------------------------------
-
-export type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
-
-const SCROLL_OWNER_CONTEXT_KEY = Symbol.for("paseo.modalBodyScrollOwnerContext");
-
-export const ModalBodyScrollOwnerContext: React.Context<ModalBodyScrollOwner> =
-  ((globalThis as any)[SCROLL_OWNER_CONTEXT_KEY] ??= createContext<ModalBodyScrollOwner>("helper"));
-
-export function useModalBodyScrollOwner(): ModalBodyScrollOwner {
-  return useContext(ModalBodyScrollOwnerContext);
-}
+// --- modal body -----------------------------------------------------------
 
 export interface HostModalBodyProps {
   children: ReactNode;
@@ -2495,7 +2541,7 @@ export function HostModalBody({
 
   if (!shouldScroll) {
     return (
-      <View style={[{ width: "100%" }, style]}>
+      <View style={[{ width: "100%" }, sanitizeFluidStyle(style, true)]}>
         {header ? (
           <View
             style={[

@@ -220,6 +220,53 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(outerStyle.width).toBe("100%");
   });
 
+  it("renders HostModalSection fluidly without pinning flex: 1 or minHeight: 0", () => {
+    const renderer = render(
+      <ModalBodyScrollOwnerContext.Provider value="host">
+        <HostModalSection>
+          <span>Modal Content</span>
+        </HostModalSection>
+      </ModalBodyScrollOwnerContext.Provider>,
+    );
+
+    const outerView = renderer.root.findAllByType("View")[0];
+    const outerStyle = resolvedStyle(outerView);
+    expect(outerStyle.flex).toBeUndefined();
+    expect(outerStyle.minHeight).toBeUndefined();
+    expect(outerStyle.width).toBe("100%");
+  });
+
+  it("defensively strips rogue flex: 1 and minHeight: 0 from HostModalSection style when host owns scroll", () => {
+    const renderer = render(
+      <ModalBodyScrollOwnerContext.Provider value="host">
+        <HostModalSection style={{ flex: 1, minHeight: 0, padding: 8 }}>
+          <span>Modal Content</span>
+        </HostModalSection>
+      </ModalBodyScrollOwnerContext.Provider>,
+    );
+
+    const outerView = renderer.root.findAllByType("View")[0];
+    const outerStyle = resolvedStyle(outerView);
+    expect(outerStyle.flex).toBeUndefined();
+    expect(outerStyle.minHeight).toBeUndefined();
+    expect(outerStyle.padding).toBe(8);
+    expect(outerStyle.width).toBe("100%");
+  });
+
+  it("renders HostCodeBlock with horizontal scroll only when host owns scroll to prevent vertical swipe conflicts", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <ModalBodyScrollOwnerContext.Provider value="host">
+          <HostCodeBlock code='{"key":"value"}' maxHeight={240} />
+        </ModalBodyScrollOwnerContext.Provider>
+      </HostThemeProvider>,
+    );
+
+    const scroller = renderer.root.findByType("ScrollView" as any);
+    expect(scroller.props.horizontal).toBe(true);
+    expect(scroller.props.style).toBeUndefined();
+  });
+
   it("renders ListActionPageTemplate with empty state when data is empty", () => {
     const renderer = render(
       <HostThemeProvider theme={{ colors: HOST_COLORS }}>

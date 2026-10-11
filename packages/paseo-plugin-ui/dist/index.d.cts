@@ -439,6 +439,15 @@ interface HostCopyButtonProps {
     textStyle?: StyleProp<TextStyle>;
 }
 declare function HostCopyButton({ text, getText, label, copiedLabel, icon, size, variant, accessibilityLabel, toastMessage, feedbackDurationMs, disabled, style, textStyle, }: HostCopyButtonProps): React.ReactElement | null;
+type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
+declare const ModalBodyScrollOwnerContext: React.Context<ModalBodyScrollOwner>;
+declare function useModalBodyScrollOwner(): ModalBodyScrollOwner;
+/**
+ * Defensive layout sanitizer: strips `flex` and `minHeight` when rendered inside
+ * a host-scrolled surface (BottomSheetScrollView), preventing accidental layout
+ * pinning and scroll lock (#1054, #1254).
+ */
+declare function sanitizeFluidStyle(style: StyleProp<ViewStyle>, hostOwnsScroll: boolean): StyleProp<ViewStyle>;
 interface HostCodeBlockProps {
     code: string;
     language?: string;
@@ -542,9 +551,6 @@ interface HostSelectProps {
 }
 /** Inline single-choice picker styled for host dark/light theme palettes. */
 declare function HostSelect({ value, options, onValueChange, placeholder, style, }: HostSelectProps): React.JSX.Element;
-type ModalBodyScrollOwner = "helper" | "host" | "required" | "popover";
-declare const ModalBodyScrollOwnerContext: React.Context<ModalBodyScrollOwner>;
-declare function useModalBodyScrollOwner(): ModalBodyScrollOwner;
 interface HostModalBodyProps {
     children: ReactNode;
     header?: ReactNode;
@@ -586,4 +592,4 @@ interface HostAboutSectionProps {
 }
 declare function HostAboutSection({ name, description, version, author, repository, issues, homepage, license, links, extraItems, style, }: HostAboutSectionProps): React.JSX.Element;
 
-export { FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type ScrollViewInstance, type StatusVariant, type ThemeColors, alpha, getStatusColor, resolveHostColors, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };
+export { FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type ScrollViewInstance, type StatusVariant, type ThemeColors, alpha, getStatusColor, resolveHostColors, sanitizeFluidStyle, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };

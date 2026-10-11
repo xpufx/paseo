@@ -787,7 +787,7 @@ function McpModalContent({ agentId, close, theme }: RenderModalProps) {
 }
 
 const styles = {
-  modalColumn: { flex: 1, minHeight: 0 },
+  modalColumn: { width: "100%" },
   modalBodyContent: { gap: 12, paddingBottom: 4 },
 } as const;
 
