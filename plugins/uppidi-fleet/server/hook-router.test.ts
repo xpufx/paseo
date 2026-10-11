@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
@@ -162,8 +162,16 @@ function parseFleetAttachment(options: any): Record<string, any> | null {
 /** Drop the persisted plugin settings so each test starts from schema defaults. */
 function clearSettingsStorage(): void {
   try {
-    rmSync(getUppidiFleetSettingsStorage().filePath, { force: true });
-  } catch {
+    const targetPath = getUppidiFleetSettingsStorage().filePath;
+    const resolvedTarget = resolve(targetPath);
+    const resolvedTmp = resolve(tmpdir());
+    if (resolvedTarget.startsWith(resolvedTmp) || resolvedTarget.includes("test")) {
+      rmSync(resolvedTarget, { force: true });
+    } else {
+      throw new Error(`[SAFETY] Refusing to unlink non-test settings file: ${resolvedTarget}`);
+    }
+  } catch (err: any) {
+    if (err?.message?.includes("[SAFETY]")) throw err;
     // ignore missing file
   }
   resetUppidiFleetSettingsStorageInstance();
