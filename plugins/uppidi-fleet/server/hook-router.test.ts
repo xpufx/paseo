@@ -5652,6 +5652,52 @@ describe("hook-router stale latestAgentMap cache invalidation and live verificat
     assert.equal(router.busyAttempts.has(key), false);
   });
 
+  it("steers queued work after the bounded busy-attempt limit", async () => {
+    const key = "forge.mrs.uppidi.com/xpufx-org/busy-timeout";
+    const targetAgentId = "agent-busy-timeout";
+    const sentMessages: Array<{ text: string; options: any }> = [];
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          current: () => ({ id, status: "running", activeTurn: { id: "turn-stalled" } }),
+          refresh: async () => ({
+            agent: { id, status: "running", activeTurn: { id: "turn-stalled" } },
+          }),
+          send: async (text: string, options: any) => {
+            sentMessages.push({ text, options });
+          },
+        }),
+      },
+    } as any;
+    const mockServer = {
+      paseo: mockPaseo,
+      events: { on: () => () => {} },
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    const router = new HookRouter(mockServer, {
+      queueDir,
+      stateDir,
+      port: 0,
+      drainBusyAttemptLimit: 1,
+    });
+    router.writeOrchestrator(key, targetAgentId);
+
+    router.enqueue(key, "Prompt for the stalled active turn");
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(sentMessages.length, 1);
+    assert.equal(sentMessages[0].text, "Prompt for the stalled active turn");
+    assert.equal(sentMessages[0].options.activeTurnBehavior, "steer");
+    assert.equal(router.getQueue(key).length, 0);
+    assert.equal(router.busyAttempts.has(key), false);
+  });
+
   it("agent.updated lifecycle event with idle status immediately updates cache and resets busyAttempts", async () => {
     const key = "forge.mrs.uppidi.com/xpufx-org/update-test";
     const targetAgentId = "agent-lifecycle-updated";

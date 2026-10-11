@@ -470,7 +470,11 @@ https://forge.example.com/your-org/your-repo/issues/42
   busy and schedules an exponential backoff retry (3 s → 30 s). It also
   subscribes to Paseo's `agent.turn_ended` lifecycle event and drains the
   matching queue immediately when that agent's turn ends, so a missed retry
-  self-corrects.
+  self-corrects. After `HOOK_DRAIN_BUSY_ATTEMPT_LIMIT` consecutive busy checks
+  (default: 10), it stops retrying indefinitely and delivers the queued work
+  with steering enabled so a stalled active turn can receive it. The
+  `drainBusyAttemptLimit` constructor option provides the equivalent
+  programmatic setting.
 - Delivery uses the SDK (`paseo.agents.ref(id).send`) when available and falls
   back to `paseo send --no-wait <agentId> <msg>`. SOS messages are delivered
   without steering; normal messages steer into the active turn queue.

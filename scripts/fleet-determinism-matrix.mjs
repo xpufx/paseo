@@ -472,6 +472,32 @@ const PARTS = [
     note: "Append-only stores and a pure CQRS projection. No input from any live model: the receipts are what the orchestrator reported, read back verbatim.",
   },
   {
+    file: `${PLUGIN}/server/telemetry.ts`,
+    part: "In-process telemetry tap, streaming JSONL store, and composite index metrics aggregation (#1173)",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "setTelemetryStorePathForTest",
+        "defaultTelemetryStorePath",
+        "getTelemetryStorePath",
+        "appendTelemetryRecord",
+        "readTelemetryRecords",
+        "aggregateModelTelemetry",
+        "setupTelemetryTap",
+        "handleUppidiModelTelemetryQuery",
+      ],
+    },
+    evidence: [
+      [`telemetry.ts:88-97`, "appends immutable normalized JSONL turn records to scoped plugin-data file"],
+      [`telemetry.ts:111-157`, "reads streaming JSONL records with exact provider/model/window filtering"],
+      [`telemetry.ts:177-335`, "aggregates counts, percentiles, cache ratios, and composite indices via pure arithmetic"],
+      [`telemetry.ts:348-429`, "in-process event listeners capture turn lifecycle timestamps and usage without inference"],
+      [`telemetry.ts:434-465`, "RPC query handler projects precomputed aggregations from stored turn telemetry"],
+    ],
+    note: "Measures LLM turn performance, tool thrashing, FDSI, and worker ROI. All numbers and composite indices are deterministic arithmetic over counters and turn timestamps.",
+  },
+  {
     file: `${PLUGIN}/server/metrics.ts`,
     part: "Model rollup receipts and candidate derivation from daemon counters",
     layer: "server",

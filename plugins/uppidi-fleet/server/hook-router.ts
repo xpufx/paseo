@@ -209,6 +209,8 @@ export interface HookRouterOptions {
   watchdogAlertCooldownMs?: number;
   boardSweepIntervalMs?: number;
   frontDeskThrottleMs?: number;
+  /** Consecutive busy drain checks before queued work is steered into the active turn. */
+  drainBusyAttemptLimit?: number;
   workspacesData?: any[];
   projectsData?: any[];
   workspacesPath?: string;
@@ -3527,6 +3529,7 @@ export class HookRouter {
   public readonly watchdogAlertCooldownMs: number;
   public readonly boardSweepIntervalMs: number;
   public readonly frontDeskThrottleMs: number;
+  public readonly drainBusyAttemptLimit: number;
   private lastDeliveryTimes = new Map<string, number>();
   public latestAgentMap: Map<string, WatchdogAgent> | null = null;
   /** Teardown reconciliation state (#872): last teardown stamp + suppressed ids. */
@@ -3715,6 +3718,10 @@ export class HookRouter {
         : isTestMode
           ? 0
           : Number(process.env.HOOK_FRONTDESK_THROTTLE_MS ?? 2000);
+    this.drainBusyAttemptLimit = Math.max(
+      1,
+      Math.floor(options?.drainBusyAttemptLimit ?? Number(process.env.HOOK_DRAIN_BUSY_ATTEMPT_LIMIT ?? 10)),
+    );
     mkdirSync(this.queueDir, { recursive: true });
     mkdirSync(this.stateDir, { recursive: true });
     mkdirSync(this.logDir, { recursive: true });
@@ -9387,6 +9394,8 @@ export class HookRouter {
 
     this.draining.add(key);
 
+    let forceSteer = false;
+
     try {
       let targetAgentId: string | null = null;
       if (key === "frontdesk") {
@@ -9551,21 +9560,32 @@ export class HookRouter {
 
         if (isBusy) {
           this.busyQueues.add(key);
-          const attempts = (this.busyAttempts.get(key) ?? 0) + 1;
+          const attempts = Math.min(
+            this.drainBusyAttemptLimit,
+            (this.busyAttempts.get(key) ?? 0) + 1,
+          );
           this.busyAttempts.set(key, attempts);
-          this.log(`[info] Agent ${targetAgentId} busy for ${key}, retry scheduled (attempt ${attempts})`);
+          if (attempts >= this.drainBusyAttemptLimit) {
+            forceSteer = true;
+            this.log(
+              `[warn] Agent ${targetAgentId} remained busy for ${key} across ${attempts} drain checks; ` +
+                "steering queued work into the active turn",
+            );
+          } else {
+            this.log(`[info] Agent ${targetAgentId} busy for ${key}, retry scheduled (attempt ${attempts})`);
 
-          // Schedule a backoff retry in case turn_ended was missed
-          if (!this.backoffTimers.has(key)) {
-            const delay = Math.min(30000, 3000 * Math.pow(1.5, Math.min(attempts, 5)));
-            const timer = setTimeout(() => {
-              this.backoffTimers.delete(key);
-              void this.drain(key);
-            }, delay);
-            timer.unref?.();
-            this.backoffTimers.set(key, timer);
+            // Schedule a backoff retry in case turn_ended was missed
+            if (!this.backoffTimers.has(key)) {
+              const delay = Math.min(30000, 3000 * Math.pow(1.5, Math.min(attempts, 5)));
+              const timer = setTimeout(() => {
+                this.backoffTimers.delete(key);
+                void this.drain(key);
+              }, delay);
+              timer.unref?.();
+              this.backoffTimers.set(key, timer);
+            }
+            return;
           }
-          return;
         }
       }
 
@@ -9579,7 +9599,7 @@ export class HookRouter {
         const combinedMsg = `[forgejo-hook] Batch notification (${batchCount} events):\n\n` +
           list.map((e, idx) => `### Event ${idx + 1}\n${e.msg}`).join("\n\n---\n\n");
         const ok = await this.deliverMessage(targetAgentId, combinedMsg, {
-          steer: isAnySos,
+          steer: isAnySos || forceSteer,
           noWait: false,
         });
         if (ok) {
@@ -9593,7 +9613,7 @@ export class HookRouter {
       } else if (list.length === 1) {
         const entry = list[0];
         const ok = await this.deliverMessage(targetAgentId, entry.msg, {
-          steer: Boolean(entry.isSos),
+          steer: Boolean(entry.isSos) || forceSteer,
           noWait: false,
         });
         if (ok) {
