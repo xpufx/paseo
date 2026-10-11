@@ -1872,26 +1872,6 @@ export async function handleFleetResetState(
       }
     }
 
-    // Also check legacy ~/.paseo/forgejo-hook/ if any
-    const legacyBoardStateDir = join(home, ".paseo", "forgejo-hook", "board-state");
-    if (fs.existsSync(legacyBoardStateDir)) {
-      try {
-        const files = fs.readdirSync(legacyBoardStateDir);
-        for (const file of files) {
-          if (file.endsWith(".json")) {
-            try {
-              fs.unlinkSync(join(legacyBoardStateDir, file));
-              boardStateFiles++;
-            } catch (err) {
-              console.warn(`[uppidi-fleet:agents] file delete failed:`, err);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[uppidi-fleet:agents] file delete failed:`, err);
-      }
-    }
-
     // 3. Clear queues on router and on disk
     const router = getActiveHookRouter();
     if (router && typeof (router as any).clearAllQueues === "function") {

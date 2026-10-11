@@ -2496,7 +2496,7 @@ export function defaultCircuitBreakerPath(): string {
   if (process.env.NODE_ENV === "test" && !process.env.MODEL_HEALTH_PATH) {
     return join(os.tmpdir(), `paseo-model-health-test-${process.pid}.json`);
   }
-  return process.env.MODEL_HEALTH_PATH || join(resolveHostHome(), ".paseo", "model-health.json");
+  return process.env.MODEL_HEALTH_PATH || join(resolveHostHome(), ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "model-health.json");
 }
 
 export interface ModelHealthEntry {

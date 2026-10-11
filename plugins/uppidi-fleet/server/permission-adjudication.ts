@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { basename, dirname, join } from "node:path";
+import { resolveHostHome } from "./role-models.js";
 
 /**
  * Conservative, documented safe-pattern allowlist for fleet permission
@@ -705,8 +706,8 @@ function defaultLogPath(options: AdjudicationLogOptions = {}): string {
   const env = options.env ?? process.env;
   const configured = env.HOOK_STATE_DIR?.trim();
   if (configured) return join(configured, "permission-decisions.jsonl");
-  const home = options.home ?? env.HOME ?? os.homedir();
-  return join(home, ".paseo", "forgejo-hook", "permission-decisions.jsonl");
+  const home = resolveHostHome(env);
+  return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "permission-decisions.jsonl");
 }
 
 /** Appends one decision record to the durable JSONL log. Never throws. */
