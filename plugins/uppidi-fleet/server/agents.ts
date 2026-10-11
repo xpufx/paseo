@@ -130,6 +130,8 @@ export interface RawAgentRecord {
     contextWindowMaxTokens?: number;
   } | null;
   url?: string;
+  category?: UppidiAgentCategory;
+  role?: string;
 }
 
 export function categorizeAgent(name: string): UppidiAgentCategory {
@@ -366,7 +368,7 @@ export function deriveDeterministicState(
       return { state: "idle:quota-exhausted", detail: "Quota cooldown" };
     }
 
-    const category = categorizeAgent(raw.name || raw.title || "");
+    const category = raw.category || raw.role || raw.labels?.["role"] || raw.labels?.["category"] || categorizeAgent(raw.name || raw.title || "");
     const lastActivity = raw.lastActivityAt || raw.updatedAt;
     if ((category === "orchestrator" || category === "front-desk") && lastActivity) {
       const idleMs = Date.now() - new Date(lastActivity).getTime();
@@ -933,33 +935,17 @@ export function resolveCanonicalRole(
   return { role: CODING_AGENT_CATEGORY };
 }
 
-function describeRoleDivergence(
-  nameCategory: UppidiAgentCategory,
-  registryRole: "front-desk" | "orchestrator" | "coding-agent"
-): string {
-  if (nameCategory === "front-desk") {
-    return `Agent name implies Front Desk but the router registry says "${registryRole}"`;
-  }
-  return `Agent name implies orchestrator but the router registry says "${registryRole}"`;
-}
-
 /**
- * Projects the canonical registry role onto every agent (#1078). When the
- * registry is reachable `category` is overwritten with the registry role and
- * the name heuristic is preserved as `nameCategory`; divergences are collected
- * so the surface can show the mismatch instead of hiding it. When the registry
- * is unreachable the name heuristic is kept and marked display-only.
+ * Projects the canonical registry role onto every agent (#1078, #1150). Role
+ * resolution relies strictly and deterministically on authoritative router
+ * registry records (`GET /frontdesk`, `GET /orchestrators`), without guessing
+ * roles from display names or alerting on name mismatches.
  */
 export function applyCanonicalRoles(
   agents: UppidiAgent[],
   registry: CanonicalFleetRegistry
 ): AgentRoleDivergence[] {
-  const divergences: AgentRoleDivergence[] = [];
-
   for (const agent of agents) {
-    const nameCategory = agent.category;
-    agent.nameCategory = nameCategory;
-
     if (!registry.available) {
       agent.roleSource = "name-heuristic";
       agent.roleDivergent = false;
@@ -969,25 +955,13 @@ export function applyCanonicalRoles(
     const canonical = resolveCanonicalRole(agent.id, registry);
     agent.category = canonical.role;
     agent.roleSource = "registry";
-    // Only a name that *claims* a role the registry does not grant is a lie.
-    // A generic display name under a registry-backed role is just a title.
-    agent.roleDivergent = !isCodingAgentCategory(nameCategory) && canonical.role !== nameCategory;
+    agent.roleDivergent = false;
     if (canonical.registryRepoKey) {
       agent.registryRepoKey = canonical.registryRepoKey;
     }
-
-    if (agent.roleDivergent) {
-      divergences.push({
-        agentId: agent.id,
-        agentName: agent.name,
-        nameCategory,
-        registryRole: canonical.role,
-        reason: describeRoleDivergence(nameCategory, canonical.role),
-      });
-    }
   }
 
-  return divergences;
+  return [];
 }
 
 export async function handleUppidiAgents(

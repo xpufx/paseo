@@ -1824,15 +1824,9 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
     const phantom = res.workers.find((a) => a.id === "phantom-desk");
     assert.ok(phantom, "the name-only desk must fall through to workers");
     assert.equal(phantom?.category, "coding-agent");
-    assert.equal(phantom?.nameCategory, "front-desk");
     assert.equal(phantom?.roleSource, "registry");
-    assert.equal(phantom?.roleDivergent, true);
-
-    const divergence = res.roleDivergences.find((d) => d.agentId === "phantom-desk");
-    assert.ok(divergence, "the registry/name mismatch must be surfaced");
-    assert.equal(divergence?.nameCategory, "front-desk");
-    assert.equal(divergence?.registryRole, "coding-agent");
-    assert.match(divergence?.reason ?? "", /registry says "coding-agent"/i);
+    assert.equal(phantom?.roleDivergent, false);
+    assert.equal(res.roleDivergences.length, 0);
   });
 
   it("promotes only the registered Front Desk id, regardless of its display name", async () => {
@@ -1873,13 +1867,13 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
     assert.equal(res.orchestrators[0]?.id, "orch-1");
     assert.equal(res.orchestrators[0]?.category, "orchestrator");
     assert.equal(res.orchestrators[0]?.registryRepoKey, "forge.example.com/org/repo");
-    assert.equal(res.orchestrators[0]?.roleDivergent, false, "a generic name is not a divergence");
+    assert.equal(res.orchestrators[0]?.roleDivergent, false);
 
     const fake = res.workers.find((a) => a.id === "fake-orch");
     assert.ok(fake);
     assert.equal(fake?.category, "coding-agent");
-    assert.equal(fake?.nameCategory, "orchestrator");
-    assert.equal(fake?.roleDivergent, true);
+    assert.equal(fake?.roleDivergent, false);
+    assert.equal(res.roleDivergences.length, 0);
   });
 
   it("marks name-derived roles display-only when no router registry is reachable", async () => {
