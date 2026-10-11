@@ -19,7 +19,7 @@
 # the gate was failing. The push run reports a regression after it lands; it
 # does not prevent one. That enforcement gap is still tracked in #680.
 #
-# Two jobs, not one, on purpose. The first live run (job 8952) proved why: every
+# Three jobs, not one, on purpose. The first live run (job 8952) proved why: every
 # test suite passed and `npm run typecheck` failed at plugins/twofado on a
 # pre-existing react/react-native ScrollView conflict. Bundled into a single job,
 # a known-red gate made the whole thing red even though nothing had regressed.
@@ -33,14 +33,15 @@
 #
 #   test-suites — `npm test` + `make conformance`. Green on every PR run so far.
 #                  The operator can make this required; see the #617 PR body.
+#   vendor-gate — vendored helper copies and tracked helper dist/ freshness.
 #   typecheck   — `npm run typecheck`. Required.
 #
-# The `test-suites` job also carries the vendored-copy gate: the committed helper
-# copies plugins publish from, plus the tracked helper dist/ against a fresh
-# build (#630, #682). It lives here rather than in install-smoke.yml, whose 0.8/0.9
-# matrix made it run twice per PR while it depends on no Paseo version at all
-# (#686) — and install-smoke is not a required check, so the gate was advisory.
-# Here it is required, and the push trigger above extends it to `main`.
+# The `vendor-gate` job checks the committed helper copies plugins publish from,
+# plus tracked helper dist/ against a fresh build (#630, #682). It lives here
+# rather than in install-smoke.yml, whose 0.8/0.9 matrix made it run twice per
+# PR while it depends on no Paseo version at all (#686) — and install-smoke is
+# not a required check, so the gate was advisory. This independent job remains
+# required, and the push trigger above extends it to `main`.
 #
 # Every gate step is `if: always()` so one red gate does not hide the state of
 # the others; a failing step still fails its job.
@@ -66,6 +67,7 @@ jobs:
   test-suites:
     name: Root test suites and plugin UI conformance
     runs-on: alpine-docker
+    timeout-minutes: 10
     # Same runner label and image as install-smoke.yml / mirror-prv.yml. A fresh
     # container per run is the point: no reused node_modules, no developer HOME,
     # and no live daemon — the three ways a suite can pass without proving
@@ -141,17 +143,45 @@ jobs:
           fi
           make conformance
 
-      # The vendored-copy gate, moved here from install-smoke.yml (#686). It used
-      # to sit in that job's 0.8/0.9 matrix while depending on no Paseo version —
-      # no CLI, no daemon, no install of Paseo — so it ran twice per PR and paid
-      # for the helper build inside `--check` twice (#685), in a job that is not a
-      # required check. Here it runs once, on a required check that also covers
-      # `main` via the push trigger above.
-      #
-      # `--check` builds packages/paseo-plugin-helper to prove the committed
-      # dist/ is what src/ produces (#682), and a build it cannot run is a red
-      # gate rather than a skipped one — hence the `npm ci` this job already had
-      # for its own suites, and the explicit skip below rather than a green pass.
+      - name: Publish gate summary
+        if: always()
+        run: |
+          set -euo pipefail
+          printf 'commit: %s\n' "${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            printf '\nTest suites and conformance: **required** as of #617.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # This gate creates throwaway plugin trees and runs several real helper
+  # builds. Keep it independent so runner/container lifecycle failures in that
+  # serial work cannot cancel an otherwise-complete root suite.
+  vendor-gate:
+    name: Vendored copy gate
+    runs-on: alpine-docker
+    timeout-minutes: 10
+    container:
+      image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Install dependencies from the lockfile
+        run: |
+          set -euo pipefail
+          npm ci
+
+      - name: Guard — dependencies are installed
+        id: deps
+        if: always()
+        run: |
+          if [ ! -d node_modules ]; then
+            echo "::error::node_modules is absent — the vendor gate cannot report a meaningful result"
+            echo "deps_ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "deps_ready=true" >> "$GITHUB_OUTPUT"
+
       - name: Unit-test the vendor gate
         if: always()
         run: |
@@ -170,19 +200,10 @@ jobs:
             echo "::error::skipped: dependencies were not installed — the vendor gate builds the helper to check dist/"
             exit 1
           fi
-          # Dev imports the bare paseo-plugin-helper specifier (resolved to the
-          # helper src via the workspace link + tsconfig paths); the vendored
-          # copies are the publish artifact the mirror stages and the install
-          # smoke installs. A legacy working-tree dev symlink is not publishable,
-          # so materialize it first (a no-op on a clean checkout). That step is
-          # the ONLY write this gate may perform: it must never refresh an
-          # already-materialized tree, or the --check below would be verifying
-          # the tree it had just rewritten and would report green whatever was
-          # committed (#630). Nothing may install or publish a linked/partial
-          # tree — such a tree installs as a broken plugin (#146).
+          # Materialize only a legacy working-tree symlink. Never rewrite a
+          # committed copy before --check, or the check would verify its own
+          # output instead of detecting drift (#630).
           node scripts/vendor-sync.mjs --materialize-links
-          # Back the claim that the step above wrote nothing it shouldn't: if it
-          # rewrote a committed copy, --check is now verifying its own output.
           if ! git diff --quiet -- plugins; then
             git --no-pager diff --stat -- plugins
             echo "::error::materialize step rewrote committed vendored copies — the --check below would verify the tree it just wrote"
@@ -202,7 +223,7 @@ jobs:
           set -euo pipefail
           printf 'commit: %s\n' "${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-            printf '\nTest suites and conformance: **required** as of #617.\n' >> "$GITHUB_STEP_SUMMARY"
+            printf '\nVendored copy trees: **required**.\n' >> "$GITHUB_STEP_SUMMARY"
           fi
 
   # Typecheck is a separate job so it reports independently of the test gate,
@@ -215,6 +236,7 @@ jobs:
   typecheck:
     name: Typecheck
     runs-on: alpine-docker
+    timeout-minutes: 10
     container:
       image: forge.mrs.uppidi.com/xpufx-org/runner-containers/paseo-ci:latest
     steps:

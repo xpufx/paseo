@@ -169,6 +169,14 @@ function clearSettingsStorage(): void {
   resetUppidiFleetSettingsStorageInstance();
 }
 
+async function waitForFile(filePath: string, timeoutMs = 1_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (!existsSync(filePath) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return existsSync(filePath);
+}
+
 beforeEach(() => {
   clearSettingsStorage();
 });
@@ -2740,9 +2748,8 @@ describe("watchdog metrics rollup tick (#560)", () => {
       metricsRollup: true,
     });
 
-    // appendRollupReceipt is fire-and-forget; flush the microtask/IO queue.
-    await new Promise((r) => setTimeout(r, 50));
-    assert.equal(existsSync(metricsFile), true);
+    // appendRollupReceipt is fire-and-forget; wait for its bounded completion.
+    assert.equal(await waitForFile(metricsFile), true);
     const persisted = JSON.parse(readFileSync(metricsFile, "utf8"));
     assert.equal(persisted.receipts.length, 1);
     assert.equal(persisted.receipts[0].model, "deepseek-v4.1-flash");
@@ -2775,9 +2782,9 @@ describe("watchdog metrics rollup tick (#560)", () => {
     const map = new Map([["agent-1", metricsAgent("agent-1")]]);
     const audit = { agentMap: map, orchestratorRecords: [], deliver: async () => true, reloadAgent: async () => ({ ok: true }), metricsRollup: true };
     await router.runWatchdogAudit({ ...audit, now: 1_000_000 });
-    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(await waitForFile(metricsFile), true);
     await router.runWatchdogAudit({ ...audit, now: 1_000_001 });
-    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(await waitForFile(metricsFile), true);
 
     assert.equal(router.canWatchdogAlert("metrics_rollup", 1_000_001), false);
     const persisted = JSON.parse(readFileSync(metricsFile, "utf8"));
