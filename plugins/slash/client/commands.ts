@@ -22,6 +22,9 @@ function showFeedback(message: string, isError = false): void {
         return;
       }
     }
+    if (!toast) {
+      console.error(`[slash.commands] show-feedback: no toast available, message="${message}"`);
+    }
   } catch {}
 }
 
@@ -84,7 +87,13 @@ export function registerSlashCommands(client: PluginClientContext): () => void {
             context: "agent",
             async onSubmit(ctx) {
               const prompt = interpolateTemplate(command.action.verb === "send" ? command.action.template : "", ctx.args);
-              await ctx.paseo.agents.ref(ctx.agent.id).send(prompt);
+              try {
+                await ctx.paseo.agents.ref(ctx.agent.id).send(prompt);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                report(`send:${command.name}`, err);
+                showFeedback(`/${command.name} send failed: ${message}`, true);
+              }
             },
           }),
         );

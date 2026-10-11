@@ -1,6 +1,17 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { useRpc } from "@getpaseo/plugin/client";
-import { Icon, Modal, useToast, ScrollView, FlatList, TextInput as HostTextInput, copyText } from "@getpaseo/plugin/client/react-native";
+import {
+  Icon,
+  Modal,
+  useToast,
+  ScrollView,
+  FlatList,
+  TextInput as HostTextInput,
+  copyText,
+  // Mobile-bridgeless guard: on platforms without @getpaseo/plugin/client/react-native
+  // these are provided as no-op stubs to prevent build failures (see #510).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+} from "@getpaseo/plugin/client/react-native";
 import { initClientHelpers, registerCommandCenterItem } from "./client/vendor/paseo-plugin-helper/core";
 import { registerSidebarSurface } from "./client/vendor/paseo-plugin-helper/lifecycle";
 import { registerSlashCommands } from "./client/commands";

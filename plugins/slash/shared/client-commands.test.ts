@@ -159,4 +159,40 @@ describe("registerSlashCommands rpc wiring", () => {
 
     dispose();
   });
+
+  it("logs error and prevents send when agent.send() fails on mobile", async () => {
+    const { client, contributions, sent, agentRef } = harness();
+    const showMock = vi.fn();
+    const errorMock = vi.fn();
+
+    // Mock client host helper deps with a toast API
+    const { initClientHelpers } = await import("../client/vendor/paseo-plugin-helper/core");
+    initClientHelpers({
+      Icon: (() => null) as any,
+      Modal: (() => null) as any,
+      useRpc: (() => () => Promise.resolve()) as any,
+      useToast: () => ({ show: showMock, error: errorMock }),
+    });
+
+    // Make agent.send() reject on mobile
+    agentRef.send = vi.fn(async (message: string) => {
+      throw new Error("Mobile delivery failed: bridge error");
+    });
+
+    const dispose = registerSlashCommands(client);
+    await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
+    const review = contributions.find((c) => c.name === "slash-review");
+    expect(review).toBeDefined();
+
+    await review?.onSubmit({
+      args: "focus on performance",
+      agent: { id: "agent-1" },
+      paseo: client.paseo,
+    });
+
+    // Error should be logged (report called), sent should be empty (send not called)
+    expect(sent).toHaveLength(0);
+
+    dispose();
+  });
 });
