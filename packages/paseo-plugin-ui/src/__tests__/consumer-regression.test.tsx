@@ -234,4 +234,68 @@ describe("Consumer Regression Harness (xpufx-org/paseo#1221)", () => {
     });
     expect(onSave).toHaveBeenCalled();
   });
+
+  it("propagates light/dark host theme colors down through HostThemeProvider to card and text surfaces (#1235)", () => {
+    const LIGHT_THEME: ThemeColors = {
+      surface0: "#ffffff",
+      surface1: "#f4f4f5",
+      surface2: "#e4e4e7",
+      border: "#e4e4e7",
+      foreground: "#09090b",
+      foregroundMuted: "#71717a",
+      accent: "#2563eb",
+      accentForeground: "#ffffff",
+      statusSuccess: "#16a34a",
+      statusWarning: "#ca8a04",
+      statusDanger: "#dc2626",
+    };
+
+    const DARK_THEME: ThemeColors = {
+      surface0: "#18181b",
+      surface1: "#27272a",
+      surface2: "#3f3f46",
+      border: "#3f3f46",
+      foreground: "#fafafa",
+      foregroundMuted: "#a1a1aa",
+      accent: "#3b82f6",
+      accentForeground: "#ffffff",
+      statusSuccess: "#22c55e",
+      statusWarning: "#eab308",
+      statusDanger: "#ef4444",
+    };
+
+    const lightRenderer = render(
+      <HostThemeProvider theme={{ colors: LIGHT_THEME }}>
+        <HostCard variant="elevated">
+          <HostFormRow label="Command prefix">
+            <HostTextInput value="slash" />
+          </HostFormRow>
+        </HostCard>
+      </HostThemeProvider>,
+    );
+
+    const lightCard = lightRenderer.root.findByType(HostCard);
+    const lightView = lightCard.findByType("View");
+    const lightStyle = Array.isArray(lightView.props.style)
+      ? Object.assign({}, ...lightView.props.style.filter(Boolean))
+      : lightView.props.style;
+    expect(lightStyle.backgroundColor).toBe(LIGHT_THEME.surface1);
+
+    const darkRenderer = render(
+      <HostThemeProvider theme={{ colors: DARK_THEME }}>
+        <HostCard variant="elevated">
+          <HostFormRow label="Command prefix">
+            <HostTextInput value="slash" />
+          </HostFormRow>
+        </HostCard>
+      </HostThemeProvider>,
+    );
+
+    const darkCard = darkRenderer.root.findByType(HostCard);
+    const darkView = darkCard.findByType("View");
+    const darkStyle = Array.isArray(darkView.props.style)
+      ? Object.assign({}, ...darkView.props.style.filter(Boolean))
+      : darkView.props.style;
+    expect(darkStyle.backgroundColor).toBe(DARK_THEME.surface1);
+  });
 });

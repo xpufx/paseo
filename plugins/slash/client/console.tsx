@@ -16,9 +16,12 @@ import {
   HostStack,
   HostTabs,
   HostTextInput,
+  HostThemeProvider,
   HostToggle,
   spacing,
+  useHostTheme,
   type HostTabItem,
+  type PluginTheme,
 } from "./host-ui";
 import { usePluginSettings, useRpcMutation, useRpcQuery } from "./vendor/paseo-plugin-helper/core";
 import {
@@ -238,7 +241,20 @@ function CommandForm({ draft, errors, warnings, catalog, onChange }: CommandForm
   );
 }
 
-export function SlashConsole() {
+export interface SlashConsoleProps {
+  theme?: PluginTheme;
+}
+
+export function SlashConsole(props: SlashConsoleProps = {}) {
+  const content = <SlashConsoleInner />;
+  if (props.theme) {
+    return <HostThemeProvider theme={props.theme}>{content}</HostThemeProvider>;
+  }
+  return content;
+}
+
+function SlashConsoleInner() {
+  const { colors } = useHostTheme();
   const { settings, updateSettings, resetSettings } = usePluginSettings(slashSettingsContract);
   const catalog = useRpcQuery(catalogRpc, {});
   const operations = useRpcQuery(operationsListRpc, {});
@@ -294,8 +310,15 @@ export function SlashConsole() {
   }
 
   return (
-    <View style={{ flex: 1, minHeight: 0, width: "100%" }}>
-      <HostScroll>
+    <View style={{ flex: 1, minHeight: 0, width: "100%", backgroundColor: colors.surface0 }}>
+      <HostScroll
+        contentContainerStyle={{
+          paddingHorizontal: spacing.lg,
+          paddingTop: 14,
+          paddingBottom: 20,
+          gap: spacing.md,
+        }}
+      >
         <HostCard variant="tinted">
           <HostFormRow label="Command prefix">
             <HostTextInput

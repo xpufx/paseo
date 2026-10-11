@@ -22,6 +22,7 @@ export {
   HostStack,
   HostTabs,
   HostTextInput,
+  HostThemeProvider,
   HostToggle,
   useHostLayout,
   useHostTheme,
@@ -49,7 +50,10 @@ export type {
   HostTabItem,
   HostTabsProps,
   HostTextInputProps,
+  HostThemeProviderProps,
   HostToggleProps,
+  PluginTheme,
+  ThemeColors,
 } from "@xpufx/paseo-plugin-ui";
 
 /** Static spacing scale shared by the console layout. */

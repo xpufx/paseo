@@ -43,4 +43,10 @@ describe("slash is off the frozen helper client kit (#937)", () => {
     expect(hostUiSource).toContain('from "@xpufx/paseo-plugin-ui"');
     expect(hostUiSource).not.toMatch(/from\s+["']react-native["']/);
   });
+
+  it("mounts the console wrapped in HostThemeProvider for host theme propagation", () => {
+    const indexSource = readFileSync(path.join(pluginRoot, "index.client.tsx"), "utf8");
+    expect(indexSource).toContain("<HostThemeProvider");
+    expect(indexSource).toContain("<SlashConsole");
+  });
 });

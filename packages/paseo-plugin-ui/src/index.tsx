@@ -112,7 +112,7 @@ export function getStatusColor(
   }
 }
 
-export type { MetricThresholds, ResponsiveLayout, StatusVariant, ThemeColors } from "./types.js";
+export type { MetricThresholds, PluginTheme, ResponsiveLayout, StatusVariant, ThemeColors } from "./types.js";
 
 export interface PluginUiTheme {
   colors: ThemeColors;
