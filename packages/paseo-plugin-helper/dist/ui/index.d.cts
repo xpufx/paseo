@@ -4,7 +4,7 @@ import { StyleProp, ViewStyle, ScrollViewProps, TextStyle, KeyboardTypeOptions, 
 import { S as StatusVariant, T as ThemeColors } from '../types-4TBN5lgi.cjs';
 import { M as MetricThresholds } from '../formatters-CtC4syDt.cjs';
 import { S as SettingsContract } from '../settings-BNRcFeSP.cjs';
-import { a as HostSurfaceProps, P as PluginCleanup } from '../host-BAF48X1U.cjs';
+import { a as HostSurfaceProps, P as PluginCleanup } from '../host-D31sreow.cjs';
 import 'zod';
 import '../rpc-D27pph91.cjs';
 import '@getpaseo/plugin/client';

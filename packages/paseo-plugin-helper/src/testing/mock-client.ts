@@ -50,7 +50,15 @@ export interface MockClientContext {
     config: unknown;
     terminals: unknown;
     agents: {
-      list(): Promise<{ entries: Array<{ agent: MockAgent }> }>;
+      list(options?: any): Promise<{
+        entries: Array<{ agent: MockAgent }>;
+        subscription?: {
+          subscribe(observer: {
+            snapshot?(snapshot: { entries: Array<{ agent: MockAgent }> }): void;
+            update?(message: { type: string; payload: HostAgentUpdate }): void;
+          }): () => void;
+        };
+      }>;
       ref(id: string): unknown;
       create(options: unknown): Promise<unknown>;
       subscribe(cb: (update: HostAgentUpdate) => void): () => void;
@@ -128,9 +136,29 @@ export function createMockClientContext(): MockClientContext {
       config: {} as any,
       terminals: {} as any,
       agents: {
-        list: async () => ({
-          entries: Array.from(agents.values()).map((agent) => ({ agent })),
-        }),
+        list: async (options?: any) => {
+          const entries = Array.from(agents.values()).map((agent) => ({ agent }));
+          if (options?.subscribe) {
+            const subscription = {
+              subscribe: (observer: {
+                snapshot?(snapshot: { entries: Array<{ agent: MockAgent }> }): void;
+                update?(message: { type: string; payload: HostAgentUpdate }): void;
+              }) => {
+                const unsub = () => {
+                  agentSubscribers.delete(listener);
+                };
+                const listener = (update: HostAgentUpdate) => {
+                  observer.update?.({ type: "agent_update", payload: update });
+                };
+                agentSubscribers.add(listener);
+                observer.snapshot?.({ entries });
+                return unsub;
+              },
+            };
+            return { entries, subscription };
+          }
+          return { entries };
+        },
         ref: () => ({} as any),
         create: async () => ({} as any),
         subscribe: (cb: (update: HostAgentUpdate) => void) => {

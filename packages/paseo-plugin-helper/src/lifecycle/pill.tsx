@@ -632,6 +632,8 @@ export function registerComposerPill<TPayload = any>(
     syncSharedLabelTimer();
   }
 
+  const lifetime = new AbortController();
+
   const unsubscribe = client.paseo.agents.subscribe((update) => {
     if (disposed) return;
     if ("agentId" in update && update.kind === "remove") {
@@ -645,14 +647,37 @@ export function registerComposerPill<TPayload = any>(
   });
 
   client.paseo.agents
-    .list()
+    .list({ subscribe: {}, signal: lifetime.signal })
     .then((result) => {
       if (disposed) return;
-      for (const { agent } of result.entries) {
-        if (agent.workspaceId) addPill(agent.id, agent.workspaceId);
+      if (result.entries) {
+        for (const { agent } of result.entries) {
+          if (agent.workspaceId) addPill(agent.id, agent.workspaceId);
+        }
+      }
+      if (result.subscription) {
+        result.subscription.subscribe({
+          snapshot: ({ entries }: { entries: Array<{ agent: { id: string; workspaceId?: string | null } }> }) => {
+            if (disposed) return;
+            for (const { agent } of entries) {
+              if (agent.workspaceId) addPill(agent.id, agent.workspaceId);
+            }
+          },
+          update: (message: any) => {
+            if (disposed) return;
+            if (message?.type !== "agent_update") return;
+            const update = message.payload;
+            if ("agentId" in update && update.kind === "remove") {
+              removePill(update.agentId);
+            } else if ("agent" in update && update.agent?.workspaceId) {
+              addPill(update.agent.id, update.agent.workspaceId);
+            }
+          },
+        });
       }
     })
     .catch((error) => {
+      if (lifetime.signal.aborted || disposed) return;
       // Silently dropping this leaves a plugin with zero pills and no clue why.
       reportSuppressed(console, "registerComposerPill agents.list() failed", error, "warn");
     });
@@ -660,6 +685,7 @@ export function registerComposerPill<TPayload = any>(
   return () => {
     if (disposed) return;
     disposed = true;
+    lifetime.abort();
     unsubscribe();
     if (sharedLabelTimer) {
       clearInterval(sharedLabelTimer);

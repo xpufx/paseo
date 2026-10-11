@@ -1,6 +1,6 @@
 import * as React from 'react';
 import React__default, { ReactNode, ComponentType } from 'react';
-import { g as HostPillProps, c as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, r as HostAgentPanelProps, t as HostWorkspacePanelProps, k as HostToast, f as HostLayout } from '../host-BAF48X1U.cjs';
+import { g as HostPillProps, c as ComposerPillRegistrar, P as PluginCleanup, a as HostSurfaceProps, r as HostAgentPanelProps, t as HostWorkspacePanelProps, k as HostToast, f as HostLayout } from '../host-D31sreow.cjs';
 export { F as FALLBACK_COLORS, H as HOST_SHADOW_COLOR, a as HostLayoutProvider, b as HostLayoutProviderProps, c as HostTheme, d as HostThemeProvider, e as HostThemeProviderProps, f as alpha, g as getContrastColor, h as getLuminance, i as getStatusColor, j as getVariantPalette, r as resolveHostColors, u as useHostLayout, k as useHostTheme } from '../host-color-C3yeBsXb.cjs';
 import { P as PluginTheme } from '../types-4TBN5lgi.cjs';
 import * as pluginClient from '@getpaseo/plugin/client';

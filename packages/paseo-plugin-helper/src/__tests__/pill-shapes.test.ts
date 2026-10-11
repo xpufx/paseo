@@ -448,4 +448,76 @@ describe("registerComposerPill host shapes", () => {
     (client as any).emit({ kind: "upsert", agent: { id: "a2", workspaceId: "w1" } });
     expect(pills).toHaveLength(0);
   });
+
+  it("subscribes to live agent updates via list({ subscribe: {} }) and mounts dynamic agents (#1222)", async () => {
+    let capturedOptions: any;
+    let observer: any;
+    const { client, pills } = modernRegistrar();
+
+    (client.paseo.agents as any).list = async (options?: any) => {
+      capturedOptions = options;
+      return {
+        entries: [{ agent: { id: "initial-1", workspaceId: "w1" } }],
+        subscription: {
+          subscribe: (obs: any) => {
+            observer = obs;
+            return () => {};
+          },
+        },
+      };
+    };
+
+    const cleanup = registerComposerPill(client, {
+      id: "dynamic-agent-pill",
+      title: "DynamicAgent",
+      renderModal: () => null,
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Verify list was called with subscribe and signal
+    expect(capturedOptions).toBeDefined();
+    expect(capturedOptions.subscribe).toEqual({});
+    expect(capturedOptions.signal).toBeInstanceOf(AbortSignal);
+    expect(capturedOptions.signal.aborted).toBe(false);
+
+    // Initial agent from list entries was mounted
+    expect(pills).toHaveLength(1);
+    expect(pills[0].contribution.agentId).toBe("initial-1");
+
+    // Live agent update: dynamic agent spawned
+    act(() => {
+      observer.update({
+        type: "agent_update",
+        payload: {
+          kind: "upsert",
+          agent: { id: "dynamic-2", workspaceId: "w1" },
+        },
+      });
+    });
+
+    expect(pills).toHaveLength(2);
+    expect(pills[1].contribution.agentId).toBe("dynamic-2");
+
+    // Dynamic agent removed
+    act(() => {
+      observer.update({
+        type: "agent_update",
+        payload: {
+          kind: "remove",
+          agentId: "dynamic-2",
+        },
+      });
+    });
+
+    expect(pills).toHaveLength(1);
+    expect(pills[0].contribution.agentId).toBe("initial-1");
+
+    // Teardown aborts the lifetime signal and removes all pills
+    cleanup();
+    expect(capturedOptions.signal.aborted).toBe(true);
+    expect(pills).toHaveLength(0);
+  });
 });
+

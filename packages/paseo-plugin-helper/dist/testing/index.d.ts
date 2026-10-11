@@ -1,7 +1,7 @@
 import { ComponentType } from 'react';
-import { H as HostAgentRef, a as HostSurfaceProps, P as PluginCleanup, b as HostAgentUpdate } from '../host-BAF48X1U.js';
+import { H as HostAgentRef, a as HostSurfaceProps, P as PluginCleanup, b as HostAgentUpdate } from '../host-D31sreow.js';
 import { PluginComposerPillContribution, PluginButtonRegistration } from '@getpaseo/plugin/client';
-import { C as CommandCenterItemContribution } from '../command-center-74fsLGOI.js';
+import { C as CommandCenterItemContribution } from '../command-center-DQU96J5s.js';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.js';
 import 'react-native';
 import 'zod';
@@ -47,10 +47,23 @@ interface MockClientContext {
         config: unknown;
         terminals: unknown;
         agents: {
-            list(): Promise<{
+            list(options?: any): Promise<{
                 entries: Array<{
                     agent: MockAgent;
                 }>;
+                subscription?: {
+                    subscribe(observer: {
+                        snapshot?(snapshot: {
+                            entries: Array<{
+                                agent: MockAgent;
+                            }>;
+                        }): void;
+                        update?(message: {
+                            type: string;
+                            payload: HostAgentUpdate;
+                        }): void;
+                    }): () => void;
+                };
             }>;
             ref(id: string): unknown;
             create(options: unknown): Promise<unknown>;

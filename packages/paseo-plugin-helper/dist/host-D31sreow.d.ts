@@ -80,11 +80,7 @@ type HostAgentUpdate = {
 };
 interface HostAgentsApi {
     subscribe(cb: (update: HostAgentUpdate) => void): () => void;
-    list(): Promise<{
-        entries: Array<{
-            agent: HostAgentRef;
-        }>;
-    }>;
+    list(options?: any): Promise<any>;
 }
 type PluginCleanup = () => void;
 type HostCopyText = (text: string) => Promise<void>;

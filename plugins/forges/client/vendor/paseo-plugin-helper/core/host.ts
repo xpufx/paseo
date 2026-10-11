@@ -110,9 +110,15 @@ export type HostAgentUpdate =
   | { kind: "remove"; agentId: string }
   | { kind: string; agent: HostAgentRef };
 
+export interface HostAgentListOptions {
+  subscribe?: Record<string, unknown>;
+  signal?: AbortSignal;
+  [key: string]: unknown;
+}
+
 export interface HostAgentsApi {
   subscribe(cb: (update: HostAgentUpdate) => void): () => void;
-  list(): Promise<{ entries: Array<{ agent: HostAgentRef }> }>;
+  list(options?: any): Promise<any>;
 }
 
 export type PluginCleanup = () => void;
