@@ -1,9 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { HostThemeProvider } from "paseo-plugin-helper/lifecycle";
 import { colorsOutsidePalette } from "paseo-plugin-ui-testing";
-import { HostBadge, HostButton, HostCard, HostProgressBar, HostStatusDot } from "./host-ui";
+import {
+  HostBadge,
+  HostButton,
+  HostCard,
+  HostProgressBar,
+  HostStatusDot,
+  HostThemeProvider,
+} from "./host-ui";
 
 vi.mock("react-native", () => {
   const stub = (name: string) => {

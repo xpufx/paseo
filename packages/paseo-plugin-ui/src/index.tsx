@@ -973,6 +973,44 @@ export function HostKeyValue({
   );
 }
 
+export interface HostKeyValueGroupProps {
+  children: ReactNode;
+  columns?: 1 | 2 | 3 | 4;
+  gap?: number;
+  style?: StyleProp<ViewStyle>;
+}
+
+/** Fluid key/value grid. */
+export function HostKeyValueGroup({
+  children,
+  columns = 2,
+  gap = 8,
+  style,
+}: HostKeyValueGroupProps) {
+  const childArray = React.Children.toArray(children).filter(Boolean);
+  return (
+    <View
+      style={[
+        { flexDirection: "row", flexWrap: "wrap", width: "100%", gap },
+        style,
+      ]}
+    >
+      {childArray.map((child, index) => (
+        <View
+          key={index}
+          style={{
+            flexGrow: 1,
+            flexShrink: 1,
+            flexBasis: `${Math.floor(100 / columns) - 2}%`,
+          }}
+        >
+          {child}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 // --- empty state -----------------------------------------------------------
 
 export interface HostEmptyStateProps {

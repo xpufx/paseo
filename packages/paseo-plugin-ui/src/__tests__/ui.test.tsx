@@ -5,6 +5,8 @@ import {
   HostActionBar,
   HostButton,
   HostFormRow,
+  HostKeyValue,
+  HostKeyValueGroup,
   HostModalBody,
   HostModalSection,
   HostScroll,
@@ -235,4 +237,22 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     // Single outer HostScroll must own the scroll viewport
     expect(renderer.root.findAllByType("ScrollView")).toHaveLength(1);
   });
+
+  it("renders HostKeyValueGroup with multi-column items", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <HostKeyValueGroup columns={2}>
+          <HostKeyValue label="Version" value="1.2.3" />
+          <HostKeyValue label="Channel" value="stable" />
+        </HostKeyValueGroup>
+      </HostThemeProvider>,
+    );
+
+    const texts = renderer.root.findAllByType("Text").map((t) => t.props.children);
+    expect(texts).toContain("Version");
+    expect(texts).toContain("1.2.3");
+    expect(texts).toContain("Channel");
+    expect(texts).toContain("stable");
+  });
 });
+
