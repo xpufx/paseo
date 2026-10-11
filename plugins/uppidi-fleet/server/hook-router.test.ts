@@ -2082,6 +2082,8 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     assert.ok(!(loadRouterConfig().enrolledRepos ?? []).includes("xpufx-org/durable-repo"));
     // Runtime state is still surfaced as queue depth, just not as enrollment.
     assert.equal(getFleetRosterInfo().repoQueuedHooks["xpufx-org/durable-repo"], 1);
+    // Orchestrator record is purged on unenroll (#1214)
+    assert.equal(router.readOrchestrator("xpufx-org/durable-repo"), null);
   });
 });
 
@@ -2269,6 +2271,7 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     queueDir = join(tempDir, "queues");
     stateDir = join(tempDir, "state");
     router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.enrollRepo("test-repo");
     router.writeFrontDesk(frontDeskId, "test");
     delivered = [];
     reloaded = [];
@@ -2315,6 +2318,17 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     });
     assert.ok(audit.anomalies.some((a) => a.type === "ORCHESTRATOR_MISSING"));
     assert.ok(delivered.some((d) => d.id === frontDeskId && d.msg.includes("was not found on daemon")));
+  });
+
+  it("skips missing orchestrator anomalies and alerts for unenrolled repositories (#1214)", async () => {
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "unenrolled-repo", agentId: "agent-missing" }],
+      agentMap: new Map(),
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+    });
+    assert.equal(audit.anomalies.some((a) => a.type === "ORCHESTRATOR_MISSING"), false);
+    assert.equal(delivered.some((d) => d.msg.includes("unenrolled-repo")), false);
   });
 
   it("stamps watchdog alerts with the fleet envelope (#985)", async () => {
@@ -3338,6 +3352,25 @@ describe("hook-router orchestrator pruning (#458)", () => {
     assert.equal(third.prunedCount, 1);
     assert.deepEqual(archivedIds, ["agent-flap"]);
     assert.equal(router.readOrchestrator("repo-flap"), null);
+  });
+
+  it("prunes orchestrator records for unenrolled repositories (#1214)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.enrollRepo("repo-enrolled");
+    router.writeOrchestrator("repo-enrolled", "agent-enrolled");
+    router.writeOrchestrator("repo-unenrolled", "agent-unenrolled");
+
+    const result = await router.pruneOrchestrators({
+      agentMap: new Map([
+        ["agent-enrolled", { id: "agent-enrolled", status: "running" }],
+        ["agent-unenrolled", { id: "agent-unenrolled", status: "running" }],
+      ]),
+    });
+
+    assert.equal(result.prunedCount, 1);
+    assert.equal(result.pruned[0]?.key, "repo-unenrolled");
+    assert.equal(router.readOrchestrator("repo-unenrolled"), null);
+    assert.equal(router.readOrchestrator("repo-enrolled")?.agentId, "agent-enrolled");
   });
 
   it("appends durable actor records for every deleteOrchestrator and front-desk clear (#1077)", () => {
