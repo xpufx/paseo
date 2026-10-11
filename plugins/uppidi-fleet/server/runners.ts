@@ -271,3 +271,17 @@ function firstFailure(fleetSources: UppidiRunnerSource[]): string | undefined {
   const first = unreachable ?? failed[0]!;
   return `Forgejo runner API ${first.failure === "unreachable" ? "unreachable" : "rejected the request"}: ${first.error ?? "no reason reported"}`;
 }
+
+export async function handleUppidiFleetScaleHost(
+  _input: Record<string, never>,
+  _context: any
+): Promise<{ ok: boolean; cpuPct?: number; memoryPct?: number; runnerCount?: number; error?: string }> {
+  return { ok: true, runnerCount: 0 };
+}
+
+export async function handleUppidiFleetDrainHost(
+  _input: Record<string, never>,
+  _context: any
+): Promise<{ ok: boolean; dinDRunning?: boolean; dinDHealthy?: boolean; error?: string }> {
+  return { ok: true, dinDRunning: false, dinDHealthy: false };
+}

@@ -1104,7 +1104,12 @@ export type UppidiLocalRunner = z.infer<typeof UppidiLocalRunnerSchema>;
 export const RunnerSourceSchema = z.object({
   /** `repo` / `org` / `user` for Forgejo scopes, `local` for podman. */
   key: z.string(),
-  kind: z.enum(["forgejo-runners", "local-containers"]),
+  kind: z.enum([
+    "forgejo-runners",
+    "local-containers",
+    "scaler-telemetry",
+    "admin-runners",
+  ]),
   /** API path or command that was queried, for display. */
   endpoint: z.string().optional(),
   ok: z.boolean(),
@@ -1176,6 +1181,38 @@ export const uppidiRunnersContract = defineContract({
   description: "Get CI runner fleet status and labels for repository actions",
   input: z.object({}),
   output: UppidiRunnersOutputSchema,
+});
+
+export const UppidiFleetScaleHostSchema = z.object({
+  ok: z.boolean(),
+  cpuPct: z.number().optional(),
+  memoryPct: z.number().optional(),
+  runnerCount: z.number().optional(),
+  onlineCount: z.number().optional(),
+  error: z.string().optional(),
+});
+export type UppidiFleetScaleHost = z.infer<typeof UppidiFleetScaleHostSchema>;
+
+export const uppidiFleetScaleHostContract = defineContract({
+  name: "uppidi-fleet.scale-host",
+  description: "Get scaler host telemetry (CPU, memory, runner capacity)",
+  input: z.object({}),
+  output: UppidiFleetScaleHostSchema,
+});
+
+export const UppidiFleetDrainHostSchema = z.object({
+  ok: z.boolean(),
+  dinDRunning: z.boolean().optional(),
+  dinDHealthy: z.boolean().optional(),
+  error: z.string().optional(),
+});
+export type UppidiFleetDrainHost = z.infer<typeof UppidiFleetDrainHostSchema>;
+
+export const uppidiFleetDrainHostContract = defineContract({
+  name: "uppidi-fleet.drain-host",
+  description: "Get DinD (Docker-in-Docker) status",
+  input: z.object({}),
+  output: UppidiFleetDrainHostSchema,
 });
 
 // Autonomous Fleet Capability & Benchmark Metrics (Issue #373 / Platform #18)

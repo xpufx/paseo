@@ -18,6 +18,8 @@ import {
   uppidiSkillsContract,
   uppidiSetSkillContract,
   uppidiRunnersContract,
+  uppidiFleetScaleHostContract,
+  uppidiFleetDrainHostContract,
   uppidiFleetMetricsContract,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
@@ -85,6 +87,7 @@ import {
 import { handleUppidiRoleModels, handleUppidiSetRoleModel } from "./server/role-models.js";
 import { handleUppidiSkills, handleUppidiSetSkill } from "./server/skills.js";
 import { handleUppidiRunners } from "./server/runners.js";
+import { handleUppidiFleetScaleHost, handleUppidiFleetDrainHost } from "./server/runners.js";
 import { handleUppidiFleetMetrics } from "./server/metrics.js";
 import {
   handleUppidiAuditRecord,
@@ -178,6 +181,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiSkillsContract, handleUppidiSkills);
   server.handle(uppidiSetSkillContract, handleUppidiSetSkill);
   server.handle(uppidiRunnersContract, handleUppidiRunners);
+  server.handle(uppidiFleetScaleHostContract, handleUppidiFleetScaleHost);
+  server.handle(uppidiFleetDrainHostContract, handleUppidiFleetDrainHost);
   server.handle(uppidiFleetMetricsContract, handleUppidiFleetMetrics);
   server.handle(uppidiArchiveAgentContract, handleUppidiArchiveAgent);
   server.handle(uppidiArchiveInactiveAgentsContract, handleUppidiArchiveInactiveAgents);
