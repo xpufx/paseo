@@ -1574,6 +1574,13 @@ export const DEFAULT_WATCHDOG_STEER_MESSAGE =
   "Health check: your previous turn ended without resuming work. " +
   "Sweep the board for triage and continue dispatching pending work.";
 
+// Machine-scale watchdog defaults (#1123). Human-timescale intervals left a
+// wedged queue unrecovered for quarter-hour stretches, so the busy threshold,
+// alert cooldown, and board sweep all run on the fleet's own cadence.
+export const DEFAULT_WATCHDOG_BUSY_THRESHOLD = 5;
+export const DEFAULT_WATCHDOG_ALERT_COOLDOWN_MS = 2 * 60 * 1000;
+export const DEFAULT_BOARD_SWEEP_INTERVAL_MS = 3 * 60 * 1000;
+
 export const CANCELLATION_TIMEOUT_MARKER = "cancelagentrun: acknowledged turn still active after timeout";
 
 const TURN_LOCK_MARKERS = [
@@ -3520,6 +3527,13 @@ export class HookRouter {
   public readonly coalesceBuffers = new Map<string, CoalesceEntry>();
   public readonly sosStates = new Map<string, { state: string; transition: number }>();
   public readonly watchdogAlerts = new Map<string, number>();
+  /**
+   * Active queue-wedge episodes already alerted (#1123). A key is present while
+   * a queue remains wedged and is cleared once it drains or the delivery streak
+   * falls back below the busy threshold, so a later re-wedge alerts again
+   * without waiting out a wall-clock cooldown.
+   */
+  public readonly watchdogWedgeAlerts = new Set<string>();
   public readonly coalesceDisable: boolean;
   public readonly debounceMs: number;
   public readonly coalesceMaxEvents: number;
@@ -3707,11 +3721,11 @@ export class HookRouter {
     this.watchdogIntervalMs =
       options?.watchdogIntervalMs ?? (isTestMode ? 0 : Number(process.env.WATCHDOG_INTERVAL_MS ?? 60000));
     this.watchdogBusyThreshold =
-      options?.watchdogBusyThreshold ?? Number(process.env.WATCHDOG_BUSY_THRESHOLD ?? 10);
+      options?.watchdogBusyThreshold ?? Number(process.env.WATCHDOG_BUSY_THRESHOLD ?? DEFAULT_WATCHDOG_BUSY_THRESHOLD);
     this.watchdogAlertCooldownMs =
-      options?.watchdogAlertCooldownMs ?? Number(process.env.WATCHDOG_ALERT_COOLDOWN_MS ?? 15 * 60 * 1000);
+      options?.watchdogAlertCooldownMs ?? Number(process.env.WATCHDOG_ALERT_COOLDOWN_MS ?? DEFAULT_WATCHDOG_ALERT_COOLDOWN_MS);
     this.boardSweepIntervalMs =
-      options?.boardSweepIntervalMs ?? (isTestMode ? 0 : Number(process.env.BOARD_SWEEP_INTERVAL_MS ?? 15 * 60 * 1000));
+      options?.boardSweepIntervalMs ?? (isTestMode ? 0 : Number(process.env.BOARD_SWEEP_INTERVAL_MS ?? DEFAULT_BOARD_SWEEP_INTERVAL_MS));
     this.frontDeskThrottleMs =
       options?.frontDeskThrottleMs !== undefined
         ? options.frontDeskThrottleMs
@@ -7253,6 +7267,18 @@ export class HookRouter {
       }
     }
 
+    // Event-based wedge dedup (#1123): an episode ends when the queue drains or
+    // its delivery streak resets below the busy threshold. Reconcile from the
+    // current queue/busy state so a recovered queue re-arms for the next wedge
+    // instead of being silenced by a blanket time cooldown.
+    for (const key of Array.from(this.watchdogWedgeAlerts)) {
+      const q = this.queues.get(key) ?? [];
+      const attempts = this.busyAttempts.get(key) ?? 0;
+      if (q.length === 0 || attempts < this.watchdogBusyThreshold) {
+        this.watchdogWedgeAlerts.delete(key);
+      }
+    }
+
     for (const [key, attempts] of this.busyAttempts.entries()) {
       const q = this.queues.get(key) ?? [];
       // A drained queue is not wedged. Clear the stale attempt counter so it
@@ -7284,7 +7310,8 @@ export class HookRouter {
         }
 
         const alertKey = `queue_wedged:${key}`;
-        if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
+        if (frontDeskId && !this.watchdogWedgeAlerts.has(key)) {
+          this.watchdogWedgeAlerts.add(key);
           this.watchdogAlerts.set(alertKey, now);
           const alert = reloaded
             ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${q.length} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`

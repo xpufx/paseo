@@ -169,8 +169,9 @@ addressed to you; find the orchestrator via the registry (§6.2).
 The hook's fleet watchdog escalates to the registered Front Desk on
 unrecoverable agent errors (quota, fatal API errors), wedged queues, and
 repositories with no orchestrator, throttled by
-`WATCHDOG_ALERT_COOLDOWN_MS` (default 15 min). Treat those as incidents, not
-chatter.
+`WATCHDOG_ALERT_COOLDOWN_MS` (default 2 min). Wedged queues are deduplicated by
+episode instead: one alert per wedge, re-armed when the queue drains. Treat
+those as incidents, not chatter.
 
 ### 4.2 Inbound from Orchestrators (`paseo send`)
 When an Orchestrator messages you regarding a ticket, blocker, or interactive question:

@@ -576,7 +576,7 @@ Legacy (pre-taxonomy) findings are still raised alongside:
 | `AGENT_ATTENTION_REQUIRED` | `requiresAttention` with a reason other than `error`/`finished` (which the taxonomy owns). |
 | `AGENT_ERROR` | Registered orchestrator is `status: error` and the taxonomy pass did not already handle it. |
 | `ORCHESTRATOR_MISSING` | A `<key>.json` state file references an agent id that no longer exists on the daemon. |
-| `QUEUE_WEDGED` | A queue has accumulated `WATCHDOG_BUSY_THRESHOLD` (default `10`) failed delivery attempts. |
+| `QUEUE_WEDGED` | A queue has accumulated `WATCHDOG_BUSY_THRESHOLD` (default `5`) failed delivery attempts. Alerted once per wedge episode (event-based dedup, #1123): the key re-arms when the queue drains. |
 | `CHILD_WAKEUP` | A worker labelled `paseo.parent-agent-id` transitioned into a block / error / completion; a reactive pulse is steered into the parent (#537). See [§13.6](#136-subagent-lifecycle-contract-reactive-wakeups--capability-grants). |
 
 #### 7.7.2 Alert message formats
@@ -621,8 +621,8 @@ the agent id, `<key>` is the enrolled repo key:
 | Env | Default | Purpose |
 | --- | --- | --- |
 | `WATCHDOG_INTERVAL_MS` | `60000` | Audit loop cadence (`0` disables the loop; test mode starts at `0`). |
-| `WATCHDOG_ALERT_COOLDOWN_MS` | `900000` (15 min) | Per-subject deduplication cooldown. |
-| `WATCHDOG_BUSY_THRESHOLD` | `10` | Failed delivery attempts before `QUEUE_WEDGED`. |
+| `WATCHDOG_ALERT_COOLDOWN_MS` | `120000` (2 min) | Per-subject deduplication cooldown. |
+| `WATCHDOG_BUSY_THRESHOLD` | `5` | Failed delivery attempts before `QUEUE_WEDGED`. |
 
 Cooldown semantics (`canWatchdogAlert`): each alert subject is keyed —
 `permission:<agentId>:<reqId>`, `attention:<agentId>:<reason>`,
@@ -637,6 +637,13 @@ cooldown-eligible is neither re-alerted nor re-recovered, so a persistently
 wedged agent is not stop/steered on every tick. The taxonomy key embeds the
 full type list, so a materially different finding re-keys (and re-alerts)
 immediately.
+
+`QUEUE_WEDGED` is the exception: it is deduplicated by episode, not by the
+wall-clock cooldown (#1123). A queue alerts once when it wedges, stays muted
+while it remains wedged, and re-arms as soon as it drains or its delivery
+streak resets below `WATCHDOG_BUSY_THRESHOLD` — so a queue that re-wedges two
+minutes after an auto-reload alerts again instead of being silenced for the
+rest of the cooldown.
 
 #### 7.7.5 Permission auto-adjudication allowlist (#1084)
 
@@ -743,7 +750,7 @@ registered orchestrator and drains the queue.
 
 ### 7.8 Deterministic board sweep
 
-`BOARD_SWEEP_INTERVAL_MS` (default `900000`, 15 min) runs the deterministic
+`BOARD_SWEEP_INTERVAL_MS` (default `180000`, 3 min) runs the deterministic
 board checker (`server/issues-check.ts`, ported in-process from the Python
 script) across enrolled repos and alerts Front Desk when new actionable tickets
 surface. A failed repo check is never silent: it is logged as
