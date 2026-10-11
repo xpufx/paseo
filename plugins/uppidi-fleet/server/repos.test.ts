@@ -1,7 +1,7 @@
 import { describe, it, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
   handleUppidiRepos,
@@ -20,8 +20,16 @@ import { getUppidiFleetSettingsStorage, resetUppidiFleetSettingsStorageInstance 
 /** Drop the persisted plugin settings so each test starts from schema defaults. */
 function clearSettingsStorage(): void {
   try {
-    rmSync(getUppidiFleetSettingsStorage().filePath, { force: true });
-  } catch {
+    const targetPath = getUppidiFleetSettingsStorage().filePath;
+    const resolvedTarget = resolve(targetPath);
+    const resolvedTmp = resolve(tmpdir());
+    if (resolvedTarget.startsWith(resolvedTmp) || resolvedTarget.includes("test")) {
+      rmSync(resolvedTarget, { force: true });
+    } else {
+      throw new Error(`[SAFETY] Refusing to unlink non-test settings file: ${resolvedTarget}`);
+    }
+  } catch (err: any) {
+    if (err?.message?.includes("[SAFETY]")) throw err;
     // ignore missing file
   }
   resetUppidiFleetSettingsStorageInstance();

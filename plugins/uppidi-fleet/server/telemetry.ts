@@ -367,14 +367,18 @@ export function setupTelemetryTap(
     if (typeof unsubStart === "function") unsubs.push(unsubStart);
 
     // 2. Usage updated (ACP asynchronous context meter)
-    const unsubUsage = (server as any).on("agent.usage_updated", (event: any) => {
-      if (!event?.agent?.id) return;
-      const usage = event.usage ?? event.agent?.lastUsage;
-      if (usage) {
-        lastKnownUsage.set(event.agent.id, usage);
-      }
-    });
-    if (typeof unsubUsage === "function") unsubs.push(unsubUsage);
+    try {
+      const unsubUsage = (server as any).on("agent.usage_updated", (event: any) => {
+        if (!event?.agent?.id) return;
+        const usage = event.usage ?? event.agent?.lastUsage;
+        if (usage) {
+          lastKnownUsage.set(event.agent.id, usage);
+        }
+      });
+      if (typeof unsubUsage === "function") unsubs.push(unsubUsage);
+    } catch {
+      // Ignored: agent.usage_updated is not a supported lifecycle event in this Paseo release
+    }
 
     // 3. Turn ended
     const unsubEnd = server.on("agent.turn_ended", async (event: any, ctx: any) => {

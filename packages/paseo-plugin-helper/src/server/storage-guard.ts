@@ -21,6 +21,7 @@ export class ScopedStorageViolationError extends Error {
 export interface InstallStorageGuardOptions {
   pluginId: string;
   namespace?: string; // defaults to "plugin-data/xpufx"
+  baseDir?: string;
   allowTmp?: boolean; // defaults to true
   mode?: "enforce" | "warn"; // defaults to "enforce"
   onViolation?: (violation: { path: string; operation: string; allowedRoots: string[] }) => void;
@@ -61,7 +62,9 @@ export function installStorageGuard(options: InstallStorageGuardOptions): () => 
   const allowTmp = options.allowTmp ?? true;
   const mode = options.mode ?? "enforce";
 
-  const pluginStorageDir = path.resolve(os.homedir(), ".paseo", namespace, pluginId);
+  const pluginStorageDir = options.baseDir
+    ? path.resolve(options.baseDir, pluginId)
+    : path.resolve(os.homedir(), ".paseo", namespace, pluginId);
   const allowedRoots: string[] = [pluginStorageDir];
 
   if (allowTmp) {
