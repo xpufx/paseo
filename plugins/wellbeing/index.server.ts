@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createPluginLogger } from "paseo-plugin-helper/server";
+import { createPluginLogger, installStorageGuard } from "paseo-plugin-helper/server";
 import {
   statusRpc,
   toggleBedModeRpc,
@@ -14,6 +14,7 @@ import { registerWellbeingServerSettings } from "./server/settings.js";
 const log = createPluginLogger("wellbeing");
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "wellbeing" });
   const tracker = new PresenceTracker(DEFAULT_SETTINGS);
   const settingsHandle = registerWellbeingServerSettings(server, tracker, DEFAULT_SETTINGS);
 
@@ -88,5 +89,6 @@ export default function contribute(server: PluginServerContext) {
   return () => {
     clearInterval(timer);
     settingsHandle.dispose();
+    uninstallStorageGuard();
   };
 }
