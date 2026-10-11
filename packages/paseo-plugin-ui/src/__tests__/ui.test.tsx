@@ -3,7 +3,10 @@ import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import {
   HostActionBar,
+  HostAttentionBeacon,
   HostButton,
+  HostCodeBlock,
+  HostCommandBox,
   HostFormRow,
   HostKeyValue,
   HostKeyValueGroup,
@@ -253,6 +256,44 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(texts).toContain("1.2.3");
     expect(texts).toContain("Channel");
     expect(texts).toContain("stable");
+  });
+
+  it("renders HostAttentionBeacon with active status indicator dot", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <HostAttentionBeacon tone="warning" active>
+          <HostButton label="Action" />
+        </HostAttentionBeacon>
+      </HostThemeProvider>,
+    );
+
+    const views = renderer.root.findAllByType("View");
+    const dot = views.find((v) => resolvedStyle(v).position === "absolute");
+    expect(dot).toBeDefined();
+    expect(resolvedStyle(dot!).backgroundColor).toBe(HOST_COLORS.statusWarning);
+  });
+
+  it("renders HostCodeBlock with title, copy button, and bounded content", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <HostCodeBlock code="const x = 42;" title="Example" language="typescript" />
+      </HostThemeProvider>,
+    );
+
+    const texts = renderer.root.findAllByType("Text").map((t) => t.props.children);
+    expect(texts).toContain("Example");
+    expect(texts).toContain("const x = 42;");
+  });
+
+  it("renders HostCommandBox with prompt and arguments", () => {
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: HOST_COLORS }}>
+        <HostCommandBox argv={["npm", "run", "test"]} />
+      </HostThemeProvider>,
+    );
+
+    const texts = renderer.root.findAllByType("Text").map((t) => t.props.children);
+    expect(texts).toContain("$ npm");
   });
 });
 

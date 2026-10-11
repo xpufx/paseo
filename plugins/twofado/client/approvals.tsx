@@ -5,7 +5,6 @@ import type {
   PluginSurfaceProps,
 } from "@getpaseo/plugin/client";
 import { Icon, copyText, useToast } from "@getpaseo/plugin/client/react-native";
-import { HostThemeProvider, useHostTheme } from "paseo-plugin-helper/lifecycle";
 import { usePluginSettings } from "paseo-plugin-helper/core";
 import {
   ActionBar,
@@ -19,6 +18,7 @@ import {
   CommandBox,
   EmptyState,
   FormRow,
+  HostThemeProvider,
   KeyValue,
   KeyValueGroup,
   ModalBody,
@@ -27,6 +27,7 @@ import {
   Tabs,
   TextInput,
   Toggle,
+  useHostTheme,
 } from "./host-ui";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -1970,5 +1971,9 @@ function ApprovalSurfaceInner({
 }
 
 export function ApprovalSurface(props: PluginSurfaceProps) {
-  return <ApprovalSurfaceInner {...props} />;
+  return (
+    <HostThemeProvider theme={props.theme}>
+      <ApprovalSurfaceInner {...props} />
+    </HostThemeProvider>
+  );
 }

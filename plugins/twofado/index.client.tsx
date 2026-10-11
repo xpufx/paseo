@@ -17,6 +17,7 @@ import {
   trackHeaderButton,
   untrackHeaderButton,
 } from "./client/approvals";
+import { HostThemeProvider } from "./client/host-ui";
 import { approvalSettings } from "./shared/approval";
 
 export default function contribute(client: PluginClientContext) {
@@ -37,7 +38,11 @@ export default function contribute(client: PluginClientContext) {
     id: "approvals",
     title: "2fado",
     icon: "ShieldCheck",
-    Component: ApprovalSurface,
+    Component: (props) => (
+      <HostThemeProvider theme={props.theme}>
+        <ApprovalSurface {...props} />
+      </HostThemeProvider>
+    ),
   });
   client.addCommandCenterItem({
     id: "open-approvals",

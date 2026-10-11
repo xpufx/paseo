@@ -1,6 +1,1 @@
-{
-  "exempt": {
-    "no-bare-react-native-ui": "client/host-ui.tsx is the plugin-local composition that replaces the removed paseo-plugin-helper/client kit (xpufx-org/paseo#937, #924). It imports the plain React Native ScrollView as the bounded scroller inside CodeBlock because the host sheet-gesture ScrollView must not be nested inside the host scroll owner (#219). The text inputs use the host SDK TextInput; no other bare React Native UI primitive is imported.",
-    "no-bespoke-react-native-interactions": "Same plugin-local composition. The host SDK ships no button/toggle/tab pressable primitive, so Card/Badge/Button/Toggle/Select/Tabs compose Pressable over react-native. Every other helper/UI rule is followed; this is the single interaction seam."
-  }
-}
+{}

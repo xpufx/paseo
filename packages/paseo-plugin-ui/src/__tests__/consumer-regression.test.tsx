@@ -3,14 +3,18 @@ import React, { useState } from "react";
 import TestRenderer, { act } from "react-test-renderer";
 import {
   HostActionBar,
+  HostAttentionBeacon,
   HostBadge,
   HostButton,
   HostCard,
   HostCardHeader,
+  HostCodeBlock,
+  HostCommandBox,
   HostEmptyState,
   HostFormRow,
   HostKeyValue,
   HostKeyValueGroup,
+  HostModalBody,
   HostProgressBar,
   HostRow,
   HostScroll,
@@ -298,4 +302,87 @@ describe("Consumer Regression Harness (xpufx-org/paseo#1221)", () => {
       : darkView.props.style;
     expect(darkStyle.backgroundColor).toBe(DARK_THEME.surface1);
   });
+
+  it("renders twofado approval fixture with shared primitives and theme propagation (#1237)", () => {
+    const onApprove = vi.fn();
+    const onReject = vi.fn();
+
+    const renderer = render(
+      <HostThemeProvider theme={{ colors: TEST_THEME_COLORS }}>
+        <HostModalBody headerMode="pinned" header={<HostSectionHeader title="Pending 2FA Approvals" />}>
+          <HostCard variant="elevated">
+            <HostCardHeader
+              title="Execution Request #42"
+              badge={<HostBadge label="Pending" tone="warning" />}
+            />
+            <HostRow align="center" gap={8}>
+              <HostAttentionBeacon active tone="warning" mode="pulse" />
+              <HostKeyValueGroup columns={2}>
+                <HostKeyValue label="By" value="agent-1" />
+                <HostKeyValue label="CWD" value="/home/user/project" mono stackOnCompact />
+              </HostKeyValueGroup>
+            </HostRow>
+
+            <HostCommandBox argv={["rm", "-rf", "/tmp/cache"]} />
+
+            <HostCodeBlock
+              title="Preview"
+              code="Removing 14 cache directories..."
+              maxHeight={120}
+              copyable
+            />
+
+            <HostFormRow label="Reason">
+              <HostTextInput
+                value="Automated clearance"
+                disabled
+                onChangeText={() => {}}
+              />
+            </HostFormRow>
+
+            <HostActionBar align="flex-end" gap={8}>
+              <HostButton label="Reject" tone="danger" onPress={onReject} />
+              <HostButton label="Approve" tone="primary" onPress={onApprove} />
+            </HostActionBar>
+          </HostCard>
+        </HostModalBody>
+      </HostThemeProvider>,
+    );
+
+    // 1. Scroller hierarchy: 1 outer modal body scroller + 1 bounded inner code snippet scroller
+    const scrollViews = renderer.root.findAllByType("ScrollView");
+    expect(scrollViews).toHaveLength(2);
+    const codeBlockScroller = renderer.root.findByType(HostCodeBlock).findByType("ScrollView");
+    expect(codeBlockScroller.props.style).toEqual({ maxHeight: 120 });
+
+    // 2. Beacon renders with warning tone color
+    const beacon = renderer.root.findByType(HostAttentionBeacon);
+    expect(beacon).toBeDefined();
+
+    // 3. Command box renders with argv joined
+    const commandBox = renderer.root.findByType(HostCommandBox);
+    expect(commandBox).toBeDefined();
+
+    // 4. Code block renders preview code
+    const codeBlock = renderer.root.findByType(HostCodeBlock);
+    expect(codeBlock).toBeDefined();
+
+    // 5. Disabled text input renders with reduced opacity
+    const textInput = renderer.root.findByType(HostTextInput);
+    const inputPrimitive = textInput.findByType("TextInput");
+    const inputStyle = Array.isArray(inputPrimitive.props.style)
+      ? Object.assign({}, ...inputPrimitive.props.style.filter(Boolean))
+      : inputPrimitive.props.style;
+    expect(inputStyle.opacity).toBe(0.5);
+    expect(inputPrimitive.props.editable).toBe(false);
+
+    // 6. Action buttons trigger handlers
+    const buttons = renderer.root.findAllByType(HostButton);
+    const approveBtn = buttons.find((b) => b.props.label === "Approve");
+    act(() => {
+      approveBtn?.props.onPress();
+    });
+    expect(onApprove).toHaveBeenCalledTimes(1);
+  });
 });
+

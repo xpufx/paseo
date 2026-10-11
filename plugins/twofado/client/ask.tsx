@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { Icon } from "@getpaseo/plugin/client/react-native";
-import { useHostTheme } from "paseo-plugin-helper/lifecycle";
-import { Badge, Button, Card, TextInput } from "./host-ui";
+import { Badge, Button, Card, TextInput, useHostTheme } from "./host-ui";
 import type { ApprovalOption } from "../shared/approval";
 
 const EXPIRY_URGENT_S = 30;

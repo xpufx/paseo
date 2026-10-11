@@ -11,6 +11,7 @@ import {
   Linking,
   Platform,
   Pressable,
+  ScrollView as RNScrollView,
   Text,
   View,
   type StyleProp,
@@ -840,6 +841,61 @@ export function HostMetricGauge({
   );
 }
 
+// --- attention -------------------------------------------------------------
+
+export type HostAttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce" | "pulse";
+export type HostAttentionBeaconTone = "warning" | "accent" | "danger";
+
+export interface HostAttentionBeaconProps {
+  children: ReactNode;
+  mode?: HostAttentionBeaconMode;
+  tone?: HostAttentionBeaconTone;
+  color?: string;
+  active?: boolean;
+  style?: StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
+  testID?: string;
+  badgeIcon?: string | ReactNode;
+  easing?: (value: number) => number;
+}
+
+export function HostAttentionBeacon({
+  children,
+  mode = "radar",
+  tone = "warning",
+  color,
+  active = true,
+  style,
+  accessibilityLabel,
+  testID,
+}: HostAttentionBeaconProps) {
+  const { getStatusColor } = useHostTheme();
+  const beaconColor =
+    color ?? getStatusColor(tone === "danger" ? "danger" : tone === "accent" ? "accent" : "warning");
+  const showDot = active && mode !== "badge";
+  return (
+    <View style={[{ position: "relative" }, style]}>
+      {children}
+      {showDot ? (
+        <View
+          testID={testID}
+          accessibilityLabel={accessibilityLabel}
+          style={{
+            position: "absolute",
+            top: -2,
+            right: -2,
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            backgroundColor: beaconColor,
+            opacity: 0.75,
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
 // --- key-value -------------------------------------------------------------
 
 export type HostKeyValueTruncateMode = "end" | "middle" | "path";
@@ -853,6 +909,7 @@ export interface HostKeyValueProps {
   truncate?: boolean | HostKeyValueTruncateMode;
   truncateMaxLength?: number;
   layout?: "stacked" | "inline";
+  stackOnCompact?: boolean;
   style?: StyleProp<ViewStyle>;
   labelStyle?: StyleProp<TextStyle>;
   valueStyle?: StyleProp<TextStyle>;
@@ -867,6 +924,7 @@ export function HostKeyValue({
   truncate: truncateProp = false,
   truncateMaxLength = 32,
   layout = "stacked",
+  stackOnCompact: _stackOnCompact,
   style,
   labelStyle,
   valueStyle,
@@ -1591,6 +1649,188 @@ export function HostCopyButton({
   );
 }
 
+// --- code / command --------------------------------------------------------
+
+export interface HostCodeBlockProps {
+  code: string;
+  language?: string;
+  title?: string;
+  maxHeight?: number;
+  copyable?: boolean;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
+}
+
+export function HostCodeBlock({
+  code,
+  language,
+  title,
+  maxHeight = 320,
+  copyable = true,
+  style,
+  textStyle,
+}: HostCodeBlockProps) {
+  const { colors, alpha } = useHostTheme();
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await copyText(code);
+      toast?.show?.(title || "Code");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast?.error?.("Copy failed");
+    }
+  };
+  return (
+    <View
+      style={[
+        {
+          borderWidth: 1,
+          borderRadius: 8,
+          overflow: "hidden",
+          backgroundColor: colors.surface0,
+          borderColor: colors.border,
+        },
+        style,
+      ]}
+    >
+      {title || language || copyable ? (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: 12,
+            paddingVertical: 4,
+            borderBottomWidth: 1,
+            borderBottomColor: alpha(colors.border, 0.7),
+          }}
+        >
+          <Text
+            style={{
+              color: title ? colors.foreground : colors.foregroundMuted,
+              fontSize: 11,
+              fontWeight: "600",
+            }}
+          >
+            {title ?? (language ? language.toUpperCase() : "")}
+          </Text>
+          {copyable ? (
+            <Pressable
+              onPress={handleCopy}
+              accessibilityRole="button"
+              accessibilityLabel="Copy code"
+              hitSlop={4}
+              style={{ padding: 4 }}
+            >
+              <Icon
+                name={copied ? "Check" : "Copy"}
+                size={12}
+                color={copied ? colors.statusSuccess : colors.foregroundMuted}
+              />
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+      <RNScrollView style={{ maxHeight }} contentContainerStyle={{ padding: 12 }}>
+        <Text
+          selectable
+          style={[
+            { color: colors.foreground, fontSize: 12, lineHeight: 18, fontFamily: "monospace" },
+            textStyle,
+          ]}
+        >
+          {code}
+        </Text>
+      </RNScrollView>
+    </View>
+  );
+}
+
+export interface HostCommandBoxProps {
+  command?: string;
+  argv?: string[];
+  copyLabel?: string;
+  style?: StyleProp<ViewStyle>;
+  textStyle?: StyleProp<TextStyle>;
+}
+
+export function HostCommandBox({
+  command,
+  argv = [],
+  copyLabel = "Copy command",
+  style,
+  textStyle,
+}: HostCommandBoxProps) {
+  const { colors } = useHostTheme();
+  const toast = useToast();
+  const [copied, setCopied] = useState(false);
+  const fullCommand = command ?? argv.map((arg) => (arg.includes(" ") ? JSON.stringify(arg) : arg)).join(" ");
+  const [prog, ...rest] = argv;
+  const handleCopy = async () => {
+    if (!fullCommand) return;
+    try {
+      await copyText(fullCommand);
+      toast?.show?.("Command");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast?.error?.("Copy failed");
+    }
+  };
+  return (
+    <View
+      style={[
+        {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          borderWidth: 1,
+          borderRadius: 8,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+          backgroundColor: colors.surface2,
+          borderColor: colors.border,
+        },
+        style,
+      ]}
+    >
+      <View style={{ flexDirection: "row", flex: 1, flexShrink: 1, minWidth: 0 }}>
+        <Text
+          style={[
+            { color: colors.statusWarning, fontSize: 12, fontWeight: "700", fontFamily: "monospace" },
+            textStyle,
+          ]}
+        >
+          {prog ? `$ ${prog}` : "$"}
+        </Text>
+        {rest.length > 0 ? (
+          <Text style={[{ color: colors.foreground, fontSize: 12, fontFamily: "monospace" }, textStyle]}>
+            {" "}
+            {rest.join(" ")}
+          </Text>
+        ) : null}
+      </View>
+      <Pressable
+        onPress={handleCopy}
+        accessibilityRole="button"
+        accessibilityLabel={copyLabel}
+        hitSlop={4}
+        style={{ padding: 4 }}
+      >
+        <Icon
+          name={copied ? "Check" : "Copy"}
+          size={12}
+          color={copied ? colors.statusSuccess : colors.foregroundMuted}
+        />
+      </Pressable>
+    </View>
+  );
+}
+
 // --- modal content ---------------------------------------------------------
 
 export interface HostModalSectionProps {
@@ -1639,7 +1879,7 @@ export function HostScroll({
 
 export interface HostActionBarProps {
   children: ReactNode;
-  align?: "start" | "center" | "end" | "between";
+  align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end";
   direction?: "row" | "column";
   gap?: number;
   style?: StyleProp<ViewStyle>;
@@ -1674,18 +1914,34 @@ export interface HostFormRowProps {
   label: string;
   description?: string;
   children: ReactNode;
+  layout?: "stacked" | "inline";
   style?: StyleProp<ViewStyle>;
 }
 
-/** Label and description stacked over a single control. */
-export function HostFormRow({ label, description, children, style }: HostFormRowProps) {
+/** Label and description stacked or inlined with a single control. */
+export function HostFormRow({ label, description, children, layout = "stacked", style }: HostFormRowProps) {
   const { colors } = useHostTheme();
   return (
-    <View style={[{ gap: 6, width: "100%" }, style]}>
-      <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>{label}</Text>
-      {description ? (
-        <Text style={{ fontSize: 11, color: colors.foregroundMuted }}>{description}</Text>
-      ) : null}
+    <View
+      style={[
+        layout === "inline"
+          ? {
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              width: "100%",
+              gap: 8,
+            }
+          : { gap: 6, width: "100%" },
+        style,
+      ]}
+    >
+      <View style={layout === "inline" ? { flex: 1, minWidth: 0 } : undefined}>
+        <Text style={{ fontSize: 12, fontWeight: "600", color: colors.foreground }}>{label}</Text>
+        {description ? (
+          <Text style={{ fontSize: 11, color: colors.foregroundMuted }}>{description}</Text>
+        ) : null}
+      </View>
       {children}
     </View>
   );
@@ -1697,6 +1953,8 @@ export interface HostTextInputProps {
   placeholder?: string;
   errorText?: string;
   helperText?: string;
+  disabled?: boolean;
+  editable?: boolean;
   multiline?: boolean;
   numberOfLines?: number;
   mono?: boolean;
@@ -1714,6 +1972,8 @@ export function HostTextInput({
   placeholder,
   errorText,
   helperText,
+  disabled,
+  editable,
   multiline = false,
   numberOfLines,
   mono = false,
@@ -1725,6 +1985,7 @@ export function HostTextInput({
 }: HostTextInputProps) {
   const { colors, alpha: alphaColor } = useHostTheme();
   const [focused, setFocused] = useState(false);
+  const isEditable = editable ?? (disabled !== undefined ? !disabled : true);
   const borderColor = errorText ? colors.statusDanger : focused ? colors.accent : colors.border;
 
   return (
@@ -1734,6 +1995,7 @@ export function HostTextInput({
         onChangeText={onChangeText}
         placeholder={placeholder}
         placeholderTextColor={colors.foregroundMuted}
+        editable={isEditable}
         multiline={multiline}
         numberOfLines={numberOfLines}
         secureTextEntry={secureTextEntry}
@@ -1755,6 +2017,7 @@ export function HostTextInput({
             paddingHorizontal: 10,
             paddingVertical: 8,
             fontFamily: mono ? "monospace" : undefined,
+            opacity: isEditable ? 1 : 0.5,
           },
           inputStyle,
         ]}
@@ -1888,20 +2151,25 @@ export interface HostModalBodyProps {
   headerStyle?: StyleProp<ViewStyle>;
   style?: StyleProp<ViewStyle>;
   contentContainerStyle?: StyleProp<ViewStyle>;
+  size?: "default" | "large";
+  headerMode?: "pinned" | "scroll";
 }
 
-/** Pinned-header scrollable body for modal dialogues. Owns single scroll below fixed header. */
+/** Scrollable body for modal dialogues and plugin surfaces. Owns single scroll. */
 export function HostModalBody({
   children,
   header,
   headerStyle,
   style,
   contentContainerStyle,
+  size,
+  headerMode = "pinned",
 }: HostModalBodyProps) {
   const { colors } = useHostTheme();
+  const isPinned = Boolean(header && headerMode === "pinned");
   return (
     <View style={[{ flex: 1, minHeight: 0, width: "100%" }, style]}>
-      {header ? (
+      {isPinned ? (
         <View
           style={[
             { width: "100%", flexShrink: 0, backgroundColor: colors.surface0 },
@@ -1924,6 +2192,7 @@ export function HostModalBody({
           contentContainerStyle,
         ]}
       >
+        {!isPinned && header ? <View style={headerStyle}>{header}</View> : null}
         {children}
       </HostScroll>
     </View>
@@ -2033,8 +2302,10 @@ const alignMap = {
 
 const justifyMap = {
   start: "flex-start",
+  "flex-start": "flex-start",
   center: "center",
   end: "flex-end",
+  "flex-end": "flex-end",
   between: "space-between",
 } as const;
 

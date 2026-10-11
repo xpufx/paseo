@@ -263,6 +263,21 @@ interface HostMetricGaugeProps {
     style?: StyleProp<ViewStyle>;
 }
 declare function HostMetricGauge({ value, size, strokeWidth, thresholds, color, autoStatusColor, label, showPercent, centerSlot, style, }: HostMetricGaugeProps): React.JSX.Element;
+type HostAttentionBeaconMode = "radar" | "ring" | "glow" | "badge" | "bounce" | "pulse";
+type HostAttentionBeaconTone = "warning" | "accent" | "danger";
+interface HostAttentionBeaconProps {
+    children: ReactNode;
+    mode?: HostAttentionBeaconMode;
+    tone?: HostAttentionBeaconTone;
+    color?: string;
+    active?: boolean;
+    style?: StyleProp<ViewStyle>;
+    accessibilityLabel?: string;
+    testID?: string;
+    badgeIcon?: string | ReactNode;
+    easing?: (value: number) => number;
+}
+declare function HostAttentionBeacon({ children, mode, tone, color, active, style, accessibilityLabel, testID, }: HostAttentionBeaconProps): React.JSX.Element;
 type HostKeyValueTruncateMode = "end" | "middle" | "path";
 interface HostKeyValueProps {
     label: string;
@@ -273,11 +288,12 @@ interface HostKeyValueProps {
     truncate?: boolean | HostKeyValueTruncateMode;
     truncateMaxLength?: number;
     layout?: "stacked" | "inline";
+    stackOnCompact?: boolean;
     style?: StyleProp<ViewStyle>;
     labelStyle?: StyleProp<TextStyle>;
     valueStyle?: StyleProp<TextStyle>;
 }
-declare function HostKeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, layout, style, labelStyle, valueStyle, }: HostKeyValueProps): React.JSX.Element;
+declare function HostKeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, layout, stackOnCompact: _stackOnCompact, style, labelStyle, valueStyle, }: HostKeyValueProps): React.JSX.Element;
 interface HostKeyValueGroupProps {
     children: ReactNode;
     columns?: 1 | 2 | 3 | 4;
@@ -378,6 +394,24 @@ interface HostCopyButtonProps {
     textStyle?: StyleProp<TextStyle>;
 }
 declare function HostCopyButton({ text, getText, label, copiedLabel, icon, size, variant, accessibilityLabel, toastMessage, feedbackDurationMs, disabled, style, textStyle, }: HostCopyButtonProps): React.ReactElement | null;
+interface HostCodeBlockProps {
+    code: string;
+    language?: string;
+    title?: string;
+    maxHeight?: number;
+    copyable?: boolean;
+    style?: StyleProp<ViewStyle>;
+    textStyle?: StyleProp<TextStyle>;
+}
+declare function HostCodeBlock({ code, language, title, maxHeight, copyable, style, textStyle, }: HostCodeBlockProps): React.JSX.Element;
+interface HostCommandBoxProps {
+    command?: string;
+    argv?: string[];
+    copyLabel?: string;
+    style?: StyleProp<ViewStyle>;
+    textStyle?: StyleProp<TextStyle>;
+}
+declare function HostCommandBox({ command, argv, copyLabel, style, textStyle, }: HostCommandBoxProps): React.JSX.Element;
 interface HostModalSectionProps {
     children: ReactNode;
     style?: StyleProp<ViewStyle>;
@@ -401,7 +435,7 @@ interface HostScrollProps {
 declare function HostScroll({ children, style, contentContainerStyle, ...props }: HostScrollProps & Record<string, unknown>): React.JSX.Element;
 interface HostActionBarProps {
     children: ReactNode;
-    align?: "start" | "center" | "end" | "between";
+    align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end";
     direction?: "row" | "column";
     gap?: number;
     style?: StyleProp<ViewStyle>;
@@ -412,16 +446,19 @@ interface HostFormRowProps {
     label: string;
     description?: string;
     children: ReactNode;
+    layout?: "stacked" | "inline";
     style?: StyleProp<ViewStyle>;
 }
-/** Label and description stacked over a single control. */
-declare function HostFormRow({ label, description, children, style }: HostFormRowProps): React.JSX.Element;
+/** Label and description stacked or inlined with a single control. */
+declare function HostFormRow({ label, description, children, layout, style }: HostFormRowProps): React.JSX.Element;
 interface HostTextInputProps {
     value: string;
     onChangeText: (text: string) => void;
     placeholder?: string;
     errorText?: string;
     helperText?: string;
+    disabled?: boolean;
+    editable?: boolean;
     multiline?: boolean;
     numberOfLines?: number;
     mono?: boolean;
@@ -432,7 +469,7 @@ interface HostTextInputProps {
     inputStyle?: StyleProp<TextStyle>;
 }
 /** Single or multi-line text input using host theme and modal-aware primitive. */
-declare function HostTextInput({ value, onChangeText, placeholder, errorText, helperText, multiline, numberOfLines, mono, secureTextEntry, autoCapitalize, autoCorrect, style, inputStyle, }: HostTextInputProps): React.JSX.Element;
+declare function HostTextInput({ value, onChangeText, placeholder, errorText, helperText, disabled, editable, multiline, numberOfLines, mono, secureTextEntry, autoCapitalize, autoCorrect, style, inputStyle, }: HostTextInputProps): React.JSX.Element;
 interface HostSelectOption {
     label: string;
     value: string;
@@ -453,9 +490,11 @@ interface HostModalBodyProps {
     headerStyle?: StyleProp<ViewStyle>;
     style?: StyleProp<ViewStyle>;
     contentContainerStyle?: StyleProp<ViewStyle>;
+    size?: "default" | "large";
+    headerMode?: "pinned" | "scroll";
 }
-/** Pinned-header scrollable body for modal dialogues. Owns single scroll below fixed header. */
-declare function HostModalBody({ children, header, headerStyle, style, contentContainerStyle, }: HostModalBodyProps): React.JSX.Element;
+/** Scrollable body for modal dialogues and plugin surfaces. Owns single scroll. */
+declare function HostModalBody({ children, header, headerStyle, style, contentContainerStyle, size, headerMode, }: HostModalBodyProps): React.JSX.Element;
 interface HostAboutLink {
     label: string;
     url: string;
@@ -481,4 +520,4 @@ interface HostAboutSectionProps {
 }
 declare function HostAboutSection({ name, description, version, author, repository, issues, homepage, license, links, extraItems, style, }: HostAboutSectionProps): React.JSX.Element;
 
-export { type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCollapsible, type HostCollapsibleProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type StatusVariant, type ThemeColors, alpha, getStatusColor, useHostLayout, useHostTheme };
+export { type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type StatusVariant, type ThemeColors, alpha, getStatusColor, useHostLayout, useHostTheme };
