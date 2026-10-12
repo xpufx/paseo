@@ -1455,7 +1455,7 @@ export interface WatchdogAgent {
   pendingPermissions?: WatchdogPermission[] | null;
   archivedAt?: string | null;
   config?: { provider?: string | null; model?: string | null; [key: string]: unknown } | null;
-  recentTimeline?: string[] | string | null;
+  recentTimeline?: unknown[] | string | null;
   timeline?: unknown;
 }
 
@@ -1511,8 +1511,8 @@ export interface WatchdogAuditOptions {
   diskMetadata?: Map<string, WatchdogAgentDisk> | null;
   /** Cancellation-timeout markers keyed by agent id; loaded from logs when omitted. */
   cancellations?: Map<string, number | null> | null;
-  /** Recent timeline provider-retry errors keyed by agent id (#890). */
-  timelineErrors?: Map<string, string[] | string> | null;
+  /** Recent timeline provider-retry errors keyed by agent id (#890, #1144). */
+  timelineErrors?: Map<string, TimelineRetryError[] | string[] | string> | null;
   /** Explicit circuit breaker cache path; defaults to ~/.paseo/model-health.json */
   circuitBreakerPath?: string;
   modelHealthPath?: string;
@@ -1779,35 +1779,55 @@ export function detectStaleErrorGhosting(liveStatus: unknown, lastError: unknown
   return Boolean(String(lastError ?? "").trim());
 }
 
+export interface ProviderQuotaDetectionOptions {
+  now?: number;
+  recencySeconds?: number;
+  lastActivityAt?: unknown;
+  liveStatus?: unknown;
+}
+
 /**
- * Scan recent timeline text or entries for provider retry errors indicating quota exhaustion (#890).
+ * Scan recent timeline text or entries for provider retry errors indicating quota exhaustion (#890, #1144).
  * Specifically handles lines like: `[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go`.
+ * Supports entry timestamps and options to filter out stale historical quota errors.
  */
-export function findProviderRetryQuotaError(recentTimeline: unknown): string | null {
+export function findProviderRetryQuotaError(
+  recentTimeline: unknown,
+  options?: ProviderQuotaDetectionOptions,
+): string | null {
   if (!recentTimeline) return null;
-  const lines: string[] = [];
+  const entries: Array<{ text: string; timestamp?: number | null }> = [];
   if (typeof recentTimeline === "string") {
-    lines.push(...recentTimeline.split("\n"));
+    for (const line of recentTimeline.split("\n")) {
+      entries.push({ text: line });
+    }
   } else if (Array.isArray(recentTimeline)) {
     for (const item of recentTimeline) {
       if (typeof item === "string") {
-        lines.push(item);
+        entries.push({ text: item });
       } else if (item && typeof item === "object") {
         const text =
           (item as any).message ??
+          (item as any).msg ??
           (item as any).text ??
           (item as any).detail ??
           (item as any).error ??
           "";
         if (typeof text === "string" && text) {
-          lines.push(text);
+          const rawTime =
+            (item as any).timestamp ??
+            (item as any).time ??
+            (item as any).createdAt ??
+            (item as any).date ??
+            null;
+          entries.push({ text, timestamp: coerceEpochMs(rawTime) });
         }
       }
     }
   }
 
-  for (const line of lines) {
-    const raw = String(line ?? "").trim();
+  for (const entry of entries) {
+    const raw = String(entry.text ?? "").trim();
     if (!raw) continue;
     const lower = raw.toLowerCase();
     const isRetryOrError =
@@ -1818,20 +1838,48 @@ export function findProviderRetryQuotaError(recentTimeline: unknown): string | n
     if (!isRetryOrError) continue;
     if (hasMarker(lower, TRANSIENT_MARKERS)) continue;
     if (hasMarker(lower, QUOTA_MARKERS)) {
+      if (options) {
+        const { now, recencySeconds, lastActivityAt } = options;
+        if (entry.timestamp != null) {
+          if (now !== undefined && recencySeconds !== undefined) {
+            if ((now - entry.timestamp) / 1000 > recencySeconds) {
+              continue;
+            }
+          }
+          if (lastActivityAt != null) {
+            const activityMs = coerceEpochMs(lastActivityAt);
+            if (activityMs != null && activityMs > entry.timestamp) {
+              continue;
+            }
+          }
+        }
+      }
       return raw;
     }
   }
   return null;
 }
 
-/** Taxonomy 6: fatal provider/quota error (not a recoverable transient). Checks lastError and recent timeline (#890). */
-export function detectProviderQuotaExhaustion(lastError: unknown, recentTimeline?: unknown): boolean {
+/** Taxonomy 6: fatal provider/quota error (not a recoverable transient). Checks lastError and recent timeline (#890, #1144). */
+export function detectProviderQuotaExhaustion(
+  lastError: unknown,
+  recentTimeline?: unknown,
+  options?: ProviderQuotaDetectionOptions,
+): boolean {
   const text = String(lastError ?? "").toLowerCase();
   if (text && !hasMarker(text, TRANSIENT_MARKERS) && hasMarker(text, QUOTA_MARKERS)) {
     return true;
   }
   if (recentTimeline) {
-    return Boolean(findProviderRetryQuotaError(recentTimeline));
+    if (options?.liveStatus) {
+      const status = String(options.liveStatus).toLowerCase();
+      // A running agent with no direct lastError has moved past the historical
+      // timeline error: treat the quota line as stale rather than active (#1144).
+      if (status === "running" && !text.trim()) {
+        return false;
+      }
+    }
+    return Boolean(findProviderRetryQuotaError(recentTimeline, options));
   }
   return false;
 }
@@ -2397,7 +2445,7 @@ export interface WatchdogAgentDisk {
   labels?: Record<string, string> | null;
   provider?: string | null;
   model?: string | null;
-  recentTimeline?: string[] | string | null;
+  recentTimeline?: unknown[] | string | null;
 }
 
 export function defaultAgentsDir(): string {
@@ -2579,13 +2627,23 @@ export function scanCancellationTimeouts(
   return latest;
 }
 
+/** Normalized provider-retry error extracted from a daemon log line (#890, #1144). */
+export interface TimelineRetryError {
+  /** Extracted error text used for marker matching. */
+  text: string;
+  /** Epoch-ms timestamp when the daemon emitted the line, if parseable. */
+  timestamp: number | null;
+}
+
 /**
  * Scan daemon log paths for provider retry quota exhaustion lines keyed by agentId (#890).
+ * Preserves each line's timestamp so the watchdog can distinguish an active quota
+ * block from a stale historical error (#1144).
  */
 export function scanTimelineRetryErrors(
   logPaths: readonly string[],
-): Map<string, string[]> {
-  const result = new Map<string, string[]>();
+): Map<string, TimelineRetryError[]> {
+  const result = new Map<string, TimelineRetryError[]>();
   for (const path of logPaths) {
     let content: string;
     try {
@@ -2602,10 +2660,22 @@ export function scanTimelineRetryErrors(
         continue;
       }
       let agentId: string | null = null;
+      let text = line.trim();
+      let timestamp: number | null = null;
       try {
         const payload = JSON.parse(line);
         if (payload && typeof payload === "object") {
           agentId = typeof payload.agentId === "string" ? payload.agentId : null;
+          if (typeof payload.message === "string") {
+            text = payload.message;
+          } else if (typeof payload.msg === "string") {
+            text = payload.msg;
+          }
+          if (typeof payload.time === "number") {
+            timestamp = payload.time;
+          } else if (typeof payload.timestamp === "string" || typeof payload.timestamp === "number") {
+            timestamp = coerceEpochMs(payload.timestamp);
+          }
         }
       } catch {
         // non-JSON log line
@@ -2616,7 +2686,7 @@ export function scanTimelineRetryErrors(
       }
       if (!agentId) continue;
       const list = result.get(agentId) ?? [];
-      list.push(line.trim());
+      list.push({ text, timestamp });
       result.set(agentId, list);
     }
   }
@@ -3192,7 +3262,7 @@ export function assessAgentHealth(
     assumePendingWork?: boolean;
     runningStaleSeconds?: number;
     recentTimeline?: string | unknown[] | null;
-    timelineErrors?: Map<string, string[] | string> | null;
+    timelineErrors?: Map<string, TimelineRetryError[] | string[] | string> | null;
     repetitiveToolLoopThreshold?: number;
   } = {},
 ): WatchdogAssessment {
@@ -3216,6 +3286,13 @@ export function assessAgentHealth(
     (disk as any)?.timeline ??
     null;
 
+  const quotaOpts: ProviderQuotaDetectionOptions = {
+    now,
+    recencySeconds,
+    lastActivityAt,
+    liveStatus,
+  };
+
   // Repetition detection needs the structured tool-call timeline. The
   // `timelineErrors` map holds daemon log lines, so it is deliberately skipped
   // here (#1265).
@@ -3231,10 +3308,10 @@ export function assessAgentHealth(
       ? detectRepetitiveToolLoop(structuredTimeline, options.repetitiveToolLoopThreshold)
       : 0;
 
-  const quotaDetected = detectProviderQuotaExhaustion(rawLastError, agentTimeline);
+  const quotaDetected = detectProviderQuotaExhaustion(rawLastError, agentTimeline, quotaOpts);
   const timelineQuotaError =
     quotaDetected && !String(rawLastError ?? "").trim()
-      ? findProviderRetryQuotaError(agentTimeline)
+      ? findProviderRetryQuotaError(agentTimeline, quotaOpts)
       : null;
   const lastError = timelineQuotaError ?? rawLastError;
 

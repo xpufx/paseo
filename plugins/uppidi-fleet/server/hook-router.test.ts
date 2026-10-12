@@ -4327,7 +4327,7 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
       "agent-quota-1",
       {
         id: "agent-quota-1",
-        status: "running",
+        status: "error",
         lastError: "",
         recentTimeline: retryLine,
       },
@@ -4345,6 +4345,138 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     const plan = planWatchdogRecovery(assessment.taxonomy);
     assert.equal(plan.steer, false);
     assert.equal(plan.blockedReason, "provider/quota exhaustion requires operator circuit-break");
+  });
+
+  it("ignores stale historical quota errors after subsequent agent activity (#1144)", () => {
+    const retryLine = "[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go";
+    const errorAt = now - 3 * 60 * 60 * 1000;
+    const activityAt = now - 60 * 1000;
+    const staleEntry = { text: retryLine, timestamp: errorAt };
+
+    // Recency alone does not drop an error that is still inside the window.
+    assert.equal(
+      findProviderRetryQuotaError([staleEntry], { now, recencySeconds: 86400 }),
+      retryLine,
+    );
+    // Subsequent activity after the error timestamp marks it historical.
+    assert.equal(
+      findProviderRetryQuotaError([staleEntry], {
+        now,
+        recencySeconds: 86400,
+        lastActivityAt: activityAt,
+      }),
+      null,
+    );
+
+    // Integration: an idle agent that resumed work after the quota error is healthy.
+    const assessment = assessAgentHealth(
+      "agent-quota-stale",
+      {
+        id: "agent-quota-stale",
+        status: "idle",
+        lastError: "",
+        lastActivityAt: new Date(activityAt).toISOString(),
+        recentTimeline: [staleEntry],
+      },
+      null,
+      now,
+      { cancellationRecencySeconds: 86400 },
+    );
+    assert.equal(assessment.taxonomy.includes("PROVIDER_QUOTA_EXHAUSTION"), false);
+    assert.equal(assessment.healthy, true);
+  });
+
+  it("filters quota errors older than the recency window (#1144)", () => {
+    const retryLine = "[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go";
+    const expired = now - 25 * 60 * 60 * 1000;
+    assert.equal(
+      findProviderRetryQuotaError([{ text: retryLine, timestamp: expired }], {
+        now,
+        recencySeconds: 86400,
+      }),
+      null,
+    );
+  });
+
+  it("still flags an active quota error with no subsequent activity (#1144)", () => {
+    const retryLine = "[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go";
+    const assessment = assessAgentHealth(
+      "agent-quota-active",
+      {
+        id: "agent-quota-active",
+        status: "idle",
+        lastError: "",
+        recentTimeline: [{ text: retryLine, timestamp: now - 60 * 1000 }],
+      },
+      null,
+      now,
+    );
+    assert.deepEqual(assessment.taxonomy, ["PROVIDER_QUOTA_EXHAUSTION"]);
+    assert.equal(assessment.healthy, false);
+    assert.equal(assessment.lastError, retryLine);
+  });
+
+  it("suppresses historical quota errors while the agent is running but honours a live lastError (#1144)", () => {
+    const retryLine = "[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go";
+    const running = assessAgentHealth(
+      "agent-quota-running",
+      {
+        id: "agent-quota-running",
+        status: "running",
+        lastError: "",
+        recentTimeline: retryLine,
+      },
+      null,
+      now,
+    );
+    assert.equal(running.taxonomy.includes("PROVIDER_QUOTA_EXHAUSTION"), false);
+
+    const runningWithError = assessAgentHealth(
+      "agent-quota-running-error",
+      {
+        id: "agent-quota-running-error",
+        status: "running",
+        lastError: "You've hit your usage limit",
+        recentTimeline: retryLine,
+      },
+      null,
+      now,
+    );
+    assert.equal(runningWithError.taxonomy.includes("PROVIDER_QUOTA_EXHAUSTION"), true);
+  });
+
+  it("preserves daemon log timestamps and treats a stale quota log line as historical (#1144)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-quota-stale-log-"));
+    try {
+      const log = join(dir, "daemon.log");
+      const errorAt = now - 6 * 60 * 60 * 1000;
+      const retryLine = "[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go";
+      writeFileSync(
+        log,
+        `${JSON.stringify({ level: 50, time: errorAt, agentId: "agent-quota-stale-log", message: retryLine })}\n`,
+      );
+      const errors = scanTimelineRetryErrors([log]);
+      const entries = errors.get("agent-quota-stale-log");
+      assert.ok(entries);
+      assert.equal(entries![0].timestamp, errorAt);
+      assert.equal(entries![0].text, retryLine);
+
+      const assessment = assessAgentHealth(
+        "agent-quota-stale-log",
+        {
+          id: "agent-quota-stale-log",
+          status: "idle",
+          lastError: "",
+          lastActivityAt: new Date(now - 60 * 1000).toISOString(),
+        },
+        null,
+        now,
+        { timelineErrors: errors },
+      );
+      assert.equal(assessment.taxonomy.includes("PROVIDER_QUOTA_EXHAUSTION"), false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("classifies runaway repetitive tool loops and ignores output-only differences (#1265)", () => {
@@ -4439,7 +4571,7 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
       assert.ok(errors.has("agent-quota-a"));
       assert.ok(errors.has("agent-quota-b"));
       assert.equal(errors.has("agent-transient"), false);
-      assert.match(errors.get("agent-quota-a")![0], /Free usage exceeded/);
+      assert.match(errors.get("agent-quota-a")![0].text, /Free usage exceeded/);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -4708,7 +4840,7 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
           {
             id: "agent-quota-exhausted",
             title: "Orchestrator · xpufx-org/paseo",
-            status: "running",
+            status: "error",
             lastError: "",
             provider: "opencode",
             model: "muse-spark-1.3-contributor-free",
