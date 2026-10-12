@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Platform, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { Linking, Platform, Text, View } from "react-native";
 import {
   getColumnTransitions,
   type KanbanColumnId,
@@ -9,9 +9,18 @@ import {
   HostButton,
   HostInteractiveRow,
   HostRow,
+  HostStatusDot,
   useHostTheme,
 } from "../index.js";
-import type { KanbanCardProps, KanbanIssue } from "./types.js";
+import {
+  describeCiStatus,
+  describePullRequest,
+  describeReviewDecision,
+  detectBranchPill,
+  detectCiStatus,
+  detectLinkedPullRequest,
+} from "./card-artifacts.js";
+import type { KanbanCardProps, KanbanIssue, LinkedPullRequest } from "./types.js";
 
 const ATTENTION_CONFIG: Record<
   string,
@@ -45,6 +54,7 @@ export function HostKanbanCard({
   onTransition,
   isTransitioning = false,
   isDragging = false,
+  isSelected = false,
   onDragStart,
   onDragEnd,
 }: KanbanCardProps) {
@@ -55,6 +65,19 @@ export function HostKanbanCard({
   const isWeb = Platform.OS === "web";
   const [internalDragging, setInternalDragging] = useState(false);
   const draggingActive = isDragging || internalDragging;
+
+  const branch = detectBranchPill(issue);
+  const pullRequest = detectLinkedPullRequest(issue);
+  const pullRequestBadge = pullRequest ? describePullRequest(pullRequest) : null;
+  const reviewBadge = pullRequest ? describeReviewDecision(pullRequest.reviewDecision) : null;
+  const ciStatus = detectCiStatus(issue);
+  const ciBadge = describeCiStatus(ciStatus);
+
+  const openPullRequest = (pr: LinkedPullRequest) => {
+    const target = pr.url ?? issue.url;
+    if (!target) return;
+    Linking.openURL(target).catch(() => {});
+  };
 
   const handleDragStart = (e: any) => {
     setInternalDragging(true);
@@ -96,10 +119,10 @@ export function HostKanbanCard({
 
   const cardStyle: Record<string, any> = {
     backgroundColor: colors.surface0,
-    borderColor: colors.border,
-    borderWidth: 1,
+    borderColor: isSelected ? colors.accent : colors.border,
+    borderWidth: isSelected ? 2 : 1,
     borderRadius: 8,
-    padding: 10,
+    padding: isSelected ? 9 : 10,
     gap: 8,
     opacity: draggingActive ? 0.6 : 1,
     ...(isWeb ? { cursor: "grab" } : {}),
@@ -157,11 +180,43 @@ export function HostKanbanCard({
         </Text>
       </HostInteractiveRow>
 
-      {/* Meta tags (branch, comments) */}
-      {(issue.branch || (issue.comments !== undefined && issue.comments > 0)) && (
+      {/* Meta tags: branch pill, linked PR badge, review verdict, CI status */}
+      {(branch || pullRequestBadge || ciBadge || (issue.comments !== undefined && issue.comments > 0)) && (
         <HostRow gap="xs" align="center" wrap>
-          {issue.branch && (
-            <HostBadge label={issue.branch} variant="neutral" size="sm" />
+          {branch && (
+            <View testID={`kanban-branch-pill-${issue.number}`}>
+              <HostBadge label={branch} variant="neutral" size="sm" icon="GitBranch" />
+            </View>
+          )}
+          {pullRequestBadge && pullRequest && (
+            <HostInteractiveRow
+              testID={`kanban-pr-badge-${issue.number}`}
+              accessibilityRole="link"
+              accessibilityLabel={`Linked pull request ${pullRequestBadge.label}`}
+              onPress={() => openPullRequest(pullRequest)}
+            >
+              <HostBadge
+                label={pullRequestBadge.label}
+                variant={pullRequestBadge.variant}
+                size="sm"
+                icon={pullRequestBadge.icon}
+              />
+            </HostInteractiveRow>
+          )}
+          {reviewBadge && (
+            <HostBadge label={reviewBadge.label} variant={reviewBadge.variant} size="sm" />
+          )}
+          {ciBadge && (
+            <HostRow testID={`kanban-ci-${issue.number}`} gap="xxs" align="center">
+              <HostStatusDot
+                variant={ciBadge.variant}
+                size="sm"
+                pulse={ciStatus === "running"}
+              />
+              <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+                {ciBadge.label}
+              </Text>
+            </HostRow>
           )}
           {issue.comments !== undefined && issue.comments > 0 && (
             <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>

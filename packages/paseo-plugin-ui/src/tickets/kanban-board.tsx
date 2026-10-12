@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Platform, Text, View } from "react-native";
 import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import {
@@ -20,6 +20,13 @@ import {
   getActiveDraggingIssue,
   setActiveDraggingIssue,
 } from "./kanban-card.js";
+import { HostIssueDetailDrawer } from "./issue-detail-drawer.js";
+import {
+  getKanbanKeydownTarget,
+  isEditableKeyboardTarget,
+  resolveKanbanKeyboardIntent,
+  type KanbanKeyboardEventLike,
+} from "./kanban-keyboard.js";
 import type { KanbanBoardProps, KanbanIssue } from "./types.js";
 
 export function HostKanbanBoard({
@@ -31,12 +38,25 @@ export function HostKanbanBoard({
   onFilterQueryChange,
   isLoading = false,
   columns = KANBAN_COLUMNS,
+  selectedIssueNumber,
+  onSelectedIssueNumberChange,
+  onOpenIssueDetail,
+  issueDetail = null,
+  detailDrawer = true,
+  onToggleChecklistItem,
+  onSubmitComment,
+  onSelectLabel,
+  activeStateLabel = null,
 }: KanbanBoardProps) {
   const { colors } = useHostTheme();
   const [internalQuery, setInternalQuery] = useState("");
   const [transitioningIssueId, setTransitioningIssueId] = useState<number | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<KanbanColumnId | null>(null);
+  const [internalSelected, setInternalSelected] = useState<number | null>(null);
+  const [drawerIssueNumber, setDrawerIssueNumber] = useState<number | null>(null);
   const isWeb = Platform.OS === "web";
+  const isSelectionControlled = selectedIssueNumber !== undefined;
+  const activeSelected = isSelectionControlled ? selectedIssueNumber ?? null : internalSelected;
 
   const query = externalFilterQuery !== undefined ? externalFilterQuery : internalQuery;
   const setQuery = onFilterQueryChange ?? setInternalQuery;
@@ -75,15 +95,134 @@ export function HostKanbanBoard({
     return map;
   }, [filteredIssues, columns]);
 
-  const handleTransition = async (issue: KanbanIssue, targetState: KanbanColumnId) => {
-    if (!onTransitionIssue) return;
-    setTransitioningIssueId(issue.number);
-    try {
-      await onTransitionIssue(issue, targetState);
-    } finally {
-      setTransitioningIssueId(null);
-    }
-  };
+  const orderedIssues = useMemo(
+    () => columns.flatMap((col) => issuesByColumn[col.id] ?? []),
+    [columns, issuesByColumn],
+  );
+
+  const setSelectedIssue = useCallback(
+    (value: number | null) => {
+      if (!isSelectionControlled) setInternalSelected(value);
+      onSelectedIssueNumberChange?.(value);
+    },
+    [isSelectionControlled, onSelectedIssueNumberChange],
+  );
+
+  const handleTransition = useCallback(
+    async (issue: KanbanIssue, targetState: KanbanColumnId) => {
+      if (!onTransitionIssue) return;
+      setTransitioningIssueId(issue.number);
+      try {
+        await onTransitionIssue(issue, targetState);
+      } finally {
+        setTransitioningIssueId(null);
+      }
+    },
+    [onTransitionIssue],
+  );
+
+  const selectByOffset = useCallback(
+    (offset: number) => {
+      if (orderedIssues.length === 0) return;
+      const currentIndex =
+        activeSelected === null
+          ? -1
+          : orderedIssues.findIndex((issue) => issue.number === activeSelected);
+      const nextIndex =
+        currentIndex < 0
+          ? offset > 0
+            ? 0
+            : orderedIssues.length - 1
+          : (currentIndex + offset + orderedIssues.length) % orderedIssues.length;
+      setSelectedIssue(orderedIssues[nextIndex].number);
+    },
+    [orderedIssues, activeSelected, setSelectedIssue],
+  );
+
+  const handleSelectCard = useCallback(
+    (issueNumber: number) => {
+      setSelectedIssue(issueNumber);
+      onSelectIssue?.(issueNumber);
+    },
+    [setSelectedIssue, onSelectIssue],
+  );
+
+  const openIssueDetail = useCallback(
+    (issueNumber: number) => {
+      setSelectedIssue(issueNumber);
+      onSelectIssue?.(issueNumber);
+      if (onOpenIssueDetail) {
+        onOpenIssueDetail(issueNumber);
+        return;
+      }
+      if (detailDrawer !== false) setDrawerIssueNumber(issueNumber);
+    },
+    [setSelectedIssue, onSelectIssue, onOpenIssueDetail, detailDrawer],
+  );
+
+  const closeIssueDetail = useCallback(() => setDrawerIssueNumber(null), []);
+
+  const drawerIssue = useMemo(
+    () => issues.find((issue) => issue.number === drawerIssueNumber) ?? null,
+    [issues, drawerIssueNumber],
+  );
+
+  useEffect(() => {
+    if (!isWeb) return;
+    const keydownTarget = getKanbanKeydownTarget();
+    if (!keydownTarget) return;
+    const handleKeyDown = (event: KanbanKeyboardEventLike) => {
+      if (isEditableKeyboardTarget(event?.target)) return;
+      const intent = resolveKanbanKeyboardIntent(String(event?.key ?? ""), columns.length);
+      if (intent.type === "none") return;
+      event.preventDefault?.();
+      if (intent.type === "close") {
+        closeIssueDetail();
+        return;
+      }
+      if (activeSelected === null) {
+        if (intent.type === "select-next") selectByOffset(1);
+        else if (intent.type === "select-prev") selectByOffset(-1);
+        return;
+      }
+      switch (intent.type) {
+        case "select-next":
+          selectByOffset(1);
+          break;
+        case "select-prev":
+          selectByOffset(-1);
+          break;
+        case "open":
+          openIssueDetail(activeSelected);
+          break;
+        case "move": {
+          const target = columns[intent.columnIndex ?? -1];
+          const issue = issues.find((candidate) => candidate.number === activeSelected);
+          if (
+            target &&
+            issue &&
+            getIssueKanbanColumn(issue) !== target.id
+          ) {
+            void handleTransition(issue, target.id);
+          }
+          break;
+        }
+        default:
+          break;
+      }
+    };
+    keydownTarget.addEventListener("keydown", handleKeyDown);
+    return () => keydownTarget.removeEventListener("keydown", handleKeyDown);
+  }, [
+    isWeb,
+    columns,
+    issues,
+    activeSelected,
+    selectByOffset,
+    openIssueDetail,
+    closeIssueDetail,
+    handleTransition,
+  ]);
 
   const handleColumnDragOver = (e: any, colId: KanbanColumnId) => {
     e.preventDefault?.();
@@ -334,9 +473,10 @@ export function HostKanbanBoard({
                   key={issue.number}
                   issue={issue}
                   columnId={col.id}
-                  onSelect={onSelectIssue}
+                  onSelect={handleSelectCard}
                   onTransition={handleTransition}
                   isTransitioning={transitioningIssueId === issue.number}
+                  isSelected={activeSelected === issue.number}
                 />
               ))
             );
@@ -395,6 +535,19 @@ export function HostKanbanBoard({
           );
         })}
       </ScrollView>
+
+      {detailDrawer !== false && !onOpenIssueDetail ? (
+        <HostIssueDetailDrawer
+          visible={drawerIssue !== null}
+          issue={drawerIssue}
+          detail={issueDetail ?? null}
+          onClose={closeIssueDetail}
+          activeStateLabel={activeStateLabel}
+          onSelectLabel={onSelectLabel}
+          onToggleChecklistItem={onToggleChecklistItem}
+          onSubmitComment={onSubmitComment}
+        />
+      ) : null}
     </View>
   );
 }

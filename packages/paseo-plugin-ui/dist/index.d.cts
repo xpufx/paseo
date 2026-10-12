@@ -1,6 +1,6 @@
 import React, { ReactNode } from 'react';
 import { StyleProp, ViewStyle, TextStyle, GestureResponderEvent, AccessibilityRole, ScrollView, ScrollViewProps, KeyboardTypeOptions } from 'react-native';
-import { KanbanColumnId, KanbanColumnDef, AgentEnvelope, IssueComment, ForgeLabel } from '@xpufx/backend-tickets/client';
+import { ForgeLabel, IssueComment, KanbanColumnId, KanbanColumnDef, AgentEnvelope } from '@xpufx/backend-tickets/client';
 export { AgentEnvelope, ForgeLabel, IssueComment, KanbanColumnDef, KanbanColumnId, KanbanTransitionAction } from '@xpufx/backend-tickets/client';
 
 /**
@@ -96,6 +96,35 @@ interface ListActionPageTemplateProps<T> {
  */
 declare function ListActionPageTemplate<T>({ title, subtitle, icon, badge, headerActions, filterSlot, bannerSlot, data, keyExtractor, renderItem, emptyState, isLoading, footerSlot, style, contentContainerStyle, }: ListActionPageTemplateProps<T>): React.JSX.Element;
 
+type PullRequestState = "open" | "draft" | "merged" | "closed" | "unknown";
+type PullRequestReviewDecision = "approved" | "changes-requested" | "pending" | "unknown";
+type CiStatus = "passing" | "failing" | "running" | "pending" | "unknown";
+interface LinkedPullRequest {
+    number?: number;
+    url?: string;
+    title?: string;
+    state?: PullRequestState;
+    draft?: boolean;
+    reviewDecision?: PullRequestReviewDecision;
+}
+interface ChecklistItem {
+    /** Zero-based position among the parsed checklist items. */
+    index: number;
+    /** 1-based line number in the source body. */
+    line: number;
+    text: string;
+    checked: boolean;
+}
+/** Full issue payload backing the slide-over detail drawer. */
+interface IssueDetailData {
+    body?: string;
+    labels?: ForgeLabel[];
+    comments?: IssueComment[];
+    author?: string;
+    createdAt?: string;
+    updatedAt?: string;
+    webUrl?: string;
+}
 interface KanbanIssue {
     number: number;
     title: string;
@@ -108,6 +137,13 @@ interface KanbanIssue {
     labels?: string[];
     url?: string;
     updatedAt?: string;
+    /** Canonical linked pull-request artifacts; the first entry is shown on the card. */
+    pullRequests?: LinkedPullRequest[];
+    /** Convenience single linked pull request for hosts that only surface one. */
+    pullRequest?: LinkedPullRequest;
+    /** Explicit CI status; falls back to `ci/*` labels when omitted. */
+    ciStatus?: CiStatus | string;
+    ciUrl?: string;
 }
 interface KanbanCardProps {
     issue: KanbanIssue;
@@ -116,6 +152,8 @@ interface KanbanCardProps {
     onTransition?: (issue: KanbanIssue, targetState: KanbanColumnId) => void | Promise<void>;
     isTransitioning?: boolean;
     isDragging?: boolean;
+    /** Keyboard/click selection highlight (board-level j/k cursor). */
+    isSelected?: boolean;
     onDragStart?: (e: any) => void;
     onDragEnd?: (e: any) => void;
 }
@@ -128,6 +166,21 @@ interface KanbanBoardProps {
     onFilterQueryChange?: (query: string) => void;
     isLoading?: boolean;
     columns?: readonly KanbanColumnDef[];
+    /** Controlled keyboard selection; leave undefined to let the board own the cursor. */
+    selectedIssueNumber?: number | null;
+    onSelectedIssueNumberChange?: (issueNumber: number | null) => void;
+    /**
+     * Called when `Enter` activates the selected card. When provided, the board
+     * delegates drawer ownership to the host instead of rendering its own.
+     */
+    onOpenIssueDetail?: (issueNumber: number) => void;
+    /** Detail payload for the internally-rendered drawer. */
+    issueDetail?: IssueDetailData | null;
+    detailDrawer?: boolean;
+    onToggleChecklistItem?: (item: ChecklistItem, checked: boolean) => void;
+    onSubmitComment?: (body: string) => void | Promise<void>;
+    onSelectLabel?: (label: string) => void;
+    activeStateLabel?: string | null;
 }
 
 interface HostMarkdownLiteProps {
@@ -164,11 +217,89 @@ interface HostScopedLabelGroupProps {
 }
 declare function HostScopedLabelGroup({ title, labels, active, pending, onSelect, style, }: HostScopedLabelGroupProps): React.JSX.Element;
 
+interface CardArtifactBadge {
+    label: string;
+    variant: StatusVariant;
+    icon?: string;
+}
+/**
+ * Resolves the branch shown as a pill on a card. Explicit `issue.branch` wins;
+ * hosts that only project labels can carry it as `branch/<name>`.
+ */
+declare function detectBranchPill(issue: KanbanIssue): string | null;
+declare function isFeatureBranch(branch: string): boolean;
+/**
+ * Normalizes an explicit pull request, a `pr/<n>` label, or a PR URL into the
+ * card artifact shape. Returns `null` when the issue carries no PR signal.
+ */
+declare function detectLinkedPullRequest(issue: KanbanIssue): LinkedPullRequest | null;
+/**
+ * Resolves the CI indicator status. Explicit `issue.ciStatus` wins; otherwise
+ * the first recognized `ci/*` or `checks/*` label is used.
+ */
+declare function detectCiStatus(issue: KanbanIssue): CiStatus;
+declare function describePullRequest(pr: LinkedPullRequest): CardArtifactBadge;
+declare function describeReviewDecision(decision: PullRequestReviewDecision | undefined): CardArtifactBadge | null;
+declare function describeCiStatus(status: CiStatus): CardArtifactBadge | null;
+/** Parses GitHub/Forgejo task-list lines (`- [ ]` / `- [x]`) from a body. */
+declare function extractChecklist(body: string | undefined | null): ChecklistItem[];
+/** Rewrites one checklist item's checked state, preserving the rest of the body. */
+declare function setChecklistItemChecked(body: string, index: number, checked: boolean): string;
+
 declare function getActiveDraggingIssue(): KanbanIssue | null;
 declare function setActiveDraggingIssue(issue: KanbanIssue | null): void;
-declare function HostKanbanCard({ issue, columnId, onSelect, onTransition, isTransitioning, isDragging, onDragStart, onDragEnd, }: KanbanCardProps): React.JSX.Element;
+declare function HostKanbanCard({ issue, columnId, onSelect, onTransition, isTransitioning, isDragging, isSelected, onDragStart, onDragEnd, }: KanbanCardProps): React.JSX.Element;
 
-declare function HostKanbanBoard({ issues, selectedRepo, onSelectIssue, onTransitionIssue, filterQuery: externalFilterQuery, onFilterQueryChange, isLoading, columns, }: KanbanBoardProps): React.JSX.Element;
+type KanbanKeyboardIntentType = "select-next" | "select-prev" | "open" | "move" | "close" | "none";
+interface KanbanKeyboardIntent {
+    type: KanbanKeyboardIntentType;
+    /** Zero-based target column for `move` intents (digit `1` -> `0`). */
+    columnIndex?: number;
+}
+/**
+ * Maps a raw keydown key to a board intent. Pure and platform-free so the
+ * dispatch logic is unit-testable without a DOM.
+ */
+declare function resolveKanbanKeyboardIntent(key: string, columnCount?: number): KanbanKeyboardIntent;
+interface KanbanKeyboardEventLike {
+    key?: string;
+    target?: unknown;
+    preventDefault?: () => void;
+}
+type KanbanKeydownListener = (event: KanbanKeyboardEventLike) => void;
+interface KanbanKeydownTarget {
+    addEventListener: (type: string, listener: KanbanKeydownListener) => void;
+    removeEventListener: (type: string, listener: KanbanKeydownListener) => void;
+}
+/**
+ * Returns the DOM keydown target when one exists. Uses `globalThis` so the
+ * package stays DOM-lib-free for hosts that compile the source without `lib.dom`.
+ */
+declare function getKanbanKeydownTarget(): KanbanKeydownTarget | null;
+/** True when the event originates from a text field and should keep native editing. */
+declare function isEditableKeyboardTarget(target: unknown): boolean;
+
+declare function HostKanbanBoard({ issues, selectedRepo, onSelectIssue, onTransitionIssue, filterQuery: externalFilterQuery, onFilterQueryChange, isLoading, columns, selectedIssueNumber, onSelectedIssueNumberChange, onOpenIssueDetail, issueDetail, detailDrawer, onToggleChecklistItem, onSubmitComment, onSelectLabel, activeStateLabel, }: KanbanBoardProps): React.JSX.Element;
+
+interface IssueDetailDrawerProps {
+    visible: boolean;
+    issue: KanbanIssue | null;
+    detail?: IssueDetailData | null;
+    onClose: () => void;
+    query?: string;
+    activeStateLabel?: string | null;
+    labelPending?: boolean;
+    onSelectLabel?: (label: string) => void;
+    onToggleChecklistItem?: (item: ChecklistItem, checked: boolean) => void;
+    onSubmitComment?: (body: string) => void | Promise<void>;
+    width?: number;
+}
+/**
+ * Non-modal slide-over for inspecting an issue without leaving the board: full
+ * markdown body, task-list toggles, scoped label quick toggles, PR/CI artifacts,
+ * the comment timeline, and a composer.
+ */
+declare function HostIssueDetailDrawer({ visible, issue, detail, onClose, query, activeStateLabel, labelPending, onSelectLabel, onToggleChecklistItem, onSubmitComment, width, }: IssueDetailDrawerProps): React.JSX.Element | null;
 
 /**
  * Canonical shared composition of the presentational pieces every plugin used
@@ -516,8 +647,9 @@ interface HostButtonProps {
     textStyle?: StyleProp<TextStyle>;
     accessibilityLabel?: string;
     accessibilityRole?: "button" | "link";
+    testID?: string;
 }
-declare function HostButton({ label, children, variant, size, icon, iconPosition, onPress, disabled, loading, style, textStyle, accessibilityLabel, accessibilityRole, }: HostButtonProps): React.JSX.Element;
+declare function HostButton({ label, children, variant, size, icon, iconPosition, onPress, disabled, loading, style, textStyle, accessibilityLabel, accessibilityRole, testID, }: HostButtonProps): React.JSX.Element;
 interface HostInlineButtonProps {
     label: string;
     onPress?: () => void | Promise<void>;
@@ -752,4 +884,4 @@ interface HostResponsiveProps {
  */
 declare function HostResponsive({ desktop, mobile, compact, wide, children }: HostResponsiveProps): React.JSX.Element;
 
-export { HostAgentEnvelopeCard as AgentEnvelopeCard, HostCommentCard as CommentCard, type HostDataColumn as DataColumn, HostDataTable as DataTable, type HostDataTableProps as DataTableProps, FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAgentEnvelopeCard, type HostAgentEnvelopeCardProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCommentCard, type HostCommentCardProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, type HostDataColumn, HostDataTable, type HostDataTableProps, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostInteractiveRow, type HostInteractiveRowProps, HostKanbanBoard, HostKanbanCard, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMarkdownLite, type HostMarkdownLiteProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostResponsive, type HostResponsiveProps, HostRow, type HostRowProps, HostScopedLabelGroup, type HostScopedLabelGroupProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, HostInteractiveRow as InteractiveRow, type HostInteractiveRowProps as InteractiveRowProps, HostKanbanBoard as KanbanBoard, type KanbanBoardProps, HostKanbanCard as KanbanCard, type KanbanCardProps, type KanbanIssue, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, HostMarkdownLite as MarkdownLite, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, HostResponsive as Responsive, type ResponsiveLayout, type HostResponsiveProps as ResponsiveProps, HostScopedLabelGroup as ScopedLabelGroup, type ScrollViewInstance, type SpacingValue, type StatusVariant, type ThemeColors, alpha, getActiveDraggingIssue, getStatusColor, resolveHostColors, resolveSpacing, sanitizeFluidStyle, setActiveDraggingIssue, spacing, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };
+export { HostAgentEnvelopeCard as AgentEnvelopeCard, type CardArtifactBadge, type ChecklistItem, type CiStatus, HostCommentCard as CommentCard, type HostDataColumn as DataColumn, HostDataTable as DataTable, type HostDataTableProps as DataTableProps, FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAgentEnvelopeCard, type HostAgentEnvelopeCardProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCommentCard, type HostCommentCardProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, type HostDataColumn, HostDataTable, type HostDataTableProps, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostInteractiveRow, type HostInteractiveRowProps, HostIssueDetailDrawer, HostKanbanBoard, HostKanbanCard, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMarkdownLite, type HostMarkdownLiteProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostResponsive, type HostResponsiveProps, HostRow, type HostRowProps, HostScopedLabelGroup, type HostScopedLabelGroupProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, HostInteractiveRow as InteractiveRow, type HostInteractiveRowProps as InteractiveRowProps, type IssueDetailData, HostIssueDetailDrawer as IssueDetailDrawer, type IssueDetailDrawerProps, HostKanbanBoard as KanbanBoard, type KanbanBoardProps, HostKanbanCard as KanbanCard, type KanbanCardProps, type KanbanIssue, type KanbanKeyboardEventLike, type KanbanKeyboardIntent, type KanbanKeyboardIntentType, type KanbanKeydownListener, type KanbanKeydownTarget, type LinkedPullRequest, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, HostMarkdownLite as MarkdownLite, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, type PullRequestReviewDecision, type PullRequestState, HostResponsive as Responsive, type ResponsiveLayout, type HostResponsiveProps as ResponsiveProps, HostScopedLabelGroup as ScopedLabelGroup, type ScrollViewInstance, type SpacingValue, type StatusVariant, type ThemeColors, alpha, describeCiStatus, describePullRequest, describeReviewDecision, detectBranchPill, detectCiStatus, detectLinkedPullRequest, extractChecklist, getActiveDraggingIssue, getKanbanKeydownTarget, getStatusColor, isEditableKeyboardTarget, isFeatureBranch, resolveHostColors, resolveKanbanKeyboardIntent, resolveSpacing, sanitizeFluidStyle, setActiveDraggingIssue, setChecklistItemChecked, spacing, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };

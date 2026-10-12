@@ -1637,6 +1637,7 @@ export interface HostButtonProps {
   textStyle?: StyleProp<TextStyle>;
   accessibilityLabel?: string;
   accessibilityRole?: "button" | "link";
+  testID?: string;
 }
 
 export function HostButton({
@@ -1653,6 +1654,7 @@ export function HostButton({
   textStyle,
   accessibilityLabel,
   accessibilityRole = "button",
+  testID,
 }: HostButtonProps) {
   const { colors, alpha: alphaColor } = useHostTheme();
 
@@ -1701,6 +1703,7 @@ export function HostButton({
       disabled={disabled || loading}
       accessibilityRole={accessibilityRole}
       accessibilityLabel={accessibilityLabel || label}
+      testID={testID}
       hitSlop={4}
       style={({ pressed }) => [
         styles.buttonBase,
