@@ -1,5 +1,7 @@
 import React, { ReactNode } from 'react';
 import { StyleProp, ViewStyle, TextStyle, GestureResponderEvent, AccessibilityRole, ScrollView, ScrollViewProps, KeyboardTypeOptions } from 'react-native';
+import { KanbanColumnId, KanbanColumnDef, AgentEnvelope, IssueComment, ForgeLabel } from '@xpufx/backend-tickets/client';
+export { AgentEnvelope, ForgeLabel, IssueComment, KanbanColumnDef, KanbanColumnId, KanbanTransitionAction } from '@xpufx/backend-tickets/client';
 
 /**
  * Structural theme/layout types for the shared UI package.
@@ -93,6 +95,80 @@ interface ListActionPageTemplateProps<T> {
  * single scroll ownership.
  */
 declare function ListActionPageTemplate<T>({ title, subtitle, icon, badge, headerActions, filterSlot, bannerSlot, data, keyExtractor, renderItem, emptyState, isLoading, footerSlot, style, contentContainerStyle, }: ListActionPageTemplateProps<T>): React.JSX.Element;
+
+interface KanbanIssue {
+    number: number;
+    title: string;
+    state?: string;
+    repo?: string;
+    status?: "Backlog" | "In progress" | "Review" | "Done" | string;
+    attention?: string;
+    branch?: string;
+    comments?: number;
+    labels?: string[];
+    url?: string;
+    updatedAt?: string;
+}
+interface KanbanCardProps {
+    issue: KanbanIssue;
+    columnId: KanbanColumnId;
+    onSelect?: (issueNumber: number) => void;
+    onTransition?: (issue: KanbanIssue, targetState: KanbanColumnId) => void | Promise<void>;
+    isTransitioning?: boolean;
+    isDragging?: boolean;
+    onDragStart?: (e: any) => void;
+    onDragEnd?: (e: any) => void;
+}
+interface KanbanBoardProps {
+    issues: KanbanIssue[];
+    selectedRepo?: string;
+    onSelectIssue?: (issueNumber: number) => void;
+    onTransitionIssue?: (issue: KanbanIssue, targetState: KanbanColumnId) => void | Promise<void>;
+    filterQuery?: string;
+    onFilterQueryChange?: (query: string) => void;
+    isLoading?: boolean;
+    columns?: readonly KanbanColumnDef[];
+}
+
+interface HostMarkdownLiteProps {
+    body: string;
+    query?: string;
+    style?: StyleProp<ViewStyle>;
+}
+declare function HostMarkdownLite({ body, query, style }: HostMarkdownLiteProps): React.JSX.Element;
+
+interface HostAgentEnvelopeCardProps {
+    envelope: AgentEnvelope;
+    style?: StyleProp<ViewStyle>;
+    onOpenSession?: (url: string) => void;
+}
+declare function HostAgentEnvelopeCard({ envelope, style, onOpenSession, }: HostAgentEnvelopeCardProps): React.JSX.Element;
+
+interface HostCommentCardProps {
+    comment: IssueComment;
+    issueUrl?: string;
+    query?: string;
+    style?: StyleProp<ViewStyle>;
+    onOpenComment?: (url: string) => void;
+    onOpenSession?: (url: string) => void;
+}
+declare function HostCommentCard({ comment, issueUrl, query, style, onOpenComment, onOpenSession, }: HostCommentCardProps): React.JSX.Element;
+
+interface HostScopedLabelGroupProps {
+    title: string;
+    labels: readonly ForgeLabel[];
+    active: string | null;
+    pending?: boolean;
+    onSelect: (label: string) => void;
+    style?: StyleProp<ViewStyle>;
+}
+declare function HostScopedLabelGroup({ title, labels, active, pending, onSelect, style, }: HostScopedLabelGroupProps): React.JSX.Element;
+
+declare function getActiveDraggingIssue(): KanbanIssue | null;
+declare function setActiveDraggingIssue(issue: KanbanIssue | null): void;
+declare function HostKanbanCard({ issue, columnId, onSelect, onTransition, isTransitioning, isDragging, onDragStart, onDragEnd, }: KanbanCardProps): React.JSX.Element;
+
+declare function HostKanbanBoard({ issues, selectedRepo, onSelectIssue, onTransitionIssue, filterQuery: externalFilterQuery, onFilterQueryChange, isLoading, columns, }: KanbanBoardProps): React.JSX.Element;
 
 /**
  * Canonical shared composition of the presentational pieces every plugin used
@@ -676,4 +752,4 @@ interface HostResponsiveProps {
  */
 declare function HostResponsive({ desktop, mobile, compact, wide, children }: HostResponsiveProps): React.JSX.Element;
 
-export { type HostDataColumn as DataColumn, HostDataTable as DataTable, type HostDataTableProps as DataTableProps, FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, type HostDataColumn, HostDataTable, type HostDataTableProps, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostInteractiveRow, type HostInteractiveRowProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostResponsive, type HostResponsiveProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, HostInteractiveRow as InteractiveRow, type HostInteractiveRowProps as InteractiveRowProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, HostResponsive as Responsive, type ResponsiveLayout, type HostResponsiveProps as ResponsiveProps, type ScrollViewInstance, type SpacingValue, type StatusVariant, type ThemeColors, alpha, getStatusColor, resolveHostColors, resolveSpacing, sanitizeFluidStyle, spacing, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };
+export { HostAgentEnvelopeCard as AgentEnvelopeCard, HostCommentCard as CommentCard, type HostDataColumn as DataColumn, HostDataTable as DataTable, type HostDataTableProps as DataTableProps, FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAgentEnvelopeCard, type HostAgentEnvelopeCardProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCommentCard, type HostCommentCardProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, type HostDataColumn, HostDataTable, type HostDataTableProps, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostInteractiveRow, type HostInteractiveRowProps, HostKanbanBoard, HostKanbanCard, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMarkdownLite, type HostMarkdownLiteProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostResponsive, type HostResponsiveProps, HostRow, type HostRowProps, HostScopedLabelGroup, type HostScopedLabelGroupProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, HostInteractiveRow as InteractiveRow, type HostInteractiveRowProps as InteractiveRowProps, HostKanbanBoard as KanbanBoard, type KanbanBoardProps, HostKanbanCard as KanbanCard, type KanbanCardProps, type KanbanIssue, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, HostMarkdownLite as MarkdownLite, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, HostResponsive as Responsive, type ResponsiveLayout, type HostResponsiveProps as ResponsiveProps, HostScopedLabelGroup as ScopedLabelGroup, type ScrollViewInstance, type SpacingValue, type StatusVariant, type ThemeColors, alpha, getActiveDraggingIssue, getStatusColor, resolveHostColors, resolveSpacing, sanitizeFluidStyle, setActiveDraggingIssue, spacing, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };

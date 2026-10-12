@@ -12,6 +12,9 @@ import {
   scopeOfLabel,
   liveScopesFromLabels,
   validateCreateIssueInput,
+  getIssueKanbanColumn,
+  getColumnTransitions,
+  isRepoMatching,
   type ForgeIssue,
 } from "../shared/index.js";
 import {
@@ -215,5 +218,50 @@ describe("Server: ForgeClient", () => {
     expect(result?.issues[0].title).toBe("Issue 10");
     expect(result?.issues[0].labels).toEqual(["priority/high"]);
     expect(result?.issues[0].labelDetails).toEqual([{ name: "priority/high", color: "ff0000" }]);
+  });
+});
+
+describe("Kanban & Repo Matching", () => {
+  it("determines correct kanban column by status, state, or labels", () => {
+    expect(getIssueKanbanColumn({ status: "Done" })).toBe("done");
+    expect(getIssueKanbanColumn({ state: "closed" })).toBe("done");
+    expect(getIssueKanbanColumn({ labels: ["state/done"] })).toBe("done");
+    expect(getIssueKanbanColumn({ labels: ["state/4-done"] })).toBe("done");
+
+    expect(getIssueKanbanColumn({ status: "Review" })).toBe("review");
+    expect(getIssueKanbanColumn({ labels: ["state/review"] })).toBe("review");
+    expect(getIssueKanbanColumn({ labels: ["state/verify"] })).toBe("review");
+    expect(getIssueKanbanColumn({ labels: ["review/needed"] })).toBe("review");
+
+    expect(getIssueKanbanColumn({ status: "In progress" })).toBe("in_progress");
+    expect(getIssueKanbanColumn({ labels: ["state/wip"] })).toBe("in_progress");
+    expect(getIssueKanbanColumn({ labels: ["state/1-wip"] })).toBe("in_progress");
+
+    expect(getIssueKanbanColumn({ status: "Backlog" })).toBe("backlog");
+    expect(getIssueKanbanColumn({ labels: ["state/triage"] })).toBe("backlog");
+    expect(getIssueKanbanColumn({})).toBe("backlog");
+  });
+
+  it("provides column transitions", () => {
+    const backlogTrans = getColumnTransitions("backlog");
+    expect(backlogTrans.map((t) => t.targetState)).toEqual(["in_progress", "review"]);
+
+    const wipTrans = getColumnTransitions("in_progress");
+    expect(wipTrans.map((t) => t.targetState)).toEqual(["backlog", "review"]);
+
+    const reviewTrans = getColumnTransitions("review");
+    expect(reviewTrans.map((t) => t.targetState)).toEqual(["in_progress", "done"]);
+
+    const doneTrans = getColumnTransitions("done");
+    expect(doneTrans.map((t) => t.targetState)).toEqual(["backlog", "in_progress"]);
+  });
+
+  it("matches repo strings correctly", () => {
+    expect(isRepoMatching("xpufx/paseo", "xpufx/paseo")).toBe(true);
+    expect(isRepoMatching("https://forge.mrs.uppidi.com/xpufx-org/paseo.git", "xpufx-org/paseo")).toBe(true);
+    expect(isRepoMatching("git@forge.mrs.uppidi.com:222/xpufx-org/paseo.git", "xpufx-org/paseo")).toBe(true);
+    expect(isRepoMatching("xpufx-org/paseo", "https://github.com/xpufx-org/paseo")).toBe(true);
+    expect(isRepoMatching("xpufx/other", "xpufx/paseo")).toBe(false);
+    expect(isRepoMatching(null, "xpufx/paseo")).toBe(false);
   });
 });

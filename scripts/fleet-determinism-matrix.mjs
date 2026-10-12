@@ -845,9 +845,8 @@ const PARTS = [
       exports: ["KANBAN_COLUMNS", "getIssueKanbanColumn", "getColumnTransitions", "KanbanCard", "UppidiFleetKanbanBoard"],
     },
     evidence: [
-      [`kanban-board.tsx:21-50`, "static column definitions and status mappings"],
-      [`kanban-board.tsx:52-92`, "maps issue labels and state to kanban columns deterministically"],
-      [`kanban-board.tsx:101-124`, "determines valid next column transition targets"],
+      [`kanban-board.tsx:21-32`, "re-exports canonical column definitions, transitions, and cards from @xpufx/paseo-plugin-ui and backend-tickets"],
+      [`kanban-board.tsx:44-56`, "UppidiFleetKanbanBoard delegates to shared presentation component; no model call"],
     ],
     note: "Interactive Kanban board mapping issues across lifecycle states.",
   },
