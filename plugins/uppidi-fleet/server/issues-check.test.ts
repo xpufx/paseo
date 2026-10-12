@@ -18,6 +18,7 @@ import {
   STALE_WIP_LABEL,
   STALE_WIP_REMINDER_MARKER,
   STALE_WIP_SKIP_LABELS,
+  TRIAGE_STATE_LABEL,
   createDefaultIssuesCheckIo,
   recoverStaleWipIssue,
   sweepStaleWipIssues,
@@ -25,6 +26,11 @@ import {
   classifyCandidate,
   isDispatchableCandidate,
   isActionable,
+  hasStateLabel,
+  needsStateTriage,
+  normalizeStatelessIssue,
+  runIssuesCheck,
+  sweepStatelessIssues,
   renderIssuesCheckMarkdown,
   type ForgejoComment,
   type ForgejoIssue,
@@ -325,6 +331,7 @@ describe("state/verify vs state/review separation (#1194)", () => {
     const outcome: IssuesCheckOutcome = {
       exitCode: 1,
       staleWipRecovery: [],
+      stateTriage: [],
       savedState: {},
       rankedCandidates: [
         {
@@ -374,3 +381,107 @@ describe("state/verify vs state/review separation (#1194)", () => {
   });
 });
 
+
+describe("attention/orchestrator classification and state/triage hygiene (#1264)", () => {
+  it("isDispatchableCandidate blocks orchestrator, front-desk, and spec/needed", () => {
+    assert.equal(isDispatchableCandidate(new Set(["attention/orchestrator"])), false);
+    assert.equal(isDispatchableCandidate(new Set(["attention/frontdesk"])), false);
+    assert.equal(isDispatchableCandidate(new Set(["spec/needed"])), false);
+    // Without one of these blockers the ticket remains autonomously dispatchable.
+    assert.equal(isDispatchableCandidate(new Set(["spec/approved"])), true);
+    assert.equal(isDispatchableCandidate(new Set(["attention/agent"])), true);
+  });
+
+  it("classifyCandidate triages attention/orchestrator before the dispatchable fallthrough", () => {
+    const result = classifyCandidate(
+      issue(300),
+      new Set(["attention/orchestrator", "spec/approved", "target/uppidi-fleet"]),
+    );
+    assert.equal(result.category, "orchestrator_triage");
+    assert.equal(result.is_dispatchable, false);
+    assert.match(result.reason, /Requires Orchestrator triage/i);
+  });
+
+  it("classifyCandidate routes attention/frontdesk to triage, not a coding worker", () => {
+    const result = classifyCandidate(issue(301), new Set(["attention/frontdesk"]));
+    assert.equal(result.category, "orchestrator_triage");
+    assert.equal(result.is_dispatchable, false);
+    assert.match(result.reason, /Front Desk/i);
+  });
+
+  it("hasStateLabel and needsStateTriage read canonical and legacy state labels", () => {
+    assert.equal(hasStateLabel(new Set(["state/wip"])), true);
+    assert.equal(hasStateLabel(new Set(["state/0-triage"])), true);
+    assert.equal(hasStateLabel(new Set(["kind/feature"])), false);
+
+    assert.equal(needsStateTriage(issue(1, { labels: ["kind/feature"] })), true);
+    assert.equal(needsStateTriage(issue(1, { labels: ["state/triage"] })), false);
+    assert.equal(needsStateTriage(issue(1, { labels: ["state/0-triage"] })), false);
+    assert.equal(needsStateTriage(issue(1, { labels: ["kind/feature"], state: "closed" })), false);
+  });
+
+  it("sweepStatelessIssues files only state-less open issues", async () => {
+    const { io, calls } = fakeIo([]);
+    const results = await sweepStatelessIssues(io, "host", "org/repo", [
+      issue(1, { labels: ["kind/feature"] }),
+      issue(2, { labels: ["state/triage"] }),
+      issue(3, { labels: ["state/0-triage"] }),
+      issue(4, { labels: ["kind/feature"], state: "closed" }),
+    ]);
+    assert.deepEqual(results, [{ number: 1, filed: true, dry_run: false }]);
+    assert.equal(calls.length, 1);
+    const cmd = calls[0].command.join(" ");
+    assert.ok(cmd.includes("issue edit 1"));
+    assert.ok(cmd.includes("--add-label state/triage"));
+    assert.ok(!cmd.includes("--remove-label"));
+  });
+
+  it("normalizeStatelessIssue dry run writes nothing", async () => {
+    const { io, calls } = fakeIo([]);
+    const result = await normalizeStatelessIssue(io, "host", "org/repo", issue(7, { labels: ["kind/feature"] }), {
+      dryRun: true,
+    });
+    assert.deepEqual(result, { number: 7, filed: true, dry_run: true });
+    assert.deepEqual(calls, []);
+  });
+
+  it("runIssuesCheck wires the state-triage sweep and honours normalizeState: false", async () => {
+    const stateless = issue(1, { labels: ["kind/feature"] });
+    const triaged = issue(2, { labels: ["state/triage", "kind/bug"] });
+    const makeIo = (commands: string[][]): IssuesCheckIo => ({
+      getOpenIssues: async () => ({ ok: true, issues: [stateless, triaged] }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async (command) => {
+        commands.push(command);
+        return true;
+      },
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    });
+
+    const commands: string[][] = [];
+    const outcome = await runIssuesCheck({
+      hostname: "host",
+      repo: "org/repo",
+      io: makeIo(commands),
+      sweepStaleWip: false,
+      now: NOW,
+    });
+    assert.deepEqual(outcome.stateTriage, [{ number: 1, filed: true, dry_run: false }]);
+    assert.equal(commands.length, 1);
+    assert.ok(commands[0].join(" ").includes("--add-label state/triage"));
+
+    const skippedCommands: string[][] = [];
+    const skipped = await runIssuesCheck({
+      hostname: "host",
+      repo: "org/repo",
+      io: makeIo(skippedCommands),
+      sweepStaleWip: false,
+      normalizeState: false,
+      now: NOW,
+    });
+    assert.deepEqual(skipped.stateTriage, []);
+    assert.equal(skippedCommands.length, 0);
+  });
+});

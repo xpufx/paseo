@@ -96,6 +96,7 @@ export const WORKER_BLOCKING_LABELS: ReadonlySet<string> = new Set([
   "flag/stop-work",
   "flag/wont-do",
   "attention/orchestrator",
+  "attention/frontdesk",
   "attention/user",
   "attention/ignore",
   "size/chunk",
@@ -188,6 +189,8 @@ export interface IssuesCheckOutcome {
   exitCode: 0 | 1;
   rankedCandidates: RankedCandidate[];
   staleWipRecovery: StaleWipResult[];
+  /** Open issues filed under state/triage because they carried no board state. */
+  stateTriage: StateTriageResult[];
   savedState: Record<string, IssueSignature>;
 }
 
@@ -418,6 +421,82 @@ export async function sweepStaleWipIssues(
   return results;
 }
 
+/** Canonical prefix of every board state-machine label. */
+export const STATE_LABEL_PREFIX = "state/";
+/** Backlog column applied to open tickets that never received a board state. */
+export const TRIAGE_STATE_LABEL = "state/triage";
+
+/** True when the issue already carries at least one `state/*` label (canonical or legacy). */
+export function hasStateLabel(labelSet: Set<string | undefined>): boolean {
+  for (const label of labelSet) {
+    if (typeof label === "string" && label.startsWith(STATE_LABEL_PREFIX)) return true;
+  }
+  return false;
+}
+
+/**
+ * True for an open issue with no board state at all. Those tickets never entered
+ * the state machine, so the sweep files them under `state/triage` before Layer 1
+ * ranking sees them. Closed issues are ignored defensively.
+ */
+export function needsStateTriage(issue: ForgejoIssue): boolean {
+  const state = issue?.state ?? null;
+  if (state !== null && state !== "open") return false;
+  return !hasStateLabel(labelSet(issue));
+}
+
+export interface StateTriageResult {
+  number: number;
+  /** True when the issue was (or, on a dry run, would be) filed under state/triage. */
+  filed: boolean;
+  dry_run: boolean;
+}
+
+/**
+ * File a state-less open issue under `state/triage`. Only the one label is
+ * added, preserving priority, kind, attention, and every unrelated label.
+ */
+export async function normalizeStatelessIssue(
+  io: Pick<IssuesCheckIo, "runStaleWipCommand">,
+  hostname: string,
+  repo: string,
+  issue: ForgejoIssue,
+  { dryRun = false }: { dryRun?: boolean } = {},
+): Promise<StateTriageResult> {
+  const number = issue.number;
+  if (dryRun) return { number, filed: true, dry_run: true };
+  const filed = await io.runStaleWipCommand([
+    "teax",
+    "issue",
+    "edit",
+    String(number),
+    "--hostname",
+    hostname,
+    "-R",
+    repo,
+    "--add-label",
+    TRIAGE_STATE_LABEL,
+  ]);
+  return { number, filed, dry_run: false };
+}
+
+/** File every open issue that carries no `state/*` label under `state/triage`. */
+export async function sweepStatelessIssues(
+  io: Pick<IssuesCheckIo, "runStaleWipCommand">,
+  hostname: string,
+  repo: string,
+  issues: ForgejoIssue[],
+  { dryRun = false }: { dryRun?: boolean } = {},
+): Promise<StateTriageResult[]> {
+  const results: StateTriageResult[] = [];
+  for (const issue of issues) {
+    if (needsStateTriage(issue)) {
+      results.push(await normalizeStatelessIssue(io, hostname, repo, issue, { dryRun }));
+    }
+  }
+  return results;
+}
+
 export function calculatePriorityTuple(issue: ForgejoIssue, isFeedbackDelta = false): PriorityTuple {
   const labels = labelSet(issue);
 
@@ -455,12 +534,14 @@ export function isDispatchableCandidate(labelSet: Set<string>): boolean {
   if (setIntersects(labelSet, ["flag/stop-work", "flag/wont-do", "attention/ignore", "state/done"])) {
     return false;
   }
-  // Gated on user attention
-  if (setIntersects(labelSet, ["attention/user"])) return false;
+  // Gated on human attention: orchestrator or front-desk hand-off
+  if (setIntersects(labelSet, ["attention/user", "attention/orchestrator", "attention/frontdesk"])) return false;
   // Dependency or upstream blocked
   if (setIntersects(labelSet, ["dep/blocked", "upstream/blocked"])) return false;
   // Oversized or needs splitting
   if (setIntersects(labelSet, ["size/chunk", "linked/needs-split"])) return false;
+  // Pre-code shaping
+  if (labelSet.has("spec/needed")) return false;
   // Active WIP (worker already assigned and actively executing)
   if (labelSet.has("state/wip")) return false;
   // Deliverable verification or review stages (pending orchestrator verification/PR merge)
@@ -612,6 +693,25 @@ export function classifyCandidate(
     };
   }
 
+  // Orchestrator explicit triage. Evaluated before the dispatchable fallthrough:
+  // an attention/orchestrator ticket is Layer 2 work even when nothing else blocks it.
+  if (labelSet.has("attention/orchestrator")) {
+    return {
+      category: "orchestrator_triage",
+      is_dispatchable: false,
+      reason: "Requires Orchestrator triage / investigation",
+    };
+  }
+
+  // Front-desk hand-off: the front desk owns routing, not a coding worker.
+  if (labelSet.has("attention/frontdesk")) {
+    return {
+      category: "orchestrator_triage",
+      is_dispatchable: false,
+      reason: "Requires Front Desk routing / triage",
+    };
+  }
+
   // Fully dispatchable worker task
   if (isDispatchableCandidate(labelSet)) {
     const target = labelNames(issue).find((label) => typeof label === "string" && label.startsWith("target/"));
@@ -620,15 +720,6 @@ export function classifyCandidate(
       category: "dispatchable",
       is_dispatchable: true,
       reason: `Dispatchable task${targetStr} (unblocked, ready for autonomous execution)`,
-    };
-  }
-
-  // Orchestrator explicit triage
-  if (labelSet.has("attention/orchestrator")) {
-    return {
-      category: "orchestrator_triage",
-      is_dispatchable: false,
-      reason: "Requires Orchestrator triage / investigation",
     };
   }
 
@@ -819,6 +910,11 @@ export interface IssuesCheckOptions {
    * Defaults to true.
    */
   sweepStaleWip?: boolean;
+  /**
+   * Whether to file open issues with no `state/*` label under `state/triage`.
+   * Board hygiene runs on every check; defaults to true.
+   */
+  normalizeState?: boolean;
   dryRun?: boolean;
   /** Injectable clock; defaults to the real current time. */
   now?: number;
@@ -876,6 +972,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
   const role = options.role ?? "orchestrator";
   const staleWipHours = options.staleWipHours ?? ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS;
   const sweepStaleWip = options.sweepStaleWip ?? true;
+  const normalizeState = options.normalizeState ?? true;
   const dryRun = options.dryRun ?? false;
   const io = options.io ?? createDefaultIssuesCheckIo();
 
@@ -889,7 +986,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
   }
   const issues = fetched.issues;
   if (issues.length === 0) {
-    return { exitCode: 0, rankedCandidates: [], staleWipRecovery: [], savedState: {} };
+    return { exitCode: 0, rankedCandidates: [], staleWipRecovery: [], stateTriage: [], savedState: {} };
   }
 
   const staleWipResults = sweepStaleWip
@@ -897,6 +994,10 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
         now: options.now,
         dryRun,
       })
+    : [];
+
+  const stateTriageResults = normalizeState
+    ? await sweepStatelessIssues(io, hostname, repo, issues, { dryRun })
     : [];
 
   const cache = await io.loadCache(repo);
@@ -1009,7 +1110,13 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
   await io.saveCache(newState, repo);
 
   if (candidates.length === 0) {
-    return { exitCode: 0, rankedCandidates: [], staleWipRecovery: staleWipResults, savedState: newState };
+    return {
+      exitCode: 0,
+      rankedCandidates: [],
+      staleWipRecovery: staleWipResults,
+      stateTriage: stateTriageResults,
+      savedState: newState,
+    };
   }
 
   // Sort candidates deterministically by priority tuple (stable, like Python).
@@ -1019,6 +1126,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
     exitCode: 1,
     rankedCandidates: candidates,
     staleWipRecovery: staleWipResults,
+    stateTriage: stateTriageResults,
     savedState: newState,
   };
 }
