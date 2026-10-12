@@ -162,7 +162,7 @@ describe("uppidi-fleet mobile layout (#621)", () => {
     for (const width of PHONE_WIDTHS) {
       const tree = await h.render(
         h.React.createElement(h.UppidiFleetTreeView, {
-          agentsData: h.payloads["uppidi-fleet.agents"],
+          agentsData: h.payloads["fleet.roster"],
         }),
       );
       sweep.collect("UppidiFleetTreeView", tree, width);
@@ -174,7 +174,7 @@ describe("uppidi-fleet mobile layout (#621)", () => {
   it("lays out a dense agent row with its worst-case chips at phone widths", async () => {
     const h = await getFleetHarness();
     installPayloads(h.payloads);
-    const fleet = h.payloads["uppidi-fleet.agents"] as any;
+    const fleet = h.payloads["fleet.roster"] as any;
     // Every row the live fleet renders, at the depth it nests to.
     const rows = [...fleet.tree.flatMap((n: any) => n.children), ...fleet.tree];
 
@@ -206,7 +206,7 @@ describe("uppidi-fleet mobile layout (#621)", () => {
     // such a floor binds — this sweeps the whole range, past where the cap sits.
     const h = await getFleetHarness();
     installPayloads(h.payloads);
-    const fleet = h.payloads["uppidi-fleet.agents"] as any;
+    const fleet = h.payloads["fleet.roster"] as any;
     const node = fleet.tree[0];
 
     const sweep = new OverflowSweep();
@@ -345,7 +345,7 @@ describe("uppidi-fleet mobile layout (#621)", () => {
     // is a wider surface than the collapsed row it replaces (#560).
     const h = await getFleetHarness();
     installPayloads(h.payloads);
-    const node = (h.payloads["uppidi-fleet.agents"] as any).tree[0];
+    const node = (h.payloads["fleet.roster"] as any).tree[0];
     const sweep = new OverflowSweep();
 
     for (const width of PHONE_WIDTHS) {

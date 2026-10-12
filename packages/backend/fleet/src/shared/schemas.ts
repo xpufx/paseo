@@ -54,13 +54,6 @@ export const fleetRosterContract = defineContract({
   output: FleetOutputSchema,
 });
 
-export const fleetAgentsContract = defineContract({
-  name: "fleet.agents",
-  description: "Read canonical fleet agent roster (alias for backward compatibility with plugins)",
-  input: FleetRosterInputSchema,
-  output: FleetOutputSchema,
-});
-
 // ---------------------------------------------------------------------------
 // 3. Mutation Contracts: Agent Lifecycle & Fleet Control
 // ---------------------------------------------------------------------------

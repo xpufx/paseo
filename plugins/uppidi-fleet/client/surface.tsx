@@ -36,6 +36,7 @@ import { ModalBodyScrollOwnerContext } from "paseo-plugin-helper/lifecycle";
 import { useRpcQuery, useRpcMutation, usePluginSettings } from "paseo-plugin-helper/core";
 import { useFleetTheme } from "./theme.js";
 import { MetricsBar } from "./metrics-bar.js";
+import { fleetRosterContract } from "@xpufx/backend-fleet/shared";
 import {
   uppidiFleetSettingsContract,
   uppidiIssuesContract,
@@ -48,7 +49,6 @@ import {
   uppidiHookServiceActionContract,
   uppidiHookConfigureContract,
   uppidiHookLogTailContract,
-  uppidiAgentsContract,
   uppidiRoleModelsContract,
   uppidiSetRoleModelContract,
   uppidiFleetAlertsContract,
@@ -1047,7 +1047,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     data: agentsData,
     isLoading: agentsLoading,
     refetch: refetchAgents,
-  } = useRpcQuery(uppidiAgentsContract, {}, { refetchInterval: 5000 });
+  } = useRpcQuery(fleetRosterContract, {}, { refetchInterval: 5000 });
 
   const {
     data: roleModelsData,

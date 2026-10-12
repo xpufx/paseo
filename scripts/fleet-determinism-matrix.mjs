@@ -800,8 +800,8 @@ const PARTS = [
     evidence: [
       [`agent-switcher.tsx:39-55`, "`AgentRowItem` derives its status dot from `getDeterministicStateConfig` over the agent's precomputed state"],
       [`agent-switcher.tsx:150-217`, "front desk and orchestrator rows render directly from props, with literal empty states"],
-      [`agent-switcher.tsx:253-266`, "`useRpcQuery` polls `uppidiAgentsContract`; selecting a row calls `openScreen` with the jump screen id and the selected agent"],
-      [`agent-switcher.tsx:308-318`, "the navigable screen forwards the selection to `navigation.openAgent` on mount"],
+      [`agent-switcher.tsx:295-310`, "`useRpcQuery` polls `fleetRosterContract`; selecting a row calls `openScreen` with the jump screen id and the selected agent"],
+      [`agent-switcher.tsx:351-362`, "the navigable screen forwards the selection to `navigation.openAgent` on mount"],
     ],
     note: "Displays the agents array and switches the host view to one of them. Reading a model session's classified state, or navigating to it, is not producing model output.",
   },

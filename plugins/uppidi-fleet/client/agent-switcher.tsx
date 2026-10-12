@@ -58,8 +58,8 @@ import {
 } from "./host-ui.js";
 import { useRpcQuery } from "paseo-plugin-helper/core";
 import { HostThemeProvider, useFleetTheme } from "./theme.js";
+import { fleetRosterContract } from "@xpufx/backend-fleet/shared";
 import {
-  uppidiAgentsContract,
   getDeterministicStateConfig,
   type UppidiAgent,
 } from "../shared/contracts.js";
@@ -294,7 +294,7 @@ function AgentSwitcherPopoverHost(props: PluginPopoverProps) {
 
 export function AgentSwitcherPopover(props: PluginPopoverProps) {
   const { data: agentsData } = useRpcQuery(
-    uppidiAgentsContract,
+    fleetRosterContract,
     {},
     { refetchInterval: 5000 },
   );

@@ -912,12 +912,7 @@ export const UppidiAgentsOutputSchema = z.object({
 });
 export type UppidiAgentsOutput = z.infer<typeof UppidiAgentsOutputSchema>;
 
-export const uppidiAgentsContract = defineContract({
-  name: "uppidi-fleet.agents",
-  description: "Get active Paseo agents grouped into tree hierarchy: Frontdesk, Orchestrators, and Workers",
-  input: z.object({}),
-  output: UppidiAgentsOutputSchema,
-});
+export { fleetRosterContract } from "@xpufx/backend-fleet/shared";
 
 // Role Model Configuration (Issue #371)
 export const RoleModelConfigSchema = z.object({

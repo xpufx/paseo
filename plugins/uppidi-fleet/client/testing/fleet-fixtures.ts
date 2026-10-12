@@ -406,7 +406,7 @@ export function installPayloads(
   fleet: Record<string, unknown> = agentsPayload(),
 ): Record<string, unknown> {
   Object.assign(payloads, {
-    "uppidi-fleet.agents": fleet,
+    "fleet.roster": fleet,
     "uppidi-fleet.issues": issuesPayload(),
     "uppidi-fleet.metrics": metricsPayload(),
     "uppidi-fleet.runners": runnersPayload(),

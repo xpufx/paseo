@@ -1,6 +1,5 @@
 import {
   fleetRosterContract,
-  fleetAgentsContract,
   archiveAgentContract,
   archiveInactiveAgentsContract,
   createFrontDeskContract,
@@ -44,7 +43,6 @@ export interface FleetHandlerOptions extends ReadFleetOptions {
   workspaceProjectMap?: WorkspaceProjectMap;
   workspacesData?: readonly WorkspaceRecord[];
   projectsData?: readonly ProjectRecord[];
-  aliasContractNames?: string[];
 
   onArchiveAgent?: (input: ArchiveAgentInput, context?: any) => Promise<{ ok: boolean; error?: string }>;
   onArchiveInactive?: (input: ArchiveInactiveAgentsInput, context?: any) => Promise<{ ok: boolean; archivedCount: number; error?: string }>;
@@ -171,16 +169,8 @@ export function registerFleetHandlers(
 ): FleetHandlers {
   const handlers = createFleetHandlers(options);
 
-  // Core canonical fleet query RPCs
+  // Core canonical fleet query RPC
   server.handle(fleetRosterContract, (input: any, ctx: any) => handlers.handleFleetRoster(input, ctx || server));
-  server.handle(fleetAgentsContract, (input: any, ctx: any) => handlers.handleFleetRoster(input, ctx || server));
-
-  // Registered aliases if supplied
-  if (Array.isArray(options?.aliasContractNames)) {
-    for (const aliasName of options.aliasContractNames) {
-      server.handle({ name: aliasName }, (input: any, ctx: any) => handlers.handleFleetRoster(input, ctx || server));
-    }
-  }
 
   // Mutation and control RPCs
   server.handle(archiveAgentContract, (input: any, ctx: any) => handlers.handleArchiveAgent(input, ctx || server));

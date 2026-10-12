@@ -284,7 +284,7 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
         deterministicState: "working",
       });
 
-      harness.payloads["uppidi-fleet.agents"] = {
+      harness.payloads["fleet.roster"] = {
         ok: true,
         frontDesk: [fd],
         orchestrators: [orch],
@@ -382,7 +382,7 @@ describe("Issue #893: Desktop Agent Switcher Dropdown", () => {
       const harness = await getFleetHarness();
       const { AgentSwitcherPopover } = await import("./agent-switcher.js");
 
-      harness.payloads["uppidi-fleet.agents"] = {
+      harness.payloads["fleet.roster"] = {
         ok: true,
         frontDesk: [makeAgent({ id: "fd-1", category: "front-desk" })],
         orchestrators: [makeAgent({ id: "orch-1", category: "orchestrator", project: "xpufx-org/paseo" })],

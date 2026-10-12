@@ -30,7 +30,6 @@ import {
   readFleetRoster,
   registerFleetHandlers,
   fleetRosterContract,
-  fleetAgentsContract,
   archiveAgentContract,
 } from "../index.js";
 
@@ -352,7 +351,6 @@ describe("@xpufx/backend-fleet", () => {
 
       let archiveCalled = false;
       registerFleetHandlers(mockServer, {
-        aliasContractNames: ["uppidi-fleet.agents", "worktree-install.fleet"],
         onArchiveAgent: async (input) => {
           archiveCalled = true;
           return { ok: true };
@@ -360,9 +358,8 @@ describe("@xpufx/backend-fleet", () => {
       });
 
       expect(typeof registered["fleet.roster"]).toBe("function");
-      expect(typeof registered["fleet.agents"]).toBe("function");
-      expect(typeof registered["uppidi-fleet.agents"]).toBe("function");
-      expect(typeof registered["worktree-install.fleet"]).toBe("function");
+      expect(registered["fleet.agents"]).toBeUndefined();
+      expect(registered["uppidi-fleet.agents"]).toBeUndefined();
       expect(typeof registered["fleet.archive-agent"]).toBe("function");
       expect(typeof registered["fleet.create-front-desk"]).toBe("function");
 

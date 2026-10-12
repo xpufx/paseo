@@ -63,7 +63,7 @@ describe("uppidi-fleet agent-switcher UI-guard census (#1043)", () => {
     const { AgentSwitcherPopover } = await import("./agent-switcher.js");
     const { HostThemeProvider } = await import("./theme.js");
 
-    harness.payloads["uppidi-fleet.agents"] = {
+    harness.payloads["fleet.roster"] = {
       ok: true,
       frontDesk: [makeAgent({ id: "fd-1", category: "front-desk", name: "Front Desk" })],
       orchestrators: [

@@ -1160,11 +1160,11 @@ describe("uppidi-fleet client entry contract", () => {
         ["all payloads undefined", {}],
         [
           "agents tree node missing children",
-          { [contracts.uppidiAgentsContract.name]: validAgents([{ agent: agent({ category: "orchestrator" }), depth: 0 }]) },
+          { [contracts.fleetRosterContract.name]: validAgents([{ agent: agent({ category: "orchestrator" }), depth: 0 }]) },
         ],
         [
           "agents tree children is an object",
-          { [contracts.uppidiAgentsContract.name]: validAgents([{ agent: agent(), depth: 0, children: {} }]) },
+          { [contracts.fleetRosterContract.name]: validAgents([{ agent: agent(), depth: 0, children: {} }]) },
         ],
         [
           "role models entry missing config",
@@ -1201,7 +1201,7 @@ describe("uppidi-fleet client entry contract", () => {
         [
           "non-array collections",
           {
-            [contracts.uppidiAgentsContract.name]: { tree: {}, workers: "x", orchestrators: 5, totalCount: 0 },
+            [contracts.fleetRosterContract.name]: { tree: {}, workers: "x", orchestrators: 5, totalCount: 0 },
             [contracts.uppidiRunnersContract.name]: { runners: "x", totalCount: 0 },
             [contracts.uppidiFleetMetricsContract.name]: { candidates: 7, totalEvaluatedTrials: 0 },
           },
