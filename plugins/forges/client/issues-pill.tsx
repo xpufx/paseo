@@ -19,6 +19,7 @@ import {
   HighlightedText,
   HostModalBody,
   HostThemeProvider,
+  KanbanBoard,
   KeyValue,
   KeyValueGroup,
   SearchInput,
@@ -26,7 +27,13 @@ import {
   TextInput,
   Toggle,
   useHostTheme,
+  type IssueDetailData,
+  type KanbanIssue,
 } from "./host-ui.js";
+import {
+  KANBAN_COLUMNS,
+  type KanbanColumnId,
+} from "@xpufx/backend-tickets/client";
 import { copyToClipboard, type RenderModalProps } from "paseo-plugin-helper/lifecycle";
 import { useRpcQuery, useRpcMutation, usePluginSettings, getClientHost } from "paseo-plugin-helper/core";
 import { hasFuzzyHighlight, normalizeSearchQuery } from "paseo-plugin-helper/shared";
@@ -37,6 +44,7 @@ import {
   STATE_ORDER,
   activeForgeForDirectory,
   addCommentContract,
+  canonicalLabel,
   classifyForgeUrl,
   createIssueContract,
   currentPriorityLabel,
@@ -276,6 +284,36 @@ function editorLabelChips(
   known: Map<string, ForgeLabel>,
 ): ForgeLabel[] {
   return names.map((name) => known.get(name) ?? { name });
+}
+
+/**
+ * Project a forge issue onto the shared board model. The forge list payload
+ * carries no PR/CI/branch fields, so those artifacts fall back to the
+ * `branch/*`, `pr/*`, and `ci/*` labels the card already understands.
+ */
+function toKanbanIssue(issue: ForgeIssue, repo: string | null): KanbanIssue {
+  const attention =
+    issue.labels.find((label) =>
+      (ATTENTION_LABELS as readonly string[]).includes(canonicalLabel(label)),
+    ) ?? null;
+  return {
+    number: issue.number,
+    title: issue.title,
+    state: issue.state,
+    repo: repo ?? undefined,
+    labels: issue.labels,
+    attention: attention ?? undefined,
+    updatedAt: issue.updatedAt,
+  };
+}
+
+/**
+ * The drawer hands `onSelectLabel` the display alias (`shortLabelName`) rather
+ * than the scoped name, so resolve it back through the names actually present
+ * on the board before asking the forge to apply it.
+ */
+function resolveBoardLabel(shortName: string, known: Map<string, string>): string {
+  return known.get(shortName) ?? shortName;
 }
 
 function renderInlineSpans(
@@ -1228,6 +1266,8 @@ export function ForgeIssuesView({
   const [activeTab, setActiveTab] = useState("issues");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<number | null>(null);
+  const [boardQuery, setBoardQuery] = useState("");
+  const [boardSelected, setBoardSelected] = useState<number | null>(null);
   const [extraIssues, setExtraIssues] = useState<ForgeIssue[]>([]);
   const [nextPage, setNextPage] = useState(2);
   const [extraHasMore, setExtraHasMore] = useState(false);
@@ -1344,7 +1384,7 @@ export function ForgeIssuesView({
   // detail runs its own target) and when the helper does not own the scroller.
   useMatchScrollTarget(
     scrollRef,
-    selected == null && activeQuery
+    activeTab === "issues" && selected == null && activeQuery
       ? `${activeQuery}|${firstMatchNumber ?? ""}|${issues.length}`
       : "",
     () => {
@@ -1355,12 +1395,134 @@ export function ForgeIssuesView({
   );
   const hasMore = extraHasMore || (data && !data.error ? data.hasMore : false);
   const failed = Boolean(data?.error) || isError;
+
+  // --- Board tab (issue #1282 phase 2) -------------------------------------
+  // The shared KanbanBoard owns drag/drop, keyboard nav, and the slide-over
+  // drawer; forges only supplies the projected issues, the state-label
+  // transition, and the write RPCs. No dependency on plugins/uppidi-fleet.
+  const kanbanIssues = useMemo(
+    () => pool.map((issue: ForgeIssue) => toKanbanIssue(issue, repo)),
+    [pool, repo],
+  );
+  const setBoardLabel = useRpcMutation(setLabelContract);
+  const addBoardComment = useRpcMutation(addCommentContract);
+  const boardDetail = useRpcQuery(
+    issueDetailContract,
+    {
+      issueNumber: boardSelected ?? undefined,
+      directory: directory ?? undefined,
+      remoteUrl: forgeTarget || undefined,
+    },
+    { enabled: activeTab === "board" && boardSelected != null, refetchInterval: 30000 },
+  );
+  const boardDetailData = useMemo<IssueDetailData | null>(() => {
+    const detail = boardDetail.data?.issue;
+    if (!detail) return null;
+    return {
+      body: detail.body,
+      labels:
+        detail.labelDetails.length > 0
+          ? detail.labelDetails
+          : detail.labels.map((name) => ({ name })),
+      comments: detail.comments,
+      author: detail.author,
+      createdAt: detail.createdAt,
+      updatedAt: detail.updatedAt,
+      webUrl: detail.webUrl,
+    };
+  }, [boardDetail.data]);
+  // The drawer hands `onSelectLabel` display aliases (`shortLabelName`), so the
+  // scoped name is resolved from the labels actually present on the board.
+  const boardLabelIndex = useMemo(() => {
+    const index = new Map<string, string>();
+    const add = (name: string) => {
+      const short = shortLabelName(name);
+      if (!index.has(short)) index.set(short, name);
+    };
+    for (const label of boardDetailData?.labels ?? []) add(label.name);
+    for (const issue of pool) for (const name of issue.labels) add(name);
+    return index;
+  }, [boardDetailData?.labels, pool]);
+  const boardSelectedIssue =
+    boardSelected == null
+      ? null
+      : kanbanIssues.find((issue) => issue.number === boardSelected) ?? null;
+  const boardCurrentState = boardSelectedIssue
+    ? currentStateLabel(boardSelectedIssue.labels ?? [])
+    : null;
+  const boardActiveStateLabel = boardCurrentState ? shortLabelName(boardCurrentState) : null;
+  const handleBoardTransition = async (
+    issue: KanbanIssue,
+    target: KanbanColumnId,
+  ) => {
+    const column = KANBAN_COLUMNS.find((candidate) => candidate.id === target);
+    if (!column) return;
+    try {
+      const result = await setBoardLabel.mutateAsync({
+        directory: directory ?? undefined,
+        remoteUrl: forgeTarget || undefined,
+        issueNumber: issue.number,
+        label: column.stateLabel,
+      });
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.show(`Moved #${issue.number} to ${column.title}`, { variant: "success" });
+      refetch();
+      void boardDetail.refetch();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not update labels");
+    }
+  };
+  const handleBoardSelectLabel = (label: string) => {
+    if (boardSelected == null) return;
+    void setBoardLabel
+      .mutateAsync({
+        directory: directory ?? undefined,
+        remoteUrl: forgeTarget || undefined,
+        issueNumber: boardSelected,
+        label: resolveBoardLabel(label, boardLabelIndex),
+      })
+      .then((result) => {
+        if (result.error) {
+          toast.error(result.error);
+          return;
+        }
+        refetch();
+        void boardDetail.refetch();
+      })
+      .catch((error) => {
+        toast.error(error instanceof Error ? error.message : "Could not update labels");
+      });
+  };
+  const handleBoardComment = async (body: string) => {
+    if (boardSelected == null) return;
+    try {
+      const result = await addBoardComment.mutateAsync({
+        directory: directory ?? undefined,
+        remoteUrl: forgeTarget || undefined,
+        issueNumber: boardSelected,
+        body,
+      });
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      toast.show("Comment posted", { variant: "success" });
+      refetch();
+      void boardDetail.refetch();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not post comment");
+    }
+  };
   return (
     <HostModalBody
       header={
         <Tabs
           tabs={[
             { id: "issues", label: "Open Issues", shortLabel: "Issues" },
+            { id: "board", label: "Board", shortLabel: "Board" },
             { id: "settings", label: "Settings", shortLabel: "Settings" },
           ]}
           activeTab={activeTab}
@@ -1631,6 +1793,46 @@ export function ForgeIssuesView({
             </Card>
             ) : null}
             </>
+          ) : activeTab === "board" ? (
+            <Card variant="elevated">
+              <Card.Header
+                title={displayName ? `Board · ${displayName}` : "Forge Board"}
+                subtitle={`${kanbanIssues.length} issues across ${KANBAN_COLUMNS.length} states`}
+                badge={<ForgeCardChips host={activeForge?.host ?? data?.host} access={access} />}
+                icon="Kanban"
+              />
+              {isLoading && !data ? (
+                <Text style={[styles.hint, { color: colors.foregroundMuted }]}>Loading board…</Text>
+              ) : null}
+              {failed ? (
+                <EmptyState
+                  icon="AlertCircle"
+                  title="Board unavailable"
+                  description={data?.error ?? "Could not reach the forge."}
+                  actionLabel="Retry"
+                  onAction={() => refetch()}
+                />
+              ) : (
+                <KanbanBoard
+                  issues={kanbanIssues}
+                  isLoading={isLoading}
+                  filterQuery={boardQuery}
+                  onFilterQueryChange={setBoardQuery}
+                  selectedIssueNumber={boardSelected}
+                  onSelectedIssueNumberChange={setBoardSelected}
+                  onSelectIssue={setBoardSelected}
+                  onTransitionIssue={handleBoardTransition}
+                  issueDetail={boardDetailData}
+                  activeStateLabel={boardActiveStateLabel}
+                  onSelectLabel={handleBoardSelectLabel}
+                  onSubmitComment={handleBoardComment}
+                />
+              )}
+              <View style={styles.actions}>
+                <Button label="Refresh" variant="secondary" onPress={() => { refetch(); }} />
+                {onClose ? <Button label="Close" variant="ghost" onPress={onClose} /> : null}
+              </View>
+            </Card>
           ) : (
           <>
           <SearchInput
