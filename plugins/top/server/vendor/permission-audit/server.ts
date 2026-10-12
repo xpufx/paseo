@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import type { FeatureModule } from "paseo-plugin-helper/shared";
 import {
   AuditRecordSchema,
   PERMISSION_AUDIT_FILENAME,
@@ -810,4 +811,29 @@ export function registerPermissionAuditServer(server: RpcServer, options: Permis
   server.handle(permissionLoggerQuery, queryHandler);
 
   return { store, logger, unsubscribe };
+}
+
+export interface PermissionAuditFeatureOptions extends PermissionAuditServerOptions {
+  id?: string;
+  onMount?: (result: { store: PermissionLogStore; logger: ReturnType<typeof createPermissionLogger> }) => void;
+}
+
+/**
+ * Creates a reusable FeatureModule for permission auditing (#933).
+ */
+export function createPermissionAuditFeature<TServerContext = any, TClientContext = any>(
+  options: PermissionAuditFeatureOptions = {},
+): FeatureModule<TServerContext, TClientContext> {
+  return {
+    id: options.id || "permission-audit",
+    contracts: {
+      query: permissionAuditQuery as any,
+      legacyQuery: permissionLoggerQuery as any,
+    },
+    contributeServer(server: any) {
+      const result = registerPermissionAuditServer(server, options);
+      options.onMount?.(result);
+      return result.unsubscribe;
+    },
+  };
 }

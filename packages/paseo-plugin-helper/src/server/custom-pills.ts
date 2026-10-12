@@ -11,6 +11,9 @@ import {
   parseNumericPillValue,
   formatPillDisplay,
 } from "../shared/custom-pills.js";
+import type { FeatureModule, FeatureDisposer } from "../shared/features.js";
+import type { PluginRpcContract } from "../shared/rpc.js";
+
 
 
 /**
@@ -342,3 +345,70 @@ export class CustomPillPoller {
     }
   }
 }
+
+export interface CustomPillsFeatureOptions {
+  id?: string;
+  configDir?: string;
+  logger?: PluginLogger;
+  poller?: CustomPillPoller;
+  contracts?: {
+    get?: PluginRpcContract;
+    list?: PluginRpcContract;
+    run?: PluginRpcContract;
+  };
+  handlers?: {
+    get?: (input?: any) => Promise<any> | any;
+    list?: (input?: any) => Promise<any> | any;
+    run?: (input: any) => Promise<any> | any;
+  };
+  onMount?: (poller: CustomPillPoller) => void;
+  startPoller?: boolean;
+}
+
+/**
+ * Creates a reusable FeatureModule for declarative custom metric pills (#933).
+ */
+export function createCustomPillsFeature<TServerContext = any, TClientContext = any>(
+  options: CustomPillsFeatureOptions = {},
+): FeatureModule<TServerContext, TClientContext> {
+  const poller = options.poller ?? new CustomPillPoller({
+    configDir: options.configDir,
+    logger: options.logger,
+  });
+
+  const contractsRecord: Record<string, PluginRpcContract> = {};
+  if (options.contracts?.get) contractsRecord.get = options.contracts.get;
+  if (options.contracts?.list) contractsRecord.list = options.contracts.list;
+  if (options.contracts?.run) contractsRecord.run = options.contracts.run;
+
+  return {
+    id: options.id || "custom-pills",
+    contracts: contractsRecord,
+    contributeServer(server: any) {
+      if (options.startPoller !== false) {
+        void poller.start();
+      }
+      options.onMount?.(poller);
+
+      if (typeof server?.handle === "function") {
+        if (options.contracts?.get && options.handlers?.get) {
+          server.handle(options.contracts.get, options.handlers.get);
+        }
+        if (options.contracts?.list && options.handlers?.list) {
+          server.handle(options.contracts.list, options.handlers.list);
+        }
+        if (options.contracts?.run && options.handlers?.run) {
+          server.handle(options.contracts.run, options.handlers.run);
+        }
+      }
+
+      let stopped = false;
+      return () => {
+        if (stopped) return;
+        stopped = true;
+        poller.stop();
+      };
+    },
+  };
+}
+

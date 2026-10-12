@@ -1,8 +1,8 @@
 import { ZodType, z } from 'zod';
 import { S as SettingsContract } from '../settings-CP1gv9q3.js';
 import { SpawnOptions } from 'node:child_process';
-import { n as CustomPillDefinition, r as CustomPillState, D as ForgeIssue, G as ForgeLabel, a9 as OpenIssuesInput, ab as OpenIssuesOutput, al as SearchIssuesInput, an as SearchIssuesOutput, w as ForgeContextInput, y as ForgeContextOutput, W as IssueDetailInput, Y as IssueDetailOutput, ap as SetLabelInput, ar as SetLabelOutput, a as AddCommentInput, c as AddCommentOutput, j as CreateIssueInput, l as CreateIssueOutput, P as InstallLabelsInput, R as InstallLabelsOutput } from '../tickets-DvG6-h4U.js';
-import '../rpc-D27pph91.js';
+import { n as CustomPillDefinition, r as CustomPillState, v as FeatureModule, H as ForgeIssue, J as ForgeLabel, ac as OpenIssuesInput, ae as OpenIssuesOutput, ao as SearchIssuesInput, aq as SearchIssuesOutput, z as ForgeContextInput, E as ForgeContextOutput, Z as IssueDetailInput, $ as IssueDetailOutput, as as SetLabelInput, au as SetLabelOutput, a as AddCommentInput, c as AddCommentOutput, j as CreateIssueInput, l as CreateIssueOutput, S as InstallLabelsInput, U as InstallLabelsOutput, u as FeatureDisposer } from '../tickets-CQ2t2Y40.js';
+import { P as PluginRpcContract } from '../rpc-D27pph91.js';
 import '../types-4TBN5lgi.js';
 
 interface PluginStorageOptions<T> {
@@ -770,6 +770,28 @@ declare class CustomPillPoller {
     private schedulePill;
     private notifyUpdate;
 }
+interface CustomPillsFeatureOptions {
+    id?: string;
+    configDir?: string;
+    logger?: PluginLogger;
+    poller?: CustomPillPoller;
+    contracts?: {
+        get?: PluginRpcContract;
+        list?: PluginRpcContract;
+        run?: PluginRpcContract;
+    };
+    handlers?: {
+        get?: (input?: any) => Promise<any> | any;
+        list?: (input?: any) => Promise<any> | any;
+        run?: (input: any) => Promise<any> | any;
+    };
+    onMount?: (poller: CustomPillPoller) => void;
+    startPoller?: boolean;
+}
+/**
+ * Creates a reusable FeatureModule for declarative custom metric pills (#933).
+ */
+declare function createCustomPillsFeature<TServerContext = any, TClientContext = any>(options?: CustomPillsFeatureOptions): FeatureModule<TServerContext, TClientContext>;
 
 interface RpcGuardOptions<T> {
     timeoutMs?: number;
@@ -1353,5 +1375,25 @@ interface ContextTurnTrace {
     hasToolLoop?: boolean;
 }
 declare function calculateContextDecayRisk(turns: readonly ContextTurnTrace[]): number;
+interface TurnTelemetryTapOptions {
+    onRecord?: (record: NormalizedTurnTelemetry) => void | Promise<void>;
+    onTurnStarted?: (event: any, context: any) => void;
+    onTurnEnded?: (event: any, context: any) => void | Promise<void>;
+    context?: any;
+}
+/**
+ * Sets up in-process turn telemetry listeners on the Paseo plugin server (#933).
+ */
+declare function setupTurnTelemetryTap(server: any, options?: TurnTelemetryTapOptions): FeatureDisposer;
+interface TimelineTelemetryFeatureOptions<TServerContext = any, TClientContext = any> extends TurnTelemetryTapOptions {
+    id?: string;
+    contracts?: Record<string, PluginRpcContract>;
+    serverTap?: (server: TServerContext) => FeatureDisposer | void;
+    clientRenderer?: (client: TClientContext) => FeatureDisposer | void;
+}
+/**
+ * Creates a reusable FeatureModule for timeline telemetry (#933).
+ */
+declare function createTimelineTelemetryFeature<TServerContext = any, TClientContext = any>(options?: TimelineTelemetryFeatureOptions<TServerContext, TClientContext>): FeatureModule<TServerContext, TClientContext>;
 
-export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type ContextTurnTrace, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type FDSIInput, ForgeClient, type ForgeClientOptions, ForgeGuard, type ForgejoComment, type ForgejoIssueDetail, type ForgejoLabel, type GuardLogLevel, type GuardedRpcHandler, type HandleableServerContext, type InstallStorageGuardOptions, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, NEGATIVE_PROBE_TTL_MS, type NormalizedTurnTelemetry, NormalizedTurnTelemetrySchema, type OrchestratorVigilanceInput, type PaseoPluginInfo, type PaseoPluginsSurface, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginPresence, type PluginQueryOptions, type PluginRegistryContext, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RawTurnData, type RawTurnOutcome, type RawTurnUsage, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, ScopedStorageViolationError, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type TicketHandlerOptions, type TicketHandlers, type ToolCallTrace, type UpsertMcpServerOptions, type WorkerROIInput, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, calculateContextDecayRisk, calculateFDSI, calculateOrchestratorVigilance, calculateToolThrashingIndex, calculateWorkerROI, clearPluginCache, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createTicketHandlers, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, gitOriginForDirectory, guardRpcHandler, handleAddComment, handleCreateIssue, handleForgeContext, handleInstallLabels, handleIssueDetail, handleOpenIssues, handleSearchIssues, handleSetLabel, installStorageGuard, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, isProductionEnv, listPlugins, normalizeBeaconColor, normalizeTurnTelemetry, parseGitDirPointer, parseJsonc, parseOriginUrl, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, registerTicketHandlers, removeMcpServer, resolveBeaconLabelName, resolveDefaultForgeHost, resolveDefaultMinLevel, resolveForgeToken, resolveHostHome, resolveMinLevelFromEnv, resolvePaseoHome, resolvePluginVersion, safeExec, safeSpawn, stampVersion, storedForgeSelection, stripJsonComments, tryParseJsonc, upsertMcpServer };
+export { type AgentCreateInjectionConfig, type AgentCreateInjectionRequest, type AgentIdentity, type AgentIdentityOptions, BEACON_COLORS, type BeaconBlinkHandle, type BeaconBlinkOptions, type BeaconClearOptions, type BeaconClearResult, type BeaconColor, type BeaconDaemonClient, type BeaconLabelState, type BeaconSetOptions, type BeaconSetResult, type ContextTurnTrace, type CpuCoreMetrics, CpuSampler, CustomPillPoller, type CustomPillPollerOptions, type CustomPillsFeatureOptions, DEFAULT_BEACON_LABEL_PREFIX, DEFAULT_NAMESPACE_README, type FDSIInput, ForgeClient, type ForgeClientOptions, ForgeGuard, type ForgejoComment, type ForgejoIssueDetail, type ForgejoLabel, type GuardLogLevel, type GuardedRpcHandler, type HandleableServerContext, type InstallStorageGuardOptions, type ListPluginsOptions, type LogLevel, type LoopWatchdogOptions, McpConfigPaths, type McpConfigTarget, type McpHttpInjectionConfig, type McpInjectionConfig, type McpInjectionFilter, type McpInjectionHookHandler, type McpInjectionServer, type McpMutationResult, type McpServerConfig, type McpSseInjectionConfig, type McpStdioInjectionConfig, NEGATIVE_PROBE_TTL_MS, type NormalizedTurnTelemetry, NormalizedTurnTelemetrySchema, type OrchestratorVigilanceInput, type PaseoPluginInfo, type PaseoPluginsSurface, type PeriodicTaskHandle, type PeriodicTaskOptions, type PingHostOptions, type PluginLogger, type PluginLoggerOptions, type PluginPresence, type PluginQueryOptions, type PluginRegistryContext, type PluginStatusFilter, PluginStorage, type PluginStorageOptions, type RawTurnData, type RawTurnOutcome, type RawTurnUsage, type RedactOptions, type RegisterMcpInjectionOptions, type RegisterSettingsRpcOptions, type RemoveMcpServerOptions, type ResolveVersionOptions, type RpcGuardOptions, type SafeSpawnOptions, type SafeSpawnResult, ScopedStorageViolationError, type SharedPluginSettings, type SharedPluginSettingsOptions, type SharedSettingsListener, type StampVersionOptions, type StorageStats, type SystemMetrics, type TicketHandlerOptions, type TicketHandlers, type TimelineTelemetryFeatureOptions, type ToolCallTrace, type TurnTelemetryTapOptions, type UpsertMcpServerOptions, type WorkerROIInput, WorkspaceBeacon, type WorkspaceBeaconOptions, type WorkspaceTitleHandle, calculateContextDecayRisk, calculateFDSI, calculateOrchestratorVigilance, calculateToolThrashingIndex, calculateWorkerROI, clearPluginCache, createCustomPillsFeature, createLoopWatchdog, createPeriodicTask, createPluginLogger, createSettingsHandlers, createSharedPluginSettings, createTicketHandlers, createTimelineTelemetryFeature, createWorkspaceBeacon, discoverCustomPillConfigs, expandPath, findAvailablePort, getAgentIdentity, getMcpServer, getPluginInfo, getSystemMetrics, gitOriginForDirectory, guardRpcHandler, handleAddComment, handleCreateIssue, handleForgeContext, handleInstallLabels, handleIssueDetail, handleOpenIssues, handleSearchIssues, handleSetLabel, installStorageGuard, isPluginEnabled, isPluginInstalled, isPluginRunning, isPortOpen, isProductionEnv, listPlugins, normalizeBeaconColor, normalizeTurnTelemetry, parseGitDirPointer, parseJsonc, parseOriginUrl, pingHost, redactSecrets, registerMcpInjection, registerSettingsRpc, registerTicketHandlers, removeMcpServer, resolveBeaconLabelName, resolveDefaultForgeHost, resolveDefaultMinLevel, resolveForgeToken, resolveHostHome, resolveMinLevelFromEnv, resolvePaseoHome, resolvePluginVersion, safeExec, safeSpawn, setupTurnTelemetryTap, stampVersion, storedForgeSelection, stripJsonComments, tryParseJsonc, upsertMcpServer };

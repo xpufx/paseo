@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { FeatureModule, FeatureDisposer } from "../shared/features.js";
+import type { PluginRpcContract } from "../shared/rpc.js";
 
 /**
  * Raw usage structure as emitted by various Paseo agent engines and providers.
@@ -351,3 +353,134 @@ export function calculateContextDecayRisk(turns: readonly ContextTurnTrace[]): n
 
   return round2((failuresUnderHighContext / highContextTurns.length) * 100);
 }
+
+export interface TurnTelemetryTapOptions {
+  onRecord?: (record: NormalizedTurnTelemetry) => void | Promise<void>;
+  onTurnStarted?: (event: any, context: any) => void;
+  onTurnEnded?: (event: any, context: any) => void | Promise<void>;
+  context?: any;
+}
+
+/**
+ * Sets up in-process turn telemetry listeners on the Paseo plugin server (#933).
+ */
+export function setupTurnTelemetryTap(
+  server: any,
+  options?: TurnTelemetryTapOptions,
+): FeatureDisposer {
+  const turnStartTimes = new Map<string, number>();
+  const lastKnownUsage = new Map<string, RawTurnUsage>();
+  const unsubs: Array<() => void> = [];
+
+  if (typeof server?.on === "function") {
+    // 1. Turn started
+    try {
+      const unsubStart = server.on("agent.turn_started", (event: any, ctx: any) => {
+        if (!event?.agent?.id) return;
+        turnStartTimes.set(event.agent.id, Date.now());
+        if (event.agent.lastUsage) {
+          lastKnownUsage.set(event.agent.id, event.agent.lastUsage);
+        }
+        options?.onTurnStarted?.(event, ctx);
+      });
+      if (typeof unsubStart === "function") unsubs.push(unsubStart);
+    } catch {}
+
+    // 2. Usage updated
+    try {
+      const unsubUsage = server.on("agent.usage_updated", (event: any) => {
+        if (!event?.agent?.id) return;
+        const usage = event.usage ?? event.agent?.lastUsage;
+        if (usage) {
+          lastKnownUsage.set(event.agent.id, usage);
+        }
+      });
+      if (typeof unsubUsage === "function") unsubs.push(unsubUsage);
+    } catch {}
+
+    // 3. Turn ended
+    try {
+      const unsubEnd = server.on("agent.turn_ended", async (event: any, ctx: any) => {
+        if (!event?.agent?.id) return;
+        const agentId = event.agent.id;
+        const startTime = turnStartTimes.get(agentId);
+        const durationMs = startTime ? Date.now() - startTime : undefined;
+        turnStartTimes.delete(agentId);
+
+        const cachedUsage = lastKnownUsage.get(agentId);
+        const effectiveUsage = (event.agent as any)?.lastUsage ?? cachedUsage ?? null;
+
+        const rawData: RawTurnData = {
+          turnId: event.turnId ?? null,
+          agentId,
+          repo: (event.agent as any)?.repo ?? null,
+          role: (event.agent as any)?.role ?? null,
+          model: event.agent.model ?? null,
+          provider: event.agent.provider ?? null,
+          outcome: event.outcome ?? { kind: "completed" },
+          durationMs,
+          timeline: event.timeline,
+          liveUsage: effectiveUsage,
+        };
+
+        try {
+          const record = normalizeTurnTelemetry(rawData);
+          if (options?.onRecord) {
+            await options.onRecord(record);
+          }
+          if (options?.onTurnEnded) {
+            await options.onTurnEnded(event, ctx);
+          }
+        } catch {
+          // Best effort
+        }
+      });
+      if (typeof unsubEnd === "function") unsubs.push(unsubEnd);
+    } catch {}
+  }
+
+  let disposed = false;
+  return () => {
+    if (disposed) return;
+    disposed = true;
+    for (const unsub of unsubs) {
+      try {
+        unsub();
+      } catch {}
+    }
+    turnStartTimes.clear();
+    lastKnownUsage.clear();
+  };
+}
+
+export interface TimelineTelemetryFeatureOptions<TServerContext = any, TClientContext = any>
+  extends TurnTelemetryTapOptions {
+  id?: string;
+  contracts?: Record<string, PluginRpcContract>;
+  serverTap?: (server: TServerContext) => FeatureDisposer | void;
+  clientRenderer?: (client: TClientContext) => FeatureDisposer | void;
+}
+
+/**
+ * Creates a reusable FeatureModule for timeline telemetry (#933).
+ */
+export function createTimelineTelemetryFeature<TServerContext = any, TClientContext = any>(
+  options: TimelineTelemetryFeatureOptions<TServerContext, TClientContext> = {},
+): FeatureModule<TServerContext, TClientContext> {
+  return {
+    id: options.id || "timeline-telemetry",
+    contracts: options.contracts,
+    contributeServer(server: TServerContext) {
+      if (options.serverTap) {
+        return options.serverTap(server);
+      }
+      return setupTurnTelemetryTap(server, options);
+    },
+    contributeClient(client: TClientContext) {
+      if (options.clientRenderer) {
+        return options.clientRenderer(client);
+      }
+    },
+  };
+}
+

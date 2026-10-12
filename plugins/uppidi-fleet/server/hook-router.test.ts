@@ -833,13 +833,16 @@ describe("hook-router HTTP server endpoints", () => {
   let router: HookRouter;
   let stopRouter: () => Promise<void>;
   let prevNodeEnv: string | undefined;
+  let prevHookStateDir: string | undefined;
 
   beforeEach(async () => {
     prevNodeEnv = process.env.NODE_ENV;
+    prevHookStateDir = process.env.HOOK_STATE_DIR;
     process.env.NODE_ENV = "test";
     tempDir = mkdtempSync(join(tmpdir(), "paseo-http-test-"));
     queueDir = join(tempDir, "queues");
     stateDir = join(tempDir, "state");
+    process.env.HOOK_STATE_DIR = stateDir;
 
     const server = {
       on: () => () => {},
@@ -857,6 +860,11 @@ describe("hook-router HTTP server endpoints", () => {
   afterEach(async () => {
     if (stopRouter) {
       await stopRouter();
+    }
+    if (prevHookStateDir !== undefined) {
+      process.env.HOOK_STATE_DIR = prevHookStateDir;
+    } else {
+      delete process.env.HOOK_STATE_DIR;
     }
     if (prevNodeEnv !== undefined) {
       process.env.NODE_ENV = prevNodeEnv;

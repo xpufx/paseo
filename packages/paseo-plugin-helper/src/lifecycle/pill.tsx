@@ -478,7 +478,8 @@ export function registerComposerPill<TPayload = any>(
     // establish the popover viewport. Compact mobile presents a full-bleed sheet
     // whose BottomSheetScrollView dynamically sizes and scrolls, so capping height
     // here would clip long content instead of scrolling it.
-    const frameMaxHeight = props.layout.compact
+    const isMobile = props.layout.platform === "ios" || props.layout.platform === "android";
+    const frameMaxHeight = props.layout.compact && isMobile
       ? undefined
       : Math.max(1, Math.min(560, windowHeight * 0.8));
     // Layout effect, not effect: the flag must be set in the same commit the

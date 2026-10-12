@@ -49,7 +49,7 @@ See *What this table does not cover* below for the sessions themselves.
 
 | Moving part | File | File exports | File loc | Classification | Anchors | Evidence |
 | --- | --- | ---: | ---: | --- | --- | --- |
-| RPC registration and plugin lifecycle | `index.server.ts` | 1 | 253 | `deterministic` | `server.handle`, `startHookRouter`, `registerSettingsRpc` | index.server.ts:146-189 — 44 `server.handle(contract, handler)` bindings, one per RPC contract<br>index.server.ts:219 — `startHookRouter(server)` starts the HTTP listener<br>index.server.ts:228-231 — teardown returns a disposer, no model call |
+| RPC registration and plugin lifecycle | `index.server.ts` | 1 | 267 | `deterministic` | `server.handle`, `startHookRouter`, `registerSettingsRpc` | index.server.ts:146-189 — 44 `server.handle(contract, handler)` bindings, one per RPC contract<br>index.server.ts:219 — `startHookRouter(server)` starts the HTTP listener<br>index.server.ts:228-231 — teardown returns a disposer, no model call |
 | Sidebar surface, workspace panel, helper settings screen registration | `index.client.tsx` | 10 | 115 | `deterministic` | `registerSidebarSurface`, `addWorkspacePanel`, `registerHelperSettingsScreen` | index.client.tsx:26-62 — three registrations, each returning a disposer<br>index.client.tsx:64-83 — teardown calls each disposer, tolerating either shape |
 
 - **RPC registration and plugin lifecycle** (`index.server.ts`) — Binds contracts to handlers and owns load/unload. Every handler it registers is classified on its own row below.
@@ -225,7 +225,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `server/disk-logger.test.ts` | server/disk-logger | `test:node` | 92 | `deterministic` |
 | `server/fleet-reset.test.ts` | server/fleet-reset | `test:node` | 168 | `deterministic` |
 | `server/fleet.test.ts` | Cross-surface fleet behaviour | `test:node` | 1391 | `deterministic` |
-| `server/hook-router.test.ts` | Webhook classification, coalescing, queueing, watchdog taxonomy, handoff | `test:node` | 9550 | `deterministic` |
+| `server/hook-router.test.ts` | Webhook classification, coalescing, queueing, watchdog taxonomy, handoff | `test:node` | 9558 | `deterministic` |
 | `server/hook.test.ts` | Hook-service handlers, endpoint resolution, unreachable-path shapes | `test:node` | 407 | `deterministic` |
 | `server/issues-check.test.ts` | Ported stale-WIP sweep fixtures, checker retirement guard (#733) | `test:node` | 547 | `deterministic` |
 | `server/issues.test.ts` | server/issues | `test:node` | 183 | `deterministic` |
@@ -313,7 +313,7 @@ matrix above is the judgement half.
 | `client/tree-zebra.test.tsx` | client | 47 | 0 | — |
 | `client/ui-guard.test.ts` | client | 155 | 0 | — |
 | `index.client.tsx` | entry | 115 | 10 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherJumpScreen`, `AgentSwitcherSidebarItem`, `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |
-| `index.server.ts` | entry | 253 | 1 | `contribute` |
+| `index.server.ts` | entry | 267 | 1 | `contribute` |
 | `server/agents.test.ts` | server | 2079 | 0 | — |
 | `server/agents.ts` | server | 3239 | 63 | `CanonicalFleetRegistry`, `DEFAULT_AUTO_ACCEPT_PROVIDERS`, `DEFAULT_SPAWN_MODE_PROVIDERS`, `ExecFileAsyncFn`, `RawAgentRecord`, `RawPendingPermissionLike`, `RepoRootInspection`, `SPAWN_AUTHORITY_WORKER_ERROR`, `SPAWN_AUTHORITY_WORKSPACE_ERROR`, `SpawnAuthorityDecision`, `SpawnCapabilities`, `SpawnCapabilityResult` …+51 more |
 | `server/audit-receipts.test.ts` | server | 268 | 0 | — |
@@ -323,7 +323,7 @@ matrix above is the judgement half.
 | `server/fleet-reset.test.ts` | server | 168 | 0 | — |
 | `server/fleet.test.ts` | server | 1391 | 0 | — |
 | `server/forgejo-api.ts` | server | 180 | 12 | `DEFAULT_FORGEJO_HOST`, `FORGEJO_API_TIMEOUT_MS`, `FetchLike`, `ForgejoApiResult`, `TokenResolverFn`, `forgejoApiGet`, `forgejoApiRequest`, `forgejoToken`, `resolveForgejoHost`, `resolveForgejoToken`, `setFetchForTest`, `setTokenResolverForTest` |
-| `server/hook-router.test.ts` | server | 9550 | 0 | — |
+| `server/hook-router.test.ts` | server | 9558 | 0 | — |
 | `server/hook-router.ts` | server | 10986 | 227 | `BoardCandidate`, `BoardCheckResult`, `BoardSweepResult`, `CANCELLATION_TIMEOUT_MARKER`, `CHILD_WAKEUP_EVENTS`, `CI_FAILURE_LABELS`, `CLOSE_GUARD_ACCEPTED_LABELS`, `CLOSE_GUARD_POLICY_COMMENT`, `ChildWakeupAssessment`, `ChildWakeupContext`, `ChildWakeupKind`, `CiFailureDetails` …+215 more |
 | `server/hook.test.ts` | server | 407 | 0 | — |
 | `server/hook.ts` | server | 325 | 16 | `HookAuthPosture`, `HookEndpointSource`, `ResolvedHookEndpoint`, `handleHookConfigure`, `handleHookDrain`, `handleHookInfo`, `handleHookLogTail`, `handleHookPause`, `handleHookQueues`, `handleHookResume`, `handleHookServiceAction`, `handleHookServiceStatus` …+4 more |

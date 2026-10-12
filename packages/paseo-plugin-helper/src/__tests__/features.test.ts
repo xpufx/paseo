@@ -6,6 +6,9 @@ import {
   type FeatureDisposer,
   type FeatureModule,
 } from "../shared/features.js";
+import { createCustomPillsFeature } from "../server/custom-pills.js";
+import { createTimelineTelemetryFeature } from "../server/telemetry.js";
+
 
 const ping = defineRpc({
   name: "test.ping",
@@ -230,3 +233,76 @@ describe("composeFeatureModules", () => {
     expect(disposers[1]).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("concrete feature modules (#933)", () => {
+  it("createCustomPillsFeature satisfies FeatureModule contract and manages poller lifecycle", () => {
+    let pollerMounted = false;
+    let started = false;
+    let stopped = false;
+    const fakePoller: any = {
+      start: () => {
+        started = true;
+      },
+      stop: () => {
+        stopped = true;
+      },
+    };
+
+    const handled = new Map<string, any>();
+    const fakeServer = {
+      handle: (contract: any, handler: any) => {
+        handled.set(contract.name, handler);
+      },
+    };
+
+    const feature = createCustomPillsFeature({
+      poller: fakePoller,
+      contracts: { get: ping },
+      handlers: { get: async () => ({ pills: [] }) },
+      onMount: () => {
+        pollerMounted = true;
+      },
+    });
+
+    expect(feature.id).toBe("custom-pills");
+    expect(feature.contracts?.get).toBe(ping);
+
+    const dispose = feature.contributeServer!(fakeServer);
+    expect(pollerMounted).toBe(true);
+    expect(started).toBe(true);
+    expect(handled.has("test.ping")).toBe(true);
+
+    // Idempotent disposer stops poller
+    expect(stopped).toBe(false);
+    dispose!();
+    expect(stopped).toBe(true);
+    dispose!(); // second call should not throw
+  });
+
+  it("createTimelineTelemetryFeature satisfies FeatureModule contract and manages tap lifecycle", () => {
+    let tapDisposed = false;
+    const fakeServer = {
+      on: (_event: string, _handler: any) => {
+        return () => {
+          tapDisposed = true;
+        };
+      },
+    };
+
+    const feature = createTimelineTelemetryFeature({
+      contracts: { test: pong },
+    });
+
+    expect(feature.id).toBe("timeline-telemetry");
+    expect(feature.contracts?.test).toBe(pong);
+
+    const dispose = feature.contributeServer!(fakeServer);
+    expect(typeof dispose).toBe("function");
+
+    expect(tapDisposed).toBe(false);
+    dispose!();
+    expect(tapDisposed).toBe(true);
+    dispose!(); // idempotent
+  });
+});
+

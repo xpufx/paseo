@@ -61,7 +61,7 @@ describe("permission-logger client/ migration (paseo#847 Phase 3)", () => {
 describe("permission-logger server entry", () => {
   it("wires the shared audit server with query RPCs and event subscription", () => {
     const source = readSource("index.server.ts");
-    expect(source).toContain("registerPermissionAuditServer");
+    expect(source.includes("createPermissionAuditFeature") || source.includes("registerPermissionAuditServer")).toBe(true);
     expect(source).toContain("permission-audit/server");
   });
 

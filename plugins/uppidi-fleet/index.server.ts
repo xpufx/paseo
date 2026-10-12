@@ -108,7 +108,13 @@ import {
   handleUppidiRotationStatus,
   handleUppidiSetRotationPolicy,
 } from "./server/hook-router.js";
-import { createPluginLogger, registerSettingsRpc, registerTicketHandlers, installStorageGuard } from "paseo-plugin-helper/server";
+import {
+  createPluginLogger,
+  registerSettingsRpc,
+  registerTicketHandlers,
+  installStorageGuard,
+  createTimelineTelemetryFeature,
+} from "paseo-plugin-helper/server";
 import { fleetRosterContract } from "@xpufx/backend-fleet/shared";
 import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 import { PLUGIN_VERSION } from "./shared/version.js";
@@ -235,8 +241,16 @@ export default function contribute(server: PluginServerContext) {
     },
   });
 
+  const fleetTelemetryFeature = createTimelineTelemetryFeature<PluginServerContext>({
+    id: "uppidi-fleet-timeline-telemetry",
+    contracts: {
+      query: uppidiModelTelemetryQueryContract as any,
+    },
+    serverTap: (srv) => setupTelemetryTap(srv),
+  });
+
   const stopHookRouter = startHookRouter(server);
-  const stopTelemetryTap = setupTelemetryTap(server);
+  const stopTelemetryTap = fleetTelemetryFeature.contributeServer?.(server);
 
   log.info("Serving paseo-plugin-helper from the checkout this plugin was installed from", {
     helper: HELPER_VERSION,
@@ -247,7 +261,7 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     log.info("Unloading; disposing hook router and telemetry tap");
-    void stopTelemetryTap();
+    if (stopTelemetryTap) void stopTelemetryTap();
     void stopHookRouter();
   };
 }

@@ -1,121 +1,10 @@
 export { a as PlatformType, P as PluginTheme, R as ResponsiveLayout, S as StatusVariant, T as ThemeColors } from '../types-4TBN5lgi.cjs';
-import { P as PluginRpcContract } from '../rpc-D27pph91.cjs';
-export { D as DefineRpcOptions, R as RpcInput, a as RpcOutput, d as defineContract, b as defineRpc } from '../rpc-D27pph91.cjs';
+export { D as DefineRpcOptions, P as PluginRpcContract, R as RpcInput, a as RpcOutput, d as defineContract, b as defineRpc } from '../rpc-D27pph91.cjs';
+export { A as ATTENTION_LABELS, a as AddCommentInput, b as AddCommentInputSchema, c as AddCommentOutput, d as AddCommentOutputSchema, e as AgentEnvelope, f as AgentEnvelopeSchema, g as AttentionLabel, B as BARE_REPO_PATTERN, C as CREATE_ISSUE_BODY_MAX, h as CREATE_ISSUE_LABEL_MAX, i as CREATE_ISSUE_TITLE_MAX, j as CreateIssueInput, k as CreateIssueInputSchema, l as CreateIssueOutput, m as CreateIssueOutputSchema, n as CustomPillDefinition, o as CustomPillDefinitionSchema, p as CustomPillModal, q as CustomPillModalSchema, r as CustomPillState, s as CustomPillThresholds, t as CustomPillThresholdsSchema, F as FeatureComposition, u as FeatureDisposer, v as FeatureModule, w as ForgeAccessInput, x as ForgeAccessState, y as ForgeAuthState, z as ForgeContextInput, D as ForgeContextInputSchema, E as ForgeContextOutput, G as ForgeContextOutputSchema, H as ForgeIssue, I as ForgeIssueSchema, J as ForgeLabel, K as ForgeLabelRef, L as ForgeLabelSchema, M as ForgeRemote, N as ForgeRepoIdentity, O as ForgeTargetResolution, P as ForgeVisibility, Q as INSTALL_LABEL_MODES, R as InstallLabelMode, S as InstallLabelsInput, T as InstallLabelsInputSchema, U as InstallLabelsOutput, V as InstallLabelsOutputSchema, W as IssueComment, X as IssueCommentSchema, Y as IssueDetail, Z as IssueDetailInput, _ as IssueDetailInputSchema, $ as IssueDetailOutput, a0 as IssueDetailOutputSchema, a1 as IssueDetailSchema, a2 as IssueNumberInput, a3 as LABEL_ALIASES, a4 as LEGACY_ATTENTION_LABELS, a5 as LEGACY_PRIORITY_ORDER, a6 as LEGACY_SPEC_LABELS, a7 as LEGACY_STATE_ORDER, a8 as LabelDefinition, a9 as LabelSetPlan, aa as MarkdownLiteBlock, ab as MarkdownLiteSpan, ac as OpenIssuesInput, ad as OpenIssuesInputSchema, ae as OpenIssuesOutput, af as OpenIssuesOutputSchema, ag as PASEO_LABEL_SCOPES, ah as PASEO_LINK_PATTERN, ai as PASEO_SERVER_PATTERN, aj as PRIORITY_ORDER, ak as PriorityLabel, al as SHA_PATTERN, am as SPEC_LABELS, an as STATE_ORDER, ao as SearchIssuesInput, ap as SearchIssuesInputSchema, aq as SearchIssuesOutput, ar as SearchIssuesOutputSchema, as as SetLabelInput, at as SetLabelInputSchema, au as SetLabelOutput, av as SetLabelOutputSchema, aw as SpecLabel, ax as StateLabel, ay as activeForgeForDirectory, az as addCommentContract, aA as canonicalLabel, aB as composeFeatureModules, aC as createIssueContract, aD as currentPriorityLabel, aE as currentStateLabel, aF as deriveForgeAccess, aG as forgeCapabilityFromRepo, aH as forgeContextContract, aI as forgeWriteScopeList, aJ as formatPillDisplay, aK as isValidForgeTarget, aL as issueDetailContract, aM as liveScopesFromIssues, aN as liveScopesFromLabels, aO as nextStateLabel, aP as normalizeIssueNumber, aQ as openIssuesContract, aR as parseAgentEnvelope, aS as parseForgeRemote, aT as parseLabelList, aU as parseMarkdownLite, aV as parseMarkdownLiteInline, aW as parseNumericPillValue, aX as paseoLabelScopes, aY as paseoLabelSet, aZ as planLabelSetInstall, a_ as rankIssues, a$ as resolveCustomPillStatus, b0 as resolveForgeTarget, b1 as sameLabel, b2 as scopeOfLabel, b3 as searchIssuesContract, b4 as setLabelContract, b5 as shortLabelName, b6 as stripAgentEnvelopeFooter, b7 as validateCreateIssueInput, b8 as writeGateNotice } from '../tickets-DiTpkDUG.cjs';
 export { F as FormatBytesOptions, a as FormatCompactNumberOptions, M as MetricThresholds, T as TruncateOptions, b as TruncatePathOptions, f as formatBytes, c as formatCompactNumber, d as formatDuration, e as formatNumber, g as formatUptime, r as resolveMetricStatus, s as stripAnsi, t as truncate, h as truncateMiddle, i as truncatePath } from '../formatters-CtC4syDt.cjs';
 import { S as SettingsContract } from '../settings-BNRcFeSP.cjs';
 export { D as DefineSettingsContractOptions, a as SettingsEmptyInput, b as SettingsEmptyInputSchema, d as defineSettingsContract } from '../settings-BNRcFeSP.cjs';
-export { A as ATTENTION_LABELS, a as AddCommentInput, b as AddCommentInputSchema, c as AddCommentOutput, d as AddCommentOutputSchema, e as AgentEnvelope, f as AgentEnvelopeSchema, g as AttentionLabel, B as BARE_REPO_PATTERN, C as CREATE_ISSUE_BODY_MAX, h as CREATE_ISSUE_LABEL_MAX, i as CREATE_ISSUE_TITLE_MAX, j as CreateIssueInput, k as CreateIssueInputSchema, l as CreateIssueOutput, m as CreateIssueOutputSchema, n as CustomPillDefinition, o as CustomPillDefinitionSchema, p as CustomPillModal, q as CustomPillModalSchema, r as CustomPillState, s as CustomPillThresholds, t as CustomPillThresholdsSchema, F as ForgeAccessInput, u as ForgeAccessState, v as ForgeAuthState, w as ForgeContextInput, x as ForgeContextInputSchema, y as ForgeContextOutput, z as ForgeContextOutputSchema, D as ForgeIssue, E as ForgeIssueSchema, G as ForgeLabel, H as ForgeLabelRef, I as ForgeLabelSchema, J as ForgeRemote, K as ForgeRepoIdentity, L as ForgeTargetResolution, M as ForgeVisibility, N as INSTALL_LABEL_MODES, O as InstallLabelMode, P as InstallLabelsInput, Q as InstallLabelsInputSchema, R as InstallLabelsOutput, S as InstallLabelsOutputSchema, T as IssueComment, U as IssueCommentSchema, V as IssueDetail, W as IssueDetailInput, X as IssueDetailInputSchema, Y as IssueDetailOutput, Z as IssueDetailOutputSchema, _ as IssueDetailSchema, $ as IssueNumberInput, a0 as LABEL_ALIASES, a1 as LEGACY_ATTENTION_LABELS, a2 as LEGACY_PRIORITY_ORDER, a3 as LEGACY_SPEC_LABELS, a4 as LEGACY_STATE_ORDER, a5 as LabelDefinition, a6 as LabelSetPlan, a7 as MarkdownLiteBlock, a8 as MarkdownLiteSpan, a9 as OpenIssuesInput, aa as OpenIssuesInputSchema, ab as OpenIssuesOutput, ac as OpenIssuesOutputSchema, ad as PASEO_LABEL_SCOPES, ae as PASEO_LINK_PATTERN, af as PASEO_SERVER_PATTERN, ag as PRIORITY_ORDER, ah as PriorityLabel, ai as SHA_PATTERN, aj as SPEC_LABELS, ak as STATE_ORDER, al as SearchIssuesInput, am as SearchIssuesInputSchema, an as SearchIssuesOutput, ao as SearchIssuesOutputSchema, ap as SetLabelInput, aq as SetLabelInputSchema, ar as SetLabelOutput, as as SetLabelOutputSchema, at as SpecLabel, au as StateLabel, av as activeForgeForDirectory, aw as addCommentContract, ax as canonicalLabel, ay as createIssueContract, az as currentPriorityLabel, aA as currentStateLabel, aB as deriveForgeAccess, aC as forgeCapabilityFromRepo, aD as forgeContextContract, aE as forgeWriteScopeList, aF as formatPillDisplay, aG as isValidForgeTarget, aH as issueDetailContract, aI as liveScopesFromIssues, aJ as liveScopesFromLabels, aK as nextStateLabel, aL as normalizeIssueNumber, aM as openIssuesContract, aN as parseAgentEnvelope, aO as parseForgeRemote, aP as parseLabelList, aQ as parseMarkdownLite, aR as parseMarkdownLiteInline, aS as parseNumericPillValue, aT as paseoLabelScopes, aU as paseoLabelSet, aV as planLabelSetInstall, aW as rankIssues, aX as resolveCustomPillStatus, aY as resolveForgeTarget, aZ as sameLabel, a_ as scopeOfLabel, a$ as searchIssuesContract, b0 as setLabelContract, b1 as shortLabelName, b2 as stripAgentEnvelopeFooter, b3 as validateCreateIssueInput, b4 as writeGateNotice } from '../tickets-z86JfQ8V.cjs';
 import { z } from 'zod';
-
-/**
- * Cleanup handle returned by a feature contribution.
- *
- * A disposer MUST be idempotent: calling it more than once must not throw and
- * must not tear down anything twice. `composeFeatureModules` additionally
- * wraps every disposer it receives so the *composed* teardown is idempotent
- * even if an individual module forgets.
- */
-type FeatureDisposer = () => void;
-/**
- * A self-contained, droppable unit of plugin functionality.
- *
- * A feature module owns one concern (custom pills, timeline telemetry,
- * permission auditing, …) and exposes it through up to two contribution hooks:
- * `contributeServer` for the daemon-side `PluginServerContext` and
- * `contributeClient` for the client-side `PluginClientContext`. Both hooks are
- * optional; a module may contribute to one side, both, or neither.
- *
- * Lifecycle contract
- * ------------------
- * - A contribution hook runs at most once per `contribute*` call on the
- *   composing plugin entry.
- * - It may return a {@link FeatureDisposer} for cleanup, or `void` when it owns
- *   nothing to release.
- * - Returned disposers MUST be idempotent (see {@link FeatureDisposer}).
- * - The plugin entry composes modules with {@link composeFeatureModules} and
- *   returns the combined disposer to Paseo.
- * - `contracts` is declarative metadata (name-keyed RPC contracts the module
- *   owns); it is not registered automatically. The composing entry still calls
- *   `server.handle(contract, handler)`.
- *
- * Context types are generic because `paseo-plugin-helper/shared` must not
- * import the Paseo SDK. Type a module with the SDK contexts at the call site:
- *
- * ```ts
- * import type { PluginClientContext } from "@getpaseo/plugin/client";
- * import type { PluginServerContext } from "@getpaseo/plugin/server";
- * import type { FeatureModule } from "paseo-plugin-helper/shared";
- *
- * export const customPills: FeatureModule<PluginServerContext, PluginClientContext> = {
- *   id: "custom-pills",
- *   contracts: { list: listCustomPillsRpc },
- *   contributeServer(server) {
- *     const { unsubscribe } = registerCustomPillsServer(server);
- *     return unsubscribe;
- *   },
- *   contributeClient(client) {
- *     const remove = registerCustomPills(client);
- *     return remove;
- *   },
- * };
- * ```
- */
-interface FeatureModule<TServerContext = unknown, TClientContext = unknown> {
-    /** Stable, plugin-unique module id (e.g. `"custom-pills"`). */
-    readonly id: string;
-    /** Daemon-side contribution. Returns an idempotent disposer, or `void`. */
-    readonly contributeServer?: (server: TServerContext) => FeatureDisposer | void;
-    /** Client-side contribution. Returns an idempotent disposer, or `void`. */
-    readonly contributeClient?: (client: TClientContext) => FeatureDisposer | void;
-    /** RPC contracts this module owns, keyed by a local name. */
-    readonly contracts?: Record<string, PluginRpcContract>;
-}
-/**
- * A composed set of feature modules. `contributeServer` / `contributeClient`
- * run every module's hook for that side and return a single combined,
- * idempotent disposer that tears the modules down in reverse order.
- */
-interface FeatureComposition<TServerContext = unknown, TClientContext = unknown> {
-    /** Module ids in composition order. */
-    readonly ids: readonly string[];
-    /** Every declared contract, flattened in module order and de-duplicated. */
-    readonly contracts: readonly PluginRpcContract[];
-    /** Run all `contributeServer` hooks; returns the combined disposer. */
-    contributeServer(server: TServerContext): FeatureDisposer;
-    /** Run all `contributeClient` hooks; returns the combined disposer. */
-    contributeClient(client: TClientContext): FeatureDisposer;
-}
-/**
- * Compose {@link FeatureModule}s into one contribution unit for a plugin entry.
- *
- * Modules run in array order on contribution and are disposed in reverse (LIFO)
- * order. The returned combined disposer is idempotent: calling it twice runs
- * teardown once and never throws the first error a second time.
- *
- * ```ts
- * import type { PluginClientContext } from "@getpaseo/plugin/client";
- * import type { PluginServerContext } from "@getpaseo/plugin/server";
- * import { composeFeatureModules } from "paseo-plugin-helper/shared";
- * import { customPills } from "./features/custom-pills.js";
- * import { timelineTelemetry } from "./features/timeline-telemetry.js";
- *
- * const features = composeFeatureModules<PluginServerContext, PluginClientContext>([
- *   customPills,
- *   timelineTelemetry,
- * ]);
- *
- * export function contributeServer(server: PluginServerContext) {
- *   return features.contributeServer(server);
- * }
- *
- * export function contributeClient(client: PluginClientContext) {
- *   return features.contributeClient(client);
- * }
- * ```
- *
- * @throws if two modules share an `id` or declare the same RPC contract `name`.
- */
-declare function composeFeatureModules<TServerContext = unknown, TClientContext = unknown>(modules: readonly FeatureModule<TServerContext, TClientContext>[]): FeatureComposition<TServerContext, TClientContext>;
 
 declare const SuiteSettingsSchema: z.ZodObject<{
     suiteTitle: z.ZodDefault<z.ZodString>;
@@ -272,4 +161,4 @@ interface SuppressedSink {
  */
 declare function reportSuppressed(sink: Pick<SuppressedSink, "debug" | "warn"> | undefined, context: string, error: unknown, level?: "debug" | "warn"): void;
 
-export { type FeatureComposition, type FeatureDisposer, type FeatureModule, type ForgeKind, type ForgeMarkInput, type HighlightOptions, type HighlightPart, PluginRpcContract, type ResolvedForgeMark, SettingsContract, type SuiteSettings, SuiteSettingsContract, SuiteSettingsSchema, type SuppressedSink, type TimeoutError, composeFeatureModules, createTimeoutError, forgeKindFromHost, forgeMarkSource, hasFuzzyHighlight, hasHighlightMatch, isForgeKind, isTimeoutError, normalizeForgeHost, normalizeSearchQuery, reportSuppressed, resolveForgeMark, splitHighlightParts, withTimeout };
+export { type ForgeKind, type ForgeMarkInput, type HighlightOptions, type HighlightPart, type ResolvedForgeMark, SettingsContract, type SuiteSettings, SuiteSettingsContract, SuiteSettingsSchema, type SuppressedSink, type TimeoutError, createTimeoutError, forgeKindFromHost, forgeMarkSource, hasFuzzyHighlight, hasHighlightMatch, isForgeKind, isTimeoutError, normalizeForgeHost, normalizeSearchQuery, reportSuppressed, resolveForgeMark, splitHighlightParts, withTimeout };

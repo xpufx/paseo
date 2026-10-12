@@ -1,6 +1,116 @@
+import { P as PluginRpcContract } from './rpc-D27pph91.cjs';
 import { z } from 'zod';
-import { S as StatusVariant } from './types-4TBN5lgi.js';
-import { P as PluginRpcContract } from './rpc-D27pph91.js';
+import { S as StatusVariant } from './types-4TBN5lgi.cjs';
+
+/**
+ * Cleanup handle returned by a feature contribution.
+ *
+ * A disposer MUST be idempotent: calling it more than once must not throw and
+ * must not tear down anything twice. `composeFeatureModules` additionally
+ * wraps every disposer it receives so the *composed* teardown is idempotent
+ * even if an individual module forgets.
+ */
+type FeatureDisposer = () => void;
+/**
+ * A self-contained, droppable unit of plugin functionality.
+ *
+ * A feature module owns one concern (custom pills, timeline telemetry,
+ * permission auditing, …) and exposes it through up to two contribution hooks:
+ * `contributeServer` for the daemon-side `PluginServerContext` and
+ * `contributeClient` for the client-side `PluginClientContext`. Both hooks are
+ * optional; a module may contribute to one side, both, or neither.
+ *
+ * Lifecycle contract
+ * ------------------
+ * - A contribution hook runs at most once per `contribute*` call on the
+ *   composing plugin entry.
+ * - It may return a {@link FeatureDisposer} for cleanup, or `void` when it owns
+ *   nothing to release.
+ * - Returned disposers MUST be idempotent (see {@link FeatureDisposer}).
+ * - The plugin entry composes modules with {@link composeFeatureModules} and
+ *   returns the combined disposer to Paseo.
+ * - `contracts` is declarative metadata (name-keyed RPC contracts the module
+ *   owns); it is not registered automatically. The composing entry still calls
+ *   `server.handle(contract, handler)`.
+ *
+ * Context types are generic because `paseo-plugin-helper/shared` must not
+ * import the Paseo SDK. Type a module with the SDK contexts at the call site:
+ *
+ * ```ts
+ * import type { PluginClientContext } from "@getpaseo/plugin/client";
+ * import type { PluginServerContext } from "@getpaseo/plugin/server";
+ * import type { FeatureModule } from "paseo-plugin-helper/shared";
+ *
+ * export const customPills: FeatureModule<PluginServerContext, PluginClientContext> = {
+ *   id: "custom-pills",
+ *   contracts: { list: listCustomPillsRpc },
+ *   contributeServer(server) {
+ *     const { unsubscribe } = registerCustomPillsServer(server);
+ *     return unsubscribe;
+ *   },
+ *   contributeClient(client) {
+ *     const remove = registerCustomPills(client);
+ *     return remove;
+ *   },
+ * };
+ * ```
+ */
+interface FeatureModule<TServerContext = unknown, TClientContext = unknown> {
+    /** Stable, plugin-unique module id (e.g. `"custom-pills"`). */
+    readonly id: string;
+    /** Daemon-side contribution. Returns an idempotent disposer, or `void`. */
+    readonly contributeServer?: (server: TServerContext) => FeatureDisposer | void;
+    /** Client-side contribution. Returns an idempotent disposer, or `void`. */
+    readonly contributeClient?: (client: TClientContext) => FeatureDisposer | void;
+    /** RPC contracts this module owns, keyed by a local name. */
+    readonly contracts?: Record<string, PluginRpcContract>;
+}
+/**
+ * A composed set of feature modules. `contributeServer` / `contributeClient`
+ * run every module's hook for that side and return a single combined,
+ * idempotent disposer that tears the modules down in reverse order.
+ */
+interface FeatureComposition<TServerContext = unknown, TClientContext = unknown> {
+    /** Module ids in composition order. */
+    readonly ids: readonly string[];
+    /** Every declared contract, flattened in module order and de-duplicated. */
+    readonly contracts: readonly PluginRpcContract[];
+    /** Run all `contributeServer` hooks; returns the combined disposer. */
+    contributeServer(server: TServerContext): FeatureDisposer;
+    /** Run all `contributeClient` hooks; returns the combined disposer. */
+    contributeClient(client: TClientContext): FeatureDisposer;
+}
+/**
+ * Compose {@link FeatureModule}s into one contribution unit for a plugin entry.
+ *
+ * Modules run in array order on contribution and are disposed in reverse (LIFO)
+ * order. The returned combined disposer is idempotent: calling it twice runs
+ * teardown once and never throws the first error a second time.
+ *
+ * ```ts
+ * import type { PluginClientContext } from "@getpaseo/plugin/client";
+ * import type { PluginServerContext } from "@getpaseo/plugin/server";
+ * import { composeFeatureModules } from "paseo-plugin-helper/shared";
+ * import { customPills } from "./features/custom-pills.js";
+ * import { timelineTelemetry } from "./features/timeline-telemetry.js";
+ *
+ * const features = composeFeatureModules<PluginServerContext, PluginClientContext>([
+ *   customPills,
+ *   timelineTelemetry,
+ * ]);
+ *
+ * export function contributeServer(server: PluginServerContext) {
+ *   return features.contributeServer(server);
+ * }
+ *
+ * export function contributeClient(client: PluginClientContext) {
+ *   return features.contributeClient(client);
+ * }
+ * ```
+ *
+ * @throws if two modules share an `id` or declare the same RPC contract `name`.
+ */
+declare function composeFeatureModules<TServerContext = unknown, TClientContext = unknown>(modules: readonly FeatureModule<TServerContext, TClientContext>[]): FeatureComposition<TServerContext, TClientContext>;
 
 declare const CustomPillThresholdsSchema: z.ZodObject<{
     warning: z.ZodOptional<z.ZodNumber>;
@@ -764,4 +874,4 @@ declare function paseoLabelSet(): LabelDefinition[];
 declare function paseoLabelScopes(): string[];
 declare function planLabelSetInstall(existing: ForgeLabelRef[], mode: InstallLabelMode): LabelSetPlan;
 
-export { IssueNumberInput as $, ATTENTION_LABELS as A, BARE_REPO_PATTERN as B, CREATE_ISSUE_BODY_MAX as C, type ForgeIssue as D, ForgeIssueSchema as E, type ForgeAccessInput as F, type ForgeLabel as G, type ForgeLabelRef as H, ForgeLabelSchema as I, type ForgeRemote as J, type ForgeRepoIdentity as K, type ForgeTargetResolution as L, type ForgeVisibility as M, INSTALL_LABEL_MODES as N, type InstallLabelMode as O, type InstallLabelsInput as P, InstallLabelsInputSchema as Q, type InstallLabelsOutput as R, InstallLabelsOutputSchema as S, type IssueComment as T, IssueCommentSchema as U, type IssueDetail as V, type IssueDetailInput as W, IssueDetailInputSchema as X, type IssueDetailOutput as Y, IssueDetailOutputSchema as Z, IssueDetailSchema as _, type AddCommentInput as a, searchIssuesContract as a$, LABEL_ALIASES as a0, LEGACY_ATTENTION_LABELS as a1, LEGACY_PRIORITY_ORDER as a2, LEGACY_SPEC_LABELS as a3, LEGACY_STATE_ORDER as a4, type LabelDefinition as a5, type LabelSetPlan as a6, type MarkdownLiteBlock as a7, type MarkdownLiteSpan as a8, type OpenIssuesInput as a9, currentStateLabel as aA, deriveForgeAccess as aB, forgeCapabilityFromRepo as aC, forgeContextContract as aD, forgeWriteScopeList as aE, formatPillDisplay as aF, isValidForgeTarget as aG, issueDetailContract as aH, liveScopesFromIssues as aI, liveScopesFromLabels as aJ, nextStateLabel as aK, normalizeIssueNumber as aL, openIssuesContract as aM, parseAgentEnvelope as aN, parseForgeRemote as aO, parseLabelList as aP, parseMarkdownLite as aQ, parseMarkdownLiteInline as aR, parseNumericPillValue as aS, paseoLabelScopes as aT, paseoLabelSet as aU, planLabelSetInstall as aV, rankIssues as aW, resolveCustomPillStatus as aX, resolveForgeTarget as aY, sameLabel as aZ, scopeOfLabel as a_, OpenIssuesInputSchema as aa, type OpenIssuesOutput as ab, OpenIssuesOutputSchema as ac, PASEO_LABEL_SCOPES as ad, PASEO_LINK_PATTERN as ae, PASEO_SERVER_PATTERN as af, PRIORITY_ORDER as ag, type PriorityLabel as ah, SHA_PATTERN as ai, SPEC_LABELS as aj, STATE_ORDER as ak, type SearchIssuesInput as al, SearchIssuesInputSchema as am, type SearchIssuesOutput as an, SearchIssuesOutputSchema as ao, type SetLabelInput as ap, SetLabelInputSchema as aq, type SetLabelOutput as ar, SetLabelOutputSchema as as, type SpecLabel as at, type StateLabel as au, activeForgeForDirectory as av, addCommentContract as aw, canonicalLabel as ax, createIssueContract as ay, currentPriorityLabel as az, AddCommentInputSchema as b, setLabelContract as b0, shortLabelName as b1, stripAgentEnvelopeFooter as b2, validateCreateIssueInput as b3, writeGateNotice as b4, type AddCommentOutput as c, AddCommentOutputSchema as d, type AgentEnvelope as e, AgentEnvelopeSchema as f, type AttentionLabel as g, CREATE_ISSUE_LABEL_MAX as h, CREATE_ISSUE_TITLE_MAX as i, type CreateIssueInput as j, CreateIssueInputSchema as k, type CreateIssueOutput as l, CreateIssueOutputSchema as m, type CustomPillDefinition as n, CustomPillDefinitionSchema as o, type CustomPillModal as p, CustomPillModalSchema as q, type CustomPillState as r, type CustomPillThresholds as s, CustomPillThresholdsSchema as t, type ForgeAccessState as u, type ForgeAuthState as v, type ForgeContextInput as w, ForgeContextInputSchema as x, type ForgeContextOutput as y, ForgeContextOutputSchema as z };
+export { type IssueDetailOutput as $, ATTENTION_LABELS as A, BARE_REPO_PATTERN as B, CREATE_ISSUE_BODY_MAX as C, ForgeContextInputSchema as D, type ForgeContextOutput as E, type FeatureComposition as F, ForgeContextOutputSchema as G, type ForgeIssue as H, ForgeIssueSchema as I, type ForgeLabel as J, type ForgeLabelRef as K, ForgeLabelSchema as L, type ForgeRemote as M, type ForgeRepoIdentity as N, type ForgeTargetResolution as O, type ForgeVisibility as P, INSTALL_LABEL_MODES as Q, type InstallLabelMode as R, type InstallLabelsInput as S, InstallLabelsInputSchema as T, type InstallLabelsOutput as U, InstallLabelsOutputSchema as V, type IssueComment as W, IssueCommentSchema as X, type IssueDetail as Y, type IssueDetailInput as Z, IssueDetailInputSchema as _, type AddCommentInput as a, resolveCustomPillStatus as a$, IssueDetailOutputSchema as a0, IssueDetailSchema as a1, IssueNumberInput as a2, LABEL_ALIASES as a3, LEGACY_ATTENTION_LABELS as a4, LEGACY_PRIORITY_ORDER as a5, LEGACY_SPEC_LABELS as a6, LEGACY_STATE_ORDER as a7, type LabelDefinition as a8, type LabelSetPlan as a9, canonicalLabel as aA, composeFeatureModules as aB, createIssueContract as aC, currentPriorityLabel as aD, currentStateLabel as aE, deriveForgeAccess as aF, forgeCapabilityFromRepo as aG, forgeContextContract as aH, forgeWriteScopeList as aI, formatPillDisplay as aJ, isValidForgeTarget as aK, issueDetailContract as aL, liveScopesFromIssues as aM, liveScopesFromLabels as aN, nextStateLabel as aO, normalizeIssueNumber as aP, openIssuesContract as aQ, parseAgentEnvelope as aR, parseForgeRemote as aS, parseLabelList as aT, parseMarkdownLite as aU, parseMarkdownLiteInline as aV, parseNumericPillValue as aW, paseoLabelScopes as aX, paseoLabelSet as aY, planLabelSetInstall as aZ, rankIssues as a_, type MarkdownLiteBlock as aa, type MarkdownLiteSpan as ab, type OpenIssuesInput as ac, OpenIssuesInputSchema as ad, type OpenIssuesOutput as ae, OpenIssuesOutputSchema as af, PASEO_LABEL_SCOPES as ag, PASEO_LINK_PATTERN as ah, PASEO_SERVER_PATTERN as ai, PRIORITY_ORDER as aj, type PriorityLabel as ak, SHA_PATTERN as al, SPEC_LABELS as am, STATE_ORDER as an, type SearchIssuesInput as ao, SearchIssuesInputSchema as ap, type SearchIssuesOutput as aq, SearchIssuesOutputSchema as ar, type SetLabelInput as as, SetLabelInputSchema as at, type SetLabelOutput as au, SetLabelOutputSchema as av, type SpecLabel as aw, type StateLabel as ax, activeForgeForDirectory as ay, addCommentContract as az, AddCommentInputSchema as b, resolveForgeTarget as b0, sameLabel as b1, scopeOfLabel as b2, searchIssuesContract as b3, setLabelContract as b4, shortLabelName as b5, stripAgentEnvelopeFooter as b6, validateCreateIssueInput as b7, writeGateNotice as b8, type AddCommentOutput as c, AddCommentOutputSchema as d, type AgentEnvelope as e, AgentEnvelopeSchema as f, type AttentionLabel as g, CREATE_ISSUE_LABEL_MAX as h, CREATE_ISSUE_TITLE_MAX as i, type CreateIssueInput as j, CreateIssueInputSchema as k, type CreateIssueOutput as l, CreateIssueOutputSchema as m, type CustomPillDefinition as n, CustomPillDefinitionSchema as o, type CustomPillModal as p, CustomPillModalSchema as q, type CustomPillState as r, type CustomPillThresholds as s, CustomPillThresholdsSchema as t, type FeatureDisposer as u, type FeatureModule as v, type ForgeAccessInput as w, type ForgeAccessState as x, type ForgeAuthState as y, type ForgeContextInput as z };

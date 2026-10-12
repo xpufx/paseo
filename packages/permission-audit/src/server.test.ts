@@ -9,6 +9,7 @@ import {
   normalizeDecision,
   PermissionLogStore,
   registerPermissionAuditServer,
+  createPermissionAuditFeature,
   splitRequestEvent,
   splitResolveEvent,
   subscribePermissionEvents,
@@ -372,4 +373,41 @@ describe("registerPermissionAuditServer", () => {
     expect(result.entries[0]?.agentId).toBe("agent-7");
     expect(() => unsubscribe()).not.toThrow();
   });
+
+  it("createPermissionAuditFeature satisfies FeatureModule contract and provides idempotent disposer", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "perm-feature-"));
+    const handled = new Map<string, (input: any) => unknown>();
+    const seenEvents: string[] = [];
+    const server = {
+      on: (name: string, _handler: (event: unknown, context: unknown) => void) => {
+        seenEvents.push(name);
+        return () => {};
+      },
+      handle: (contract: { name: string }, handler: (input: any) => unknown) => {
+        handled.set(contract.name, handler);
+      },
+    };
+
+    let mountedResult: any = null;
+    const feature = createPermissionAuditFeature({
+      filePath: path.join(dir, "feature-audit.jsonl"),
+      onMount: (res) => {
+        mountedResult = res;
+      },
+    });
+
+    expect(feature.id).toBe("permission-audit");
+    expect(feature.contracts?.query).toBeDefined();
+    expect(typeof feature.contributeServer).toBe("function");
+
+    const dispose = feature.contributeServer!(server);
+    expect(typeof dispose).toBe("function");
+    expect(mountedResult).toBeDefined();
+    expect(handled.has("permission-audit.query")).toBe(true);
+
+    // Idempotent disposer
+    expect(() => dispose!()).not.toThrow();
+    expect(() => dispose!()).not.toThrow();
+  });
 });
+
