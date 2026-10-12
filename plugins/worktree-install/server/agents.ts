@@ -67,7 +67,11 @@ export function deriveState(
   quotaAlertIds: Set<string>,
 ): DerivedState {
   const work = attributedWork(raw);
-  return deriveDeterministicState(raw, work, quotaAlertIds);
+  const result = deriveDeterministicState(raw, work, quotaAlertIds);
+  return {
+    state: result.state as FleetAgent["deterministicState"],
+    detail: result.detail,
+  };
 }
 
 /**

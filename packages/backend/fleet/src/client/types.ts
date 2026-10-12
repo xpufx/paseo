@@ -326,7 +326,7 @@ export interface FleetAgentTreeNode {
   isDetached?: boolean;
 }
 
-export const FleetAgentTreeNodeSchema: z.ZodType<FleetAgentTreeNode, z.ZodTypeDef, any> = z.lazy(() =>
+export const FleetAgentTreeNodeSchema: z.ZodType<FleetAgentTreeNode, any, any> = z.lazy(() =>
   z.object({
     agent: FleetAgentSchema,
     depth: z.number(),

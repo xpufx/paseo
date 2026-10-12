@@ -9,6 +9,7 @@
     "test": "npm run typecheck && vitest run --config client/vitest.config.ts"
   },
   "devDependencies": {
+    "@xpufx/mcp-gateway": "*",
     "@xpufx/paseo-plugin-ui": "*",
     "paseo-plugin-ui-testing": "*",
     "@getpaseo/plugin": "^0.9.0",

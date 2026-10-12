@@ -6,14 +6,27 @@ export const settingsStorage = new PluginStorage<McpToolsSettings>("mcp-tools", 
   schema: mcpToolsSettingsContract.schema,
 });
 
+import { startGateway, stopGateway } from "./gateway";
+
 // Plain handler functions on purpose: index.server.ts wires them via
 // server.handle, which is the only call form the compiler strips
 // from the client bundle.
 export const settingsHandlers = createSettingsHandlers(mcpToolsSettingsContract, settingsStorage, {
   onUpdate: (next) => {
     log.info("Settings updated", next);
+    if (next.gatewayInject) {
+      void startGateway(next);
+    } else {
+      void stopGateway();
+    }
   },
   onReset: () => {
     log.info("Settings reset to defaults");
+    const defaults = settingsStorage.read();
+    if (defaults.gatewayInject) {
+      void startGateway(defaults);
+    } else {
+      void stopGateway();
+    }
   },
 });
