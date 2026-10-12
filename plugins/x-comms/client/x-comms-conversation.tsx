@@ -522,7 +522,7 @@ export function CrossDaemonConversation({
         </View>
       ) : null}
       <Modal title="New conversation" open={pickerOpen} onOpenChange={setPickerOpen}>
-        <ModalContent size="large">
+        <ModalContent>
           <View>
             <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 4, textTransform: "uppercase" as const }}>
               Configured hosts

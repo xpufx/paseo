@@ -9,6 +9,7 @@ import {
   StatusDot,
   Tabs,
   Toggle,
+  HostThemeProvider,
   usePluginTheme,
 } from "./host-ui";
 import {
@@ -131,26 +132,28 @@ const X_COMMS_TABS = [
 function XCommsModalContent({ theme, agentId }: { theme: RenderModalProps["theme"]; agentId: string }) {
   const [tab, setTab] = useState("chat");
   return (
-    <ModalBody
-      header={<Tabs tabs={X_COMMS_TABS} activeTab={tab} onTabChange={setTab} />}
-      headerMode="pinned"
-      headerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 }}
-    >
-      {tab === "about" ? (
-        <AboutSection
-          name="X-comms"
-          description="Cross-daemon agent conversation over Paseo Relay."
-          version="0.3.0"
-          repository="https://github.com/xpufx/paseo-x-comms"
-          license="MIT"
-          density="tiny"
-        />
-      ) : tab === "settings" ? (
-        <XCommsSettings />
-      ) : (
-        <CrossDaemonConversation theme={theme} agentId={agentId} />
-      )}
-    </ModalBody>
+    <HostThemeProvider theme={theme}>
+      <ModalBody
+        header={<Tabs tabs={X_COMMS_TABS} activeTab={tab} onTabChange={setTab} />}
+        headerMode="pinned"
+        headerStyle={{ paddingHorizontal: 12, paddingTop: 12, paddingBottom: 6 }}
+      >
+        {tab === "about" ? (
+          <AboutSection
+            name="X-comms"
+            description="Cross-daemon agent conversation over Paseo Relay."
+            version="0.3.0"
+            repository="https://github.com/xpufx/paseo-x-comms"
+            license="MIT"
+            density="tiny"
+          />
+        ) : tab === "settings" ? (
+          <XCommsSettings />
+        ) : (
+          <CrossDaemonConversation theme={theme} agentId={agentId} />
+        )}
+      </ModalBody>
+    </HostThemeProvider>
   );
 }
 

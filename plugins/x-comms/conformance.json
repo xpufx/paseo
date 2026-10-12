@@ -1,6 +1,3 @@
 {
-  "exempt": {
-    "no-bare-react-native-ui": "client/host-ui.tsx is the plugin-local composition that replaces the removed helper `client/` fork (xpufx-org/paseo#970, #938, #924). It imports the plain React Native ScrollView for the two surfaces where the host sheet-gesture scroller must not be used: the horizontal tab strip and the nested code-block snippet scroller (#219).",
-    "no-bespoke-react-native-interactions": "Same plugin-local composition. The host SDK ships no button/toggle/tab pressable primitive, so Card/Badge/Button/Tabs/InlineButton compose Pressable over react-native. Every other helper/UI rule is followed; this is the single interaction seam."
-  }
+  "exempt": {}
 }

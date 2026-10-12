@@ -18,6 +18,7 @@ import {
   SectionHeader,
   Tabs,
   TextInput,
+  HostThemeProvider,
   usePluginTheme,
 } from "./host-ui";
 import { formatPeerDisplay } from "./peer-label";
@@ -95,6 +96,15 @@ function HealthBadge({
 // #7 adds a third "Peers" tab: the known daemon registry with a live per-peer
 // daemon.get_status probe. It is additive — the other two tabs are untouched.
 export function MainSurface(props: PluginSurfaceProps) {
+  // Kit primitives read colors from the kit HostThemeProvider (#1268).
+  return (
+    <HostThemeProvider theme={props.theme}>
+      <MainSurfaceBody {...props} />
+    </HostThemeProvider>
+  );
+}
+
+function MainSurfaceBody(props: PluginSurfaceProps) {
   const { colors } = usePluginTheme();
   const [surface, setSurface] = useState<"current" | "prototype" | "peers">("current");
   return (

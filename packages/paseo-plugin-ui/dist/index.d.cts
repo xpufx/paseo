@@ -1,5 +1,5 @@
 import React, { ReactNode } from 'react';
-import { StyleProp, ViewStyle, TextStyle, ScrollViewProps, ScrollView as ScrollView$1 } from 'react-native';
+import { StyleProp, ViewStyle, TextStyle, ScrollViewProps, ScrollView as ScrollView$1, KeyboardTypeOptions } from 'react-native';
 import { ScrollView } from '@getpaseo/plugin/client/react-native';
 
 /**
@@ -521,11 +521,13 @@ interface HostTextInputProps {
     secureTextEntry?: boolean;
     autoCapitalize?: "none" | "sentences" | "words" | "characters";
     autoCorrect?: boolean;
+    keyboardType?: KeyboardTypeOptions;
+    onSubmitEditing?: () => void;
     style?: StyleProp<ViewStyle>;
     inputStyle?: StyleProp<TextStyle>;
 }
 /** Single or multi-line text input using host theme and modal-aware primitive. */
-declare function HostTextInput({ value, onChangeText, label, placeholder, errorText, helperText, disabled, editable, multiline, numberOfLines, mono, secureTextEntry, autoCapitalize, autoCorrect, style, inputStyle, }: HostTextInputProps): React.JSX.Element;
+declare function HostTextInput({ value, onChangeText, label, placeholder, errorText, helperText, disabled, editable, multiline, numberOfLines, mono, secureTextEntry, autoCapitalize, autoCorrect, keyboardType, onSubmitEditing, style, inputStyle, }: HostTextInputProps): React.JSX.Element;
 interface HostSearchInputProps {
     value: string;
     onChangeText: (text: string) => void;

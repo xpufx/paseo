@@ -17,6 +17,7 @@ import {
   StyleSheet,
   Text,
   View,
+  type KeyboardTypeOptions,
   type RefreshControlProps,
   type ScrollViewProps,
   type StyleProp,
@@ -2233,6 +2234,8 @@ export interface HostTextInputProps {
   secureTextEntry?: boolean;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   autoCorrect?: boolean;
+  keyboardType?: KeyboardTypeOptions;
+  onSubmitEditing?: () => void;
   style?: StyleProp<ViewStyle>;
   inputStyle?: StyleProp<TextStyle>;
 }
@@ -2253,6 +2256,8 @@ export function HostTextInput({
   secureTextEntry = false,
   autoCapitalize = "none",
   autoCorrect = false,
+  keyboardType,
+  onSubmitEditing,
   style,
   inputStyle,
 }: HostTextInputProps) {
@@ -2277,6 +2282,8 @@ export function HostTextInput({
         secureTextEntry={secureTextEntry}
         autoCapitalize={autoCapitalize}
         autoCorrect={autoCorrect}
+        keyboardType={keyboardType}
+        onSubmitEditing={onSubmitEditing ? () => onSubmitEditing() : undefined}
         textAlignVertical={multiline ? "top" : "center"}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}

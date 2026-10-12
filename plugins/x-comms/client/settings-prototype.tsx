@@ -252,7 +252,7 @@ export function SettingsPrototype({ theme }: PluginSurfaceProps) {
               title={formatPeerDisplay(daemon.name, daemon.serverId)}
               subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
               badge={
-                <Row gap="xs" align="center">
+                <Row gap={4} align="center">
                   {/* Pillar (b) of #639: a daemon that only exists because it is
                       written in the manual registry file is a foreign, manually
                       added external — not a peer this mesh discovered. The badge
