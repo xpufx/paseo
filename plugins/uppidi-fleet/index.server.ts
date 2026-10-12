@@ -110,6 +110,7 @@ import {
   handleUppidiSetRotationPolicy,
 } from "./server/hook-router.js";
 import { createPluginLogger, registerSettingsRpc, registerTicketHandlers, installStorageGuard } from "paseo-plugin-helper/server";
+import { fleetRosterContract, fleetAgentsContract } from "@xpufx/backend-fleet/shared";
 import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 import { PLUGIN_VERSION } from "./shared/version.js";
 import { HELPER_VERSION, HELPER_SERVED_FROM } from "./shared/helper-version.js";
@@ -172,6 +173,8 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiHookConfigureContract, handleHookConfigure);
   server.handle(uppidiHookLogTailContract, handleHookLogTail);
   server.handle(uppidiAgentsContract, handleUppidiAgents);
+  server.handle(fleetRosterContract as any, handleUppidiAgents);
+  server.handle(fleetAgentsContract as any, handleUppidiAgents);
   server.handle(uppidiRoleModelsContract, handleUppidiRoleModels);
   server.handle(uppidiSetRoleModelContract, handleUppidiSetRoleModel);
   server.handle(uppidiFleetAlertsContract, handleUppidiFleetAlerts);

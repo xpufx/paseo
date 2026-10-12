@@ -83,6 +83,11 @@ import {
 } from "./workspace-guard.js";
 import { loadSavedRoleModels, DEFAULT_ROLE_MODELS, resolveHostHome, resolveRoleModelKey } from "./role-models.js";
 import { renderSkillDirective } from "./skills.js";
+import {
+  readWorkspaceProjectMap as readBackendWorkspaceProjectMap,
+  buildWorkspaceProjectMapFromRegistry,
+  canonicalDescriptorsToRegistry,
+} from "@xpufx/backend-fleet/server";
 
 
 export type ExecFileAsyncFn = (
@@ -575,56 +580,21 @@ function deriveRepoFromWorkspace(
   return undefined;
 }
 
+let testWorkspaceProjectMap: WorkspaceProjectMap | null = null;
+
 /**
- * Builds a cached map of Paseo workspaceId -> canonical repository by joining
- * ~/.paseo/projects/workspaces.json with ~/.paseo/projects/projects.json.
+ * Builds a cached map of Paseo workspaceId -> canonical repository using
+ * the canonical backend-fleet storage resolver.
  */
 export function getWorkspaceProjectMap(options: { forceRefresh?: boolean } = {}): WorkspaceProjectMap {
-  const now = Date.now();
-  if (
-    !options.forceRefresh &&
-    workspaceProjectCache &&
-    now - workspaceProjectCache.cachedAt < WORKSPACE_PROJECT_CACHE_TTL_MS
-  ) {
-    return workspaceProjectCache.map;
+  if (testWorkspaceProjectMap !== null) {
+    return testWorkspaceProjectMap;
   }
-
-  const map: WorkspaceProjectMap = {};
-  try {
-    const projectsDir = path.join(resolveHostHome(), ".paseo", "projects");
-
-    const projectsById = new Map<string, ProjectRecord>();
-    const projectsPath = path.join(projectsDir, "projects.json");
-    if (fs.existsSync(projectsPath)) {
-      const projects = JSON.parse(fs.readFileSync(projectsPath, "utf-8"));
-      if (Array.isArray(projects)) {
-        for (const project of projects) {
-          if (project?.projectId) projectsById.set(project.projectId, project);
-        }
-      }
-    }
-
-    const workspacesPath = path.join(projectsDir, "workspaces.json");
-    if (fs.existsSync(workspacesPath)) {
-      const workspaces = JSON.parse(fs.readFileSync(workspacesPath, "utf-8"));
-      if (Array.isArray(workspaces)) {
-        for (const workspace of workspaces) {
-          if (!workspace?.workspaceId) continue;
-          const repo = deriveRepoFromWorkspace(workspace, projectsById.get(workspace.projectId));
-          if (repo) map[workspace.workspaceId] = normalizeProjectName(repo);
-        }
-      }
-    }
-  } catch {
-    // Best-effort: authoritative metadata unavailable, callers fall back.
-  }
-
-  workspaceProjectCache = { map, cachedAt: now };
-  return map;
+  return readBackendWorkspaceProjectMap({ home: resolveHostHome(), forceRefresh: options.forceRefresh });
 }
 
 export function setWorkspaceProjectMapForTest(map: WorkspaceProjectMap | null): void {
-  workspaceProjectCache = map ? { map, cachedAt: Date.now() } : null;
+  testWorkspaceProjectMap = map;
 }
 
 /**
@@ -786,42 +756,40 @@ export async function checkRepoMainDirty(cwd?: string): Promise<RepoRootInspecti
 
 export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<UppidiAgent[]> {
   const quotaAlerts = getQuotaAlertAgentIds();
-  const diskMeta = getAgentDiskMetadataMap();
   const mergedAgents = new Map<string, RawAgentRecord>();
 
-  // 1. Try SDK context.paseo.agents.list()
+  // 1. Try SDK context.paseo.agents.list() (Daemon RPC — no disk scraping)
   if (context?.paseo?.agents?.list) {
     try {
       const list = await context.paseo.agents.list();
-      if (Array.isArray(list?.entries)) {
+      if (Array.isArray(list?.entries) && list.entries.length > 0) {
         for (const entry of list.entries) {
           const a: any = entry.agent || entry;
           if (!a?.id) continue;
-          const disk = diskMeta.get(a.id) || {};
           mergedAgents.set(a.id, {
             id: a.id,
-            name: a.name || a.title || disk.name,
-            title: a.title || disk.title,
-            status: a.status || disk.status,
-            provider: a.provider || a.config?.provider || disk.provider,
-            model: a.model || disk.model,
-            cwd: a.cwd || a.config?.cwd || disk.cwd,
-            workspaceId: a.workspaceId || disk.workspaceId,
-            created: a.created || a.createdAt || disk.createdAt,
-            updatedAt: a.updatedAt || disk.updatedAt,
-            lastActivityAt: a.lastActivityAt || disk.lastActivityAt,
-            labels: { ...(disk.labels || {}), ...(a.labels || {}) },
+            name: a.name || a.title || "",
+            title: a.title || a.name || "",
+            status: a.status || "idle",
+            provider: a.provider || a.config?.provider || "",
+            model: a.model || null,
+            cwd: a.cwd || a.config?.cwd || "",
+            workspaceId: a.workspaceId,
+            created: a.created || a.createdAt,
+            updatedAt: a.updatedAt,
+            lastActivityAt: a.lastActivityAt,
+            labels: a.labels || {},
             parentId:
               a.labels?.["paseo.parent-agent-id"] ||
-              disk.parentId ||
+              a.parentId ||
               null,
-            lastError: a.lastError || disk.lastError,
-            requiresAttention: a.requiresAttention ?? disk.requiresAttention,
-            attentionReason: a.attentionReason || disk.attentionReason,
-            attentionTimestamp: a.attentionTimestamp || disk.attentionTimestamp,
-            pendingPermissions: a.pendingPermissions ?? disk.pendingPermissions,
-            activeTurn: a.activeTurn || disk.activeTurn,
-            lastUsage: a.lastUsage || disk.lastUsage,
+            lastError: a.lastError,
+            requiresAttention: a.requiresAttention,
+            attentionReason: a.attentionReason,
+            attentionTimestamp: a.attentionTimestamp,
+            pendingPermissions: a.pendingPermissions,
+            activeTurn: a.activeTurn,
+            lastUsage: a.lastUsage,
           });
         }
       }
@@ -830,15 +798,16 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
     }
   }
 
-  // 2. If no agents from SDK, fallback to CLI: paseo ls --json
+  // 2. If no agents from SDK, fallback to CLI or disk metadata
   if (mergedAgents.size === 0) {
+    const diskMeta = getAgentDiskMetadataMap();
     try {
       const { stdout } = await execFileAsync("paseo", ["ls", "--json", "--global"], {
         timeout: 5000,
         encoding: "utf-8",
       });
       const parsed = JSON.parse(stdout);
-      if (Array.isArray(parsed)) {
+      if (Array.isArray(parsed) && parsed.length > 0) {
         for (const item of parsed) {
           if (!item?.id) continue;
           const disk = diskMeta.get(item.id) || {};
@@ -867,11 +836,51 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
         }
       }
     } catch {
-      // If CLI unavailable, return empty array
+      // If CLI unavailable, fall back to disk
+    }
+
+    if (mergedAgents.size === 0 && diskMeta.size > 0) {
+      for (const [id, meta] of diskMeta) {
+        mergedAgents.set(id, {
+          id,
+          name: meta.name || meta.title || id,
+          title: meta.title || meta.name || id,
+          status: meta.status || "idle",
+          provider: meta.provider || "",
+          model: meta.model || null,
+          cwd: meta.cwd || "",
+          created: meta.createdAt,
+          updatedAt: meta.updatedAt,
+          lastActivityAt: meta.lastActivityAt,
+          workspaceId: meta.workspaceId,
+          labels: meta.labels || {},
+          parentId: meta.parentId || null,
+          lastError: meta.lastError,
+          requiresAttention: meta.requiresAttention,
+          attentionReason: meta.attentionReason,
+          attentionTimestamp: meta.attentionTimestamp,
+          pendingPermissions: meta.pendingPermissions,
+          activeTurn: meta.activeTurn,
+          lastUsage: meta.lastUsage,
+        });
+      }
     }
   }
 
-  const workspaceProjectMap = getWorkspaceProjectMap();
+  // Authoritative workspace -> project map from daemon RPC when available
+  let workspaceProjectMap: WorkspaceProjectMap;
+  if (context?.paseo?.workspaces?.list) {
+    try {
+      const listed = await context.paseo.workspaces.list({});
+      const entries = Array.isArray(listed?.entries) ? listed.entries : [];
+      const { workspaces, projects } = canonicalDescriptorsToRegistry(entries);
+      workspaceProjectMap = buildWorkspaceProjectMapFromRegistry(workspaces, projects);
+    } catch {
+      workspaceProjectMap = getWorkspaceProjectMap();
+    }
+  } else {
+    workspaceProjectMap = getWorkspaceProjectMap();
+  }
   const agents = Array.from(mergedAgents.values()).map((raw) =>
     normalizeRawAgent(raw, quotaAlerts, workspaceProjectMap)
   );
@@ -965,7 +974,7 @@ export function applyCanonicalRoles(
 }
 
 export async function handleUppidiAgents(
-  _input: Record<string, never>,
+  _input: unknown,
   context: PluginHandlerContext
 ): Promise<UppidiAgentsOutput> {
   try {

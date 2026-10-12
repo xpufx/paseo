@@ -7,10 +7,16 @@ import type { RawAgentRecord, WorkspaceProjectMap } from "../shared/classify.js"
 import { inheritProjectFromParents } from "../shared/classify.js";
 import { buildAgentTree } from "../shared/tree.js";
 import {
+  buildWorkspaceProjectMapFromRegistry,
   readOnDiskAgentMetadata,
   readQuotaAlertAgentIds,
   readWorkspaceProjectMap,
 } from "./storage.js";
+import {
+  canonicalDescriptorsToRegistry,
+  type WorkspaceRecord,
+  type ProjectRecord,
+} from "./workspace.js";
 import { normalizeRawAgent } from "./normalize.js";
 
 const defaultExecFileAsync = promisify(execFile);
@@ -30,92 +36,94 @@ export async function readRawRoster(
   context?: any,
   options?: ReadFleetOptions,
 ): Promise<{ roster: RawAgentRecord[]; source: "sdk" | "cli" | "disk" | "none" }> {
-  const disk = readOnDiskAgentMetadata({ home: options?.home });
   const execFn = options?.execFileAsync || defaultExecFileAsync;
 
-  // 1. Try SDK
+  // 1. Try SDK (Pure RPC / daemon-owned state — no disk reads)
   if (context?.paseo?.agents?.list) {
     try {
       const list = await context.paseo.agents.list();
       const entries = Array.isArray(list?.entries) ? list.entries : [];
-      const roster: RawAgentRecord[] = [];
-      for (const entry of entries) {
-        const agent = (entry as any)?.agent ?? entry;
-        const id = String(agent?.id ?? "");
-        if (!id) continue;
-        const local = disk.get(id) ?? {};
-        roster.push({
-          id,
-          name: (agent.name as string) || (agent.title as string) || local.name,
-          title: (agent.title as string) || local.title,
-          status: (agent.status as string) || local.status,
-          provider: (agent.provider as string) || local.provider,
-          model: (agent.model as string) ?? local.model ?? null,
-          cwd: (agent.cwd as string) || local.cwd,
-          workspaceId: (agent.workspaceId as string) || local.workspaceId,
-          created: (agent.created as string) || (agent.createdAt as string) || local.createdAt,
-          updatedAt: (agent.updatedAt as string) || local.updatedAt,
-          lastActivityAt: (agent.lastActivityAt as string) ?? local.lastActivityAt,
-          labels: { ...(local.labels || {}), ...((agent.labels as Record<string, string>) || {}) },
-          parentId:
-            (agent.labels as Record<string, string>)?.["paseo.parent-agent-id"] || local.parentId || null,
-          lastError: (agent.lastError as string) || local.lastError,
-          requiresAttention: (agent.requiresAttention as boolean) ?? local.requiresAttention,
-          attentionReason: (agent.attentionReason as string) || local.attentionReason,
-          attentionTimestamp: (agent.attentionTimestamp as string) || local.attentionTimestamp,
-          pendingPermissions:
-            (agent.pendingPermissions as Array<Record<string, unknown>>) ?? local.pendingPermissions,
-          activeTurn: (agent.activeTurn as RawAgentRecord["activeTurn"]) || local.activeTurn,
-          lastUsage: (agent.lastUsage as RawAgentRecord["lastUsage"]) || local.lastUsage,
-        });
+      if (entries.length > 0) {
+        const roster: RawAgentRecord[] = [];
+        for (const entry of entries) {
+          const agent = (entry as any)?.agent ?? entry;
+          const id = String(agent?.id ?? "");
+          if (!id) continue;
+          roster.push({
+            id,
+            name: (agent.name as string) || (agent.title as string) || "",
+            title: (agent.title as string) || (agent.name as string) || "",
+            status: (agent.status as string) || "idle",
+            provider: (agent.provider as string) || "",
+            model: (agent.model as string) ?? null,
+            cwd: (agent.cwd as string) || "",
+            workspaceId: (agent.workspaceId as string) || undefined,
+            created: (agent.created as string) || (agent.createdAt as string) || undefined,
+            updatedAt: (agent.updatedAt as string) || undefined,
+            lastActivityAt: (agent.lastActivityAt as string) ?? undefined,
+            labels: ((agent.labels as Record<string, string>) || {}),
+            parentId:
+              (agent.labels as Record<string, string>)?.["paseo.parent-agent-id"] ||
+              (agent.parentId as string) ||
+              null,
+            lastError: (agent.lastError as string) || undefined,
+            requiresAttention: (agent.requiresAttention as boolean) ?? undefined,
+            attentionReason: (agent.attentionReason as string) || undefined,
+            attentionTimestamp: (agent.attentionTimestamp as string) || undefined,
+            pendingPermissions:
+              (agent.pendingPermissions as Array<Record<string, unknown>>) ?? undefined,
+            activeTurn: (agent.activeTurn as RawAgentRecord["activeTurn"]) || undefined,
+            lastUsage: (agent.lastUsage as RawAgentRecord["lastUsage"]) || undefined,
+          });
+        }
+        return { roster, source: "sdk" };
       }
-      if (roster.length > 0) return { roster, source: "sdk" };
     } catch {
-      // Fall through to CLI
+      // Fall through to CLI / disk
     }
   }
 
-  // 2. Try CLI
+  // 2. Try CLI (daemon client via CLI)
   try {
     const { stdout } = await execFn("paseo", ["ls", "--json"], { timeout: 5000, encoding: "utf-8" });
     const parsed = JSON.parse(stdout);
-    if (Array.isArray(parsed)) {
+    if (Array.isArray(parsed) && parsed.length > 0) {
       const roster: RawAgentRecord[] = [];
       for (const item of parsed) {
         const id = String(item?.id ?? "");
         if (!id) continue;
-        const local = disk.get(id) ?? {};
-        const provider = (item.provider as string) || local.provider;
+        const provider = (item.provider as string) || "";
         roster.push({
           id,
-          name: item.name || item.title || local.name,
-          title: item.title || local.title,
-          status: item.status || local.status,
+          name: item.name || item.title || "",
+          title: item.title || item.name || "",
+          status: item.status || "idle",
           provider,
-          model: local.model ?? (provider?.includes("/") ? provider.split("/")[1] : undefined) ?? null,
-          cwd: item.cwd || local.cwd,
-          created: item.created || local.createdAt,
-          updatedAt: local.updatedAt,
-          lastActivityAt: local.lastActivityAt,
-          workspaceId: local.workspaceId,
-          labels: local.labels,
-          parentId: local.parentId || null,
-          lastError: local.lastError,
-          requiresAttention: local.requiresAttention,
-          attentionReason: local.attentionReason,
-          attentionTimestamp: local.attentionTimestamp,
-          pendingPermissions: local.pendingPermissions,
-          activeTurn: local.activeTurn,
-          lastUsage: local.lastUsage,
+          model: (provider?.includes("/") ? provider.split("/")[1] : undefined) ?? null,
+          cwd: item.cwd || "",
+          created: item.created || undefined,
+          updatedAt: item.updatedAt || undefined,
+          lastActivityAt: item.lastActivityAt || undefined,
+          workspaceId: item.workspaceId || undefined,
+          labels: item.labels || {},
+          parentId: item.parentId || null,
+          lastError: item.lastError,
+          requiresAttention: item.requiresAttention,
+          attentionReason: item.attentionReason,
+          attentionTimestamp: item.attentionTimestamp,
+          pendingPermissions: item.pendingPermissions,
+          activeTurn: item.activeTurn,
+          lastUsage: item.lastUsage,
         });
       }
-      if (roster.length > 0) return { roster, source: "cli" };
+      return { roster, source: "cli" };
     }
   } catch {
     // Fall through to disk only
   }
 
-  // 3. Fall back to on-disk metadata if available
+  // 3. Fall back to on-disk metadata only if daemon/CLI is unreachable
+  const disk = readOnDiskAgentMetadata({ home: options?.home });
   if (disk.size > 0) {
     const roster: RawAgentRecord[] = [];
     for (const [id, meta] of disk) {
@@ -196,13 +204,38 @@ export async function readFleetRoster(
     pausedRepos?: string[];
     repoQueuedHooks?: Record<string, number>;
     workspaceProjectMap?: WorkspaceProjectMap;
+    workspacesData?: readonly WorkspaceRecord[];
+    projectsData?: readonly ProjectRecord[];
   },
 ): Promise<FleetOutput> {
   const { roster } = await readRawRoster(context, options);
   const quota = readQuotaAlertAgentIds({ home: options?.home });
-  const map = options?.workspaceProjectMap ?? readWorkspaceProjectMap({ home: options?.home, forceRefresh: true });
 
-  const agents = roster.map((raw) => normalizeRawAgent(raw, { quotaAlertAgentIds: quota, workspaceProjectMap: map, home: options?.home }));
+  let map = options?.workspaceProjectMap;
+  if (!map) {
+    if (options?.workspacesData) {
+      map = buildWorkspaceProjectMapFromRegistry(options.workspacesData, options.projectsData);
+    } else if (context?.paseo?.workspaces?.list) {
+      try {
+        const listed = await context.paseo.workspaces.list({});
+        const entries = Array.isArray(listed?.entries) ? listed.entries : [];
+        const { workspaces, projects } = canonicalDescriptorsToRegistry(entries);
+        map = buildWorkspaceProjectMapFromRegistry(workspaces, projects);
+      } catch {
+        map = readWorkspaceProjectMap({ home: options?.home, forceRefresh: true });
+      }
+    } else {
+      map = readWorkspaceProjectMap({ home: options?.home, forceRefresh: true });
+    }
+  }
+
+  const agents = roster.map((raw) =>
+    normalizeRawAgent(raw, {
+      quotaAlertAgentIds: quota,
+      workspaceProjectMap: map,
+      home: options?.home,
+    }),
+  );
   inheritProjectFromParents(agents);
 
   return buildFleetOutput(agents, options);

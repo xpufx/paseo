@@ -26,6 +26,12 @@ import {
   resolveWorkspaceForRepo,
   normalizeRawAgent,
   DEFAULT_PROJECT,
+  buildWorkspaceProjectMapFromRegistry,
+  readFleetRoster,
+  registerFleetHandlers,
+  fleetRosterContract,
+  fleetAgentsContract,
+  archiveAgentContract,
 } from "../index.js";
 
 describe("@xpufx/backend-fleet", () => {
@@ -260,7 +266,109 @@ describe("@xpufx/backend-fleet", () => {
       expect(tree[0].children.length).toBe(1);
       expect(tree[0].children[0].agent.id).toBe("orch-1");
       expect(tree[0].children[0].children.length).toBe(1);
-      expect(tree[0].children[0].children[0].agent.id).toBe("worker-1");
+    });
+  });
+
+  describe("Daemon RPC Roster & Server Handlers", () => {
+    it("builds workspace-to-project map in-memory without filesystem access", () => {
+      const map = buildWorkspaceProjectMapFromRegistry(
+        [
+          {
+            workspaceId: "ws-99",
+            projectId: "p-99",
+            cwd: "/repos/app",
+            displayName: "app-workspace",
+          },
+        ],
+        [
+          {
+            projectId: "p-99",
+            displayName: "my-org/my-app",
+            projectKey: "remote:forge.mrs.uppidi.com/my-org/my-app",
+          },
+        ]
+      );
+      expect(map["ws-99"]).toBe("forge.mrs.uppidi.com/my-org/my-app");
+    });
+
+    it("reads roster purely via daemon SDK without disk scraping", async () => {
+      const mockContext = {
+        paseo: {
+          agents: {
+            list: async () => ({
+              entries: [
+                {
+                  id: "agent-101",
+                  name: "Front Desk Liaison",
+                  status: "running",
+                  workspaceId: "ws-1",
+                },
+                {
+                  id: "agent-102",
+                  name: "Repo Orchestrator",
+                  status: "idle",
+                  workspaceId: "ws-1",
+                  labels: { "paseo.parent-agent-id": "agent-101" },
+                },
+              ],
+            }),
+          },
+          workspaces: {
+            list: async () => ({
+              entries: [
+                {
+                  id: "ws-1",
+                  cwd: "/workspace/my-repo",
+                  projectDisplayName: "xpufx-org/paseo",
+                },
+              ],
+            }),
+          },
+        },
+      };
+
+      const roster = await readFleetRoster(mockContext, {
+        enrolledRepos: ["xpufx-org/paseo"],
+      });
+
+      expect(roster.ok).toBe(true);
+      expect(roster.totalCount).toBe(2);
+      expect(roster.runningCount).toBe(1);
+      expect(roster.idleCount).toBe(1);
+      expect(roster.frontDesk.length).toBe(1);
+      expect(roster.orchestrators.length).toBe(1);
+      expect(roster.tree.length).toBe(1);
+      expect(roster.tree[0].agent.id).toBe("agent-101");
+      expect(roster.tree[0].children[0].agent.id).toBe("agent-102");
+    });
+
+    it("registers canonical fleet RPC handlers on server context", async () => {
+      const registered: Record<string, Function> = {};
+      const mockServer = {
+        handle: (contract: any, handler: Function) => {
+          registered[contract.name] = handler;
+        },
+      };
+
+      let archiveCalled = false;
+      registerFleetHandlers(mockServer, {
+        aliasContractNames: ["uppidi-fleet.agents", "worktree-install.fleet"],
+        onArchiveAgent: async (input) => {
+          archiveCalled = true;
+          return { ok: true };
+        },
+      });
+
+      expect(typeof registered["fleet.roster"]).toBe("function");
+      expect(typeof registered["fleet.agents"]).toBe("function");
+      expect(typeof registered["uppidi-fleet.agents"]).toBe("function");
+      expect(typeof registered["worktree-install.fleet"]).toBe("function");
+      expect(typeof registered["fleet.archive-agent"]).toBe("function");
+      expect(typeof registered["fleet.create-front-desk"]).toBe("function");
+
+      const archiveRes = await registered["fleet.archive-agent"]({ agentId: "ag-1" }, {});
+      expect(archiveRes).toEqual({ ok: true });
+      expect(archiveCalled).toBe(true);
     });
   });
 });

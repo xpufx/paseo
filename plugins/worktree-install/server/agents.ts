@@ -219,7 +219,7 @@ export async function readFleet(context: PluginHandlerContext): Promise<FleetOut
 }
 
 export async function handleFleet(
-  _input: Record<string, never>,
+  _input: unknown,
   context: PluginHandlerContext,
 ): Promise<FleetOutput> {
   return readFleet(context);
