@@ -20,7 +20,11 @@
       ],
       "@xpufx/paseo-plugin-ui": [
         "../../packages/paseo-plugin-ui/src/index.tsx"
-      ]
+      ],
+      "@xpufx/backend-tickets": ["../../packages/backend/tickets/src/index.ts"],
+      "@xpufx/backend-tickets/client": ["../../packages/backend/tickets/src/client/index.ts"],
+      "@xpufx/backend-tickets/shared": ["../../packages/backend/tickets/src/shared/index.ts"],
+      "@xpufx/backend-tickets/server": ["../../packages/backend/tickets/src/server/index.ts"]
     },
     "target": "ES2020",
     "module": "ESNext",

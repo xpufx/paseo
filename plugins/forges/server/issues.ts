@@ -7,4 +7,5 @@ export {
   handleAddComment,
   handleCreateIssue,
   handleInstallLabels,
-} from "paseo-plugin-helper/server";
+} from "@xpufx/backend-tickets/server";
+

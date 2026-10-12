@@ -1,0 +1,647 @@
+import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import {
+  BARE_REPO_PATTERN,
+  INSTALL_LABEL_MODES,
+  IssueDetailSchema,
+  PASEO_LABEL_SCOPES,
+  activeForgeForDirectory,
+  forgeContextContract,
+  forgeForgeContextContract,
+  openIssuesContract,
+  searchIssuesContract,
+  issueDetailContract,
+  setLabelContract,
+  addCommentContract,
+  createIssueContract,
+  liveScopesFromIssues,
+  liveScopesFromLabels,
+  normalizeIssueNumber,
+  parseAgentEnvelope,
+  parseForgeRemote,
+  planLabelSetInstall,
+  rankIssues,
+  resolveForgeTarget,
+  scopeOfLabel,
+  validateCreateIssueInput,
+  type AddCommentInput,
+  type AddCommentOutput,
+  type CreateIssueInput,
+  type CreateIssueOutput,
+  type ForgeContextInput,
+  type ForgeContextOutput,
+  type InstallLabelsInput,
+  type InstallLabelsOutput,
+  type IssueDetail,
+  type IssueDetailInput,
+  type IssueDetailOutput,
+  type OpenIssuesInput,
+  type OpenIssuesOutput,
+  type SearchIssuesInput,
+  type SearchIssuesOutput,
+  type SetLabelInput,
+  type SetLabelOutput,
+} from "../shared/index.js";
+import {
+  ForgeClient,
+  type ForgejoIssueDetail,
+  resolveForgeToken,
+  resolveDefaultForgeHost,
+} from "./client.js";
+import { ForgeGuard, type GuardLogLevel } from "./forge-guard.js";
+import { gitOriginForDirectory } from "./git-origin.js";
+
+export interface TicketLogger {
+  info(message: string, context?: Record<string, unknown>): void;
+  warn(message: string, context?: Record<string, unknown>): void;
+  debug(message: string, context?: Record<string, unknown>): void;
+}
+
+const defaultLogger: TicketLogger = {
+  info: () => {},
+  warn: (msg, ctx) => console.warn(`[tickets:warn] ${msg}`, ctx ?? ""),
+  debug: () => {},
+};
+
+export async function storedForgeSelection(
+  directory: string | undefined,
+  storagePluginId = "forges",
+  readSettings?: (pluginId: string, filename: string) => Promise<any>,
+): Promise<string | undefined> {
+  if (!directory) return undefined;
+  try {
+    let settings: any = null;
+    if (readSettings) {
+      settings = await readSettings(storagePluginId, "settings.json");
+    } else {
+      const paseoHome = process.env.PASEO_HOME || join(homedir(), ".paseo");
+      const settingsPath = join(paseoHome, "plugin-data", "xpufx", storagePluginId, "settings.json");
+      const raw = await readFile(settingsPath, "utf8");
+      settings = JSON.parse(raw);
+    }
+    return activeForgeForDirectory(settings, directory) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type ResolvedRepo =
+  | { ok: true; host: string; repo: string; derivedRemote: string | null; remoteSource: "explicit" | "derived" }
+  | { ok: false; derivedRemote: string | null; error: string };
+
+function validateSetLabel(label: string, boardLabels: string[]): string | null {
+  const trimmed = label.trim();
+  if (!trimmed) return "Label must not be empty";
+  if (trimmed.length > 100) return "Label is too long";
+  if (/[\s,;]/.test(trimmed)) return `Unsupported label: ${trimmed}`;
+  const scope = scopeOfLabel(trimmed);
+  if (scope) {
+    const live = new Set(liveScopesFromLabels(boardLabels));
+    const fallback = new Set<string>(PASEO_LABEL_SCOPES);
+    if (!live.has(scope) && !fallback.has(scope)) {
+      return `Unknown label scope: ${trimmed}`;
+    }
+  }
+  return null;
+}
+
+function toIssueDetail(detail: ForgejoIssueDetail): IssueDetail | null {
+  const comments: IssueDetail["comments"] = detail.comments.map((comment) => ({
+    id: comment.id,
+    author: comment.author,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt,
+    body: comment.body,
+    url: comment.url,
+    envelope: parseAgentEnvelope(comment.id, comment.body),
+  }));
+  const candidate = {
+    ...detail,
+    comments,
+    envelopes: comments
+      .map((comment) => comment.envelope)
+      .filter((envelope): envelope is NonNullable<typeof envelope> => envelope !== null),
+  };
+  const parsed = IssueDetailSchema.safeParse(candidate);
+  return parsed.success ? parsed.data : null;
+}
+
+export interface TicketHandlerOptions {
+  storagePluginId?: string;
+  resolveToken?: (host: string) => Promise<string | undefined | null>;
+  readSettings?: (pluginId: string, filename: string) => Promise<any>;
+  guard?: ForgeGuard;
+  logger?: TicketLogger;
+}
+
+export interface TicketHandlers {
+  handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssuesOutput>;
+  handleSearchIssues(input: SearchIssuesInput): Promise<SearchIssuesOutput>;
+  handleForgeContext(input: ForgeContextInput): Promise<ForgeContextOutput>;
+  handleIssueDetail(input: IssueDetailInput): Promise<IssueDetailOutput>;
+  handleSetLabel(input: SetLabelInput): Promise<SetLabelOutput>;
+  handleAddComment(input: AddCommentInput): Promise<AddCommentOutput>;
+  handleCreateIssue(input: CreateIssueInput): Promise<CreateIssueOutput>;
+  handleInstallLabels(input: InstallLabelsInput): Promise<InstallLabelsOutput>;
+}
+
+export function createTicketHandlers(options: TicketHandlerOptions = {}): TicketHandlers {
+  const storagePluginId = options.storagePluginId ?? "forges";
+  const log = options.logger ?? defaultLogger;
+  const guard = options.guard ?? new ForgeGuard();
+
+  function logAt(level: GuardLogLevel, message: string, context: Record<string, unknown>): void {
+    if (level === "warn") log.warn(message, context);
+    else if (level === "info") log.info(message, context);
+    else log.debug(message, context);
+  }
+
+  async function clientFor(host: string): Promise<ForgeClient> {
+    return new ForgeClient({ host, token: await resolveForgeToken(host, options) });
+  }
+
+  async function probeForgeHost(client: ForgeClient): Promise<boolean> {
+    const cached = guard.cachedProbe(client.host);
+    if (cached !== null) return cached;
+    const speaks = await client.isForgeHost();
+    guard.recordProbe(client.host, speaks);
+    return speaks;
+  }
+
+  async function resolveRepo(
+    directory?: string,
+    explicitRemote?: string,
+  ): Promise<ResolvedRepo> {
+    const stored = await storedForgeSelection(directory, storagePluginId, options.readSettings);
+    const explicit = explicitRemote?.trim() ? explicitRemote.trim() : stored?.trim();
+    const remoteUrl = directory ? await gitOriginForDirectory(directory) : null;
+    let resolved = resolveForgeTarget(explicit, remoteUrl);
+    if (!resolved.ok && explicit && BARE_REPO_PATTERN.test(explicit)) {
+      const defaultHost = await resolveDefaultForgeHost();
+      if (defaultHost) {
+        const fallbackTarget = `https://${defaultHost}/${explicit}`;
+        const fallbackResolved = resolveForgeTarget(fallbackTarget, remoteUrl);
+        if (fallbackResolved.ok) {
+          resolved = fallbackResolved;
+        }
+      }
+    }
+    if (!resolved.ok) {
+      return { ok: false, derivedRemote: remoteUrl, error: resolved.error };
+    }
+    return {
+      ok: true,
+      host: resolved.host,
+      repo: resolved.repo,
+      derivedRemote: remoteUrl,
+      remoteSource: resolved.source,
+    };
+  }
+
+  async function fetchIssueDetail(
+    repo: string,
+    host: string,
+    issueNumber: number,
+  ): Promise<IssueDetail | null> {
+    const client = await clientFor(host);
+    const detail = await client.getIssue(repo, host, issueNumber);
+    return detail ? toIssueDetail(detail) : null;
+  }
+
+  const handlers: TicketHandlers = {
+    async handleForgeContext(input: ForgeContextInput): Promise<ForgeContextOutput> {
+      const directory =
+        typeof input?.directory === "string" && input.directory.trim()
+          ? input.directory.trim()
+          : null;
+      if (!directory) {
+        return { directory: null, derivedRemote: null, derivedHost: null, derivedRepo: null };
+      }
+      const derivedRemote = await gitOriginForDirectory(directory);
+      const parsed = parseForgeRemote(derivedRemote);
+      return {
+        directory,
+        derivedRemote,
+        derivedHost: parsed?.host ?? null,
+        derivedRepo: parsed ? `${parsed.owner}/${parsed.repo}` : null,
+      };
+    },
+
+    async handleOpenIssues(input: OpenIssuesInput): Promise<OpenIssuesOutput> {
+      const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+      if (!resolved.ok) {
+        return {
+          repo: null,
+          host: null,
+          issues: [],
+          openIssueCount: null,
+          derivedRemote: resolved.derivedRemote,
+          remoteSource: null,
+          repoPublic: null,
+          tokenPresent: false,
+          tokenValid: null,
+          repoWritePermission: null,
+          page: 1,
+          hasMore: false,
+          error: resolved.error,
+        };
+      }
+      const { host, repo, derivedRemote, remoteSource } = resolved;
+      const client = await clientFor(host);
+      if (!(await probeForgeHost(client))) {
+        logAt(guard.skipLogLevel(host), "skipping non-forge remote", { repo, host });
+        const message =
+          remoteSource === "explicit"
+            ? `Selected forge ${host}/${repo} is unreachable or not a forge API host`
+            : "Not a forge repo for this workspace";
+        return {
+          repo,
+          host,
+          issues: [],
+          openIssueCount: null,
+          page: 1,
+          hasMore: false,
+          derivedRemote,
+          remoteSource,
+          repoPublic: null,
+          tokenPresent: false,
+          tokenValid: null,
+          repoWritePermission: null,
+          error: message,
+        };
+      }
+      const anonClient = new ForgeClient({ host });
+      const tokenPresent = client.hasToken();
+      const page = input?.page ?? 1;
+      const [paged, openIssueCount, repoPublic, tokenValid, repoWritePermission] = await Promise.all([
+        client.listIssues(repo, page),
+        client.openIssueCount(repo),
+        anonClient.repoIsPublic(repo),
+        client.tokenIsValid(),
+        client.repoWritePermission(repo),
+      ]);
+      if (!paged) {
+        logAt(guard.failureLogLevel(host, repo), "issue list failed", { repo, host });
+        const message =
+          remoteSource === "explicit"
+            ? `Issue list unavailable for ${host}/${repo}`
+            : "Issue list unavailable";
+        return {
+          repo,
+          host,
+          issues: [],
+          openIssueCount,
+          page,
+          hasMore: false,
+          derivedRemote,
+          remoteSource,
+          repoPublic,
+          tokenPresent,
+          tokenValid,
+          repoWritePermission,
+          error: message,
+        };
+      }
+      guard.noteSuccess(host, repo);
+      const issues = rankIssues(paged.issues);
+      void liveScopesFromIssues(issues);
+      return {
+        repo,
+        host,
+        issues,
+        openIssueCount,
+        page,
+        hasMore: paged.hasMore,
+        derivedRemote,
+        remoteSource,
+        repoPublic,
+        tokenPresent,
+        tokenValid,
+        repoWritePermission,
+      };
+    },
+
+    async handleSearchIssues(input: SearchIssuesInput): Promise<SearchIssuesOutput> {
+      const query = typeof input?.query === "string" ? input.query.trim() : "";
+      if (!query) {
+        return { repo: null, host: null, issues: [], page: 1, hasMore: false, error: "Enter a search query" };
+      }
+      const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+      if (!resolved.ok) {
+        return { repo: null, host: null, issues: [], page: 1, hasMore: false, error: resolved.error };
+      }
+      const { host, repo } = resolved;
+      const client = await clientFor(host);
+      if (!(await probeForgeHost(client))) {
+        logAt(guard.skipLogLevel(host), "skipping non-forge remote", { repo, host });
+        return {
+          repo,
+          host,
+          issues: [],
+          page: 1,
+          hasMore: false,
+          error: `Selected forge ${host}/${repo} is unreachable or not a forge API host`,
+        };
+      }
+      const page = input?.page ?? 1;
+      const result = await client.searchIssues(repo, query, page);
+      if (!result) {
+        logAt(guard.failureLogLevel(host, repo), "issue search failed", { repo, host });
+        return { repo, host, issues: [], page, hasMore: false, error: `Search unavailable for ${host}/${repo}` };
+      }
+      guard.noteSuccess(host, repo);
+      return { repo, host, issues: result.issues, page, hasMore: result.hasMore };
+    },
+
+    async handleIssueDetail(input: IssueDetailInput): Promise<IssueDetailOutput> {
+      const fetchedAt = new Date().toISOString();
+      try {
+        const issueNumber = normalizeIssueNumber(input ?? {});
+        if (issueNumber == null) {
+          return {
+            repo: null,
+            issue: null,
+            fetchedAt,
+            repoPublic: null,
+            tokenPresent: false,
+            tokenValid: null,
+            repoWritePermission: null,
+            error: "issueNumber is required",
+          };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return {
+            repo: null,
+            issue: null,
+            fetchedAt,
+            repoPublic: null,
+            tokenPresent: false,
+            tokenValid: null,
+            repoWritePermission: null,
+            error: resolved.error,
+          };
+        }
+        const { host, repo } = resolved;
+        const client = await clientFor(host);
+        const tokenPresent = client.hasToken();
+        const [issue, repoPublic, tokenValid, repoWritePermission] = await Promise.all([
+          fetchIssueDetail(repo, host, issueNumber),
+          new ForgeClient({ host }).repoIsPublic(repo),
+          client.tokenIsValid(),
+          client.repoWritePermission(repo),
+        ]);
+        if (!issue) {
+          return {
+            repo,
+            issue: null,
+            fetchedAt,
+            repoPublic,
+            tokenPresent,
+            tokenValid,
+            repoWritePermission,
+            error: `Issue #${issueNumber} not found in ${repo}`,
+          };
+        }
+        return { repo, issue, fetchedAt, repoPublic, tokenPresent, tokenValid, repoWritePermission };
+      } catch (error) {
+        log.warn("issue detail failed", { error: String(error) });
+        return {
+          repo: null,
+          issue: null,
+          fetchedAt,
+          repoPublic: null,
+          tokenPresent: false,
+          tokenValid: null,
+          repoWritePermission: null,
+          error: "Issue detail unavailable",
+        };
+      }
+    },
+
+    async handleSetLabel(input: SetLabelInput): Promise<SetLabelOutput> {
+      try {
+        const issueNumber = normalizeIssueNumber(input ?? {});
+        if (issueNumber == null) {
+          return { number: 0, labels: [], error: "issueNumber is required" };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return {
+            number: issueNumber,
+            labels: [],
+            error: resolved.error,
+          };
+        }
+        const { host, repo } = resolved;
+        const client = await clientFor(host);
+        const detail = await client.getIssue(repo, host, issueNumber);
+        if (!detail) {
+          return {
+            number: issueNumber,
+            labels: [],
+            error: `Issue #${issueNumber} not found in ${repo}`,
+          };
+        }
+        const rawLabel = (input as { label?: unknown }).label;
+        const labelError = validateSetLabel(
+          typeof rawLabel === "string" ? rawLabel : "",
+          detail.labels,
+        );
+        if (labelError) {
+          return { number: issueNumber, labels: [], error: labelError };
+        }
+        const label = (rawLabel as string).trim();
+        const scope = scopeOfLabel(label);
+        const remove = scope
+          ? detail.labels.filter(
+              (existing) => scopeOfLabel(existing) === scope && existing !== label,
+            )
+          : [];
+        const labels = await client.setLabels(repo, issueNumber, [label], remove);
+        if (!labels) {
+          log.warn("set-label failed", { repo, issueNumber, label });
+          return { number: issueNumber, labels: [], error: "Could not update labels" };
+        }
+        return { number: issueNumber, labels };
+      } catch (error) {
+        log.warn("set-label failed", { error: String(error) });
+        return { number: 0, labels: [], error: "Could not update labels" };
+      }
+    },
+
+    async handleAddComment(input: AddCommentInput): Promise<AddCommentOutput> {
+      try {
+        const issueNumber = normalizeIssueNumber(input ?? {});
+        if (issueNumber == null) {
+          return { number: 0, commentId: null, error: "issueNumber is required" };
+        }
+        const body =
+          typeof (input as { body?: unknown }).body === "string"
+            ? ((input as { body: string }).body as string).trim()
+            : "";
+        if (!body) {
+          return { number: issueNumber, commentId: null, error: "Comment body must not be empty" };
+        }
+        if (body.length > 10000) {
+          return { number: issueNumber, commentId: null, error: "Comment body is too long" };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return {
+            number: issueNumber,
+            commentId: null,
+            error: resolved.error,
+          };
+        }
+        const { host, repo } = resolved;
+        const client = await clientFor(host);
+        const commentId = await client.addComment(repo, issueNumber, body);
+        if (commentId == null) {
+          const detail = await client.getIssue(repo, host, issueNumber);
+          if (!detail) {
+            log.warn("add-comment failed", { repo, issueNumber });
+            return { number: issueNumber, commentId: null, error: "Could not post comment" };
+          }
+        }
+        return { number: issueNumber, commentId };
+      } catch (error) {
+        log.warn("add-comment failed", { error: String(error) });
+        return { number: 0, commentId: null, error: "Could not post comment" };
+      }
+    },
+
+    async handleCreateIssue(input: CreateIssueInput): Promise<CreateIssueOutput> {
+      try {
+        const validationError = validateCreateIssueInput(input ?? {});
+        if (validationError) {
+          return { repo: null, host: null, number: null, error: validationError };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return { repo: null, host: null, number: null, error: resolved.error };
+        }
+        const { host, repo } = resolved;
+        const title = (input.title as string).trim();
+        const body = typeof input.body === "string" ? input.body.trim() : "";
+        const labels = Array.isArray(input.labels)
+          ? input.labels.map((label) => String(label).trim()).filter(Boolean)
+          : [];
+        const client = await clientFor(host);
+        const number = await client.createIssue(repo, { title, body, labels });
+        if (number == null) {
+          log.warn("create-issue failed", { repo });
+          return { repo, host, number: null, error: "Could not create issue" };
+        }
+        return { repo, host, number };
+      } catch (error) {
+        log.warn("create-issue failed", { error: String(error) });
+        return { repo: null, host: null, number: null, error: "Could not create issue" };
+      }
+    },
+
+    async handleInstallLabels(input: InstallLabelsInput): Promise<InstallLabelsOutput> {
+      const rawMode = (input as { mode?: unknown }).mode;
+      const mode = INSTALL_LABEL_MODES.find((candidate) => candidate === rawMode);
+      if (!mode) {
+        return {
+          host: null,
+          repo: null,
+          mode: null,
+          created: [],
+          skipped: [],
+          removed: [],
+          error: "An explicit install mode (merge or replace) is required",
+        };
+      }
+      try {
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return { host: null, repo: null, mode, created: [], skipped: [], removed: [], error: resolved.error };
+        }
+        const { host, repo } = resolved;
+        const result: InstallLabelsOutput = {
+          host,
+          repo,
+          mode,
+          created: [],
+          skipped: [],
+          removed: [],
+        };
+        const client = await clientFor(host);
+        if (!client.hasToken()) {
+          result.error = "A valid API token is required to install labels";
+          return result;
+        }
+        const existing = await client.listLabels(repo);
+        if (!existing) {
+          result.error = `Could not read labels for ${host}/${repo}`;
+          return result;
+        }
+        const plan = planLabelSetInstall(existing, mode);
+        result.skipped = [...plan.skip];
+        for (const label of plan.remove) {
+          if (typeof label.id !== "number") continue;
+          if (!(await client.deleteLabel(repo, label.id))) {
+            result.error = `Could not remove label ${label.name}`;
+            return result;
+          }
+          result.removed.push(label.name);
+        }
+        for (const definition of plan.create) {
+          if (await client.createLabel(repo, definition)) {
+            result.created.push(definition.name);
+            continue;
+          }
+          const refreshed = await client.listLabels(repo);
+          if (refreshed?.some((label) => label.name === definition.name)) {
+            result.skipped.push(definition.name);
+            continue;
+          }
+          result.error = `Could not create label ${definition.name}`;
+          return result;
+        }
+        return result;
+      } catch (error) {
+        log.warn("install-labels failed", { error: String(error) });
+        return { host: null, repo: null, mode, created: [], skipped: [], removed: [], error: "Could not install labels" };
+      }
+    },
+  };
+
+  return handlers;
+}
+
+const defaultTicketHandlers = createTicketHandlers();
+
+export const handleOpenIssues = (input: OpenIssuesInput) => defaultTicketHandlers.handleOpenIssues(input);
+export const handleSearchIssues = (input: SearchIssuesInput) => defaultTicketHandlers.handleSearchIssues(input);
+export const handleForgeContext = (input: ForgeContextInput) => defaultTicketHandlers.handleForgeContext(input);
+export const handleIssueDetail = (input: IssueDetailInput) => defaultTicketHandlers.handleIssueDetail(input);
+export const handleSetLabel = (input: SetLabelInput) => defaultTicketHandlers.handleSetLabel(input);
+export const handleAddComment = (input: AddCommentInput) => defaultTicketHandlers.handleAddComment(input);
+export const handleCreateIssue = (input: CreateIssueInput) => defaultTicketHandlers.handleCreateIssue(input);
+export const handleInstallLabels = (input: InstallLabelsInput) => defaultTicketHandlers.handleInstallLabels(input);
+
+export interface HandleableServerContext {
+  handle(contract: any, handler: (input: any) => Promise<any> | any): void;
+}
+
+export function registerTicketHandlers(
+  server: HandleableServerContext,
+  options?: TicketHandlerOptions,
+): TicketHandlers {
+  const handlers = options ? createTicketHandlers(options) : defaultTicketHandlers;
+
+  server.handle(openIssuesContract, (input: OpenIssuesInput) => handlers.handleOpenIssues(input));
+  server.handle(searchIssuesContract, (input: SearchIssuesInput) => handlers.handleSearchIssues(input));
+  server.handle(forgeContextContract, (input: ForgeContextInput) => handlers.handleForgeContext(input));
+  server.handle(forgeForgeContextContract, (input: ForgeContextInput) => handlers.handleForgeContext(input));
+  server.handle(issueDetailContract, (input: IssueDetailInput) => handlers.handleIssueDetail(input));
+  server.handle(setLabelContract, (input: SetLabelInput) => handlers.handleSetLabel(input));
+  server.handle(addCommentContract, (input: AddCommentInput) => handlers.handleAddComment(input));
+  server.handle(createIssueContract, (input: CreateIssueInput) => handlers.handleCreateIssue(input));
+
+  return handlers;
+}

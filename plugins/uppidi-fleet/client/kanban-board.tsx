@@ -12,6 +12,7 @@ import {
 import { useFleetTheme } from "./theme.js";
 import type { UppidiIssue, AttentionLabel, KanbanColumnId } from "../shared/contracts.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
+import { canonicalLabel } from "@xpufx/backend-tickets/client";
 
 export interface KanbanColumnDef {
   id: KanbanColumnId;
@@ -54,12 +55,12 @@ export const KANBAN_COLUMNS: KanbanColumnDef[] = [
 
 export function getIssueKanbanColumn(issue: UppidiIssue): KanbanColumnId {
   const labels = Array.isArray(issue.labels) ? issue.labels : [];
-  const normalized = labels.map((l) => String(l).trim().toLowerCase());
+  const normalized = labels.map((l) => canonicalLabel(String(l).trim().toLowerCase()));
 
   if (
     issue.status === "Done" ||
     issue.state === "closed" ||
-    normalized.some((l) => l === "state/done" || l === "state/4-done" || l.startsWith("state/4"))
+    normalized.some((l) => l === "state/done" || l.startsWith("state/4"))
   ) {
     return "done";
   }
@@ -69,8 +70,6 @@ export function getIssueKanbanColumn(issue: UppidiIssue): KanbanColumnId {
       (l) =>
         l === "state/review" ||
         l === "state/verify" ||
-        l === "state/2-review" ||
-        l === "state/3-verify" ||
         l.startsWith("state/2") ||
         l.startsWith("state/3") ||
         l.startsWith("review/"),
@@ -80,7 +79,7 @@ export function getIssueKanbanColumn(issue: UppidiIssue): KanbanColumnId {
   }
   if (
     issue.status === "In progress" ||
-    normalized.some((l) => l === "state/wip" || l === "state/1-wip" || l.startsWith("state/1"))
+    normalized.some((l) => l === "state/wip" || l.startsWith("state/1"))
   ) {
     return "in_progress";
   }

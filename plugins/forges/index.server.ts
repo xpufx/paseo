@@ -1,5 +1,6 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createPluginLogger, registerTicketHandlers } from "paseo-plugin-helper/server";
+import { createPluginLogger } from "paseo-plugin-helper/server";
+import { registerTicketHandlers } from "@xpufx/backend-tickets/server";
 import { forgeSettingsContract } from "./shared/issues.js";
 import { settingsHandlers } from "./server/settings.js";
 

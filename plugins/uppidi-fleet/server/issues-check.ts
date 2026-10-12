@@ -26,37 +26,13 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 
-// Dual-read label aliases (platform#247): legacy numeric -> canonical numberless.
-const LABEL_ALIASES: Readonly<Record<string, string>> = {
-  "state/0-triage": "state/triage",
-  "state/1-wip": "state/wip",
-  "state/2-review": "state/review",
-  "state/3-verify": "state/verify",
-  "state/4-done": "state/done",
-  "attention/0-orchestrator": "attention/orchestrator",
-  "attention/1-agent": "attention/agent",
-  "attention/2-user": "attention/user",
-  "attention/3-ignore": "attention/ignore",
-  "priority/0-SOS": "priority/sos",
-  "priority/1-high": "priority/high",
-  "priority/2-normal": "priority/normal",
-  "priority/3-low": "priority/low",
-  "priority/4-backburner": "priority/backburner",
-  "spec/0-needed": "spec/needed",
-  "spec/1-checklist": "spec/checklist",
-  "spec/2-approved": "spec/approved",
-  "size/0-cheap": "size/cheap",
-  "size/1-medium": "size/medium",
-  "size/2-expensive": "size/expensive",
-  "size/3-chunk": "size/chunk",
-  "linked/0-needs-split": "linked/needs-split",
-  "upstream/1-blocked": "upstream/blocked",
-};
+import {
+  LABEL_ALIASES,
+  canonicalLabel,
+} from "@xpufx/backend-tickets/shared";
 
-/** Canonical numberless spelling; unknown labels pass through. */
-export function canonicalLabel(label: string): string {
-  return LABEL_ALIASES[label] ?? label;
-}
+export { LABEL_ALIASES, canonicalLabel };
+
 
 export const STALE_WIP_LABEL = "state/wip";
 export const STALE_WIP_REMINDER_MARKER = "<!-- forgejo-issues-check:stale-wip-reminder -->";
@@ -258,7 +234,9 @@ function labelSet(issue: ForgejoIssue): Set<string | undefined> {
 export function cacheFilePath(repo: string): string {
   const slug = repo.replaceAll("/", "_");
   const home = process.env.HOME ?? homedir();
-  return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "board-state", `${slug}.json`);
+  const custom = (process.env.PASEO_HOME || "").trim();
+  const root = custom || join(home, ".paseo");
+  return join(root, "plugin-data", "xpufx", "uppidi-fleet", "board-state", `${slug}.json`);
 }
 
 /**

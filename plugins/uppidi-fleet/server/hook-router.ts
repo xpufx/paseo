@@ -644,23 +644,7 @@ export function normalizeLabelName(raw: unknown): string {
   return String(raw ?? "").trim().toLowerCase();
 }
 
-// Legacy numeric -> canonical numberless, lowercased (platform#247 dual-read).
-const LABEL_ALIASES: Readonly<Record<string, string>> = {
-  "state/0-triage": "state/triage",
-  "state/1-wip": "state/wip",
-  "state/2-review": "state/review",
-  "state/3-verify": "state/verify",
-  "state/4-done": "state/done",
-  "attention/0-orchestrator": "attention/orchestrator",
-  "attention/1-agent": "attention/agent",
-  "attention/2-user": "attention/user",
-  "attention/3-ignore": "attention/ignore",
-  "priority/0-sos": "priority/sos",
-  "priority/1-high": "priority/high",
-  "priority/2-normal": "priority/normal",
-  "priority/3-low": "priority/low",
-  "priority/4-backburner": "priority/backburner",
-};
+import { LABEL_ALIASES } from "@xpufx/backend-tickets/shared";
 
 /** Lowercased canonical spelling; legacy numeric folds into numberless. */
 export function canonicalLabelName(raw: unknown): string {
@@ -2449,7 +2433,9 @@ export interface WatchdogAgentDisk {
 }
 
 export function defaultAgentsDir(): string {
-  return join(resolveHostHome(), ".paseo", "agents");
+  const custom = (process.env.PASEO_HOME || "").trim();
+  const root = custom || join(resolveHostHome(), ".paseo");
+  return join(root, "agents");
 }
 
 /** Map agent id -> persisted metadata path under the agents directory subfolders. */
@@ -2704,7 +2690,9 @@ export function defaultCircuitBreakerPath(): string {
   if (process.env.NODE_ENV === "test" && !process.env.MODEL_HEALTH_PATH) {
     return join(os.tmpdir(), `paseo-model-health-test-${process.pid}.json`);
   }
-  return process.env.MODEL_HEALTH_PATH || join(resolveHostHome(), ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "model-health.json");
+  const custom = (process.env.PASEO_HOME || "").trim();
+  const root = custom || join(resolveHostHome(), ".paseo");
+  return process.env.MODEL_HEALTH_PATH || join(root, "plugin-data", "xpufx", "uppidi-fleet", "model-health.json");
 }
 
 export interface ModelHealthEntry {
@@ -3005,7 +2993,9 @@ export const MODEL_EXHAUSTION_ALERT_LABELS: readonly string[] = [
 export function defaultModelAlertsPath(home: string = resolveHostHome()): string {
   const override = process.env.UPPIDI_FLEET_ALERTS_PATH?.trim();
   if (override) return override;
-  return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "model-alerts.json");
+  const custom = (process.env.PASEO_HOME || "").trim();
+  const root = custom || join(home, ".paseo");
+  return join(root, "plugin-data", "xpufx", "uppidi-fleet", "model-alerts.json");
 }
 
 export function readModelAlerts(
@@ -3909,9 +3899,11 @@ export class HookRouter {
     }
 
     const home = resolveHostHome();
+    const custom = (process.env.PASEO_HOME || "").trim();
+    const root = custom || join(home, ".paseo");
     const scopedRoot = this.isTestMode
       ? join(os.tmpdir(), `paseo-test-hook-router-${process.pid}`)
-      : join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet");
+      : join(root, "plugin-data", "xpufx", "uppidi-fleet");
     this.queueDir = options?.queueDir ?? process.env.HOOK_QUEUE_DIR ?? join(scopedRoot, "queues");
     this.stateDir =
       options?.stateDir ?? process.env.HOOK_STATE_DIR ?? join(scopedRoot, "orchestrators");

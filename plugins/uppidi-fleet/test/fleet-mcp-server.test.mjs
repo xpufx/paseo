@@ -91,6 +91,7 @@ describe("fleet-mcp-server stdio E2E", () => {
       ...process.env,
       NODE_ENV: "test",
       HOME: homeDir,
+      PASEO_HOME: path.join(homeDir, ".paseo"),
       HOOK_QUEUE_DIR: queueDir,
       HOOK_STATE_DIR: stateDir,
       UPPIDI_FLEET_AUDITS_FILE: path.join(root, "audits.jsonl"),

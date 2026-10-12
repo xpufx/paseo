@@ -70,7 +70,9 @@ export function defaultMetricsFilePath(context?: any): string {
   }
 
   const home = process.env.HOME ?? os.homedir();
-  return path.join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "metrics.json");
+  const custom = (process.env.PASEO_HOME || "").trim();
+  const root = custom || path.join(home, ".paseo");
+  return path.join(root, "plugin-data", "xpufx", "uppidi-fleet", "metrics.json");
 }
 
 let metricsFilePathOverride: string | null = null;

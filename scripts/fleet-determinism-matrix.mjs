@@ -912,9 +912,20 @@ const PARTS = [
     evidence: [
       [`host-ui.tsx:1-20`, "component library over the host theme, host Icon and plain react-native; no model call"],
       [`host-ui.tsx:100-200`, "Row/Stack/Grid and Card/Tabs compose host theme colors only"],
-      [`host-ui.tsx:2000-2112`, "ticket lifecycle view renders RPC payloads; it does not produce model output"],
+      [`host-ui.tsx:603-760`, "ticket lifecycle view renders RPC payloads; it does not produce model output"],
     ],
     note: "Replaces the removed frozen helper client kit for uppidi-fleet. Deterministic presentation; model work stays behind the RPCs it renders.",
+  },
+  {
+    file: `${PLUGIN}/client/runners-tab.tsx`,
+    part: "CI Runner Fleet presentation: runner cards, scaler telemetry, DinD status",
+    layer: "client",
+    label: DETERMINISTIC,
+    anchors: { exports: ["RunnersTab"] },
+    evidence: [
+      [`runners-tab.tsx:228-335`, "renders runner status, scaler telemetry, and DinD status from RPC; no model inference"],
+    ],
+    note: "Pure UI presentation of CI runner fleet and scaler vitals.",
   },
   {
     file: `${PLUGIN}/client/testing/fleet-fixtures.ts`,

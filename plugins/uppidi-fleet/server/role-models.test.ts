@@ -18,6 +18,7 @@ import {
 const originalEnv = {
   HOME: process.env.HOME,
   REAL_HOME: process.env.REAL_HOME,
+  PASEO_HOME: process.env.PASEO_HOME,
   UPPIDI_FLEET_ROLE_MODELS_CONFIG: process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG,
 };
 
@@ -37,6 +38,8 @@ afterEach(() => {
   else process.env.HOME = originalEnv.HOME;
   if (originalEnv.REAL_HOME === undefined) delete process.env.REAL_HOME;
   else process.env.REAL_HOME = originalEnv.REAL_HOME;
+  if (originalEnv.PASEO_HOME === undefined) delete process.env.PASEO_HOME;
+  else process.env.PASEO_HOME = originalEnv.PASEO_HOME;
   if (originalEnv.UPPIDI_FLEET_ROLE_MODELS_CONFIG === undefined) {
     delete process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG;
   } else {
@@ -121,6 +124,7 @@ describe("role-models legacy migration (#1012)", () => {
     );
     process.env.HOME = home;
     delete process.env.REAL_HOME;
+    delete process.env.PASEO_HOME;
     delete process.env.UPPIDI_FLEET_ROLE_MODELS_CONFIG;
 
     const roles = loadSavedRoleModels();

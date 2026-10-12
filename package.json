@@ -5,6 +5,8 @@
   "private": true,
   "type": "module",
   "workspaces": [
+    "packages/backend/tickets",
+    "packages/backend/fleet",
     "packages/paseo-plugin-helper",
     "packages/paseo-plugin-ui",
     "packages/paseo-plugin-ui-testing",

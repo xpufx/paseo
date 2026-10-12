@@ -53,8 +53,13 @@ export function resolveHostHome(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /** Scoped role-model config path under the plugin data dir (#1012). */
-export function defaultRoleModelsConfigPath(home: string = resolveHostHome()): string {
-  return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", SCOPED_CONFIG_FILENAME);
+export function defaultRoleModelsConfigPath(home?: string): string {
+  if (home !== undefined) {
+    return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", SCOPED_CONFIG_FILENAME);
+  }
+  const custom = (process.env.PASEO_HOME || "").trim();
+  const root = custom || join(resolveHostHome(), ".paseo");
+  return join(root, "plugin-data", "xpufx", "uppidi-fleet", SCOPED_CONFIG_FILENAME);
 }
 
 /**

@@ -4,4 +4,5 @@ export {
   type ForgejoLabel,
   type ForgejoComment,
   type ForgejoIssueDetail,
-} from "paseo-plugin-helper/server";
+} from "@xpufx/backend-tickets/server";
+

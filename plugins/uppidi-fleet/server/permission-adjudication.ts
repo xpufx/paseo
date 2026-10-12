@@ -707,7 +707,9 @@ function defaultLogPath(options: AdjudicationLogOptions = {}): string {
   const configured = env.HOOK_STATE_DIR?.trim();
   if (configured) return join(configured, "permission-decisions.jsonl");
   const home = resolveHostHome(env);
-  return join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "permission-decisions.jsonl");
+  const custom = (env.PASEO_HOME || "").trim();
+  const root = custom || join(home, ".paseo");
+  return join(root, "plugin-data", "xpufx", "uppidi-fleet", "permission-decisions.jsonl");
 }
 
 /** Appends one decision record to the durable JSONL log. Never throws. */

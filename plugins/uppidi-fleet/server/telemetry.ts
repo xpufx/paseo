@@ -75,7 +75,9 @@ export function defaultTelemetryStorePath(context?: any): string {
   }
 
   const home = process.env.HOME ?? os.homedir();
-  return path.join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet", "telemetry.jsonl");
+  const custom = (process.env.PASEO_HOME || "").trim();
+  const root = custom || path.join(home, ".paseo");
+  return path.join(root, "plugin-data", "xpufx", "uppidi-fleet", "telemetry.jsonl");
 }
 
 export function getTelemetryStorePath(context?: any): string {
