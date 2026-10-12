@@ -13,8 +13,9 @@ called out under [Unknowns](#7-unknowns--experiments-to-prove-them).
 
 The Uppidi fleet spawns agents through `spawnPaseoAgent`
 (`plugins/uppidi-fleet/server/agents.ts:2200`). Those agents have no MCP tools
-of their own: the fleet exposes `FLEET_MCP_TOOLS` (9 tools,
-`plugins/uppidi-fleet/server/mcp-tools.ts`) over plugin RPC
+of their own: the fleet exposes `FLEET_MCP_TOOLS` (10 tools,
+`plugins/uppidi-fleet/server/mcp-tools.ts`; per-tool reference in
+`plugins/uppidi-fleet/docs/fleet-mcp-server.md`) over plugin RPC
 (`uppidiFleetToolListContract` / `uppidiFleetToolExecuteContract`) and a
 standalone stdio server (`plugins/uppidi-fleet/bin/fleet-mcp-server.mjs`), but
 nothing injects that server into spawned agents. Meanwhile the daemon already

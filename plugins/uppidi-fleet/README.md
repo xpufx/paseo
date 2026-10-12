@@ -762,6 +762,26 @@ clean board. Run it on demand with `POST /board-sweep`.
 checker binary instead of the in-process implementation. It is not a runtime
 dependency; do not set it in production.
 
+### 7.9 Fleet MCP server (stdio tools)
+
+The 10 autonomous tools (`fleet_check_board`, `fleet_watchdog_audit`,
+`fleet_board_sweep`, `fleet_prune_orchestrators`, `fleet_queue_inspect`,
+`fleet_queue_purge`, `fleet_handoff_generate`, `fleet_rotate_role`,
+`fleet_ensure_orchestrator`, `fleet_validate_workspace`) are also served over a
+standalone stdio JSON-RPC 2.0 server, `bin/fleet-mcp-server.mjs`, for any
+MCP-compatible agent harness:
+
+```sh
+node plugins/uppidi-fleet/bin/fleet-mcp-server.mjs   # newline-delimited JSON-RPC on stdin/stdout
+```
+
+Exact signatures, per-tool parameters, `json`/markdown output, `dryRun`/`confirm`
+safety guards, fail-closed error responses, and the
+`AgentSessionConfig.mcpServers` registration contract (with the per-class tool
+matrix) are documented in
+[docs/fleet-mcp-server.md](./docs/fleet-mcp-server.md). The E2E protocol suite
+lives in `test/fleet-mcp-server.test.mjs`.
+
 ---
 
 ## 8. Configuring webhooks on the Forgejo side

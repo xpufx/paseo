@@ -245,7 +245,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `shared/sort-filter.test.ts` | Filter, sort, gauge and grouping functions | `test:node` | 1684 | `deterministic` |
 | `test/fleet-board-check-cli.test.mjs` | Standalone fleet-board-check CLI options and exit codes | `test:node` | 46 | `deterministic` |
 | `test/fleet-ensure-orchestrator-cli.test.mjs` | test/fleet-ensure-orchestrator-cli | `test:node` | 44 | `deterministic` |
-| `test/fleet-mcp-server.test.mjs` | MCP stdio protocol handshake, tools/list and execution over stdin/stdout | `test:node` | 104 | `deterministic` |
+| `test/fleet-mcp-server.test.mjs` | MCP stdio protocol handshake, tools/list and execution over stdin/stdout | `test:node` | 536 | `deterministic` |
 | `test/fleet-watchdog-cli.test.mjs` | Standalone fleet-watchdog CLI options, recency validation, and diagnostic run | `test:node` | 60 | `deterministic` |
 | `test/main-branch-guard.test.mjs` | test/main-branch-guard | `test:node` | 122 | `deterministic` |
 | `test/runtime-boundary.test.mjs` | test/runtime-boundary | `test:node` | 53 | `deterministic` |
@@ -365,7 +365,7 @@ matrix above is the judgement half.
 | `shared/version.ts` | shared | 2 | 1 | `PLUGIN_VERSION` |
 | `test/fleet-board-check-cli.test.mjs` | script | 46 | 0 | — |
 | `test/fleet-ensure-orchestrator-cli.test.mjs` | script | 44 | 0 | — |
-| `test/fleet-mcp-server.test.mjs` | script | 104 | 0 | — |
+| `test/fleet-mcp-server.test.mjs` | script | 536 | 0 | — |
 | `test/fleet-watchdog-cli.test.mjs` | script | 60 | 0 | — |
 | `test/main-branch-guard.mjs` | script | 76 | 6 | `ALLOW_MAIN_TESTS_ENV`, `BLOCKED_BRANCHES`, `MAIN_BRANCH_MESSAGE`, `assertNotOnMainBranch`, `enforceMainBranchGuard`, `resolveCurrentBranch` |
 | `test/main-branch-guard.test.mjs` | script | 122 | 0 | — |
