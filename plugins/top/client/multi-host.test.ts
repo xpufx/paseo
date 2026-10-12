@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  MultiHostPoller,
+  createMultiHostPoller,
+  DEFAULT_MULTI_HOST_INTERVAL_MS,
+  DEFAULT_MULTI_HOST_TIMEOUT_MS,
   aggregateFleet,
   sortFleetSnapshots,
   type FleetHostClient,
@@ -87,8 +89,8 @@ function createHarness() {
 }
 
 test("defaults match the #299 bounded contract: 15s cadence, 4s timeout", () => {
-  assert.equal(MultiHostPoller.DEFAULT_INTERVAL_MS, 15_000);
-  assert.equal(MultiHostPoller.DEFAULT_TIMEOUT_MS, 4_000);
+  assert.equal(DEFAULT_MULTI_HOST_INTERVAL_MS, 15_000);
+  assert.equal(DEFAULT_MULTI_HOST_TIMEOUT_MS, 4_000);
 });
 
 test("online host reports counts and latency on a successful probe", async () => {
@@ -98,7 +100,7 @@ test("online host reports counts and latency on a successful probe", async () =>
   // last-updated stamp; drive those three reads explicitly.
   const clock = [1000, 1042, 1042];
   let tick = 0;
-  const poller = new MultiHostPoller({
+  const poller = createMultiHostPoller({
     acquire: h.acquire,
     now: () => clock[Math.min(tick++, clock.length - 1)],
   });
@@ -122,7 +124,7 @@ test("online host reports counts and latency on a successful probe", async () =>
 test("offline host never acquires a client and renders an offline badge", async () => {
   const h = createHarness();
   h.setImmediateResponse({});
-  const poller = new MultiHostPoller({ acquire: h.acquire });
+  const poller = createMultiHostPoller({ acquire: h.acquire });
   poller.setHosts([host("host-a", "offline")]);
 
   await poller.pollOnce();
@@ -137,7 +139,7 @@ test("offline host never acquires a client and renders an offline badge", async 
 test("errored host renders an error badge without throwing", async () => {
   const h = createHarness();
   h.setImmediateResponse({});
-  const poller = new MultiHostPoller({ acquire: h.acquire });
+  const poller = createMultiHostPoller({ acquire: h.acquire });
   poller.setHosts([host("host-a", "error")]);
 
   await poller.pollOnce();
@@ -153,7 +155,7 @@ test("a timed-out host is marked stale with a timestamp and is not retried until
   const h = createHarness();
   h.setNeverResponse();
   let clock = 0;
-  const poller = new MultiHostPoller({
+  const poller = createMultiHostPoller({
     acquire: h.acquire,
     timeoutMs: 20,
     now: () => clock,
@@ -184,7 +186,7 @@ test("a timed-out host is marked stale with a timestamp and is not retried until
 test("stale clears when the host responds on a later tick", async () => {
   const h = createHarness();
   h.setNeverResponse();
-  const poller = new MultiHostPoller({ acquire: h.acquire, timeoutMs: 15 });
+  const poller = createMultiHostPoller({ acquire: h.acquire, timeoutMs: 15 });
   poller.setHosts([host("host-a")]);
   await poller.pollOnce();
   assert.equal(poller.getSnapshots()[0].status, "stale");
@@ -201,7 +203,7 @@ test("stale clears when the host responds on a later tick", async () => {
 test("a rejected probe marks the host error and drops the client so the next tick reacquires", async () => {
   const h = createHarness();
   h.setRejectingResponse("borrowed API released");
-  const poller = new MultiHostPoller({ acquire: h.acquire });
+  const poller = createMultiHostPoller({ acquire: h.acquire });
   poller.setHosts([host("host-a")]);
 
   await poller.pollOnce();
@@ -218,7 +220,7 @@ test("a rejected probe marks the host error and drops the client so the next tic
 test("status transition disposes the borrowed client and reacquires on the next probe", async () => {
   const h = createHarness();
   h.setImmediateResponse({ "host-a": counts() });
-  const poller = new MultiHostPoller({ acquire: h.acquire });
+  const poller = createMultiHostPoller({ acquire: h.acquire });
   poller.setHosts([host("host-a")]);
   await poller.pollOnce();
   assert.deepEqual(h.acquired, ["host-a"]);
@@ -245,7 +247,7 @@ test("status transition disposes the borrowed client and reacquires on the next 
 test("a result from a superseded connection generation is discarded", async () => {
   const h = createHarness();
   h.setDeferredResponse();
-  const poller = new MultiHostPoller({ acquire: h.acquire });
+  const poller = createMultiHostPoller({ acquire: h.acquire });
   poller.setHosts([host("host-a")]);
 
   const tick = poller.pollOnce();
@@ -265,7 +267,7 @@ test("a result from a superseded connection generation is discarded", async () =
 test("removing a host releases its client and drops it from the fleet", async () => {
   const h = createHarness();
   h.setImmediateResponse({ "host-a": counts(), "host-b": counts() });
-  const poller = new MultiHostPoller({ acquire: h.acquire });
+  const poller = createMultiHostPoller({ acquire: h.acquire });
   poller.setHosts([host("host-a"), host("host-b")]);
   await poller.pollOnce();
   assert.equal(poller.getSnapshots().length, 2);
@@ -279,7 +281,7 @@ test("removing a host releases its client and drops it from the fleet", async ()
 test("bounds concurrency to one in-flight probe per host", async () => {
   const h = createHarness();
   h.setDeferredResponse();
-  const poller = new MultiHostPoller({ acquire: h.acquire });
+  const poller = createMultiHostPoller({ acquire: h.acquire });
   poller.setHosts([host("host-a")]);
 
   const first = poller.pollOnce();

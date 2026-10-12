@@ -135,10 +135,11 @@ declare const SuiteSettingsContract: SettingsContract<{
     showSuiteTabs: boolean;
 }>;
 
-declare class TimeoutError extends Error {
+interface TimeoutError extends Error {
     readonly timeoutMs: number;
-    constructor(message: string, timeoutMs: number);
 }
+declare function createTimeoutError(message: string, timeoutMs: number): TimeoutError;
+declare function isTimeoutError(e: unknown): e is TimeoutError;
 /**
  * Races a promise against a timeout duration in milliseconds.
  * If the timeout expires before the promise resolves, rejects with a TimeoutError.
@@ -271,4 +272,4 @@ interface SuppressedSink {
  */
 declare function reportSuppressed(sink: Pick<SuppressedSink, "debug" | "warn"> | undefined, context: string, error: unknown, level?: "debug" | "warn"): void;
 
-export { type FeatureComposition, type FeatureDisposer, type FeatureModule, type ForgeKind, type ForgeMarkInput, type HighlightOptions, type HighlightPart, PluginRpcContract, type ResolvedForgeMark, SettingsContract, type SuiteSettings, SuiteSettingsContract, SuiteSettingsSchema, type SuppressedSink, TimeoutError, composeFeatureModules, forgeKindFromHost, forgeMarkSource, hasFuzzyHighlight, hasHighlightMatch, isForgeKind, normalizeForgeHost, normalizeSearchQuery, reportSuppressed, resolveForgeMark, splitHighlightParts, withTimeout };
+export { type FeatureComposition, type FeatureDisposer, type FeatureModule, type ForgeKind, type ForgeMarkInput, type HighlightOptions, type HighlightPart, PluginRpcContract, type ResolvedForgeMark, SettingsContract, type SuiteSettings, SuiteSettingsContract, SuiteSettingsSchema, type SuppressedSink, type TimeoutError, composeFeatureModules, createTimeoutError, forgeKindFromHost, forgeMarkSource, hasFuzzyHighlight, hasHighlightMatch, isForgeKind, isTimeoutError, normalizeForgeHost, normalizeSearchQuery, reportSuppressed, resolveForgeMark, splitHighlightParts, withTimeout };

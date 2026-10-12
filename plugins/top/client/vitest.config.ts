@@ -38,6 +38,10 @@ export default defineConfig({
         root,
         "../../packages/paseo-plugin-helper/src/core/index.ts",
       ),
+      "paseo-plugin-helper/shared": path.resolve(
+        root,
+        "../../packages/paseo-plugin-helper/src/shared/index.ts",
+      ),
       "paseo-plugin-helper/lifecycle": path.resolve(
         root,
         "../../packages/paseo-plugin-helper/src/lifecycle/index.ts",

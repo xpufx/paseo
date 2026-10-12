@@ -158,6 +158,15 @@ export const AUDIT_RULES: Record<string, AuditRule> = {
       "Read the host `theme.colors.*` tokens (or a helper color utility) instead; keep literals only in the documented appearance module or an `addTheme` contribution",
     docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/cli.md#no-raw-color-literal",
   },
+  "no-class-in-client-bundle": {
+    id: "no-class-in-client-bundle",
+    severity: "error",
+    description:
+      "`class` in client/shared code. Hermes eval of plugin client bundles binds class expressions as undefined (\"Cannot read property 'prototype' of undefined\").",
+    replacement:
+      "Use a closure factory (createX()) plus an interface, and plain Error objects with a name brand instead of `extends Error`. Error boundaries are host-provided",
+    docUrl: "https://github.com/xpufx/paseo-plugin-helper/blob/main/docs/client-migration.md",
+  },
   "no-modal-scroll-pinning": {
     id: "no-modal-scroll-pinning",
     severity: "warn",

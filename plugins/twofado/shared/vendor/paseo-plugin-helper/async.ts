@@ -1,11 +1,18 @@
-export class TimeoutError extends Error {
+// NOTE: no `class` here. Hermes eval of plugin client bundles binds class
+// expressions as `undefined`, so errors are plain Error objects with a brand.
+export interface TimeoutError extends Error {
   readonly timeoutMs: number;
+}
 
-  constructor(message: string, timeoutMs: number) {
-    super(message);
-    this.name = "TimeoutError";
-    this.timeoutMs = timeoutMs;
-  }
+export function createTimeoutError(message: string, timeoutMs: number): TimeoutError {
+  const err = new Error(message) as Error & { timeoutMs: number };
+  err.name = "TimeoutError";
+  err.timeoutMs = timeoutMs;
+  return err;
+}
+
+export function isTimeoutError(e: unknown): e is TimeoutError {
+  return e instanceof Error && e.name === "TimeoutError";
 }
 
 /**
@@ -21,7 +28,7 @@ export async function withTimeout<T>(
   let timer: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new TimeoutError(`${label} timed out after ${timeoutMs}ms`, timeoutMs));
+      reject(createTimeoutError(`${label} timed out after ${timeoutMs}ms`, timeoutMs));
     }, timeoutMs);
   });
 

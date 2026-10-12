@@ -537,5 +537,21 @@ describe("conformance exemptions", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
-});
 
+  it("flags class declarations in client and shared code under no-class-in-client-bundle", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-class-"));
+    try {
+      for (const d of ["client", "shared", "server"]) fs.mkdirSync(path.join(tmpDir, d), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, "client", "a.tsx"), "export class Boundary extends React.Component {}\n");
+      fs.writeFileSync(path.join(tmpDir, "shared", "b.ts"), "export class E extends Error {}\n");
+      fs.writeFileSync(path.join(tmpDir, "server", "c.ts"), "export class Srv {}\n");
+      const report = auditProject(tmpDir);
+      const hits = report.issues.filter((i) => i.ruleId === "no-class-in-client-bundle").map((i) => i.file);
+      expect(hits.some((f) => f.includes("a.tsx"))).toBe(true);
+      expect(hits.some((f) => f.includes("b.ts"))).toBe(true);
+      expect(hits.some((f) => f.includes("c.ts"))).toBe(false);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});

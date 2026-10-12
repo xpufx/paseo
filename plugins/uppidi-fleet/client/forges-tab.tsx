@@ -107,27 +107,6 @@ export function resolveForgeSelection(
   return resolveCanonicalRepo(value, { knownRepos });
 }
 
-class SafeWorkspaceBoundary extends React.Component<
-  { children: React.ReactNode },
-  { hasError: boolean }
-> {
-  state = { hasError: false };
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    // The boundary renders null on failure, so without this log a broken
-    // workspace watcher would blank the directory with no trace at all.
-    console.error(
-      `[uppidi-fleet] SafeWorkspaceBoundary caught an error (componentStack: ${errorInfo?.componentStack ?? "n/a"}): ${error?.message ?? String(error)}`,
-    );
-  }
-  render() {
-    if (this.state.hasError) return null;
-    return this.props.children;
-  }
-}
-
 function WorkspaceDirectoryWatcher({
   workspaceId,
   onResolve,
@@ -297,12 +276,10 @@ function ForgeIssuesViewInner({
   return (
     <ModalBody>
       {workspaceId && !propDirectory ? (
-        <SafeWorkspaceBoundary>
-          <WorkspaceDirectoryWatcher
+                  <WorkspaceDirectoryWatcher
             workspaceId={workspaceId}
             onResolve={setWatchedDirectory}
           />
-        </SafeWorkspaceBoundary>
       ) : null}
       <Stack gap={4}>
         <Card variant="flat">

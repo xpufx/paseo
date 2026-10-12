@@ -1,4 +1,4 @@
-import { TimeoutError, withTimeout } from "paseo-plugin-helper/shared";
+import { isTimeoutError, withTimeout } from "paseo-plugin-helper/shared";
 
 /**
  * Bounded multi-host fleet polling state machine.
@@ -136,56 +136,146 @@ export function aggregateFleet(
 export const DEFAULT_MULTI_HOST_INTERVAL_MS = 15_000;
 export const DEFAULT_MULTI_HOST_TIMEOUT_MS = 4_000;
 
-export class MultiHostPoller {
-  static get DEFAULT_INTERVAL_MS(): number {
-    return DEFAULT_MULTI_HOST_INTERVAL_MS;
-  }
-  static get DEFAULT_TIMEOUT_MS(): number {
-    return DEFAULT_MULTI_HOST_TIMEOUT_MS;
-  }
+export interface MultiHostPoller {
+  setHosts(hosts: readonly FleetHostInput[]): void;
+  start(): void;
+  stop(): void;
+  pollOnce(): Promise<void>;
+  getSnapshots(): FleetHostSnapshot[];
+  dispose(): void;
+}
 
-  private readonly options: Required<
-    Pick<MultiHostPollerOptions, "timeoutMs" | "intervalMs" | "now">
-  > &
-    Pick<MultiHostPollerOptions, "acquire" | "onUpdate">;
-  private readonly snapshots = new Map<string, FleetHostSnapshot>();
-  private readonly clients = new Map<string, FleetHostClient>();
-  private readonly inFlight = new Set<string>();
+/**
+ * Closure-based on purpose: plugin client bundles are evaluated by Hermes from
+ * source, where a `class` expression binds as `undefined`. A class here made the
+ * Fleet tab crash with "Cannot read property 'prototype' of undefined"
+ * (#1066, #510). Never use `class` in client-reachable code.
+ */
+export function createMultiHostPoller(opts: MultiHostPollerOptions): MultiHostPoller {
+  const options = {
+    timeoutMs: opts.timeoutMs ?? DEFAULT_MULTI_HOST_TIMEOUT_MS,
+    intervalMs: opts.intervalMs ?? DEFAULT_MULTI_HOST_INTERVAL_MS,
+    now: opts.now ?? (() => Date.now()),
+    acquire: opts.acquire,
+    onUpdate: opts.onUpdate,
+  };
+  const snapshots = new Map<string, FleetHostSnapshot>();
+  const clients = new Map<string, FleetHostClient>();
+  const inFlight = new Set<string>();
   /** Bumped on any connection transition so in-flight results are discarded. */
-  private readonly generation = new Map<string, number>();
-  private timer: ReturnType<typeof setInterval> | null = null;
-  private running = false;
-  private tickInFlight = false;
-  private disposed = false;
+  const generation = new Map<string, number>();
+  let timer: ReturnType<typeof setInterval> | null = null;
+  let running = false;
+  let tickInFlight = false;
+  let disposed = false;
 
-  constructor(options: MultiHostPollerOptions) {
-    this.options = {
-      timeoutMs: options.timeoutMs ?? DEFAULT_MULTI_HOST_TIMEOUT_MS,
-      intervalMs: options.intervalMs ?? DEFAULT_MULTI_HOST_INTERVAL_MS,
-      now: options.now ?? (() => Date.now()),
-      acquire: options.acquire,
-      onUpdate: options.onUpdate,
-    };
+  function currentGeneration(serverId: string): number {
+    return generation.get(serverId) ?? 0;
+  }
+  function bumpGeneration(serverId: string): void {
+    generation.set(serverId, currentGeneration(serverId) + 1);
+  }
+  function getSnapshots(): FleetHostSnapshot[] {
+    return sortFleetSnapshots([...snapshots.values()]);
+  }
+  function emit(): void {
+    options.onUpdate?.(getSnapshots());
+  }
+  function acquireClient(serverId: string): FleetHostClient {
+    const existing = clients.get(serverId);
+    if (existing) return existing;
+    const client = options.acquire(serverId);
+    clients.set(serverId, client);
+    return client;
+  }
+  function disposeClient(serverId: string): void {
+    const client = clients.get(serverId);
+    if (!client) return;
+    clients.delete(serverId);
+    try {
+      void client.dispose();
+    } catch {
+      // A released borrowed client may already be disposed; ignore.
+    }
   }
 
-  /** Reconcile the live host list, releasing clients across transitions. */
-  setHosts(hosts: readonly FleetHostInput[]): void {
-    if (this.disposed) return;
+  async function probeHost(serverId: string): Promise<void> {
+    const snapshot = snapshots.get(serverId);
+    if (!snapshot) return;
+
+    if (snapshot.connectionStatus !== "online") {
+      snapshot.status = fleetStatusFor(snapshot.connectionStatus);
+      snapshot.error =
+        snapshot.connectionStatus === "error" ? "Host connection error" : null;
+      return;
+    }
+    if (inFlight.has(serverId)) return;
+
+    inFlight.add(serverId);
+    const startGeneration = currentGeneration(serverId);
+    const startedAt = options.now();
+    try {
+      const client = acquireClient(serverId);
+      const counts = await withTimeout(
+        client.readCounts(),
+        options.timeoutMs,
+        `fleet probe ${snapshot.label}`,
+      );
+      if (currentGeneration(serverId) !== startGeneration) return;
+      snapshot.status = "online";
+      snapshot.counts = counts;
+      snapshot.latencyMs = options.now() - startedAt;
+      snapshot.lastUpdatedAt = options.now();
+      snapshot.staleAt = null;
+      snapshot.error = null;
+    } catch (cause) {
+      if (currentGeneration(serverId) !== startGeneration) return;
+      if (isTimeoutError(cause)) {
+        // Unresponsive: mark stale with a timestamp and keep the borrowed
+        // client. The next 15s tick is the only retry.
+        snapshot.status = "stale";
+        snapshot.staleAt = options.now();
+        snapshot.error = "Timed out";
+      } else {
+        // A released/replaced connection surfaces here; drop the client so the
+        // next probe reacquires a fresh one.
+        snapshot.status = "error";
+        snapshot.error = errorMessage(cause);
+        disposeClient(serverId);
+      }
+    } finally {
+      inFlight.delete(serverId);
+    }
+  }
+
+  async function pollOnce(): Promise<void> {
+    if (disposed || tickInFlight) return;
+    tickInFlight = true;
+    try {
+      await Promise.all([...snapshots.keys()].map((serverId) => probeHost(serverId)));
+    } finally {
+      tickInFlight = false;
+      emit();
+    }
+  }
+
+  function setHosts(hosts: readonly FleetHostInput[]): void {
+    if (disposed) return;
     const next = new Map(hosts.map((host) => [host.serverId, host]));
 
-    for (const serverId of [...this.snapshots.keys()]) {
+    for (const serverId of [...snapshots.keys()]) {
       if (!next.has(serverId)) {
-        this.bumpGeneration(serverId);
-        this.disposeClient(serverId);
-        this.snapshots.delete(serverId);
-        this.inFlight.delete(serverId);
+        bumpGeneration(serverId);
+        disposeClient(serverId);
+        snapshots.delete(serverId);
+        inFlight.delete(serverId);
       }
     }
 
     for (const host of next.values()) {
-      const existing = this.snapshots.get(host.serverId);
+      const existing = snapshots.get(host.serverId);
       if (!existing) {
-        this.snapshots.set(host.serverId, {
+        snapshots.set(host.serverId, {
           serverId: host.serverId,
           label: host.label,
           connectionStatus: host.status,
@@ -202,8 +292,8 @@ export class MultiHostPoller {
       if (transitioned) {
         // A status change (including reconnect/failover) invalidates the
         // borrowed client; reacquire on the next probe.
-        this.bumpGeneration(host.serverId);
-        this.disposeClient(host.serverId);
+        bumpGeneration(host.serverId);
+        disposeClient(host.serverId);
         existing.connectionStatus = host.status;
         existing.status = fleetStatusFor(host.status);
         if (host.status !== "online") {
@@ -216,133 +306,37 @@ export class MultiHostPoller {
       existing.label = host.label;
     }
 
-    this.emit();
+    emit();
   }
 
-  /** Start the immediate poll plus the fixed-cadence loop. */
-  start(): void {
-    if (this.disposed || this.running) return;
-    this.running = true;
-    void this.pollOnce();
-    this.timer = setInterval(() => void this.pollOnce(), this.options.intervalMs);
-  }
-
-  stop(): void {
-    this.running = false;
-    if (this.timer !== null) {
-      clearInterval(this.timer);
-      this.timer = null;
+  function stop(): void {
+    running = false;
+    if (timer !== null) {
+      clearInterval(timer);
+      timer = null;
     }
   }
 
-  /** Run one bounded pass over all hosts. Safe to await in tests. */
-  async pollOnce(): Promise<void> {
-    if (this.disposed || this.tickInFlight) return;
-    this.tickInFlight = true;
-    try {
-      await Promise.all(
-        [...this.snapshots.keys()].map((serverId) => this.probeHost(serverId)),
-      );
-    } finally {
-      this.tickInFlight = false;
-      this.emit();
-    }
-  }
-
-  getSnapshots(): FleetHostSnapshot[] {
-    return sortFleetSnapshots([...this.snapshots.values()]);
-  }
-
-  dispose(): void {
-    if (this.disposed) return;
-    this.disposed = true;
-    this.stop();
-    for (const serverId of [...this.clients.keys()]) {
-      this.disposeClient(serverId);
-    }
-    this.snapshots.clear();
-    this.inFlight.clear();
-  }
-
-  private async probeHost(serverId: string): Promise<void> {
-    const snapshot = this.snapshots.get(serverId);
-    if (!snapshot) return;
-
-    if (snapshot.connectionStatus !== "online") {
-      snapshot.status = fleetStatusFor(snapshot.connectionStatus);
-      snapshot.error =
-        snapshot.connectionStatus === "error" ? "Host connection error" : null;
-      return;
-    }
-    if (this.inFlight.has(serverId)) return;
-
-    this.inFlight.add(serverId);
-    const generation = this.currentGeneration(serverId);
-    const startedAt = this.options.now();
-    let timedOut = false;
-    try {
-      const client = this.acquireClient(serverId);
-      const counts = await withTimeout(
-        client.readCounts(),
-        this.options.timeoutMs,
-        `fleet probe ${snapshot.label}`,
-      );
-      if (this.currentGeneration(serverId) !== generation) return;
-      snapshot.status = "online";
-      snapshot.counts = counts;
-      snapshot.latencyMs = this.options.now() - startedAt;
-      snapshot.lastUpdatedAt = this.options.now();
-      snapshot.staleAt = null;
-      snapshot.error = null;
-    } catch (cause) {
-      if (this.currentGeneration(serverId) !== generation) return;
-      timedOut = cause instanceof TimeoutError;
-      if (timedOut) {
-        // Unresponsive: mark stale with a timestamp and keep the borrowed
-        // client. The next 15s tick is the only retry.
-        snapshot.status = "stale";
-        snapshot.staleAt = this.options.now();
-        snapshot.error = "Timed out";
-      } else {
-        // A released/replaced connection surfaces here; drop the client so the
-        // next probe reacquires a fresh one.
-        snapshot.status = "error";
-        snapshot.error = errorMessage(cause);
-        this.disposeClient(serverId);
-      }
-    } finally {
-      this.inFlight.delete(serverId);
-    }
-  }
-
-  private acquireClient(serverId: string): FleetHostClient {
-    const existing = this.clients.get(serverId);
-    if (existing) return existing;
-    const client = this.options.acquire(serverId);
-    this.clients.set(serverId, client);
-    return client;
-  }
-
-  private disposeClient(serverId: string): void {
-    const client = this.clients.get(serverId);
-    if (!client) return;
-    this.clients.delete(serverId);
-    try {
-      void client.dispose();
-    } catch {
-      // A released borrowed client may already be disposed; ignore.
-    }
-  }
-
-  private currentGeneration(serverId: string): number {
-    return this.generation.get(serverId) ?? 0;
-  }
-
-  private bumpGeneration(serverId: string): void {
-    this.generation.set(serverId, this.currentGeneration(serverId) + 1);
-  }
-
-  private emit(): void {
-    this.options.onUpdate?.(this.getSnapshots());
-  }
+  return {
+    setHosts,
+    /** Start the immediate poll plus the fixed-cadence loop. */
+    start() {
+      if (disposed || running) return;
+      running = true;
+      void pollOnce();
+      timer = setInterval(() => void pollOnce(), options.intervalMs);
+    },
+    stop,
+    /** Run one bounded pass over all hosts. Safe to await in tests. */
+    pollOnce,
+    getSnapshots,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      stop();
+      for (const serverId of [...clients.keys()]) disposeClient(serverId);
+      snapshots.clear();
+      inFlight.clear();
+    },
+  };
 }

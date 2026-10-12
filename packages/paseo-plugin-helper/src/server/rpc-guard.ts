@@ -1,4 +1,4 @@
-import { withTimeout, TimeoutError } from "../shared/async.js";
+import { withTimeout, isTimeoutError } from "../shared/async.js";
 
 export interface RpcGuardOptions<T> {
   timeoutMs?: number;
@@ -40,7 +40,7 @@ export function guardRpcHandler<TInput, TOutput>(
         "RPC handler",
       );
     } catch (err) {
-      if (err instanceof TimeoutError) {
+      if (isTimeoutError(err)) {
         options.onTimeout?.({ timeoutMs, inflight });
       }
       throw err;

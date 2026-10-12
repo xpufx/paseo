@@ -676,6 +676,30 @@ export function auditProject(targetDir: string, options: AuditOptions = {}): Aud
       }
     }
 
+    // Rule: no-class-in-client-bundle (#1066, #510). Shared code is bundled
+    // into the client too, so both dirs are covered; server-only code is free.
+    const isSharedFile = relPath.split(path.sep).includes("shared");
+    if ((isClientFile || isSharedFile) && !inTest && !inBuildOrTool) {
+      const classRegex = /(?:^|[\s=(,:;{}])class\s+[A-Za-z_$][\w$]*(?:\s+extends\b|\s*\{)|=\s*class\b|\bclass\s+extends\b/;
+      lines.forEach((ln, idx) => {
+        const t = ln.trim();
+        if (t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) return;
+        if (!classRegex.test(ln)) return;
+        const rule = AUDIT_RULES["no-class-in-client-bundle"];
+        issues.push({
+          ruleId: rule.id,
+          severity: rule.severity,
+          file: relPath,
+          line: idx + 1,
+          column: Math.max(0, ln.indexOf(t)),
+          message: rule.description,
+          codeSnippet: t,
+          replacement: rule.replacement,
+          docUrl: rule.docUrl,
+        });
+      });
+    }
+
     // Rule: no-modal-scroll-pinning (#1054, #1254).
     // Modal bodies must stay fluid (width: '100%') without pinning flex: 1 or
     // minHeight: 0, which collapses inside BottomSheetScrollView on mobile.

@@ -5,7 +5,8 @@ import {
   useOptionalHosts,
 } from "paseo-plugin-helper/lifecycle";
 import {
-  MultiHostPoller,
+  createMultiHostPoller,
+  type MultiHostPoller,
   type FleetHostClient,
   type FleetHostCounts,
   type FleetHostSnapshot,
@@ -98,7 +99,7 @@ export function useFleetPolling({ enabled = true }: UseFleetPollingOptions = {})
 
   useEffect(() => {
     if (!enabled || !supported) return;
-    const poller = new MultiHostPoller({
+    const poller = createMultiHostPoller({
       acquire: createFleetClient,
       onUpdate: setSnapshots,
     });
