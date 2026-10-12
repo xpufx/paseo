@@ -1,6 +1,5 @@
 import React, { ReactNode } from 'react';
-import { StyleProp, ViewStyle, TextStyle, ScrollViewProps, ScrollView as ScrollView$1, KeyboardTypeOptions } from 'react-native';
-import { ScrollView } from '@getpaseo/plugin/client/react-native';
+import { StyleProp, ViewStyle, TextStyle, GestureResponderEvent, AccessibilityRole, ScrollView, ScrollViewProps, KeyboardTypeOptions } from 'react-native';
 
 /**
  * Structural theme/layout types for the shared UI package.
@@ -28,6 +27,7 @@ interface PluginTheme {
 type PlatformType = "ios" | "android" | "web";
 interface ResponsiveLayout {
     compact: boolean;
+    isCompact?: boolean;
     platform: PlatformType;
     width?: number;
     height?: number;
@@ -157,32 +157,73 @@ interface HostLayoutProviderProps {
 /** Carries the host layout descriptor to local adapters that branch on it. */
 declare function HostLayoutProvider({ layout, children }: HostLayoutProviderProps): React.JSX.Element;
 /** Reads the host layout descriptor. */
-declare function useHostLayout(): ResponsiveLayout;
+declare function useHostLayout(): ResponsiveLayout & {
+    isCompact: boolean;
+};
+/** Static spacing scale (px). */
+declare const spacing: {
+    readonly xxs: 2;
+    readonly xs: 4;
+    readonly sm: 8;
+    readonly md: 12;
+    readonly lg: 16;
+    readonly xl: 24;
+};
+type SpacingValue = keyof typeof spacing | number;
+declare function resolveSpacing(value: SpacingValue | undefined, fallback: number): number;
 interface HostRowProps {
-    children: ReactNode;
-    gap?: number;
-    align?: "start" | "center" | "end" | "stretch";
-    justify?: "start" | "center" | "end" | "between";
+    children?: ReactNode;
+    gap?: SpacingValue;
+    align?: "start" | "center" | "end" | "stretch" | "flex-start" | "flex-end" | ViewStyle["alignItems"];
+    justify?: "start" | "center" | "end" | "between" | "space-between" | "space-around" | "space-evenly" | "flex-start" | "flex-end" | ViewStyle["justifyContent"];
     wrap?: boolean;
     style?: StyleProp<ViewStyle>;
+    testID?: string;
 }
-declare function HostRow({ children, gap, align, justify, wrap, style, }: HostRowProps): React.JSX.Element;
+declare function HostRow({ children, gap, align, justify, wrap, style, testID, }: HostRowProps): React.JSX.Element;
+interface HostInteractiveRowProps {
+    children?: ReactNode;
+    onPress?: (event: GestureResponderEvent) => void;
+    title?: string;
+    disabled?: boolean;
+    accessibilityRole?: AccessibilityRole;
+    accessibilityLabel?: string;
+    accessibilityHint?: string;
+    testID?: string;
+    style?: StyleProp<ViewStyle>;
+    hoverStyle?: StyleProp<ViewStyle>;
+    hoverTint?: boolean;
+    hoverTintOpacity?: number;
+    pressedOpacity?: number;
+    hoveredOpacity?: number;
+    opacity?: number;
+    disabledOpacity?: number;
+    hitSlop?: number;
+    onHoverChange?: (hovered: boolean) => void;
+}
+/**
+ * Clickable/tappable row container with hover tint, pressed states, and accessibility semantics.
+ */
+declare function HostInteractiveRow({ children, onPress, title, disabled, accessibilityRole, accessibilityLabel, accessibilityHint, testID, style, hoverStyle, hoverTint, hoverTintOpacity, pressedOpacity, hoveredOpacity, opacity, disabledOpacity, hitSlop, onHoverChange, }: HostInteractiveRowProps): React.JSX.Element;
+
 interface HostStackProps {
-    children: ReactNode;
-    gap?: number;
-    align?: "start" | "center" | "end" | "stretch";
-    justify?: "start" | "center" | "end" | "between";
+    children?: ReactNode;
+    gap?: SpacingValue;
+    align?: "start" | "center" | "end" | "stretch" | "flex-start" | "flex-end" | ViewStyle["alignItems"];
+    justify?: "start" | "center" | "end" | "between" | "space-between" | "space-around" | "space-evenly" | "flex-start" | "flex-end" | ViewStyle["justifyContent"];
     grow?: boolean;
     style?: StyleProp<ViewStyle>;
+    testID?: string;
 }
-declare function HostStack({ children, gap, align, justify, grow, style, }: HostStackProps): React.JSX.Element;
+declare function HostStack({ children, gap, align, justify, grow, style, testID, }: HostStackProps): React.JSX.Element;
 interface HostGridProps {
-    children: ReactNode;
+    children?: ReactNode;
     columns?: number;
-    gap?: number;
+    gap?: SpacingValue;
     style?: StyleProp<ViewStyle>;
+    testID?: string;
 }
-declare function HostGrid({ children, columns, gap, style }: HostGridProps): React.JSX.Element;
+declare function HostGrid({ children, columns, gap, style, testID }: HostGridProps): React.JSX.Element;
 type HostSurfaceVariant = "flat" | "elevated" | "tinted";
 interface HighlightPart {
     text: string;
@@ -329,8 +370,10 @@ interface HostKeyValueProps {
 declare function HostKeyValue({ label, value, subValue, mono, copyable, truncate: truncateProp, truncateMaxLength, layout, stackOnCompact: _stackOnCompact, style, labelStyle, valueStyle, }: HostKeyValueProps): React.JSX.Element;
 interface HostKeyValueGroupProps {
     children: ReactNode;
-    columns?: 1 | 2 | 3 | 4;
+    columns?: 1 | 2 | 3 | 4 | number;
     gap?: number;
+    collapse?: "compact" | "never" | string;
+    minColumnWidth?: number;
     style?: StyleProp<ViewStyle>;
 }
 /** Fluid key/value grid. */
@@ -487,7 +530,7 @@ interface HostScrollProps extends ScrollViewProps {
     contentContainerStyle?: StyleProp<ViewStyle>;
 }
 /** Explicit single scroll owner for surfaces where the host supplies none. */
-declare const HostScroll: React.ForwardRefExoticComponent<HostScrollProps & React.RefAttributes<ScrollView$1>>;
+declare const HostScroll: React.ForwardRefExoticComponent<HostScrollProps & React.RefAttributes<ScrollView>>;
 interface HostActionBarProps {
     children: ReactNode;
     align?: "start" | "center" | "end" | "between" | "flex-start" | "flex-end" | "space-between";
@@ -543,16 +586,20 @@ interface HostSelectOption {
     label: string;
     value: string;
     description?: string;
+    display?: string;
 }
 interface HostSelectProps {
     value: string;
     options: readonly HostSelectOption[];
     onValueChange: (value: string) => void;
+    label?: string;
+    size?: "sm" | "md" | string;
     placeholder?: string;
+    disabled?: boolean;
     style?: StyleProp<ViewStyle>;
 }
 /** Inline single-choice picker styled for host dark/light theme palettes. */
-declare function HostSelect({ value, options, onValueChange, placeholder, style, }: HostSelectProps): React.JSX.Element;
+declare function HostSelect({ value, options, onValueChange, label, size, placeholder, disabled, style, }: HostSelectProps): React.JSX.Element;
 interface HostModalBodyProps {
     children: ReactNode;
     header?: ReactNode;
@@ -593,5 +640,40 @@ interface HostAboutSectionProps {
     style?: StyleProp<ViewStyle>;
 }
 declare function HostAboutSection({ name, description, version, author, repository, issues, homepage, license, links, extraItems, style, }: HostAboutSectionProps): React.JSX.Element;
+interface HostDataColumn<T> {
+    key: string;
+    header: string;
+    flex?: number;
+    width?: number;
+    align?: "left" | "center" | "right";
+    render: (item: T) => ReactNode;
+}
+interface HostDataTableProps<T> {
+    data: T[];
+    columns: HostDataColumn<T>[];
+    keyExtractor: (item: T, index: number) => string;
+    emptyState?: ReactNode;
+    style?: StyleProp<ViewStyle>;
+}
+/**
+ * Standard table container rendering styled header and rows with theme borders.
+ */
+declare function HostDataTable<T>({ data, columns, keyExtractor, emptyState, style, }: HostDataTableProps<T>): React.JSX.Element | null;
 
-export { FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, type ResponsiveLayout, type ScrollViewInstance, type StatusVariant, type ThemeColors, alpha, getStatusColor, resolveHostColors, sanitizeFluidStyle, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };
+interface HostResponsiveProps {
+    desktop?: ReactNode;
+    mobile?: ReactNode;
+    compact?: ReactNode;
+    wide?: ReactNode;
+    children?: ReactNode | ((responsive: {
+        isCompact: boolean;
+        isMobile: boolean;
+        isWide: boolean;
+    }) => ReactNode);
+}
+/**
+ * Responsive viewport container that switches children between mobile and desktop layouts.
+ */
+declare function HostResponsive({ desktop, mobile, compact, wide, children }: HostResponsiveProps): React.JSX.Element;
+
+export { type HostDataColumn as DataColumn, HostDataTable as DataTable, type HostDataTableProps as DataTableProps, FALLBACK_COLORS, type HighlightOptions, type HighlightPart, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, type HostDataColumn, HostDataTable, type HostDataTableProps, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostInteractiveRow, type HostInteractiveRowProps, HostKeyValue, HostKeyValueGroup, type HostKeyValueGroupProps, type HostKeyValueProps, type HostKeyValueTruncateMode, HostLayoutProvider, type HostLayoutProviderProps, HostMetricGauge, type HostMetricGaugeProps, HostModalBody, type HostModalBodyProps, HostModalSection, type HostModalSectionProps, HostProgressBar, type HostProgressBarProps, HostResponsive, type HostResponsiveProps, HostRow, type HostRowProps, HostScroll, type HostScrollProps, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostThemeProvider, type HostThemeProviderProps, HostToggle, type HostToggleProps, HostVital, type HostVitalProps, HostInteractiveRow as InteractiveRow, type HostInteractiveRowProps as InteractiveRowProps, type ListActionHeaderAction, ListActionPageTemplate, type ListActionPageTemplateProps, type MetricThresholds, type ModalBodyScrollOwner, ModalBodyScrollOwnerContext, type PluginTheme, type PluginUiTheme, HostResponsive as Responsive, type ResponsiveLayout, type HostResponsiveProps as ResponsiveProps, type ScrollViewInstance, type SpacingValue, type StatusVariant, type ThemeColors, alpha, getStatusColor, resolveHostColors, resolveSpacing, sanitizeFluidStyle, spacing, splitHighlightParts, useHostLayout, useHostTheme, useModalBodyScrollOwner };

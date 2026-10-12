@@ -27,6 +27,7 @@ export type PlatformType = "ios" | "android" | "web";
 
 export interface ResponsiveLayout {
   compact: boolean;
+  isCompact?: boolean;
   platform: PlatformType;
   width?: number;
   height?: number;

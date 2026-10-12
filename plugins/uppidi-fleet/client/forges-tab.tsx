@@ -107,6 +107,35 @@ export function resolveForgeSelection(
   return resolveCanonicalRepo(value, { knownRepos });
 }
 
+function SafeWorkspaceBoundaryImpl(
+  this: any,
+  props: { children: React.ReactNode },
+) {
+  (React.Component as any).call(this, props);
+  this.state = { hasError: false };
+}
+SafeWorkspaceBoundaryImpl.prototype = Object.create(React.Component.prototype);
+SafeWorkspaceBoundaryImpl.prototype.constructor = SafeWorkspaceBoundaryImpl;
+SafeWorkspaceBoundaryImpl.getDerivedStateFromError = function () {
+  return { hasError: true };
+};
+SafeWorkspaceBoundaryImpl.prototype.componentDidCatch = function (
+  error: Error,
+  errorInfo: React.ErrorInfo,
+) {
+  console.error(
+    `[uppidi-fleet] SafeWorkspaceBoundary caught an error: ${error?.message ?? String(error)}`,
+  );
+};
+SafeWorkspaceBoundaryImpl.prototype.render = function (this: any) {
+  if (this.state.hasError) return null;
+  return this.props.children;
+};
+
+const SafeWorkspaceBoundary = SafeWorkspaceBoundaryImpl as unknown as React.ComponentType<{
+  children: React.ReactNode;
+}>;
+
 function WorkspaceDirectoryWatcher({
   workspaceId,
   onResolve,
@@ -276,10 +305,12 @@ function ForgeIssuesViewInner({
   return (
     <ModalBody>
       {workspaceId && !propDirectory ? (
-                  <WorkspaceDirectoryWatcher
+        <SafeWorkspaceBoundary>
+          <WorkspaceDirectoryWatcher
             workspaceId={workspaceId}
             onResolve={setWatchedDirectory}
           />
+        </SafeWorkspaceBoundary>
       ) : null}
       <Stack gap={4}>
         <Card variant="flat">

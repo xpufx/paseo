@@ -155,8 +155,9 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(pressables.length).toBeGreaterThan(1);
 
     // Click second option
+    const opt2 = renderer.root.findByProps({ testID: "fleet-select-option-opt2" });
     act(() => {
-      pressables[2].props.onPress();
+      opt2.props.onPress();
     });
     expect(onSelect).toHaveBeenCalledWith("opt2");
   });

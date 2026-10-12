@@ -1,5 +1,13 @@
-import { useHostTheme } from "paseo-plugin-helper/lifecycle";
-import type { StatusVariant, ThemeColors } from "paseo-plugin-helper/shared";
+import React, { type ReactNode } from "react";
+import {
+  HostThemeProvider as PluginUiThemeProvider,
+  useHostTheme,
+  type StatusVariant,
+  type ThemeColors,
+} from "@xpufx/paseo-plugin-ui";
+import {
+  HostThemeProvider as HelperThemeProvider,
+} from "paseo-plugin-helper/lifecycle";
 
 /**
  * Fleet theme accessor backed by the host theme prop.
@@ -58,5 +66,15 @@ export function useFleetTheme(): FleetTheme {
   };
 }
 
+export interface HostThemeProviderProps {
+  theme?: { colors: ThemeColors } | { colors?: Partial<ThemeColors> };
+  children: ReactNode;
+}
+
 /** Host theme provider for the plugin's surfaces and panels. */
-export { HostThemeProvider } from "paseo-plugin-helper/lifecycle";
+export function HostThemeProvider({ theme, children }: HostThemeProviderProps) {
+  return React.createElement(HelperThemeProvider, {
+    theme: theme as any,
+    children: React.createElement(PluginUiThemeProvider, { theme: theme as any, children }),
+  });
+}

@@ -17,6 +17,9 @@
       ],
       "paseo-plugin-helper/ui": [
         "../../packages/paseo-plugin-helper/src/ui/index.ts"
+      ],
+      "@xpufx/paseo-plugin-ui": [
+        "../../packages/paseo-plugin-ui/src/index.tsx"
       ]
     },
     "target": "ES2020",

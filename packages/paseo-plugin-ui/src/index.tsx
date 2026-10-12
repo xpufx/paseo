@@ -1,6 +1,7 @@
 import React, {
   createContext,
   forwardRef,
+  useCallback,
   useContext,
   useMemo,
   useRef,
@@ -10,13 +11,17 @@ import React, {
 import {
   ActivityIndicator,
   Linking,
+  Modal,
   Platform,
   Pressable,
   RefreshControl,
   ScrollView as RNScrollView,
   StyleSheet,
   Text,
+  TextInput as HostTextInputPrimitive,
   View,
+  type AccessibilityRole,
+  type GestureResponderEvent,
   type KeyboardTypeOptions,
   type RefreshControlProps,
   type ScrollViewProps,
@@ -27,7 +32,6 @@ import {
 import {
   Icon,
   ScrollView as HostScrollView,
-  TextInput as HostTextInputPrimitive,
   copyText,
   useToast,
 } from "@getpaseo/plugin/client/react-native";
@@ -201,19 +205,39 @@ export function HostLayoutProvider({ layout, children }: HostLayoutProviderProps
 }
 
 /** Reads the host layout descriptor. */
-export function useHostLayout(): ResponsiveLayout {
-  return useContext(LayoutContext);
+export function useHostLayout(): ResponsiveLayout & { isCompact: boolean } {
+  const layout = useContext(LayoutContext);
+  return { ...layout, isCompact: layout.isCompact ?? layout.compact };
 }
 
 // --- layout ----------------------------------------------------------------
 
+/** Static spacing scale (px). */
+export const spacing = {
+  xxs: 2,
+  xs: 4,
+  sm: 8,
+  md: 12,
+  lg: 16,
+  xl: 24,
+} as const;
+
+export type SpacingValue = keyof typeof spacing | number;
+
+export function resolveSpacing(value: SpacingValue | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (typeof value === "number") return value;
+  return spacing[value] ?? fallback;
+}
+
 export interface HostRowProps {
-  children: ReactNode;
-  gap?: number;
-  align?: "start" | "center" | "end" | "stretch";
-  justify?: "start" | "center" | "end" | "between";
+  children?: ReactNode;
+  gap?: SpacingValue;
+  align?: "start" | "center" | "end" | "stretch" | "flex-start" | "flex-end" | ViewStyle["alignItems"];
+  justify?: "start" | "center" | "end" | "between" | "space-between" | "space-around" | "space-evenly" | "flex-start" | "flex-end" | ViewStyle["justifyContent"];
   wrap?: boolean;
   style?: StyleProp<ViewStyle>;
+  testID?: string;
 }
 
 export function HostRow({
@@ -223,15 +247,20 @@ export function HostRow({
   justify = "start",
   wrap = false,
   style,
+  testID,
 }: HostRowProps) {
+  const resolvedGap = resolveSpacing(gap, 8);
+  const resolvedAlign = (align && (alignMap as Record<string, ViewStyle["alignItems"]>)[align as any]) ?? (align as ViewStyle["alignItems"]);
+  const resolvedJustify = (justify && (justifyMap as Record<string, ViewStyle["justifyContent"]>)[justify as any]) ?? (justify as ViewStyle["justifyContent"]);
   return (
     <View
+      testID={testID}
       style={[
         styles.row,
         {
-          gap,
-          alignItems: alignMap[align],
-          justifyContent: justifyMap[justify],
+          gap: resolvedGap,
+          alignItems: resolvedAlign,
+          justifyContent: resolvedJustify,
           flexWrap: wrap ? "wrap" : "nowrap",
         },
         style,
@@ -242,13 +271,109 @@ export function HostRow({
   );
 }
 
+export interface HostInteractiveRowProps {
+  children?: ReactNode;
+  onPress?: (event: GestureResponderEvent) => void;
+  title?: string;
+  disabled?: boolean;
+  accessibilityRole?: AccessibilityRole;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  testID?: string;
+  style?: StyleProp<ViewStyle>;
+  hoverStyle?: StyleProp<ViewStyle>;
+  hoverTint?: boolean;
+  hoverTintOpacity?: number;
+  pressedOpacity?: number;
+  hoveredOpacity?: number;
+  opacity?: number;
+  disabledOpacity?: number;
+  hitSlop?: number;
+  onHoverChange?: (hovered: boolean) => void;
+}
+
+/**
+ * Clickable/tappable row container with hover tint, pressed states, and accessibility semantics.
+ */
+export function HostInteractiveRow({
+  children,
+  onPress,
+  title,
+  disabled = false,
+  accessibilityRole,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
+  style,
+  hoverStyle,
+  hoverTint = false,
+  hoverTintOpacity = 0.05,
+  pressedOpacity = 0.7,
+  hoveredOpacity,
+  opacity = 1,
+  disabledOpacity = 0.45,
+  hitSlop,
+  onHoverChange,
+}: HostInteractiveRowProps) {
+  const { colors } = useHostTheme();
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const interactive = hovered && !disabled;
+
+  const handleEnter = useCallback(() => {
+    if (disabled) return;
+    setHovered(true);
+    onHoverChange?.(true);
+  }, [disabled, onHoverChange]);
+
+  const handleLeave = useCallback(() => {
+    setHovered(false);
+    onHoverChange?.(false);
+  }, [onHoverChange]);
+
+  const webProps = {
+    onMouseEnter: handleEnter,
+    onMouseLeave: handleLeave,
+    ...(title ? { title } : {}),
+  } as any;
+
+  return (
+    <Pressable
+      {...webProps}
+      onPress={onPress}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+      disabled={disabled}
+      accessibilityRole={accessibilityRole ?? (onPress ? "button" : undefined)}
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+      testID={testID}
+      hitSlop={hitSlop}
+      style={[
+        {
+          opacity: disabled ? disabledOpacity : pressed ? pressedOpacity : hovered && hoveredOpacity !== undefined ? hoveredOpacity : opacity,
+          ...(hoverTint && interactive ? { backgroundColor: alpha(colors.accent, hoverTintOpacity) } : {}),
+        },
+        style,
+        interactive && hoverStyle,
+      ]}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
+export { HostInteractiveRow as InteractiveRow };
+export type { HostInteractiveRowProps as InteractiveRowProps };
+
 export interface HostStackProps {
-  children: ReactNode;
-  gap?: number;
-  align?: "start" | "center" | "end" | "stretch";
-  justify?: "start" | "center" | "end" | "between";
+  children?: ReactNode;
+  gap?: SpacingValue;
+  align?: "start" | "center" | "end" | "stretch" | "flex-start" | "flex-end" | ViewStyle["alignItems"];
+  justify?: "start" | "center" | "end" | "between" | "space-between" | "space-around" | "space-evenly" | "flex-start" | "flex-end" | ViewStyle["justifyContent"];
   grow?: boolean;
   style?: StyleProp<ViewStyle>;
+  testID?: string;
 }
 
 export function HostStack({
@@ -258,15 +383,20 @@ export function HostStack({
   justify = "start",
   grow = false,
   style,
+  testID,
 }: HostStackProps) {
+  const resolvedGap = resolveSpacing(gap, 8);
+  const resolvedAlign = (align && (alignMap as Record<string, ViewStyle["alignItems"]>)[align as any]) ?? (align as ViewStyle["alignItems"]);
+  const resolvedJustify = (justify && (justifyMap as Record<string, ViewStyle["justifyContent"]>)[justify as any]) ?? (justify as ViewStyle["justifyContent"]);
   return (
     <View
+      testID={testID}
       style={[
         styles.stack,
         {
-          gap,
-          alignItems: alignMap[align],
-          justifyContent: justifyMap[justify],
+          gap: resolvedGap,
+          alignItems: resolvedAlign,
+          justifyContent: resolvedJustify,
           ...(grow ? { flex: 1, minHeight: 0 } : null),
         },
         style,
@@ -278,15 +408,17 @@ export function HostStack({
 }
 
 export interface HostGridProps {
-  children: ReactNode;
+  children?: ReactNode;
   columns?: number;
-  gap?: number;
+  gap?: SpacingValue;
   style?: StyleProp<ViewStyle>;
+  testID?: string;
 }
 
-export function HostGrid({ children, columns = 2, gap = 8, style }: HostGridProps) {
+export function HostGrid({ children, columns = 2, gap = 8, style, testID }: HostGridProps) {
+  const resolvedGap = resolveSpacing(gap, 8);
   return (
-    <View style={[styles.grid, { gap }, style]}>
+    <View testID={testID} style={[styles.grid, { gap: resolvedGap }, style]}>
       {React.Children.map(children, (child) => (
         <View style={{ flexBasis: `${100 / columns}%`, flexGrow: 0, flexShrink: 1, minWidth: 0 }}>
           {child}
@@ -1187,8 +1319,10 @@ export function HostKeyValue({
 
 export interface HostKeyValueGroupProps {
   children: ReactNode;
-  columns?: 1 | 2 | 3 | 4;
+  columns?: 1 | 2 | 3 | 4 | number;
   gap?: number;
+  collapse?: "compact" | "never" | string;
+  minColumnWidth?: number;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -1571,10 +1705,17 @@ export function HostButton({
       style={({ pressed }) => [
         styles.buttonBase,
         {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          flexShrink: 1,
+          minWidth: 0,
+          maxWidth: "100%",
           backgroundColor: pressed && !disabled ? alphaColor(bg, 0.8) : bg,
           borderColor: border,
           borderWidth: border !== "transparent" ? 1 : 0,
-          borderRadius: 10,
+          borderRadius: 8,
           paddingVertical: py,
           paddingHorizontal: px,
           opacity: disabled ? 0.45 : 1,
@@ -1585,13 +1726,23 @@ export function HostButton({
       {loading ? (
         <ActivityIndicator size="small" color={textColor} />
       ) : (
-        <View style={styles.buttonContent}>
+        <>
           {iconPosition === "left" ? renderIcon() : null}
-          <Text style={[styles.buttonText, { color: textColor, fontSize }, textStyle]}>
-            {children ?? label}
-          </Text>
+          {label !== undefined || children ? (
+            <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[
+                styles.buttonText,
+                { color: textColor, fontSize, fontWeight: "600", textAlign: "center", flexShrink: 1, minWidth: 0 },
+                textStyle,
+              ]}
+            >
+              {children ?? label}
+            </Text>
+          ) : null}
           {iconPosition === "right" ? renderIcon() : null}
-        </View>
+        </>
       )}
     </Pressable>
   );
@@ -2123,7 +2274,7 @@ export function HostModalSection({ children, style }: HostModalSectionProps) {
   return <View style={[sectionStyle, sanitized]}>{children}</View>;
 }
 
-export type ScrollViewInstance = React.ElementRef<typeof HostScrollView>;
+export type ScrollViewInstance = React.ElementRef<typeof RNScrollView>;
 
 export interface HostScrollProps extends ScrollViewProps {
   children: ReactNode;
@@ -2135,14 +2286,14 @@ export interface HostScrollProps extends ScrollViewProps {
 export const HostScroll = forwardRef<ScrollViewInstance, HostScrollProps>(
   function HostScroll({ children, style, contentContainerStyle, ...props }, ref) {
     return (
-      <HostScrollView
+      <RNScrollView
         ref={ref}
         style={[{ flex: 1, minHeight: 0, width: "100%" }, style]}
         contentContainerStyle={contentContainerStyle}
         {...props}
       >
         {children}
-      </HostScrollView>
+      </RNScrollView>
     );
   },
 );
@@ -2394,13 +2545,17 @@ export interface HostSelectOption {
   label: string;
   value: string;
   description?: string;
+  display?: string;
 }
 
 export interface HostSelectProps {
   value: string;
   options: readonly HostSelectOption[];
   onValueChange: (value: string) => void;
+  label?: string;
+  size?: "sm" | "md" | string;
   placeholder?: string;
+  disabled?: boolean;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -2409,36 +2564,47 @@ export function HostSelect({
   value,
   options,
   onValueChange,
+  label,
+  size = "md",
   placeholder = "Select…",
+  disabled = false,
   style,
 }: HostSelectProps) {
   const { colors } = useHostTheme();
   const [open, setOpen] = useState(false);
   const selected = options.find((option) => option.value === value);
-  const display = selected?.label ?? (value || placeholder);
-  const canOpen = options.length > 0;
+  const display = selected?.display ?? selected?.label ?? (value || placeholder);
+  const canOpen = !disabled && options.length > 0;
+  const isSm = size === "sm";
 
   return (
-    <View style={[{ gap: 4, width: "100%" }, style]}>
+    <View testID="fleet-select-root" style={[{ width: "100%" }, style]}>
+      {label ? (
+        <Text style={{ fontSize: isSm ? 11 : 12, color: colors.foregroundMuted, fontWeight: "500" }}>
+          {label}
+        </Text>
+      ) : null}
       <Pressable
+        testID="fleet-select-trigger"
         onPress={() => {
           if (canOpen) setOpen((prev) => !prev);
         }}
         disabled={!canOpen}
         accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
+        accessibilityLabel={label ? `${label}: ${display}` : display}
+        accessibilityState={{ expanded: open, disabled: !canOpen }}
         style={{
           flexDirection: "row",
           alignItems: "center",
           justifyContent: "space-between",
           gap: 8,
-          minHeight: 36,
+          minHeight: isSm ? 30 : 36,
           borderWidth: 1,
           borderColor: colors.border,
           borderRadius: 8,
           backgroundColor: colors.surface1,
-          paddingHorizontal: 10,
-          paddingVertical: 8,
+          paddingHorizontal: isSm ? 8 : 10,
+          paddingVertical: isSm ? 4 : 8,
           opacity: canOpen ? 1 : 0.5,
         }}
       >
@@ -2451,53 +2617,93 @@ export function HostSelect({
           color={colors.foregroundMuted}
         />
       </Pressable>
-      {open
-        ? options.map((option) => {
-            const active = option.value === value;
-            return (
-              <Pressable
-                key={option.value}
-                onPress={() => {
-                  onValueChange(option.value);
-                  setOpen(false);
-                }}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                style={{
-                  borderWidth: 1,
-                  borderColor: active ? colors.accent : colors.border,
-                  borderRadius: 8,
-                  backgroundColor: colors.surface2,
-                  paddingHorizontal: 10,
-                  paddingVertical: 8,
-                }}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    fontSize: 12,
-                    fontWeight: active ? "600" : "400",
-                    color: active ? colors.accent : colors.foreground,
-                  }}
-                >
-                  {option.label}
-                </Text>
-                {option.description ? (
-                  <Text
-                    numberOfLines={2}
+      {open ? (
+        <Modal transparent visible={open} animationType="none" onRequestClose={() => setOpen(false)}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss options"
+            onPress={() => setOpen(false)}
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
+          />
+          <View
+            testID="fleet-select-overlay"
+            style={{
+              position: "absolute",
+              top: 50,
+              left: 10,
+              right: 10,
+              borderWidth: 1,
+              borderColor: colors.border,
+              borderRadius: 8,
+              backgroundColor: colors.surface0,
+              overflow: "hidden",
+              zIndex: 1000,
+              elevation: 20,
+            }}
+          >
+            <RNScrollView
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: 220 }}
+            >
+              {options.map((option) => {
+                const active = option.value === value;
+                const primary = option.display ?? option.label;
+                const hasMore = Boolean(option.display && option.display !== option.label);
+                return (
+                  <Pressable
+                    key={option.value}
+                    testID={`fleet-select-option-${option.value}`}
+                    onPress={() => {
+                      onValueChange(option.value);
+                      setOpen(false);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={option.label}
+                    accessibilityHint={hasMore ? option.label : undefined}
+                    accessibilityState={{ selected: active }}
                     style={{
-                      fontSize: 11,
-                      color: colors.foregroundMuted,
-                      marginTop: 2,
+                      borderWidth: 1,
+                      borderColor: active ? colors.accent : colors.border,
+                      borderRadius: 8,
+                      backgroundColor: active ? colors.surface2 : colors.surface1,
+                      paddingHorizontal: 10,
+                      paddingVertical: 6,
+                      minHeight: 46,
+                      justifyContent: "center",
                     }}
                   >
-                    {option.description}
-                  </Text>
-                ) : null}
-              </Pressable>
-            );
-          })
-        : null}
+                    <Text
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      style={{
+                        fontSize: 13,
+                        fontWeight: active ? "600" : "400",
+                        color: active ? colors.accent : colors.foreground,
+                      }}
+                    >
+                      {primary}
+                    </Text>
+                    <Text
+                      testID={`fleet-select-option-full-${option.value}`}
+                      numberOfLines={1}
+                      ellipsizeMode="tail"
+                      selectable
+                      style={{
+                        fontSize: 11,
+                        color: colors.foregroundMuted,
+                        marginTop: 2,
+                      }}
+                    >
+                      {option.description ?? option.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </RNScrollView>
+          </View>
+        </Modal>
+      ) : null}
     </View>
   );
 }
@@ -2710,9 +2916,12 @@ export function HostAboutSection({
 
 const alignMap = {
   start: "flex-start",
+  "flex-start": "flex-start",
   center: "center",
   end: "flex-end",
+  "flex-end": "flex-end",
   stretch: "stretch",
+  baseline: "baseline",
 } as const;
 
 const justifyMap = {
@@ -2723,6 +2932,10 @@ const justifyMap = {
   "flex-end": "flex-end",
   between: "space-between",
   "space-between": "space-between",
+  around: "space-around",
+  "space-around": "space-around",
+  evenly: "space-evenly",
+  "space-evenly": "space-evenly",
 } as const;
 
 const styles = {
@@ -2959,6 +3172,140 @@ const styles = {
   aboutRepo: { fontSize: 11 },
 } as const;
 
+// --- data table & responsive ------------------------------------------------
+
+export interface HostDataColumn<T> {
+  key: string;
+  header: string;
+  flex?: number;
+  width?: number;
+  align?: "left" | "center" | "right";
+  render: (item: T) => ReactNode;
+}
+
+export interface HostDataTableProps<T> {
+  data: T[];
+  columns: HostDataColumn<T>[];
+  keyExtractor: (item: T, index: number) => string;
+  emptyState?: ReactNode;
+  style?: StyleProp<ViewStyle>;
+}
+
+/**
+ * Standard table container rendering styled header and rows with theme borders.
+ */
+export function HostDataTable<T>({
+  data,
+  columns,
+  keyExtractor,
+  emptyState,
+  style,
+}: HostDataTableProps<T>) {
+  const { colors } = useHostTheme();
+  if (!data || data.length === 0) {
+    return emptyState ? <View style={style}>{emptyState}</View> : null;
+  }
+  const cellStyle = (col: HostDataColumn<T>): StyleProp<ViewStyle> => ({
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    ...(col.flex !== undefined ? { flex: col.flex } : { flex: 1 }),
+    ...(col.width !== undefined ? { width: col.width } : null),
+    alignItems: col.align === "right" ? "flex-end" : col.align === "center" ? "center" : "flex-start",
+  });
+  return (
+    <View
+      style={[
+        {
+          borderWidth: 1,
+          borderColor: colors.border,
+          backgroundColor: colors.surface0,
+          borderRadius: 8,
+          overflow: "hidden",
+        },
+        style,
+      ]}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          backgroundColor: colors.surface1,
+          borderBottomWidth: 1,
+          borderBottomColor: colors.border,
+        }}
+      >
+        {columns.map((col) => (
+          <View key={col.key} style={cellStyle(col)}>
+            <Text
+              numberOfLines={1}
+              style={{
+                color: colors.foregroundMuted,
+                fontSize: 11,
+                fontWeight: "600",
+                textTransform: "uppercase",
+              }}
+            >
+              {col.header}
+            </Text>
+          </View>
+        ))}
+      </View>
+      {data.map((item, idx) => (
+        <View
+          key={keyExtractor(item, idx)}
+          style={[
+            { flexDirection: "row" },
+            idx < data.length - 1 && {
+              borderBottomColor: colors.border,
+              borderBottomWidth: 1,
+            },
+          ]}
+        >
+          {columns.map((col) => (
+            <View key={col.key} style={cellStyle(col)}>
+              {col.render(item)}
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+export { HostDataTable as DataTable };
+export type { HostDataTableProps as DataTableProps, HostDataColumn as DataColumn };
+
+export interface HostResponsiveProps {
+  desktop?: ReactNode;
+  mobile?: ReactNode;
+  compact?: ReactNode;
+  wide?: ReactNode;
+  children?: ReactNode | ((responsive: { isCompact: boolean; isMobile: boolean; isWide: boolean }) => ReactNode);
+}
+
+/**
+ * Responsive viewport container that switches children between mobile and desktop layouts.
+ */
+export function HostResponsive({ desktop, mobile, compact, wide, children }: HostResponsiveProps) {
+  const layout = useHostLayout();
+  const isCompact = layout.compact;
+  const isMobile = layout.platform === "ios" || layout.platform === "android";
+  const isWide = !isCompact;
+  if (typeof children === "function") {
+    return <>{children({ isCompact, isMobile, isWide })}</>;
+  }
+  const selected = isMobile && mobile !== undefined
+    ? mobile
+    : isCompact && compact !== undefined
+      ? compact
+      : isWide && wide !== undefined
+        ? wide
+        : desktop;
+  return <>{selected ?? desktop ?? null}</>;
+}
+
+export { HostResponsive as Responsive };
+export type { HostResponsiveProps as ResponsiveProps };
+
 // --- page templates --------------------------------------------------------
 
 export {
@@ -2966,3 +3313,4 @@ export {
   type ListActionPageTemplateProps,
   type ListActionHeaderAction,
 } from "./templates/list-action.js";
+
