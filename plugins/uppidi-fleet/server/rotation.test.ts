@@ -31,6 +31,7 @@ describe("rotation policy resolution (#1019)", () => {
     assert.equal(orch.failureWindowMs, 15 * MINUTE);
     assert.equal(orch.failureThreshold, 3);
     assert.equal(orch.cooldownMs, 30 * MINUTE);
+    assert.equal(orch.midTurnImmunityMs, 15 * MINUTE);
 
     const fd = resolveRotationPolicy(DEFAULT_ROTATION_POLICY, "front-desk");
     assert.equal(fd.enabled, true);
@@ -156,6 +157,46 @@ describe("rotation trigger evaluation (#1019)", () => {
     );
     assert.equal(manual.shouldRotate, true);
     assert.equal(manual.reason, "manual");
+  });
+
+  it("keeps mid-turn immunity only while the turn is younger than the threshold (#1265)", () => {
+    const young = evaluateRotationTrigger(
+      observation({ spawnedAtMs: NOW - 3 * HOUR }),
+      { nowMs: NOW, midTurn: true, turnStartedAtMs: NOW - 5 * MINUTE },
+      DEFAULT_ROTATION_POLICY,
+    );
+    assert.equal(young.shouldRotate, false);
+    assert.equal(young.blocked, "mid-turn");
+
+    // A turn that outlives the immunity window is a stalled runaway: rotating
+    // is the only way out even when no other trigger has crossed its threshold.
+    const stalled = evaluateRotationTrigger(
+      observation({ spawnedAtMs: NOW - 5 * MINUTE }),
+      { nowMs: NOW, midTurn: true, turnStartedAtMs: NOW - 20 * MINUTE },
+      DEFAULT_ROTATION_POLICY,
+    );
+    assert.equal(stalled.shouldRotate, true);
+    assert.equal(stalled.reason, "stalled-turn");
+    assert.deepEqual(stalled.triggers, ["stalled-turn"]);
+  });
+
+  it("treats an unknown turn start as immune and honors a custom immunity window (#1265)", () => {
+    const unknown = evaluateRotationTrigger(
+      observation({ spawnedAtMs: NOW - 3 * HOUR }),
+      { nowMs: NOW, midTurn: true },
+      DEFAULT_ROTATION_POLICY,
+    );
+    assert.equal(unknown.shouldRotate, false);
+    assert.equal(unknown.blocked, "mid-turn");
+
+    const policy: RotationPolicy = { roles: { orchestrator: { midTurnImmunityMs: 5 * MINUTE } }, byRepo: {} };
+    const stalled = evaluateRotationTrigger(
+      observation({ spawnedAtMs: NOW - 3 * HOUR }),
+      { nowMs: NOW, midTurn: true, turnStartedAtMs: NOW - 10 * MINUTE },
+      policy,
+    );
+    assert.equal(stalled.shouldRotate, true);
+    assert.equal(stalled.reason, "stalled-turn");
   });
 
   it("always allows manual rotation even when the role is disabled or cooling down", () => {

@@ -216,8 +216,17 @@ export interface HookRouterOptions {
    */
   boardReconciliationIntervalMs?: number;
   frontDeskThrottleMs?: number;
-  /** Consecutive busy drain checks before queued work is steered into the active turn. */
+  /**
+   * Consecutive busy drain checks before queued work is steered into the
+   * active turn. Defaults to {@link DEFAULT_DRAIN_STEER_ATTEMPT_LIMIT}.
+   */
   drainBusyAttemptLimit?: number;
+  /**
+   * Consecutive busy drain checks before the active turn is interrupted and
+   * canceled (steer never lands if the turn does not yield). Defaults to
+   * {@link DEFAULT_DRAIN_INTERRUPT_ATTEMPT_LIMIT}.
+   */
+  drainInterruptAttemptLimit?: number;
   workspacesData?: any[];
   projectsData?: any[];
   workspacesPath?: string;
@@ -1512,6 +1521,8 @@ export interface WatchdogAuditOptions {
   steerMessage?: string;
   runningStaleSeconds?: number;
   cancellationRecencySeconds?: number;
+  /** Consecutive identical tool calls that classify as a runaway loop (#1265). */
+  repetitiveToolLoopThreshold?: number;
   /** Also treat a plain finished idle agent as stalled (aggressive amnesia detection). */
   assumePendingWork?: boolean;
   /**
@@ -1558,6 +1569,7 @@ export const WATCHDOG_TAXONOMY = [
   "ZOMBIE_HUNG_TURN",
   "STALE_ERROR_GHOSTING",
   "PROVIDER_QUOTA_EXHAUSTION",
+  "REPETITIVE_TOOL_LOOP",
 ] as const;
 export type WatchdogTaxonomyType = (typeof WATCHDOG_TAXONOMY)[number];
 
@@ -1596,6 +1608,14 @@ export const DEFAULT_BOARD_SWEEP_INTERVAL_MS = 3 * 60 * 1000;
  */
 export const DEFAULT_BOARD_RECONCILIATION_INTERVAL_MS = 2 * 60 * 60 * 1000;
 
+// Queue-drain escalation (#1265). A busy incumbent is retried politely first;
+// by the steer threshold queued work is pushed into the active turn, and by the
+// interrupt threshold a turn that still has not yielded is canceled outright.
+// Without the interrupt step a runaway turn that never yields swallows every
+// steer and strands the queue (the #1265 incident).
+export const DEFAULT_DRAIN_STEER_ATTEMPT_LIMIT = 8;
+export const DEFAULT_DRAIN_INTERRUPT_ATTEMPT_LIMIT = 12;
+
 export const CANCELLATION_TIMEOUT_MARKER = "cancelagentrun: acknowledged turn still active after timeout";
 
 const TURN_LOCK_MARKERS = [
@@ -1630,6 +1650,9 @@ const TRANSIENT_MARKERS = [
 ];
 const ATTENTION_STALL_REASONS = ["error", "stalled", "interrupted", "failed"];
 
+/** Consecutive identical tool calls that classify as a runaway loop (#1265). */
+export const DEFAULT_REPETITIVE_TOOL_LOOP_THRESHOLD = 15;
+
 export const WATCHDOG_SEVERITIES: Record<WatchdogTaxonomyType, WatchdogSeverity> = {
   TURN_CONCURRENCY_LOCK: "high",
   TURN_CANCELLATION_TIMEOUT: "high",
@@ -1637,18 +1660,21 @@ export const WATCHDOG_SEVERITIES: Record<WatchdogTaxonomyType, WatchdogSeverity>
   PROVIDER_QUOTA_EXHAUSTION: "high",
   STALE_ERROR_GHOSTING: "medium",
   IDLE_POST_ERROR_AMNESIA: "medium",
+  REPETITIVE_TOOL_LOOP: "high",
 };
 
 const STOP_TRIGGERS: ReadonlySet<WatchdogTaxonomyType> = new Set([
   "TURN_CONCURRENCY_LOCK",
   "TURN_CANCELLATION_TIMEOUT",
   "ZOMBIE_HUNG_TURN",
+  "REPETITIVE_TOOL_LOOP",
 ]);
 const STEER_TRIGGERS: ReadonlySet<WatchdogTaxonomyType> = new Set([
   "TURN_CONCURRENCY_LOCK",
   "TURN_CANCELLATION_TIMEOUT",
   "ZOMBIE_HUNG_TURN",
   "IDLE_POST_ERROR_AMNESIA",
+  "REPETITIVE_TOOL_LOOP",
 ]);
 
 export function hasMarker(text: unknown, markers: readonly string[]): boolean {
@@ -1844,6 +1870,96 @@ export function detectZombieHungTurn(
   const activity = parseIsoTimestamp(lastActivityAt);
   if (activity === null) return false;
   return (now - activity) / 1000 >= staleSeconds;
+}
+
+/**
+ * Per-tool input keys, so a tool call's identity ignores result payloads
+ * (`output`, `content`, `diff`, ...). Two `read`s of the same file are the same
+ * call even though the returned content may differ each time (#1265).
+ */
+const TOOL_CALL_INPUT_KEYS: Record<string, readonly string[]> = {
+  shell: ["command", "cwd"],
+  read: ["filePath", "offset", "limit"],
+  edit: ["filePath", "oldString", "newString"],
+  write: ["filePath", "content"],
+  search: ["query", "toolName", "mode"],
+  fetch: ["url", "prompt"],
+  plain_text: ["label", "text"],
+  plan: ["text"],
+};
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map((entry) => stableStringify(entry)).join(",")}]`;
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(obj[key])}`).join(",")}}`;
+}
+
+/**
+ * Input-only signature for a structured tool-call timeline item. Returns null
+ * for non-tool items so assistant text, reasoning, and errors never join a run.
+ */
+export function toolCallSignature(item: unknown): string | null {
+  if (!item || typeof item !== "object") return null;
+  const raw = item as Record<string, unknown>;
+  if (raw.type !== "tool_call" && raw.type !== "tool_use") return null;
+  const nested = raw.toolCall && typeof raw.toolCall === "object" ? (raw.toolCall as Record<string, unknown>) : null;
+  const name = String(raw.name ?? raw.toolName ?? nested?.name ?? "").trim();
+  if (!name) return null;
+  const detail = raw.detail ?? raw.input ?? nested?.input ?? null;
+  let args: unknown = detail;
+  if (detail && typeof detail === "object") {
+    const d = detail as Record<string, unknown>;
+    const inputKeys = typeof d.type === "string" ? TOOL_CALL_INPUT_KEYS[d.type] : undefined;
+    if (inputKeys) {
+      args = Object.fromEntries(inputKeys.filter((key) => key in d).map((key) => [key, d[key]]));
+    } else if (d.type === "unknown") {
+      args = d.input ?? null;
+    }
+  }
+  return `${name}:${stableStringify(args)}`;
+}
+
+/**
+ * Longest run of identical consecutive tool calls (same tool name and input
+ * arguments) in a structured timeline. Non-tool items do not break a run: a
+ * runaway loop interleaves reasoning between otherwise identical calls. Returns
+ * the run length, or 0 when it stays under `threshold`.
+ */
+export function detectRepetitiveToolLoop(
+  timeline: unknown,
+  threshold: number = DEFAULT_REPETITIVE_TOOL_LOOP_THRESHOLD,
+): number {
+  const items = normalizeTimelineItems(timeline);
+  if (threshold <= 1 || items.length === 0) return 0;
+  let best = 0;
+  let run = 0;
+  let last: string | null = null;
+  for (const item of items) {
+    const signature = toolCallSignature(item);
+    if (signature === null) continue;
+    run = signature === last ? run + 1 : 1;
+    last = signature;
+    if (run > best) best = run;
+  }
+  return best >= threshold ? best : 0;
+}
+
+function normalizeTimelineItems(timeline: unknown): unknown[] {
+  if (!timeline) return [];
+  if (Array.isArray(timeline)) return timeline;
+  if (typeof timeline === "string") {
+    const trimmed = timeline.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // not a JSON timeline; nothing structured to classify
+    }
+  }
+  return [];
 }
 
 // ---------------------------------------------------------------------------
@@ -3077,6 +3193,7 @@ export function assessAgentHealth(
     runningStaleSeconds?: number;
     recentTimeline?: string | unknown[] | null;
     timelineErrors?: Map<string, string[] | string> | null;
+    repetitiveToolLoopThreshold?: number;
   } = {},
 ): WatchdogAssessment {
   const liveStatus = String(live?.status ?? disk?.lastStatus ?? "").toLowerCase();
@@ -3098,6 +3215,21 @@ export function assessAgentHealth(
     (disk as any)?.recentTimeline ??
     (disk as any)?.timeline ??
     null;
+
+  // Repetition detection needs the structured tool-call timeline. The
+  // `timelineErrors` map holds daemon log lines, so it is deliberately skipped
+  // here (#1265).
+  const structuredTimeline =
+    options.recentTimeline ??
+    (live as any)?.recentTimeline ??
+    (live as any)?.timeline ??
+    (disk as any)?.recentTimeline ??
+    (disk as any)?.timeline ??
+    null;
+  const repetitiveRun =
+    liveStatus === "running" || liveStatus === "working"
+      ? detectRepetitiveToolLoop(structuredTimeline, options.repetitiveToolLoopThreshold)
+      : 0;
 
   const quotaDetected = detectProviderQuotaExhaustion(rawLastError, agentTimeline);
   const timelineQuotaError =
@@ -3143,6 +3275,7 @@ export function assessAgentHealth(
     ZOMBIE_HUNG_TURN: detectZombieHungTurn(liveStatus, lastActivityAt, now, staleSeconds),
     STALE_ERROR_GHOSTING: detectStaleErrorGhosting(liveStatus, rawLastError),
     PROVIDER_QUOTA_EXHAUSTION: quotaDetected,
+    REPETITIVE_TOOL_LOOP: repetitiveRun > 0,
   };
 
   const taxonomy = archived ? [] : WATCHDOG_TAXONOMY.filter((name) => checks[name]);
@@ -3157,7 +3290,9 @@ export function assessAgentHealth(
           ? attentionReason ?? undefined
           : name === "ZOMBIE_HUNG_TURN"
             ? lastActivityAt ?? undefined
-            : String(lastError || "").trim() || undefined;
+            : name === "REPETITIVE_TOOL_LOOP"
+              ? `${repetitiveRun} identical consecutive tool calls`
+              : String(lastError || "").trim() || undefined;
     if (detail) details[name] = detail;
   }
 
@@ -3560,6 +3695,7 @@ export class HookRouter {
   public readonly boardReconciliationIntervalMs: number;
   public readonly frontDeskThrottleMs: number;
   public readonly drainBusyAttemptLimit: number;
+  public readonly drainInterruptAttemptLimit: number;
   private lastDeliveryTimes = new Map<string, number>();
   public latestAgentMap: Map<string, WatchdogAgent> | null = null;
   /** Teardown reconciliation state (#872): last teardown stamp + suppressed ids. */
@@ -3755,10 +3891,18 @@ export class HookRouter {
         : isTestMode
           ? 0
           : Number(process.env.HOOK_FRONTDESK_THROTTLE_MS ?? 2000);
-    this.drainBusyAttemptLimit = Math.max(
-      1,
-      Math.floor(options?.drainBusyAttemptLimit ?? Number(process.env.HOOK_DRAIN_BUSY_ATTEMPT_LIMIT ?? 10)),
-    );
+    const steerAttemptLimitRaw =
+      options?.drainBusyAttemptLimit ?? Number(process.env.HOOK_DRAIN_BUSY_ATTEMPT_LIMIT ?? DEFAULT_DRAIN_STEER_ATTEMPT_LIMIT);
+    this.drainBusyAttemptLimit = Number.isFinite(steerAttemptLimitRaw)
+      ? Math.max(1, Math.floor(steerAttemptLimitRaw))
+      : DEFAULT_DRAIN_STEER_ATTEMPT_LIMIT;
+    const interruptAttemptLimitRaw =
+      options?.drainInterruptAttemptLimit ??
+      Number(process.env.HOOK_DRAIN_INTERRUPT_ATTEMPT_LIMIT ?? DEFAULT_DRAIN_INTERRUPT_ATTEMPT_LIMIT);
+    const interruptAttemptLimit = Number.isFinite(interruptAttemptLimitRaw)
+      ? Math.max(1, Math.floor(interruptAttemptLimitRaw))
+      : DEFAULT_DRAIN_INTERRUPT_ATTEMPT_LIMIT;
+    this.drainInterruptAttemptLimit = Math.max(this.drainBusyAttemptLimit, interruptAttemptLimit);
     mkdirSync(this.queueDir, { recursive: true });
     mkdirSync(this.stateDir, { recursive: true });
     mkdirSync(this.logDir, { recursive: true });
@@ -6908,11 +7052,13 @@ export class HookRouter {
           });
     const adjudicationLogPath = opts.adjudicationLogPath ?? join(this.stateDir, "permission-decisions.jsonl");
 
+    let fleetAuditedAgents = 0;
     if (agentMap) {
+      // Pending permissions and operator-attention stalls are surfaced for every
+      // live agent, fleet-owned or not: a wedged session still blocks its queue,
+      // and the operator needs to see it. Auto-allow remains fleet-gated inside
+      // `adjudicatePermission`, which escalates non-fleet agents instead (#1084).
       for (const agent of agentMap.values()) {
-        // Restrict watchdog audits and hook management to fleet-owned agents only.
-        // Ad-hoc/user sessions are excluded.
-        if (!isFleetAgent(agent, { frontDeskId, orchestratorAgentIds: fleetAgentIds })) continue;
         // Legitimate teardown must not raise amnesia/lock/permission alerts
         // (#872): culled agents are suppressed even if a stale snapshot still
         // lists them.
@@ -7010,12 +7156,14 @@ export class HookRouter {
         if (!isFleetAgent(agent, { frontDeskId, orchestratorAgentIds: fleetAgentIds })) continue;
         if (agent.archivedAt) continue;
         if (this.isTeardownSuppressedAgent(agent.id)) continue;
+        fleetAuditedAgents += 1;
         const assessment = assessAgentHealth(agent.id, agent, diskMetadata?.get(agent.id), now, {
           cancellations,
           cancellationRecencySeconds: opts.cancellationRecencySeconds,
           activeWorkers: countActiveWorkers(agentMap, agent.id, diskMetadata),
           assumePendingWork: opts.assumePendingWork,
           runningStaleSeconds: opts.runningStaleSeconds,
+          repetitiveToolLoopThreshold: opts.repetitiveToolLoopThreshold,
           timelineErrors,
         });
         if (assessment.healthy) continue;
@@ -7355,7 +7503,7 @@ export class HookRouter {
       timestamp: now,
       audited: {
         orchestrators: orchRecords.length,
-        agents: agentMap ? agentMap.size : 0,
+        agents: agentMap ? fleetAuditedAgents : 0,
         queues: this.busyAttempts.size,
       },
       anomalies,
@@ -8007,6 +8155,17 @@ export class HookRouter {
     return target;
   }
 
+  /**
+   * Epoch ms when the incumbent's active turn started, when the live snapshot
+   * carries it. Used to distinguish a healthy in-flight turn from a stalled
+   * runaway that has outlived the mid-turn immunity window (#1265).
+   */
+  private turnStartedAtMsFor(live: WatchdogAgent | null | undefined): number | null {
+    const anyLive = live as any;
+    const raw = anyLive?.activeTurn?.startedAt ?? anyLive?.metrics?.activeTurnStartedAt ?? null;
+    return raw != null ? coerceEpochMs(raw) : null;
+  }
+
   private observationForRole(role: string, repo: string | null, live: WatchdogAgent | null): RotationObservation {
     const anyLive = live as any;
     return {
@@ -8175,6 +8334,7 @@ export class HookRouter {
             nowMs: Date.now(),
             lastRotationAtMs: this.lastRotationAt.get(lockKey) ?? null,
             midTurn: oldAgentId ? this.isAgentBusy(oldAgentId, map) : false,
+            turnStartedAtMs: this.turnStartedAtMsFor(live),
             inFlight: false,
           },
           this.readRotationPolicy(),
@@ -8314,6 +8474,7 @@ export class HookRouter {
         nowMs: Date.now(),
         lastRotationAtMs: this.lastRotationAt.get(lockKey) ?? null,
         midTurn: live ? this.isAgentBusy(live.id, agentMap) : false,
+        turnStartedAtMs: this.turnStartedAtMsFor(live),
         inFlight: this.rotationLock.isLocked(role, repo),
       },
       this.readRotationPolicy(),
@@ -9489,6 +9650,7 @@ export class HookRouter {
     this.draining.add(key);
 
     let forceSteer = false;
+    let forceInterrupt = false;
 
     try {
       let targetAgentId: string | null = null;
@@ -9654,12 +9816,18 @@ export class HookRouter {
 
         if (isBusy) {
           this.busyQueues.add(key);
-          const attempts = Math.min(
-            this.drainBusyAttemptLimit,
-            (this.busyAttempts.get(key) ?? 0) + 1,
-          );
+          // The streak is intentionally not capped at the steer threshold: it
+          // keeps counting while the incumbent stays busy so a steer that never
+          // lands eventually escalates to an interrupt (#1265).
+          const attempts = (this.busyAttempts.get(key) ?? 0) + 1;
           this.busyAttempts.set(key, attempts);
-          if (attempts >= this.drainBusyAttemptLimit) {
+          if (attempts >= this.drainInterruptAttemptLimit) {
+            forceInterrupt = true;
+            this.log(
+              `[warn] Agent ${targetAgentId} remained busy for ${key} across ${attempts} drain checks; ` +
+                "interrupting the active turn to break the deadlock",
+            );
+          } else if (attempts >= this.drainBusyAttemptLimit) {
             forceSteer = true;
             this.log(
               `[warn] Agent ${targetAgentId} remained busy for ${key} across ${attempts} drain checks; ` +
@@ -9683,17 +9851,25 @@ export class HookRouter {
         }
       }
 
-      this.busyQueues.delete(key);
-      this.busyAttempts.delete(key);
+      // While a steer is still escalating, keep the busy streak so the next
+      // busy drain advances toward the interrupt threshold. The interrupt (or a
+      // verified idle turn) ends the streak.
+      if (!forceSteer || forceInterrupt) {
+        this.busyQueues.delete(key);
+        this.busyAttempts.delete(key);
+      }
 
-      // Deliver queued messages: batch if multiple entries, or single entry with appropriate steering
+      // Deliver queued messages: batch if multiple entries, or single entry with
+      // appropriate steering. An interrupt overrides steer so the active turn
+      // is canceled rather than fed work it will never reach (#1265).
+      const deliverSteer = (requested: boolean): boolean => (forceInterrupt ? false : requested);
       if (list.length > 1) {
         const isAnySos = list.some((e) => Boolean(e.isSos));
         const batchCount = list.length;
         const combinedMsg = `[forgejo-hook] Batch notification (${batchCount} events):\n\n` +
           list.map((e, idx) => `### Event ${idx + 1}\n${e.msg}`).join("\n\n---\n\n");
         const ok = await this.deliverMessage(targetAgentId, combinedMsg, {
-          steer: isAnySos || forceSteer,
+          steer: deliverSteer(isAnySos || forceSteer),
           noWait: false,
         });
         if (ok) {
@@ -9707,7 +9883,7 @@ export class HookRouter {
       } else if (list.length === 1) {
         const entry = list[0];
         const ok = await this.deliverMessage(targetAgentId, entry.msg, {
-          steer: Boolean(entry.isSos) || forceSteer,
+          steer: deliverSteer(Boolean(entry.isSos) || forceSteer),
           noWait: false,
         });
         if (ok) {

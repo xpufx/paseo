@@ -1747,6 +1747,11 @@ export const RotationRolePolicySchema = z.object({
   failureThreshold: z.number().int().positive().optional(),
   /** Minimum age of the previous automatic rotation before another can fire. */
   cooldownMs: z.number().int().positive().optional(),
+  /**
+   * A turn younger than this is shielded from automatic rotation. An older
+   * mid-turn is treated as a stalled runaway and becomes rotatable (#1265).
+   */
+  midTurnImmunityMs: z.number().int().positive().optional(),
 });
 export type RotationRolePolicy = z.infer<typeof RotationRolePolicySchema>;
 

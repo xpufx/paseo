@@ -25,6 +25,14 @@ export const ROTATION_ROLES: readonly RotationRole[] = [
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 
+/**
+ * A mid-turn younger than this keeps rotation immunity. Older mid-turns are
+ * treated as stalled runaways: a healthy turn does not sit active this long, so
+ * the immunity that normally protects an in-flight turn becomes the deadlock
+ * that strands queued work (#1265).
+ */
+export const DEFAULT_MID_TURN_IMMUNITY_MS = 15 * MINUTE;
+
 /** Built-in defaults from the approved #1019 spec. */
 export const DEFAULT_ROTATION_ROLE_POLICY: Record<RotationRole, Required<RotationRolePolicy>> = {
   orchestrator: {
@@ -35,6 +43,7 @@ export const DEFAULT_ROTATION_ROLE_POLICY: Record<RotationRole, Required<Rotatio
     failureWindowMs: 15 * MINUTE,
     failureThreshold: 3,
     cooldownMs: 30 * MINUTE,
+    midTurnImmunityMs: DEFAULT_MID_TURN_IMMUNITY_MS,
   },
   "front-desk": {
     enabled: true,
@@ -44,6 +53,7 @@ export const DEFAULT_ROTATION_ROLE_POLICY: Record<RotationRole, Required<Rotatio
     failureWindowMs: 15 * MINUTE,
     failureThreshold: 3,
     cooldownMs: 30 * MINUTE,
+    midTurnImmunityMs: DEFAULT_MID_TURN_IMMUNITY_MS,
   },
   auditor: {
     enabled: false,
@@ -53,6 +63,7 @@ export const DEFAULT_ROTATION_ROLE_POLICY: Record<RotationRole, Required<Rotatio
     failureWindowMs: 15 * MINUTE,
     failureThreshold: 3,
     cooldownMs: 30 * MINUTE,
+    midTurnImmunityMs: DEFAULT_MID_TURN_IMMUNITY_MS,
   },
   "coding-agent": {
     enabled: false,
@@ -62,6 +73,7 @@ export const DEFAULT_ROTATION_ROLE_POLICY: Record<RotationRole, Required<Rotatio
     failureWindowMs: 15 * MINUTE,
     failureThreshold: 3,
     cooldownMs: 30 * MINUTE,
+    midTurnImmunityMs: DEFAULT_MID_TURN_IMMUNITY_MS,
   },
 };
 
@@ -133,6 +145,12 @@ export interface RotationTriggerContext {
   lastRotationAtMs?: number | null;
   /** True while the incumbent is mid-turn. */
   midTurn?: boolean;
+  /**
+   * Epoch ms when the incumbent's active turn started, when known. Combined
+   * with `midTurn`, this distinguishes a healthy in-flight turn from a stalled
+   * runaway: a turn older than `midTurnImmunityMs` no longer blocks rotation.
+   */
+  turnStartedAtMs?: number | null;
   /** True while a rotation for this role/repo is already running. */
   inFlight?: boolean;
   /** Explicit manual trigger: bypasses enabled/cooldown/thresholds/mid-turn. */
@@ -144,7 +162,8 @@ export type RotationTriggerReason =
   | "age"
   | "turns"
   | "token-pressure"
-  | "failures";
+  | "failures"
+  | "stalled-turn";
 
 export type RotationBlockReason = "disabled" | "cooldown" | "mid-turn" | "in-flight";
 
@@ -215,7 +234,30 @@ export function evaluateRotationTrigger(
 
   if (!policy.enabled) return empty("disabled");
   if (cooldownRemainingMs > 0) return empty("cooldown");
-  if (context.midTurn) return empty("mid-turn");
+
+  if (context.midTurn) {
+    const immunityMs = policy.midTurnImmunityMs;
+    const turnAgeMs = context.turnStartedAtMs != null ? nowMs - context.turnStartedAtMs : null;
+    // Unknown turn age or an unconfigured window keeps the safe default: do not
+    // rotate out from under a turn we cannot prove is stalled.
+    if (immunityMs <= 0 || turnAgeMs == null || turnAgeMs < immunityMs) {
+      return empty("mid-turn");
+    }
+    // Immunity expired: the turn has outlived a plausible in-flight window and
+    // is treated as a stalled runaway. Rotating here is the only escape when
+    // the turn never yields (and therefore never consumes a steer).
+    return {
+      shouldRotate: true,
+      reason: "stalled-turn",
+      triggers: ["stalled-turn"],
+      blocked: null,
+      cooldownRemainingMs,
+      policy,
+      reasons: [
+        `mid-turn ${Math.round(turnAgeMs / MINUTE)}m >= ${Math.round(immunityMs / MINUTE)}m immunity`,
+      ],
+    };
+  }
 
   const triggers: RotationTriggerReason[] = [];
   const reasons: string[] = [];

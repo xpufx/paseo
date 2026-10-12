@@ -62,6 +62,9 @@ import {
   detectStaleErrorGhosting,
   detectProviderQuotaExhaustion,
   findProviderRetryQuotaError,
+  detectRepetitiveToolLoop,
+  toolCallSignature,
+  DEFAULT_REPETITIVE_TOOL_LOOP_THRESHOLD,
   scanTimelineRetryErrors,
   recordModelQuotaFailure,
   getCachedModelHealth,
@@ -2302,8 +2305,8 @@ describe("hook-router fleet watchdog audit (#458)", () => {
 
   it("reports a clean audit when no anomalies are present", async () => {
     const cleanMap = new Map<string, WatchdogAgent>([
-      ["agent-1", { id: "agent-1", status: "idle", lastError: null }],
-      ["agent-2", { id: "agent-2", status: "running", lastError: null }],
+      ["agent-1", { id: "agent-1", status: "idle", lastError: null, role: "orchestrator", labels: { role: "orchestrator" } }],
+      ["agent-2", { id: "agent-2", status: "running", lastError: null, role: "worker", labels: { role: "worker" } }],
     ]);
     const audit = await router.runWatchdogAudit({
       orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
@@ -2323,7 +2326,9 @@ describe("hook-router fleet watchdog audit (#458)", () => {
       ["adhoc-2", { id: "adhoc-2", status: "running", lastError: null, labels: {} }],
     ]);
     const audit = await router.runWatchdogAudit({
-      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      // An unenrolled repo record is skipped by the missing-orchestrator pass
+      // (#1214), keeping this fixture focused on ad-hoc exclusion.
+      orchestratorRecords: [{ key: "unenrolled-repo", agentId: "agent-1" }],
       agentMap: adhocMap,
       deliver: fakeDeliver,
       reloadAgent: fakeReload,
@@ -2339,7 +2344,7 @@ describe("hook-router fleet watchdog audit (#458)", () => {
       ["adhoc-quota", { id: "adhoc-quota", status: "error", lastError: "usage limit exceeded", labels: {} }],
     ]);
     const audit = await router.runWatchdogAudit({
-      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      orchestratorRecords: [{ key: "unenrolled-repo", agentId: "agent-1" }],
       agentMap: adhocMap,
       deliver: fakeDeliver,
       reloadAgent: fakeReload,
@@ -2366,12 +2371,47 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.equal(audit.audited.orchestrators, 1);
   });
 
+  it("raises a REPETITIVE_TOOL_LOOP anomaly and alerts Front Desk for a runaway turn (#1265)", async () => {
+    const loop = Array.from({ length: 15 }, () => ({
+      type: "tool_call",
+      callId: "c",
+      name: "read",
+      status: "completed",
+      detail: { type: "read", filePath: "/etc/hosts" },
+    }));
+    const fleetMap = new Map<string, WatchdogAgent>([
+      [
+        "orch-loop",
+        {
+          id: "orch-loop",
+          status: "running",
+          lastError: null,
+          role: "orchestrator",
+          labels: { role: "orchestrator" },
+          recentTimeline: loop as any,
+        },
+      ],
+    ]);
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "orch-loop" }],
+      agentMap: fleetMap,
+      deliver: fakeDeliver,
+      reloadAgent: fakeReload,
+      recover: false,
+    });
+    const anomaly = audit.anomalies.find((a) => a.type === "REPETITIVE_TOOL_LOOP");
+    assert.ok(anomaly, "runaway loop must be classified as an anomaly");
+    assert.equal(anomaly?.severity, "high");
+    assert.match(anomaly?.details?.REPETITIVE_TOOL_LOOP ?? "", /15 identical consecutive tool calls/);
+    assert.ok(delivered.some((d) => d.id === frontDeskId && d.msg.includes("REPETITIVE_TOOL_LOOP")));
+  });
+
   it("skips ad-hoc agents with idle turns from triggering alerts", async () => {
     const adhocMap = new Map<string, WatchdogAgent>([
       ["adhoc-idle", { id: "adhoc-idle", status: "idle", lastError: null, labels: {} }],
     ]);
     const audit = await router.runWatchdogAudit({
-      orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
+      orchestratorRecords: [{ key: "unenrolled-repo", agentId: "agent-1" }],
       agentMap: adhocMap,
       deliver: fakeDeliver,
       reloadAgent: fakeReload,
@@ -4307,6 +4347,84 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     assert.equal(plan.blockedReason, "provider/quota exhaustion requires operator circuit-break");
   });
 
+  it("classifies runaway repetitive tool loops and ignores output-only differences (#1265)", () => {
+    const readCall = (filePath: string, content = "same") => ({
+      type: "tool_call",
+      callId: "call-1",
+      name: "read",
+      status: "completed",
+      detail: { type: "read", filePath, content },
+    });
+    const loop = Array.from({ length: 15 }, (_, i) => readCall("/etc/hosts", `chunk-${i}`));
+    assert.equal(detectRepetitiveToolLoop(loop), 15);
+    assert.equal(detectRepetitiveToolLoop(loop, 16), 0, "under the threshold is healthy");
+    assert.equal(DEFAULT_REPETITIVE_TOOL_LOOP_THRESHOLD, 15);
+
+    // Reasoning between identical calls does not break the run.
+    const interleaved: unknown[] = [];
+    for (let i = 0; i < 15; i += 1) {
+      interleaved.push({ type: "reasoning", text: "still looking" });
+      interleaved.push(readCall("/etc/hosts", `chunk-${i}`));
+    }
+    assert.equal(detectRepetitiveToolLoop(interleaved), 15);
+
+    // Varying the input arguments breaks the run.
+    const varied = Array.from({ length: 30 }, (_, i) => readCall(`/etc/hosts/${i}`));
+    assert.equal(detectRepetitiveToolLoop(varied), 0);
+
+    // Only input arguments define a tool call's identity, never its result.
+    const signatureA = toolCallSignature({
+      type: "tool_call",
+      name: "shell",
+      detail: { type: "shell", command: "ls", output: "one" },
+    });
+    const signatureB = toolCallSignature({
+      type: "tool_call",
+      name: "shell",
+      detail: { type: "shell", command: "ls", output: "two" },
+    });
+    assert.equal(signatureA, signatureB);
+    assert.notEqual(
+      signatureA,
+      toolCallSignature({ type: "tool_call", name: "shell", detail: { type: "shell", command: "pwd" } }),
+    );
+    assert.equal(toolCallSignature({ type: "assistant_message", text: "hi" }), null);
+  });
+
+  it("fuses repetitive tool loops into assessAgentHealth and plans stop+steer (#1265)", () => {
+    const loop = Array.from({ length: 15 }, () => ({
+      type: "tool_call",
+      callId: "c",
+      name: "read",
+      status: "completed",
+      detail: { type: "read", filePath: "/etc/hosts" },
+    }));
+    const assessment = assessAgentHealth(
+      "agent-loop-1",
+      { id: "agent-loop-1", status: "running", lastError: null, recentTimeline: loop as any },
+      null,
+      now,
+    );
+    assert.deepEqual(assessment.taxonomy, ["REPETITIVE_TOOL_LOOP"]);
+    assert.equal(assessment.healthy, false);
+    assert.equal(assessment.severities.REPETITIVE_TOOL_LOOP, "high");
+    assert.match(assessment.details.REPETITIVE_TOOL_LOOP ?? "", /15 identical consecutive tool calls/);
+
+    const plan = planWatchdogRecovery(assessment.taxonomy);
+    assert.equal(plan.stop, true);
+    assert.equal(plan.steer, true);
+    assert.equal(plan.blockedReason, null);
+
+    // A finished turn is not flagged even when its history contains the loop.
+    const idle = assessAgentHealth(
+      "agent-loop-idle",
+      { id: "agent-loop-idle", status: "idle", lastError: null, recentTimeline: loop as any },
+      null,
+      now,
+    );
+    assert.equal(idle.taxonomy.includes("REPETITIVE_TOOL_LOOP"), false);
+  });
+
   it("scans daemon logs for provider-retry quota exhaustion lines (#890)", () => {
     const dir = mkdtempSync(join(tmpdir(), "paseo-quota-test-"));
     try {
@@ -4878,7 +4996,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       delivered.push({ id, msg, steer: o?.steer });
       return true;
     };
-    const map = new Map<string, WatchdogAgent>([["agent-zombie", { id: "agent-zombie", status: "running" }]]);
+    const map = new Map<string, WatchdogAgent>([["agent-zombie", { id: "agent-zombie", status: "running", role: "orchestrator", labels: { role: "orchestrator" } }]]);
 
     const audit = await router.runWatchdogAudit({
       agentMap: map,
@@ -4911,7 +5029,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       return true;
     };
     const map = new Map<string, WatchdogAgent>([
-      ["agent-quota", { id: "agent-quota", status: "idle", lastError: "You've hit your usage limit" }],
+      ["agent-quota", { id: "agent-quota", status: "idle", lastError: "You've hit your usage limit", role: "orchestrator", labels: { role: "orchestrator" } }],
     ]);
 
     const audit = await router.runWatchdogAudit({
@@ -4938,7 +5056,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       delivered.push({ id, msg });
       return true;
     };
-    const map = new Map<string, WatchdogAgent>([["agent-ghost", { id: "agent-ghost", status: "idle" }]]);
+    const map = new Map<string, WatchdogAgent>([["agent-ghost", { id: "agent-ghost", status: "idle", role: "orchestrator", labels: { role: "orchestrator" } }]]);
 
     const runOnce = () =>
       router.runWatchdogAudit({
@@ -5001,7 +5119,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       return true;
     };
     const map = new Map<string, WatchdogAgent>([
-      ["wedged-1", { id: "wedged-1", status: "idle" }],
+      ["wedged-1", { id: "wedged-1", status: "idle", role: "orchestrator", labels: { role: "orchestrator" } }],
     ]);
 
     const audit = await router.runWatchdogAudit({
@@ -5034,7 +5152,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       return true;
     };
     const map = new Map<string, WatchdogAgent>([
-      ["orch-loop", { id: "orch-loop", status: "idle" }],
+      ["orch-loop", { id: "orch-loop", status: "idle", role: "orchestrator", labels: { role: "orchestrator" } }],
     ]);
     const cancellations = new Map([["orch-loop", cancelTime]]);
 
@@ -5808,7 +5926,63 @@ describe("hook-router stale latestAgentMap cache invalidation and live verificat
     assert.equal(sentMessages[0].text, "Prompt for the stalled active turn");
     assert.equal(sentMessages[0].options.activeTurnBehavior, "steer");
     assert.equal(router.getQueue(key).length, 0);
-    assert.equal(router.busyAttempts.has(key), false);
+    // The streak is retained after a steer so the next busy drain can keep
+    // escalating toward the interrupt threshold (#1265).
+    assert.equal(router.busyAttempts.get(key), 1);
+  });
+
+  it("escalates from steer to interrupting the stalled turn at the interrupt threshold (#1265)", async () => {
+    const key = "forge.mrs.uppidi.com/xpufx-org/drain-escalation";
+    const targetAgentId = "agent-drain-escalation";
+    const sentMessages: Array<{ text: string; options: any }> = [];
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          current: () => ({ id, status: "running", activeTurn: { id: "turn-runaway" } }),
+          refresh: async () => ({
+            agent: { id, status: "running", activeTurn: { id: "turn-runaway" } },
+          }),
+          send: async (text: string, options: any) => {
+            sentMessages.push({ text, options });
+          },
+        }),
+      },
+    } as any;
+    const mockServer = {
+      paseo: mockPaseo,
+      events: { on: () => () => {} },
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    const router = new HookRouter(mockServer, {
+      queueDir,
+      stateDir,
+      port: 0,
+      drainBusyAttemptLimit: 8,
+      drainInterruptAttemptLimit: 12,
+    });
+    router.writeOrchestrator(key, targetAgentId);
+    // Seven prior busy checks: the next four drains steer (8..11) and the fifth
+    // interrupts (12) because the turn never yields.
+    router.busyAttempts.set(key, 7);
+
+    for (let i = 0; i < 5; i += 1) {
+      router.enqueue(key, `Prompt ${i} for the runaway turn`);
+      await new Promise((r) => setTimeout(r, 30));
+    }
+
+    assert.equal(sentMessages.length, 5);
+    for (const message of sentMessages.slice(0, 4)) {
+      assert.equal(message.options.activeTurnBehavior, "steer");
+    }
+    assert.equal(sentMessages[4].options.activeTurnBehavior, "interrupt");
+    assert.equal(router.getQueue(key).length, 0);
+    assert.equal(router.busyAttempts.has(key), false, "the interrupt ends the busy streak");
   });
 
   it("agent.updated lifecycle event with idle status immediately updates cache and resets busyAttempts", async () => {
