@@ -478,16 +478,22 @@ export function AgentHealthGauge({
   expanded = false,
   now = Date.now(),
 }: AgentHealthGaugeProps) {
-  const { colors } = useFleetTheme();
+  const { colors, alpha } = useFleetTheme();
   const metrics = agent.metrics;
   // Absent gauge for legacy payloads: no metrics block, nothing rendered.
   if (!metrics) return null;
 
   const gauge: HealthGauge = deriveHealthGauge(agent, DEFAULT_HEALTH_GAUGE_THRESHOLDS, now);
   const toneColor = healthToneColor(gauge.overall, colors);
-  const trackColor = colors.surface2;
+  // Enhanced visibility (#1205): use a semi-opaque surface tone with a
+  // contrasting border so the track is always discernible on light and dark surfaces.
+  const trackColor = alpha(colors.foregroundMuted, 0.5);
   const width = compact ? 28 : 56;
   const height = 4;
+  // Three segments with 2px gaps. A non-zero fill below ~2px renders as a
+  // stray tick mark rather than a level, so partial fills floor at 2px (#1205).
+  const segmentWidth = (width - 4) / 3;
+  const minFillRatio = Math.min(2, segmentWidth) / segmentWidth;
 
   const isRunning =
     String(agent.status ?? "").toLowerCase() === "running" &&
@@ -512,8 +518,8 @@ export function AgentHealthGauge({
         width: compact ? 12 : 14,
         height: compact ? 12 : 14,
         borderRadius: compact ? 6 : 7,
-        borderWidth: 1.5,
-        borderColor: trackColor,
+        borderWidth: 1,
+        borderColor: colors.border,
         alignItems: "center",
         justifyContent: "center",
         position: "relative",
@@ -542,7 +548,7 @@ export function AgentHealthGauge({
     // Thin stacked micro-bar: three side-by-side segments (context / turn / error).
     <View
       testID={`agent-health-gauge-track-${agent.id}`}
-      style={{ width, height, flexDirection: "row", gap: 2 }}
+      style={{ width, height, flexDirection: "row", gap: 2, borderRadius: 4, borderWidth: 1, borderColor: colors.border }}
     >
       {gauge.segments.map((segment: HealthGaugeSegment) => (
         <View
@@ -558,9 +564,11 @@ export function AgentHealthGauge({
         >
           <View
             style={{
-              width: `${Math.round(segment.ratio * 100)}%`,
+              width: `${Math.round(
+                (segment.ratio > 0 ? Math.max(segment.ratio, minFillRatio) : 0) * 100,
+              )}%`,
               height: "100%",
-              borderRadius: 2,
+              borderRadius: 1,
               backgroundColor: healthToneColor(segment.tone, colors),
             }}
           />
