@@ -681,7 +681,7 @@ describe("two-tier spawn authority guard (#573)", () => {
     }
   });
 
-  it("resolveDeskWorkingDirs includes ~/code/meta and the desk's recorded cwd", () => {
+  it("resolveDeskWorkingDirs includes ~/code/meta", () => {
     const originalHome = process.env.HOME;
     process.env.HOME = "/home/user";
     try {

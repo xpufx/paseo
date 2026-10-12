@@ -8,7 +8,6 @@ import { inheritProjectFromParents } from "../shared/classify.js";
 import { buildAgentTree } from "../shared/tree.js";
 import {
   buildWorkspaceProjectMapFromRegistry,
-  readOnDiskAgentMetadata,
   readQuotaAlertAgentIds,
   readWorkspaceProjectMap,
 } from "./storage.js";
@@ -35,7 +34,7 @@ export interface ReadFleetOptions {
 export async function readRawRoster(
   context?: any,
   options?: ReadFleetOptions,
-): Promise<{ roster: RawAgentRecord[]; source: "sdk" | "cli" | "disk" | "none" }> {
+): Promise<{ roster: RawAgentRecord[]; source: "sdk" | "cli" | "none"; error?: string }> {
   const execFn = options?.execFileAsync || defaultExecFileAsync;
 
   // 1. Try SDK (Pure RPC / daemon-owned state — no disk reads)
@@ -43,47 +42,46 @@ export async function readRawRoster(
     try {
       const list = await context.paseo.agents.list();
       const entries = Array.isArray(list?.entries) ? list.entries : [];
-      if (entries.length > 0) {
-        const roster: RawAgentRecord[] = [];
-        for (const entry of entries) {
-          const agent = (entry as any)?.agent ?? entry;
-          const id = String(agent?.id ?? "");
-          if (!id) continue;
-          roster.push({
-            id,
-            name: (agent.name as string) || (agent.title as string) || "",
-            title: (agent.title as string) || (agent.name as string) || "",
-            status: (agent.status as string) || "idle",
-            provider: (agent.provider as string) || "",
-            model: (agent.model as string) ?? null,
-            cwd: (agent.cwd as string) || "",
-            workspaceId: (agent.workspaceId as string) || undefined,
-            created: (agent.created as string) || (agent.createdAt as string) || undefined,
-            updatedAt: (agent.updatedAt as string) || undefined,
-            lastActivityAt: (agent.lastActivityAt as string) ?? undefined,
-            labels: ((agent.labels as Record<string, string>) || {}),
-            parentId:
-              (agent.labels as Record<string, string>)?.["paseo.parent-agent-id"] ||
-              (agent.parentId as string) ||
-              null,
-            lastError: (agent.lastError as string) || undefined,
-            requiresAttention: (agent.requiresAttention as boolean) ?? undefined,
-            attentionReason: (agent.attentionReason as string) || undefined,
-            attentionTimestamp: (agent.attentionTimestamp as string) || undefined,
-            pendingPermissions:
-              (agent.pendingPermissions as Array<Record<string, unknown>>) ?? undefined,
-            activeTurn: (agent.activeTurn as RawAgentRecord["activeTurn"]) || undefined,
-            lastUsage: (agent.lastUsage as RawAgentRecord["lastUsage"]) || undefined,
-          });
-        }
-        return { roster, source: "sdk" };
+      const roster: RawAgentRecord[] = [];
+      for (const entry of entries) {
+        const agent = (entry as any)?.agent ?? entry;
+        const id = String(agent?.id ?? "");
+        if (!id) continue;
+        roster.push({
+          id,
+          name: (agent.name as string) || (agent.title as string) || "",
+          title: (agent.title as string) || (agent.name as string) || "",
+          status: (agent.status as string) || "idle",
+          provider: (agent.provider as string) || "",
+          model: (agent.model as string) ?? null,
+          cwd: (agent.cwd as string) || "",
+          workspaceId: (agent.workspaceId as string) || undefined,
+          created: (agent.created as string) || (agent.createdAt as string) || undefined,
+          updatedAt: (agent.updatedAt as string) || undefined,
+          lastActivityAt: (agent.lastActivityAt as string) ?? undefined,
+          labels: ((agent.labels as Record<string, string>) || {}),
+          parentId:
+            (agent.labels as Record<string, string>)?.["paseo.parent-agent-id"] ||
+            (agent.parentId as string) ||
+            null,
+          lastError: (agent.lastError as string) || undefined,
+          requiresAttention: (agent.requiresAttention as boolean) ?? undefined,
+          attentionReason: (agent.attentionReason as string) || undefined,
+          attentionTimestamp: (agent.attentionTimestamp as string) || undefined,
+          pendingPermissions:
+            (agent.pendingPermissions as Array<Record<string, unknown>>) ?? undefined,
+          activeTurn: (agent.activeTurn as RawAgentRecord["activeTurn"]) || undefined,
+          lastUsage: (agent.lastUsage as RawAgentRecord["lastUsage"]) || undefined,
+        });
       }
-    } catch {
-      // Fall through to CLI / disk
+      return { roster, source: "sdk" };
+    } catch (err: any) {
+      // Deterministic fail-fast: if the daemon SDK exists and throws, fail fast
+      return { roster: [], source: "none", error: err?.message || String(err) };
     }
   }
 
-  // 2. Try CLI (daemon client via CLI)
+  // 2. Try CLI (daemon client via CLI when running in CLI-only environment without SDK)
   try {
     const { stdout } = await execFn("paseo", ["ls", "--json"], { timeout: 5000, encoding: "utf-8" });
     const parsed = JSON.parse(stdout);
@@ -118,21 +116,8 @@ export async function readRawRoster(
       }
       return { roster, source: "cli" };
     }
-  } catch {
-    // Fall through to disk only
-  }
-
-  // 3. Fall back to on-disk metadata only if daemon/CLI is unreachable
-  const disk = readOnDiskAgentMetadata({ home: options?.home });
-  if (disk.size > 0) {
-    const roster: RawAgentRecord[] = [];
-    for (const [id, meta] of disk) {
-      roster.push({
-        id,
-        ...meta,
-      });
-    }
-    return { roster, source: "disk" };
+  } catch (err: any) {
+    return { roster: [], source: "none", error: err?.message || String(err) };
   }
 
   return { roster: [], source: "none" };

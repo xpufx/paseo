@@ -736,12 +736,6 @@ export const forgeContextContract = defineContract({
   output: ForgeContextOutputSchema,
 });
 
-export const forgeForgeContextContract = defineContract({
-  name: "forge.forge-context",
-  description: "Git-origin forge coordinates for a workspace, independent of issue queries",
-  input: ForgeContextInputSchema,
-  output: ForgeContextOutputSchema,
-});
 
 // ---------------------------------------------------------------------------
 // Agent envelope parsing

@@ -321,7 +321,7 @@ export const ForgeContextOutputSchema = z.object({
 export type ForgeContextOutput = z.infer<typeof ForgeContextOutputSchema>;
 
 export const forgeContextContract = defineContract({
-  name: "forge.forge-context",
+  name: "forge.context",
   description: "Git-origin forge coordinates for a workspace, independent of issue queries",
   input: ForgeContextInputSchema,
   output: ForgeContextOutputSchema,

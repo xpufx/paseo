@@ -140,7 +140,7 @@ versioned with the plugin instead of tracking a host binary.
 - There is no daemon-side board cache: reads are served live from the API.
 - Client-side: `useRpcQuery` for reads with a 30 s `refetchInterval` (the
   issues list), plus a manual Refresh; the settings form queries
-  `forge.forge-context` independently so the token/host fields render while
+  `forge.context` independently so the token/host fields render while
   issues load or fail (regression #152). Writes go through `useRpcMutation`
   and refetch the board/detail on success.
 - Handlers stay cheap because each query is one or two API calls; a failed

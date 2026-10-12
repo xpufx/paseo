@@ -241,7 +241,7 @@ const PARTS = [
   },
   {
     file: `${PLUGIN}/server/agents.ts`,
-    part: "Fleet topology, workspace mapping, permission scope, on-disk metadata",
+    part: "Fleet topology, workspace mapping, permission scope, desk working dirs",
     layer: "server",
     label: DETERMINISTIC,
     anchors: {
@@ -249,7 +249,7 @@ const PARTS = [
         "buildAgentTree",
         "getWorkspaceProjectMap",
         "findScopeMatchingPermission",
-        "getAgentDiskMetadataMap",
+        "resolveDeskWorkingDirs",
         "checkRepoMainDirty",
       ],
     },

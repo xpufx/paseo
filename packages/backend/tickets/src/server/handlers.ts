@@ -8,7 +8,6 @@ import {
   PASEO_LABEL_SCOPES,
   activeForgeForDirectory,
   forgeContextContract,
-  forgeForgeContextContract,
   openIssuesContract,
   searchIssuesContract,
   issueDetailContract,
@@ -637,7 +636,6 @@ export function registerTicketHandlers(
   server.handle(openIssuesContract, (input: OpenIssuesInput) => handlers.handleOpenIssues(input));
   server.handle(searchIssuesContract, (input: SearchIssuesInput) => handlers.handleSearchIssues(input));
   server.handle(forgeContextContract, (input: ForgeContextInput) => handlers.handleForgeContext(input));
-  server.handle(forgeForgeContextContract, (input: ForgeContextInput) => handlers.handleForgeContext(input));
   server.handle(issueDetailContract, (input: IssueDetailInput) => handlers.handleIssueDetail(input));
   server.handle(setLabelContract, (input: SetLabelInput) => handlers.handleSetLabel(input));
   server.handle(addCommentContract, (input: AddCommentInput) => handlers.handleAddComment(input));

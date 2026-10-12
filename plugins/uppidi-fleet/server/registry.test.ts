@@ -23,7 +23,6 @@ describe("uppidi-fleet server registration (issue #761)", () => {
       "forge.open-issues",
       "forge.search-issues",
       "forge.context",
-      "forge.forge-context",
       "forge.issue-detail",
       "forge.set-label",
       "forge.add-comment",

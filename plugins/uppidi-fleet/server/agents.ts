@@ -642,57 +642,6 @@ export function getQuotaAlertAgentIds(): Set<string> {
   return ids;
 }
 
-// Index on disk: ~/.paseo/agents/*/*.json
-export function getAgentDiskMetadataMap(): Map<string, Partial<RawAgentRecord>> {
-  const metaMap = new Map<string, Partial<RawAgentRecord>>();
-  try {
-    const paseoDir = process.env.PASEO_DIR || path.join(resolveHostHome(), ".paseo");
-    const agentsDir = path.join(paseoDir, "agents");
-    if (!fs.existsSync(agentsDir)) return metaMap;
-
-    const subdirs = fs.readdirSync(agentsDir, { withFileTypes: true }).filter((d) => d.isDirectory());
-    for (const dir of subdirs) {
-      const fullDir = path.join(agentsDir, dir.name);
-      const files = fs.readdirSync(fullDir);
-      for (const file of files) {
-        if (!file.endsWith(".json")) continue;
-        const agentId = file.replace(/\.json$/, "");
-        const filePath = path.join(fullDir, file);
-        try {
-          const content = fs.readFileSync(filePath, "utf-8");
-          const data = JSON.parse(content);
-          metaMap.set(agentId, {
-            id: data.id || agentId,
-            name: data.name || data.title,
-            title: data.title,
-            provider: data.provider,
-            model: data.runtimeInfo?.model || data.config?.model || null,
-            status: data.lastStatus || data.status,
-            cwd: data.cwd,
-            createdAt: data.createdAt,
-            updatedAt: data.updatedAt,
-            lastActivityAt: data.lastActivityAt || data.updatedAt,
-            workspaceId: data.workspaceId,
-            labels: data.labels,
-            parentId: data.labels?.["paseo.parent-agent-id"] || null,
-            lastError: data.lastError,
-            requiresAttention: data.requiresAttention,
-            attentionReason: data.attentionReason,
-            attentionTimestamp: data.attentionTimestamp,
-            pendingPermissions: data.pendingPermissions,
-            activeTurn: data.activeTurn,
-            lastUsage: data.lastUsage,
-          });
-        } catch {
-          // Ignore parse errors on individual files
-        }
-      }
-    }
-  } catch {
-    // Best-effort
-  }
-  return metaMap;
-}
 
 
 export interface RepoRootInspection {
@@ -793,14 +742,13 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
           });
         }
       }
-    } catch {
-      // Fallback to CLI if SDK call throws
+    } catch (err: any) {
+      // Deterministic fail-fast: if the daemon SDK exists and throws, fail fast
+      console.warn(`[uppidi-fleet:agents] SDK agents.list() failed:`, err?.message || err);
+      return [];
     }
-  }
-
-  // 2. If no agents from SDK, fallback to CLI or disk metadata
-  if (mergedAgents.size === 0) {
-    const diskMeta = getAgentDiskMetadataMap();
+  } else {
+    // 2. CLI fallback only when SDK is absent in context (CLI-only environment)
     try {
       const { stdout } = await execFileAsync("paseo", ["ls", "--json", "--global"], {
         timeout: 5000,
@@ -810,60 +758,33 @@ export async function fetchPaseoAgents(context?: PluginHandlerContext): Promise<
       if (Array.isArray(parsed) && parsed.length > 0) {
         for (const item of parsed) {
           if (!item?.id) continue;
-          const disk = diskMeta.get(item.id) || {};
           mergedAgents.set(item.id, {
             id: item.id,
-            name: item.name || item.title || disk.name,
-            title: item.title || disk.title,
-            status: item.status || disk.status,
-            provider: item.provider || disk.provider,
-            model: disk.model || (item.provider?.includes("/") ? item.provider.split("/")[1] : undefined),
-            cwd: item.cwd || disk.cwd,
-            created: item.created || disk.createdAt,
-            updatedAt: disk.updatedAt,
-            lastActivityAt: disk.lastActivityAt,
-            workspaceId: disk.workspaceId,
-            labels: disk.labels,
-            parentId: disk.parentId || null,
-            lastError: disk.lastError,
-            requiresAttention: disk.requiresAttention,
-            attentionReason: disk.attentionReason,
-            attentionTimestamp: disk.attentionTimestamp,
-            pendingPermissions: disk.pendingPermissions,
-            activeTurn: disk.activeTurn,
-            lastUsage: disk.lastUsage,
+            name: item.name || item.title || "",
+            title: item.title || item.name || "",
+            status: item.status || "idle",
+            provider: item.provider || "",
+            model: item.provider?.includes("/") ? item.provider.split("/")[1] : undefined,
+            cwd: item.cwd || "",
+            created: item.created || item.createdAt,
+            updatedAt: item.updatedAt,
+            lastActivityAt: item.lastActivityAt,
+            workspaceId: item.workspaceId,
+            labels: item.labels || {},
+            parentId: item.labels?.["paseo.parent-agent-id"] || item.parentId || null,
+            lastError: item.lastError,
+            requiresAttention: item.requiresAttention,
+            attentionReason: item.attentionReason,
+            attentionTimestamp: item.attentionTimestamp,
+            pendingPermissions: item.pendingPermissions,
+            activeTurn: item.activeTurn,
+            lastUsage: item.lastUsage,
           });
         }
       }
-    } catch {
-      // If CLI unavailable, fall back to disk
-    }
-
-    if (mergedAgents.size === 0 && diskMeta.size > 0) {
-      for (const [id, meta] of diskMeta) {
-        mergedAgents.set(id, {
-          id,
-          name: meta.name || meta.title || id,
-          title: meta.title || meta.name || id,
-          status: meta.status || "idle",
-          provider: meta.provider || "",
-          model: meta.model || null,
-          cwd: meta.cwd || "",
-          created: meta.createdAt,
-          updatedAt: meta.updatedAt,
-          lastActivityAt: meta.lastActivityAt,
-          workspaceId: meta.workspaceId,
-          labels: meta.labels || {},
-          parentId: meta.parentId || null,
-          lastError: meta.lastError,
-          requiresAttention: meta.requiresAttention,
-          attentionReason: meta.attentionReason,
-          attentionTimestamp: meta.attentionTimestamp,
-          pendingPermissions: meta.pendingPermissions,
-          activeTurn: meta.activeTurn,
-          lastUsage: meta.lastUsage,
-        });
-      }
+    } catch (err: any) {
+      console.warn(`[uppidi-fleet:agents] CLI paseo ls failed:`, err?.message || err);
+      return [];
     }
   }
 
@@ -1090,11 +1011,15 @@ export async function handleUppidiArchiveAgent(
         return { ok: true, agentId, message: `Archived agent ${agentId}` };
       }
     } catch (err: any) {
-      // Fall through to CLI fallback
+      return {
+        ok: false,
+        agentId,
+        error: err?.message || String(err),
+      };
     }
   }
 
-  // 2. Fallback to CLI: paseo archive <agentId>
+  // 2. Fallback to CLI only when SDK is not present: paseo archive <agentId>
   try {
     await execFileAsync("paseo", ["archive", agentId], {
       timeout: 5000,
@@ -2241,9 +2166,10 @@ export async function allowPermission(
       }
     } catch (err: any) {
       console.warn(
-        `[uppidi-fleet:agents] SDK respondToPermission failed for ${agentId} ${requestId}, falling back to CLI:`,
+        `[uppidi-fleet:agents] SDK respondToPermission failed for ${agentId} ${requestId}:`,
         err?.message || err,
       );
+      return false;
     }
   }
   try {
@@ -2339,20 +2265,14 @@ function normalizeSpawnDir(dir: string | undefined): string | undefined {
 
 /**
  * Deterministic set of directories an orchestrator must never inherit as its
- * root: the desk's conventional `~/code/meta` checkout plus the desk agent's
- * recorded cwd (#573, same bug class as #530).
+ * root: the desk's conventional `~/code/meta` checkout (#573, same bug class as #530).
  */
-export function resolveDeskWorkingDirs(deskAgentId: string | null): Set<string> {
+export function resolveDeskWorkingDirs(_deskAgentId: string | null): Set<string> {
   const dirs = new Set<string>();
   const home = process.env.HOME ?? os.homedir();
   if (home) {
     const meta = normalizeSpawnDir(join(home, "code", "meta"));
     if (meta) dirs.add(meta);
-  }
-  if (deskAgentId) {
-    const disk = getAgentDiskMetadataMap().get(deskAgentId);
-    const recorded = normalizeSpawnDir(disk?.cwd);
-    if (recorded) dirs.add(recorded);
   }
   return dirs;
 }
