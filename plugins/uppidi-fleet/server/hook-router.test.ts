@@ -9173,6 +9173,72 @@ describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
       assert.equal(fourthSweep.notified, 1);
       assert.equal(deliveries.length, 3, "expected delivery when candidate set changes");
     });
+
+    it("re-emits an unchanged attention/orchestrator ticket on the periodic reconciliation pass (#1263)", async () => {
+      const deliveries: Array<{ agentId: string; prompt: string }> = [];
+      const mockPaseo = {
+        agents: {
+          ref: (id: string) => ({
+            send: async (prompt: string) => {
+              deliveries.push({ agentId: id, prompt });
+              return { ok: true };
+            },
+          }),
+        },
+      } as any;
+
+      const router = new HookRouter({} as any, {
+        queueDir,
+        stateDir,
+        port: 0,
+        boardReconciliationIntervalMs: 2 * 60 * 60 * 1000,
+      });
+      router.setActivePaseo(mockPaseo);
+      router.writeFrontDesk("fd-1", "operator");
+
+      const issue = {
+        number: 1020,
+        title: "MCP injection",
+        state: "open",
+        updated_at: "2026-10-06T17:11:38Z",
+        created_at: "2026-10-06T17:11:38Z",
+        comments: 0,
+        labels: [{ name: "attention/orchestrator" }, { name: "kind/feature" }],
+      };
+      const io: IssuesCheckIo = {
+        getOpenIssues: async () => ({ ok: true, issues: [issue] as any }),
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+        // Byte-matches the persisted signature, so the ticket is seen and unchanged.
+        loadCache: async () => ({
+          "1020": {
+            updated_at: "2026-10-06T17:11:38Z",
+            labels: ["attention/orchestrator", "kind/feature"],
+            comments_count: 0,
+          },
+        }),
+        saveCache: async () => {},
+      };
+
+      const t0 = 1_800_000_000_000;
+      const firstSweep = await router.runBoardSweep(["xpufx-org/paseo"], io, { now: t0 });
+      assert.equal(firstSweep.notified, 1);
+      assert.equal(deliveries.length, 1);
+
+      // Before the interval: an unchanged digest suppresses re-delivery.
+      const suppressed = await router.runBoardSweep(["xpufx-org/paseo"], io, { now: t0 + 60_000 });
+      assert.equal(suppressed.notified, 0);
+      assert.equal(deliveries.length, 1, "expected no delivery before the reconciliation interval");
+
+      // At the interval: the full reconciliation pass re-emits the ticket.
+      const reconciled = await router.runBoardSweep(["xpufx-org/paseo"], io, {
+        now: t0 + 2 * 60 * 60 * 1000,
+      });
+      assert.equal(reconciled.notified, 1);
+      assert.equal(deliveries.length, 2, "expected reconciliation to re-deliver the unchanged ticket");
+      assert.ok(deliveries[1].prompt.includes("xpufx-org/paseo: 1 actionable"));
+    });
   });
 });
 

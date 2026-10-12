@@ -208,6 +208,13 @@ export interface HookRouterOptions {
   watchdogBusyThreshold?: number;
   watchdogAlertCooldownMs?: number;
   boardSweepIntervalMs?: number;
+  /**
+   * Interval between forced full-reconciliation board sweeps (#1263). The
+   * reconciliation pass re-emits candidates even when the actionable digest is
+   * unchanged, recovering tickets hidden by the board-state cache. Defaults to
+   * {@link DEFAULT_BOARD_RECONCILIATION_INTERVAL_MS}; `0` disables it.
+   */
+  boardReconciliationIntervalMs?: number;
   frontDeskThrottleMs?: number;
   /** Consecutive busy drain checks before queued work is steered into the active turn. */
   drainBusyAttemptLimit?: number;
@@ -1580,6 +1587,14 @@ export const DEFAULT_WATCHDOG_STEER_MESSAGE =
 export const DEFAULT_WATCHDOG_BUSY_THRESHOLD = 5;
 export const DEFAULT_WATCHDOG_ALERT_COOLDOWN_MS = 2 * 60 * 1000;
 export const DEFAULT_BOARD_SWEEP_INTERVAL_MS = 3 * 60 * 1000;
+/**
+ * Interval between forced full-reconciliation sweeps (#1263). Routine sweeps
+ * suppress Front Desk delivery when the actionable digest is unchanged, which
+ * strands a candidate whose notification was never consumed (orchestrator
+ * busy, rotated, or missed). The reconciliation pass re-emits every candidate
+ * regardless of that digest. Defaults to 2h; `0` disables the periodic pass.
+ */
+export const DEFAULT_BOARD_RECONCILIATION_INTERVAL_MS = 2 * 60 * 60 * 1000;
 
 export const CANCELLATION_TIMEOUT_MARKER = "cancelagentrun: acknowledged turn still active after timeout";
 
@@ -3542,6 +3557,7 @@ export class HookRouter {
   public readonly watchdogBusyThreshold: number;
   public readonly watchdogAlertCooldownMs: number;
   public readonly boardSweepIntervalMs: number;
+  public readonly boardReconciliationIntervalMs: number;
   public readonly frontDeskThrottleMs: number;
   public readonly drainBusyAttemptLimit: number;
   private lastDeliveryTimes = new Map<string, number>();
@@ -3578,6 +3594,8 @@ export class HookRouter {
   private readonly lastSweepActionDigests = new Map<string, string>();
   /** Failure signature of the last sweep, for error-state change detection (#1181). */
   private lastSweepErrorSignature = "";
+  /** Epoch-ms of the last forced full-reconciliation sweep (#1263). */
+  private lastBoardReconciliationAt: number | null = null;
   private rotationAutoEnabled: boolean;
   /** Direct-action guards (#847). */
   public readonly labelTriageEnabled: boolean;
@@ -3726,6 +3744,11 @@ export class HookRouter {
       options?.watchdogAlertCooldownMs ?? Number(process.env.WATCHDOG_ALERT_COOLDOWN_MS ?? DEFAULT_WATCHDOG_ALERT_COOLDOWN_MS);
     this.boardSweepIntervalMs =
       options?.boardSweepIntervalMs ?? (isTestMode ? 0 : Number(process.env.BOARD_SWEEP_INTERVAL_MS ?? DEFAULT_BOARD_SWEEP_INTERVAL_MS));
+    this.boardReconciliationIntervalMs =
+      options?.boardReconciliationIntervalMs ??
+      (isTestMode
+        ? 0
+        : Number(process.env.BOARD_RECONCILIATION_INTERVAL_MS ?? DEFAULT_BOARD_RECONCILIATION_INTERVAL_MS));
     this.frontDeskThrottleMs =
       options?.frontDeskThrottleMs !== undefined
         ? options.frontDeskThrottleMs
@@ -8387,7 +8410,7 @@ export class HookRouter {
   public async runBoardSweep(
     repos?: string[],
     io?: IssuesCheckIo,
-    opts: { explicit?: boolean } = {},
+    opts: { explicit?: boolean; now?: number } = {},
   ): Promise<BoardSweepResult> {
     if (this.isHaltedState) {
       return { ok: true, swept: 0, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
@@ -8407,6 +8430,21 @@ export class HookRouter {
     }
 
     const promise = (async (): Promise<BoardSweepResult> => {
+      // Full reconciliation (#1263): the delta gate below suppresses
+      // re-delivery of an unchanged actionable set, which strands a candidate
+      // whose notification was never consumed (orchestrator busy, rotated, or
+      // missed). Every `boardReconciliationIntervalMs` the sweep forces the
+      // notification through even when the digest is unchanged, so the
+      // board-state cache can never hide an actionable ticket forever.
+      const nowMs = opts.now ?? Date.now();
+      const reconciliationDue =
+        this.boardReconciliationIntervalMs > 0 &&
+        (this.lastBoardReconciliationAt === null ||
+          nowMs - this.lastBoardReconciliationAt >= this.boardReconciliationIntervalMs);
+      if (reconciliationDue) {
+        this.lastBoardReconciliationAt = nowMs;
+        this.log("[info] Board sweep full reconciliation due; re-emitting unchanged candidates");
+      }
       const actionable: BoardSweepResult["actionable"] = [];
       const staleWipRecovered: StaleWipResult[] = [];
       const errors: Array<{ repo: string; error: string }> = [];
@@ -8444,9 +8482,11 @@ export class HookRouter {
       }
 
       // Delta gate (#1181): only deliver when the actionable set or the error
-      // state actually changed, or an operator asked explicitly. An unchanged
-      // board must not wake Front Desk on the rigid sweep interval.
-      let actionableChanged = opts.explicit === true;
+      // state actually changed, an operator asked explicitly, or a full
+      // reconciliation is due (#1263). An unchanged board must not wake Front
+      // Desk on the rigid sweep interval, but the periodic pass must.
+      const forceDelivery = opts.explicit === true || reconciliationDue;
+      let actionableChanged = forceDelivery;
       for (const repo of targets) {
         const digest = sweepDigests.get(repo) ?? "";
         if (this.lastSweepActionDigests.get(repo) !== digest) actionableChanged = true;
@@ -8455,7 +8495,7 @@ export class HookRouter {
         .map((e) => `${e.repo}:${e.error}`)
         .sort()
         .join("|");
-      const errorStateChanged = opts.explicit === true || errorSignature !== this.lastSweepErrorSignature;
+      const errorStateChanged = forceDelivery || errorSignature !== this.lastSweepErrorSignature;
       for (const repo of targets) {
         this.lastSweepActionDigests.set(repo, sweepDigests.get(repo) ?? "");
       }

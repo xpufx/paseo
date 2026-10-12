@@ -34,6 +34,7 @@ import {
   renderIssuesCheckMarkdown,
   type ForgejoComment,
   type ForgejoIssue,
+  type IssueSignature,
   type IssuesCheckIo,
   type IssuesCheckOutcome,
 } from "./issues-check.js";
@@ -260,6 +261,65 @@ describe("external checker retirement guard (#733)", () => {
         assert.ok(!pattern.test(text), `${file} re-references the retired checker path (${why})`);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1263: the board-state cache must not hide an unconsumed candidate forever.
+// A delta pass skips an unchanged signature; the full (`all: true`)
+// reconciliation pass re-emits it so the sweep can re-deliver it.
+// ---------------------------------------------------------------------------
+describe("full board reconciliation re-emits cached candidates (#1263)", () => {
+  const attentionIssue: ForgejoIssue = {
+    number: 1020,
+    title: "Unconsumed attention ticket",
+    state: "open",
+    updated_at: "2026-10-06T17:11:38Z",
+    created_at: "2026-10-06T17:11:38Z",
+    comments: 0,
+    labels: [
+      { name: "attention/orchestrator" },
+      { name: "kind/feature" },
+      { name: "priority/high" },
+    ],
+  };
+  // Byte-matches the signature runIssuesCheck persists for `attentionIssue`,
+  // so the cache reports the ticket as seen and unchanged.
+  const cachedSignature: IssueSignature = {
+    updated_at: "2026-10-06T17:11:38Z",
+    labels: ["attention/orchestrator", "kind/feature", "priority/high"],
+    comments_count: 0,
+  };
+  const cachedIo = (): IssuesCheckIo => ({
+    getOpenIssues: async () => ({ ok: true, issues: [attentionIssue] }),
+    getLatestComments: async () => [],
+    getIssueComments: async () => [],
+    runStaleWipCommand: async () => true,
+    loadCache: async () => ({ "1020": cachedSignature }),
+    saveCache: async () => {},
+  });
+
+  it("delta pass skips an unchanged cached attention/orchestrator ticket", async () => {
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: false,
+      io: cachedIo(),
+    });
+    assert.equal(outcome.rankedCandidates.length, 0);
+  });
+
+  it("reconciliation pass re-emits the unchanged attention/orchestrator ticket", async () => {
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      io: cachedIo(),
+    });
+    assert.equal(outcome.rankedCandidates.length, 1);
+    assert.equal(outcome.rankedCandidates[0].number, 1020);
+    assert.ok(outcome.rankedCandidates[0].labels.includes("attention/orchestrator"));
+    assert.equal(outcome.exitCode, 1);
   });
 });
 
