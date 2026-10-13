@@ -122,10 +122,11 @@ import { UppidiFleetKanbanBoard } from "./kanban-board.js";
 import { ForgeIssuesView } from "./forges-tab.js";
 import { canonicalForgeUrl, resolveForgeSelection } from "./forges-tab.js";
 import { ActionsTabView } from "./actions-tab.js";
+import { RunnersTab } from "./runners-tab.js";
 import { canonicalRepoName, resolveCanonicalRepo } from "../shared/repo-identity.js";
 import { defaultAgentLink } from "../shared/agent-links.js";
 
-export type SurfaceTab = "tree" | "dashboard" | "tooling" | "settings" | "board" | "forges" | "actions";
+export type SurfaceTab = "tree" | "dashboard" | "tooling" | "settings" | "board" | "forges" | "actions" | "runners";
 
 /**
  * Narrows a possibly-partial RPC collection to an array. A truncated or legacy
@@ -177,6 +178,7 @@ const tabs = [
   { id: "board", label: "Board", shortLabel: "Board", icon: "Kanban" },
   { id: "forges", label: "Forge Issues", shortLabel: "Forges", icon: "GitPullRequest" },
   { id: "actions", label: "Action Runs", shortLabel: "Actions", icon: "PlayCircle" },
+  { id: "runners", label: "Runners & Fleet", shortLabel: "Runners", icon: "Server" },
 ];
 
 const attentionMap: Record<AttentionLabel, string> = {
@@ -2954,6 +2956,24 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             selectedRepo={selectedRepo}
             onSelectRepo={setSelectedRepo}
             enrolledRepos={availableRepos}
+          />
+        </ModalBodyScrollOwnerContext.Provider>
+      ) : activeTab === "runners" ? (
+        <ModalBodyScrollOwnerContext.Provider value="host">
+          <RunnersTab
+            runnersData={{
+              ok: !!runnersData?.ok,
+              runners: toList(runnersData?.runners),
+              fleetStatus: runnersData?.fleetStatus,
+              error: runnersData?.error,
+              totalCount: runnersData?.totalCount,
+              onlineCount: runnersData?.onlineCount,
+            }}
+            scaleHostData={{ ok: false, cpuPct: 0, memoryPct: 0, runnerCount: 0, onlineCount: 0 }}
+            drainHostData={{ ok: false, dinDRunning: false, dinDHealthy: false, error: "not-loaded" }}
+            repoOptions={repoOptions}
+            selectedRepo={selectedRepo}
+            onRepoChange={setSelectedRepo}
           />
         </ModalBodyScrollOwnerContext.Provider>
       ) : (
