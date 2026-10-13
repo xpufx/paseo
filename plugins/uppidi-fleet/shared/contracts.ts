@@ -2049,6 +2049,19 @@ export const uppidiFleetSettingsSchema = z.object({
   /** Unified fleet lifecycle mode (#1034). Defaults to `RUN`. */
   mode: FleetModeSchema.default("RUN"),
   /**
+   * Boot-time behaviour for the daemon when it starts (#1112).
+   *
+   * - `'previous-state'` — resume whatever mode was active before shutdown
+   *   (the persisted mode from `RouterConfig`, falling back to settings mode).
+   * - `'halt'`             — always start in HALT mode, suspending background
+   *   loops and auto-provisioning until an operator resumes.
+   * - `'run'`              — always start in RUN mode, overriding any
+   *   previously persisted state.
+   *
+   * Defaults to `'previous-state'` so existing installs keep their last mode.
+   */
+  startModeOnBoot: z.enum(["previous-state", "halt", "run"]).default("previous-state"),
+  /**
    * Per-class delivery overrides for the current mode (#1034).
    * Absent entries fall back to the defaults from `defaultEventClassPolicyByMode[mode]`.
    */

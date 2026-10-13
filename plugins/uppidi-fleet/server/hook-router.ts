@@ -4527,11 +4527,25 @@ export class HookRouter {
     }
     // Unified fleet control mode + policy (#1034)
     const settingsMode = coerceFleetMode(settings?.mode ?? "RUN");
-    this._mode = persisted.mode ?? settingsMode;
+    // Boot-time start mode (#1112)
+    const startModeOnBoot = settings?.startModeOnBoot ?? "previous-state";
+    if (startModeOnBoot === "halt") {
+      this._mode = "HALT";
+    } else if (startModeOnBoot === "run") {
+      this._mode = "RUN";
+    } else {
+      // 'previous-state': honour persisted mode, fall back to settings mode
+      this._mode = persisted.mode ?? settingsMode;
+    }
     this._eventClassPolicy = settings?.eventClassPolicy;
     // Back-compat: if isHaltedState was true, set mode to HALT
     if (this.isHaltedState && this._mode === "RUN") {
       this._mode = "HALT";
+    }
+    // Immediately synchronise isHaltedState / allQueuesPaused with _mode
+    if (this._mode === "HALT" || this._mode === "STOP") {
+      this.isHaltedState = true;
+      this.allQueuesPaused = true;
     }
 
     const home = resolveHostHome();
@@ -11136,18 +11150,23 @@ export class HookRouter {
   }
 
   public async start(): Promise<void> {
-    try {
-      await this.reconcileFrontDesk();
-    } catch (err) {
-      this.log(`[warn] Front Desk startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    // Eagerly reconcile enrolled repository orchestrators from the live roster
-    // before serving traffic, so a cold start never demotes live orchestrators
-    // to workers with false divergence warnings (#1143).
-    try {
-      await this.reconcileEnrolledOrchestrators();
-    } catch (err) {
-      this.log(`[warn] Orchestrator startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+    const isHalted = this._mode === "HALT" || this._mode === "STOP" || this.isHaltedState;
+    if (isHalted) {
+      this.log(`[info] HookRouter started in ${this._mode} mode; background loops and auto-provisioning suspended until resume`);
+    } else {
+      try {
+        await this.reconcileFrontDesk();
+      } catch (err) {
+        this.log(`[warn] Front Desk startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      // Eagerly reconcile enrolled repository orchestrators from the live roster
+      // before serving traffic, so a cold start never demotes live orchestrators
+      // to workers with false divergence warnings (#1143).
+      try {
+        await this.reconcileEnrolledOrchestrators();
+      } catch (err) {
+        this.log(`[warn] Orchestrator startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
     return new Promise((resolve, reject) => {
       this.isClosed = false;

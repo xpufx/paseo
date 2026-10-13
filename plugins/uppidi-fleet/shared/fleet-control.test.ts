@@ -244,3 +244,47 @@ describe("HookStatusOutputSchema — mode + eventClassPolicy + derived halted (#
     );
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Boot-mode persistence (#1112)
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("uppidiFleetSettingsSchema — startModeOnBoot (#1112)", () => {
+  it("defaults to 'previous-state'", () => {
+    const defaults = uppidiFleetSettingsSchema.parse({});
+    assert.equal(defaults.startModeOnBoot, "previous-state");
+  });
+
+  it("accepts 'halt' as a valid value", () => {
+    const parsed = uppidiFleetSettingsSchema.parse({ startModeOnBoot: "halt" });
+    assert.equal(parsed.startModeOnBoot, "halt");
+  });
+
+  it("accepts 'run' as a valid value", () => {
+    const parsed = uppidiFleetSettingsSchema.parse({ startModeOnBoot: "run" });
+    assert.equal(parsed.startModeOnBoot, "run");
+  });
+
+  it("accepts 'previous-state' as a valid value", () => {
+    const parsed = uppidiFleetSettingsSchema.parse({ startModeOnBoot: "previous-state" });
+    assert.equal(parsed.startModeOnBoot, "previous-state");
+  });
+
+  it("rejects invalid startModeOnBoot values", () => {
+    assert.throws(() => uppidiFleetSettingsSchema.parse({ startModeOnBoot: "pause" }));
+    assert.throws(() => uppidiFleetSettingsSchema.parse({ startModeOnBoot: "drain" }));
+  });
+
+  it("preserves startModeOnBoot alongside other settings", () => {
+    const combined = uppidiFleetSettingsSchema.parse({
+      hookHost: "0.0.0.0",
+      hookPort: 9000,
+      mode: "HALT",
+      startModeOnBoot: "halt",
+    });
+    assert.equal(combined.hookHost, "0.0.0.0");
+    assert.equal(combined.hookPort, 9000);
+    assert.equal(combined.mode, "HALT");
+    assert.equal(combined.startModeOnBoot, "halt");
+  });
+});

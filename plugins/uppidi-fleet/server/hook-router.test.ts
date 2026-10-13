@@ -142,6 +142,7 @@ import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import { setMetricsFilePathForTest } from "./metrics.js";
 import { STALE_WIP_REMINDER_MARKER, type IssuesCheckIo } from "./issues-check.js";
 import { getUppidiFleetSettingsStorage, resetUppidiFleetSettingsStorageInstance } from "./settings.js";
+import type { UppidiFleetSettings } from "../shared/contracts.js";
 import { renderSkillDirective } from "./skills.js";
 import { loadSavedRoleModels, DEFAULT_ROLE_MODELS } from "./role-models.js";
 
@@ -9063,6 +9064,183 @@ describe("HookRouter canonical ALL HALT mode (#994)", () => {
     assert.equal(allowed.ok, true);
     assert.equal(allowed.resumed, true);
     assert.equal(router.isHalted(), false);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────
+// Boot-mode persistence (#1112)
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("HookRouter startModeOnBoot — constructor initialisation (#1112)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-bootmode-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    // Reset the singleton and set up storage pointing at our tempDir
+    resetUppidiFleetSettingsStorageInstance();
+    // First call establishes the singleton; in test mode the singleton is only set when no options are passed
+    // and testActive is false. Since we ARE in test mode, we must pass baseDir explicitly each time.
+    // But the HookRouter constructor calls getUppidiFleetSettingsStorage() without options.
+    // Solution: set PASEO_HOME to point to our tempDir so the default path resolves there.
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+    resetUppidiFleetSettingsStorageInstance();
+  });
+
+  function createMockServer(): PluginServerContext {
+    return {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+  }
+
+  /** Write settings by temporarily redirecting PASEO_HOME so both storage and constructor share the same dir. */
+  function writeSettings(partial: Partial<UppidiFleetSettings>): void {
+    const oldPaseoHome = process.env.PASEO_HOME;
+    process.env.PASEO_HOME = tempDir;
+    try {
+      resetUppidiFleetSettingsStorageInstance();
+      const storage = getUppidiFleetSettingsStorage();
+      const current = storage.read();
+      storage.write(Object.assign({}, current, partial));
+    } finally {
+      if (oldPaseoHome === undefined) {
+        delete process.env.PASEO_HOME;
+      } else {
+        process.env.PASEO_HOME = oldPaseoHome;
+      }
+    }
+  }
+
+  it("startModeOnBoot: 'halt' initializes in HALT mode with isHaltedState = true", () => {
+    writeSettings({ startModeOnBoot: "halt" });
+
+    const server = createMockServer();
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+
+    assert.equal((router as any)._mode, "HALT");
+    assert.equal(router.isHalted(), true);
+    assert.equal(router.isAllPaused(), true);
+  });
+
+  it("startModeOnBoot: 'run' overrides persisted HALT mode", () => {
+    // Persist a HALT mode from a previous session
+    saveRouterConfig({ mode: "HALT" });
+    // But settings say to always run
+    writeSettings({ startModeOnBoot: "run" });
+
+    const server = createMockServer();
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+
+    assert.equal((router as any)._mode, "RUN");
+    assert.equal(router.isHalted(), false);
+  });
+
+  it("persisted mode: 'HALT' sets isHaltedState = true (previous-state default)", () => {
+    // Persist HALT mode but leave startModeOnBoot at its default ('previous-state')
+    saveRouterConfig({ mode: "HALT" });
+
+    const server = createMockServer();
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+
+    assert.equal((router as any)._mode, "HALT");
+    assert.equal(router.isHalted(), true);
+    assert.equal(router.isAllPaused(), true);
+  });
+
+  it("persisted mode: 'STOP' sets isHaltedState = true", () => {
+    saveRouterConfig({ mode: "STOP" });
+
+    const server = createMockServer();
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+
+    assert.equal((router as any)._mode, "STOP");
+    assert.equal(router.isHalted(), true);
+    assert.equal(router.isAllPaused(), true);
+  });
+
+  it("startModeOnBoot: 'previous-state' with no persisted mode falls back to settings mode", () => {
+    writeSettings({ mode: "DRAIN", startModeOnBoot: "previous-state" });
+
+    const server = createMockServer();
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+
+    assert.equal((router as any)._mode, "DRAIN");
+    assert.equal(router.isHalted(), false); // DRAIN is not a halted mode
+  });
+
+  it("start() under HALT mode skips reconcileFrontDesk and reconcileEnrolledOrchestrators", async () => {
+    writeSettings({ startModeOnBoot: "halt" });
+
+    let frontDeskReconciled = false;
+    let orchestratorReconciled = false;
+
+    const server = createMockServer();
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+
+    // Patch reconciliation methods to track calls
+    const origReconcileFrontDesk = router.reconcileFrontDesk.bind(router);
+    const origReconcileOrchestrators = router.reconcileEnrolledOrchestrators.bind(router);
+
+    router.reconcileFrontDesk = async () => {
+      frontDeskReconciled = true;
+      return origReconcileFrontDesk();
+    };
+    router.reconcileEnrolledOrchestrators = async () => {
+      orchestratorReconciled = true;
+      return origReconcileOrchestrators();
+    };
+
+    await router.start();
+
+    assert.equal(frontDeskReconciled, false, "reconcileFrontDesk should be skipped in HALT mode");
+    assert.equal(orchestratorReconciled, false, "reconcileEnrolledOrchestrators should be skipped in HALT mode");
+    assert.equal(router.isHalted(), true);
+  });
+
+  it("start() under HALT mode does not start background loops", async () => {
+    writeSettings({ startModeOnBoot: "halt" });
+
+    let watchdogRan = false;
+    let sweepRan = false;
+
+    const server = createMockServer();
+    const router = new HookRouter(server, {
+      queueDir,
+      stateDir,
+      port: 0,
+      watchdogIntervalMs: 50,
+      boardSweepIntervalMs: 50,
+    });
+
+    // Replace loop methods to detect execution
+    (router as any).runWatchdogAudit = async () => {
+      watchdogRan = true;
+      return { ok: true, now: Date.now(), anomalies: [], actions: [] };
+    };
+    (router as any).runBoardSweep = async () => {
+      sweepRan = true;
+      return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
+    };
+
+    await router.start();
+
+    // Wait long enough for timers to fire if they were started
+    await new Promise((resolve) => setTimeout(resolve, 150));
+
+    assert.equal(watchdogRan, false, "watchdog should not run when started in HALT mode");
+    assert.equal(sweepRan, false, "board sweep should not run when started in HALT mode");
   });
 });
 

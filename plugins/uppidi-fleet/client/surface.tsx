@@ -2986,6 +2986,45 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             </Card>
           </Collapsible>
 
+          {/* Collapsible Section: Daemon Boot Mode (#1112) */}
+          <Collapsible
+            title="Daemon Boot Mode"
+            icon="Power"
+            isExpanded={false}
+            onToggle={() => {}}
+          >
+            <Card variant="flat">
+              <Stack gap="sm">
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                  Control how the fleet daemon starts after a restart. Choose to keep the previous state,
+                  always start halted (suspended), or always start running.
+                </Text>
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <Stack gap="xxs">
+                    <Text style={{ color: colors.foreground, ...typography.heading }}>
+                      Start Mode on Boot
+                    </Text>
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                      Determines the initial fleet mode when the daemon boots.
+                    </Text>
+                  </Stack>
+                  <Select
+                    options={[
+                      { label: "Keep previous state", value: "previous-state" },
+                      { label: "Always start halted", value: "halt" },
+                      { label: "Always start running", value: "run" },
+                    ]}
+                    value={settings.startModeOnBoot ?? "previous-state"}
+                    onValueChange={(next) => {
+                      updateSettings({ startModeOnBoot: next as "previous-state" | "halt" | "run" });
+                    }}
+                    placeholder="Select boot mode..."
+                  />
+                </Row>
+              </Stack>
+            </Card>
+          </Collapsible>
+
         </Stack>
       ) : activeTab === "tooling" ? (
         <UppidiFleetToolingView />
