@@ -238,6 +238,12 @@ export interface HookRouterOptions {
   coalesceDisable?: boolean;
   watchdogIntervalMs?: number;
   watchdogBusyThreshold?: number;
+  /**
+   * Minimum consecutive busy-ms before the watchdog considers an orchestrator
+   * wedged and attempts auto-recovery (#1344). Defaults to
+   * {@link DEFAULT_WATCHDOG_MIN_BUSY_ELAPSED_MS}.
+   */
+  watchdogMinBusyElapsedMs?: number;
   watchdogAlertCooldownMs?: number;
   boardSweepIntervalMs?: number;
   /**
@@ -1867,7 +1873,18 @@ export const DEFAULT_WATCHDOG_STEER_MESSAGE =
 // Machine-scale watchdog defaults (#1123). Human-timescale intervals left a
 // wedged queue unrecovered for quarter-hour stretches, so the busy threshold,
 // alert cooldown, and board sweep all run on the fleet's own cadence.
-export const DEFAULT_WATCHDOG_BUSY_THRESHOLD = 5;
+/**
+ * Minimum consecutive busy drain checks before the watchdog considers an
+ * orchestrator wedged and attempts auto-recovery (#1344).
+ *
+ * Rationale: drain-steer must fire *before* the watchdog reloads.
+ * With drainBusyAttemptLimit at 4 the first steer lands well ahead of this
+ * threshold, giving queued work a chance to flow through without the
+ * watchdog nuking the orchestrator mid-turn. Normal agent turns that run
+ * tests routinely take several minutes; a low threshold would reload the
+ * orchestrator before steering ever gets a shot.
+ */
+export const DEFAULT_WATCHDOG_BUSY_THRESHOLD = 12;
 export const DEFAULT_WATCHDOG_ALERT_COOLDOWN_MS = 2 * 60 * 1000;
 export const DEFAULT_BOARD_SWEEP_INTERVAL_MS = 3 * 60 * 1000;
 /**
@@ -1884,8 +1901,19 @@ export const DEFAULT_BOARD_RECONCILIATION_INTERVAL_MS = 2 * 60 * 60 * 1000;
 // interrupt threshold a turn that still has not yielded is canceled outright.
 // Without the interrupt step a runaway turn that never yields swallows every
 // steer and strands the queue (the #1265 incident).
-export const DEFAULT_DRAIN_STEER_ATTEMPT_LIMIT = 8;
+//
+// Harmonized with {@link DEFAULT_WATCHDOG_BUSY_THRESHOLD} so steer always fires
+// before the watchdog considers the orchestrator wedged (#1344).
+export const DEFAULT_DRAIN_STEER_ATTEMPT_LIMIT = 4;
 export const DEFAULT_DRAIN_INTERRUPT_ATTEMPT_LIMIT = 12;
+
+/**
+ * Minimum elapsed time (ms) the busy streak must be continuous before the
+ * watchdog considers an orchestrator wedged and attempts auto-recovery (#1344).
+ * Normal agent turns running tests routinely take several minutes; this guard
+ * prevents the watchdog from nuking a healthy in-flight turn.
+ */
+export const DEFAULT_WATCHDOG_MIN_BUSY_ELAPSED_MS = 3 * 60 * 1000; // 3 minutes
 
 export const CANCELLATION_TIMEOUT_MARKER = "cancelagentrun: acknowledged turn still active after timeout";
 
@@ -4343,6 +4371,8 @@ export class HookRouter {
   /** Global pause-all flag (#877): set by `pause('all')`, consulted by `isPaused`. */
   private allQueuesPaused = false;
   private busyQueues = new Set<string>();
+  /** Timestamp when each queue first entered the busy streak (#1344). */
+  private busySince = new Map<string, number>();
   public busyAttempts = new Map<string, number>();
   private droppedCount = new Map<string, number>();
   private draining = new Set<string>();
@@ -4377,6 +4407,7 @@ export class HookRouter {
   public readonly coalesceWindowMaxMs: number;
   public readonly watchdogIntervalMs: number;
   public readonly watchdogBusyThreshold: number;
+  public readonly watchdogMinBusyElapsedMs: number;
   public readonly watchdogAlertCooldownMs: number;
   public readonly boardSweepIntervalMs: number;
   public readonly boardReconciliationIntervalMs: number;
@@ -4595,6 +4626,9 @@ export class HookRouter {
       options?.watchdogIntervalMs ?? (isTestMode ? 0 : Number(process.env.WATCHDOG_INTERVAL_MS ?? 60000));
     this.watchdogBusyThreshold =
       options?.watchdogBusyThreshold ?? Number(process.env.WATCHDOG_BUSY_THRESHOLD ?? DEFAULT_WATCHDOG_BUSY_THRESHOLD);
+    this.watchdogMinBusyElapsedMs =
+      options?.watchdogMinBusyElapsedMs ??
+      Number(process.env.WATCHDOG_MIN_BUSY_ELAPSED_MS ?? DEFAULT_WATCHDOG_MIN_BUSY_ELAPSED_MS);
     this.watchdogAlertCooldownMs =
       options?.watchdogAlertCooldownMs ?? Number(process.env.WATCHDOG_ALERT_COOLDOWN_MS ?? DEFAULT_WATCHDOG_ALERT_COOLDOWN_MS);
     this.boardSweepIntervalMs =
@@ -8532,9 +8566,25 @@ export class HookRouter {
       if (q.length === 0) {
         this.busyAttempts.delete(key);
         this.busyQueues.delete(key);
+        this.busySince.delete(key);
         continue;
       }
       if (attempts >= this.watchdogBusyThreshold) {
+        // Enforce a minimum elapsed duration before wedged reload so normal
+        // in-flight turns are not abruptly killed (#1344).
+        const busyStartedAt = this.busySince.get(key);
+        const minElapsedMs = this.watchdogMinBusyElapsedMs;
+        const eligibleForReload =
+          !busyStartedAt || (now - busyStartedAt) >= minElapsedMs;
+        if (!eligibleForReload) {
+          this.log(
+            `[info] watchdog: ${key} has reached busy threshold (${attempts} attempts) ` +
+              `but streak is only ${(now - busyStartedAt) / 1000 | 0}s old; ` +
+              `waiting ${minElapsedMs / 1000}s minimum before wedged reload`,
+          );
+          anomalies.push({ type: "QUEUE_WEDGED", key, attempts, queueDepth: q.length });
+          continue;
+        }
         anomalies.push({ type: "QUEUE_WEDGED", key, attempts, queueDepth: q.length });
         const orchId = orchRecords.find((r) => r.key === key)?.agentId;
         let reloaded = false;
@@ -8546,6 +8596,7 @@ export class HookRouter {
           if (reloadRes.ok) {
             this.busyAttempts.delete(key);
             this.busyQueues.delete(key);
+            this.busySince.delete(key);
             const timer = this.backoffTimers.get(key);
             if (timer) {
               clearTimeout(timer);
@@ -10201,6 +10252,7 @@ export class HookRouter {
     }
     this.queues.delete(key);
     this.busyQueues.delete(key);
+    this.busySince.delete(key);
     this.busyAttempts.delete(key);
     this.draining.delete(key);
     this.droppedCount.delete(key);
@@ -10308,6 +10360,7 @@ export class HookRouter {
     }
     for (const key of registeredKeys) {
       this.busyQueues.delete(key);
+      this.busySince.delete(key);
       this.busyAttempts.delete(key);
       this.draining.delete(key);
       this.droppedCount.delete(key);
@@ -10576,6 +10629,7 @@ export class HookRouter {
       }
       this.busyQueues.delete(key);
       this.draining.delete(key);
+      this.busySince.delete(key);
       this.busyAttempts.delete(key);
       this.droppedCount.delete(key);
 
@@ -10635,6 +10689,7 @@ export class HookRouter {
     const frontDesk = this.readFrontDesk();
     if (frontDesk?.agentId === agentId) {
       this.busyQueues.delete("frontdesk");
+      this.busySince.delete("frontdesk");
       this.busyAttempts.delete("frontdesk");
       this.lastDeliveryTimes.delete(agentId);
       const timer = this.backoffTimers.get("frontdesk");
@@ -10652,6 +10707,7 @@ export class HookRouter {
       const orch = this.readOrchestrator(key);
       if (orch?.agentId === agentId) {
         this.busyQueues.delete(key);
+        this.busySince.delete(key);
         this.busyAttempts.delete(key);
         const timer = this.backoffTimers.get(key);
         if (timer) {
@@ -10669,6 +10725,7 @@ export class HookRouter {
       const orch = this.readOrchestrator(key);
       if (orch?.agentId === agentId) {
         this.busyQueues.delete(key);
+        this.busySince.delete(key);
         this.busyAttempts.delete(key);
         const timer = this.backoffTimers.get(key);
         if (timer) {
@@ -10789,6 +10846,7 @@ export class HookRouter {
       // No pending work: drop any stale busy counter so it cannot leak into the
       // next burst of traffic and look like a wedged queue (#1072).
       this.busyAttempts.delete(key);
+      this.busySince.delete(key);
       this.busyQueues.delete(key);
       return;
     }
@@ -10857,6 +10915,7 @@ export class HookRouter {
                     entry.activeTurn = null;
                   }
                   this.busyAttempts.delete(key);
+                  this.busySince.delete(key);
                   this.busyQueues.delete(key);
                 }
               }
@@ -10951,6 +11010,7 @@ export class HookRouter {
                   entry.activeTurn = null;
                 }
                 this.busyAttempts.delete(key);
+                this.busySince.delete(key);
                 this.busyQueues.delete(key);
               }
             } else {
@@ -10962,6 +11022,11 @@ export class HookRouter {
 
         if (isBusy) {
           this.busyQueues.add(key);
+          // Track when the busy streak started so the watchdog can enforce a
+          // minimum elapsed duration before wedged reload (#1344).
+          if (!this.busySince.has(key)) {
+            this.busySince.set(key, Date.now());
+          }
           // The streak is intentionally not capped at the steer threshold: it
           // keeps counting while the incumbent stays busy so a steer that never
           // lands eventually escalates to an interrupt (#1265).
@@ -11002,6 +11067,7 @@ export class HookRouter {
       // verified idle turn) ends the streak.
       if (!forceSteer || forceInterrupt) {
         this.busyQueues.delete(key);
+        this.busySince.delete(key);
         this.busyAttempts.delete(key);
       }
 
