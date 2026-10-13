@@ -8538,6 +8538,8 @@ export class HookRouter {
         anomalies.push({ type: "QUEUE_WEDGED", key, attempts, queueDepth: q.length });
         const orchId = orchRecords.find((r) => r.key === key)?.agentId;
         let reloaded = false;
+        // Snapshot depth before drain so alerts report the real pre-drain count.
+        const initialDepth = q.length;
         if (orchId && reloadFn) {
           this.log(`[info] watchdog: attempting auto-recovery reload for wedged orchestrator ${orchId.slice(0, 7)} (${key})`);
           const reloadRes = await reloadFn(orchId);
@@ -8559,8 +8561,8 @@ export class HookRouter {
           this.watchdogWedgeAlerts.add(key);
           this.watchdogAlerts.set(alertKey, now);
           const alert = reloaded
-            ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${q.length} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`
-            : `[Fleet Watchdog] Queue for ${key} has ${q.length} pending message(s) and has failed delivery ${attempts} times.`;
+            ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${initialDepth} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`
+            : `[Fleet Watchdog] Queue for ${key} has ${initialDepth} pending message(s) and has failed delivery ${attempts} times.`;
           this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
         }
       }
