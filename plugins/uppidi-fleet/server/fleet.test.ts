@@ -42,6 +42,8 @@ after(() => {
 import {
   categorizeAgent,
   normalizeRawAgent,
+  getActiveAgentCountByProvider,
+  normalizeProviderKey,
   handleUppidiAgents,
   extractAttributedWork,
   deriveDeterministicState,
@@ -1398,6 +1400,196 @@ describe("two-tier spawn authority guard (#573)", () => {
         setExecFileAsyncForTest(null);
       }
     });
+  });
+});
+
+// ── Provider concurrency limits (#1198) ────────────────────────────────────
+
+describe("normalizeProviderKey (#1198)", () => {
+  it("strips model suffix from compound keys", () => {
+    assert.equal(normalizeProviderKey("openai/gpt-4o"), "openai");
+    assert.equal(normalizeProviderKey("anthropic/claude-sonnet-4-20250514"), "anthropic");
+    assert.equal(normalizeProviderKey("opencode/foo"), "opencode");
+  });
+
+  it("returns the input when no slash present", () => {
+    assert.equal(normalizeProviderKey("openai"), "openai");
+    assert.equal(normalizeProviderKey("anthropic"), "anthropic");
+  });
+
+  it("handles null/undefined/empty gracefully", () => {
+    assert.equal(normalizeProviderKey(null), "");
+    assert.equal(normalizeProviderKey(undefined), "");
+    assert.equal(normalizeProviderKey(""), "");
+    assert.equal(normalizeProviderKey("  "), "");
+  });
+});
+
+describe("getActiveAgentCountByProvider (#1198)", () => {
+  const mockAgents = [
+    { id: "a1", provider: "openai/gpt-4o", status: "running" },
+    { id: "a2", provider: "openai/gpt-3.5", status: "running" },
+    { id: "a3", provider: "anthropic/claude-sonnet", status: "idle" },
+    { id: "a4", provider: "anthropic/claude-opus", lifecycleState: "running" },
+    { id: "a5", provider: "openai/gpt-4o", deterministicState: "working" },
+    { id: "a6", provider: "openai/gpt-4o", deterministicState: "running" },
+    { id: "a7", provider: null, status: "running" },
+    { id: "a8", status: "running" },
+  ];
+
+  it("counts running agents per provider", () => {
+    const counts = getActiveAgentCountByProvider(mockAgents as any);
+    assert.deepStrictEqual(counts, {
+      openai: 4, // a1 (running), a2 (running), a5 (working), a6 (running)
+      anthropic: 1, // a4 (lifecycleState=running)
+    });
+  });
+
+  it("normalizes compound provider/model to root provider", () => {
+    const agents = [
+      { id: "x1", provider: "openai/gpt-4o", status: "running" },
+      { id: "x2", provider: "openai/gpt-3.5", status: "running" },
+    ];
+    const counts = getActiveAgentCountByProvider(agents as any);
+    assert.deepStrictEqual(counts, { openai: 2 });
+  });
+
+  it("excludes non-running agents", () => {
+    const agents = [
+      { id: "b1", provider: "openai", status: "idle" },
+      { id: "b2", provider: "openai", status: "error" },
+      { id: "b3", provider: "openai", lifecycleState: "idle" },
+    ];
+    const counts = getActiveAgentCountByProvider(agents as any);
+    assert.deepStrictEqual(counts, {});
+  });
+
+  it("skips agents without a provider", () => {
+    const agents = [
+      { id: "c1", status: "running" },
+      { id: "c2", provider: null, status: "running" },
+    ];
+    const counts = getActiveAgentCountByProvider(agents as any);
+    assert.deepStrictEqual(counts, {});
+  });
+
+  it("returns empty record for empty array", () => {
+    const counts = getActiveAgentCountByProvider([]);
+    assert.deepStrictEqual(counts, {});
+  });
+});
+
+describe("spawn rejection when provider concurrency limit is reached (#1198)", () => {
+  it("handleSpawnAgent returns provider_concurrency_limit error code", async () => {
+    const { handleSpawnAgent } = await import("./hook-router.js");
+
+    // Create a mock agent list where codex has 4 active agents (at the limit)
+    const mockAgents = Array.from({ length: 4 }, (_, i) => ({
+      id: `codex-agent-${i}`,
+      provider: "codex/gpt-5.6-terra",
+      status: "running",
+    }));
+
+    const paseoApi = {
+      agents: {
+        list: async () => ({ entries: mockAgents }),
+      },
+    };
+
+    // Set up settings with a limit of 4 for codex
+    const { getUppidiFleetSettingsStorage } = await import("./settings.js");
+    const storage = getUppidiFleetSettingsStorage();
+    const original = storage.read();
+    try {
+      storage.update(() => ({
+        ...original,
+        providerConcurrencyLimits: { codex: 4 },
+      }));
+
+      const result = await handleSpawnAgent(
+        { role: "worker", repo: "xpufx-org/paseo", issueIndex: 100, model: "codex/gpt-5.6-terra" },
+        { paseo: paseoApi as any }
+      );
+
+      assert.equal(result.ok, false);
+      assert.equal(result.errorCode, "provider_concurrency_limit");
+      assert.ok(result.error?.includes("Concurrency limit"));
+      assert.ok(result.error?.includes("codex"));
+    } finally {
+      storage.update(() => original);
+    }
+  });
+
+  it("allows spawn when below the concurrency limit", async () => {
+    const { handleSpawnAgent } = await import("./hook-router.js");
+
+    // Only 2 active codex agents, limit is 4
+    const mockAgents = Array.from({ length: 2 }, (_, i) => ({
+      id: `codex-agent-${i}`,
+      provider: "codex/gpt-5.6-terra",
+      status: "running",
+    }));
+
+    const paseoApi = {
+      agents: {
+        list: async () => ({ entries: mockAgents }),
+      },
+    };
+
+    const { getUppidiFleetSettingsStorage } = await import("./settings.js");
+    const storage = getUppidiFleetSettingsStorage();
+    const original = storage.read();
+    try {
+      storage.update(() => ({
+        ...original,
+        providerConcurrencyLimits: { codex: 4 },
+      }));
+
+      const result = await handleSpawnAgent(
+        { role: "worker", repo: "xpufx-org/paseo", issueIndex: 100, model: "codex/gpt-5.6-terra" },
+        { paseo: paseoApi as any }
+      );
+
+      // Should not be blocked by concurrency limit; may fail due to no spawn mechanism
+      assert.notEqual(result.errorCode, "provider_concurrency_limit");
+    } finally {
+      storage.update(() => original);
+    }
+  });
+
+  it("allows spawn when no limit is configured for the provider", async () => {
+    const { handleSpawnAgent } = await import("./hook-router.js");
+
+    const mockAgents = Array.from({ length: 10 }, (_, i) => ({
+      id: `unknown-provider-agent-${i}`,
+      provider: "unknown-provider/model",
+      status: "running",
+    }));
+
+    const paseoApi = {
+      agents: {
+        list: async () => ({ entries: mockAgents }),
+      },
+    };
+
+    const { getUppidiFleetSettingsStorage } = await import("./settings.js");
+    const storage = getUppidiFleetSettingsStorage();
+    const original = storage.read();
+    try {
+      storage.update(() => ({
+        ...original,
+        providerConcurrencyLimits: { codex: 4 }, // unknown-provider not configured
+      }));
+
+      const result = await handleSpawnAgent(
+        { role: "worker", repo: "xpufx-org/paseo", issueIndex: 100, model: "unknown-provider/some-model" },
+        { paseo: paseoApi as any }
+      );
+
+      assert.notEqual(result.errorCode, "provider_concurrency_limit");
+    } finally {
+      storage.update(() => original);
+    }
   });
 });
 

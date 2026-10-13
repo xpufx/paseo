@@ -242,6 +242,60 @@ export function resolveAgentRole(
  * coding-agent). Retired sessions and workers whose branch/title merely
  * mentions Front Desk are always coding-agents.
  */
+/**
+ * Normalizes a compound provider/model key to the root provider name.
+ * E.g. "openai/gpt-4o" -> "openai", "opencode/foo" -> "opencode".
+ */
+export function normalizeProviderKey(input?: string | null): string {
+  if (!input) return "";
+  const trimmed = String(input).trim();
+  if (!trimmed) return "";
+  // Strip model suffix: first slash separates provider from model
+  const slashIdx = trimmed.indexOf("/");
+  return slashIdx > 0 ? trimmed.slice(0, slashIdx) : trimmed;
+}
+
+/**
+ * Counts active (running) agents per provider from a roster.
+ * An agent is counted when its status or lifecycleState indicates running
+ * and it has a matching provider.
+ *
+ * Input can be UppidiAgent[], RawAgentRecord[], WatchdogAgent[], or any
+ * shape with optional `provider`, `status`, `lifecycleState` fields.
+ */
+export function getActiveAgentCountByProvider(
+  agents: Array<{
+    provider?: string | null;
+    status?: string | null;
+    lifecycleState?: string | null;
+    deterministicState?: string | null;
+    config?: { provider?: string | null } | null;
+  }>
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const agent of agents) {
+    // Determine if this agent is actively running
+    const isActive =
+      agent.status === "running" ||
+      agent.lifecycleState === "running" ||
+      agent.deterministicState === "working" ||
+      agent.deterministicState === "running";
+    if (!isActive) continue;
+
+    // Resolve provider: explicit field, config.provider, or skip
+    const rawProvider =
+      agent.provider ??
+      (agent.config?.provider as string | undefined);
+    if (!rawProvider) continue;
+
+    const providerName = normalizeProviderKey(rawProvider);
+    if (!providerName) continue;
+
+    counts[providerName] = (counts[providerName] ?? 0) + 1;
+  }
+  return counts;
+}
+
 export function categorizeAgent(
   nameOrAgent:
     | string

@@ -1210,6 +1210,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const [customHost, setCustomHost] = useState<string>("");
   const [isCustomHost, setIsCustomHost] = useState<boolean>(false);
   const [configuredPortInput, setConfiguredPortInput] = useState<string>("8099");
+  /** Provider concurrency limit: new provider input for the add form (#1198). */
+  const [newProviderInput, setNewProviderInput] = useState<string>("");
   const [isConfiguring, setIsConfiguring] = useState<boolean>(false);
   const configInitializedRef = React.useRef(false);
 
@@ -2895,6 +2897,91 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                     ))}
                   </Stack>
                 )}
+              </Stack>
+            </Card>
+          </Collapsible>
+
+          {/* Collapsible Section: Provider Concurrency Limits (#1198) */}
+          <Collapsible
+            title="Provider Concurrency Limits"
+            icon="Gauge"
+            isExpanded={false}
+            onToggle={() => {}}
+          >
+            <Card variant="flat">
+              <Stack gap="sm">
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                  Set maximum concurrent running agents per LLM provider. When a provider reaches its
+                  configured limit, new agent spawns fail fast with a clear error instead of hitting
+                  API rate limits (429s). Leave blank or set to 0 to disable.
+                </Text>
+
+                {/* Limit entries */}
+                <Stack gap="xs">
+                  {Object.entries(settings.providerConcurrencyLimits ?? {}).map(([provider, limit]) => (
+                    <Row key={provider} align="center" gap="xs">
+                      <View style={{ flex: 1, minWidth: 120 }}>
+                        <Text style={{ color: colors.foreground, ...typography.body, fontFamily: "monospace", fontSize: 13 }}>
+                          {provider}
+                        </Text>
+                      </View>
+                      <View style={{ width: 80 }}>
+                        <TextInput
+                          value={String(limit)}
+                          onChangeText={(val) => {
+                            const num = parseInt(val, 10);
+                            if (!isNaN(num) && num >= 0) {
+                              const next = { ...(settings.providerConcurrencyLimits ?? {}) };
+                              if (num <= 0) delete next[provider];
+                              else next[provider] = num;
+                              updateSettings({ providerConcurrencyLimits: next });
+                            }
+                          }}
+                          keyboardType="number-pad"
+                          placeholder="∞"
+                        />
+                      </View>
+                      <Button
+                        label="✕"
+                        size="sm"
+                        variant="ghost"
+                        onPress={() => {
+                          const next = { ...(settings.providerConcurrencyLimits ?? {}) };
+                          delete next[provider];
+                          updateSettings({ providerConcurrencyLimits: next });
+                        }}
+                      />
+                    </Row>
+                  ))}
+                </Stack>
+
+                {/* Add new limit */}
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <View style={{ flex: 1, flexDirection: "row", gap: "xs", alignItems: "center" }}>
+                    <TextInput
+                      placeholder="Provider id (e.g. openai)"
+                      value={newProviderInput}
+                      onChangeText={setNewProviderInput}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      label="Add"
+                      size="sm"
+                      variant="primary"
+                      onPress={() => {
+                        const trimmed = newProviderInput.trim();
+                        if (trimmed) {
+                          const next = { ...(settings.providerConcurrencyLimits ?? {}) };
+                          if (!next[trimmed]) {
+                            next[trimmed] = 4;
+                            updateSettings({ providerConcurrencyLimits: next });
+                          }
+                          setNewProviderInput("");
+                        }
+                      }}
+                    />
+                  </View>
+                </Row>
               </Stack>
             </Card>
           </Collapsible>

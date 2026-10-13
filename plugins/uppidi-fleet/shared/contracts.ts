@@ -2069,6 +2069,17 @@ export const uppidiFleetSettingsSchema = z.object({
       { message: "eventClassPolicy keys must be valid event classes" },
     )
     .optional(),
+  /**
+   * Optional per-provider max concurrent agent limit across fleet (#1198).
+   * Maps provider id (e.g. "openai", "anthropic") to an integer cap ≥ 1.
+   * When a spawn target's provider reaches its configured limit, spawn fails
+   * fast with errorCode `provider_concurrency_limit` instead of spawning into
+   * immediate API rate-limit failures.
+   */
+  providerConcurrencyLimits: z
+    .record(z.string(), z.number().int().min(1))
+    .optional()
+    .default({}),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 

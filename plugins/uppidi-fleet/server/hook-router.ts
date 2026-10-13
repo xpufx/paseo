@@ -103,6 +103,7 @@ import {
   auditCheck,
   type AuditMergeReconciliation,
 } from "./audit-receipts.js";
+import { getActiveAgentCountByProvider, normalizeProviderKey } from "./agents.js";
 
 const defaultExecFileAsync = promisify(execFile);
 let execFileAsync = defaultExecFileAsync;
@@ -382,7 +383,7 @@ export interface EnsureOrchestratorResult {
   workspaceId?: string;
   cwd?: string;
   /** Machine-readable failure kind so callers can pick an HTTP status (#973). */
-  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted";
+  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted" | "provider_concurrency_limit";
   /** Model the spawn resolved to, surfaced so intent and reality can be compared (#1011). */
   resolvedModelKey?: string;
   /** Configured entries skipped as dead before the resolved model (#1011). */
@@ -3226,6 +3227,8 @@ export interface SpawnResult {
   model?: string;
   repo?: string;
   error?: string;
+  /** Machine-readable failure kind so callers can pick an HTTP status (#973). */
+  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted" | "provider_concurrency_limit";
 }
 
 /**
@@ -3425,6 +3428,49 @@ export async function handleSpawnAgent(
     title = `Worker · ${canonicalRepo}${issueRef}`;
     prompt = buildWorkerPrompt({ repo: canonicalRepo, issueIndex, model: resolvedModel });
     Object.assign(labels, buildWorkerLabels({ repo: canonicalRepo, issueIndex }));
+  }
+
+  // ── Per-provider concurrency limit guard (#1198) ─────────────────────
+  try {
+    const settings = getUppidiFleetSettingsStorage().read();
+    const limits = settings.providerConcurrencyLimits ?? {};
+    // Derive provider from the resolved model key (e.g. "openai/gpt-4o")
+    const parsedModel = parseModelKey(resolvedModel);
+    const targetProvider = parsedModel.provider;
+    if (targetProvider && limits[targetProvider] && limits[targetProvider] > 0) {
+      // Fetch live agent map to count active agents for this provider
+      let agentMap: Map<string, any> | null = null;
+      try {
+        if (options.paseo?.agents?.list) {
+          const list = await options.paseo.agents.list();
+          const entries = list?.entries ?? list;
+          if (Array.isArray(entries)) {
+            agentMap = new Map();
+            for (const entry of entries) {
+              const a: any = entry?.agent ?? entry;
+              if (a?.id) agentMap.set(a.id, a);
+            }
+          }
+        }
+      } catch {
+        // Best-effort; proceed without blocking on roster fetch
+      }
+      if (agentMap) {
+        const activeCounts = getActiveAgentCountByProvider(
+          Array.from(agentMap.values())
+        );
+        const activeForProvider = activeCounts[targetProvider] ?? 0;
+        if (activeForProvider >= limits[targetProvider]) {
+          return {
+            ok: false,
+            errorCode: "provider_concurrency_limit",
+            error: `Concurrency limit (${limits[targetProvider]}) reached for provider "${targetProvider}"`,
+          };
+        }
+      }
+    }
+  } catch {
+    // Settings read failure is non-fatal; proceed with spawn
   }
 
   // Spawn via injected spawnAgent or fall through to the router's provision logic
@@ -7181,6 +7227,25 @@ export class HookRouter {
             this.log(`[warn] Failed to archive existing orchestrator ${existingAgent.id}: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+      }
+    }
+
+    // ── Per-provider concurrency limit guard (#1198) ─────────────────────
+    const settings = getUppidiFleetSettingsStorage().read();
+    const limits = settings.providerConcurrencyLimits ?? {};
+    const configuredLimit = limits[targetProvider];
+    if (configuredLimit && configuredLimit > 0 && preSpawnAgentMap) {
+      const activeCounts = getActiveAgentCountByProvider(
+        Array.from(preSpawnAgentMap.values())
+      );
+      const activeForProvider = activeCounts[targetProvider] ?? 0;
+      if (activeForProvider >= configuredLimit) {
+        return {
+          ok: false,
+          errorCode: "provider_concurrency_limit",
+          error: `Concurrency limit (${configuredLimit}) reached for provider "${targetProvider}"`,
+          repo: canonicalKey,
+        };
       }
     }
 
