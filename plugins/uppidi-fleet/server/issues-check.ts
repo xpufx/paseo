@@ -522,8 +522,14 @@ export function isDispatchableCandidate(labelSet: Set<string>): boolean {
   if (labelSet.has("spec/needed")) return false;
   // Active WIP (worker already assigned and actively executing)
   if (labelSet.has("state/wip")) return false;
-  // Deliverable verification or review stages (pending orchestrator verification/PR merge)
-  if (setIntersects(labelSet, ["state/verify", "state/review"])) return false;
+  // Deliverable review stage (pending orchestrator PR pre-flight audit)
+  if (labelSet.has("state/review")) return false;
+
+  // state/verify is only non-dispatchable when no attention/* signal overrides it.
+  // When attention/agent is attached the operator has explicitly handed the ticket
+  // to an agent — that driving signal trumps the lifecycle stage and lets a worker
+  // pick it up for verification work.
+  if (labelSet.has("state/verify") && !labelSet.has("attention/agent")) return false;
 
   // Natural autonomous dispatch: Open tickets without user blockers or hard stops
   return true;
@@ -722,7 +728,11 @@ export function isActionable(labelSet: Set<string>, role: IssuesCheckRole = "orc
   if (labelSet.has("state/done")) return false;
 
   if (role === "worker") {
-    // Workers can ONLY pick up dispatchable tasks
+    // Workers can ONLY pick up dispatchable tasks.
+    // Exception: attention/agent is the operator's explicit hand-off signal that
+    // trumps all lifecycle-stage blockers (including state/verify), letting a
+    // worker act on the ticket despite its stage.
+    if (labelSet.has("attention/agent")) return true;
     return isDispatchableCandidate(labelSet);
   }
 

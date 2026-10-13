@@ -545,3 +545,37 @@ describe("attention/orchestrator classification and state/triage hygiene (#1264)
     assert.equal(skippedCommands.length, 0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1196: decouple attention/* from state/verify blocking.
+// When the operator sets an attention/* signal it trumps lifecycle stage.
+// ---------------------------------------------------------------------------
+describe("#1196: attention/* overrides state/verify blocking", () => {
+  it("isDispatchableCandidate returns true for state/verify + attention/agent (+ spec/approved)", () => {
+    // Without attention/agent, state/verify alone is non-dispatchable.
+    assert.equal(isDispatchableCandidate(new Set(["state/verify"])), false);
+    // With attention/agent attached, the operator's hand-off signal lets a worker in.
+    assert.equal(
+      isDispatchableCandidate(new Set(["state/verify", "attention/agent", "spec/approved"])),
+      true,
+    );
+  });
+
+  it("isActionable(..., 'worker') returns true when attention/agent is present on state/verify", () => {
+    // state/verify alone → not actionable for workers.
+    assert.equal(isActionable(new Set(["state/verify"]), "worker"), false);
+    // state/verify + attention/agent → actionable for workers (operator hand-off).
+    assert.equal(
+      isActionable(new Set(["state/verify", "attention/agent"]), "worker"),
+      true,
+    );
+  });
+
+  it("classifyCandidate returns orchestrator_triage for state/verify + attention/orchestrator", () => {
+    const testIssue = issue(1196);
+    const result = classifyCandidate(testIssue, new Set(["state/verify", "attention/orchestrator"]));
+    assert.equal(result.category, "orchestrator_triage");
+    assert.equal(result.is_dispatchable, false);
+    assert.match(result.reason, /Requires Orchestrator triage/i);
+  });
+});
