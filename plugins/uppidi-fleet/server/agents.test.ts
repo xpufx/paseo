@@ -2235,6 +2235,8 @@ describe("coding-agent role model resolution (#1126)", () => {
     assert.equal(payload().provider, "coding");
     assert.equal(payload().model, "provider-model");
     assert.equal(payload().config.provider, "coding/provider-model");
+    assert.equal(payload().env?.PASEO_FLEET_ROLE, "worker");
+    assert.equal(payload().config.env?.PASEO_FLEET_ROLE, "worker");
   });
 
   it("uses the coding-agent role model for the canonical `coding-agent` category", async () => {

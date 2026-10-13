@@ -693,6 +693,28 @@ const PARTS = [
     note: "Declares fleet MCP tools and dispatches executions with argument validation. Fully deterministic control plane; does not query an LLM.",
   },
   {
+    file: `${PLUGIN}/server/mcp-injection.ts`,
+    part: "Fleet MCP injection hook, per-class server selection, and profile registration",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "FLEET_ROLE_ENV_KEY",
+        "resolveActiveProfiles",
+        "registerFleetMcpInjection",
+        "STABLE_FLEET_BIN_DIRNAME",
+        "STABLE_FLEET_SERVER_FILENAME",
+        "stableFleetServerPath",
+      ],
+    },
+    evidence: [
+      [`mcp-injection.ts:48-54`, "pure profile filtering based on settings toggles"],
+      [`mcp-injection.ts:70-161`, "lifecycle agent.create hook registering per-class and profile injection"],
+      [`mcp-injection.ts:170-174`, "deterministic stable fleet server path resolution"],
+    ],
+    note: "Pure function profile resolution and deterministic before('agent.create') lifecycle registration.",
+  },
+  {
     file: `${PLUGIN}/server/workspace-lookup.ts`,
     part: "Deterministic repository workspace resolution and candidate ranking",
     layer: "server",
@@ -1225,6 +1247,7 @@ const SUITE_NOTES = {
   "server/skills.test.ts": "Fleet skill resolution, canonical override precedence, drift, and spawn-prompt wiring",
   "server/permission-adjudication.test.ts": "Safe-pattern allowlist, shell scanner, fleet detection, and durable decision log (#1084)",
   "server/mcp-tools.test.ts": "MCP tool definitions, schema validation, and dispatch fixtures",
+  "server/mcp-injection.test.ts": "Profile shape, fleet agent filter scoping, and lifecycle registration",
   "test/fleet-board-check-cli.test.mjs": "Standalone fleet-board-check CLI options and exit codes",
   "test/fleet-watchdog-cli.test.mjs": "Standalone fleet-watchdog CLI options, recency validation, and diagnostic run",
   "test/fleet-mcp-server.test.mjs": "MCP stdio protocol handshake, tools/list and execution over stdin/stdout",

@@ -2593,6 +2593,9 @@ export async function spawnPaseoAgent(
         sdkConfig.env.PASEO_FLEET_ROLE = options.category;
       }
       createPayload.config = sdkConfig;
+      if (sdkConfig.env) {
+        createPayload.env = { ...sdkConfig.env };
+      }
       if (options.workspaceId) {
         createPayload.workspaceId = options.workspaceId;
         createPayload.workspace = options.workspaceId;
@@ -2660,6 +2663,7 @@ export async function spawnPaseoAgent(
     if (options.category) {
       spawnEnv = spawnEnv ?? {};
       spawnEnv.PASEO_FLEET_ROLE = options.category;
+      args.push("--env", `PASEO_FLEET_ROLE=${options.category}`);
     }
 
     const { stdout } = await execFileAsync("paseo", args, {

@@ -62,10 +62,12 @@ export function resolveActiveProfiles(
  * function that unregisters the hook.
  *
  * The hook:
- * 1. Reads `request.env.PASEO_FLEET_ROLE` to determine the agent class.
- * 2. Injects the class-appropriate MCP servers into `config.mcpServers`.
- * 3. Strips the env marker before returning so it doesn't leak.
- * 4. If injection profiles are enabled in settings, also adds those servers.
+ * 1. Checks whether the agent is a fleet agent via request.env.PASEO_FLEET_ROLE
+ *    or request.config.env.PASEO_FLEET_ROLE.
+ * 2. Injects profile-based MCP servers (e.g. Serena) only when enabled in settings
+ *    AND the agent is a fleet agent.
+ * 3. Injects class-appropriate MCP servers into `config.mcpServers`.
+ * 4. Strips the env marker before returning so it doesn't leak to child processes.
  */
 export function registerFleetMcpInjection(
   server: McpInjectionServer,
@@ -78,41 +80,15 @@ export function registerFleetMcpInjection(
 
   const removeHooks: (() => void)[] = [];
 
-  // Per-class injection hook
-  removeHooks.push(
-    server.before("agent.create", ({ request }) => {
-      const role = request.env?.[FLEET_ROLE_ENV_KEY] as FleetRole | undefined;
+  // Helper to determine if an agent is fleet-managed.
+  const isFleetAgent = (request: any): boolean =>
+    Boolean(
+      request.env?.[FLEET_ROLE_ENV_KEY] ||
+      request.config?.env?.[FLEET_ROLE_ENV_KEY]
+    );
 
-      if (role) {
-        // Strip the marker so it doesn't leak into child processes
-        const nextEnv = { ...request.env };
-        delete nextEnv[FLEET_ROLE_ENV_KEY];
-
-        log.debug(`injecting MCP servers for role "${role}"`, { role });
-
-        return {
-          request: {
-            ...request,
-            env: nextEnv,
-            config: {
-              ...request.config,
-              mcpServers: {
-                ...(request.config.mcpServers ?? {}),
-                // TODO: populate per-class servers from the matrix (§4 of research doc)
-                // For now the class-specific layer is a placeholder until the
-                // stdio transport decision (#1020 §5.1) lands.
-              },
-            },
-          },
-        };
-      }
-
-      // No class marker — apply read-only defaults (no-op today).
-      return request;
-    }),
-  );
-
-  // Profile-based injection hook (settings-driven)
+  // Profile-based injection hook (settings-driven, filtered to fleet agents)
+  // Registered first so it evaluates `isFleetAgent` before the per-class hook strips the marker.
   const activeProfiles = resolveActiveProfiles(settings.enabled, settings.profiles);
   if (activeProfiles.length > 0) {
     for (const profile of activeProfiles) {
@@ -125,6 +101,7 @@ export function registerFleetMcpInjection(
             command: profile.mcpCommand,
             args: profile.mcpArgs,
           },
+          filter: ({ request }) => isFleetAgent(request),
         });
         removeHooks.push(remove);
         log.info(`injection: registered profile "${profile.id}" (${serverName})`, {
@@ -137,6 +114,46 @@ export function registerFleetMcpInjection(
   } else if (settings.enabled) {
     log.info("injection: settings enabled but no profiles selected");
   }
+
+  // Per-class injection hook — runs after profile injection
+  removeHooks.push(
+    server.before("agent.create", ({ request }) => {
+      const role = (request.env?.[FLEET_ROLE_ENV_KEY] ?? (request.config as any)?.env?.[FLEET_ROLE_ENV_KEY]) as FleetRole | undefined;
+
+      if (role) {
+        // Strip the marker so it doesn't leak into child processes
+        const nextEnv = request.env ? { ...request.env } : undefined;
+        if (nextEnv) {
+          delete nextEnv[FLEET_ROLE_ENV_KEY];
+        }
+
+        const nextConfigEnv = (request.config as any)?.env ? { ...(request.config as any).env } : undefined;
+        if (nextConfigEnv) {
+          delete nextConfigEnv[FLEET_ROLE_ENV_KEY];
+        }
+
+        log.debug(`injecting MCP servers for role "${role}"`, { role });
+
+        return {
+          ...request,
+          ...(nextEnv ? { env: nextEnv } : {}),
+          config: {
+            ...request.config,
+            ...(nextConfigEnv ? { env: nextConfigEnv } : {}),
+            mcpServers: {
+              ...(request.config.mcpServers ?? {}),
+              // TODO: populate per-class servers from the matrix (§4 of research doc)
+              // For now the class-specific layer is a placeholder until the
+              // stdio transport decision (#1020 §5.1) lands.
+            },
+          },
+        };
+      }
+
+      // No class marker — apply read-only defaults (no-op today).
+      return request;
+    }),
+  );
 
   return () => {
     for (const fn of removeHooks) fn();
