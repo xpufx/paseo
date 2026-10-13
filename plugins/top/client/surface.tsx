@@ -24,6 +24,8 @@ import {
   topSettingsContract,
   checkboxesFromTarget,
   targetFromCheckboxes,
+  isPillEnabled,
+  isTimelineEnabled,
   METRIC_DEFINITIONS,
   CPU_THRESHOLDS,
   MEM_THRESHOLDS,
@@ -34,7 +36,7 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 import { notifySettingsChanged } from "./settings-events";
-import { ChoiceChips } from "./settings-ui";
+import { ChoiceChips, MultiChoiceChips } from "./settings-ui";
 import { useTopResourceQuery } from "./resources-query";
 import { FleetView } from "./multi-host-view";
 
@@ -204,53 +206,96 @@ export function TopDashboardSurface(props: PluginSurfaceProps) {
 
                 <HostCard variant="elevated">
                   <HostCardHeader
-                    title="Metric Surfaces"
+                    title="Active Pill Items"
                     icon="Sliders"
-                    subtitle="Choose where each metric appears (pill vs timeline)"
+                    value={
+                      <Text style={{ fontWeight: "600", color: colors.accent }}>
+                        {`${METRIC_DEFINITIONS.filter((d) => isPillEnabled(settings.metricSurfaces?.[d.id])).length} active`}
+                      </Text>
+                    }
+                    subtitle="Choose which items appear in the composer pill"
                   />
-                  <HostStack gap={12}>
-                    {METRIC_DEFINITIONS.map((def) => {
-                      const boxes = checkboxesFromTarget(settings.metricSurfaces?.[def.id]);
-                      const setBox = (which: "pill" | "timeline", val: boolean) => {
-                        const nextBoxes = { ...boxes, [which]: val };
-                        if (def.pillOnly) nextBoxes.timeline = false;
-                        applySettings({
-                          metricSurfaces: {
-                            ...settings.metricSurfaces,
-                            [def.id]: targetFromCheckboxes(nextBoxes.pill, nextBoxes.timeline),
-                          } as TopSettings["metricSurfaces"],
-                        });
-                      };
-                      return (
-                        <View key={def.id}>
-                          <Text style={{ fontSize: 11, fontWeight: "700", color: colors.foreground }}>
-                            {def.title}
-                          </Text>
-                          <HostRow gap={24} align="center" style={styles.metricTargets}>
-                            <HostRow gap={6} align="center">
-                              <Text style={[styles.metricTargetLabel, { color: colors.foreground }]}>
-                                Pill
-                              </Text>
-                              <HostToggle
-                                value={boxes.pill}
-                                onValueChange={(val) => setBox("pill", val)}
-                              />
-                            </HostRow>
-                            <HostRow gap={6} align="center">
-                              <Text style={[styles.metricTargetLabel, { color: colors.foreground }]}>
-                                Timeline
-                              </Text>
-                              <HostToggle
-                                value={boxes.timeline && !def.pillOnly}
-                                disabled={!!def.pillOnly}
-                                onValueChange={(val) => setBox("timeline", val)}
-                              />
-                            </HostRow>
-                          </HostRow>
-                        </View>
-                      );
-                    })}
-                  </HostStack>
+                  <MultiChoiceChips
+                    options={METRIC_DEFINITIONS.map((def) => ({
+                      id: def.id,
+                      label: def.title,
+                      icon: def.icon,
+                    }))}
+                    selected={METRIC_DEFINITIONS.filter((d) => isPillEnabled(settings.metricSurfaces?.[d.id])).map((d) => d.id)}
+                    onToggle={(metricId) => {
+                      const boxes = checkboxesFromTarget(settings.metricSurfaces?.[metricId]);
+                      applySettings({
+                        metricSurfaces: {
+                          ...settings.metricSurfaces,
+                          [metricId]: targetFromCheckboxes(!boxes.pill, boxes.timeline),
+                        } as TopSettings["metricSurfaces"],
+                      });
+                    }}
+                    onSelectAll={() => {
+                      const next = { ...settings.metricSurfaces };
+                      for (const def of METRIC_DEFINITIONS) {
+                        const boxes = checkboxesFromTarget(settings.metricSurfaces?.[def.id]);
+                        next[def.id] = targetFromCheckboxes(true, boxes.timeline);
+                      }
+                      applySettings({ metricSurfaces: next as TopSettings["metricSurfaces"] });
+                    }}
+                    onClearAll={() => {
+                      const next = { ...settings.metricSurfaces };
+                      for (const def of METRIC_DEFINITIONS) {
+                        const boxes = checkboxesFromTarget(settings.metricSurfaces?.[def.id]);
+                        next[def.id] = targetFromCheckboxes(false, boxes.timeline);
+                      }
+                      applySettings({ metricSurfaces: next as TopSettings["metricSurfaces"] });
+                    }}
+                  />
+                </HostCard>
+
+                <HostCard variant="elevated">
+                  <HostCardHeader
+                    title="Timeline Card Metrics"
+                    icon="GitCommitHorizontal"
+                    value={
+                      <Text style={{ fontWeight: "600", color: colors.accent }}>
+                        {`${METRIC_DEFINITIONS.filter((d) => !d.pillOnly && isTimelineEnabled(settings.metricSurfaces?.[d.id])).length} active`}
+                      </Text>
+                    }
+                    subtitle="Choose which metrics appear on turn timeline cards"
+                  />
+                  <MultiChoiceChips
+                    options={METRIC_DEFINITIONS.filter((d) => !d.pillOnly).map((def) => ({
+                      id: def.id,
+                      label: def.title,
+                      icon: def.icon,
+                    }))}
+                    selected={METRIC_DEFINITIONS.filter((d) => !d.pillOnly && isTimelineEnabled(settings.metricSurfaces?.[d.id])).map((d) => d.id)}
+                    onToggle={(metricId) => {
+                      const boxes = checkboxesFromTarget(settings.metricSurfaces?.[metricId]);
+                      applySettings({
+                        metricSurfaces: {
+                          ...settings.metricSurfaces,
+                          [metricId]: targetFromCheckboxes(boxes.pill, !boxes.timeline),
+                        } as TopSettings["metricSurfaces"],
+                      });
+                    }}
+                    onSelectAll={() => {
+                      const next = { ...settings.metricSurfaces };
+                      for (const def of METRIC_DEFINITIONS) {
+                        if (def.pillOnly) continue;
+                        const boxes = checkboxesFromTarget(settings.metricSurfaces?.[def.id]);
+                        next[def.id] = targetFromCheckboxes(boxes.pill, true);
+                      }
+                      applySettings({ metricSurfaces: next as TopSettings["metricSurfaces"] });
+                    }}
+                    onClearAll={() => {
+                      const next = { ...settings.metricSurfaces };
+                      for (const def of METRIC_DEFINITIONS) {
+                        if (def.pillOnly) continue;
+                        const boxes = checkboxesFromTarget(settings.metricSurfaces?.[def.id]);
+                        next[def.id] = targetFromCheckboxes(boxes.pill, false);
+                      }
+                      applySettings({ metricSurfaces: next as TopSettings["metricSurfaces"] });
+                    }}
+                  />
                 </HostCard>
 
                 <HostCard variant="elevated">
