@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+
 
 /** Forgejo host used when `FORGEJO_HOST` is unset. */
 export const DEFAULT_FORGEJO_HOST = "forge.mrs.uppidi.com";
@@ -13,36 +11,40 @@ export function resolveForgejoHost(): string {
 /** Default per-request timeout for Forgejo API reads. */
 export const FORGEJO_API_TIMEOUT_MS = 6000;
 
+import { PluginStorage } from "paseo-plugin-helper/server";
+
 /**
- * Resolves the Forgejo API token from the two sources the plugin already used
- * for issue reads: `FORGEJO_TOKEN` / `GITEA_TOKEN`, then the matching login
- * block in `~/.config/tea/config.yml`.
+ * Resolves the Forgejo API token from explicit env vars or the uppidi-fleet
+ * plugin's own settings. Never falls back to 'forges' settings or
+ * ~/.config/tea/config.yml.
  *
  * A null return means "no usable token", which callers must surface as an
  * authorization failure — never as a reason to serve substitute data.
  */
 export async function resolveForgejoToken(host: string): Promise<string | null> {
-  if (process.env.FORGEJO_TOKEN) return process.env.FORGEJO_TOKEN.trim();
-  if (process.env.GITEA_TOKEN) return process.env.GITEA_TOKEN.trim();
+  if (process.env.FORGEJO_TOKEN?.trim()) return process.env.FORGEJO_TOKEN.trim();
+  if (process.env.GITEA_TOKEN?.trim()) return process.env.GITEA_TOKEN.trim();
+
+  // Read ONLY from the uppidi-fleet plugin's own settings.
   try {
-    const teaConfigPath = join(homedir(), ".config", "tea", "config.yml");
-    const content = await readFile(teaConfigPath, "utf8");
-    const lines = content.split("\n");
-    let currentLoginMatches = false;
-    for (const line of lines) {
-      if (line.includes(host) || line.includes("https://" + host)) {
-        currentLoginMatches = true;
-      } else if (line.trim().startsWith("- name:")) {
-        currentLoginMatches = line.includes(host);
-      }
-      if (currentLoginMatches && line.trim().startsWith("token:")) {
-        const token = line.replace(/.*token:\s*/, "").trim();
-        if (token) return token;
-      }
+    const storage = new PluginStorage<{ tokensByHost?: Record<string, string>; forgejoToken?: string }>(
+      "uppidi-fleet",
+      "settings.json",
+    );
+    const data = await storage.readAsync();
+    const token = data?.tokensByHost?.[host];
+    if (typeof token === "string" && token.trim()) {
+      return token.trim();
+    }
+    // Fallback to a single forgejoToken field if no per-host map exists.
+    const singleToken = data?.forgejoToken;
+    if (typeof singleToken === "string" && singleToken.trim()) {
+      return singleToken.trim();
     }
   } catch {
-    // No readable tea config — the caller reports this as unauthenticated.
+    // uppidi-fleet settings unavailable — fail closed.
   }
+
   return null;
 }
 

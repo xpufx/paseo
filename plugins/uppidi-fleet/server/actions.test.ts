@@ -1,11 +1,11 @@
-import { test, describe } from "node:test";
+import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   handleForgeActionRuns,
   filterByStatus,
 } from "./actions.js";
 import type { ForgeActionRun } from "../shared/contracts.js";
-import { setFetchForTest } from "./forgejo-api.js";
+import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 
 // ------------------------------------------------------------------ fixtures ---
 
@@ -151,6 +151,17 @@ const MOCK_RUN_3 = {
 // ------------------------------------------------------------------- tests ----
 
 describe("server/actions.ts", () => {
+  beforeEach(() => {
+    // Pin a deterministic token so the handler never falls back to the
+    // operator's ~/.config/tea/config.yml — that would make this suite pass
+    // or fail based on which workstation it runs on.
+    setTokenResolverForTest(async () => "test-token");
+  });
+
+  afterEach(() => {
+    setTokenResolverForTest(null);
+  });
+
   describe("handleForgeActionRuns – single repo", () => {
     test("returns runs for a specific repository", async () => {
       const mockResponse = [MOCK_RUN_1, MOCK_RUN_3];

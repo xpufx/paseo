@@ -65,10 +65,10 @@ const defaultLogger: TicketLogger = {
 
 export async function storedForgeSelection(
   directory: string | undefined,
-  storagePluginId = "forges",
+  storagePluginId?: string,
   readSettings?: (pluginId: string, filename: string) => Promise<any>,
 ): Promise<string | undefined> {
-  if (!directory) return undefined;
+  if (!directory || !storagePluginId) return undefined;
   try {
     let settings: any = null;
     if (readSettings) {
@@ -146,7 +146,7 @@ export interface TicketHandlers {
 }
 
 export function createTicketHandlers(options: TicketHandlerOptions = {}): TicketHandlers {
-  const storagePluginId = options.storagePluginId ?? "forges";
+  const storagePluginId = options.storagePluginId; // no 'forges' fallback
   const log = options.logger ?? defaultLogger;
   const guard = options.guard ?? new ForgeGuard();
 

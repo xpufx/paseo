@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { join } from "node:path";
+
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type {
   AttentionLabel,
@@ -18,27 +16,12 @@ const DEFAULT_HOST = process.env.FORGEJO_HOST || "forge.mrs.uppidi.com";
 const DEFAULT_REPO = process.env.FORGEJO_REPO || "xpufx-org/paseo";
 
 /**
- * Token resolution, in order: an explicit env token, then the `tea` CLI config
- * for this host. A board with no token still serves public issues.
+ * Token resolution: only explicit env vars. A board with no token still serves
+ * public issues — never falls back to any global settings or tea/config.yml.
  */
-export async function resolveToken(host: string): Promise<string | null> {
+export async function resolveToken(_host: string): Promise<string | null> {
   const explicit = process.env.FORGEJO_TOKEN?.trim() || process.env.GITEA_TOKEN?.trim();
-  if (explicit) return explicit;
-  try {
-    const content = await readFile(join(homedir(), ".config", "tea", "config.yml"), "utf8");
-    let inHostBlock = false;
-    for (const line of content.split("\n")) {
-      if (line.includes(host)) inHostBlock = true;
-      else if (line.trim().startsWith("- name:")) inHostBlock = false;
-      if (inHostBlock && line.trim().startsWith("token:")) {
-        const token = line.replace(/.*token:\s*/, "").trim();
-        if (token) return token;
-      }
-    }
-  } catch {
-    // No tea config: the board may still be public.
-  }
-  return null;
+  return explicit || null;
 }
 
 /** Operator attention; accepts canonical numberless and legacy numeric spellings. */

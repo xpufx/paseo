@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 113 |
+| `deterministic` | 114 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **117** |
+| **total** | **118** |
 
-Inventory: 109 tracked source files in scope — 64 described above as source (56 files, some carrying several parts) and 53 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 110 tracked source files in scope — 64 described above as source (56 files, some carrying several parts) and 54 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -63,7 +63,7 @@ See *What this table does not cover* below for the sessions themselves.
 | Agent record normalisation, metrics projection, deterministic-state derivation | `server/agents.ts` | 68 | 3459 | `deterministic` | `normalizeRawAgent`, `normalizeAgentMetrics`, `deriveDeterministicState`, `categorizeAgent` | agents.ts:227-253 — copies token/cost/turn counters off the record, no inference<br>agents.ts:255-348 — `deriveDeterministicState` is ordered `if`/`includes` matching over status and error text<br>agents.ts:281-296 — quota/spawn/timeout classification is literal substring matching |
 | Fleet topology, workspace mapping, permission scope, desk working dirs | `server/agents.ts` | 68 | 3459 | `deterministic` | `buildAgentTree`, `getWorkspaceProjectMap`, `findScopeMatchingPermission`, `resolveDeskWorkingDirs`, `checkRepoMainDirty` | agents.ts:425-543 — `buildAgentTree` links parents to children from ids<br>agents.ts:748-765 — `checkRepoMainDirty` resolves the primary checkout, shells `git status`/`git rev-parse` and parses the result<br>agents.ts:767 — `fetchPaseoAgents` reads `paseo ls --json` |
 | Agent session spawning, front-desk and orchestrator lifecycle, hook-context injection, spawn-authority guard | `server/agents.ts` | 68 | 3459 | `hybrid` | `spawnPaseoAgent`, `buildFrontDeskIntroPrompt`, `handleUppidiCreateFrontDesk`, `handleUppidiAddOrchestrator`, `evaluateSpawnAuthority` | agents.ts:2075 — `context.paseo.agents.create(createPayload)` creates a model-backed session<br>agents.ts:2130-2147 — CLI fallback `paseo run -d ... <prompt>` — the prompt is the agent's task<br>agents.ts:2238-2256 — `buildFrontDeskIntroPrompt` appends the resolved hook endpoint and auth posture (#903)<br>agents.ts:2265 — `handleUppidiCreateFrontDesk` uses the intro prompt at spawn<br>agents.ts:1966-2014 — spawn-authority guard is deterministic policy over caller id and cwd |
-| Forgejo host/token resolution and classified API reads | `server/forgejo-api.ts` | 12 | 180 | `deterministic` | `resolveForgejoHost`, `resolveForgejoToken`, `forgejoApiGet`, `forgejoToken` | forgejo-api.ts:9-11 — host is `process.env.FORGEJO_HOST` or a constant<br>forgejo-api.ts:24-47 — token is read from env or parsed out of `~/.config/tea/config.yml`<br>forgejo-api.ts:88-122 — one GET, three outcomes: ok / http-error / unreachable |
+| Forgejo host/token resolution and classified API reads | `server/forgejo-api.ts` | 12 | 182 | `deterministic` | `resolveForgejoHost`, `resolveForgejoToken`, `forgejoApiGet`, `forgejoToken` | forgejo-api.ts:9-11 — host is `process.env.FORGEJO_HOST` or a constant<br>forgejo-api.ts:24-47 — token is read from env or parsed out of `~/.config/tea/config.yml`<br>forgejo-api.ts:88-122 — one GET, three outcomes: ok / http-error / unreachable |
 | Issue read and label-derived attention/status projection | `server/issues.ts` | 6 | 262 | `deterministic` | `handleUppidiIssues` | issues.ts:20-32 — single `GET /api/v1/repos/<repo>/issues`<br>issues.ts:55-64 — attention is exact label matching against three known spellings<br>issues.ts:66-73 — status is a fixed precedence over `state/*` and `review/*` labels |
 | Repo enrollment surface: Forgejo listing, roster/pause/queue/orchestrator projection, enroll/unenroll | `server/repos.ts` | 3 | 213 | `deterministic` | `handleUppidiRepos`, `handleUppidiEnrollRepo`, `handleUppidiUnenrollRepo` | repos.ts:39-60 — one classified GET (`/repos/search`) with a `/user/repos` 404 fallback; 401 maps to a fixed message and an empty list<br>repos.ts:73-95 — each row is built by matching the roster (enrolled, paused, summed queue depth) and the active router's orchestrator record<br>repos.ts:127-150 — enroll canonicalises the key, delegates to the router, or patches the persisted config when no router is active<br>repos.ts:177-195 — unenroll is the same shape with a membership filter |
 | Hook-service RPC handlers, endpoint resolution, auth posture, x-comms presence probe | `server/hook.ts` | 16 | 325 | `deterministic` | `resolveHookEndpoint`, `resolveHookAuthPosture`, `resolveHookUrl`, `handleHookStatus`, `handleHookQueues`, `handleHookConfigure`, +1 more | hook.ts:88-121 — `resolveHookEndpoint` ordered fallback: explicit arg, env, live router, settings, loopback<br>hook.ts:148-166 — `resolveHookAuthPosture` reports the secret location, never the value<br>hook.ts:169-187 — status is a `fetch` with a 4s timeout<br>hook.ts:194-200 — `resolveXCommsInstalled` tolerates absence to `false` and never throws |
@@ -230,13 +230,14 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `client/surface-halt.test.tsx` | client/surface-halt | `test:tsx` | 173 | `deterministic` |
 | `client/tree-zebra.test.tsx` | Tree zebra striping | `test:tsx` | 47 | `deterministic` |
 | `client/ui-guard.test.ts` | client/ui-guard | `test:tsx` | 155 | `deterministic` |
-| `server/actions.test.ts` | Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing | `test:node` | 508 | `deterministic` |
+| `server/actions.test.ts` | Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing | `test:node` | 519 | `deterministic` |
 | `server/agent-health.test.ts` | server/agent-health | `test:node` | 488 | `deterministic` |
 | `server/agents.test.ts` | Agent normalisation, state derivation, spawn-authority and archive paths | `test:node` | 2274 | `deterministic` |
 | `server/audit-receipts.test.ts` | server/audit-receipts | `test:node` | 268 | `deterministic` |
 | `server/disk-logger.test.ts` | server/disk-logger | `test:node` | 92 | `deterministic` |
 | `server/fleet-reset.test.ts` | server/fleet-reset | `test:node` | 168 | `deterministic` |
 | `server/fleet.test.ts` | Cross-surface fleet behaviour | `test:node` | 1403 | `deterministic` |
+| `server/forgejo-token.test.ts` | server/forgejo-token | `test:node` | 109 | `deterministic` |
 | `server/hook-router.test.ts` | Webhook classification, coalescing, queueing, watchdog taxonomy, handoff | `test:node` | 10727 | `deterministic` |
 | `server/hook.test.ts` | Hook-service handlers, endpoint resolution, unreachable-path shapes | `test:node` | 407 | `deterministic` |
 | `server/issues-check.test.ts` | Ported stale-WIP sweep fixtures, checker retirement guard (#733) | `test:node` | 547 | `deterministic` |
@@ -330,7 +331,7 @@ matrix above is the judgement half.
 | `client/ui-guard.test.ts` | client | 155 | 0 | — |
 | `index.client.tsx` | entry | 115 | 10 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherJumpScreen`, `AgentSwitcherSidebarItem`, `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |
 | `index.server.ts` | entry | 282 | 1 | `contribute` |
-| `server/actions.test.ts` | server | 508 | 0 | — |
+| `server/actions.test.ts` | server | 519 | 0 | — |
 | `server/actions.ts` | server | 228 | 2 | `filterByStatus`, `handleForgeActionRuns` |
 | `server/agent-health.test.ts` | server | 488 | 0 | — |
 | `server/agent-health.ts` | server | 814 | 36 | `AgentCandidate`, `BuildAssessmentOptions`, `DEFAULT_REPETITIVE_TOOL_LOOP_THRESHOLD`, `DeadPredicateResult`, `HealthAssessment`, `KillGuardResult`, `LoadedDiskEntry`, `PrunePlan`, `RecoveryPlan`, `buildHealthAssessment`, `detectCancellationTimeout`, `detectDeadOrphanedDiskRecord` …+24 more |
@@ -342,7 +343,8 @@ matrix above is the judgement half.
 | `server/disk-logger.ts` | server | 184 | 6 | `DEFAULT_LOG_FILE_NAME`, `DEFAULT_MAX_LOG_BYTES`, `DEFAULT_MAX_LOG_FILES`, `DiskLogger`, `DiskLoggerOptions`, `defaultScopedLogDir` |
 | `server/fleet-reset.test.ts` | server | 168 | 0 | — |
 | `server/fleet.test.ts` | server | 1403 | 0 | — |
-| `server/forgejo-api.ts` | server | 180 | 12 | `DEFAULT_FORGEJO_HOST`, `FORGEJO_API_TIMEOUT_MS`, `FetchLike`, `ForgejoApiResult`, `TokenResolverFn`, `forgejoApiGet`, `forgejoApiRequest`, `forgejoToken`, `resolveForgejoHost`, `resolveForgejoToken`, `setFetchForTest`, `setTokenResolverForTest` |
+| `server/forgejo-api.ts` | server | 182 | 12 | `DEFAULT_FORGEJO_HOST`, `FORGEJO_API_TIMEOUT_MS`, `FetchLike`, `ForgejoApiResult`, `TokenResolverFn`, `forgejoApiGet`, `forgejoApiRequest`, `forgejoToken`, `resolveForgejoHost`, `resolveForgejoToken`, `setFetchForTest`, `setTokenResolverForTest` |
+| `server/forgejo-token.test.ts` | server | 109 | 0 | — |
 | `server/hook-router.test.ts` | server | 10727 | 0 | — |
 | `server/hook-router.ts` | server | 12110 | 245 | `BACKWARD_TRANSITION_STEERING_COMMENT`, `BACKWARD_TRANSITION_STEERING_MARKER`, `BoardCandidate`, `BoardCheckResult`, `BoardSweepResult`, `CANCELLATION_TIMEOUT_MARKER`, `CHILD_WAKEUP_EVENTS`, `CI_FAILURE_LABELS`, `CLOSE_GUARD_ACCEPTED_LABELS`, `CLOSE_GUARD_POLICY_COMMENT`, `ChildWakeupAssessment`, `ChildWakeupContext` …+233 more |
 | `server/hook.test.ts` | server | 407 | 0 | — |

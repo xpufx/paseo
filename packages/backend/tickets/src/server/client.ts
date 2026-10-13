@@ -450,22 +450,24 @@ export async function resolveForgeToken(
     } catch {}
   }
 
-  const storagePluginId = options?.storagePluginId ?? "forges";
-  try {
-    let data: any = null;
-    if (options?.readSettings) {
-      data = await options.readSettings(storagePluginId, "settings.json");
-    } else {
-      const paseoHome = process.env.PASEO_HOME || join(homedir(), ".paseo");
-      const settingsPath = join(paseoHome, "plugin-data", "xpufx", storagePluginId, "settings.json");
-      const raw = await readFile(settingsPath, "utf8");
-      data = JSON.parse(raw);
-    }
-    const token = data?.tokensByHost?.[host];
-    if (typeof token === "string" && token.trim()) {
-      return token.trim();
-    }
-  } catch {}
+  // Read ONLY from the caller's own plugin scope — never fall back to 'forges'.
+  if (options?.storagePluginId) {
+    try {
+      let data: any = null;
+      if (options?.readSettings) {
+        data = await options.readSettings(options.storagePluginId!, "settings.json");
+      } else {
+        const paseoHome = process.env.PASEO_HOME || join(homedir(), ".paseo");
+        const settingsPath = join(paseoHome, "plugin-data", "xpufx", options.storagePluginId, "settings.json");
+        const raw = await readFile(settingsPath, "utf8");
+        data = JSON.parse(raw);
+      }
+      const token = data?.tokensByHost?.[host];
+      if (typeof token === "string" && token.trim()) {
+        return token.trim();
+      }
+    } catch {}
+  }
 
   if (process.env.FORGEJO_TOKEN?.trim()) {
     return process.env.FORGEJO_TOKEN.trim();
@@ -473,24 +475,6 @@ export async function resolveForgeToken(
   if (process.env.GITEA_TOKEN?.trim()) {
     return process.env.GITEA_TOKEN.trim();
   }
-
-  try {
-    const teaConfigPath = join(homedir(), ".config", "tea", "config.yml");
-    const content = await readFile(teaConfigPath, "utf8");
-    const lines = content.split("\n");
-    let currentLoginMatches = false;
-    for (const line of lines) {
-      if (line.includes(host) || line.includes("https://" + host)) {
-        currentLoginMatches = true;
-      } else if (line.trim().startsWith("- name:")) {
-        currentLoginMatches = line.includes(host);
-      }
-      if (currentLoginMatches && line.trim().startsWith("token:")) {
-        const token = line.replace(/.*token:\s*/, "").trim();
-        if (token) return token;
-      }
-    }
-  } catch {}
 
   return undefined;
 }
@@ -502,36 +486,6 @@ export async function resolveDefaultForgeHost(): Promise<string> {
   if (process.env.GITEA_HOST?.trim()) {
     return process.env.GITEA_HOST.trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
   }
-  try {
-    const teaConfigPath = join(homedir(), ".config", "tea", "config.yml");
-    const content = await readFile(teaConfigPath, "utf8");
-    const lines = content.split("\n");
-    let defaultLoginUrl = "";
-    let firstLoginUrl = "";
-    let inDefaultLogin = false;
-    for (const line of lines) {
-      if (line.trim().startsWith("- name:")) {
-        inDefaultLogin = false;
-      }
-      if (line.trim().startsWith("default: true")) {
-        inDefaultLogin = true;
-      }
-      if (line.trim().startsWith("url:") || line.trim().startsWith("ssh_host:")) {
-        const urlOrHost = line.replace(/.*(?:url|ssh_host):\s*/, "").trim();
-        if (urlOrHost) {
-          const host = urlOrHost.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-          if (inDefaultLogin && !defaultLoginUrl) {
-            defaultLoginUrl = host;
-          }
-          if (!firstLoginUrl) {
-            firstLoginUrl = host;
-          }
-        }
-      }
-    }
-    if (defaultLoginUrl) return defaultLoginUrl;
-    if (firstLoginUrl) return firstLoginUrl;
-  } catch {}
 
   return "forge.mrs.uppidi.com";
 }
