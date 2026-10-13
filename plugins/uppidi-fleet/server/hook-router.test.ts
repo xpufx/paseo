@@ -126,6 +126,11 @@ import {
   WAKEUP_RULES,
   isActionableWakeupEvent,
   SLASH_SWEEP_RE,
+  verifyModelWhitelist,
+  resolveSpawnModel,
+  handleSpawnAgent,
+  type SpawnRequest,
+  type SpawnResult,
   type CoalesceEvent,
   type WatchdogAgent,
   type WatchdogAgentDisk,
@@ -137,6 +142,8 @@ import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import { setMetricsFilePathForTest } from "./metrics.js";
 import { STALE_WIP_REMINDER_MARKER, type IssuesCheckIo } from "./issues-check.js";
 import { getUppidiFleetSettingsStorage, resetUppidiFleetSettingsStorageInstance } from "./settings.js";
+import { renderSkillDirective } from "./skills.js";
+import { loadSavedRoleModels, DEFAULT_ROLE_MODELS } from "./role-models.js";
 
 /** Extract the hidden `<!-- {"fleet": ...} -->` JSON comment from a delivered prompt. */
 function parseFleetComment(text: string | undefined): Record<string, any> | null {
@@ -9851,5 +9858,394 @@ describe("backward transition steering (#1282)", () => {
     assert.equal(res.acted, false);
     assert.equal(res.reason, "not a backward state transition");
     assert.equal(requests.length, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unified agent spawning & role-model whitelist enforcement (#1215)
+// ---------------------------------------------------------------------------
+
+describe("unified agent spawning endpoints (#1215)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-spawn-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("POST /agents/spawn rejects invalid roles with 400", async () => {
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+    await router.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "badger" }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.ok, false);
+      assert.ok(body.error.includes("Invalid role"));
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /agents/spawn validates model whitelist — allowed model succeeds", async () => {
+    const spawnedAgents: Array<{ title: string; prompt: string; labels: Record<string, string>; model: string }> = [];
+    const mockSpawnAgent = async (opts: {
+      title: string;
+      prompt: string;
+      cwd?: string;
+      workspaceId?: string;
+      mode?: string;
+      provider?: string;
+      model?: string;
+      labels?: Record<string, string>;
+    }) => {
+      spawnedAgents.push({
+        title: opts.title,
+        prompt: opts.prompt,
+        labels: opts.labels ?? {},
+        model: opts.model ?? "",
+      });
+      return { id: `spawned-${Date.now()}` };
+    };
+
+    // Determine a whitelisted orchestrator model from the current config
+    const roles = loadSavedRoleModels();
+    const orchConfig = roles["orchestrator"];
+    const whitelistedModel = orchConfig?.primaryModel || "antigravity-acp/gemini-3.8-flash-low";
+
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, {
+      queueDir,
+      stateDir,
+      port: 0,
+      spawnAgent: mockSpawnAgent,
+    });
+    await router.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "orchestrator",
+          repo: "xpufx-org/test-repo",
+          model: whitelistedModel,
+        }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.ok(body.agentId);
+      assert.equal(body.role, "orchestrator");
+      assert.equal(spawnedAgents.length, 1);
+      assert.ok(spawnedAgents[0].prompt.includes(renderSkillDirective("orchestrator")));
+      assert.ok(spawnedAgents[0].labels["role"] === "orchestrator");
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /agents/spawn rejects non-whitelisted model with 400", async () => {
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+    await router.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "worker",
+          repo: "xpufx-org/test-repo",
+          model: "nemotron-3.5-lightning-free",
+        }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.ok, false);
+      assert.ok(body.error.includes("not authorized"));
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /workers/spawn appends coding-agent skill directive and fleet role labels", async () => {
+    const spawnedAgents: Array<{ title: string; prompt: string; labels: Record<string, string> }> = [];
+    const mockSpawnAgent = async (opts: {
+      title: string;
+      prompt: string;
+      cwd?: string;
+      workspaceId?: string;
+      mode?: string;
+      provider?: string;
+      model?: string;
+      labels?: Record<string, string>;
+    }) => {
+      spawnedAgents.push({
+        title: opts.title,
+        prompt: opts.prompt,
+        labels: opts.labels ?? {},
+      });
+      return { id: `spawned-${Date.now()}` };
+    };
+
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, {
+      queueDir,
+      stateDir,
+      port: 0,
+      spawnAgent: mockSpawnAgent,
+    });
+    await router.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/workers/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          repo: "xpufx-org/paseo",
+          issueIndex: 1144,
+        }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.ok(body.agentId);
+
+      assert.equal(spawnedAgents.length, 1);
+      const agent = spawnedAgents[0];
+      // Must include coding-agent skill directive
+      assert.ok(agent.prompt.includes("### Coding agent skill"), "Worker prompt must include coding-agent skill directive");
+      // Must include teax usage instructions
+      assert.ok(agent.prompt.includes("teax"), "Worker prompt must mention teax CLI");
+      assert.ok(agent.prompt.includes("-R xpufx-org/paseo"), "Worker prompt must show teax -R form");
+      // Must have fleet role label
+      assert.equal(agent.labels["fleet.role"], "worker");
+      assert.equal(agent.labels["role"], "worker");
+      assert.equal(agent.labels["category"], "coding-agent");
+      assert.equal(agent.labels["repo"], "forge.mrs.uppidi.com/xpufx-org/paseo");
+      assert.equal(agent.labels["fleet.issue"], "1144");
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /frontdesk/spawn registers front desk in router state", async () => {
+    let registeredFrontDesk: string | null = null;
+    const mockSpawnAgent = async (opts: { title: string; prompt: string }) => {
+      return { id: `fd-spawned-${Date.now()}` };
+    };
+
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, {
+      queueDir,
+      stateDir,
+      port: 0,
+      spawnAgent: mockSpawnAgent,
+    });
+    await router.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/frontdesk/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.ok(body.agentId);
+
+      // Verify front desk was registered
+      const infoRes = await fetch(`http://127.0.0.1:${router.port}/info`);
+      const infoBody = await infoRes.json();
+      assert.equal(infoBody.frontDeskAgentId, body.agentId);
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /agents/spawn defaults model when omitted", async () => {
+    const spawnedModels: string[] = [];
+    const mockSpawnAgent = async (opts: { model?: string }) => {
+      spawnedModels.push(opts.model ?? "");
+      return { id: `default-model-spawn` };
+    };
+
+    // Get the expected front-desk default from config
+    const roles = loadSavedRoleModels();
+    const fdConfig = roles["front-desk"] ?? DEFAULT_ROLE_MODELS["front-desk"];
+    const expectedModel = fdConfig.primaryModel;
+
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, {
+      queueDir,
+      stateDir,
+      port: 0,
+      spawnAgent: mockSpawnAgent,
+    });
+    await router.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "frontdesk",
+        }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      // Should resolve to the configured primary model for front-desk
+      assert.ok(spawnedModels[0], "Model should be resolved from defaults");
+      assert.equal(spawnedModels[0], expectedModel);
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /workers/spawn requires repo", async () => {
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+    await router.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${router.port}/workers/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.ok, false);
+      assert.ok(body.error.includes("repo is required"));
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /agents/spawn requires repo for orchestrator and worker", async () => {
+    const server = {
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, { queueDir, stateDir, port: 0 });
+    await router.start();
+    try {
+      // Orchestrator without repo
+      let res = await fetch(`http://127.0.0.1:${router.port}/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "orchestrator" }),
+      });
+      assert.equal(res.status, 400);
+      let body = await res.json();
+      assert.equal(body.ok, false);
+      assert.ok(body.error.includes("repo is required"));
+
+      // Worker without repo
+      res = await fetch(`http://127.0.0.1:${router.port}/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "worker" }),
+      });
+      assert.equal(res.status, 400);
+      body = await res.json();
+      assert.equal(body.ok, false);
+      assert.ok(body.error.includes("repo is required"));
+    } finally {
+      await router.stop();
+    }
+  });
+});
+
+describe("model whitelist verification (#1215)", () => {
+  it("verifyModelWhitelist accepts models in primaryModel + fallbackGroup", () => {
+    const roles = loadSavedRoleModels();
+    const orchConfig = roles["orchestrator"];
+    const allowed = new Set([
+      orchConfig.primaryModel,
+      ...(orchConfig.fallbackGroup ?? []),
+    ]);
+    // Pick any model from the configured whitelist
+    const testModel = orchConfig.primaryModel;
+    const ok = verifyModelWhitelist("orchestrator", testModel);
+    assert.equal(ok.allowed, true);
+  });
+
+  it("verifyModelWhitelist rejects models not in the role's whitelist", () => {
+    const bad = verifyModelWhitelist("worker", "nemotron-3.5-lightning-free");
+    assert.equal(bad.allowed, false);
+    assert.ok(bad.error.includes("not authorized"));
+  });
+
+  it("resolveSpawnModel returns default when model is undefined", () => {
+    const result = resolveSpawnModel("frontdesk", undefined);
+    assert.equal(result.resolvedFrom, "default");
+    // Should resolve to whatever the configured front-desk primary is
+    const roles = loadSavedRoleModels();
+    const fdConfig = roles["front-desk"] ?? DEFAULT_ROLE_MODELS["front-desk"];
+    assert.equal(result.model, fdConfig.primaryModel);
+  });
+
+  it("resolveSpawnModel throws when model is not whitelisted", () => {
+    assert.throws(
+      () => resolveSpawnModel("worker", "nemotron-3.5-lightning-free"),
+      { message: /not authorized/ },
+    );
   });
 });

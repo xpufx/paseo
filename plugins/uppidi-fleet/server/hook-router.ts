@@ -64,8 +64,15 @@ import {
   listEnabledProviders,
   loadSavedRoleModels,
   resolveHostHome,
+  resolveRoleModelKey,
+  type RoleModelKey,
 } from "./role-models.js";
-import { getEffectiveSkillContent, getEffectiveSkillPath, renderSkillDirective } from "./skills.js";
+import type { RoleModelConfig } from "../shared/contracts.js";
+import {
+  getEffectiveSkillContent,
+  getEffectiveSkillPath,
+  renderSkillDirective,
+} from "./skills.js";
 import {
   DEFAULT_ROTATION_POLICY,
   RotationLock,
@@ -2944,6 +2951,260 @@ function formatModelResolutionFailure(
     `Live enabled providers: ${live}. ` +
     "Fix the provider set or the configured fallback group; the fleet will not substitute a hidden default (#1011)."
   );
+}
+
+// ---------------------------------------------------------------------------
+// Unified agent spawning & role-model whitelist enforcement (#1215)
+// ---------------------------------------------------------------------------
+
+/** Valid role values for the unified spawn endpoint. */
+export type SpawnRole = "frontdesk" | "orchestrator" | "worker";
+
+/** Request payload for the unified spawn endpoint. */
+export interface SpawnRequest {
+  role: SpawnRole;
+  repo?: string;
+  issueIndex?: number;
+  model?: string;
+  workspace?: string;
+}
+
+/** Result of a spawn request through the Hook Router. */
+export interface SpawnResult {
+  ok: boolean;
+  agentId?: string;
+  role?: string;
+  model?: string;
+  repo?: string;
+  error?: string;
+}
+
+/**
+ * Resolve the `role-models.json` key for a spawn role.
+ * Maps `worker` → `coding-agent`, `frontdesk` → `front-desk`, `orchestrator` → `orchestrator`.
+ */
+function roleKeyForSpawn(role: SpawnRole): RoleModelKey {
+  if (role === "frontdesk") return "front-desk";
+  if (role === "orchestrator") return "orchestrator";
+  // worker → coding-agent
+  return "coding-agent";
+}
+
+/**
+ * Verify that a requested model is whitelisted for the given role.
+ * Returns `{ allowed: true }` when the model is in the role's primaryModel + fallbackGroup,
+ * or `{ allowed: false, error }` when it is not.
+ */
+export function verifyModelWhitelist(
+  role: SpawnRole,
+  requestedModel: string,
+): { allowed: true } | { allowed: false; error: string } {
+  const roleKey = roleKeyForSpawn(role);
+  const savedRoles = loadSavedRoleModels();
+  const config = savedRoles[roleKey];
+  if (!config) {
+    return { allowed: false, error: `No role-model configuration found for role '${role}' (${roleKey})` };
+  }
+  const allowed = new Set<string>([
+    config.primaryModel,
+    ...(config.fallbackGroup ?? []),
+  ]);
+  if (allowed.has(requestedModel)) {
+    return { allowed: true };
+  }
+  return {
+    allowed: false,
+    error: `Model ${requestedModel} is not authorized for role ${role}`,
+  };
+}
+
+/**
+ * Resolve the model to use for a spawn request.
+ * When `model` is omitted, returns the canonical default for the role.
+ * When `model` is specified, validates against the whitelist.
+ */
+export function resolveSpawnModel(
+  role: SpawnRole,
+  requestedModel: string | undefined,
+): { model: string; resolvedFrom: "explicit" | "default" } {
+  const roleKey = roleKeyForSpawn(role);
+  const savedRoles = loadSavedRoleModels();
+  const config = savedRoles[roleKey] ?? DEFAULT_ROLE_MODELS[roleKey];
+  const defaultModel = config?.primaryModel ?? "antigravity-acp/gemini-3.8-flash-low";
+
+  if (!requestedModel || !requestedModel.trim()) {
+    return { model: defaultModel, resolvedFrom: "default" };
+  }
+
+  const trimmed = requestedModel.trim();
+  // Validate against whitelist
+  const verdict = verifyModelWhitelist(role, trimmed);
+  if (!verdict.allowed) {
+    throw new Error(verdict.error);
+  }
+  return { model: trimmed, resolvedFrom: "explicit" };
+}
+
+/**
+ * Build the prompt body for a worker spawn, including the coding-agent skill
+ * directive, teax usage instructions, and fleet role label guidance.
+ */
+function buildWorkerPrompt(options: {
+  repo: string;
+  issueIndex?: number;
+  model: string;
+}): string {
+  const issueRef = options.issueIndex ? ` #${options.issueIndex}` : "";
+  const host = resolveForgejoHost();
+  const repoArg = ` -R ${options.repo}`;
+  const hostArg = host ? ` --hostname ${host}` : "";
+  return [
+    `You are a coding agent working on repository ${options.repo}${issueRef}.`,
+    `Use the Forgejo CLI \`teax\` for all Forgejo interactions.`,
+    `Form: \`teax <command>${repoArg}${hostArg}\``,
+    "",
+    renderSkillDirective("coding-agent"),
+    "",
+    `### Fleet Role: worker`,
+    `This agent was spawned by the Fleet Hook Router. Always report back via \`teax comment${repoArg}${hostArg} ...\`.`,
+  ].join("\n");
+}
+
+/**
+ * Build the prompt body for a frontdesk spawn.
+ */
+function buildFrontDeskPrompt(): string {
+  return [
+    "You are the Fleet Front Desk liaison. Monitor incoming events, coordinate with project orchestrators, and triage requests across the workspace.",
+    "",
+    renderSkillDirective("front-desk"),
+  ].join("\n");
+}
+
+/**
+ * Build the prompt body for an orchestrator spawn.
+ */
+function buildOrchestratorPrompt(repo: string): string {
+  return [
+    `You are the project orchestrator for ${repo}. Coordinate tasks, supervise coding agents, and manage pull requests and issues for this repository using the forge CLI (teax) and Paseo conventions.`,
+    "",
+    renderSkillDirective("orchestrator"),
+    "",
+    renderSkillDirective("coding-agent"),
+  ].join("\n");
+}
+
+/**
+ * Labels applied to every worker spawn so the fleet dashboard can identify it.
+ */
+function buildWorkerLabels(options: {
+  repo: string;
+  issueIndex?: number;
+}): Record<string, string> {
+  const labels: Record<string, string> = {
+    role: "worker",
+    category: "coding-agent",
+    repo: options.repo,
+    "fleet.role": "worker",
+  };
+  if (options.issueIndex) {
+    labels["fleet.issue"] = String(options.issueIndex);
+  }
+  return labels;
+}
+
+/**
+ * Spawn an agent through the Hook Router with full whitelist enforcement.
+ * This is the single authoritative spawn path for all fleet agents.
+ */
+export async function handleSpawnAgent(
+  request: SpawnRequest,
+  options: {
+    paseo?: PaseoApi;
+    spawnAgent?: HookRouterOptions["spawnAgent"];
+    spawnAutoAllow?: HookRouterOptions["spawnAutoAllow"];
+    archiveAgent?: HookRouterOptions["archiveAgent"];
+    queueDir?: string;
+    stateDir?: string;
+  } = {},
+): Promise<SpawnResult> {
+  const { role, repo, issueIndex, model, workspace } = request;
+
+  // Validate required fields per role
+  if (role === "orchestrator" && (!repo || !repo.trim())) {
+    return { ok: false, error: "repo is required for orchestrator spawns" };
+  }
+  if (role === "worker" && (!repo || !repo.trim())) {
+    return { ok: false, error: "repo is required for worker spawns" };
+  }
+
+  // Resolve and validate model
+  let resolvedModel: string;
+  let resolvedFrom: "explicit" | "default";
+  try {
+    const result = resolveSpawnModel(role, model);
+    resolvedModel = result.model;
+    resolvedFrom = result.resolvedFrom;
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: msg };
+  }
+
+  // Build prompt based on role
+  let title: string;
+  let prompt: string;
+  const labels: Record<string, string> = {};
+  const category: string = role === "worker" ? "coding-agent" : role;
+
+  if (role === "frontdesk") {
+    title = "Front Desk";
+    prompt = buildFrontDeskPrompt();
+    Object.assign(labels, { role: "front-desk", category: "front-desk" });
+  } else if (role === "orchestrator") {
+    const canonicalRepo = canonicalRepoKey(repo!) ?? repo!;
+    title = `Orchestrator · ${canonicalRepo}`;
+    prompt = buildOrchestratorPrompt(canonicalRepo);
+    Object.assign(labels, {
+      role: "orchestrator",
+      category: "orchestrator",
+      repo: canonicalRepo,
+    });
+  } else {
+    // worker
+    const canonicalRepo = canonicalRepoKey(repo!) ?? repo!;
+    const issueRef = issueIndex ? ` #${issueIndex}` : "";
+    title = `Worker · ${canonicalRepo}${issueRef}`;
+    prompt = buildWorkerPrompt({ repo: canonicalRepo, issueIndex, model: resolvedModel });
+    Object.assign(labels, buildWorkerLabels({ repo: canonicalRepo, issueIndex }));
+  }
+
+  // Spawn via injected spawnAgent or fall through to the router's provision logic
+  if (typeof options.spawnAgent === "function") {
+    try {
+      const spawned = await options.spawnAgent({
+        title,
+        prompt,
+        cwd: workspace,
+        model: resolvedModel,
+        labels,
+      });
+      if (spawned?.id) {
+        return {
+          ok: true,
+          agentId: spawned.id,
+          role,
+          model: resolvedModel,
+          repo: repo,
+        };
+      }
+      return { ok: false, error: "spawn returned no agent id" };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: msg };
+    }
+  }
+
+  return { ok: false, error: "no spawn mechanism available" };
 }
 
 export function resolveOrchestratorModel(
@@ -10702,6 +10963,119 @@ export class HookRouter {
           void this.drain(cand);
         }
         this.sendJson(res, 200, { ok: true, repo, agentId });
+        return;
+      }
+
+      // ---------------------------------------------------------------------------
+      // Unified agent spawn endpoints (#1215)
+      // ---------------------------------------------------------------------------
+
+      // POST /agents/spawn — unified entry point for all role spawns
+      if (req.method === "POST" && pathname === "/agents/spawn") {
+        const body = await this.readJsonBody(req).catch(() => ({}));
+        const role = typeof body?.role === "string" ? body.role.trim().toLowerCase() : "";
+        const validRoles = new Set(["frontdesk", "orchestrator", "worker"]);
+        if (!validRoles.has(role)) {
+          this.sendJson(res, 400, { ok: false, error: `Invalid role '${role}'. Must be one of: frontdesk, orchestrator, worker` });
+          return;
+        }
+        const repo = typeof body?.repo === "string" ? body.repo.trim() : undefined;
+        const issueIndex = typeof body?.issueIndex === "number" ? body.issueIndex : undefined;
+        const model = typeof body?.model === "string" ? body.model.trim() || undefined : undefined;
+        const workspace = typeof body?.workspace === "string" ? body.workspace.trim() || undefined : undefined;
+
+        try {
+          const result = await handleSpawnAgent(
+            { role, repo, issueIndex, model, workspace },
+            {
+              paseo: this.getPaseo() ?? undefined,
+              spawnAgent: this.options?.spawnAgent,
+              spawnAutoAllow: this.options?.spawnAutoAllow,
+              archiveAgent: this.options?.archiveAgent,
+              queueDir: this.options?.queueDir,
+              stateDir: this.options?.stateDir,
+            },
+          );
+          if (!result.ok) {
+            this.sendJson(res, 400, result);
+            return;
+          }
+          // Register in router state
+          if (result.role === "orchestrator" && result.repo) {
+            this.writeOrchestrator(result.repo, result.agentId!, "spawn-router");
+            this.enrollRepo(result.repo);
+          }
+          if (result.role === "frontdesk") {
+            this.writeFrontDesk(result.agentId!, "spawn-router");
+          }
+          this.log(`[info] Spawned ${role} agent ${result.agentId} (model: ${result.model})`);
+          this.sendJson(res, 200, result);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      // POST /frontdesk/spawn — dedicated Front Desk spawn
+      if (req.method === "POST" && pathname === "/frontdesk/spawn") {
+        const body = await this.readJsonBody(req).catch(() => ({}));
+        const model = typeof body?.model === "string" ? body.model.trim() || undefined : undefined;
+        try {
+          const result = await handleSpawnAgent(
+            { role: "frontdesk", model },
+            {
+              paseo: this.getPaseo() ?? undefined,
+              spawnAgent: this.options?.spawnAgent,
+              spawnAutoAllow: this.options?.spawnAutoAllow,
+              archiveAgent: this.options?.archiveAgent,
+              queueDir: this.options?.queueDir,
+              stateDir: this.options?.stateDir,
+            },
+          );
+          if (!result.ok) {
+            this.sendJson(res, 400, result);
+            return;
+          }
+          this.writeFrontDesk(result.agentId!, "spawn-router");
+          this.log(`[info] Spawned frontdesk agent ${result.agentId} (model: ${result.model})`);
+          this.sendJson(res, 200, result);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      // POST /workers/spawn — dedicated Worker spawn with skill directive + labels
+      if (req.method === "POST" && pathname === "/workers/spawn") {
+        const body = await this.readJsonBody(req).catch(() => ({}));
+        const repo = typeof body?.repo === "string" ? body.repo.trim() : "";
+        if (!repo) {
+          this.sendJson(res, 400, { ok: false, error: "repo is required for worker spawns" });
+          return;
+        }
+        const issueIndex = typeof body?.issueIndex === "number" ? body.issueIndex : undefined;
+        const model = typeof body?.model === "string" ? body.model.trim() || undefined : undefined;
+        try {
+          const result = await handleSpawnAgent(
+            { role: "worker", repo, issueIndex, model },
+            {
+              paseo: this.getPaseo() ?? undefined,
+              spawnAgent: this.options?.spawnAgent,
+              spawnAutoAllow: this.options?.spawnAutoAllow,
+              archiveAgent: this.options?.archiveAgent,
+              queueDir: this.options?.queueDir,
+              stateDir: this.options?.stateDir,
+            },
+          );
+          if (!result.ok) {
+            this.sendJson(res, 400, result);
+            return;
+          }
+          this.log(`[info] Spawned worker agent ${result.agentId} for ${repo}${issueIndex ? ` #${issueIndex}` : ""} (model: ${result.model})`);
+          this.sendJson(res, 200, result);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
         return;
       }
 
