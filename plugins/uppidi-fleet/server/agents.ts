@@ -64,6 +64,7 @@ import {
 } from "../shared/contracts.js";
 import type { WorkspaceProjectMap } from "../shared/contracts.js";
 import { isAgentEligibleForBulkArchive, isRepoMatching } from "../shared/sort-filter.js";
+import { buildAgentLink, resolveAgentLinkConfig } from "../shared/agent-links.js";
 import {
   appendHookLog,
   formatFleetTeardownNotice,
@@ -457,7 +458,7 @@ export function normalizeRawAgent(
     usage: raw.lastUsage || null,
     metrics,
     lastError: raw.lastError || null,
-    url: raw.url || (id ? `paseo://agent/${id}` : undefined),
+    url: raw.url || (id ? buildAgentLink({ agentId: id, workspaceId: raw.workspaceId }, resolveAgentLinkConfig()) : undefined),
     worktree: extractAgentWorktree(raw),
     project,
     labels: raw.labels,

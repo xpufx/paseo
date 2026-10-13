@@ -119,6 +119,7 @@ import { UppidiFleetKanbanBoard } from "./kanban-board.js";
 import { ForgeIssuesView } from "./forges-tab.js";
 import { canonicalForgeUrl, resolveForgeSelection } from "./forges-tab.js";
 import { canonicalRepoName, resolveCanonicalRepo } from "../shared/repo-identity.js";
+import { defaultAgentLink } from "../shared/agent-links.js";
 
 export type SurfaceTab = "tree" | "dashboard" | "tooling" | "settings" | "board" | "forges";
 
@@ -1600,7 +1601,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
       props.navigation.openAgent({ agentId });
       return;
     }
-    Linking.openURL(`paseo://agent/${agentId}`).catch(() => {});
+    Linking.openURL(defaultAgentLink(agentId)).catch(() => {});
   };
 
   const handleArchiveAgent = async (agentId: string) => {

@@ -6,6 +6,12 @@ import {
   forgeCapabilityFromRepo,
   parseAgentEnvelope,
   stripAgentEnvelopeFooter,
+  buildPaseoAgentLink,
+  buildHappierAgentLink,
+  buildDashboardAgentLink,
+  createAgentLinkResolver,
+  primaryAgentLink,
+  AgentEnvelopeSchema,
   parseMarkdownLite,
   parseMarkdownLiteInline,
   rankIssues,
@@ -79,6 +85,73 @@ describe("Agent Envelopes", () => {
   it("strips envelope footer cleanly", () => {
     const body = "Turn completed.\n\n---\n<sub>🤖 **Coding Agent** (`abc1234`) · `gpt-4o` · `owner/repo:main` · _2026-10-12T10:00:00Z_</sub>";
     expect(stripAgentEnvelopeFooter(body)).toBe("Turn completed.");
+  });
+
+  it("parses historical paseo:// links into agentLinks with a paseoLinks alias", () => {
+    const body = "Done. See paseo://agent/abc1234 for the session.\n\n---\n<sub>🤖 **Coding Agent** (`abc1234`) · `gpt-4o` · `owner/repo:main` · _2026-10-12T10:00:00Z_</sub>";
+    const parsed = parseAgentEnvelope(7, body);
+    expect(parsed?.agentLinks).toEqual(["paseo://agent/abc1234"]);
+    expect(parsed?.paseoLinks).toEqual(parsed?.agentLinks);
+    expect(primaryAgentLink(parsed)).toBe("paseo://agent/abc1234");
+  });
+
+  it("extracts server ids from hosted paseo:// links", () => {
+    const body = "Done. See paseo://h/server-1/agent/abc1234 for the session.\n\n---\n<sub>🤖 **Coding Agent** (`abc1234`) · `gpt-4o` · `owner/repo:main` · _2026-10-12T10:00:00Z_</sub>";
+    const parsed = parseAgentEnvelope(8, body);
+    expect(parsed?.agentLinks).toEqual(["paseo://h/server-1/agent/abc1234"]);
+    expect(parsed?.serverId).toBe("server-1");
+  });
+
+  it("parses happier:// and dashboard agent links", () => {
+    const body = "Done. happier://agent/abc1234 and https://dash.example.com/agents/abc1234\n\n---\n<sub>🤖 **Coding Agent** (`abc1234`) · `gpt-4o` · `owner/repo:main` · _2026-10-12T10:00:00Z_</sub>";
+    const parsed = parseAgentEnvelope(9, body);
+    expect(parsed?.agentLinks).toEqual([
+      "happier://agent/abc1234",
+      "https://dash.example.com/agents/abc1234",
+    ]);
+    expect(parsed?.paseoLinks).toEqual(parsed?.agentLinks);
+  });
+
+  it("accepts a custom link pattern from host clients", () => {
+    const body = "Done. See myapp://sessions/abc1234 for details.\n\n---\n<sub>🤖 **Coding Agent** (`abc1234`) · `gpt-4o` · `owner/repo:main` · _2026-10-12T10:00:00Z_</sub>";
+    expect(parseAgentEnvelope(10, body)?.agentLinks).toEqual([]);
+    const custom = parseAgentEnvelope(10, body, { linkPattern: /myapp:\/\/[^\s)>\]]+/ });
+    expect(custom?.agentLinks).toEqual(["myapp://sessions/abc1234"]);
+  });
+
+  it("builds configurable agent links for every supported template", () => {
+    expect(buildPaseoAgentLink({ agentId: "a1" })).toBe("paseo://agent/a1");
+    expect(buildPaseoAgentLink({ agentId: "a1", workspaceId: "ws-9" })).toBe(
+      "paseo://agent/a1?workspace=ws-9",
+    );
+    expect(buildPaseoAgentLink({ agentId: "a1", serverId: "h1" })).toBe(
+      "paseo://h/h1/agent/a1",
+    );
+    expect(buildHappierAgentLink({ agentId: "a1" })).toBe("happier://agent/a1");
+    expect(buildDashboardAgentLink({ agentId: "a1", dashboardHost: "dash.example.com" })).toBe(
+      "https://dash.example.com/agents/a1",
+    );
+    expect(createAgentLinkResolver()({ agentId: "a1" })).toBe("paseo://agent/a1");
+    expect(createAgentLinkResolver({ scheme: "happier" })({ agentId: "a1" })).toBe(
+      "happier://agent/a1",
+    );
+    expect(
+      createAgentLinkResolver({ scheme: "https", dashboardHost: "dash.example.com" })({ agentId: "a1" }),
+    ).toBe("https://dash.example.com/agents/a1");
+    expect(
+      createAgentLinkResolver({ scheme: "paseo", workspaceId: "ws-9" })({ agentId: "a1" }),
+    ).toBe("paseo://agent/a1?workspace=ws-9");
+  });
+
+  it("normalizes historical paseoLinks-only payloads to agentLinks", () => {
+    const parsed = AgentEnvelopeSchema.parse({
+      commentId: 11,
+      sessionTitle: "Coding Agent",
+      agentShortId: "abc1234",
+      paseoLinks: ["paseo://agent/abc1234"],
+    });
+    expect(parsed.agentLinks).toEqual(["paseo://agent/abc1234"]);
+    expect(parsed.paseoLinks).toEqual(["paseo://agent/abc1234"]);
   });
 });
 

@@ -2,7 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, FORGE_WRITE_SCOPES, ForgeIssueSchema, forgeCapabilityFromRepo, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, forgeWriteScopeList, isBoardAlertText, isValidForgeTarget, issueMatchesQuery, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, createIssueContract, parseLabelList, splitScopedLabel, validateCreateIssueInput, workspaceNameKey, writeGateNotice, type ForgeIssue } from "./issues.ts";import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
+import { activeForgeForDirectory, classifyForgeLink, classifyForgeUrl, compactLabelValue, createRemoteSearchGate, darkenLabelColor, deriveForgeAccess, displayNameForDirectory, effectiveForgeHost, extractBareForgeIssueUrls, extractForgeIssueUrls, FORGE_WRITE_SCOPES, ForgeIssueSchema, forgeCapabilityFromRepo, forgeSettingsContract, forgeTargetsForWorkspace, forgeIssueLinkFromUrl, forgeWriteScopeList, isBoardAlertText, isValidForgeTarget, issueMatchesQuery, LABEL_VALUE_MAX_LENGTH, labelTextColor, liveScopesFromIssues, normalizeLabelColor, openIssuesContract, parseBoardAlert, parseForgeRemote, parseMarkdownLite, parseMarkdownLiteInline, paseoLabelScopes, paseoLabelSet, planLabelChip, planLabelSetInstall, rankIssues, resolveForgeRepo, resolveIssueSearchLayer, resolveForgeTarget, scopeOfLabel, SearchIssuesInputSchema, searchIssuesContract, createIssueContract, parseLabelList, splitScopedLabel, validateCreateIssueInput, workspaceNameKey, writeGateNotice, type ForgeIssue } from "./issues.ts";
+import { buildDashboardAgentLink, buildHappierAgentLink, buildPaseoAgentLink, createAgentLinkResolver, parseAgentEnvelope, primaryAgentLink } from "./issues.ts";import { createForgeLabelResolver, forgePillLabel, type ForgePillRuntime } from "../client/pill-label.ts";
 
 const ALIAS_REMOTE = "forge-alias:your-org/your-repo.git";
 const REAL_HOST = "forge.example.com";
@@ -1274,5 +1275,57 @@ describe("create issue gate (issue #200)", () => {
   it("falls back to the access summary for every other read-only state", () => {
     const anonymous = deriveForgeAccess({ repoPublic: true, tokenPresent: false });
     assert.match(writeGateNotice(anonymous, "creating issues"), /No token saved/);
+  });
+});
+
+describe("agent envelope links (issue #1297)", () => {
+  const footer = "<sub>🤖 **Coding Agent** (`abc1234`) · `gpt-4o` · `owner/repo:main` · _2026-10-12T10:00:00Z_</sub>";
+
+  it("parses historical paseo:// links into agentLinks with a paseoLinks alias", () => {
+    const parsed = parseAgentEnvelope(7, `Done. See paseo://agent/abc1234 for the session.\n\n---\n${footer}`);
+    assert.deepEqual(parsed?.agentLinks, ["paseo://agent/abc1234"]);
+    assert.deepEqual(parsed?.paseoLinks, parsed?.agentLinks);
+    assert.equal(primaryAgentLink(parsed), "paseo://agent/abc1234");
+  });
+
+  it("extracts server ids and parses happier/dashboard links", () => {
+    const hosted = parseAgentEnvelope(8, `Done. paseo://h/server-1/agent/abc1234\n\n---\n${footer}`);
+    assert.deepEqual(hosted?.agentLinks, ["paseo://h/server-1/agent/abc1234"]);
+    assert.equal(hosted?.serverId, "server-1");
+    const multi = parseAgentEnvelope(
+      9,
+      `Done. happier://agent/abc1234 and https://dash.example.com/agents/abc1234\n\n---\n${footer}`,
+    );
+    assert.deepEqual(multi?.agentLinks, [
+      "happier://agent/abc1234",
+      "https://dash.example.com/agents/abc1234",
+    ]);
+  });
+
+  it("accepts a custom host link pattern", () => {
+    const body = `Done. See myapp://sessions/abc1234 for details.\n\n---\n${footer}`;
+    assert.deepEqual(parseAgentEnvelope(10, body)?.agentLinks, []);
+    assert.deepEqual(parseAgentEnvelope(10, body, { linkPattern: /myapp:\/\/[^\s)>\]]+/ })?.agentLinks, [
+      "myapp://sessions/abc1234",
+    ]);
+  });
+
+  it("builds every supported link template", () => {
+    assert.equal(buildPaseoAgentLink({ agentId: "a1" }), "paseo://agent/a1");
+    assert.equal(
+      buildPaseoAgentLink({ agentId: "a1", workspaceId: "ws-9" }),
+      "paseo://agent/a1?workspace=ws-9",
+    );
+    assert.equal(buildHappierAgentLink({ agentId: "a1" }), "happier://agent/a1");
+    assert.equal(
+      buildDashboardAgentLink({ agentId: "a1", dashboardHost: "dash.example.com" }),
+      "https://dash.example.com/agents/a1",
+    );
+    assert.equal(createAgentLinkResolver()({ agentId: "a1" }), "paseo://agent/a1");
+    assert.equal(createAgentLinkResolver({ scheme: "happier" })({ agentId: "a1" }), "happier://agent/a1");
+    assert.equal(
+      createAgentLinkResolver({ scheme: "https", dashboardHost: "dash.example.com" })({ agentId: "a1" }),
+      "https://dash.example.com/agents/a1",
+    );
   });
 });

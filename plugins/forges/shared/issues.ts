@@ -1328,8 +1328,15 @@ export const AgentEnvelopeSchema = z.object({
   branch: z.string().nullable().default(null),
   postedAt: z.string().nullable().default(null),
   commitShas: z.array(z.string().regex(/^[0-9a-f]{7,40}$/)).default([]),
+  /** Client-agnostic agent session deep-links (`paseo://`, `happier://`, dashboard URLs). */
+  agentLinks: z.array(z.string()).default([]),
+  /** @deprecated Alias of `agentLinks`; kept so historical `paseo://` payloads keep parsing. */
   paseoLinks: z.array(z.string()).default([]),
   serverId: z.string().nullable().default(null),
+}).transform((value) => {
+  const agentLinks = value.agentLinks.length > 0 ? value.agentLinks : value.paseoLinks;
+  const paseoLinks = value.paseoLinks.length > 0 ? value.paseoLinks : value.agentLinks;
+  return { ...value, agentLinks, paseoLinks };
 });
 export type AgentEnvelope = z.infer<typeof AgentEnvelopeSchema>;
 
@@ -1370,8 +1377,101 @@ export function stripAgentEnvelopeFooter(body: string | undefined | null): strin
 }
 
 const SHA_PATTERN = /\b[0-9a-f]{7,40}\b/g;
+/**
+ * @deprecated Use {@link AGENT_LINK_PATTERN}. Kept so historical `paseo://`
+ * envelopes in comments keep parsing.
+ */
 const PASEO_LINK_PATTERN = /paseo:\/\/[^\s)>\]]+/g;
+/** @deprecated Use {@link AGENT_SERVER_PATTERN}. Kept for backwards compatibility. */
 const PASEO_SERVER_PATTERN = /paseo:\/\/h\/([^/\s]+)\/agent\//;
+
+/**
+ * Client-agnostic agent deep-link matcher: historical `paseo://` links plus
+ * `happier://` links and `https://` dashboard `/agents/` URLs.
+ */
+export const AGENT_LINK_PATTERN =
+  /(?:paseo|happier):\/\/[^\s)>\]]+|https?:\/\/[^\s)>\]]*\/agents\/[^\s)>\]]+/g;
+/** Extracts the server id from hosted `paseo://` / `happier://` agent links. */
+export const AGENT_SERVER_PATTERN = /(?:paseo|happier):\/\/h\/([^/\s]+)\/agent\//;
+
+/** Target coordinates for building one agent session deep-link. */
+export interface AgentLinkTarget {
+  agentId: string;
+  workspaceId?: string | null;
+  serverId?: string | null;
+  dashboardHost?: string | null;
+}
+
+/** Builds an agent session deep-link for the given target coordinates. */
+export type AgentLinkResolver = (target: AgentLinkTarget) => string;
+
+/** `paseo://agent/{agentId}?workspace={workspaceId}` */
+export function buildPaseoAgentLink(target: AgentLinkTarget): string {
+  const base = target.serverId
+    ? `paseo://h/${target.serverId}/agent/${target.agentId}`
+    : `paseo://agent/${target.agentId}`;
+  return target.workspaceId
+    ? `${base}?workspace=${encodeURIComponent(target.workspaceId)}`
+    : base;
+}
+
+/** `happier://agent/{agentId}` */
+export function buildHappierAgentLink(target: AgentLinkTarget): string {
+  return `happier://agent/${target.agentId}`;
+}
+
+/** `https://{dashboardHost}/agents/{agentId}` */
+export function buildDashboardAgentLink(target: AgentLinkTarget): string {
+  const host = (target.dashboardHost ?? "").trim().replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  if (!host) return buildPaseoAgentLink(target);
+  return `https://${host}/agents/${target.agentId}`;
+}
+
+export interface AgentLinkResolverConfig {
+  /** Link scheme to generate. Defaults to `"paseo"` (historical behavior). */
+  scheme?: "paseo" | "happier" | "https";
+  /** Required when `scheme` is `"https"`. */
+  dashboardHost?: string | null;
+  /** Default server id baked into generated `paseo://` links. */
+  serverId?: string | null;
+  /** Default workspace id appended as `?workspace=` to generated links. */
+  workspaceId?: string | null;
+}
+
+/**
+ * Create a configured agent deep-link generator so each host client supplies
+ * its own URI scheme / URL template while envelopes stay client-agnostic.
+ */
+export function createAgentLinkResolver(config?: AgentLinkResolverConfig): AgentLinkResolver {
+  const scheme = config?.scheme ?? "paseo";
+  return (target: AgentLinkTarget) => {
+    const merged: AgentLinkTarget = {
+      agentId: target.agentId,
+      workspaceId: target.workspaceId ?? config?.workspaceId ?? null,
+      serverId: target.serverId ?? config?.serverId ?? null,
+      dashboardHost: target.dashboardHost ?? config?.dashboardHost ?? null,
+    };
+    if (scheme === "happier") return buildHappierAgentLink(merged);
+    if (scheme === "https") return buildDashboardAgentLink(merged);
+    return buildPaseoAgentLink(merged);
+  };
+}
+
+/**
+ * Primary deep-link for an envelope: the first `agentLinks` entry, falling
+ * back to the historical `paseoLinks` entry.
+ */
+export function primaryAgentLink(
+  envelope: { agentLinks?: string[]; paseoLinks?: string[] } | null | undefined,
+): string | null {
+  if (!envelope) return null;
+  return envelope.agentLinks?.[0] ?? envelope.paseoLinks?.[0] ?? null;
+}
+
+export interface ParseAgentEnvelopeOptions {
+  /** Custom link matcher for host-specific URL templates. Defaults to {@link AGENT_LINK_PATTERN}. */
+  linkPattern?: RegExp;
+}
 
 /**
  * Parse the agent envelope footer of one comment body into structured
@@ -1381,6 +1481,7 @@ const PASEO_SERVER_PATTERN = /paseo:\/\/h\/([^/\s]+)\/agent\//;
 export function parseAgentEnvelope(
   commentId: number,
   body: string | undefined | null,
+  options?: ParseAgentEnvelopeOptions,
 ): AgentEnvelope | null {
   if (!body || typeof body !== "string") return null;
   const match = ENVELOPE_FOOTER_PATTERN.exec(body);
@@ -1409,9 +1510,11 @@ export function parseAgentEnvelope(
       ),
     ),
   );
-  const paseoLinks = Array.from(new Set(body.match(PASEO_LINK_PATTERN) ?? []));
-  const serverMatch = PASEO_SERVER_PATTERN.exec(paseoLinks[0] ?? "");
-  return {
+  const agentLinks = Array.from(
+    new Set(body.match(normalizeLinkMatcher(options?.linkPattern ?? AGENT_LINK_PATTERN)) ?? []),
+  );
+  const serverMatch = AGENT_SERVER_PATTERN.exec(agentLinks[0] ?? "");
+  const parsed = AgentEnvelopeSchema.safeParse({
     commentId,
     sessionTitle,
     agentShortId,
@@ -1420,9 +1523,22 @@ export function parseAgentEnvelope(
     branch,
     postedAt,
     commitShas,
-    paseoLinks,
+    agentLinks,
+    // Deprecated alias: historical readers expect `paseoLinks`.
+    paseoLinks: agentLinks,
     serverId: serverMatch ? serverMatch[1] : null,
-  };
+  });
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Normalize a link matcher to a fresh global regex so custom (non-global)
+ * patterns cannot infinite-loop `String.match` and shared patterns keep no
+ * exec state.
+ */
+function normalizeLinkMatcher(pattern: RegExp): RegExp {
+  const flags = pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`;
+  return new RegExp(pattern.source, flags);
 }
 
 // ---------------------------------------------------------------------------

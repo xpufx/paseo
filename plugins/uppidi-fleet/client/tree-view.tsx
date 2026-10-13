@@ -65,6 +65,7 @@ import {
   type ProjectSortField,
   type SortDirection,
 } from "../shared/sort-filter.js";
+import { defaultAgentLink } from "../shared/agent-links.js";
 
 export {
   type DeterministicStateConfig,
@@ -155,7 +156,7 @@ export function AgentStatusLight({
         console.error(`[uppidi-fleet] agent status light: window.open failed for ${agent.id}:`, err);
       }
     }
-    const url = agent.url || `paseo://agent/${agent.id}`;
+    const url = agent.url || defaultAgentLink(agent.id, { workspaceId: agent.workspaceId });
     Linking.openURL(url).catch(() => {
       copyToClipboard(url).catch(() => {});
     });
@@ -369,7 +370,7 @@ export function AgentTitleLink({
       navigation.openAgent({ agentId: agent.id });
       return;
     }
-    const url = agent.url || `paseo://agent/${agent.id}`;
+    const url = agent.url || defaultAgentLink(agent.id, { workspaceId: agent.workspaceId });
     Linking.openURL(url).catch(() => {
       copyToClipboard(url).catch(() => {});
     });

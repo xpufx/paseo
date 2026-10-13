@@ -55,6 +55,7 @@ import {
   type IssueComment,
   type MarkdownLiteSpan,
 } from "paseo-plugin-helper/core";
+import { resolveEnvelopeAgentLink } from "../shared/agent-links.js";
 import {
   HostAboutSection,
   HostActionBar,
@@ -424,7 +425,7 @@ export function MarkdownLite({ body, query = "" }: { body: string; query?: strin
 
 export function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
   const openSession = () => {
-    const link = envelope.paseoLinks[0];
+    const link = resolveEnvelopeAgentLink(envelope);
     if (link) Linking.openURL(link).catch(() => {});
   };
   return (
@@ -451,7 +452,7 @@ export function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
           ))}
         </Stack>
       ) : null}
-      {envelope.paseoLinks.length > 0 ? (
+      {resolveEnvelopeAgentLink(envelope) ? (
         <Button size="sm" variant="ghost" icon="ExternalLink" label="Open agent session" onPress={openSession} />
       ) : null}
     </Card>

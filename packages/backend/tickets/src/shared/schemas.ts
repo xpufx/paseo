@@ -26,7 +26,7 @@ export const ForgeIssueSchema = z.object({
 });
 export type ForgeIssue = z.infer<typeof ForgeIssueSchema>;
 
-export const AgentEnvelopeSchema = z.object({
+const AgentEnvelopeBaseSchema = z.object({
   commentId: z.number(),
   sessionTitle: z.string(),
   agentShortId: z.string(),
@@ -35,8 +35,22 @@ export const AgentEnvelopeSchema = z.object({
   branch: z.string().nullable().default(null),
   postedAt: z.string().nullable().default(null),
   commitShas: z.array(z.string().regex(/^[0-9a-f]{7,40}$/)).default([]),
+  /** Client-agnostic agent session deep-links (`paseo://`, `happier://`, dashboard URLs). */
+  agentLinks: z.array(z.string()).default([]),
+  /** @deprecated Alias of `agentLinks`; kept so historical `paseo://` payloads keep parsing. */
   paseoLinks: z.array(z.string()).default([]),
   serverId: z.string().nullable().default(null),
+});
+
+/**
+ * Agent envelope with normalized link aliases: payloads carrying only the
+ * historical `paseoLinks` (or only the new `agentLinks`) read back with both
+ * fields populated.
+ */
+export const AgentEnvelopeSchema = AgentEnvelopeBaseSchema.transform((value) => {
+  const agentLinks = value.agentLinks.length > 0 ? value.agentLinks : value.paseoLinks;
+  const paseoLinks = value.paseoLinks.length > 0 ? value.paseoLinks : value.agentLinks;
+  return { ...value, agentLinks, paseoLinks };
 });
 export type AgentEnvelope = z.infer<typeof AgentEnvelopeSchema>;
 

@@ -1053,6 +1053,33 @@ const PARTS = [
     ],
     note: "The one file in the plugin that is a declaration about a dependency rather than behaviour — and it is explicit that consumers must re-derive rather than trust it.",
   },
+  {
+    file: `${PLUGIN}/shared/agent-links.ts`,
+    part: "Multi-client agent deep link resolvers, URI templates, and envelope link extractors",
+    layer: "shared",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "AgentLinkScheme",
+        "AgentLinkTarget",
+        "AgentLinkConfig",
+        "buildPaseoAgentLink",
+        "buildHappierAgentLink",
+        "buildDashboardAgentLink",
+        "buildAgentLink",
+        "resolveAgentLinkConfig",
+        "createAgentLinkResolver",
+        "resolveEnvelopeAgentLink",
+        "defaultAgentLink",
+      ],
+    },
+    evidence: [
+      [`agent-links.ts:29-57`, "pure functions formatting paseo://, happier://, and dashboard deep links"],
+      [`agent-links.ts:59-75`, "resolver composition over scheme and pattern templates"],
+      [`agent-links.ts:77-109`, "authoritative config resolver reading explicit override or environment"],
+    ],
+    note: "Pure URI algebra and template resolution shared by client and server. Zero side effects.",
+  },
 
   // ------------------------------------------------- plugin-owned scripts ---
   {
@@ -1180,6 +1207,7 @@ const SUITE_NOTES = {
   "client/mobile-layout.test.ts": "Mobile layout behaviour under the measurement double",
   "client/role-model-picker.test.ts": "Role-model picker interaction",
   "client/tree-zebra.test.tsx": "Tree zebra striping",
+  "shared/agent-links.test.ts": "Multi-client agent deep link resolvers and URI templates",
   "shared/contracts.test.ts": "Contract schema validation",
   "shared/sort-filter.test.ts": "Filter, sort, gauge and grouping functions",
 };

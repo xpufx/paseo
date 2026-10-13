@@ -69,6 +69,7 @@ import {
   nextStateLabel,
   openIssuesContract,
   parseMarkdownLite,
+  primaryAgentLink,
   resolveIssueSearchLayer,
   searchIssuesContract,
   setLabelContract,
@@ -513,7 +514,7 @@ function IssueRow({
 
 function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
   const openSession = () => {
-    const link = envelope.paseoLinks[0];
+    const link = primaryAgentLink(envelope);
     if (!link) return;
     Linking.openURL(link).catch(() => {
       copyToClipboard(link).catch(() => {});
@@ -543,7 +544,7 @@ function AgentEnvelopeCard({ envelope }: { envelope: AgentEnvelope }) {
           ))}
         </View>
       ) : null}
-      {envelope.paseoLinks.length > 0 ? (
+      {(envelope.agentLinks ?? envelope.paseoLinks).length > 0 ? (
         <Button
           size="sm"
           variant="ghost"
