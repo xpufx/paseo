@@ -32,7 +32,15 @@ import type {
   UppidiAuditSummaryInput,
   MergeEventHook,
 } from "../shared/contracts.js";
-import { UppidiAuditRecordInputSchema } from "../shared/contracts.js";
+import {
+  UppidiAuditRecordInputSchema,
+  FleetModeSchema,
+  type FleetMode,
+  EventClassSchema,
+  EventClassActionSchema,
+  coerceFleetMode,
+  defaultEventClassPolicyByMode,
+} from "../shared/contracts.js";
 import { extractPermissionScope } from "../shared/contracts.js";
 import {
   candidateRepoKeys,
@@ -120,6 +128,10 @@ export interface RouterConfig {
   enrolledRepos?: string[];
   /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
   mergeEventHooks?: Record<string, MergeEventHook>;
+  /** Unified fleet lifecycle mode (#1034). */
+  mode?: FleetMode;
+  /** Per-class delivery overrides (#1034). */
+  eventClassPolicy?: Record<string, string>;
 }
 
 export function getAvailableNetworkInterfaces(): string[] {
@@ -199,6 +211,11 @@ export function saveRouterConfig(config: RouterConfig): void {
     }
     if (config.mergeEventHooks !== undefined) {
       updateData.mergeEventHooks = config.mergeEventHooks;
+    }
+    // Unified fleet control mode + policy (#1034)
+    if (config.mode !== undefined) updateData.mode = config.mode;
+    if (config.eventClassPolicy !== undefined) {
+      updateData.eventClassPolicy = config.eventClassPolicy;
     }
     if (Object.keys(updateData).length > 0) {
       storage.update((prev) => ({ ...prev, ...updateData }));
@@ -4073,6 +4090,10 @@ export class HookRouter {
   private unsubscribeLifecycle?: () => void;
   private isClosed = false;
   private isHaltedState = false;
+  /** Unified fleet lifecycle mode (#1034). Replaces bare `isHaltedState` as the source of truth. */
+  private _mode: FleetMode = "RUN";
+  /** Per-class delivery overrides; absent entries fall back to defaults for `_mode`. */
+  private _eventClassPolicy?: Record<string, string>;
   private teardownInProgress = false;
   private startedAt: number | null = null;
   private pausedRepos = new Set<string>();
@@ -4243,6 +4264,14 @@ export class HookRouter {
       for (const r of persisted.enrolledRepos) {
         if (r) this.enrolledRepos.add(r);
       }
+    }
+    // Unified fleet control mode + policy (#1034)
+    const settingsMode = coerceFleetMode(settings?.mode ?? "RUN");
+    this._mode = persisted.mode ?? settingsMode;
+    this._eventClassPolicy = settings?.eventClassPolicy;
+    // Back-compat: if isHaltedState was true, set mode to HALT
+    if (this.isHaltedState && this._mode === "RUN") {
+      this._mode = "HALT";
     }
 
     const home = resolveHostHome();
@@ -5719,6 +5748,8 @@ export class HookRouter {
       pausedRepos: Array.from(this.pausedRepos),
       kanbanOnlyRepos: Array.from(this.kanbanOnlyRepos),
       enrolledRepos: Array.from(this.enrolledRepos),
+      mode: this._mode,
+      eventClassPolicy: this._eventClassPolicy,
     });
   }
 
@@ -9598,15 +9629,45 @@ export class HookRouter {
    * auto-provisioning (orchestrators, unstaffed repos, front desk).
    */
   public halt(): void {
+    this._mode = "HALT";
     this.isHaltedState = true;
     this.pause("all");
     this.stopBackgroundLoops();
+    this.saveConfigState();
     this.log("[warn] HookRouter canonical ALL HALT engaged: background loops stopped, ingress paused, auto-provisioning disabled");
   }
 
   /** Returns true when the canonical ALL HALT state is engaged (#994). */
   public isHalted(): boolean {
     return this.isHaltedState;
+  }
+
+  // ── Unified fleet control (§1034) ────────────────────────────────────────
+
+  /** Current fleet mode. */
+  public get mode(): FleetMode {
+    return this._mode;
+  }
+
+  /** Set fleet mode, coercing `HOLD` → `HALT` per §4.3. Persists to config. */
+  public setMode(mode: string): void {
+    const resolved = coerceFleetMode(mode);
+    if (resolved !== this._mode) {
+      this._mode = resolved;
+      this.saveConfigState();
+      this.log(`[info] Fleet mode changed → ${resolved}`);
+    }
+  }
+
+  /** Per-class delivery overrides; undefined means "use mode defaults". */
+  public get eventClassPolicy(): Record<string, string> | undefined {
+    return this._eventClassPolicy;
+  }
+
+  /** Set per-class delivery overrides and persist. */
+  public setEventClassPolicy(policy: Record<string, string>): void {
+    this._eventClassPolicy = policy;
+    this.saveConfigState();
   }
 
   /**
@@ -10545,6 +10606,14 @@ export class HookRouter {
     const allKeys = new Set<string>(enrolledRepos);
     for (const k of this.queues.keys()) allKeys.add(k);
 
+    // Derive `halted` from mode for backward compatibility (§8.2)
+    const halted = this._mode === "HALT" || this.isHaltedState;
+    // Merge per-class overrides with the mode defaults (§5.2)
+    const modeDefaults = defaultEventClassPolicyByMode[this._mode as keyof typeof defaultEventClassPolicyByMode];
+    const eventClassPolicy = this._eventClassPolicy
+      ? { ...modeDefaults, ...this._eventClassPolicy }
+      : modeDefaults;
+
     return {
       ok: true,
       service: "uppidi-fleet-hook-router",
@@ -10560,7 +10629,9 @@ export class HookRouter {
           }
         : null,
       paused: Array.from(this.pausedQueues),
-      halted: this.isHaltedState,
+      mode: this._mode,
+      eventClassPolicy,
+      halted,
       teardownInProgress: this.teardownInProgress,
       totalQueued,
       repoCount: allKeys.size,

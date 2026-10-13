@@ -2,6 +2,80 @@ import { z } from "zod";
 import { defineContract, defineSettingsContract } from "paseo-plugin-helper/shared";
 import { DEFAULT_FORGEJO_HOST } from "./repo-identity.js";
 
+// ──────────────────────────────────────────────────────────────────────────
+// Unified fleet control model (#1034)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Canonical fleet lifecycle modes (§4.1). `HOLD` is accepted as a request alias for `HALT` (§4.3). */
+export const FleetModeSchema = z.enum(["RUN", "DRAIN", "HALT", "STOP"]);
+export type FleetMode = z.infer<typeof FleetModeSchema>;
+
+/** Accepts `HOLD` and coerces it to `HALT` per §4.3. */
+export function coerceFleetMode(input: string): FleetMode {
+  const upper = input.toUpperCase();
+  if (upper === "HOLD") return "HALT";
+  const parsed = FleetModeSchema.safeParse(upper);
+  if (parsed.success) return parsed.data;
+  // Fall back to RUN on unknown input rather than throwing
+  return "RUN";
+}
+
+/** Six event classes that gate delivery per mode (§5.1 / §5.2). */
+export const EventClassSchema = z.enum([
+  "sos",
+  "administrative",
+  "health",
+  "attention",
+  "work",
+  "noise",
+]);
+export type EventClass = z.infer<typeof EventClassSchema>;
+
+/** Per-class delivery action used in event-class policy overrides. */
+export const EventClassActionSchema = z.enum([
+  "deliver",
+  "hold",
+  "detect",
+  "drop",
+]);
+export type EventClassAction = z.infer<typeof EventClassActionSchema>;
+
+/** Default event-class policy for each fleet mode (§5.2). */
+export const defaultEventClassPolicyByMode: Record<FleetMode, Partial<Record<EventClass, EventClassAction>>> = {
+  RUN: {
+    sos: "deliver",
+    administrative: "deliver",
+    attention: "deliver",
+    health: "detect",
+    work: "deliver",
+    noise: "drop",
+  },
+  DRAIN: {
+    sos: "deliver",
+    administrative: "deliver",
+    attention: "deliver",
+    health: "detect",
+    work: "hold",
+    noise: "drop",
+  },
+  HALT: {
+    sos: "deliver",
+    administrative: "deliver",
+    attention: "deliver",
+    health: "detect",
+    work: "hold",
+    noise: "drop",
+  },
+  STOP: {
+    sos: "deliver",
+    administrative: "deliver",
+    attention: "deliver",
+    health: "drop",
+    work: "hold",
+    noise: "drop",
+  },
+};
+
 // Dual-read: canonical numberless spellings (platform#247) plus the legacy
 // numeric ones during the migration.
 export const AttentionLabelSchema = z.enum([
@@ -138,8 +212,24 @@ export const HookStatusOutputSchema = z.object({
     .nullable()
     .optional(),
   paused: z.array(z.string()).default([]),
+  // Unified fleet control mode (#1034)
+  mode: FleetModeSchema.default("RUN"),
+  /** Per-class delivery overrides; absent entries fall back to the default for `mode`. */
+  eventClassPolicy: z
+    .record(z.string(), EventClassActionSchema)
+    .refine(
+      (obj) => {
+        for (const key of Object.keys(obj)) {
+          if (!EventClassSchema.safeParse(key).success) return false;
+        }
+        return true;
+      },
+      { message: "eventClassPolicy keys must be valid event classes" },
+    )
+    .optional(),
   // Canonical ALL HALT state (#994) and the teardown window that activates it.
   // The dashboard banner and RESUME guard read these off the status snapshot.
+  // Derived alias — see §8.2: `halted` is true when `mode === "HALT"`.
   halted: z.boolean().default(false),
   teardownInProgress: z.boolean().default(false),
   totalQueued: z.number().default(0),
@@ -1956,6 +2046,29 @@ export const uppidiFleetSettingsSchema = z.object({
       profiles: z.record(z.string(), z.boolean()).default({}),
     })
     .default({ enabled: false, profiles: {} }),
+  /** Unified fleet lifecycle mode (#1034). Defaults to `RUN`. */
+  mode: FleetModeSchema.default("RUN"),
+  /**
+   * Per-class delivery overrides for the current mode (#1034).
+   * Absent entries fall back to the defaults from `defaultEventClassPolicyByMode[mode]`.
+   */
+  /**
+   * Per-class delivery overrides for the current mode (#1034).
+   * Absent entries fall back to the defaults from `defaultEventClassPolicyByMode[mode]`.
+   * Keys are validated as valid event classes; values must be valid actions.
+   */
+  eventClassPolicy: z
+    .record(z.string(), EventClassActionSchema)
+    .refine(
+      (obj) => {
+        for (const key of Object.keys(obj)) {
+          if (!EventClassSchema.safeParse(key).success) return false;
+        }
+        return true;
+      },
+      { message: "eventClassPolicy keys must be valid event classes" },
+    )
+    .optional(),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 

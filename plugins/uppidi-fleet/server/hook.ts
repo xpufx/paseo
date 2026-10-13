@@ -175,7 +175,7 @@ export async function handleHookStatus(
   try {
     const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(4000) });
     if (!res.ok) {
-      return { ok: false, totalQueued: 0, repoCount: 0, paused: [], halted: false, teardownInProgress: false, capabilities, error: `HTTP ${res.status}: ${res.statusText}` };
+      return { ok: false, mode: "RUN", totalQueued: 0, repoCount: 0, paused: [], halted: false, teardownInProgress: false, capabilities, error: `HTTP ${res.status}: ${res.statusText}` };
     }
     const data = (await res.json()) as HookStatusOutput;
     return {
@@ -190,7 +190,7 @@ export async function handleHookStatus(
     };
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, totalQueued: 0, repoCount: 0, paused: [], halted: false, teardownInProgress: false, capabilities, error: `Unreachable: ${msg}` };
+    return { ok: false, mode: "RUN", totalQueued: 0, repoCount: 0, paused: [], halted: false, teardownInProgress: false, capabilities, error: `Unreachable: ${msg}` };
   }
 }
 

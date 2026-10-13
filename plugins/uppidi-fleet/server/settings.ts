@@ -43,7 +43,7 @@ export function getUppidiFleetSettingsStorage(
       "settings.json",
       {
         schema: uppidiFleetSettingsContract.schema,
-        defaultData: uppidiFleetSettingsContract.defaultSettings,
+        defaultData: uppidiFleetSettingsContract.defaultSettings as UppidiFleetSettings,
         ...options,
         baseDir,
       },
