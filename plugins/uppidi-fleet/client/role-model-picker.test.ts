@@ -59,4 +59,28 @@ describe("role model picker (#635)", () => {
       "the empty state must be explained",
     );
   });
+
+  it("makes the primary model Select searchable (#1127)", () => {
+    // The primary model Select carries searchable + searchPlaceholder
+    const idx = src.indexOf('label={`\${roleKey} model`');
+    assert.ok(idx >= 0, "the primary model Select label must exist");
+    // Grab a chunk around the label and verify searchable props are present
+    const snippet = src.substring(idx, idx + 600);
+    assert.ok(snippet.includes("searchable"), "the primary model Select must have searchable");
+    assert.ok(
+      snippet.includes('searchPlaceholder="Filter models..."'),
+      "the primary model Select must have searchPlaceholder",
+    );
+  });
+
+  it("makes the fallback Add Select searchable (#1127)", () => {
+    const idx = src.indexOf('label={`Add \${roleKey} fallback`}');
+    assert.ok(idx >= 0, "the Add fallback Select label must exist");
+    const snippet = src.substring(idx, idx + 900);
+    assert.ok(snippet.includes("searchable"), "the Add fallback Select must be searchable");
+    assert.ok(
+      snippet.includes('searchPlaceholder="Filter models..."'),
+      "the Add fallback Select must have searchPlaceholder",
+    );
+  });
 });

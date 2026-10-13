@@ -829,10 +829,12 @@ interface HostSelectProps {
     size?: "sm" | "md" | string;
     placeholder?: string;
     disabled?: boolean;
+    searchable?: boolean;
+    searchPlaceholder?: string;
     style?: StyleProp<ViewStyle>;
 }
 /** Inline single-choice picker styled for host dark/light theme palettes. */
-declare function HostSelect({ value, options, onValueChange, label, size, placeholder, disabled, style, }: HostSelectProps): React.JSX.Element;
+declare function HostSelect({ value, options, onValueChange, label, size, placeholder, disabled, searchable, searchPlaceholder, style, }: HostSelectProps): React.JSX.Element;
 interface HostModalBodyProps {
     children: ReactNode;
     header?: ReactNode;

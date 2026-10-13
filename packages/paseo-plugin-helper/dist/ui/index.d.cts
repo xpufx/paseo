@@ -372,6 +372,8 @@ interface HostSelectProps {
     size?: "sm" | "md";
     placeholder?: string;
     disabled?: boolean;
+    searchable?: boolean;
+    searchPlaceholder?: string;
     style?: StyleProp<ViewStyle>;
 }
 /**
@@ -381,7 +383,7 @@ interface HostSelectProps {
  * above later siblings. The option list scrolls with a plain React Native
  * ScrollView — never the host sheet-gesture scroller (#219).
  */
-declare function HostSelect({ value, options, onValueChange, label, size, placeholder, disabled, style, }: HostSelectProps): React__default.JSX.Element;
+declare function HostSelect({ value, options, onValueChange, label, size, placeholder, disabled, searchable, searchPlaceholder, style, }: HostSelectProps): React__default.JSX.Element;
 type HostCopyButtonSize = "sm" | "md";
 type HostCopyButtonVariant = "ghost" | "secondary";
 interface HostCopyButtonProps {

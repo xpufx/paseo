@@ -2560,6 +2560,8 @@ export interface HostSelectProps {
   size?: "sm" | "md" | string;
   placeholder?: string;
   disabled?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -2572,10 +2574,13 @@ export function HostSelect({
   size = "md",
   placeholder = "Select…",
   disabled = false,
+  searchable = false,
+  searchPlaceholder,
   style,
 }: HostSelectProps) {
   const { colors } = useHostTheme();
   const [open, setOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const selected = options.find((option) => option.value === value);
   const display = selected?.display ?? selected?.label ?? (value || placeholder);
   const canOpen = !disabled && options.length > 0;
@@ -2626,7 +2631,10 @@ export function HostSelect({
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Dismiss options"
-            onPress={() => setOpen(false)}
+            onPress={() => {
+              setOpen(false);
+              setSearchQuery("");
+            }}
             style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}
           />
           <View
@@ -2645,12 +2653,55 @@ export function HostSelect({
               elevation: 20,
             }}
           >
+            {searchable ? (
+              <View style={{ padding: 6 }}>
+                <HostTextInputPrimitive
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder={searchPlaceholder ?? "Search..."}
+                  placeholderTextColor={colors.foregroundMuted}
+                  style={{
+                    color: colors.foreground,
+                    backgroundColor: colors.surface0,
+                    borderColor: colors.border,
+                    borderWidth: 1,
+                    borderRadius: 8,
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    fontSize: 13,
+                  }}
+                />
+              </View>
+            ) : null}
             <RNScrollView
               nestedScrollEnabled
               keyboardShouldPersistTaps="handled"
               style={{ maxHeight: 220 }}
             >
-              {options.map((option) => {
+              {(() => {
+                const filtered = searchable && searchQuery
+                  ? options.filter(
+                      (option) =>
+                        option.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        option.value.toLowerCase().includes(searchQuery.toLowerCase()),
+                    )
+                  : options;
+                if (filtered.length === 0) {
+                  return (
+                    <View style={{ padding: 12 }}>
+                      <Text
+                        style={{
+                          color: colors.foregroundMuted,
+                          fontSize: 13,
+                          textAlign: "center",
+                        }}
+                      >
+                        No matching options
+                      </Text>
+                    </View>
+                  );
+                }
+                return filtered.map((option) => {
                 const active = option.value === value;
                 const primary = option.display ?? option.label;
                 const hasMore = Boolean(option.display && option.display !== option.label);
@@ -2661,6 +2712,7 @@ export function HostSelect({
                     onPress={() => {
                       onValueChange(option.value);
                       setOpen(false);
+                      setSearchQuery("");
                     }}
                     accessibilityRole="button"
                     accessibilityLabel={option.label}
@@ -2703,7 +2755,8 @@ export function HostSelect({
                     </Text>
                   </Pressable>
                 );
-              })}
+                });
+              })()}
             </RNScrollView>
           </View>
         </Modal>

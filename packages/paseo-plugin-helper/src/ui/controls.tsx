@@ -318,6 +318,8 @@ export interface HostSelectProps {
   size?: "sm" | "md";
   placeholder?: string;
   disabled?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -347,6 +349,8 @@ export function HostSelect({
   size = "md",
   placeholder = "Select…",
   disabled = false,
+  searchable = false,
+  searchPlaceholder,
   style,
 }: HostSelectProps) {
   const { Icon } = getClientHost();
@@ -354,6 +358,7 @@ export function HostSelect({
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<TriggerCoords | null>(null);
   const triggerRef = useRef<View>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fontSize = size === "sm" ? 10 : 12;
   const lineHeight = size === "sm" ? 12 : 15;
@@ -376,6 +381,7 @@ export function HostSelect({
   const handleToggle = () => {
     if (isOpen) {
       setOpen(false);
+      setSearchQuery("");
       return;
     }
     const node = triggerRef.current;
@@ -386,6 +392,28 @@ export function HostSelect({
     node.measureInWindow((x, y, width, height) => {
       openAt({ x, y, width, height });
     });
+  };
+
+  const handleSelect = (optionValue: string) => {
+    onValueChange(optionValue);
+    setOpen(false);
+    setSearchQuery("");
+  };
+
+  const filteredOptions = searchable && searchQuery
+    ? options.filter(
+        (option) =>
+          option.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          option.value.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : options;
+
+  const ResolvedSearchInput = (
+    getOptionalClientHost()?.TextInput ?? RNTextInput
+  ) as ComponentType<RNTextInputProps & { ref?: Ref<RNTextInputInstance> }>;
+
+  const handleSearchChange = (text: string) => {
+    setSearchQuery(text);
   };
 
   return (
@@ -456,53 +484,84 @@ export function HostSelect({
               },
             ]}
           >
+            {searchable ? (
+              <View style={{ padding: spacing.xs }}>
+                <ResolvedSearchInput
+                  value={searchQuery}
+                  onChangeText={handleSearchChange}
+                  placeholder={searchPlaceholder ?? "Search..."}
+                  placeholderTextColor={colors.foregroundMuted}
+                  style={[
+                    styles.searchInput,
+                    {
+                      color: colors.foreground,
+                      backgroundColor: colors.surface0,
+                      borderColor: colors.border,
+                      borderRadius: 8,
+                      fontSize: 13,
+                    },
+                  ]}
+                />
+              </View>
+            ) : null}
             <RNScrollView
               nestedScrollEnabled
               keyboardShouldPersistTaps="handled"
               style={{ maxHeight: OPTION_LIST_MAX_HEIGHT }}
             >
-              {options.map((option) => {
-                const isSelected = option.value === value;
-                return (
-                  <Pressable
-                    key={option.value}
-                    accessibilityRole="button"
-                    accessibilityLabel={option.label}
-                    accessibilityState={{ selected: isSelected }}
-                    onPress={() => {
-                      onValueChange(option.value);
-                      setOpen(false);
+              {filteredOptions.length === 0 ? (
+                <View style={{ padding: spacing.sm }}>
+                  <Text
+                    style={{
+                      color: colors.foregroundMuted,
+                      fontSize: 13,
+                      textAlign: "center",
                     }}
-                    style={({ pressed }) => [
-                      styles.selectOption,
-                      {
-                        paddingVertical,
-                        paddingHorizontal,
-                        backgroundColor: isSelected
-                          ? colors.surface2
-                          : pressed
-                            ? alphaColor(colors.surface2, 0.5)
-                            : "transparent",
-                      },
-                    ]}
                   >
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.selectOptionText,
+                    No matching options
+                  </Text>
+                </View>
+              ) : (
+                filteredOptions.map((option) => {
+                  const isSelected = option.value === value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      accessibilityRole="button"
+                      accessibilityLabel={option.label}
+                      accessibilityState={{ selected: isSelected }}
+                      onPress={() => handleSelect(option.value)}
+                      style={({ pressed }) => [
+                        styles.selectOption,
                         {
-                          color: isSelected ? colors.foreground : colors.foregroundMuted,
-                          fontSize: fontSize + 1,
-                          lineHeight,
-                          fontWeight: isSelected ? "600" : "400",
+                          paddingVertical,
+                          paddingHorizontal,
+                          backgroundColor: isSelected
+                            ? colors.surface2
+                            : pressed
+                              ? alphaColor(colors.surface2, 0.5)
+                              : "transparent",
                         },
                       ]}
                     >
-                      {option.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.selectOptionText,
+                          {
+                            color: isSelected ? colors.foreground : colors.foregroundMuted,
+                            fontSize: fontSize + 1,
+                            lineHeight,
+                            fontWeight: isSelected ? "600" : "400",
+                          },
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })
+              )}
             </RNScrollView>
           </View>
         </Modal>

@@ -2330,6 +2330,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                         disabled={roleModelOptions.length < 2}
                         placeholder="Select a model"
                         size="sm"
+                        searchable
+                        searchPlaceholder="Filter models..."
                         style={{ minWidth: 180 }}
                       />
                     </Row>
@@ -2400,6 +2402,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                       disabled={removableOptions.length === 0}
                       placeholder="Add a fallback tier"
                       size="sm"
+                      searchable
+                      searchPlaceholder="Filter models..."
                       style={{ minWidth: 180 }}
                     />
                     </Stack>
