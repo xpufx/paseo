@@ -5502,9 +5502,6 @@ export class HookRouter {
       if (options?.noWait !== false) {
         args.push("--no-wait");
       }
-      if (shouldSteer) {
-        args.push("--steer");
-      }
       // The CLI has no attachment channel; re-inline the envelope so the
       // fallback path still carries provenance to the model (legacy grammar).
       const cliMsg =

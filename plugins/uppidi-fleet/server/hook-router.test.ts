@@ -1428,7 +1428,7 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
     }
   });
 
-  it("deliverMessage CLI fallback keeps --steer when the SDK ref is unavailable (#1027)", async () => {
+  it("deliverMessage CLI fallback omits --steer when the SDK ref is unavailable (#1290)", async () => {
     const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
     (router as any).activePaseo = null;
     const calls: string[][] = [];
@@ -1442,7 +1442,10 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
     } finally {
       setExecFileAsyncForTest(null);
     }
-    assert.deepEqual(calls[0], ["send", "--no-wait", "--steer", "agent-cli-steer", "go"]);
+    // The paseo CLI send command has no --steer option; passing it fails with
+    // "error: unknown option '--steer'". The CLI fallback must drop it even
+    // when steer is requested for the SDK path.
+    assert.deepEqual(calls[0], ["send", "--no-wait", "agent-cli-steer", "go"]);
     assert.deepEqual(calls[1], ["send", "--no-wait", "agent-cli-plain", "go"]);
   });
 

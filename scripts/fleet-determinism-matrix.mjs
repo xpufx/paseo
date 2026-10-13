@@ -391,7 +391,7 @@ const PARTS = [
     anchors: { symbols: ["deliverMessage", "runBoardSweep", "doFrontDeskHandoff"] },
     evidence: [
       [`hook-router.ts:1924`, "`agentRef.send(msg, { steer })` hands text to a model-backed session"],
-      [`hook-router.ts:1929-1939`, "CLI fallback `paseo send --no-wait --steer <id> <msg>`"],
+      [`hook-router.ts:1929-1939`, "CLI fallback `paseo send --no-wait <id> <msg>` (the CLI has no `--steer` option)"],
       [`hook-router.ts:2589-2592`, "handoff onboarding text is a template, delivered with `steer: true`"],
       [`hook-router.ts:2703-2712`, "board sweep summarises candidates deterministically, then steers the notice (failures included)"],
     ],
