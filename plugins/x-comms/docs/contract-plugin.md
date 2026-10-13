@@ -55,8 +55,8 @@ Counted from `index.server.ts`, `index.client.tsx`, and `shared/registry.ts`.
 | **Total** | **35** | |
 
 Plus a shared wire substrate (`shared/envelope.ts`, `server/busy.ts`,
-`server/defer-queue.ts`, `server/outbox.ts`, `server/mesh-identity.ts`,
-`server/mesh-keys.ts`) that the MCP server mirrors in standalone form. It is
+`server/defer-queue.ts`, `server/outbox.ts`) that the MCP server mirrors in
+standalone form. It is
 described once, in [§6](#6-shared-wire-substrate), and not counted in the 35
 because it has no registration site of its own.
 
@@ -466,12 +466,11 @@ where it does, the two are pinned against each other by a test.
 |---|---|---|
 | `version` | `6` | `6` for the tagged form. A `[x-comms] ` prefixed envelope with `version: 5` still parses. |
 | `type` | `"x-comms.message"` | |
-| `direction` | `"outgoing"` | **Always** `"outgoing"` on the wire: every message leaves its sender. Readers derive incoming vs outgoing by comparing `sender.agentId` to their own agent id (`viewerDirection`). It is also excluded from the signature. |
+| `direction` | `"outgoing"` | **Always** `"outgoing"` on the wire: every message leaves its sender. Readers derive incoming vs outgoing by comparing `sender.agentId` to their own agent id (`viewerDirection`). |
 | `sender.agentId` / `agentName` / `host` / `daemonServerId` / `cwd` | `string \| null` | All nullable. |
 | `target.daemon` / `agentId` | `string \| null` | Both nullable. |
 | `messageId` | `string` (1–128, optional) | The **daemon's delivery key**, not a conversation id. Retained across outbox retries so the daemon can discard a duplicate. Never surfaced to a user. |
 | `sentAt` | ISO string | |
-| `auth` | `{ v, alg, keyId, sig }` (optional) | See below. |
 
 `parseEnvelope` returns `null` — never a partial parse — when the text does not
 start with a known prefix, the closing tag is missing, the JSON is malformed, or
@@ -479,57 +478,13 @@ the object fails the schema. Prose may follow the envelope and does not demote
 the message to chat. A paste that merely *contains* the tag mid-sentence is not
 a delivery.
 
-### 6.2 `auth` — envelope authentication
+### 6.2 Sender identity
 
-An ed25519 signature over the attribution fields. It exists because the envelope
-is plain text inside an agent's turn: without it any agent that can write to a
-timeline can hand-write the tag and claim any `sender.agentId` (#594).
-
-* **Signed payload** is a context line `x-comms/envelope-auth/v1` followed by one
-  line per field in a fixed order: `version`, `type`, `sender.agentId`,
-  `sender.agentName`, `sender.host`, `sender.daemonServerId`, `sender.cwd`,
-  `target.daemon`, `target.agentId`, `messageId`, `sentAt`. Eleven fields. The
-  list is exported and pinned by `shared/auth-fields.test.ts`, because it used to
-  be module-private, which is exactly why nothing asserted it: a refactor
-  dropping an entry would have shipped green.
-* **Deliberately not JSON.** A JSON canonicalisation would depend on key order
-  and escaping, so a re-serialized but identical envelope would stop verifying.
-  A newline inside any signed value is **rejected**, not escaped, because it
-  would forge a field boundary.
-* **Not signed:** `direction` (every sender stamps the same value) and the prose
-  body. This authenticates *who sent this*, not *what they said*, and binding the
-  body would make the signature depend on whitespace the delivery path is free to
-  normalise.
-* **The schema is permissive and the trust decision is strict.** Anything shaped
-  like an auth block parses, so a corrupt or future-algorithm block never loses a
-  message. `verifyEnvelopeAuth` returns one of `verified` / `missing` /
-  `invalid`, and only `verified` may be used for attribution. A verifier that has
-  no key for a `keyId` returns `null`, which is an `invalid` verdict, not a pass.
-* **Key.** ed25519, generated on first use, stored `0600` at
-  `~/.paseo/plugin-data/xpufx/paseo-x-comms/mesh-key.json`, written atomically. `keyId` is
-  `xck1:` + base64url of the DER SubjectPublicKeyInfo — a fingerprint of the key
-  **bytes**, so re-wrapping the same key in different PEM armour cannot change its
-  identity. A stored key whose fingerprint disagrees with its own bytes is
-  treated as corrupt and regenerated.
-* **Distribution.** `mesh.key` over the peer channel. The caller **overwrites**
-  the response's `serverId` with the link's own verified identity, so a buggy or
-  spoofed local id cannot launder a key onto the wrong peer. A relay offer is
-  checked against the handshake `serverId`; a mismatch aborts before any payload
-  is sent.
-* **Pinning is permanent.** The first `keyId` seen for a peer is pinned forever. A
-  different `keyId` for an already pinned peer is **refused**, and the refusal is
-  logged loudly rather than silently degrading. The declared fingerprint must
-  also be the one the key bytes actually produce, so a pinned id cannot be
-  pointed at a substituted key.
-* **Direct `host:port` peers have no authenticated identity**, so their keys are
-  never fetched and their envelopes are unverifiable by construction. Degraded,
-  never trusted.
-* **A sender cannot choose its own identity.** Inside an agent session,
-  `x_comms_send` takes the sender from the daemon-injected `PASEO_AGENT_ID` and
-  **ignores any `fromAgentId` passed**. Only the plugin server's own subprocess,
-  which runs without that variable, may set it — otherwise any agent could have
-  the trusted server stamp a sender block claiming someone else, which is the
-  same forgery as hand-writing the tag, one call cheaper.
+The sender fields are plain, unverified claims — the envelope is plain text
+inside an agent's turn, so anyone able to write to a timeline can type the tag
+and name any sender. All Paseo daemons belong to one user, so there is no
+cross-user boundary for a signature to protect; the fields record a return
+address for replies, nothing more.
 
 ### 6.3 Constants, in one place
 
@@ -552,8 +507,6 @@ timeline can hand-write the tag and claim any `sender.agentId` (#594).
 | `MESH_KEY_REFRESH_MS` | 5 min | `server/handlers.ts` |
 | `MESH_KEY_PASS_DEADLINE_MS` | 5 s | `server/handlers.ts` |
 | `SNAPSHOT_STALE_MS` | 60 s | `server/snapshot.ts` |
-| `AUTH_VERSION` / `AUTH_ALG` | 1 / `ed25519` | `shared/envelope.ts` |
-| `AUTH_PAYLOAD_CONTEXT` | `x-comms/envelope-auth/v1` | `shared/envelope.ts` |
 
 The mesh-key pass is rate-limited and deadline-bounded because a snapshot refresh
 is a user-visible RPC: dialling every relay peer on each one would put an 8 s
@@ -571,8 +524,6 @@ forward-only one-time migration from the old `~/.paseo` root location.
 | `plugin.json` | preferences: `prereqsCollapsed`, `presenceEnabled`, `injectionEnabled`, `outboxExpirySeconds`, `daemonEnabled`, `daemonIdentities`, `daemonHostnames`, `serverPath` |
 | `outbox.json` | held messages + backoff state |
 | `presence.json` | live entries, sticky tombstones, bounded seen-id LRU, queued retracts |
-| `mesh-key.json` | this daemon's private signing key, `0600` |
-| `mesh-keys.json` | pinned peer verify keys, `serverId → keyId` + PEM |
 | `conversations.json` | thread snapshot for cross-plugin readers, capped at 200 |
 | `snapshot.json` | last fleet probe, `0600` |
 | `pending/` | defer queue, one file per item (`.json` waiting, `.sending` claimed) |
@@ -590,7 +541,6 @@ file cannot take the plugin down; writers rebuild.
 | `PASEO_X_COMMS_REMOTES` | plugin registry + MCP server | registry file path |
 | `PASEO_HOSTS_FILE` | plugin registry + MCP server | configured-hosts file path |
 | `PASEO_X_COMMS_MCP_SERVER` | plugin only | explicit bundled-server path override |
-| `PASEO_X_COMMS_MESH_KEY` | MCP server | this daemon's signing key path; the plugin passes it by absolute path in the injected env |
 
 ---
 

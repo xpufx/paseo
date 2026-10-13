@@ -923,7 +923,7 @@ test("redaction: a throwing extension hook cannot write a raw offer to the serve
 // The preemption being fixed: paseo sends with replaceRunning: true, so a send
 // into a running agent replaced its turn. These assert the send does not go out
 // at all while the target is mid-turn, that the queued copy is the stamped bytes
-// (envelope + signature intact), and that the notice back to the sender is itself
+// (envelope intact), and that the notice back to the sender is itself
 // queued rather than steered into the sender's own turn.
 function pendingDir(remotesFile) {
   return join(dirname(remotesFile), "pending");

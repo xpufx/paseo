@@ -65,7 +65,7 @@ Everything marked `peer` is a sample of a remote daemon's state at one instant.
 | Server capabilities beyond tools | 14 | see below |
 | **Total** | **25** | |
 
-Capability list: C1 envelope stamping and signing · C2 sender identity
+Capability list: C1 envelope stamping · C2 sender identity
 resolution · C3 self-message guard · C4 busy gate · C5 defer queue · C6
 delivery notices · C7 registry I/O · C8 configured-hosts merge · C9 target
 preflight and unknown-daemon diagnostic · C10 offer redaction · C11 extension
@@ -226,28 +226,16 @@ beyond `z.number().int().positive()`.
 
 ## 2. Capabilities (14)
 
-### C1 · Envelope stamping and signing
+### C1 · Envelope stamping
 
 Stamps `<x-comms-message>{"xComms":{…}}</x-comms-message>` — version **6**,
 `type: "x-comms.message"`, `direction: "outgoing"` — then `\n\n` and the caller's
-prose. Field-for-field identical to the plugin's
-`buildSenderEnvelope` / `senderMetaBlock`; the two producers are byte-compatible
-and both feed the same `parseEnvelope`.
+prose. The `sender` block is a plain, unverified claim: the envelope is plain text
+inside an agent's turn, so anyone able to write to a timeline can type the tag
+and name any sender. All Paseo daemons belong to one user, so there is no
+cross-user boundary for a signature to protect; the fields record a return
+address for replies, nothing more.
 
-`auth` is an ed25519 signature over a canonical, field-ordered payload: the
-context line `x-comms/envelope-auth/v1` then one line each for `version`, `type`,
-`sender.agentId`, `sender.agentName`, `sender.host`, `sender.daemonServerId`,
-`sender.cwd`, `target.daemon`, `target.agentId`, `messageId`, `sentAt`. Eleven
-fields, in that order and that spelling, duplicated here because the key is
-`PASEO_X_COMMS_MESH_KEY` and the file layout is not importable. `direction` and
-the prose are excluded: this authenticates who sent, not what they said.
-
-* **Fails** — if the mesh key is missing or unreadable, the send still goes out
-  **unsigned**. That is legal on the wire and never trusted by a receiver; it
-  degrades to "unattributable", never to a lost message. A key file whose
-  `keyId` does not match the fingerprint of its own public key is treated as
-  absent — the fingerprint is re-derived from the DER bytes on every load, so a
-  hand-edited `keyId` cannot vouch for other bytes.
 * **Depends on** — local.
 
 ### C2 · Sender identity resolution
@@ -560,7 +548,7 @@ x_comms_send(daemon, agentId, prompt, fromAgentId?, fromAgentName?, messageId?, 
   │     very turn this send is about to start
   ├─ stamp the envelope (C1)            ── BEFORE the busy check, so a queued item
   │                                        carries the exact bytes it will deliver:
-  │                                        same signature, same inputs, made earlier
+  │                                        same envelope, same inputs, made earlier
   ├─ busy probe (C4)  ── busy ─▶ deferEnqueue ─▶ delivery:"queued" (+ depth, expiresAt)
   │                                     └─ at a bound ─▶ delivery:"dropped" (isError)
   └─ callPaseo("send", …)  ── throw ─▶ isError
@@ -568,8 +556,8 @@ x_comms_send(daemon, agentId, prompt, fromAgentId?, fromAgentName?, messageId?, 
 ```
 
 * **Stamping before queueing is the load-bearing ordering.** A queued item carries
-  the exact bytes it will deliver, signature and all, so nothing re-stamps it
-  later — re-stamping would move `sentAt` and invalidate the signature.
+  the exact bytes it will deliver, so nothing re-stamps it later — re-stamping
+  would move `sentAt`.
 * **`messageId`** defaults to a fresh `randomUUID()` and is retained across every
   retry. Dedupe engages only where that value reaches the daemon's request-level
   receipt — the native SDK send carrying `options.messageId` (local-send.ts).
@@ -605,7 +593,6 @@ an `isError`, and the plugin server's outbox is what holds it on the other route
 | Env var | Default | Purpose |
 |---|---|---|
 | `PASEO_X_COMMS_REMOTES` | `~/.paseo/plugin-data/xpufx/paseo-x-comms/registry.json` | registry file path; the defer queue directory is derived from it, so it moves with it |
-| `PASEO_X_COMMS_MESH_KEY` | `~/.paseo/plugin-data/xpufx/paseo-x-comms/mesh-key.json` | this daemon's signing key for `xComms.auth`; the plugin passes it by absolute path |
 | `PASEO_X_COMMS_PASEO` | `paseo` | the `paseo` binary |
 | `PASEO_X_COMMS_TIMEOUT_MS` | `120000` | per-`paseo`-call timeout |
 | `PASEO_X_COMMS_EXTENSIONS` | `~/.paseo/plugin-data/xpufx/paseo-x-comms/extensions` | extension dir (trusted, unsandboxed) |
@@ -631,9 +618,7 @@ The defer queue has two independent drainers on the same directory.
 An item this process enqueues is always `stamped: true`, and an item the plugin
 server enqueues is always `stamped: false`. So the split is clean by
 construction rather than by negotiation: each side delivers only what it can
-deliver correctly, and neither re-stamps (which would change `sentAt`) nor sends
-an unstamped prompt (which would drop the attribution the signature exists to
-provide).
+deliver correctly, and neither re-stamps (which would change `sentAt`).
 
 The consequence to be aware of: a `stamped: true` item this process enqueued for
 a target that never goes idle is only re-offered when some agent on this daemon
