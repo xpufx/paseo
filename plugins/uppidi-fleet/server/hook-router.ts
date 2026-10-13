@@ -1647,6 +1647,179 @@ export interface WatchdogAuditResult {
   timestamp: number;
   audited: { orchestrators: number; agents: number; queues: number };
   anomalies: WatchdogAnomaly[];
+  /** Dead session verdicts from the health-canary pass (#1328). */
+  deadSessions?: DeadSessionVerdict[];
+}
+
+// ---------------------------------------------------------------------------
+// Dead session detection (#1328)
+//
+// Deterministic predicates derived from the Python agent-health-check:
+//   DEAD_ORPHANED_DISK_RECORD    – absent from daemon, still on disk.
+//   DEAD_TERMINAL_FATAL_ERROR    – error/closed with non-transient lastError.
+//   DEAD_WEDGED_RUNNING_TURN     – running turn with no activity in stale window.
+//   DEAD_REGISTRY_WITHOUT_PROCESS– registry references id but daemon list does not.
+//   DEAD_SUPERSEDED_BY_RETRY     – terminal session superseded by newer retry.
+// ---------------------------------------------------------------------------
+
+export const DEAD_PREDICATE_ORDER = [
+  "DEAD_ORPHANED_DISK_RECORD",
+  "DEAD_TERMINAL_FATAL_ERROR",
+  "DEAD_WEDGED_RUNNING_TURN",
+  "DEAD_REGISTRY_WITHOUT_PROCESS",
+  "DEAD_SUPERSEDED_BY_RETRY",
+] as const;
+export type DeadPredicateType = (typeof DEAD_PREDICATE_ORDER)[number];
+
+export interface DeadSessionVerdict {
+  agentId: string;
+  name: string | null;
+  liveStatus: string;
+  deadPredicates: DeadPredicateType[];
+  deadReasons: string[];
+  registrations: string[];
+  activeWorkers: number;
+  killAllowed: boolean;
+  killBlockedReasons: string[];
+  supersededBy: string | null;
+}
+
+/** Kill-safety guard: returns reasons why this agent must NOT be killed. */
+export function computeKillGuardReasons(
+  assessment: {
+    agentId: string;
+    liveStatus: string;
+    taxonomy: WatchdogTaxonomyType[];
+    deadPredicates: DeadPredicateType[];
+    activeWorkers: number;
+    frontDeskId?: string | null;
+    selfId?: string | null;
+    sameCwdAsSuccessor?: boolean;
+  },
+  opts: { selfId?: string | null; frontDeskId?: string | null } = {},
+): string[] {
+  const reasons: string[] = [];
+  const { selfId = opts.selfId, frontDeskId = opts.frontDeskId } = opts;
+  const dead = assessment.deadPredicates;
+
+  if (dead.length === 0) {
+    reasons.push("not classified as dead (no dead predicate holds)");
+  }
+  if (assessment.liveStatus === "running" && !dead.includes("DEAD_WEDGED_RUNNING_TURN")) {
+    reasons.push("healthy running agent with recent activity");
+  }
+  if (assessment.activeWorkers > 0) {
+    reasons.push(`has ${assessment.activeWorkers} live child worker(s)`);
+  }
+  if (frontDeskId && assessment.agentId === frontDeskId) {
+    reasons.push("registered front desk");
+  }
+  if (selfId && assessment.agentId === selfId) {
+    reasons.push("self / dispatching agent");
+  }
+  if (assessment.sameCwdAsSuccessor) {
+    reasons.push("shares worktree cwd with successor");
+  }
+  return reasons;
+}
+
+/** Evidence strings for each dead predicate. */
+const DEAD_PREDICATE_EVIDENCE: Record<string, string> = {
+  DEAD_ORPHANED_DISK_RECORD: "live daemon list no longer contains the agent, but ~/.paseo/agents/<id>.json still exists",
+  DEAD_TERMINAL_FATAL_ERROR: "status is error/closed with a non-transient disk lastError",
+  DEAD_WEDGED_RUNNING_TURN: "running turn with no activity inside the stale window",
+  DEAD_REGISTRY_WITHOUT_PROCESS: "fleet registry still references the agent id, but the live daemon list does not",
+  DEAD_SUPERSEDED_BY_RETRY: "terminal error/closed session superseded by a newer retry with matching scope/task",
+};
+
+/** Normalize agent display name/title into a task name for comparison. */
+export function extractTaskName(name: string | null | undefined): string {
+  if (!name) return "";
+  const text = String(name).trim();
+  const m = text.match(/^Worker\s*[·-]\s*(.*)/i);
+  return m ? m[1].trim() : text;
+}
+
+/** Match task/ticket name or issue prefix (e.g. 'repo#23 ...'). */
+export function matchTaskName(nameA: string | null | undefined, nameB: string | null | undefined): boolean {
+  const taskA = extractTaskName(nameA);
+  const taskB = extractTaskName(nameB);
+  if (!taskA || !taskB) return false;
+  if (taskA.toLowerCase() === taskB.toLowerCase()) return true;
+  const re = /^([a-zA-Z0-9_./-]+#\d+)\b/;
+  const mA = taskA.match(re);
+  const mB = taskB.match(re);
+  if (mA && mB && mA[1].toLowerCase() === mB[1].toLowerCase()) return true;
+  return false;
+}
+
+/** Extract (parentAgentId, repoScope) tuple from agent representation. */
+function getAgentScope(agent: { id: string; name?: string | null; title?: string | null; cwd?: string | null; createdAt?: number | string | null; labels?: Record<string, string> | null; parentAgentId?: string | null; repo?: string | null }): [string | null, string | null] {
+  const labels = agent.labels ?? {};
+  const parentId = labels["paseo.parent-agent-id"] ?? labels["parentAgentId"] ?? agent.parentAgentId ?? null;
+  let repo = agent.repo ?? labels["repo"] ?? null;
+  if (!repo) {
+    const name = agent.name ?? agent.title ?? "";
+    const m = name.match(/(?:Worker\s*[·-]\s*)?([a-zA-Z0-9_.-]+)#\d+/);
+    if (m) repo = m[1];
+    else {
+      const orch = name.match(/Orchestrator\s*[·-]\s*([a-zA-Z0-9_./-]+)/);
+      if (orch) repo = orch[1];
+    }
+  }
+  return [parentId, repo];
+}
+
+/** Determine whether two agents share parent orchestrator or repo scope. */
+function matchAgentScope(a: { id: string; name?: string | null; title?: string | null; cwd?: string | null; createdAt?: number | string | null; labels?: Record<string, string> | null }, b: { id: string; name?: string | null; title?: string | null; cwd?: string | null; createdAt?: number | string | null; labels?: Record<string, string> | null }): boolean {
+  const [parentA, repoA] = getAgentScope(a);
+  const [parentB, repoB] = getAgentScope(b);
+  if (parentA && parentB && String(parentA) === String(parentB)) return true;
+  if (repoA && repoB) {
+    const ra = repoA.split("/").pop()?.toLowerCase() ?? "";
+    const rb = repoB.split("/").pop()?.toLowerCase() ?? "";
+    if (ra === rb) return true;
+  }
+  return false;
+}
+
+function normalizeAgentCwd(cwd: string | null | undefined): string | null {
+  if (!cwd || typeof cwd !== "string") return null;
+  return cwd.trim().replace(/^~(?=$|[/\\])/, process.env.HOME ?? "") || null;
+}
+
+function getAgentCreatedAtMs(agent: { createdAt?: number | string | null }): number | null {
+  if (!agent) return null;
+  const val = agent.createdAt;
+  if (val == null) return null;
+  return coerceEpochMs(val);
+}
+
+/** Find a candidate successor B strictly newer than A matching scope, task, and distinct cwd. */
+export function findSuccessorRetry(agent: { id: string; name?: string | null; title?: string | null; cwd?: string | null; createdAt?: number | string | null; labels?: Record<string, string> | null }, candidates: Array<{ id: string; name?: string | null; title?: string | null; cwd?: string | null; createdAt?: number | string | null; labels?: Record<string, string> | null }>): { id: string; name?: string | null; title?: string | null; cwd?: string | null; createdAt?: number | string | null; labels?: Record<string, string> | null } | null {
+  const timeA = getAgentCreatedAtMs(agent);
+  if (timeA == null) return null;
+  const nameA = agent.name ?? agent.title;
+  const cwdA = normalizeAgentCwd(agent.cwd);
+
+  let best: typeof agent | null = null;
+  let bestTime = -1;
+
+  for (const cand of candidates) {
+    if (cand.id === agent.id) continue;
+    const timeB = getAgentCreatedAtMs(cand);
+    if (timeB == null || timeB <= timeA) continue;
+    if (!matchAgentScope(agent, cand)) continue;
+    const nameB = cand.name ?? cand.title;
+    if (!matchTaskName(nameA, nameB)) continue;
+    const cwdB = normalizeAgentCwd(cand.cwd);
+    if (cwdA && cwdB && cwdA === cwdB) continue;
+    if (timeB > bestTime) {
+      bestTime = timeB;
+      best = cand;
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------
@@ -1661,6 +1834,7 @@ export interface WatchdogAuditResult {
 export const WATCHDOG_TAXONOMY = [
   "TURN_CONCURRENCY_LOCK",
   "TURN_CANCELLATION_TIMEOUT",
+  "PENDING_PERMISSION_BLOCKED",
   "IDLE_POST_ERROR_AMNESIA",
   "ZOMBIE_HUNG_TURN",
   "STALE_ERROR_GHOSTING",
@@ -1752,6 +1926,7 @@ export const DEFAULT_REPETITIVE_TOOL_LOOP_THRESHOLD = 15;
 export const WATCHDOG_SEVERITIES: Record<WatchdogTaxonomyType, WatchdogSeverity> = {
   TURN_CONCURRENCY_LOCK: "high",
   TURN_CANCELLATION_TIMEOUT: "high",
+  PENDING_PERMISSION_BLOCKED: "medium",
   ZOMBIE_HUNG_TURN: "high",
   PROVIDER_QUOTA_EXHAUSTION: "high",
   STALE_ERROR_GHOSTING: "medium",
@@ -3719,6 +3894,7 @@ export function assessAgentHealth(
   const checks: Record<WatchdogTaxonomyType, boolean> = {
     TURN_CONCURRENCY_LOCK: turnLock,
     TURN_CANCELLATION_TIMEOUT: cancellationTimeout,
+    PENDING_PERMISSION_BLOCKED: Boolean(live?.pendingPermissions?.length),
     IDLE_POST_ERROR_AMNESIA: detectIdlePostErrorAmnesia(
       liveStatus,
       rawLastError,
@@ -3747,7 +3923,11 @@ export function assessAgentHealth(
             ? lastActivityAt ?? undefined
             : name === "REPETITIVE_TOOL_LOOP"
               ? `${repetitiveRun} identical consecutive tool calls`
-              : String(lastError || "").trim() || undefined;
+              : name === "PENDING_PERMISSION_BLOCKED"
+                ? live?.pendingPermissions?.length
+                  ? `requires ${live.pendingPermissions.length} permission(s)`
+                  : undefined
+                : String(lastError || "").trim() || undefined;
     if (detail) details[name] = detail;
   }
 
@@ -7668,6 +7848,7 @@ export class HookRouter {
     const recover = opts.recover ?? true;
     const steerMessage = opts.steerMessage ?? DEFAULT_WATCHDOG_STEER_MESSAGE;
     const anomalies: WatchdogAnomaly[] = [];
+    const deadSessions: DeadSessionVerdict[] = [];
 
     let agentMap = opts.agentMap ?? null;
     if (!agentMap) {
@@ -7725,6 +7906,9 @@ export class HookRouter {
     const adjudicationLogPath = opts.adjudicationLogPath ?? join(this.stateDir, "permission-decisions.jsonl");
 
     let fleetAuditedAgents = 0;
+    // Agents whose pending permissions were auto-allowed in the first pass;
+    // PENDING_PERMISSION_BLOCKED must not fire for them.
+    const autoAllowedPerms = new Set<string>();
     if (agentMap) {
       // Pending permissions and operator-attention stalls are surfaced for every
       // live agent, fleet-owned or not: a wedged session still blocks its queue,
@@ -7769,6 +7953,7 @@ export class HookRouter {
             this.log(
               `[info] permission auto-allow: ${agent.id} ${reqId} rule=${adjudication.ruleId} scope=${adjudication.scope ?? "n/a"}`,
             );
+            autoAllowedPerms.add(agent.id);
           } else {
             anomalies.push({
               type: "AGENT_PERMISSION_REQUIRED",
@@ -7829,7 +8014,12 @@ export class HookRouter {
         if (agent.archivedAt) continue;
         if (this.isTeardownSuppressedAgent(agent.id)) continue;
         fleetAuditedAgents += 1;
-        const assessment = assessAgentHealth(agent.id, agent, diskMetadata?.get(agent.id), now, {
+        // For agents whose permissions were auto-allowed, clear pendingPermissions
+        // so PENDING_PERMISSION_BLOCKED does not fire.
+        const taxonomyAgent = autoAllowedPerms.has(agent.id)
+          ? { ...agent, pendingPermissions: [] as import("./hook-router.js").WatchdogPermission[] }
+          : agent;
+        const assessment = assessAgentHealth(agent.id, taxonomyAgent, diskMetadata?.get(agent.id), now, {
           cancellations,
           cancellationRecencySeconds: opts.cancellationRecencySeconds,
           activeWorkers: countActiveWorkers(agentMap, agent.id, diskMetadata),
@@ -8011,6 +8201,128 @@ export class HookRouter {
         }
       }
 
+      // -----------------------------------------------------------------
+      // Dead session detection (#1328)
+      //
+      // After taxonomy classification, derive explicit dead verdicts from
+      // named predicates and surface them alongside anomalies so the MCP
+      // tool `fleet_prune_dead_sessions` can act on them deterministically.
+      // -----------------------------------------------------------------
+      const allCandidates: Array<{ id: string; name?: string | null; title?: string | null; cwd?: string | null; createdAt?: number | string | null; labels?: Record<string, string> | null }> = [];
+      for (const agent of agentMap.values()) {
+        if (this.isTeardownSuppressedAgent(agent.id)) continue;
+        allCandidates.push({
+          id: agent.id,
+          name: agent.name ?? agent.title ?? null,
+          title: agent.title ?? agent.name ?? null,
+          cwd: agent.cwd ?? null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          createdAt: ((diskMetadata?.get(agent.id) as any)?.createdAt ?? (agent as any)?.createdAt) as string | number | null,
+          labels: agent.labels ?? diskMetadata?.get(agent.id)?.labels,
+        });
+      }
+
+      for (const agent of agentMap.values()) {
+        if (!isFleetAgent(agent, { frontDeskId, orchestratorAgentIds: fleetAgentIds })) continue;
+        if (agent.archivedAt) continue;
+        if (this.isTeardownSuppressedAgent(agent.id)) continue;
+
+        const disk = diskMetadata?.get(agent.id);
+        const livePresent = true;
+        const diskPresent = Boolean(disk);
+
+        // Collect registry registrations for this agent
+        const registrations: string[] = [];
+        if (frontDeskId === agent.id) registrations.push("frontdesk");
+        for (const rec of orchRecords) {
+          if (rec.agentId === agent.id && rec.key) registrations.push(rec.key);
+        }
+
+        // Check each dead predicate
+        const nowMs = opts.now ?? Date.now();
+        const staleSecs = opts.runningStaleSeconds ?? DEFAULT_RUNNING_STALE_SECONDS;
+        const lastActivityAt = disk?.lastActivityAt ?? agent.lastActivityAt ?? disk?.updatedAt ?? agent.updatedAt ?? null;
+
+        const deadPredicates: DeadPredicateType[] = [];
+
+        // 1. DEAD_ORPHANED_DISK_RECORD
+        if (!livePresent && diskPresent) deadPredicates.push("DEAD_ORPHANED_DISK_RECORD");
+
+        // 2. DEAD_TERMINAL_FATAL_ERROR
+        const ls = String(agent.status ?? "").toLowerCase();
+        if (["error", "closed"].includes(ls)) {
+          const le = String(agent.lastError ?? disk?.lastError ?? "");
+          if (le.trim() && !/fetch failed|econnreset|etimedout|connection refused|socket hang up|temporarily unavailable/i.test(le)) {
+            deadPredicates.push("DEAD_TERMINAL_FATAL_ERROR");
+          }
+        }
+
+        // 3. DEAD_WEDGED_RUNNING_TURN
+        if (ls === "running" && lastActivityAt) {
+          const activityTs = parseIsoTimestamp(lastActivityAt);
+          if (activityTs != null && (nowMs - activityTs) / 1000 >= staleSecs) {
+            deadPredicates.push("DEAD_WEDGED_RUNNING_TURN");
+          }
+        }
+
+        // 4. DEAD_REGISTRY_WITHOUT_PROCESS
+        if (registrations.length > 0 && !livePresent) {
+          deadPredicates.push("DEAD_REGISTRY_WITHOUT_PROCESS");
+        }
+
+        // 5. DEAD_SUPERSEDED_BY_RETRY
+        if (["error", "closed"].includes(ls) && deadPredicates.includes("DEAD_TERMINAL_FATAL_ERROR")) {
+          const activeWorkers = countActiveWorkers(agentMap, agent.id, diskMetadata);
+          if (activeWorkers === 0 && registrations.length === 0) {
+            const agentInfo = allCandidates.find((c) => c.id === agent.id);
+            if (agentInfo) {
+              const successor = findSuccessorRetry(agentInfo, allCandidates.filter((c) => c.id !== agent.id));
+              if (successor) deadPredicates.push("DEAD_SUPERSEDED_BY_RETRY");
+            }
+          }
+        }
+
+        if (deadPredicates.length === 0) continue;
+
+        const guardReasons = computeKillGuardReasons(
+          { agentId: agent.id, liveStatus: ls, taxonomy: [], deadPredicates, activeWorkers: countActiveWorkers(agentMap, agent.id, diskMetadata), frontDeskId, selfId: null },
+          { frontDeskId },
+        );
+
+        // Find superseded-by agent
+        let supersededBy: string | null = null;
+        if (deadPredicates.includes("DEAD_SUPERSEDED_BY_RETRY")) {
+          const agentInfo = allCandidates.find((c) => c.id === agent.id);
+          if (agentInfo) {
+            const successor = findSuccessorRetry(agentInfo, allCandidates.filter((c) => c.id !== agent.id));
+            supersededBy = successor?.id ?? null;
+          }
+        }
+
+        deadSessions.push({
+          agentId: agent.id,
+          name: agent.name ?? agent.title ?? null,
+          liveStatus: ls,
+          deadPredicates,
+          deadReasons: deadPredicates.map((p) => `${p}: ${DEAD_PREDICATE_EVIDENCE[p] ?? ""}`),
+          registrations,
+          activeWorkers: countActiveWorkers(agentMap, agent.id, diskMetadata),
+          killAllowed: guardReasons.length === 0,
+          killBlockedReasons: guardReasons,
+          supersededBy,
+        });
+      }
+
+      // deadSessions collected above; added to return value below.
+
+      // When an orchestrator or worker is superseded/spawned, clean up dead sessions.
+      for (const ds of deadSessions) {
+        if (ds.deadPredicates.includes("DEAD_SUPERSEDED_BY_RETRY") && ds.supersededBy) {
+          // Log cleanup action; actual registry pruning is handled by fleet_prune_dead_sessions.
+          this.log(`[info] watchdog: dead session ${ds.agentId} superseded by ${ds.supersededBy}, ${ds.deadPredicates.join(", ")}`);
+        }
+      }
+
       for (const record of orchRecords) {
         const { key, agentId } = record;
         if (!agentId) continue;
@@ -8179,6 +8491,7 @@ export class HookRouter {
         queues: this.busyAttempts.size,
       },
       anomalies,
+      deadSessions: deadSessions.length > 0 ? deadSessions : undefined,
     };
   }
 

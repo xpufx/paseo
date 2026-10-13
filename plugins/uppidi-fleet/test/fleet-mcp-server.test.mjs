@@ -22,6 +22,7 @@ const TOOL_NAMES = [
   "fleet_rotate_role",
   "fleet_ensure_orchestrator",
   "fleet_validate_workspace",
+  "fleet_prune_dead_sessions",
 ];
 
 // ---------------------------------------------------------------------------
@@ -240,7 +241,7 @@ describe("fleet-mcp-server stdio E2E", () => {
       });
     });
 
-    test("tools/list advertises all 10 tools with object input schemas", async () => {
+    test("tools/list advertises all 11 tools with object input schemas", async () => {
       await withClient(async (client) => {
         const res = await client.request("tools/list", {});
         assert.ok(Array.isArray(res.result.tools));
@@ -293,7 +294,7 @@ describe("fleet-mcp-server stdio E2E", () => {
     });
   });
 
-  describe("tools/call executes all 10 tools over stdio", () => {
+  describe("tools/call executes all 11 tools over stdio", () => {
     test("dispatches every declared tool without an unknown-tool error", async () => {
       await withClient(async (client) => {
         const safeArgs = {
@@ -307,6 +308,7 @@ describe("fleet-mcp-server stdio E2E", () => {
           fleet_rotate_role: { role: "orchestrator", repo: "test-org/repo-a", json: true },
           fleet_ensure_orchestrator: { repo: "test-org/repo-a", json: true },
           fleet_validate_workspace: { path: root, json: true },
+          fleet_prune_dead_sessions: { dryRun: true, json: true },
         };
 
         for (const name of TOOL_NAMES) {

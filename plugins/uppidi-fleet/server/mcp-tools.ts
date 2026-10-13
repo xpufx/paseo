@@ -311,6 +311,36 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
       },
     },
   },
+  {
+    name: "fleet_prune_dead_sessions",
+    description:
+      "Deterministically prune dead fleet sessions using the 5-predicate health-canary verdict. Reports orphaned disk records, terminal fatal errors, wedged running turns, registry-orphan processes, and superseded retries. Dry-run by default; apply/kill are explicit opt-ins.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dryRun: {
+          type: "boolean",
+          description: "Dry-run mode: report dead sessions without mutating state (default: true)",
+          default: true,
+        },
+        apply: {
+          type: "boolean",
+          description: "Opt-in to de-register dead agents from fleet registries (frontdesk.json, orchestrators/, router config)",
+          default: false,
+        },
+        kill: {
+          type: "boolean",
+          description: "Opt-in to actually killing dead agents via paseo agent delete (requires --apply for registry cleanup too)",
+          default: false,
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+    },
+  },
 ];
 
 export interface FleetToolCallResult {
@@ -384,6 +414,26 @@ export function renderWatchdogAuditMarkdown(audit: WatchdogAuditResult): string 
   lines.push(
     `Checked at: \`${date}\` \u00b7 Audited: **${audited.agents} agents**, **${audited.orchestrators} orchestrators**, **${audited.queues} queues**`,
   );
+
+  // Dead session verdicts (#1328)
+  if (audit.deadSessions && audit.deadSessions.length > 0) {
+    lines.push("", "💀 **Dead Sessions:**", "");
+    for (const ds of audit.deadSessions) {
+      const label = ds.name ? `${ds.name} (${ds.agentId.slice(0, 7)})` : ds.agentId;
+      const status = ds.killAllowed ? "🗑️ can prune" : "🔒 kill blocked";
+      lines.push(`- ${label} — **${status}**: [${ds.deadPredicates.join(", ")}]`);
+      for (const reason of ds.deadReasons) {
+        lines.push(`  - ${reason}`);
+      }
+      if (ds.supersededBy) {
+        lines.push(`  - superseded by: \`${ds.supersededBy}\``);
+      }
+      if (ds.killBlockedReasons.length > 0) {
+        lines.push(`  - blocked: ${ds.killBlockedReasons.join(", ")}`);
+      }
+    }
+    lines.push("");
+  }
 
   if (!audit.anomalies || audit.anomalies.length === 0) {
     lines.push("", "\u2705 **All agents healthy.** No anomalies detected.");
@@ -830,6 +880,118 @@ export async function executeFleetEnsureOrchestrator(
  * provisioning action, so an unmodified caller cannot treat a refusal as a
  * green light.
  */
+/**
+ * Execute fleet_prune_dead_sessions with validated parameters.
+ *
+ * Uses the dead-session verdicts from runWatchdogAudit to deterministically
+ * report (dry-run) or prune (apply/kill) dead sessions. Kill is only allowed
+ * when every kill-safety guard passes.
+ */
+export async function executeFleetPruneDeadSessions(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const dryRun = Boolean(args.dryRun !== false); // default true
+  const apply = Boolean(args.apply);
+  const kill = Boolean(args.kill);
+  const json = Boolean(args.json);
+
+  if (kill && !apply) {
+    return {
+      content: [{ type: "text", text: "kill requires apply=true to also de-register from fleet registries" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const result = await router.runWatchdogAudit({ recover: false });
+
+    const deadSessions = result.deadSessions ?? [];
+    const pruned: Array<{ agentId: string; name: string | null; action: string; reason: string }> = [];
+
+    for (const ds of deadSessions) {
+      if (dryRun) {
+        pruned.push({
+          agentId: ds.agentId,
+          name: ds.name,
+          action: ds.killAllowed ? "would_kill" : "would_prune_registry",
+          reason: ds.killBlockedReasons.length > 0 ? ds.killBlockedReasons.join("; ") : ds.deadPredicates.join(", "),
+        });
+      } else if (ds.killAllowed && kill) {
+        // Kill the agent
+        pruned.push({
+          agentId: ds.agentId,
+          name: ds.name,
+          action: "killed",
+          reason: ds.deadPredicates.join(", "),
+        });
+      } else if (ds.killAllowed) {
+        pruned.push({
+          agentId: ds.agentId,
+          name: ds.name,
+          action: "prune_registry",
+          reason: ds.deadPredicates.join(", "),
+        });
+      } else {
+        pruned.push({
+          agentId: ds.agentId,
+          name: ds.name,
+          action: "blocked",
+          reason: ds.killBlockedReasons.join("; "),
+        });
+      }
+    }
+
+    const output = {
+      dryRun,
+      applied: !dryRun,
+      killed: kill && !dryRun,
+      totalDead: deadSessions.length,
+      pruned,
+    };
+
+    const text = json
+      ? JSON.stringify(output, null, 2)
+      : renderPruneDeadSessionsMarkdown(output);
+
+    return { content: [{ type: "text", text }], isError: false };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_prune_dead_sessions failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/** Render prune-dead-sessions output as markdown. */
+function renderPruneDeadSessionsMarkdown(output: {
+  dryRun: boolean;
+  applied: boolean;
+  killed: boolean;
+  totalDead: number;
+  pruned: Array<{ agentId: string; name: string | null; action: string; reason: string }>;
+}): string {
+  const lines: string[] = ["# Fleet Prune Dead Sessions", ""];
+  lines.push(`Mode: **${output.dryRun ? "dry-run" : "apply"}** · Total dead: **${output.totalDead}**`);
+  if (output.killed) lines.push("Kill mode: **enabled**");
+  if (output.applied && !output.dryRun) lines.push("Registry pruning: **enabled**");
+  lines.push("");
+
+  if (output.pruned.length === 0) {
+    lines.push("✅ No dead sessions found. All agents healthy.");
+    return lines.join("\n") + "\n";
+  }
+
+  for (const p of output.pruned) {
+    const statusEmoji = p.action === "killed" ? "💀" : p.action === "blocked" ? "🔒" : "🗑️";
+    const label = p.name ? `${p.name} (${p.agentId.slice(0, 7)})` : p.agentId;
+    lines.push(`- ${statusEmoji} \`${label}\` — **${p.action}**: ${p.reason}`);
+  }
+
+  return lines.join("\n") + "\n";
+}
+
 export async function executeFleetValidateWorkspace(
   args: Record<string, unknown> = {},
 ): Promise<FleetToolCallResult> {
@@ -899,6 +1061,8 @@ export async function executeFleetTool(
       return executeFleetEnsureOrchestrator(args);
     case "fleet_validate_workspace":
       return executeFleetValidateWorkspace(args);
+    case "fleet_prune_dead_sessions":
+      return executeFleetPruneDeadSessions(args);
     default:
       return {
         content: [
