@@ -146,15 +146,8 @@ export class PresenceTracker {
     fatigueAlertTriggered: boolean;
     source: ActivitySource;
   } {
-    const today = getTodayStamp(new Date(now));
-    if (this.state.lastDayStamp !== today) {
-      this.state.dailyUsageSeconds = 0;
-      this.state.longestStretchSeconds = 0;
-      this.state.breaksTakenToday = 0;
-      this.state.lastDayStamp = today;
-      this.state.fatigueAlertCount = 0;
-      this.state.lastFatigueAlertTs = null;
-    }
+    // Day rollover handled by shared helper.
+    this.rollOverDayIfNecessary(now);
 
     if (this.state.lastActivityTs === null) {
       this.state.streakStartTs = now;
@@ -201,6 +194,9 @@ export class PresenceTracker {
     activeStretchMinutes: number;
     fatigueAlertTriggered: boolean;
   } {
+    // Day rollover for background evaluations too (#386).
+    this.rollOverDayIfNecessary(now);
+
     const activeMinutes = this.getActiveStretchMinutes(now);
     const fatigueAlertTriggered = this.maybeTriggerFatigueAlert(activeMinutes, now);
     if (fatigueAlertTriggered) {
@@ -361,7 +357,34 @@ export class PresenceTracker {
     }
   }
 
+  /**
+   * Roll over daily counters when the day has changed since last recorded
+   * activity.  Called by both recordActivity() and getStatus() so that a
+   * brand-new day without any prior recordActivity call still zeroes out
+   * stale counters (fixes #386).
+   *
+   * Only rolls forward (never backward): if `now` is on the same day as
+   * `lastDayStamp` or an earlier day, nothing changes — this prevents
+   * artificial timestamps in tests from triggering a rollover.
+   */
+  private rollOverDayIfNecessary(now: number): void {
+    const today = getTodayStamp(new Date(now));
+    // Only advance; never reset counters when jumping backwards in time.
+    if (today > this.state.lastDayStamp) {
+      this.state.dailyUsageSeconds = 0;
+      this.state.longestStretchSeconds = 0;
+      this.state.breaksTakenToday = 0;
+      this.state.lastDayStamp = today;
+      this.state.fatigueAlertCount = 0;
+      this.state.lastFatigueAlertTs = null;
+    }
+  }
+
   public getStatus(now = Date.now()): WellbeingStatus {
+    // Ensure day rollover happens here too — a new day without any
+    // recordActivity() would otherwise carry over stale counters (#386).
+    this.rollOverDayIfNecessary(now);
+
     const isBed = this.isBedModeActive(now);
     const phase = this.calculatePhase(now);
     const activeStretch = Math.round(this.getActiveStretchMinutes(now));

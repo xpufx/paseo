@@ -32,8 +32,13 @@ export function WellbeingSurface() {
   const recordActivityMutation = useRpcMutation(recordActivityRpc);
 
   const lastHeartbeatRef = useRef<number>(0);
+  const lastInteractionTsRef = useRef<number>(0);
 
-  // Client-side operator presence detection: window events + document visibility heartbeat
+  // Client-side operator presence detection: window events + bounded visibility heartbeat.
+  // Surface-level heartbeats are only allowed within a short post-load window
+  // (3 min) to avoid counting an overnight-open tab as continuous activity (#386).
+  const surfaceHeartbeatWindowMs = 3 * 60 * 1000;
+
   useEffect(() => {
     const reportActivity = (source: ActivitySource = "client_interaction") => {
       const now = Date.now();
@@ -47,23 +52,41 @@ export function WellbeingSurface() {
 
     // Immediate initial heartbeat when surface opens
     reportActivity("client_surface");
+    lastInteractionTsRef.current = Date.now();
 
     // React Native defines `window` as an alias of `global` but provides no
     // DOM event API, so `window.addEventListener` is undefined on mobile.
     // Gate on the function itself, not the global's existence.
     if (typeof window?.addEventListener === "function") {
-      const handlePointer = () => reportActivity("client_interaction");
-      const handleKey = () => reportActivity("client_interaction");
-      const handleFocus = () => reportActivity("client_interaction");
+      const handlePointer = () => {
+        lastInteractionTsRef.current = Date.now();
+        reportActivity("client_interaction");
+      };
+      const handleKey = () => {
+        lastInteractionTsRef.current = Date.now();
+        reportActivity("client_interaction");
+      };
+      const handleFocus = () => {
+        lastInteractionTsRef.current = Date.now();
+        reportActivity("client_interaction");
+      };
 
       window.addEventListener("pointerdown", handlePointer, { passive: true });
       window.addEventListener("keydown", handleKey, { passive: true });
       window.addEventListener("focus", handleFocus);
 
-      // Heartbeat while surface is active and visible
+      // Heartbeat while surface is active and visible — bounded to the
+      // initial surface-heartbeat window so an overnight-open tab does not
+      // keep the operator continuously active (#386).
       const interval = setInterval(() => {
         if (typeof document !== "undefined" && document.visibilityState === "visible") {
-          reportActivity("client_surface");
+          const now = Date.now();
+          const timeSinceLastInteraction = now - lastInteractionTsRef.current;
+          // Only allow client_surface heartbeats within the initial window;
+          // after that, real interactions (pointer/key/focus) drive presence.
+          if (timeSinceLastInteraction <= surfaceHeartbeatWindowMs) {
+            reportActivity("client_surface");
+          }
         }
       }, 30000);
 

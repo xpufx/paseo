@@ -6,6 +6,7 @@ import os from "node:os";
 import {
   parseMinutes,
   isTimeInWindow,
+  getTodayStamp,
   PresenceTracker,
 } from "./presence.js";
 import type { WellbeingSettings } from "../shared/contracts.js";
@@ -241,6 +242,84 @@ describe("PresenceTracker", () => {
     } finally {
       (os as any).homedir = origHomedir;
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  /*** #386 — presence idle reset and passive-tab heartbeat fixes ***/
+
+  it("6+ hour absence properly idles out and resets active stretch to 0 (#386)", () => {
+    const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-386a.json`);
+    try {
+      const tracker = new PresenceTracker(TEST_SETTINGS, { stateFilePath: tmpFile });
+      const base = 1790000000000; // arbitrary epoch
+
+      // Operator is active with sub-idle-interval heartbeats.
+      tracker.recordActivity("client_interaction", base);
+      tracker.recordActivity("client_interaction", base + 10 * 60000); // 10m
+      tracker.recordActivity("client_interaction", base + 20 * 60000); // 20m
+      tracker.recordActivity("client_interaction", base + 30 * 60000); // 30m
+      const midStatus = tracker.getStatus(base + 30 * 60000);
+      assert.equal(midStatus.activeStretchMinutes, 30);
+      assert.equal(midStatus.phase, "working");
+
+      // Simulate a 6-hour absence (no recordActivity calls).
+      const wakeUp = base + 6 * 60 * 60 * 1000; // 6 hours later
+
+      // getStatus should show idle and zero active stretch.
+      const afterAbsence = tracker.getStatus(wakeUp);
+      assert.equal(afterAbsence.activeStretchMinutes, 0);
+      assert.equal(afterAbsence.phase, "idle");
+      assert.equal(afterAbsence.fleetPosture, "idle-standby");
+      assert.ok(afterAbsence.idleMinutes >= 329); // ~330 min idle (6h - 30m)
+
+      // evaluateFatigue during absence should not reset streakStartTs
+      // but should also show 0 active stretch.
+      const fatigueResult = tracker.evaluateFatigue(wakeUp);
+      assert.equal(fatigueResult.activeStretchMinutes, 0);
+      assert.equal(fatigueResult.fatigueAlertTriggered, false);
+
+      // After waking, a new interaction starts a fresh streak (idle gap > timeout
+      // means streakStartTs resets to the new activity time).
+      const postWake = tracker.recordActivity("client_interaction", wakeUp + 60000);
+      assert.equal(postWake.activeStretchMinutes, 0); // streak just started
+      assert.equal(postWake.source, "client_interaction");
+
+      // A follow-up interaction within idle timeout shows growing stretch.
+      const postWake2 = tracker.recordActivity("client_interaction", wakeUp + 120000); // 2 min
+      assert.equal(postWake2.activeStretchMinutes, 1);
+    } finally {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
+    }
+  });
+
+  it("day rollover in getStatus() without prior recordActivity() zeroes stale counters (#386)", () => {
+    const tmpFile = path.join(os.tmpdir(), `wellbeing-test-${Date.now()}-386b.json`);
+    try {
+      // Use a fixed timestamp for yesterday.
+      const yesterday = 1735689600000; // 2024-12-31 16:00 UTC
+      const todayTs = 1735776000000;   // 2025-01-01 16:00 UTC (next calendar day)
+
+      // Construct tracker with initialState that has lastDayStamp set to yesterday.
+      const tracker = new PresenceTracker(TEST_SETTINGS, {
+        stateFilePath: tmpFile,
+        initialState: {
+          dailyUsageSeconds: 300, // 5 minutes of stale usage from yesterday
+          longestStretchSeconds: 300,
+          breaksTakenToday: 1,
+          lastDayStamp: getTodayStamp(new Date(yesterday)),
+        },
+      });
+
+      // No recordActivity — just call getStatus on today.
+      const status = tracker.getStatus(todayTs);
+      assert.equal(status.dailyUsageMinutes, 0, "daily usage should be zero after day rollover");
+      assert.equal(status.longestStretchMinutes, 0, "longest stretch should reset on day rollover");
+      assert.equal(status.breaksTaken, 0, "breaks taken should reset on day rollover");
+
+      // Verify internal state was rolled over.
+      assert.equal((tracker as any).state.lastDayStamp, getTodayStamp(new Date(todayTs)));
+    } finally {
+      if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile);
     }
   });
 
