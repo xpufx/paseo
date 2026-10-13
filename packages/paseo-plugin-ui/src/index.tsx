@@ -1658,11 +1658,11 @@ export function HostButton({
 }: HostButtonProps) {
   const { colors, alpha: alphaColor } = useHostTheme();
 
-  const py = size === "sm" ? 3 : size === "lg" ? 10 : 7;
-  const px = size === "sm" ? 8 : size === "lg" ? 16 : 12;
-  const fontSize = size === "sm" ? 11 : size === "lg" ? 14 : 13;
-  const iconSize = size === "sm" ? 11 : size === "lg" ? 15 : 13;
-  const borderRadius = size === "sm" ? 6 : size === "lg" ? 10 : 8;
+  const py = size === "sm" ? 2 : size === "lg" ? 8 : 5;
+  const px = size === "sm" ? 6 : size === "lg" ? 14 : 10;
+  const fontSize = size === "sm" ? 11 : size === "lg" ? 13 : 12;
+  const iconSize = size === "sm" ? 10 : size === "lg" ? 14 : 12;
+  const borderRadius = size === "sm" ? 5 : size === "lg" ? 8 : 6;
 
   let bg = "transparent";
   let border = "transparent";
