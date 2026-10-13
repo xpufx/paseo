@@ -2388,6 +2388,12 @@ export async function spawnPaseoAgent(
   }
   appendHookLog(`[info] worktree-only-dispatch: allowed: ${workspaceGuard.reason}`);
 
+  // Determine whether this is a worker spawn so we can sanitize its
+  // environment (FORGEJO_TOKEN stripped) without mutating the daemon
+  // process.env. Workers must interact exclusively via MCP tools.
+  const isWorker = options.category ? isCodingAgentCategory(options.category) : false;
+  const hasForgeToken = typeof process.env.FORGEJO_TOKEN === "string" && process.env.FORGEJO_TOKEN.length > 0;
+
   // Canonical workspace requirement (#1159): an orchestrator must be placed in
   // a concrete workspace. If neither a cwd nor a workspaceId resolved, fail
   // fast instead of letting the daemon fall back to an arbitrary default.
@@ -2456,6 +2462,13 @@ export async function spawnPaseoAgent(
       if (options.cwd) sdkConfig.cwd = options.cwd;
       if (spawnMode) sdkConfig.modeId = spawnMode;
       if (autoAccept) sdkConfig.featureValues = { auto_accept: true };
+      // Sanitize child env for workers: strip FORGEJO_TOKEN so they
+      // interact exclusively via MCP tools (#1296).
+      if (isWorker && hasForgeToken) {
+        sdkConfig.env = Object.fromEntries(
+          Object.entries(process.env).filter(([k]) => k !== "FORGEJO_TOKEN")
+        );
+      }
       createPayload.config = sdkConfig;
       if (options.workspaceId) {
         createPayload.workspaceId = options.workspaceId;
@@ -2512,9 +2525,19 @@ export async function spawnPaseoAgent(
     }
     args.push("--json", options.prompt);
 
+    // Sanitize child env for workers: strip FORGEJO_TOKEN so they
+    // interact exclusively via MCP tools (#1296).
+    const spawnEnv =
+      isWorker && hasForgeToken
+        ? Object.fromEntries(
+            Object.entries(process.env).filter(([k]) => k !== "FORGEJO_TOKEN")
+          )
+        : undefined;
+
     const { stdout } = await execFileAsync("paseo", args, {
       timeout: 15000,
       encoding: "utf-8",
+      env: spawnEnv,
     });
 
     let agentId: string | undefined;

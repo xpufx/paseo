@@ -7,6 +7,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { McpCompositeRouter } from "./router.js";
 import { McpServerConfigSchema } from "../shared/schemas.js";
+import { ToolRegistry } from "./tools.js";
 import type {
   McpGatewayServerOptions,
   McpGatewayMetrics,
@@ -14,15 +15,17 @@ import type {
 
 export class McpControlServer {
   private router: McpCompositeRouter;
+  private toolRegistry: ToolRegistry;
   private server?: http.Server;
   private activeTransports = new Map<string, SSEServerTransport>();
   private options: Required<McpGatewayServerOptions>;
 
   constructor(
     router?: McpCompositeRouter,
-    options?: McpGatewayServerOptions
+    options?: McpGatewayServerOptions & { toolRegistry?: ToolRegistry }
   ) {
     this.router = router || new McpCompositeRouter();
+    this.toolRegistry = options?.toolRegistry || new ToolRegistry();
     this.options = {
       port: options?.port ?? 37374,
       host: options?.host ?? "127.0.0.1",
@@ -34,6 +37,20 @@ export class McpControlServer {
 
   getRouter(): McpCompositeRouter {
     return this.router;
+  }
+
+  getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
+  }
+
+  /** Returns the MCP-compatible tool definitions from the typed tool registry. */
+  async getTypedTools(): Promise<any[]> {
+    const tools = this.toolRegistry.getTools();
+    return tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema,
+    }));
   }
 
   getMetrics(): McpGatewayMetrics {
@@ -298,6 +315,62 @@ export class McpControlServer {
     if (method === "GET" && pathname === "/api/metrics") {
       const metrics = this.getMetrics();
       this.sendJson(res, 200, { metrics });
+      return;
+    }
+
+    // GET /api/typed-tools – list the typed ticket & fleet tool definitions
+    if (method === "GET" && pathname === "/api/typed-tools") {
+      const tools = await this.getTypedTools();
+      this.sendJson(res, 200, { tools });
+      return;
+    }
+
+    // POST /api/tools/call – dispatch a typed tool call with session gating
+    if (method === "POST" && pathname === "/api/tools/call") {
+      const bodyText = await this.readRequestBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        this.sendJson(res, 400, { error: "Malformed JSON body" });
+        return;
+      }
+
+      const name = typeof (parsed as any)?.name === "string" ? (parsed as any).name : undefined;
+      const args = typeof (parsed as any)?.args === "object" && (parsed as any).args !== null ? (parsed as any).args : {};
+      const sessionId = typeof (parsed as any)?.sessionId === "string" ? (parsed as any).sessionId : undefined;
+
+      if (!name) {
+        this.sendJson(res, 400, { error: "Tool name is required" });
+        return;
+      }
+
+      const result = await this.toolRegistry.callTool(name, args, sessionId);
+      this.sendJson(res, result.ok ? 200 : 400, result);
+      return;
+    }
+
+    // POST /api/sessions/register – register an agent session
+    if (method === "POST" && pathname === "/api/sessions/register") {
+      const bodyText = await this.readRequestBody(req);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(bodyText);
+      } catch {
+        this.sendJson(res, 400, { error: "Malformed JSON body" });
+        return;
+      }
+
+      const sessionId = typeof (parsed as any)?.sessionId === "string" ? (parsed as any).sessionId : undefined;
+      const agentId = typeof (parsed as any)?.agentId === "string" ? (parsed as any).agentId : undefined;
+
+      if (!sessionId || !agentId) {
+        this.sendJson(res, 400, { error: "sessionId and agentId are required" });
+        return;
+      }
+
+      this.toolRegistry.registerSession(sessionId, agentId);
+      this.sendJson(res, 200, { ok: true, sessionId, agentId });
       return;
     }
 
