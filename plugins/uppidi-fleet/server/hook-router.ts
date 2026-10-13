@@ -6296,10 +6296,15 @@ export class HookRouter {
       const cliMsg =
         attachments.length > 0 ? inlineFleetEnvelopeAttachments(extracted.text, attachments) : msg;
       args.push(targetAgentId, cliMsg);
-      await execFileAsync("paseo", args, { timeout: options?.noWait ? 5000 : 15000 });
+      await execFileAsync("paseo", args, { timeout: 30000 });
       return true;
     } catch (err) {
-      this.log(`[error] CLI send failed for ${targetAgentId}: ${err instanceof Error ? err.message : String(err)}`);
+      const details = [
+        err instanceof Error ? err.message : String(err),
+        (err as any)?.code ? `code=${(err as any).code}` : '',
+        (err as any)?.stderr ? `stderr=${String((err as any).stderr).trim()}` : '',
+      ].filter(Boolean).join(' | ');
+      this.log(`[error] CLI send failed for ${targetAgentId}: ${details}`);
       return false;
     }
   }
