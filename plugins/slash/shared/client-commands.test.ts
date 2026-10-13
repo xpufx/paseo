@@ -108,8 +108,8 @@ describe("registerSlashCommands rpc wiring", () => {
     dispose();
   });
 
-  it("retains agent.send() for send-verb templated prompt macros", async () => {
-    const { client, contributions, sent, timelineAppended, agentRef } = harness();
+  it("routes send-verb commands through runCommandRpc (server delivers via agent.send)", async () => {
+    const { client, rpcCalls, contributions, sent, timelineAppended, agentRef } = harness();
     const dispose = registerSlashCommands(client);
 
     await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
@@ -122,8 +122,18 @@ describe("registerSlashCommands rpc wiring", () => {
       paseo: client.paseo,
     });
 
-    expect(agentRef.send).toHaveBeenCalledWith("Review the current changes: focus on performance");
-    expect(sent).toEqual(["Review the current changes: focus on performance"]);
+    // Client now dispatches through RPC; server handles agent.send()
+    expect(rpcCalls).toContainEqual({
+      contract: runCommandRpc,
+      input: {
+        name: "review",
+        args: "focus on performance",
+        agentId: "agent-1",
+      },
+    });
+    // Client must NOT call agent.send() directly anymore
+    expect(agentRef.send).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(0);
     expect(timelineAppended).toHaveLength(0);
 
     dispose();
@@ -160,7 +170,7 @@ describe("registerSlashCommands rpc wiring", () => {
     dispose();
   });
 
-  it("falls back to runCommandRpc when client-side agent.send() fails on mobile", async () => {
+  it("dispatches send-verb through RPC even when agent.send() is unavailable", async () => {
     const { client, rpcCalls, contributions, sent, agentRef } = harness();
     const showMock = vi.fn();
     const errorMock = vi.fn();
@@ -174,10 +184,8 @@ describe("registerSlashCommands rpc wiring", () => {
       useToast: () => ({ show: showMock, error: errorMock }),
     });
 
-    // Make agent.send() reject on mobile
-    agentRef.send = vi.fn(async (_message: string) => {
-      throw new Error("Mobile delivery failed: bridge error");
-    });
+    // Stub agent.send so it never gets called, simulating an environment without it
+    agentRef.send = vi.fn();
 
     const dispose = registerSlashCommands(client);
     await vi.waitFor(() => expect(contributions.length).toBe(SEED_COMMANDS.length));
@@ -190,7 +198,7 @@ describe("registerSlashCommands rpc wiring", () => {
       paseo: client.paseo,
     });
 
-    // Client-side direct send failed, but RPC fallback was called with agentId
+    // Send-verb always goes through RPC; server handles delivery
     expect(rpcCalls).toContainEqual({
       contract: runCommandRpc,
       input: {
@@ -199,11 +207,13 @@ describe("registerSlashCommands rpc wiring", () => {
         agentId: "agent-1",
       },
     });
+    expect(agentRef.send).not.toHaveBeenCalled();
+    expect(sent).toHaveLength(0);
 
     dispose();
   });
 
-  it("logs error and shows toast when both client agent.send() and server runCommandRpc fail", async () => {
+  it("shows toast when runCommandRpc fails for send-verb command", async () => {
     const { client, contributions, agentRef } = harness();
     const showMock = vi.fn();
     const errorMock = vi.fn();
@@ -216,11 +226,7 @@ describe("registerSlashCommands rpc wiring", () => {
       useToast: () => ({ show: showMock, error: errorMock }),
     });
 
-    agentRef.send = vi.fn(async () => {
-      throw new Error("Mobile delivery failed: bridge error");
-    });
-
-    // Force runCommandRpc to fail too
+    // Force runCommandRpc to fail
     (client.rpc as any).mockImplementation(async (contract: unknown) => {
       if (contract === listCommandsRpc) return { commands: SEED_COMMANDS };
       if (contract === slashSettingsContract.get) return { prefix: "slash-" };
@@ -240,6 +246,7 @@ describe("registerSlashCommands rpc wiring", () => {
     });
 
     expect(errorMock).toHaveBeenCalledWith("/review send failed: Server RPC offline");
+    expect(agentRef.send).not.toHaveBeenCalled();
 
     dispose();
   });
