@@ -1545,10 +1545,15 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
       { noWait: true, attachments: [fleetEnvelopeAttachment(routerEnvelope({ repo: "other", kind: "handoff" }))] },
     );
     assert.equal(payloads[0].text, "alert body");
+    // Multiple envelopes are consolidated into a single outer envelope (#1326)
     assert.deepEqual(
       payloads[0].options.attachments.map((a: any) => a.contextKind),
-      ["fleet_envelope", "fleet_envelope"],
+      ["fleet_envelope"],
     );
+    const consolidated = JSON.parse(payloads[0].options.attachments[0].text);
+    assert.equal(consolidated.fleet.kind, "batch");
+    assert.equal(consolidated.fleet.origin, "router");
+    assert.equal(consolidated.fleet.sender, "forgejo-hook");
   });
 
   it("deliverMessage CLI fallback re-inlines the envelope for the model (#1003)", async () => {
@@ -1571,6 +1576,79 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
     const sent = calls[0][calls[0].length - 1];
     assert.ok(sent.startsWith('<!-- {"fleet"'));
     assert.ok(sent.endsWith("\nbody"));
+  });
+
+  it("deliverMessage consolidates multiple envelopes into a single outer envelope for batch deliveries (#1326)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const payloads: Array<{ text: string; options: any }> = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          send: async (text: string, options: any) => {
+            payloads.push({ text, options });
+          },
+        }),
+      },
+    };
+
+    // Simulate a batch message with N constituent fleet envelopes.
+    const batchMsg =
+      "[forgejo-hook] Batch notification (3 events):\n\n" +
+      `### Event 1\n${withFleetEnvelope(routerEnvelope({ repo: "xpufx-org/paseo", kind: "webhook", ref: 42 }), "PR closed")}\n\n---\n\n` +
+      `### Event 2\n${withFleetEnvelope(routerEnvelope({ repo: "xpufx-org/aur-automation", kind: "webhook", ref: 99 }), "Action failure")}\n\n---\n\n` +
+      `### Event 3\n${withFleetEnvelope(routerEnvelope({ repo: "xpufx-org/platform", kind: "webhook", ref: 7 }), "Issue labeled")}`;
+
+    await router.deliverMessage("agent-batch", batchMsg, { noWait: true, steer: false });
+
+    // Exactly one envelope attachment — consolidated from the three constituents.
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].options.attachments?.length, 1);
+    assert.equal(payloads[0].options.attachments![0].contextKind, "fleet_envelope");
+    const env = JSON.parse(payloads[0].options.attachments![0].text);
+    assert.equal(env.fleet.kind, "batch");
+    assert.equal(env.fleet.origin, "router");
+    assert.equal(env.fleet.sender, "forgejo-hook");
+    // Repo is taken from the first valid envelope.
+    assert.equal(env.fleet.repo, "xpufx-org/paseo");
+    assert.equal(env.fleet.ref, null);
+    // The body text must NOT contain any stacked <!-- {"fleet" --> comments.
+    assert.equal(batchMsg.includes("<!-- {"), true); // original has them
+    assert.equal(payloads[0].text.includes("<!-- {"), false); // stripped by extract
+    // Verify the SDK path strips all envelope comments from the body.
+    assert.ok(payloads[0].text.includes("Batch notification (3 events)"));
+    assert.ok(payloads[0].text.includes("Event 1"));
+    assert.ok(payloads[0].text.includes("Event 2"));
+    assert.ok(payloads[0].text.includes("Event 3"));
+  });
+
+  it("CLI fallback inlines a single consolidated envelope instead of stacking (#1326)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    (router as any).activePaseo = null;
+    const calls: string[][] = [];
+    setExecFileAsyncForTest(async (_cmd: string, args: readonly string[]) => {
+      calls.push([...args]);
+      return { stdout: "" };
+    });
+    try {
+      const batchMsg =
+        "[forgejo-hook] Batch notification (2 events):\n\n" +
+        `### Event 1\n${withFleetEnvelope(routerEnvelope({ repo: "r/a", kind: "webhook", ref: 1 }), "msg 1")}\n\n---\n\n` +
+        `### Event 2\n${withFleetEnvelope(routerEnvelope({ repo: "r/b", kind: "webhook", ref: 2 }), "msg 2")}`;
+      await router.deliverMessage("agent-cli-batch", batchMsg, { noWait: true });
+    } finally {
+      setExecFileAsyncForTest(null);
+    }
+    const sent = calls[0][calls[0].length - 1];
+    // Count how many envelope comments appear at the top of the prompt.
+    const envelopeMatches = sent.match(/<!-- \{"fleet":.*?\} -->/g);
+    assert.ok(envelopeMatches, "must have at least one envelope comment");
+    assert.equal(envelopeMatches!.length, 1, "must have exactly ONE envelope comment, not stacked");
+    const env = JSON.parse(envelopeMatches![0].slice(5, -4));
+    assert.equal(env.fleet.kind, "batch");
+    // Body still contains the event sections but no envelope comments.
+    assert.ok(sent.includes("Batch notification (2 events)"));
+    assert.ok(sent.includes("Event 1"));
+    assert.ok(sent.includes("Event 2"));
   });
 
   it("routes frontdesk events to frontdesk agent", async () => {

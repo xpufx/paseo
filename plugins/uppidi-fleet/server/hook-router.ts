@@ -1345,9 +1345,43 @@ export function extractFleetEnvelopeAttachments(message: string): {
   return { text, attachments };
 }
 
-/** Re-inline attachments for the CLI fallback, which has no attachment channel. */
+/**
+ * Consolidate multiple fleet-envelope attachments into a single outer envelope.
+ * When a batch delivery carries N constituent envelopes, this produces one
+ * `kind: "batch"` envelope so the prompt carries exactly one provenance signal
+ * per fleet design (#283 / #1326).
+ */
+function consolidateFleetEnvelopeAttachments(
+  attachments: readonly FleetEnvelopeAttachment[],
+): FleetEnvelopeAttachment {
+  // Pick repo from the first valid envelope; fall back to the fleet repo.
+  let repo = FLEET_REPO;
+  for (const att of attachments) {
+    try {
+      const fleet = JSON.parse(att.text)?.fleet;
+      if (fleet?.repo) { repo = fleet.repo; break; }
+    } catch {}
+  }
+
+  const fields: FleetEnvelopeFields = {
+    origin: "router",
+    sender: ROUTER_SENDER,
+    repo,
+    kind: "batch",
+    ref: null,
+  };
+  return fleetEnvelopeAttachment(fields);
+}
+
+/** Re-inline attachments for the CLI fallback, which has no attachment channel.
+ * When multiple attachments are present (e.g. a batch), they are consolidated
+ * into a single outer envelope instead of being stacked (#1326). */
 function inlineFleetEnvelopeAttachments(text: string, attachments: readonly FleetEnvelopeAttachment[]): string {
-  const comments = attachments.map((a) => `<!-- ${a.text} -->`).join("\n");
+  let effective = attachments;
+  if (attachments.length > 1) {
+    effective = [consolidateFleetEnvelopeAttachments(attachments)];
+  }
+  const comments = effective.map((a) => `<!-- ${a.text} -->`).join("\n");
   return text.length > 0 ? `${comments}\n${text}` : comments;
 }
 
@@ -5997,7 +6031,13 @@ export class HookRouter {
     // Fleet provenance rides on `attachments`; extract any legacy in-band
     // comment so the SDK send carries the body as `text` (#1003).
     const extracted = extractFleetEnvelopeAttachments(msg);
-    const attachments = [...(options?.attachments ?? []), ...extracted.attachments];
+    let attachments = [...(options?.attachments ?? []), ...extracted.attachments];
+    // When multiple envelopes are present (e.g. a batch delivery), consolidate
+    // them into a single outer envelope so the prompt carries exactly one
+    // provenance signal per fleet design (#283 / #1326).
+    if (attachments.length > 1) {
+      attachments = [consolidateFleetEnvelopeAttachments(attachments)];
+    }
     if (paseo?.agents?.ref) {
       try {
         const agentRef = paseo.agents.ref(targetAgentId);
