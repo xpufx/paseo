@@ -1658,10 +1658,11 @@ export function HostButton({
 }: HostButtonProps) {
   const { colors, alpha: alphaColor } = useHostTheme();
 
-  const py = size === "sm" ? 6 : size === "lg" ? 12 : 10;
-  const px = size === "sm" ? 10 : size === "lg" ? 18 : 14;
-  const fontSize = size === "sm" ? 12 : size === "lg" ? 15 : 13;
-  const iconSize = size === "sm" ? 12 : size === "lg" ? 16 : 14;
+  const py = size === "sm" ? 3 : size === "lg" ? 10 : 7;
+  const px = size === "sm" ? 8 : size === "lg" ? 16 : 12;
+  const fontSize = size === "sm" ? 11 : size === "lg" ? 14 : 13;
+  const iconSize = size === "sm" ? 11 : size === "lg" ? 15 : 13;
+  const borderRadius = size === "sm" ? 6 : size === "lg" ? 10 : 8;
 
   let bg = "transparent";
   let border = "transparent";
@@ -1718,7 +1719,7 @@ export function HostButton({
           backgroundColor: pressed && !disabled ? alphaColor(bg, 0.8) : bg,
           borderColor: border,
           borderWidth: border !== "transparent" ? 1 : 0,
-          borderRadius: 8,
+          borderRadius,
           paddingVertical: py,
           paddingHorizontal: px,
           opacity: disabled ? 0.45 : 1,
