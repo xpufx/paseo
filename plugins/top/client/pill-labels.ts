@@ -40,7 +40,8 @@ export type PillItemType =
   | "changes"
   | "tokens"
   | "tools"
-  | "turns";
+  | "turns"
+  | "velocity";
 
 export interface SegmentSnapshot {
   data?: SystemResources;
@@ -79,6 +80,9 @@ export interface TokenMetrics {
   contextMaxTokens?: number;
   costUsd?: number;
 }
+
+/** Context pressure level classification. */
+export type ContextPressureLevel = "normal" | "warning" | "high";
 
 export function formatCompactTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0";
@@ -441,6 +445,70 @@ export function describeSegment(
         tone: "foreground",
       };
     }
+    case "velocity": {
+      // Pull velocity from liveUsage (real-time) or lastTurn (post-turn).
+      const tps =
+        data?.tokensPerSecond ?? data?.lastTurn?.tokensPerSecond;
+      const ctxPct =
+        data?.contextUtilizationPct ?? data?.lastTurn?.contextUtilizationPct;
+      const ctxLevel =
+        data?.contextPressureLevel ?? data?.lastTurn?.contextPressureLevel;
+
+      if (tps == null || !Number.isFinite(tps)) {
+        return {
+          icon,
+          iconTone: "none",
+          prefix,
+          prefixTone: "muted",
+          text: "--",
+          tone: "muted",
+        };
+      }
+
+      // Cache hit rate from liveUsage.
+      const live = data?.liveUsage;
+      let cachePct: number | undefined;
+      if (
+        live &&
+        live.inputTokens != null &&
+        live.cachedInputTokens != null &&
+        live.inputTokens > 0
+      ) {
+        cachePct = Math.round((live.cachedInputTokens / live.inputTokens) * 100);
+      }
+
+      // Build label: ⚡ N tok/s · M% cache
+      let text = `${Math.round(tps)} tok/s`;
+      let tone: SegmentTone = "success";
+      if (cachePct != null) {
+        text += ` · ${cachePct}% cache`;
+      }
+
+      // Context pressure badge as trailing.
+      let trailing: string | undefined;
+      let trailingTone: SegmentTone = "foreground";
+      if (ctxLevel === "high") {
+        trailing = "⚠️ high ctx";
+        trailingTone = "danger";
+        tone = "danger";
+      } else if (ctxLevel === "warning") {
+        trailing = "⚠️ warn ctx";
+        trailingTone = "warning";
+        tone = "warning";
+      } else if (ctxPct != null) {
+        trailing = `${ctxPct}% ctx`;
+        trailingTone = "foreground";
+      }
+
+      return {
+        icon,
+        iconTone: "accent",
+        text,
+        tone,
+        trailing,
+        trailingTone,
+      };
+    }
     case "cpu_ram":
     default: {
       const ram =
@@ -503,6 +571,9 @@ export function enabledItemsForSettings(settings: TopSettings): PillItemType[] {
   }
   if (settings.metricSurfaces && isPillEnabled(settings.metricSurfaces.turns)) {
     items.push("turns");
+  }
+  if (settings.metricSurfaces && isPillEnabled(settings.metricSurfaces.velocity)) {
+    items.push("velocity");
   }
   return items;
 }

@@ -29,6 +29,91 @@ import {
 } from "../shared/resources";
 import { PLUGIN_VERSION } from "../shared/version";
 
+// --- Velocity & Context Pressure helpers -------------------------------------
+
+/** Thresholds for context pressure levels. */
+const CONTEXT_NORMAL_UPPER = 60; // <60% → normal
+const CONTEXT_WARNING_UPPER = 75; // 60-74% → warning, >=75% → high
+
+/**
+ * Compute live generation velocity (tokens per second).
+ *
+ * Formula: (outputTokens + reasoningTokens) / (durationMs / 1000)
+ *
+ * Returns 0 for:
+ * - zero or missing duration (< 50 ms threshold to avoid skewed averages)
+ * - missing output tokens
+ * - interrupted/canceled turns (prevents skewed averages on partial generations)
+ */
+export function computeTokensPerSecond(
+  outputTokens: number | undefined,
+  durationMs: number | undefined,
+  outcomeKind: string,
+): number | undefined {
+  if (outputTokens == null || !Number.isFinite(outputTokens)) return undefined;
+  if (outputTokens <= 0) return 0;
+
+  const dur = durationMs ?? undefined;
+  if (dur == null || !Number.isFinite(dur) || dur < 50) return 0;
+
+  // Interrupted/canceled turns with partial data yield 0 TPS.
+  if (outcomeKind === "canceled" || outcomeKind === "failed") return 0;
+
+  const durationSec = dur / 1000;
+  const rate = outputTokens / durationSec;
+  if (!Number.isFinite(rate) || rate <= 0) return 0;
+  return Math.round(rate * 100) / 100; // round to 2dp
+}
+
+/** Context pressure level based on utilization percentage. */
+type ContextPressureLevel = "normal" | "warning" | "high";
+
+/**
+ * Classify context pressure into discrete levels:
+ * - "normal": utilization < 60%
+ * - "warning": 60–74%
+ * - "high": >= 75% (amnesia risk)
+ *
+ * Returns undefined when context window info is absent.
+ */
+export function classifyContextPressure(
+  contextUsedTokens: number | undefined,
+  contextMaxTokens: number | undefined,
+): { level: ContextPressureLevel; pct: number } | undefined {
+  if (
+    contextUsedTokens == null ||
+    contextMaxTokens == null ||
+    contextMaxTokens <= 0
+  ) {
+    return undefined;
+  }
+
+  const pct = Math.min(100, Math.round((contextUsedTokens / contextMaxTokens) * 100));
+
+  let level: ContextPressureLevel;
+  if (pct >= CONTEXT_WARNING_UPPER) {
+    level = "high";
+  } else if (pct >= CONTEXT_NORMAL_UPPER) {
+    level = "warning";
+  } else {
+    level = "normal";
+  }
+
+  return { level, pct };
+}
+
+/** Spread context pressure fields into the telemetry object. */
+function computeContextPressure(
+  contextUsedTokens: number | undefined,
+  contextMaxTokens: number | undefined,
+): Pick<TopTimelineTelemetryData, "contextPressureLevel" | "contextUtilizationPct"> {
+  const result = classifyContextPressure(contextUsedTokens, contextMaxTokens);
+  return {
+    contextPressureLevel: result?.level,
+    contextUtilizationPct: result?.pct,
+  };
+}
+
 export const log = createPluginLogger("top", { version: PLUGIN_VERSION });
 
 log.info("Initialized host system resources monitor", { version: PLUGIN_VERSION });
@@ -437,6 +522,10 @@ export async function handleGetSystemResources(input?: {
       .filter((state) => effectiveEnabled.has(state.id)),
     lastTurn: lastTurnTelemetry,
     liveUsage: lastLiveUsage,
+    // Velocity data from the most recent turn telemetry.
+    tokensPerSecond: lastTurnTelemetry?.tokensPerSecond,
+    contextPressureLevel: lastTurnTelemetry?.contextPressureLevel,
+    contextUtilizationPct: lastTurnTelemetry?.contextUtilizationPct,
   };
 }
 
@@ -778,6 +867,15 @@ export async function collectTurnTelemetry(
     contextUsedTokens,
     contextMaxTokens,
     costUsd,
+    // Live generation velocity: (output + reasoning) / durationSec.
+    // Guard against zero-duration, missing fields, and interrupted turns.
+    tokensPerSecond: computeTokensPerSecond(
+      outputTokens,
+      durationMs,
+      outcome.kind,
+    ),
+    // Context pressure from the most recent turn's utilization.
+    ...computeContextPressure(contextUsedTokens, contextMaxTokens),
   };
   lastTurnTelemetry = data;
   return data;

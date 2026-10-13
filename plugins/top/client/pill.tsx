@@ -189,6 +189,7 @@ export function getItemTab(item: PillItemType): "system" | "context" {
     case "tokens":
     case "tools":
     case "turns":
+    case "velocity":
       return "system";
     case "branch":
     case "worktree":
@@ -811,6 +812,9 @@ function PillViewBody({ isOpen, open, workspaceId, agentId }: PillBodyProps) {
   }
   if (settings.metricSurfaces && isPillEnabled(settings.metricSurfaces.turns)) {
     items.push("turns");
+  }
+  if (settings.metricSurfaces && isPillEnabled(settings.metricSurfaces.velocity)) {
+    items.push("velocity");
   }
 
   // Legacy render fallback only. On the supported 0.8 host the pill is
@@ -2126,6 +2130,16 @@ export function contributeClient(client: ComposerPillRegistrar | PluginClientCon
           item: "turns",
           icon: "RotateCw",
           title: "Turn Count",
+          modalTitle: "Host System Resources",
+          defaultTab: "system",
+        });
+      }
+      if (settings.metricSurfaces && isPillEnabled(settings.metricSurfaces.velocity)) {
+        desiredPills.push({
+          id: "paseo-top-velocity",
+          item: "velocity",
+          icon: "Zap",
+          title: "Generation Velocity",
           modalTitle: "Host System Resources",
           defaultTab: "system",
         });

@@ -163,6 +163,19 @@ export function TopTimelineTelemetryCard({
     [data.outputTokens, data.durationMs],
   );
 
+  // Velocity badge from computed tokensPerSecond.
+  const velocityBadge = useMemo(() => {
+    if (data.tokensPerSecond == null || !Number.isFinite(data.tokensPerSecond)) return null;
+    const tps = Math.round(data.tokensPerSecond);
+    let label = `⚡ ${tps} tok/s`;
+    if (data.contextPressureLevel === "high") {
+      label += " · ⚠️ high ctx";
+    } else if (data.contextPressureLevel === "warning") {
+      label += " · ⚠️ warn ctx";
+    }
+    return label;
+  }, [data.tokensPerSecond, data.contextPressureLevel]);
+
   return (
     <HostThemeProvider theme={theme}>
       <HostLayoutProvider layout={layout}>
@@ -188,6 +201,19 @@ export function TopTimelineTelemetryCard({
                 <HostBadge
                   label={turnThroughput}
                   variant="neutral"
+                  style={{ flexShrink: 0 }}
+                />
+              ) : null}
+              {show("velocity") && velocityBadge ? (
+                <HostBadge
+                  label={velocityBadge}
+                  variant={
+                    data.contextPressureLevel === "high"
+                      ? "danger"
+                      : data.contextPressureLevel === "warning"
+                        ? "warning"
+                        : "neutral"
+                  }
                   style={{ flexShrink: 0 }}
                 />
               ) : null}
@@ -351,6 +377,25 @@ export function TopTimelineTelemetryCard({
                       : contextUsedTokens != null
                         ? `${formatCompactTokens(contextUsedTokens)} ctx`
                         : "tok --"}
+                </HostVital>
+              )}
+
+              {show("velocity") && (
+                <HostVital
+                  icon="Zap"
+                  color={
+                    data.tokensPerSecond != null && Number.isFinite(data.tokensPerSecond)
+                      ? data.contextPressureLevel === "high"
+                        ? theme.colors.statusDanger
+                        : data.contextPressureLevel === "warning"
+                          ? theme.colors.statusWarning
+                          : theme.colors.foreground
+                      : theme.colors.foregroundMuted
+                  }
+                >
+                  {data.tokensPerSecond != null && Number.isFinite(data.tokensPerSecond)
+                    ? `${Math.round(data.tokensPerSecond)} tok/s`
+                    : "vel --"}
                 </HostVital>
               )}
 

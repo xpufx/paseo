@@ -145,6 +145,12 @@ export const topTimelineTelemetrySchema = z.object({
   contextUsedTokens: z.number().optional(),
   contextMaxTokens: z.number().optional(),
   costUsd: z.number().optional(),
+  /** Tokens per second of generation (output + reasoning / durationSec). Zero for zero-duration or interrupted turns. */
+  tokensPerSecond: z.number().optional(),
+  /** Context pressure level: "normal" (<60%), "warning" (60-74%), "high" (>=75%). */
+  contextPressureLevel: z.enum(["normal", "warning", "high"]).optional(),
+  /** Context utilization percentage (0-100). */
+  contextUtilizationPct: z.number().optional(),
 });
 export type TopTimelineTelemetryData = z.infer<typeof topTimelineTelemetrySchema>;
 
@@ -180,6 +186,12 @@ export const getSystemResourcesRpc = defineContract({
     customPills: z.array(CustomPillStateSchema).optional(),
     lastTurn: topTimelineTelemetrySchema.nullable().optional(),
     liveUsage: liveUsageSchema.nullable().optional(),
+    /** Tokens per second of generation from the most recent turn. */
+    tokensPerSecond: z.number().optional(),
+    /** Context pressure level from the most recent turn. */
+    contextPressureLevel: z.enum(["normal", "warning", "high"]).optional(),
+    /** Context utilization percentage from the most recent turn. */
+    contextUtilizationPct: z.number().optional(),
   }),
 });
 
@@ -207,6 +219,7 @@ export const MetricIdSchema = z.enum([
   "tokens",
   "tools",
   "turns",
+  "velocity",
 ]);
 export type MetricId = z.infer<typeof MetricIdSchema>;
 
@@ -226,6 +239,7 @@ export const METRIC_IDS: readonly MetricId[] = [
   "tokens",
   "tools",
   "turns",
+  "velocity",
 ];
 
 export const CORE_TIMELINE_METRICS: readonly MetricId[] = [
@@ -236,6 +250,7 @@ export const CORE_TIMELINE_METRICS: readonly MetricId[] = [
   "agent_id",
   "changes",
   "tokens",
+  "velocity",
 ];
 
 export const DEFAULT_METRIC_SURFACES: Record<MetricId, SurfaceTarget> = {
@@ -254,6 +269,7 @@ export const DEFAULT_METRIC_SURFACES: Record<MetricId, SurfaceTarget> = {
   tokens: "timeline",
   tools: "timeline",
   turns: "none",
+  velocity: "both",
 };
 
 export interface MetricDefinition {
@@ -265,6 +281,12 @@ export interface MetricDefinition {
   core?: boolean;
   pillOnly?: boolean;
 }
+
+/** Context pressure thresholds matching the velocity pill's bloat logic. */
+export const CONTEXT_PRESSURE_THRESHOLDS: Record<string, number> = {
+  normalUpper: 60,
+  warningUpper: 75,
+};
 
 export const METRIC_DEFINITIONS: MetricDefinition[] = [
   {
@@ -368,6 +390,14 @@ export const METRIC_DEFINITIONS: MetricDefinition[] = [
     description: "Lifetime completed turns for the active agent",
     icon: "Repeat",
     shortLabel: "turns",
+  },
+  {
+    id: "velocity",
+    title: "Generation Velocity",
+    description: "Live tokens-per-second tachometer with cache hit rate and context pressure",
+    icon: "Zap",
+    shortLabel: "tps",
+    core: true,
   },
 ];
 
@@ -484,6 +514,7 @@ export const TIMELINE_RENDERED_METRICS: readonly MetricId[] = [
   "tokens",
   "tools",
   "turns",
+  "velocity",
 ];
 
 export interface LegacyFlagView {
@@ -716,6 +747,7 @@ export function migrateLegacyMetricSurfaces(raw: Record<string, unknown>): Recor
     tokens: false,
     tools: false,
     turns: false,
+    velocity: false,
   };
 
   const result: Record<MetricId, SurfaceTarget> = { ...DEFAULT_METRIC_SURFACES };

@@ -15,6 +15,7 @@ import {
   PILL_RENDERED_METRICS,
   MULTIPLE_MODE_RENDERED_METRICS,
   TIMELINE_RENDERED_METRICS,
+  CORE_TIMELINE_METRICS,
   DEFAULT_METRIC_SURFACES,
   isMcpSurfaceEnabled,
   customPillEffectiveEnabled,
@@ -22,7 +23,7 @@ import {
   shouldAppendTimelineForTurn,
   type McpStatusSnapshot,
 } from "../shared/resources";
-import { collectTurnTelemetry, countTurns, customPillPoller, isInterruptEcho, isStaleTurnEnd, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline } from "./resources";
+import { collectTurnTelemetry, countTurns, customPillPoller, isInterruptEcho, isStaleTurnEnd, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline, computeTokensPerSecond, classifyContextPressure } from "./resources";
 
 after(() => {
   customPillPoller.stop();
@@ -671,4 +672,177 @@ test("interrupt echo is dropped by matching the cancel's user_message count", ()
     }),
     false,
   );
+});
+
+// --- Velocity & Context Pressure tests ---------------------------------------
+
+test("computeTokensPerSecond returns correct rate for normal turn", () => {
+  // 100 output tokens over 2 seconds = 50 tok/s
+  assert.equal(computeTokensPerSecond(100, 2000, "completed"), 50);
+  // 42 tokens over 500ms = 84 tok/s
+  assert.equal(computeTokensPerSecond(42, 500, "completed"), 84);
+  // Sub-second with fractional: 3 tokens over 150ms = 20 tok/s
+  assert.equal(computeTokensPerSecond(3, 150, "completed"), 20);
+});
+
+test("computeTokensPerSecond handles zero duration", () => {
+  // Zero duration yields 0 (not division by zero)
+  assert.equal(computeTokensPerSecond(100, 0, "completed"), 0);
+  // Missing duration yields 0 (guarded against skewed averages)
+  assert.equal(computeTokensPerSecond(100, undefined, "completed"), 0);
+});
+
+test("computeTokensPerSecond handles sub-threshold duration (<50ms)", () => {
+  // Very short durations yield 0 to avoid skewed averages
+  assert.equal(computeTokensPerSecond(100, 49, "completed"), 0);
+  assert.equal(computeTokensPerSecond(100, 50, "completed"), 2000);
+});
+
+test("computeTokensPerSecond returns 0 for interrupted turns", () => {
+  assert.equal(computeTokensPerSecond(100, 2000, "canceled"), 0);
+  assert.equal(computeTokensPerSecond(100, 2000, "failed"), 0);
+});
+
+test("computeTokensPerSecond returns undefined for missing output tokens", () => {
+  assert.equal(computeTokensPerSecond(undefined, 2000, "completed"), undefined);
+  assert.equal(computeTokensPerSecond(0, 2000, "completed"), 0);
+  // Negative tokens are finite but <= 0, so yields 0
+  assert.equal(computeTokensPerSecond(-1, 2000, "completed"), 0);
+  assert.equal(computeTokensPerSecond(NaN, 2000, "completed"), undefined);
+});
+
+test("classifyContextPressure returns normal for <60% utilization", () => {
+  assert.deepEqual(classifyContextPressure(59000, 100000), { level: "normal", pct: 59 });
+  assert.deepEqual(classifyContextPressure(0, 100000), { level: "normal", pct: 0 });
+  assert.deepEqual(classifyContextPressure(5000, 100000), { level: "normal", pct: 5 });
+});
+
+test("classifyContextPressure returns warning for 60-74% utilization", () => {
+  assert.deepEqual(classifyContextPressure(60000, 100000), { level: "warning", pct: 60 });
+  assert.deepEqual(classifyContextPressure(65000, 100000), { level: "warning", pct: 65 });
+  assert.deepEqual(classifyContextPressure(74000, 100000), { level: "warning", pct: 74 });
+});
+
+test("classifyContextPressure returns high for >=75% utilization", () => {
+  assert.deepEqual(classifyContextPressure(75000, 100000), { level: "high", pct: 75 });
+  assert.deepEqual(classifyContextPressure(90000, 100000), { level: "high", pct: 90 });
+  assert.deepEqual(classifyContextPressure(100000, 100000), { level: "high", pct: 100 });
+});
+
+test("classifyContextPressure returns undefined for missing context data", () => {
+  assert.equal(classifyContextPressure(undefined, 100000), undefined);
+  assert.equal(classifyContextPressure(50000, undefined), undefined);
+  assert.equal(classifyContextPressure(undefined, undefined), undefined);
+  assert.equal(classifyContextPressure(50000, 0), undefined); // max <= 0
+});
+
+test("collectTurnTelemetry includes velocity and context pressure fields", async () => {
+  const telemetry = await collectTurnTelemetry(
+    "turn-vel-1",
+    "agent-test",
+    { kind: "completed" },
+    1000,
+    {
+      timeline: [
+        { type: "user_message", text: "hello" },
+        { type: "usage_updated", usage: { inputTokens: 500, outputTokens: 100 } },
+      ],
+    },
+  );
+
+  assert.ok(telemetry.tokensPerSecond != null, "tokensPerSecond should be defined");
+  assert.ok(telemetry.contextUtilizationPct != null || telemetry.contextPressureLevel != null,
+    "context pressure fields should be present");
+  topTimelineTelemetrySchema.parse(telemetry);
+});
+
+test("collectTurnTelemetry velocity is 0 for canceled turn", async () => {
+  const telemetry = await collectTurnTelemetry(
+    "turn-vel-cancel",
+    "agent-test",
+    { kind: "canceled" },
+    500,
+    {
+      timeline: [
+        { type: "user_message", text: "stop" },
+        { type: "usage_updated", usage: { outputTokens: 50 } },
+      ],
+    },
+  );
+
+  assert.equal(telemetry.tokensPerSecond, 0);
+  topTimelineTelemetrySchema.parse(telemetry);
+});
+
+test("collectTurnTelemetry velocity is 0 for failed turn", async () => {
+  const telemetry = await collectTurnTelemetry(
+    "turn-vel-fail",
+    "agent-test",
+    { kind: "failed", error: { message: "timeout" } },
+    3000,
+    {
+      timeline: [
+        { type: "user_message", text: "do stuff" },
+        { type: "usage_updated", usage: { outputTokens: 200 } },
+      ],
+    },
+  );
+
+  assert.equal(telemetry.tokensPerSecond, 0);
+  topTimelineTelemetrySchema.parse(telemetry);
+});
+
+test("collectTurnTelemetry context pressure is classified correctly", async () => {
+  // Simulate a turn with contextWindowUsedTokens / contextWindowMaxTokens via liveUsage
+  setLastLiveUsage({
+    inputTokens: 50000,
+    cachedInputTokens: 30000,
+    outputTokens: 100,
+    contextWindowUsedTokens: 80000,
+    contextWindowMaxTokens: 100000,
+  });
+
+  const telemetry = await collectTurnTelemetry(
+    "turn-ctx-high",
+    "agent-test",
+    { kind: "completed" },
+    1000,
+  );
+
+  assert.equal(telemetry.contextPressureLevel, "high");
+  assert.equal(telemetry.contextUtilizationPct, 80);
+  topTimelineTelemetrySchema.parse(telemetry);
+
+  setLastLiveUsage(null);
+});
+
+test("velocity metric appears in all required registries", () => {
+  assert.ok(METRIC_IDS.includes("velocity"), "velocity must be in METRIC_IDS");
+  assert.ok(
+    CORE_TIMELINE_METRICS.includes("velocity"),
+    "velocity must be a core timeline metric",
+  );
+  assert.ok(
+    TIMELINE_RENDERED_METRICS.includes("velocity"),
+    "velocity must render in timeline",
+  );
+  assert.ok(
+    PILL_RENDERED_METRICS.includes("velocity"),
+    "velocity must render in pills",
+  );
+  assert.ok(
+    MULTIPLE_MODE_RENDERED_METRICS.includes("velocity"),
+    "velocity must have a dedicated pill in multiple mode",
+  );
+  assert.ok(
+    DEFAULT_METRIC_SURFACES.velocity === "both",
+    "velocity default surface must be 'both'",
+  );
+
+  const def = METRIC_DEFINITIONS.find((d) => d.id === "velocity");
+  assert.ok(def, "velocity must have a metric definition");
+  assert.ok(def.title.length > 0, "velocity definition needs a title");
+  assert.ok(def.description.length > 0, "velocity definition needs a description");
+  assert.ok(def.icon.length > 0, "velocity definition needs an icon");
+  assert.ok(def.shortLabel, "velocity definition needs a shortLabel");
 });
