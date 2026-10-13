@@ -1894,6 +1894,40 @@ export type MergeEventHook = z.infer<typeof MergeEventHookSchema>;
 export const MergeEventHooksSchema = z.record(z.string(), MergeEventHookSchema);
 
 // Uppidi Fleet Plugin Settings Contract (Issue #444)
+/**
+ * Available MCP injection profiles. Each profile names a server config that
+ * will be injected into agent sessions via the `agent.create` lifecycle hook.
+ */
+export const McpInjectionProfileSchema = z.object({
+  /** Unique, human-readable identifier for this profile (e.g. "serena"). */
+  id: z.string(),
+  /** Display name shown in the dropdown. */
+  label: z.string(),
+  /** Server command used by this MCP server, shown as a description hint. */
+  command: z.string(),
+  /** Human-readable description of what this server provides. */
+  description: z.string(),
+  /** stdio command to launch the MCP server. */
+  mcpCommand: z.string(),
+  /** stdio args array for the MCP server. */
+  mcpArgs: z.array(z.string()),
+  /** Whether this server is enabled by default. */
+  enabled: z.boolean().default(true),
+});
+export type McpInjectionProfile = z.infer<typeof McpInjectionProfileSchema>;
+
+/** Built-in Serena profile shipped with the fleet plugin. */
+export const SERENA_MCP_PROFILE: McpInjectionProfile = {
+  id: "serena",
+  label: "Serena",
+  command: "serena start-mcp-server --project-from-cwd --context ide",
+  description:
+    "Serena — code-aware MCP server with symbol search, file editing, and language-server integration",
+  mcpCommand: "serena",
+  mcpArgs: ["start-mcp-server", "--project-from-cwd", "--context", "ide"],
+  enabled: true,
+};
+
 export const uppidiFleetSettingsSchema = z.object({
   hookHost: z.string().default("127.0.0.1"),
   hookPort: z.number().int().min(1).max(65535).default(8099),
@@ -1910,6 +1944,18 @@ export const uppidiFleetSettingsSchema = z.object({
   rotationPolicy: RotationPolicySchema.optional(),
   /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
   mergeEventHooks: MergeEventHooksSchema.default({}),
+  /**
+   * MCP Injection settings (#1020).
+   * Controls which MCP servers are injected into spawned agent sessions.
+   */
+  mcpInjection: z
+    .object({
+      /** Global toggle: when false, no MCP servers are injected regardless of profile selections. */
+      enabled: z.boolean().default(false),
+      /** Map of profile id → enabled state. Profiles not listed use their built-in default. */
+      profiles: z.record(z.string(), z.boolean()).default({}),
+    })
+    .default({ enabled: false, profiles: {} }),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 

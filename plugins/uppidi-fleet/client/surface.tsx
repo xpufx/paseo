@@ -11,6 +11,7 @@ import {
   CardHeader,
   CodeBlock,
   Collapsible,
+  HostToggle,
   CommandBox,
   DataTable,
   EmptyState,
@@ -39,6 +40,8 @@ import { MetricsBar } from "./metrics-bar.js";
 import { fleetRosterContract, type FleetOutput, type UppidiAgentsOutput } from "@xpufx/backend-fleet/shared";
 import {
   uppidiFleetSettingsContract,
+  SERENA_MCP_PROFILE,
+  type McpInjectionProfile,
   uppidiIssuesContract,
   uppidiHookStatusContract,
   uppidiHookQueuesContract,
@@ -137,6 +140,9 @@ function toList<T>(value: T[] | null | undefined): T[] {
 function toRepoList(value: string[] | null | undefined): string[] {
   return Array.isArray(value) ? value.filter((r): r is string => typeof r === "string" && r.length > 0) : [];
 }
+
+/** #1020: MCP injection profiles available in the settings surface. */
+const mcpProfiles: McpInjectionProfile[] = [SERENA_MCP_PROFILE];
 
 const issuePresetFilters: Array<{ id: IssuePreset; label: string }> = [
   { id: "all", label: "All work" },
@@ -1005,6 +1011,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const [runnerSortDir, setRunnerSortDir] = useState<SortDirection>("asc");
 
   // Section 5: Fleet Capability & Benchmark Matrix sort & filter state
+  const [mcpInjectionExpanded, setMcpInjectionExpanded] = useState(false);
   const [metricsExpanded, setMetricsExpanded] = useState(false);
   const [metricPreset, setMetricPreset] = useState<MetricPreset>("all");
   const [metricQuery, setMetricQuery] = useState("");
@@ -2804,6 +2811,83 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                       </Stack>
                     </Card>
                   ))
+                )}
+              </Stack>
+            </Card>
+          </Collapsible>
+
+          {/* Collapsible Section: MCP Injection (#1020) */}
+          <Collapsible
+            title="MCP Injection"
+            icon="Cpu"
+            isExpanded={mcpInjectionExpanded}
+            onToggle={(exp) => setMcpInjectionExpanded(exp)}
+          >
+            <Card variant="flat">
+              <Stack gap="sm">
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                  Inject MCP servers into spawned agent sessions. Toggle the global switch to enable,
+                  then select which profiles to inject.
+                </Text>
+
+                {/* Global toggle */}
+                <Row justify="space-between" align="center" wrap gap="xs">
+                  <Stack gap="xxs">
+                    <Text style={{ color: colors.foreground, ...typography.heading }}>
+                      Enable MCP Injection
+                    </Text>
+                    <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                      When enabled, selected MCP servers are injected into every spawned agent session.
+                    </Text>
+                  </Stack>
+                  <HostToggle
+                    value={settings.mcpInjection?.enabled ?? false}
+                    onValueChange={(next) => updateSettings({ mcpInjection: { ...(settings.mcpInjection ?? {}), enabled: next } })}
+                    disabled={isUpdatingSettings}
+                  />
+                </Row>
+
+                {/* Profile list */}
+                {(settings.mcpInjection?.enabled ?? false) && (
+                  <Stack gap="xs">
+                    <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
+                      Injection Profiles
+                    </Text>
+                    {mcpProfiles.map((profile) => (
+                      <Card key={profile.id} variant="elevated">
+                        <Row justify="space-between" align="center" wrap gap="xs">
+                          <Stack gap="xxs" style={{ flex: 1 }}>
+                            <Row align="center" gap="xs">
+                              <Text style={{ color: colors.foreground, ...typography.heading }}>
+                                {profile.label}
+                              </Text>
+                              <Badge label="stdio" variant="info" size="sm" />
+                            </Row>
+                            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                              {profile.description}
+                            </Text>
+                            <CodeBlock
+                              code={`${profile.command}`}
+                              language="bash"
+                            />
+                          </Stack>
+                          <HostToggle
+                            value={settings.mcpInjection?.profiles?.[profile.id] ?? profile.enabled}
+                            onValueChange={(next) => {
+                              const currentProfiles = settings.mcpInjection?.profiles ?? {};
+                              updateSettings({
+                                mcpInjection: {
+                                  ...(settings.mcpInjection ?? {}),
+                                  profiles: { ...currentProfiles, [profile.id]: next },
+                                },
+                              });
+                            }}
+                            disabled={isUpdatingSettings}
+                          />
+                        </Row>
+                      </Card>
+                    ))}
+                  </Stack>
                 )}
               </Stack>
             </Card>

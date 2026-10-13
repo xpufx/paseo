@@ -2586,6 +2586,12 @@ export async function spawnPaseoAgent(
           Object.entries(process.env).filter(([k]) => k !== "FORGEJO_TOKEN")
         );
       }
+      // #1020: stamp fleet role so the agent.create hook can select per-class
+      // MCP servers. The marker is consumed and stripped by the hook.
+      if (options.category) {
+        sdkConfig.env = sdkConfig.env ?? {};
+        sdkConfig.env.PASEO_FLEET_ROLE = options.category;
+      }
       createPayload.config = sdkConfig;
       if (options.workspaceId) {
         createPayload.workspaceId = options.workspaceId;
@@ -2644,12 +2650,17 @@ export async function spawnPaseoAgent(
 
     // Sanitize child env for workers: strip FORGEJO_TOKEN so they
     // interact exclusively via MCP tools (#1296).
-    const spawnEnv =
+    let spawnEnv =
       isWorker && hasForgeToken
         ? Object.fromEntries(
             Object.entries(process.env).filter(([k]) => k !== "FORGEJO_TOKEN")
           )
         : undefined;
+    // #1020: stamp fleet role for CLI path too.
+    if (options.category) {
+      spawnEnv = spawnEnv ?? {};
+      spawnEnv.PASEO_FLEET_ROLE = options.category;
+    }
 
     const { stdout } = await execFileAsync("paseo", args, {
       timeout: 15000,
