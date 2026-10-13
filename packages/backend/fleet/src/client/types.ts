@@ -662,12 +662,14 @@ export const DEFAULT_PROJECT = "Default Project";
 export function normalizeRepoKey(raw: string | null | undefined): string | null {
   if (!raw || typeof raw !== "string") return null;
   let s = raw.trim();
+  if (/^prj_[a-z0-9]+$/i.test(s)) return null;
   s = s.replace(/^git@([^:]+):/, "$1/");
   s = s.replace(/^https?:\/\//, "");
   s = s.replace(/^ssh:\/\/git@/, "");
   s = s.replace(/:\d+\//, "/");
   s = s.replace(/\.git$/, "");
   s = s.replace(/^\/+|\/+$/g, "");
+  if (/^prj_[a-z0-9]+$/i.test(s)) return null;
   return s || null;
 }
 
@@ -703,7 +705,7 @@ export function candidateRepoKeys(raw: string | null | undefined): string[] {
 
 export function canonicalRepoKey(raw: string | null | undefined): string | null {
   if (!raw || typeof raw !== "string") return null;
-  const normalized = normalizeRepoKey(raw) ?? raw.trim();
+  const normalized = normalizeRepoKey(raw);
   if (!normalized) return null;
   if (!normalized.includes("/")) return normalized;
   const parts = normalized.split("/");

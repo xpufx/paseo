@@ -149,7 +149,10 @@ function workspaceCandidateKeys(workspace: WorkspaceRecord, project?: ProjectRec
     if (canonical) keys.add(canonical.toLowerCase());
   };
 
-  add(project?.projectKey ?? undefined);
+  const rawProjectKey = project?.projectKey?.trim();
+  if (rawProjectKey && !rawProjectKey.startsWith("prj_") && !/^prj_[a-z0-9]+$/i.test(rawProjectKey)) {
+    add(project?.projectKey);
+  }
   if (typeof workspace.projectId === "string" && workspace.projectId.startsWith("remote:")) {
     add(workspace.projectId);
   }

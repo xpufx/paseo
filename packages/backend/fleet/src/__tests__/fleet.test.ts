@@ -20,6 +20,7 @@ import {
   planWatchdogRecovery,
   canonicalRepoKey,
   candidateRepoKeys,
+  normalizeRepoKey,
   resolveCanonicalRepo,
   isRepoMatching,
   canonicalDescriptorsToRegistry,
@@ -223,6 +224,15 @@ describe("@xpufx/backend-fleet", () => {
       expect(isRepoMatching("paseo", "xpufx-org/paseo")).toBe(true);
       expect(isRepoMatching("other", "xpufx-org/paseo")).toBe(false);
     });
+
+    it("rejects opaque internal project IDs in normalizeRepoKey", () => {
+      expect(normalizeRepoKey("prj_0e77794a3a650cdf")).toBeNull();
+      expect(normalizeRepoKey("prj_abc123")).toBeNull();
+      expect(normalizeRepoKey("PRJ_XYZ789")).toBeNull();
+      expect(normalizeRepoKey("prj_0e77794a3a650cdf.git")).toBeNull();
+      expect(normalizeRepoKey("  prj_0e77794a3a650cdf  ")).toBeNull();
+      expect(normalizeRepoKey("xpufx-org/paseo")).toBe("xpufx-org/paseo");
+    });
   });
 
   describe("Workspace Registry and Resolution", () => {
@@ -288,6 +298,65 @@ describe("@xpufx/backend-fleet", () => {
         ]
       );
       expect(map["ws-99"]).toBe("forge.mrs.uppidi.com/my-org/my-app");
+    });
+
+    it("ignores opaque prj_* projectKey and resolves to human-readable repository display name", () => {
+      const map = buildWorkspaceProjectMapFromRegistry(
+        [
+          {
+            workspaceId: "ws-1",
+            projectId: "prj_0e77794a3a650cdf",
+            cwd: "/home/user/code/paseo",
+            displayName: "paseo-workspace",
+          },
+        ],
+        [
+          {
+            projectId: "prj_0e77794a3a650cdf",
+            displayName: "xpufx-org/paseo",
+            projectKey: "prj_0e77794a3a650cdf",
+          },
+        ]
+      );
+      expect(map["ws-1"]).toBe("forge.mrs.uppidi.com/xpufx-org/paseo");
+    });
+
+    it("falls through to workspace displayName or rootPath when projectKey is opaque prj_*", () => {
+      const mapFromWs = buildWorkspaceProjectMapFromRegistry(
+        [
+          {
+            workspaceId: "ws-2",
+            projectId: "prj_abc",
+            cwd: "/repos/my-repo",
+            displayName: "my-custom-display",
+          },
+        ],
+        [
+          {
+            projectId: "prj_abc",
+            projectKey: "prj_abc",
+          },
+        ]
+      );
+      expect(mapFromWs["ws-2"]).toBe("my-custom-display");
+
+      const mapFromRoot = buildWorkspaceProjectMapFromRegistry(
+        [
+          {
+            workspaceId: "ws-3",
+            projectId: "prj_def",
+            cwd: "/repos/my-repo",
+          },
+        ],
+        [
+          {
+            projectId: "prj_def",
+            projectKey: "prj_def",
+            rootPath: "/repos/my-repo",
+          },
+        ]
+      );
+      expect(mapFromRoot["ws-3"]).toBe("my-repo");
     });
 
     it("reads roster purely via daemon SDK without disk scraping", async () => {
