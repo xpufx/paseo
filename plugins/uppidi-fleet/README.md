@@ -72,6 +72,12 @@ which pieces you must supply because the plugin does not ship them ([§10](#10-g
 
 ---
 
+### Quick links
+
+- **[End-User Guide](./docs/user-guide.md)** — non-technical walkthrough for operators: dashboard, monitoring, interacting with agents, managing tasks, and troubleshooting.
+
+---
+
 Four moving parts:
 
 1. **The forge** stores all durable state (issues, comments, labels, commits)
