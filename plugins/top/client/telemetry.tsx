@@ -445,13 +445,13 @@ export function TopTimelineTelemetryCard({
 
                 <HostRow wrap gap={6} align="center">
                   {inputTokens != null && (
-                    <HostBadge label={`In: ${inputTokens.toLocaleString()}`} variant="neutral" />
+                    <HostBadge label={`In: ${inputTokens.toLocaleString('en-US')}`} variant="neutral" />
                   )}
                   {outputTokens != null && (
-                    <HostBadge label={`Out: ${outputTokens.toLocaleString()}`} variant="neutral" />
+                    <HostBadge label={`Out: ${outputTokens.toLocaleString('en-US')}`} variant="neutral" />
                   )}
                   {cachedTokens != null && (
-                    <HostBadge label={`Cache: ${cachedTokens.toLocaleString()}`} variant="neutral" />
+                    <HostBadge label={`Cache: ${cachedTokens.toLocaleString('en-US')}`} variant="neutral" />
                   )}
                 </HostRow>
               </HostStack>

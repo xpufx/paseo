@@ -1466,25 +1466,25 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
           ) : tokenMetrics?.contextUsedTokens != null ? (
             <HostKeyValue {...compactKvProps}
               label="Context Used"
-              value={`${tokenMetrics.contextUsedTokens.toLocaleString()} (${formatCompactTokens(tokenMetrics.contextUsedTokens)})`}
+              value={`${tokenMetrics.contextUsedTokens.toLocaleString('en-US')} (${formatCompactTokens(tokenMetrics.contextUsedTokens)})`}
             />
           ) : null}
 
           <HostStack gap={12}>
             <HostKeyValue {...compactKvProps}
               label="Input Tokens"
-              value={tokenMetrics?.inputTokens != null ? tokenMetrics.inputTokens.toLocaleString() : "--"}
+              value={tokenMetrics?.inputTokens != null ? tokenMetrics.inputTokens.toLocaleString('en-US') : "--"}
               subValue={tokenMetrics?.inputTokens != null ? formatCompactTokens(tokenMetrics.inputTokens) : undefined}
             />
             <HostKeyValue {...compactKvProps}
               label="Output Tokens"
-              value={tokenMetrics?.outputTokens != null ? tokenMetrics.outputTokens.toLocaleString() : "--"}
+              value={tokenMetrics?.outputTokens != null ? tokenMetrics.outputTokens.toLocaleString('en-US') : "--"}
               subValue={tokenMetrics?.outputTokens != null ? formatCompactTokens(tokenMetrics.outputTokens) : undefined}
             />
             {tokenMetrics?.cachedTokens != null && (
               <HostKeyValue {...compactKvProps}
                 label="Cached Tokens"
-                value={tokenMetrics.cachedTokens.toLocaleString()}
+                value={tokenMetrics.cachedTokens.toLocaleString('en-US')}
                 subValue={formatCompactTokens(tokenMetrics.cachedTokens)}
               />
             )}

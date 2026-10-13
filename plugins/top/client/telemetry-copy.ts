@@ -99,7 +99,7 @@ export function buildTelemetryCopyText({ data, liveUsage, timeLabel }: Telemetry
     lines.push(`Tokens ${formatCompactTokens(contextUsedTokens)} ctx`);
   }
 
-  if (cachedTokens != null) lines.push(`Cache ${cachedTokens.toLocaleString()}`);
+  if (cachedTokens != null) lines.push(`Cache ${cachedTokens.toLocaleString('en-US')}`);
   if (costUsd != null) {
     lines.push(`Cost $${costUsd < 0.01 ? costUsd.toFixed(4) : costUsd.toFixed(2)}`);
   }
