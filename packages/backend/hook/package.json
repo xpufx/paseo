@@ -3,7 +3,14 @@
   "version": "0.1.0",
   "description": "Standalone webhook event engine — HMAC validators, payload normalizers, and queue backend",
   "license": "MIT",
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xpufx/paseo.git"
+  },
   "type": "module",
   "sideEffects": false,
   "main": "./dist/index.cjs",
@@ -34,6 +41,7 @@
   "files": ["dist", "README.md"],
   "scripts": {
     "build": "tsup",
+    "prepack": "npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

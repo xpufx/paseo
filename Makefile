@@ -92,6 +92,7 @@ npm-push-x-comms:
 packages-build:
 	@npm run build --workspace=packages/backend/tickets
 	@npm run build --workspace=packages/backend/fleet
+	@npm run build --workspace=packages/backend/hook
 	@npm run build --workspace=packages/mcp-gateway
 	@npm run build --workspace=packages/paseo-plugin-ui
 
@@ -99,6 +100,7 @@ packages-build:
 packages-publish-dry: packages-build
 	@npm publish --workspace=packages/backend/tickets --access public --dry-run
 	@npm publish --workspace=packages/backend/fleet --access public --dry-run
+	@npm publish --workspace=packages/backend/hook --access public --dry-run
 	@npm publish --workspace=packages/mcp-gateway --access public --dry-run
 	@npm publish --workspace=packages/paseo-plugin-ui --access public --dry-run
 
@@ -106,6 +108,7 @@ packages-publish-dry: packages-build
 packages-publish: packages-build
 	@npm publish --workspace=packages/backend/tickets --access public
 	@npm publish --workspace=packages/backend/fleet --access public
+	@npm publish --workspace=packages/backend/hook --access public
 	@npm publish --workspace=packages/mcp-gateway --access public
 	@npm publish --workspace=packages/paseo-plugin-ui --access public
 
