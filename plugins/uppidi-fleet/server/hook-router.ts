@@ -2058,7 +2058,7 @@ function normalizeTimelineItems(timeline: unknown): unknown[] {
 // Reactive child-lifecycle wakeups (#537)
 //
 // The watchdog tick also acts as the bounded, dedup-guarded watcher that wakes
-// a parent agent (`paseo send --steer --no-wait <parent>`) when one of its
+// a parent agent (`paseo send --no-wait <parent>`) when one of its
 // labelled children becomes blocked, errors, or finishes. Pure assessment
 // helpers live here so tests can exercise the transition rules directly.
 // ---------------------------------------------------------------------------
@@ -10776,7 +10776,7 @@ export class HookRouter {
 
         const notice =
           instruction ||
-          `Front Desk registered: ${agentId}. Orchestrators must maintain composer silence and route all operator-escalation requests (attention/2-user) to Front Desk (${agentId}) via 'paseo send --steer --no-wait ${agentId} <msg>'.`;
+          `Front Desk registered: ${agentId}. Orchestrators must maintain composer silence and route all operator-escalation requests (attention/2-user) to Front Desk (${agentId}) via 'paseo send --no-wait ${agentId} <msg>'.`;
 
         let notified = 0;
         for (const target of targetOrchestrators) {

@@ -347,8 +347,8 @@ The resolved **content** is inlined into the spawn prompt (not a path), so a spa
 **Front Desk** — the operator-facing liaison and triage intake:
 
 - The operator talks only to Front Desk. Orchestrators reach it with
-  `paseo send --steer --no-wait <frontDeskId> "..."`
-  (`--steer` is mandatory so it never clobbers an active turn).
+  `paseo send --no-wait <frontDeskId> "..."`
+  (`--no-wait` returns immediately without waiting for the target turn).
 - It registers itself with the router via `POST /frontdesk`
   ([§7.4](#74-control-endpoints)).
 - It receives only **frontdesk-directed events** — `attention/frontdesk`,
@@ -613,7 +613,7 @@ the agent id, `<key>` is the enrolled repo key:
   but the watchdog is silent — register one via `POST /frontdesk` (§7.4).
 - Every alert is delivered with `{noWait: true, steer: true}`: SDK
   `paseo.agents.ref(id).send(msg, {steer: true})`, falling back to
-  `paseo send --no-wait --steer <id> <msg>`. The alert lands immediately and
+  `paseo send --no-wait <id> <msg>`. The alert lands immediately and
   steers into (interrupts) the Front Desk's active turn.
 
 #### 7.7.4 Configuration & throttling
@@ -737,7 +737,7 @@ registered orchestrator and drains the queue.
   quota-dead turn only burns more of an exhausted budget). The alert repeats
   every cooldown with the raw `lastError` inline. Fix the cause (top up
   credits, wait out the rate limit, or switch model), then wake the agent with
-  `paseo send --no-wait --steer <id> <msg>` or restart it from the Paseo UI.
+  `paseo send --no-wait <id> <msg>` or restart it from the Paseo UI.
 - **`AGENT_ERROR` escalation**: the auto-reload failed (or the error text
   matched a quota pattern) — triage the error string in the alert, then reload
   manually.
@@ -1118,7 +1118,7 @@ topology is a strict two-tier authority chain, enforced deterministically in
    [paseo#530](https://forge.mrs.uppidi.com/xpufx-org/paseo/issues/530)).
 2. The **front desk must never spawn workers**. Worker spawning is
    orchestrator-exclusive; the desk's dispatch paths are steering a registered
-   orchestrator (`paseo send --steer --no-wait <orchId>`), the router API
+   orchestrator (`paseo send --no-wait <orchId>`), the router API
    (`POST <hook-host>:<port>/orchestrator`, `/board-sweep`), or operator
    escalation.
 
@@ -1354,7 +1354,7 @@ transitions:
 - into idle/`finished` completion → `agent.child_completed`
 
 …the pulse is delivered **directly to the parent** with
-`paseo send --steer --no-wait <parentId>` (the same `deliver()` primitive as
+`paseo send --no-wait <parentId>` (the same `deliver()` primitive as
 Front Desk alerts; no Front Desk routing). Dedup reuses `canWatchdogAlert` with
 per-`(child,event)` keys — `child_waiting:<id>:<reqId|reason>`,
 `child_errored:<id>`, `child_completed:<id>` — so a persistently blocked child

@@ -1170,7 +1170,7 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
 [User] please sweep the fleet and check #710
 [Shell] cat /tmp/test.txt
 [Thought] Analyzing the situation...
-[Shell] paseo send --steer --no-wait agent-orch-1 "run tests"
+[Shell] paseo send --no-wait agent-orch-1 "run tests"
 [Heartbeat] Scheduled tick
 [Assistant] Dispatched the test command to orchestrator.
 [Error] Temporary connection drop

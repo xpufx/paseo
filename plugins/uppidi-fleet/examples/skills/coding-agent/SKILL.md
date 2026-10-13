@@ -277,9 +277,9 @@ When code is implemented and verified locally in your worktree:
 6. **Do NOT close the issue, merge the PR, or archive the workspace**: Leaf workers do not merge PRs, close issues, or perform workspace/branch cleanup. The PR is merged and the issue is closed by the Repo Orchestrator after pre-flight audit, and the Paseo workspace is archived by the Orchestrator afterward. A done ticket is a closed ticket. Operator escalation is strictly via `attention/1-user`.
 7. **Notify the parent Orchestrator (MANDATORY)**: The board handoff above is the durable record; this callback is the immediate signal so the Orchestrator does not sit polling a ticket. On completion **or** on any blocker, message the parent explicitly:
    ```bash
-   paseo send --steer --no-wait <parentAgentId> "Worker #<issue#> completed: PR <url>, tests pass."
+   paseo send --no-wait <parentAgentId> "Worker #<issue#> completed: PR <url>, tests pass."
    ```
-   - `--steer` is **mandatory**: without it the default `activeTurnBehavior` is `interrupt`, which clobbers the parent's active turn mid-work (see `skills/orchestrator/SKILL.md` §13 for the same footgun on the Front Desk escalation path).
+   - `--no-wait` is **required** so the send returns immediately instead of waiting for the parent turn to complete (see `skills/orchestrator/SKILL.md` §13 for the same footgun on the Front Desk escalation path).
    - `<parentAgentId>` comes from the Orchestrator's launch contract; if it was not supplied, treat that as a contract gap and escalate on the ticket instead of staying silent.
    - **This supplements the board handoff, it never replaces it**: still post the envelope comment, still apply `state/2-review` + `review/0-needed`. The callback is a ping, the board is the record.
    - Keep it to one line. Do not paste diffs, logs, or per-step narration into the parent message.

@@ -99,9 +99,9 @@ Notes:
 ### 2.2 Paseo session primitives (raw daemon client)
 
 - `sendAgentMessage(agentId, text, { activeTurnBehavior })` — deliver `/compact`
-  or a reorientation envelope; `--steer` in the platform `paseo send` wrapper
-  maps to `activeTurnBehavior:"steer"` so it queues behind an active turn
-  instead of interrupting it.
+  or a reorientation envelope; `activeTurnBehavior:"steer"` queues behind an
+  active turn instead of interrupting it (the `paseo send` CLI has no `--steer`
+  option; pass `--no-wait` for a non-blocking send).
 - `refreshAgent(agentId)` (`daemon-client.d.ts:838`) — "reload the agent
   (restarts the underlying process)". The lifecycle contract models this as
   `PluginSessionOpenRequest.reason:"refresh"` (`@getpaseo/plugin/dist/server/
@@ -181,7 +181,7 @@ agent.
 ### Option A — Compact in place with the provider's own command
 
 Send `/compact` (optionally with custom instructions) to the live orchestrator
-via `paseo send --steer --no-wait <id> /compact`, then send a short
+via `paseo send --no-wait <id> /compact`, then send a short
 reorientation envelope naming the skill path and the next sweep.
 
 - **Pros:** cheapest; preserves session identity, registry, workspace, and tool

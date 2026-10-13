@@ -1264,7 +1264,7 @@ describe("two-tier spawn authority guard (#573)", () => {
         );
         assert.equal(res.ok, false);
         assert.ok(res.error?.includes("two-tier spawn authority"));
-        assert.ok(res.error?.includes("paseo send --steer --no-wait <orchId>"));
+        assert.ok(res.error?.includes("paseo send --no-wait <orchId>"));
         assert.ok(res.error?.includes("POST <hook-host>:<port>/orchestrator"));
         assert.equal(created, false);
       } finally {
@@ -1359,7 +1359,7 @@ describe("two-tier spawn authority guard (#573)", () => {
         {} as any
       );
       assert.equal(res.ok, false);
-      assert.ok(res.error?.includes("paseo send --steer --no-wait <orchId>"));
+      assert.ok(res.error?.includes("paseo send --no-wait <orchId>"));
       assert.ok(res.error?.includes("POST <hook-host>:<port>/orchestrator"));
     });
   });

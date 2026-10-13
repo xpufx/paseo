@@ -44,7 +44,7 @@ describe("safe permission allowlist (#1084)", () => {
     assert.equal(classify("git rev-parse --abbrev-ref HEAD")?.ruleId, "read-only-probe");
     assert.equal(classify("git fetch origin")?.ruleId, "read-only-probe");
     assert.equal(classify("ls -la")?.ruleId, "read-only-probe");
-    assert.equal(classify("paseo send --steer --no-wait abc 'continue'")?.ruleId, "paseo-send");
+    assert.equal(classify("paseo send --no-wait abc 'continue'")?.ruleId, "paseo-send");
     assert.equal(classify("paseo permit ls")?.ruleId, "paseo-permit-ls");
     assert.equal(classify("paseo plugin reload uppidi-fleet")?.ruleId, "paseo-plugin-reload");
   });

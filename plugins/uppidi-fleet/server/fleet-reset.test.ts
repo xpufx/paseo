@@ -102,12 +102,12 @@ describe("fleet reset state handler (#764)", { concurrency: false }, () => {
     assert.ok(!fs.existsSync(path.join(boardStateDir, "xpufx-org__paseo.json")));
     assert.ok(!fs.existsSync(path.join(queueDir, "queue-repo1.json")));
 
-    // Verify steer notification was dispatched to orchestrator
+    // Verify reset notification was dispatched to orchestrator
     const steerCmd = execCommands.find((c) => c.args.includes("send"));
-    assert.ok(steerCmd, "steer command dispatched");
+    assert.ok(steerCmd, "send command dispatched");
     assert.equal(steerCmd.file, "paseo");
-    assert.deepEqual(steerCmd.args.slice(0, 4), ["send", "--no-wait", "--steer", "agent-orch-42"]);
-    assert.ok(steerCmd.args[4].includes("Fleet state reset"));
+    assert.deepEqual(steerCmd.args.slice(0, 3), ["send", "--no-wait", "agent-orch-42"]);
+    assert.ok(steerCmd.args[3].includes("Fleet state reset"));
   });
 
   it("skips orchestrator notification when notifyOrchestrators is false", async () => {

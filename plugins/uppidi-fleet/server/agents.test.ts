@@ -601,7 +601,7 @@ describe("two-tier spawn authority guard (#573)", () => {
     const decision = evaluateSpawnAuthority({ category: "worker", callerAgentId: DESK }, undefined, deps);
     assert.equal(decision.allowed, false);
     assert.equal(decision.error, SPAWN_AUTHORITY_WORKER_ERROR);
-    assert.ok(decision.error?.includes("paseo send --steer --no-wait <orchId>"));
+    assert.ok(decision.error?.includes("paseo send --no-wait <orchId>"));
     assert.ok(decision.error?.includes("POST <hook-host>:<port>/orchestrator"));
   });
 

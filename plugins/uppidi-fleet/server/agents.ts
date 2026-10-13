@@ -1726,7 +1726,7 @@ export async function handleFleetResume(
  * Reset fleet state (Issue #764):
  * Purge persisted/stale cache and status in ~/.cache and plugin storage directory
  * (board-state, queues), clear in-memory queues if active, and notify registered
- * orchestrators via paseo send --steer so they do not rely on stale context.
+ * orchestrators via paseo send --no-wait so they do not rely on stale context.
  */
 export async function handleFleetResetState(
   input: FleetResetStateInput,
@@ -1828,7 +1828,7 @@ export async function handleFleetResetState(
       }
     }
 
-    // 4. Notify registered orchestrators via paseo send --steer
+    // 4. Notify registered orchestrators via paseo send --no-wait
     if (input.notifyOrchestrators !== false) {
       const orchestratorIds = new Set<string>();
 
@@ -1894,7 +1894,7 @@ export async function handleFleetResetState(
               await agentRef.send(resetNotice, { steer: true } as any);
               sent = true;
             } else {
-              await execFileAsync("paseo", ["send", "--no-wait", "--steer", orchId, resetNotice], { timeout: 5000 });
+              await execFileAsync("paseo", ["send", "--no-wait", orchId, resetNotice], { timeout: 5000 });
               sent = true;
             }
           } catch (err: any) {
@@ -2198,7 +2198,7 @@ export async function allowPermission(
  * Quoted verbatim so operators and agents see the exact dispatch paths.
  */
 const SPAWN_AUTHORITY_REMEDIATION =
-  "steer the registered orchestrator: paseo send --steer --no-wait <orchId>, or self-register via POST <hook-host>:<port>/orchestrator";
+  "steer the registered orchestrator: paseo send --no-wait <orchId>, or self-register via POST <hook-host>:<port>/orchestrator";
 
 /** The front desk may never spawn subagents (coding agents). */
 export const SPAWN_AUTHORITY_WORKER_ERROR =
@@ -3319,7 +3319,7 @@ export async function handleUppidiFrontDeskPrompt(
         await agentRef.send(prompt, { steer: true } as any);
         sent = true;
       } else {
-        await execFileAsync("paseo", ["send", "--no-wait", "--steer", targetAgentId, prompt], { timeout: 8000 });
+        await execFileAsync("paseo", ["send", "--no-wait", targetAgentId, prompt], { timeout: 8000 });
         sent = true;
       }
     }

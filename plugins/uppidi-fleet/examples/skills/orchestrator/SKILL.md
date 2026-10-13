@@ -259,7 +259,7 @@ routine webhook or dismiss it because it lacks a conventional command verb.
   - **Zero Wire Protocol Envelopes in Comments**: NEVER emit `<x-comms-message>`, `<x-comms>`, raw XML tags, or raw JSON RPC payloads into issue or PR comments. Wire protocols belong strictly on network/socket RPC transports.
   - Metadata envelopes on Forgejo/GitHub are generated automatically by `teax --envelope`, which embeds a hidden HTML comment (`<!-- envelope:v1 ... -->`). Never hand-craft or fake wire envelopes in comment bodies.
 - **Local vs Remote Agent Communication**:
-  - Agents on the local daemon are contacted directly via `paseo send --steer --no-wait <agentId> "<message>"` (plain text) or native MCP `send_agent_prompt`.
+  - Agents on the local daemon are contacted directly via `paseo send --no-wait <agentId> "<message>"` (plain text) or native MCP `send_agent_prompt`.
   - Do NOT use `x_comms_*` tools for local agents residing on the same machine/daemon. `x_comms_*` is strictly for cross-daemon/remote fleet hosts.
 
 ## 11. Composer silence & webhook discipline (keep quiet)
@@ -314,8 +314,8 @@ Board ranking, triage, and dispatch are the Orchestrator's responsibility (worke
 ## 13. Front Desk escalation protocol (attention to user)
 
 > [!IMPORTANT]
-> **Gentle (`--steer`) Escalation Mandatory**:
-> When communicating with Front Desk, orchestrators MUST always include `--steer` (i.e. `paseo send --steer --no-wait ...`). Passing `--steer` queues the escalation message smoothly into the agent's active turn queue without aborting or preempting active user conversations. Omitting `--steer` defaults to `activeTurnBehavior: "interrupt"` which clobbers Front Desk mid-turn.
+> **Gentle Escalation Mandatory**:
+> When communicating with Front Desk, orchestrators MUST use `paseo send --no-wait ...`. Passing `--no-wait` returns immediately without waiting for the target turn to complete, so the escalation lands without blocking on an active user conversation.
 
 
 - **The Front Desk agent is the operator interface**: The human operator works directly through the Front Desk agent. Orchestrators do not talk into their own composer window. Front Desk never spawns workers — it steers orchestrators; orchestrators dispatch workers (two-tier spawn authority, [#172](https://forge.example.com/owner/repo/issues/172)).
@@ -329,7 +329,7 @@ Board ranking, triage, and dispatch are the Orchestrator's responsibility (worke
      Do not inspect `frontdesk.json` or `settings.json` directly on disk.
   2. If a live Front Desk exists (`liveFrontDeskId` is non-null), dispatch the escalation:
      ```bash
-     paseo send --steer --no-wait <liveFrontDeskId> "Issue https://forge.example.com/<repo>/issues/<n> needs operator attention: <concise question/action required>"
+     paseo send --no-wait <liveFrontDeskId> "Issue https://forge.example.com/<repo>/issues/<n> needs operator attention: <concise question/action required>"
      ```
   3. Post the detailed context, pre-flight audit, or options on the Forgejo issue using `teax issue comment --envelope`.
   4. Keep your own composer window quiet.
@@ -341,7 +341,7 @@ Board ranking, triage, and dispatch are the Orchestrator's responsibility (worke
 - **Orchestrator Relay Fallback (Only when Direct Hook Did Not Fire)**:
   - If the operator mentions or petitions Front Desk in an issue comment without the `attention/frontdesk` label or `/frontdesk` prefix, the local repo orchestrator catches it during board sweeps and sends a relay:
     ```bash
-    paseo send --steer --no-wait <frontDeskId> "Heads up: operator requested Front Desk intervention on https://forge.example.com/<repo>/issues/<n>"
+    paseo send --no-wait <frontDeskId> "Heads up: operator requested Front Desk intervention on https://forge.example.com/<repo>/issues/<n>"
     ```
   - **Deduplication guard**: If `attention/frontdesk` was already handled by the hook daemon, the orchestrator MUST NOT fire a redundant relay.
 ## 14. Workspace Tooling
