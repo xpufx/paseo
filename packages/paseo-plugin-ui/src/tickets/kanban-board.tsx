@@ -35,6 +35,7 @@ import {
   resolveKanbanKeyboardIntent,
   type KanbanKeyboardEventLike,
 } from "./kanban-keyboard.js";
+import { HostSwimlaneRow } from "./swimlane-row.js";
 import type { KanbanBoardProps, KanbanIssue } from "./types.js";
 
 export function HostKanbanBoard({
@@ -61,6 +62,9 @@ export function HostKanbanBoard({
   automationTiers,
   onToggleAutomationTier,
   onBackwardTransition,
+  swimlaneGroup,
+  collapsedSwimlanes: externalCollapsedSwimlanes,
+  onSwimlaneToggle,
 }: KanbanBoardProps) {
   const { colors } = useHostTheme();
   const [internalQuery, setInternalQuery] = useState("");
@@ -99,6 +103,43 @@ export function HostKanbanBoard({
     () => groupTabs.find((group) => group.id === activeRepoGroup) ?? null,
     [groupTabs, activeRepoGroup],
   );
+
+  // Swimlane collapse state (#1282)
+  const isSwimlaneControlled = externalCollapsedSwimlanes !== undefined;
+  const [internalCollapsedSwimlanes, setInternalCollapsedSwimlanes] = useState<Set<string>>(
+    new Set(),
+  );
+  const activeCollapsedSwimlanes = isSwimlaneControlled
+    ? externalCollapsedSwimlanes ?? new Set()
+    : internalCollapsedSwimlanes;
+
+  const handleSwimlaneToggle = useCallback(
+    (swimlaneId: string) => {
+      if (!isSwimlaneControlled) {
+        setInternalCollapsedSwimlanes((prev) => {
+          const next = new Set(prev);
+          if (next.has(swimlaneId)) next.delete(swimlaneId);
+          else next.add(swimlaneId);
+          return next;
+        });
+      }
+      onSwimlaneToggle?.(swimlaneId);
+    },
+    [isSwimlaneControlled, onSwimlaneToggle],
+  );
+
+  // Determine effective swimlane grouping mode:
+  // - Explicit prop wins
+  // - Multiple repo groups configured → default to "repository"
+  // - No groups or single group → "none" (classic layout)
+  const effectiveSwimlaneGroup = useMemo(() => {
+    if (swimlaneGroup !== undefined) return swimlaneGroup;
+    // When multiple repo groups are configured, default to repository grouping
+    if (groupTabs.length > 1) {
+      return "repository";
+    }
+    return "none";
+  }, [swimlaneGroup, groupTabs.length]);
 
   // Filter issues by search query, single repository, and repo group
   const filteredIssues = useMemo(() => {
@@ -159,6 +200,78 @@ export function HostKanbanBoard({
     }
     return map;
   }, [filteredIssues, columns]);
+
+  // Build swimlane data when grouping is active (#1282)
+  const swimlanes = useMemo(() => {
+    if (effectiveSwimlaneGroup === "none") return null;
+
+    interface SwimlaneData {
+      id: string;
+      title: string;
+      issuesByColumn: Record<KanbanColumnId, KanbanIssue[]>;
+      totalCount: number;
+    }
+
+    const swimlanesMap = new Map<string, SwimlaneData>();
+
+    for (const issue of filteredIssues) {
+      let key: string;
+      let title: string;
+
+      switch (effectiveSwimlaneGroup) {
+        case "repository":
+          key = issue.repo ?? "unassigned";
+          title = issue.repo ?? "Unassigned";
+          break;
+        case "epic":
+          const epicLabel = issue.labels?.find((l) => l.startsWith("epic/"));
+          key = epicLabel ?? "no-epic";
+          title = epicLabel ? epicLabel.slice(5) : "No Epic";
+          break;
+        case "priority":
+          const priLabel = issue.labels?.find((l) => l.startsWith("priority/"));
+          key = priLabel ?? "no-priority";
+          title = priLabel ? priLabel.slice(9) : "No Priority";
+          break;
+        default:
+          continue;
+      }
+
+      let entry = swimlanesMap.get(key);
+      if (!entry) {
+        entry = { id: key, title, issuesByColumn: {} as Record<KanbanColumnId, KanbanIssue[]>, totalCount: 0 };
+        for (const col of columns) {
+          entry!.issuesByColumn[col.id] = [];
+        }
+        swimlanesMap.set(key, entry);
+      }
+
+      const col = getIssueKanbanColumn(issue);
+      if (entry.issuesByColumn[col]) {
+        entry.issuesByColumn[col].push(issue);
+      } else if (entry.issuesByColumn.backlog) {
+        entry.issuesByColumn.backlog.push(issue);
+      }
+      entry.totalCount += 1;
+    }
+
+    return Array.from(swimlanesMap.values()).sort((a, b) => a.title.localeCompare(b.title));
+  }, [filteredIssues, effectiveSwimlaneGroup, columns]);
+
+  // Pre-compute column counts per swimlane to avoid hooks in map (#1282)
+  const swimlaneColumnCounts = useMemo(
+    () => {
+      if (!swimlanes) return [];
+      return swimlanes.map((swimlane) => {
+        const counts: Record<KanbanColumnId, number> = {} as Record<KanbanColumnId, number>;
+        for (const col of columns) {
+          counts[col.id] = (swimlane.issuesByColumn[col.id] ?? []).length;
+        }
+        return counts;
+      });
+    },
+    [swimlanes, columns],
+  );
 
   const orderedIssues = useMemo(
     () => columns.flatMap((col) => issuesByColumn[col.id] ?? []),
@@ -544,150 +657,197 @@ export function HostKanbanBoard({
         </View>
       ) : null}
 
-      {/* Horizontal ScrollView across the Columns */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={true}
-        contentContainerStyle={{
-          flexDirection: "row",
-          gap: 12,
-          paddingBottom: 16,
-          paddingTop: 4,
-        }}
-        testID="kanban-board-scroll"
-      >
-        {columns.map((col) => {
-          const colIssues = issuesByColumn[col.id] ?? [];
-          const isOver = dragOverColumn === col.id;
-
-          const columnStyle: Record<string, any> = {
-            width: 290,
-            minWidth: 260,
-            backgroundColor: isOver ? colors.surface2 : colors.surface1,
-            borderColor: isOver ? colors.accent : colors.border,
-            borderWidth: isOver ? 2 : 1,
-            borderStyle: isOver ? "dashed" : "solid",
-            borderRadius: 8,
+      {/* Board body: swimlane rows or classic columns (#1282) */}
+      {swimlanes && swimlanes.length > 0 ? (
+        // Swimlane mode: horizontal rows grouped by repository/epic/priority
+        <View
+          testID="kanban-board-scroll"
+          style={{
             flexDirection: "column",
-            flexShrink: 0,
-            padding: isOver ? 9 : 10,
-          };
+            gap: 8,
+            paddingBottom: 16,
+            paddingTop: 4,
+          }}
+        >
+          {swimlanes.map((swimlane, idx) => {
+            const isCollapsed = activeCollapsedSwimlanes.has(swimlane.id);
+            const colCounts = swimlaneColumnCounts[idx] ?? ({} as Record<KanbanColumnId, number>);
+            const visibleColumns = isCollapsed
+              ? columns.filter((col) => colCounts[col.id] === 0)
+              : columns;
 
-          const dropHandlers = {
-            onDragOver: (e: any) => handleColumnDragOver(e, col.id),
-            onDragEnter: (e: any) => handleColumnDragEnter(e, col.id),
-            onDragLeave: (e: any) => handleColumnDragLeave(e, col.id),
-            onDrop: (e: any) => handleColumnDrop(e, col.id),
-          };
+            return (
+              <HostSwimlaneRow
+                key={swimlane.id}
+                id={swimlane.id}
+                title={swimlane.title}
+                totalCount={swimlane.totalCount}
+                issuesByColumn={swimlane.issuesByColumn}
+                columns={columns}
+                renderCard={(issue, colId) => (
+                  <HostKanbanCard
+                    key={issue.number}
+                    issue={issue}
+                    columnId={colId}
+                    onSelect={handleSelectCard}
+                    onTransition={handleTransition}
+                    isTransitioning={transitioningIssueId === issue.number}
+                    isSelected={activeSelected === issue.number}
+                  />
+                )}
+                collapsed={isCollapsed}
+                onToggle={() => handleSwimlaneToggle(swimlane.id)}
+                tone="accent"
+              />
+            );
+          })}
+        </View>
+      ) : (
+        // Classic column layout (no swimlanes)
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={true}
+          contentContainerStyle={{
+            flexDirection: "row",
+            gap: 12,
+            paddingBottom: 16,
+            paddingTop: 4,
+          }}
+          testID="kanban-board-scroll"
+        >
+          {columns.map((col) => {
+            const colIssues = issuesByColumn[col.id] ?? [];
+            const isOver = dragOverColumn === col.id;
 
-          const columnHeader = (
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center",
-                paddingBottom: 8,
-                marginBottom: 8,
-                borderBottomWidth: 1,
-                borderBottomColor: colors.border,
-              }}
-            >
-              <HostRow align="center" gap="xs">
-                <HostStatusDot variant={col.tone === "accent" ? "info" : col.tone} />
-                <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 13 }}>
-                  {col.title}
-                </Text>
-              </HostRow>
-              <HostBadge label={String(colIssues.length)} variant="neutral" size="sm" />
-            </View>
-          );
+            const columnStyle: Record<string, any> = {
+              width: 290,
+              minWidth: 260,
+              backgroundColor: isOver ? colors.surface2 : colors.surface1,
+              borderColor: isOver ? colors.accent : colors.border,
+              borderWidth: isOver ? 2 : 1,
+              borderStyle: isOver ? "dashed" : "solid",
+              borderRadius: 8,
+              flexDirection: "column",
+              flexShrink: 0,
+              padding: isOver ? 9 : 10,
+            };
 
-          const columnCards =
-            colIssues.length === 0 ? (
+            const dropHandlers = {
+              onDragOver: (e: any) => handleColumnDragOver(e, col.id),
+              onDragEnter: (e: any) => handleColumnDragEnter(e, col.id),
+              onDragLeave: (e: any) => handleColumnDragLeave(e, col.id),
+              onDrop: (e: any) => handleColumnDrop(e, col.id),
+            };
+
+            const columnHeader = (
               <View
                 style={{
-                  padding: 24,
+                  flexDirection: "row",
+                  justifyContent: "space-between",
                   alignItems: "center",
-                  justifyContent: "center",
+                  paddingBottom: 8,
+                  marginBottom: 8,
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
                 }}
               >
-                <Text
-                  style={{
-                    color: colors.foregroundMuted,
-                    fontSize: 12,
-                  }}
-                >
-                  No issues in this column
-                </Text>
+                <HostRow align="center" gap="xs">
+                  <HostStatusDot variant={col.tone === "accent" ? "info" : col.tone} />
+                  <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 13 }}>
+                    {col.title}
+                  </Text>
+                </HostRow>
+                <HostBadge label={String(colIssues.length)} variant="neutral" size="sm" />
               </View>
-            ) : (
-              colIssues.map((issue) => (
-                <HostKanbanCard
-                  key={issue.number}
-                  issue={issue}
-                  columnId={col.id}
-                  onSelect={handleSelectCard}
-                  onTransition={handleTransition}
-                  isTransitioning={transitioningIssueId === issue.number}
-                  isSelected={activeSelected === issue.number}
-                />
-              ))
             );
 
-          if (isWeb) {
-            const webColumnTestProps = { testID: `kanban-column-${col.id}` } as any;
-            const webBodyTestProps = { testID: `kanban-column-body-${col.id}` } as any;
+            const columnCards =
+              colIssues.length === 0 ? (
+                <View
+                  style={{
+                    padding: 24,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: colors.foregroundMuted,
+                      fontSize: 12,
+                    }}
+                  >
+                    No issues in this column
+                  </Text>
+                </View>
+              ) : (
+                colIssues.map((issue) => (
+                  <HostKanbanCard
+                    key={issue.number}
+                    issue={issue}
+                    columnId={col.id}
+                    onSelect={handleSelectCard}
+                    onTransition={handleTransition}
+                    isTransitioning={transitioningIssueId === issue.number}
+                    isSelected={activeSelected === issue.number}
+                  />
+                ))
+              );
+
+            if (isWeb) {
+              const webColumnTestProps = { testID: `kanban-column-${col.id}` } as any;
+              const webBodyTestProps = { testID: `kanban-column-body-${col.id}` } as any;
+              return (
+                <div
+                  key={col.id}
+                  {...webColumnTestProps}
+                  data-testid={`kanban-column-${col.id}`}
+                  {...dropHandlers}
+                  style={{ display: "flex", ...columnStyle }}
+                >
+                  {columnHeader}
+                  <div
+                    {...webBodyTestProps}
+                    data-testid={`kanban-column-body-${col.id}`}
+                    {...dropHandlers}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      flex: 1,
+                      minHeight: 0,
+                      maxHeight: 600,
+                    }}
+                  >
+                    <ScrollView
+                      style={{ flex: 1, minHeight: 0 }}
+                      contentContainerStyle={{ gap: 8, paddingBottom: 8 }}
+                    >
+                      {columnCards}
+                    </ScrollView>
+                  </div>
+                </div>
+              );
+            }
+
             return (
-              <div
+              <View
                 key={col.id}
-                {...webColumnTestProps}
-                data-testid={`kanban-column-${col.id}`}
-                {...dropHandlers}
-                style={{ display: "flex", ...columnStyle }}
+                testID={`kanban-column-${col.id}`}
+                style={columnStyle}
               >
                 {columnHeader}
-                <div
-                  {...webBodyTestProps}
-                  data-testid={`kanban-column-body-${col.id}`}
-                  {...dropHandlers}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    flex: 1,
-                    minHeight: 0,
-                    maxHeight: 600,
-                  }}
+                <ScrollView
+                  showsVerticalScrollIndicator={true}
+                  style={{ flex: 1, maxHeight: 600 }}
+                  contentContainerStyle={{ gap: 8, paddingBottom: 8 }}
+                  testID={`kanban-column-body-${col.id}`}
                 >
-                  <ScrollView
-                    style={{ flex: 1, minHeight: 0 }}
-                    contentContainerStyle={{ gap: 8, paddingBottom: 8 }}
-                  >
-                    {columnCards}
-                  </ScrollView>
-                </div>
-              </div>
+                  {columnCards}
+                </ScrollView>
+              </View>
             );
-          }
-
-          return (
-            <View
-              key={col.id}
-              testID={`kanban-column-${col.id}`}
-              style={columnStyle}
-            >
-              {columnHeader}
-              <ScrollView
-                showsVerticalScrollIndicator={true}
-                style={{ flex: 1, maxHeight: 600 }}
-                contentContainerStyle={{ gap: 8, paddingBottom: 8 }}
-                testID={`kanban-column-body-${col.id}`}
-              >
-                {columnCards}
-              </ScrollView>
-            </View>
-          );
-        })}
-      </ScrollView>
+          })}
+        </ScrollView>
+      )}
 
       {detailDrawer !== false && !onOpenIssueDetail ? (
         <HostIssueDetailDrawer

@@ -146,4 +146,15 @@ export interface KanbanBoardProps {
     from: KanbanColumnId,
     to: KanbanColumnId,
   ) => void | Promise<void>;
+  /**
+   * Swimlane grouping mode (#1282). When set to `repository` (default when
+   * multi-repo group view is active), issues are grouped horizontally by
+   * repository with collapsible swimlane rows. Also supports `epic`,
+   * `priority`, or `none` for classic column layout.
+   */
+  swimlaneGroup?: "none" | "repository" | "epic" | "priority";
+  /** Controlled swimlane selection; leave undefined to let the board own collapse state. */
+  collapsedSwimlanes?: ReadonlySet<string>;
+  /** Toggle handler called when a swimlane header is pressed. */
+  onSwimlaneToggle?: (swimlaneId: string) => void;
 }

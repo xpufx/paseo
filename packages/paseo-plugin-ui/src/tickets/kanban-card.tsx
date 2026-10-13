@@ -20,6 +20,7 @@ import {
   detectCiStatus,
   detectLinkedPullRequest,
 } from "./card-artifacts.js";
+import { HostScopedLabelChip, isScopedLabel } from "./scoped-label-chip.js";
 import type { KanbanCardProps, KanbanIssue, LinkedPullRequest } from "./types.js";
 
 const ATTENTION_CONFIG: Record<
@@ -179,6 +180,24 @@ export function HostKanbanCard({
           {issue.title}
         </Text>
       </HostInteractiveRow>
+
+      {/* Scoped labels rendered as two-tone chips (#1282) */}
+      {issue.labels && issue.labels.length > 0 && (
+        <HostRow gap="xs" align="center" wrap>
+          {issue.labels.map((label) => {
+            const scoped = isScopedLabel(label);
+            return (
+              <View key={label} testID={`kanban-label-${issue.number}-${label}`}>
+                {scoped ? (
+                  <HostScopedLabelChip label={label} onPress={() => onSelect?.(issue.number)} />
+                ) : (
+                  <HostBadge label={label} variant="neutral" size="sm" />
+                )}
+              </View>
+            );
+          })}
+        </HostRow>
+      )}
 
       {/* Meta tags: branch pill, linked PR badge, review verdict, CI status */}
       {(branch || pullRequestBadge || ciBadge || (issue.comments !== undefined && issue.comments > 0)) && (
