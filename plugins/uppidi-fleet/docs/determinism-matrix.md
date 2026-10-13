@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 105 |
+| `deterministic` | 108 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **109** |
+| **total** | **112** |
 
-Inventory: 101 tracked source files in scope — 60 described above as source (52 files, some carrying several parts) and 49 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 104 tracked source files in scope — 62 described above as source (54 files, some carrying several parts) and 50 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -49,7 +49,7 @@ See *What this table does not cover* below for the sessions themselves.
 
 | Moving part | File | File exports | File loc | Classification | Anchors | Evidence |
 | --- | --- | ---: | ---: | --- | --- | --- |
-| RPC registration and plugin lifecycle | `index.server.ts` | 1 | 270 | `deterministic` | `server.handle`, `startHookRouter`, `registerSettingsRpc` | index.server.ts:146-189 — 44 `server.handle(contract, handler)` bindings, one per RPC contract<br>index.server.ts:219 — `startHookRouter(server)` starts the HTTP listener<br>index.server.ts:228-231 — teardown returns a disposer, no model call |
+| RPC registration and plugin lifecycle | `index.server.ts` | 1 | 273 | `deterministic` | `server.handle`, `startHookRouter`, `registerSettingsRpc` | index.server.ts:146-189 — 44 `server.handle(contract, handler)` bindings, one per RPC contract<br>index.server.ts:219 — `startHookRouter(server)` starts the HTTP listener<br>index.server.ts:228-231 — teardown returns a disposer, no model call |
 | Sidebar surface, workspace panel, helper settings screen registration | `index.client.tsx` | 10 | 115 | `deterministic` | `registerSidebarSurface`, `addWorkspacePanel`, `registerHelperSettingsScreen` | index.client.tsx:26-62 — three registrations, each returning a disposer<br>index.client.tsx:64-83 — teardown calls each disposer, tolerating either shape |
 
 - **RPC registration and plugin lifecycle** (`index.server.ts`) — Binds contracts to handlers and owns load/unload. Every handler it registers is classified on its own row below.
@@ -87,6 +87,7 @@ See *What this table does not cover* below for the sessions themselves.
 | Fleet MCP tool declarations, schemas, execution dispatchers, and RPC handlers | `server/mcp-tools.ts` | 16 | 942 | `deterministic` | `FLEET_MCP_TOOLS`, `executeFleetCheckBoard`, `executeFleetWatchdogAudit`, `executeFleetBoardSweep`, `executeFleetPruneOrchestrators`, `executeFleetQueueInspect`, +5 more | mcp-tools.ts:31-218 — typed JSON schemas for daemon operations and diagnostic tools<br>mcp-tools.ts:230-330 — deterministic board-checker execution with argument validation<br>mcp-tools.ts:334-372 — deterministic watchdog audit execution and markdown rendering<br>mcp-tools.ts:375-432 — deterministic board sweep execution and Front Desk notification<br>mcp-tools.ts:434-484 — deterministic orchestrator pruning with dry-run support<br>mcp-tools.ts:486-549 — deterministic queue inspection and filtering<br>mcp-tools.ts:551-614 — deterministic queue purge with confirmation guard<br>mcp-tools.ts:616-646 — deterministic fleet shift handoff generation |
 | Deterministic repository workspace resolution and candidate ranking | `server/workspace-lookup.ts` | 12 | 326 | `deterministic` | `resolveWorkspaceForRepo` | workspace-lookup.ts:54-130 — deterministically matches repo slugs against projects/workspaces registry |
 | Worktree-only dispatch guard: primary-checkout detection and worker workspace policy | `server/workspace-guard.ts` | 13 | 323 | `deterministic` | `inspectPrimaryCheckout`, `evaluateWorkerWorkspaceGuard`, `evaluateWorkerSpawnWorkspace`, `WORKER_PRIMARY_CHECKOUT_ERROR` | workspace-guard.ts:62-105 — `inspectPrimaryCheckout` shells `git rev-parse --path-format=absolute --git-dir`/`--git-common-dir` and treats equality as the primary checkout<br>workspace-guard.ts:149-215 — `evaluateWorkerWorkspaceGuard` is ordered policy over the inspection, project rootPath and daemon registry record; non-worker categories pass untouched<br>workspace-guard.ts:264-321 — `resolveWorkerWorkspaceContext`/`evaluateWorkerSpawnWorkspace` resolve the workspace record/project rootPath from the daemon registry and apply the guard to worker spawns |
+| Forgejo Actions CI/CD run fetcher: single-repo query, parallel multi-repo aggregation with Promise.allSettled, status filtering | `server/actions.ts` | 2 | 162 | `deterministic` | `handleForgeActionRuns`, `filterByStatus` | actions.ts:17-45 — `parseForgejoRun` normalises Forgejo JSON into the typed contract shape; branch is derived from ref prefix<br>actions.ts:48-67 — single-repo fetch via `/api/v1/repos/{owner}/{repo}/actions/runs` using `forgejoApiGet` + `forgejoToken`<br>actions.ts:70-77 — enrolled repos resolved from hook router roster for 'all' mode<br>actions.ts:80-115 — parallel `Promise.allSettled` fetch across enrolled repos; errors silently skipped for resilient aggregation<br>actions.ts:125-140 — `filterByStatus` is a fixed switch on status/conclusion fields |
 
 - **Persistent rotating hook log writer in plugin storage (#1115)** (`server/disk-logger.ts`) — Durable hook-router log appender writing to scoped plugin storage with bounded log rotation.
 - **Agent record normalisation, metrics projection, deterministic-state derivation** (`server/agents.ts`) — THE TELEMETRY ROW. It reads token counts, cost and turn state produced by an LLM session, and it is fully deterministic: same record in, same state out. Observing a model is not being one. The substring table at 281-296 is a fixed vocabulary, not a learned judgement.
@@ -116,6 +117,7 @@ See *What this table does not cover* below for the sessions themselves.
 - **Fleet MCP tool declarations, schemas, execution dispatchers, and RPC handlers** (`server/mcp-tools.ts`) — Declares fleet MCP tools and dispatches executions with argument validation. Fully deterministic control plane; does not query an LLM.
 - **Deterministic repository workspace resolution and candidate ranking** (`server/workspace-lookup.ts`) — Resolves daemon workspace directory for repository checkouts deterministically by ranking unarchived primary workspaces.
 - **Worktree-only dispatch guard: primary-checkout detection and worker workspace policy** (`server/workspace-guard.ts`) — Enforces #918: a worker is refused the primary checkout before any SDK/CLI spawn. Detection is a fixed git probe, never a model judgement.
+- **Forgejo Actions CI/CD run fetcher: single-repo query, parallel multi-repo aggregation with Promise.allSettled, status filtering** (`server/actions.ts`) — HTTP reads against Forgejo API with deterministic token resolution and error handling. No inference.
 
 ## Client
 
@@ -126,7 +128,7 @@ See *What this table does not cover* below for the sessions themselves.
 | Workspace panel and sidebar wrappers, panel registration | `client/panel.tsx` | 6 | 49 | `deterministic` | `UppidiFleetPanel`, `UppidiFleetSidebar`, `registerWorkspacePanel` | panel.tsx:11-19 — the panel mounts the host theme and the required scroll owner<br>panel.tsx:27-33 — the sidebar wrapper mounts the host theme for the sidebar registration<br>panel.tsx:40-49 — registration wraps `client.addWorkspacePanel` |
 | Agent switcher data projection: Front Desk extraction and per-repo orchestrator grouping | `client/agent-switcher-data.ts` | 3 | 59 | `deterministic` | `AgentSwitcherData`, `AgentSwitcherGroup`, `mapAgentSwitcherData` | agent-switcher-data.ts:22-24 — a missing snapshot returns the empty shape rather than a guess<br>agent-switcher-data.ts:35-43 — repo key falls through `project`, `attributedWork.repo`, `labels.repo`, then `"unassigned"`; the first orchestrator per repo wins<br>agent-switcher-data.ts:45-52 — rows are ordered with `localeCompare` and mapped, no model |
 | Agent switcher: navigable sidebar item, popover rows, live agent query, and in-client hand-off | `client/agent-switcher.tsx` | 11 | 373 | `deterministic` | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherSidebarIcon`, `AgentSwitcherDropdownProps`, `AgentRowItem`, `AgentSwitcherDropdown`, `AgentSwitcherSidebarItem`, +2 more | agent-switcher.tsx:39-55 — `AgentRowItem` derives its status dot from `getDeterministicStateConfig` over the agent's precomputed state<br>agent-switcher.tsx:150-217 — front desk and orchestrator rows render directly from props, with literal empty states<br>agent-switcher.tsx:295-310 — `useRpcQuery` polls `fleetRosterContract`; selecting a row calls `openScreen` with the jump screen id and the selected agent<br>agent-switcher.tsx:351-362 — the navigable screen forwards the selection to `navigation.openAgent` on mount |
-| Fleet surface: tabs, router status badge, attention card, role-model and metrics dashboards | `client/surface.tsx` | 19 | 3257 | `deterministic` | `UppidiFleetSurface`, `UppidiBrandMark`, `UppidiTopHeaderBar`, `AttentionAgentCard`, `resolveRouterStatusBadge` | surface.tsx:295-306 — router badge is a three-way branch on two booleans<br>surface.tsx:499 — the surface reads every dataset over `useRpc`<br>surface.tsx:1281-1300 — model selection is a `Select` writing the role-model RPC<br>surface.tsx:682-685 — the write reports the server's own message, not a local guess |
+| Fleet surface: tabs, router status badge, attention card, role-model and metrics dashboards | `client/surface.tsx` | 19 | 3268 | `deterministic` | `UppidiFleetSurface`, `UppidiBrandMark`, `UppidiTopHeaderBar`, `AttentionAgentCard`, `resolveRouterStatusBadge` | surface.tsx:295-306 — router badge is a three-way branch on two booleans<br>surface.tsx:499 — the surface reads every dataset over `useRpc`<br>surface.tsx:1281-1300 — model selection is a `Select` writing the role-model RPC<br>surface.tsx:682-685 — the write reports the server's own message, not a local guess |
 | Forge issues surface: query, filtering, issue rows, status badges | `client/forges-tab.tsx` | 13 | 544 | `deterministic` | `forgeOpenIssuesContract`, `forgeContextContract`, `ForgeIssuesView`, `ForgesTabView` | forges-tab.tsx:21-70 — declares RPC query contracts for forge open issues and context<br>forges-tab.tsx:96-100 — reads issues over useRpcQuery<br>forges-tab.tsx:110-125 — filters issues by client query without model interaction |
 | Fleet Kanban board: column mapping, transitions, ticket cards | `client/kanban-board.tsx` | 14 | 74 | `deterministic` | `KANBAN_COLUMNS`, `getIssueKanbanColumn`, `getColumnTransitions`, `KanbanCard`, `UppidiFleetKanbanBoard` | kanban-board.tsx:21-32 — re-exports canonical column definitions, transitions, and cards from @xpufx/paseo-plugin-ui and backend-tickets<br>kanban-board.tsx:44-56 — UppidiFleetKanbanBoard delegates to shared presentation component; no model call |
 | Agent tree rendering: status lights, health gauges, metrics cards, rows, project groups | `client/tree-view.tsx` | 37 | 3418 | `deterministic` | `UppidiFleetTreeView`, `AgentStatusLight`, `AgentStateDot`, `AgentHealthGauge`, `AgentMetricsCard`, `OrchestratorRow`, +3 more | tree-view.tsx:387-403 — relative time is arithmetic on a timestamp<br>tree-view.tsx:450 — health gauge reads thresholds computed server-side<br>tree-view.tsx:2042 — the tree view is a pure function of the agents array |
@@ -134,6 +136,7 @@ See *What this table does not cover* below for the sessions themselves.
 | Fleet theme accessor: host theme colors and helpers plus plugin typography scale | `client/theme.ts` | 6 | 80 | `deterministic` | `FleetTheme`, `useFleetTheme` | theme.ts:50-60 — colors, alpha and status helpers come from the host theme; typography is a fixed local scale<br>theme.ts:7-13 — no computed-style scraping, no client provider |
 | Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle | `client/host-ui.tsx` | 127 | 764 | `deterministic` | `Card`, `Button`, `Badge`, `DataTable`, `ModalBody`, `ForgeIcon`, +2 more | host-ui.tsx:1-20 — component library over the host theme, host Icon and plain react-native; no model call<br>host-ui.tsx:100-200 — Row/Stack/Grid and Card/Tabs compose host theme colors only<br>host-ui.tsx:603-760 — ticket lifecycle view renders RPC payloads; it does not produce model output |
 | CI Runner Fleet presentation: runner cards, scaler telemetry, DinD status | `client/runners-tab.tsx` | 1 | 335 | `deterministic` | `RunnersTab` | runners-tab.tsx:228-335 — renders runner status, scaler telemetry, and DinD status from RPC; no model inference |
+| Action Runs tab: repository-scoped RPC query, client-side search, status quick-filter chips, rich run cards | `client/actions-tab.tsx` | 1 | 355 | `deterministic` | `ActionsTabView` | actions-tab.tsx:95-130 — uses `useRpcQuery` with `forgeActionRunsContract`; poll interval set to 30 s for live telemetry<br>actions-tab.tsx:140-155 — client-side search across workflow name, commit message, branch, SHA, user login, event type<br>actions-tab.tsx:175-280 — rich card rendering: repo pill, status/conclusion badges, branch, short SHA link, avatar, event pill, elapsed duration |
 | Static fleet fixtures for client tests | `client/testing/fleet-fixtures.ts` | 9 | 422 | `deterministic` | `agentsPayload`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `hookQueuesPayload` | fleet-fixtures.ts:222-370 — seven payload builders returning fixed records<br>fleet-fixtures.ts:32 — one wide-worktree geometry constant |
 | Render harness: host element stubs, rpc stubs, provider wrapper | `client/testing/fleet-harness.ts` | 36 | 280 | `deterministic` | `getFleetHarness`, `useToast`, `Icon`, `useRevealedText` | fleet-harness.ts:28-58 — host components stubbed to inert React elements<br>fleet-harness.ts:70-80 — toast, icon, scroll/flatlist and copyText stubs<br>fleet-harness.ts:111 — the harness is assembled once and awaited |
 
@@ -150,6 +153,7 @@ See *What this table does not cover* below for the sessions themselves.
 - **Fleet theme accessor: host theme colors and helpers plus plugin typography scale** (`client/theme.ts`) — Thin hook over the host theme provider. Same host theme in, same FleetTheme out; no inference.
 - **Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle** (`client/host-ui.tsx`) — Replaces the removed frozen helper client kit for uppidi-fleet. Deterministic presentation; model work stays behind the RPCs it renders.
 - **CI Runner Fleet presentation: runner cards, scaler telemetry, DinD status** (`client/runners-tab.tsx`) — Pure UI presentation of CI runner fleet and scaler vitals.
+- **Action Runs tab: repository-scoped RPC query, client-side search, status quick-filter chips, rich run cards** (`client/actions-tab.tsx`) — Pure presentation over server-fetched action runs. Search and filter are arithmetic string operations; no model call.
 - **Static fleet fixtures for client tests** (`client/testing/fleet-fixtures.ts`) — Test data. Deterministic by construction.
 - **Render harness: host element stubs, rpc stubs, provider wrapper** (`client/testing/fleet-harness.ts`) — Test scaffolding. Never shipped: package.json `files` excludes `client/testing`.
 
@@ -157,7 +161,7 @@ See *What this table does not cover* below for the sessions themselves.
 
 | Moving part | File | File exports | File loc | Classification | Anchors | Evidence |
 | --- | --- | ---: | ---: | --- | --- | --- |
-| 45 RPC contracts (zod schemas + input/output types) and the fleet settings contract | `shared/contracts.ts` | 334 | 2508 | `deterministic` | `uppidiFleetSettingsContract`, `uppidiFleetSettingsSchema` | contracts.ts:54-2348 — 45 `defineContract`/`defineSettingsContract` objects across the file<br>contracts.ts:1739-1754 — the fleet settings schema is a `z.object`<br>index.server.ts:135-189 — every one of them is bound to a handler there |
+| 45 RPC contracts (zod schemas + input/output types) and the fleet settings contract | `shared/contracts.ts` | 347 | 2601 | `deterministic` | `uppidiFleetSettingsContract`, `uppidiFleetSettingsSchema` | contracts.ts:54-2348 — 45 `defineContract`/`defineSettingsContract` objects across the file<br>contracts.ts:1739-1754 — the fleet settings schema is a `z.object`<br>index.server.ts:135-189 — every one of them is bound to a handler there |
 | Settings re-export barrel | `shared/settings.ts` | 3 | 5 | `deterministic` | whole file | shared/settings.ts:1-5 — re-exports three names from `contracts.js` |
 | Filtering, sorting, health-gauge derivation, project grouping, bulk-archive eligibility | `shared/sort-filter.ts` | 46 | 1233 | `deterministic` | `filterIssues`, `sortIssues`, `filterQueues`, `sortAgents`, `filterRunners`, `filterMetricCandidates`, +4 more | sort-filter.ts:148 — health gauge buckets counters against fixed thresholds<br>sort-filter.ts:484-540 — bulk-archive eligibility is an explicit ordered rule list<br>sort-filter.ts:875 — project grouping is set/dict work over agent records |
 | Canonical repository identity resolution: normalization, coordinate splitting, single-name resolver (#888) | `shared/repo-identity.ts` | 11 | 191 | `deterministic` | `normalizeRepoKey`, `canonicalRepoKey`, `resolveCanonicalRepo`, `canonicalRepoName`, `compactRepoName` | repo-identity.ts:14-30 — `normalizeRepoKey` strips protocol, scp, port and `.git` deterministically<br>repo-identity.ts:83-115 — `repoCoordinates` splits a fully-qualified key into host/owner/repo<br>repo-identity.ts:135-176 — `resolveCanonicalRepo` matches a bare name against the known roster or returns null |
@@ -222,6 +226,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `client/surface-halt.test.tsx` | client/surface-halt | `test:tsx` | 173 | `deterministic` |
 | `client/tree-zebra.test.tsx` | Tree zebra striping | `test:tsx` | 47 | `deterministic` |
 | `client/ui-guard.test.ts` | client/ui-guard | `test:tsx` | 155 | `deterministic` |
+| `server/actions.test.ts` | Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing | `test:node` | 234 | `deterministic` |
 | `server/agents.test.ts` | Agent normalisation, state derivation, spawn-authority and archive paths | `test:node` | 2079 | `deterministic` |
 | `server/audit-receipts.test.ts` | server/audit-receipts | `test:node` | 268 | `deterministic` |
 | `server/disk-logger.test.ts` | server/disk-logger | `test:node` | 92 | `deterministic` |
@@ -283,6 +288,7 @@ matrix above is the judgement half.
 | `bin/fleet-ensure-orchestrator.mjs` | script | 111 | 0 | — |
 | `bin/fleet-mcp-server.mjs` | script | 120 | 0 | — |
 | `bin/fleet-watchdog.mjs` | script | 117 | 0 | — |
+| `client/actions-tab.tsx` | client | 355 | 1 | `ActionsTabView` |
 | `client/agent-switcher-data.ts` | client | 59 | 3 | `AgentSwitcherData`, `AgentSwitcherGroup`, `mapAgentSwitcherData` |
 | `client/agent-switcher.test.tsx` | client | 420 | 0 | — |
 | `client/agent-switcher.tsx` | client | 373 | 11 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentRowItem`, `AgentSwitcherDropdown`, `AgentSwitcherDropdownProps`, `AgentSwitcherJumpScreen`, `AgentSwitcherPopover`, `AgentSwitcherSidebarIcon`, `AgentSwitcherSidebarItem`, `PluginPopoverProps`, `PluginScreenProps`, `PluginSidebarItemProps` |
@@ -307,7 +313,7 @@ matrix above is the judgement half.
 | `client/search-height.test.ts` | client | 166 | 0 | — |
 | `client/select-stable-rows.test.tsx` | client | 176 | 0 | — |
 | `client/surface-halt.test.tsx` | client | 173 | 0 | — |
-| `client/surface.tsx` | client | 3257 | 19 | `AttentionAgentCard`, `AttentionAgentCardProps`, `HaltConfirmModal`, `HaltConfirmModalProps`, `HaltedBanner`, `HaltedBannerProps`, `ModelAlertBanner`, `ModelAlertBannerProps`, `ResetStateModal`, `ResetStateModalProps`, `RouterStatusBadge`, `SurfaceTab` …+7 more |
+| `client/surface.tsx` | client | 3268 | 19 | `AttentionAgentCard`, `AttentionAgentCardProps`, `HaltConfirmModal`, `HaltConfirmModalProps`, `HaltedBanner`, `HaltedBannerProps`, `ModelAlertBanner`, `ModelAlertBannerProps`, `ResetStateModal`, `ResetStateModalProps`, `RouterStatusBadge`, `SurfaceTab` …+7 more |
 | `client/testing/fleet-fixtures.ts` | client | 422 | 9 | `WIDE_WORKTREE`, `agentsPayload`, `agentsPayloadNoFrontDesk`, `hookQueuesPayload`, `installPayloads`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `skillsPayload` |
 | `client/testing/fleet-harness.ts` | client | 280 | 36 | `ActivityIndicator`, `Animated`, `Appearance`, `Dimensions`, `Easing`, `FlatList`, `FleetRenderHarness`, `Icon`, `Image`, `Linking`, `Modal`, `PanResponder` …+24 more |
 | `client/theme.ts` | client | 80 | 6 | `FleetTheme`, `FleetTypographyScale`, `FleetTypographyToken`, `HostThemeProvider`, `HostThemeProviderProps`, `useFleetTheme` |
@@ -316,7 +322,9 @@ matrix above is the judgement half.
 | `client/tree-zebra.test.tsx` | client | 47 | 0 | — |
 | `client/ui-guard.test.ts` | client | 155 | 0 | — |
 | `index.client.tsx` | entry | 115 | 10 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherJumpScreen`, `AgentSwitcherSidebarItem`, `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |
-| `index.server.ts` | entry | 270 | 1 | `contribute` |
+| `index.server.ts` | entry | 273 | 1 | `contribute` |
+| `server/actions.test.ts` | server | 234 | 0 | — |
+| `server/actions.ts` | server | 162 | 2 | `filterByStatus`, `handleForgeActionRuns` |
 | `server/agents.test.ts` | server | 2079 | 0 | — |
 | `server/agents.ts` | server | 3340 | 64 | `CanonicalFleetRegistry`, `DEFAULT_AUTO_ACCEPT_PROVIDERS`, `DEFAULT_SPAWN_MODE_PROVIDERS`, `ExecFileAsyncFn`, `RawAgentRecord`, `RawPendingPermissionLike`, `RepoRootInspection`, `SPAWN_AUTHORITY_WORKER_ERROR`, `SPAWN_AUTHORITY_WORKSPACE_ERROR`, `SpawnAuthorityDecision`, `SpawnCapabilities`, `SpawnCapabilityResult` …+52 more |
 | `server/audit-receipts.test.ts` | server | 268 | 0 | — |
@@ -362,7 +370,7 @@ matrix above is the judgement half.
 | `shared/agent-links.test.ts` | shared | 80 | 0 | — |
 | `shared/agent-links.ts` | shared | 145 | 11 | `AgentLinkConfig`, `AgentLinkScheme`, `AgentLinkTarget`, `buildAgentLink`, `buildDashboardAgentLink`, `buildHappierAgentLink`, `buildPaseoAgentLink`, `createAgentLinkResolver`, `defaultAgentLink`, `resolveAgentLinkConfig`, `resolveEnvelopeAgentLink` |
 | `shared/contracts.test.ts` | shared | 1437 | 0 | — |
-| `shared/contracts.ts` | shared | 2508 | 334 | `AgentAttentionReason`, `AgentAttentionReasonSchema`, `AgentBlockDetail`, `AgentBlockDetailSchema`, `AgentLifecycleState`, `AgentLifecycleStateSchema`, `AgentRoleDivergence`, `AgentRoleDivergenceSchema`, `AttentionLabel`, `AttentionLabelSchema`, `AutomationTierSchema`, `AutomationTierValue` …+322 more |
+| `shared/contracts.ts` | shared | 2601 | 347 | `AgentAttentionReason`, `AgentAttentionReasonSchema`, `AgentBlockDetail`, `AgentBlockDetailSchema`, `AgentLifecycleState`, `AgentLifecycleStateSchema`, `AgentRoleDivergence`, `AgentRoleDivergenceSchema`, `AttentionLabel`, `AttentionLabelSchema`, `AutomationTierSchema`, `AutomationTierValue` …+335 more |
 | `shared/helper-version.ts` | shared | 29 | 3 | `HELPER_REVISION`, `HELPER_SERVED_FROM`, `HELPER_VERSION` |
 | `shared/repo-identity.test.ts` | shared | 132 | 0 | — |
 | `shared/repo-identity.ts` | shared | 191 | 11 | `CanonicalRepo`, `DEFAULT_FORGEJO_HOST`, `RepoCoordinates`, `ResolveCanonicalRepoOptions`, `candidateRepoKeys`, `canonicalRepoKey`, `canonicalRepoName`, `compactRepoName`, `normalizeRepoKey`, `repoCoordinates`, `resolveCanonicalRepo` |

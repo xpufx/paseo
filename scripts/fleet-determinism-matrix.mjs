@@ -927,6 +927,34 @@ const PARTS = [
     note: "Pure UI presentation of CI runner fleet and scaler vitals.",
   },
   {
+    file: `${PLUGIN}/client/actions-tab.tsx`,
+    part: "Action Runs tab: repository-scoped RPC query, client-side search, status quick-filter chips, rich run cards",
+    layer: "client",
+    label: DETERMINISTIC,
+    anchors: { exports: ["ActionsTabView"] },
+    evidence: [
+      [`actions-tab.tsx:95-130`, "uses `useRpcQuery` with `forgeActionRunsContract`; poll interval set to 30 s for live telemetry"],
+      [`actions-tab.tsx:140-155`, "client-side search across workflow name, commit message, branch, SHA, user login, event type"],
+      [`actions-tab.tsx:175-280`, "rich card rendering: repo pill, status/conclusion badges, branch, short SHA link, avatar, event pill, elapsed duration"],
+    ],
+    note: "Pure presentation over server-fetched action runs. Search and filter are arithmetic string operations; no model call.",
+  },
+  {
+    file: `${PLUGIN}/server/actions.ts`,
+    part: "Forgejo Actions CI/CD run fetcher: single-repo query, parallel multi-repo aggregation with Promise.allSettled, status filtering",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: { exports: ["handleForgeActionRuns", "filterByStatus"] },
+    evidence: [
+      [`actions.ts:17-45`, "`parseForgejoRun` normalises Forgejo JSON into the typed contract shape; branch is derived from ref prefix"],
+      [`actions.ts:48-67`, "single-repo fetch via `/api/v1/repos/{owner}/{repo}/actions/runs` using `forgejoApiGet` + `forgejoToken`"],
+      [`actions.ts:70-77`, "enrolled repos resolved from hook router roster for 'all' mode"],
+      [`actions.ts:80-115`, "parallel `Promise.allSettled` fetch across enrolled repos; errors silently skipped for resilient aggregation"],
+      [`actions.ts:125-140`, "`filterByStatus` is a fixed switch on status/conclusion fields"],
+    ],
+    note: "HTTP reads against Forgejo API with deterministic token resolution and error handling. No inference.",
+  },
+  {
     file: `${PLUGIN}/client/testing/fleet-fixtures.ts`,
     part: "Static fleet fixtures for client tests",
     layer: "client",
@@ -1210,6 +1238,7 @@ const SUITE_NOTES = {
   "shared/agent-links.test.ts": "Multi-client agent deep link resolvers and URI templates",
   "shared/contracts.test.ts": "Contract schema validation",
   "shared/sort-filter.test.ts": "Filter, sort, gauge and grouping functions",
+  "server/actions.test.ts": "Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing"
 };
 
 // ---------------------------------------------------------------------------

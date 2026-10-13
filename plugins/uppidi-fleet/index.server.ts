@@ -48,6 +48,7 @@ import {
   uppidiAuditCheckContract,
   uppidiAuditSummaryContract,
   uppidiModelTelemetryQueryContract,
+  forgeActionRunsContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues, handleUppidiTransitionIssue } from "./server/issues.js";
 import {
@@ -100,6 +101,7 @@ import {
   setupTelemetryTap,
 } from "./server/telemetry.js";
 import { handleFleetToolList, handleFleetToolExecute } from "./server/mcp-tools.js";
+import { handleForgeActionRuns } from "./server/actions.js";
 import {
   HookRouter,
   startHookRouter,
@@ -215,6 +217,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiAuditCheckContract, handleUppidiAuditCheck);
   server.handle(uppidiAuditSummaryContract, handleUppidiAuditSummary);
   server.handle(uppidiModelTelemetryQueryContract, handleUppidiModelTelemetryQuery);
+  server.handle(forgeActionRunsContract, handleForgeActionRuns);
 
   const settingsStorage = getUppidiFleetSettingsStorage();
   registerSettingsRpc(server, uppidiFleetSettingsContract, settingsStorage, {

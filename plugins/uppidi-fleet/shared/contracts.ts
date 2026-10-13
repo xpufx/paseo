@@ -2303,6 +2303,99 @@ export const uppidiFrontDeskPromptContract = defineContract({
   output: UppidiFrontDeskPromptOutputSchema,
 });
 
+// ---------------------------------------------------------------- Action Runs ---
+
+export const ForgeActionRunConclusionSchema = z.enum([
+  "success",
+  "failure",
+  "neutral",
+  "cancelled",
+  "skipped",
+  "timed_out",
+  "requested",
+  "in_progress",
+]);
+export type ForgeActionRunConclusion = z.infer<typeof ForgeActionRunConclusionSchema>;
+
+export const ForgeActionRunStatusSchema = z.enum([
+  "completed",
+  "in_progress",
+  "queued",
+  "pending",
+  "waiting",
+]);
+export type ForgeActionRunStatus = z.infer<typeof ForgeActionRunStatusSchema>;
+
+export const ForgeActionRunEventSchema = z.enum([
+  "push",
+  "issue",
+  "issues",
+  "pull_request",
+  "pull_request_review",
+  "pull_request_review_comment",
+  "commit_comment",
+  "workflow_dispatch",
+  "schedule",
+  "release",
+  "fork",
+  "wiki",
+  "gollum",
+  "check_run",
+  "check_suite",
+  "delete",
+  "create",
+  "merge_group",
+]);
+export type ForgeActionRunEvent = z.infer<typeof ForgeActionRunEventSchema>;
+
+export const ForgeActionRunSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  html_url: z.string().default(""),
+  status: ForgeActionRunStatusSchema.default("completed"),
+  conclusion: ForgeActionRunConclusionSchema.nullable().default(null),
+  workflow_id: z.string().default(""),
+  ref: z.string().default(""),
+  branch: z.string().nullable().default(null),
+  event: ForgeActionRunEventSchema.default("push"),
+  head_commit: z.object({
+    message: z.string().default(""),
+    sha: z.string().default(""),
+  }).default({ message: "", sha: "" }),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  run_started_at: z.string().nullable().default(null),
+  completed_at: z.string().nullable().default(null),
+  user: z.object({
+    login: z.string().default(""),
+    avatar_url: z.string().nullable().default(null),
+  }).default({ login: "", avatar_url: null }),
+  repo: z.string().default(""),
+  repo_url: z.string().default(""),
+});
+export type ForgeActionRun = z.infer<typeof ForgeActionRunSchema>;
+
+export const ForgeActionRunsInputSchema = z.object({
+  repo: z.string().optional(),
+  status: z.enum(["all", "running", "failed", "succeeded"]).default("all"),
+  limit: z.number().default(50),
+});
+export type ForgeActionRunsInput = z.infer<typeof ForgeActionRunsInputSchema>;
+
+export const ForgeActionRunsOutputSchema = z.object({
+  ok: z.boolean(),
+  runs: z.array(ForgeActionRunSchema).default([]),
+  error: z.string().optional(),
+});
+export type ForgeActionRunsOutput = z.infer<typeof ForgeActionRunsOutputSchema>;
+
+export const forgeActionRunsContract = defineContract({
+  name: "uppidi-fleet.action-runs",
+  description: "List recent Forgejo Actions CI/CD workflow runs, optionally scoped to a single repository",
+  input: ForgeActionRunsInputSchema,
+  output: ForgeActionRunsOutputSchema,
+});
+
 export const DISPATCH_COMMAND_PATTERNS = [
   /\bpaseo\s+(send|permit|create|spawn|kill|archive)\b/i,
   /\bteax\s+(pr|issue)\s+(merge|close|create|assign)\b/i,

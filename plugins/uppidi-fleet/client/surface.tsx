@@ -118,10 +118,11 @@ import { UppidiFleetToolingView } from "./tooling.js";
 import { UppidiFleetKanbanBoard } from "./kanban-board.js";
 import { ForgeIssuesView } from "./forges-tab.js";
 import { canonicalForgeUrl, resolveForgeSelection } from "./forges-tab.js";
+import { ActionsTabView } from "./actions-tab.js";
 import { canonicalRepoName, resolveCanonicalRepo } from "../shared/repo-identity.js";
 import { defaultAgentLink } from "../shared/agent-links.js";
 
-export type SurfaceTab = "tree" | "dashboard" | "tooling" | "settings" | "board" | "forges";
+export type SurfaceTab = "tree" | "dashboard" | "tooling" | "settings" | "board" | "forges" | "actions";
 
 /**
  * Narrows a possibly-partial RPC collection to an array. A truncated or legacy
@@ -169,6 +170,7 @@ const tabs = [
   { id: "settings", label: "Settings", shortLabel: "Settings", icon: "Sliders" },
   { id: "board", label: "Board", shortLabel: "Board", icon: "Kanban" },
   { id: "forges", label: "Forge Issues", shortLabel: "Forges", icon: "GitPullRequest" },
+  { id: "actions", label: "Action Runs", shortLabel: "Actions", icon: "PlayCircle" },
 ];
 
 const attentionMap: Record<AttentionLabel, string> = {
@@ -2859,6 +2861,15 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             onSelectRepo={setSelectedRepo}
             enrolledRepos={availableRepos}
             activeRepo={issuesData?.repo ?? undefined}
+          />
+        </ModalBodyScrollOwnerContext.Provider>
+      ) : activeTab === "actions" ? (
+        <ModalBodyScrollOwnerContext.Provider value="host">
+          <ActionsTabView
+            workspaceId={activeWorkspaceId}
+            selectedRepo={selectedRepo}
+            onSelectRepo={setSelectedRepo}
+            enrolledRepos={availableRepos}
           />
         </ModalBodyScrollOwnerContext.Provider>
       ) : (
