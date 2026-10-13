@@ -2120,22 +2120,41 @@ export function isOrchestratorAgent(
 }
 
 /**
- * True when the agent is a Front Desk agent (#999).
- * Standardized on agent title/name matching `/^Front Desk\b/i`, with fallback to role/labels.
+ * True when the agent is a Front Desk agent (#999, #1143).
+ * Authoritative and deterministic: identity resolves strictly from the roster
+ * (the registered Front Desk id) and explicit spawn metadata (`role` /
+ * `labels.role` / `labels.category`). Display names and titles are never
+ * inspected, so retired sessions (`Front Desk (retired)`) and workers whose
+ * branch or title merely mentions Front Desk never match.
  */
 export function isFrontDeskAgent(
-  agent: Pick<WatchdogAgent, "role" | "labels"> & { title?: string | null; name?: string | null },
+  agent: Pick<WatchdogAgent, "role" | "labels"> & {
+    title?: string | null;
+    name?: string | null;
+    id?: string | null;
+  },
+  registeredFrontDeskId?: string | null,
 ): boolean {
   if (!agent) return false;
-  const title = String(agent.title ?? agent.name ?? "").trim();
-  if (/^Front Desk\b/i.test(title) || title.toLowerCase() === "frontdesk") {
-    return true;
+  const agentId = typeof (agent as { id?: unknown }).id === "string"
+    ? String((agent as { id?: unknown }).id)
+    : null;
+  if (registeredFrontDeskId && agentId && agentId === registeredFrontDeskId) return true;
+  const labels = ((agent as { labels?: unknown }).labels ?? {}) as Record<string, unknown>;
+  const role = String(
+    (agent as { role?: unknown }).role ?? (labels as Record<string, unknown>).role ?? "",
+  )
+    .trim()
+    .toLowerCase();
+  if (role) {
+    // Retired sessions explicitly opt out, even when a stale registration lingers.
+    if (role.includes("retired")) return false;
+    return role === "front-desk" || role === "frontdesk";
   }
-  const labels = agent.labels ?? {};
-  const role = String(agent.role ?? labels.role ?? "").trim().toLowerCase();
-  if (role === "front-desk" || role === "frontdesk") return true;
-  if (String(labels.category ?? "").trim().toLowerCase() === "front-desk") return true;
-  return false;
+  const category = String((labels as Record<string, unknown>).category ?? "")
+    .trim()
+    .toLowerCase();
+  return category === "front-desk" || category === "frontdesk";
 }
 
 /**
@@ -2312,9 +2331,10 @@ export function findLiveOrchestratorAgent(
   return matching[0]?.id ?? null;
 }
 
-/** Find active Front Desk agents, newest first, for registry recovery. */
+/** Find active Front Desk agents, newest first, for registry recovery (#1143: roster/labels only, never display names). */
 export function findLiveFrontDeskAgents(
   agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
+  registeredFrontDeskId?: string | null,
 ): WatchdogAgent[] {
   if (!agentMap || agentMap.size === 0) return [];
   const isLive = (agent: WatchdogAgent): boolean => {
@@ -2322,7 +2342,9 @@ export function findLiveFrontDeskAgents(
     const status = String(agent.status ?? "").toLowerCase();
     return !["closed", "archived", "terminated", "error", "failed"].includes(status);
   };
-  const matches = Array.from(agentMap.values()).filter((agent) => isLive(agent) && isFrontDeskAgent(agent));
+  const matches = Array.from(agentMap.values()).filter(
+    (agent) => isLive(agent) && isFrontDeskAgent(agent, registeredFrontDeskId),
+  );
   const getTime = (agent: WatchdogAgent): number => {
     const ts = agent.updatedAt || agent.lastActivityAt || agent.activeTurn?.startedAt;
     if (!ts) return 0;
@@ -7388,6 +7410,41 @@ export class HookRouter {
     return { ok: true, agentId: candidate.id, recovered: true };
   }
 
+  /**
+   * Reconcile missing orchestrator registrations for enrolled repositories from
+   * the live daemon roster (#1143). Prevents cold-start registry role divergence.
+   */
+  public async reconcileEnrolledOrchestrators(
+    agentMap?: Map<string, WatchdogAgent> | null,
+  ): Promise<{ reconciled: number; repos: string[] }> {
+    let live = agentMap;
+    if (live === undefined) {
+      try {
+        live = await this.fetchAgentMap();
+      } catch {
+        live = null;
+      }
+    }
+    const repos = this.getCanonicalEnrolledRepos();
+    const reconciledRepos: string[] = [];
+    for (const repo of repos) {
+      if (!repo || repo === "frontdesk") continue;
+      if (this.readOrchestrator(repo)?.agentId) continue;
+      try {
+        const active = await this.getActiveOrchestrator(repo, live);
+        if (active?.agentId) {
+          reconciledRepos.push(repo);
+        }
+      } catch (err) {
+        this.log(`[warn] Failed to reconcile orchestrator for ${repo}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (reconciledRepos.length > 0) {
+      this.log(`[info] Reconciled ${reconciledRepos.length} orchestrator registration(s) from live agent roster: ${reconciledRepos.join(", ")}`);
+    }
+    return { reconciled: reconciledRepos.length, repos: reconciledRepos };
+  }
+
   public canWatchdogAlert(alertKey: string, now = Date.now()): boolean {
     const last = this.watchdogAlerts.get(alertKey) ?? 0;
     return now - last >= this.watchdogAlertCooldownMs;
@@ -8798,10 +8855,18 @@ export class HookRouter {
     if (map && map.size > 0) {
       const live = map.get(agentId);
       if (!live) return { ok: false, reason: `replacement ${agentId} missing from live roster` };
-      const roleText = `${live.role ?? ""} ${live.title ?? ""} ${live.name ?? ""}`.toLowerCase();
-      const expected = role === "front-desk" ? ["front-desk", "front desk"] : [role];
-      if (!expected.some((token) => roleText.includes(token))) {
-        return { ok: false, reason: `replacement ${agentId} registered without ${role} role/title` };
+      // Authoritative verification only: explicit spawn metadata (role/labels),
+      // never the display title (#1143). Rotation spawns stamp `role`, so a
+      // replacement without it is not verified.
+      const liveRole = String(
+        live.role ?? live.labels?.role ?? live.labels?.category ?? "",
+      )
+        .trim()
+        .toLowerCase();
+      const expected =
+        role === "front-desk" ? ["front-desk", "frontdesk"] : [role.toLowerCase()];
+      if (!expected.includes(liveRole)) {
+        return { ok: false, reason: `replacement ${agentId} registered without ${role} role metadata` };
       }
     }
     return { ok: true };
@@ -9861,9 +9926,15 @@ export class HookRouter {
           // ephemeral and already removed above when culled.
           if (!liveOrchestratorIds.has(cachedId)) {
             const entry = this.latestAgentMap.get(cachedId);
-            const role = String((entry as any)?.role ?? "").toLowerCase();
-            const title = String((entry as any)?.title ?? (entry as any)?.name ?? "").toLowerCase();
-            if (role === "orchestrator" || title.includes("orchestrator") || title.includes("front desk")) {
+            // Authoritative role scope only: explicit role/label metadata, never
+            // display-title substrings (#1143).
+            const entryLabels = ((entry as any)?.labels ?? {}) as Record<string, unknown>;
+            const role = String(
+              (entry as any)?.role ?? entryLabels.role ?? entryLabels.category ?? "",
+            )
+              .trim()
+              .toLowerCase();
+            if (role === "orchestrator" || role === "front-desk" || role === "frontdesk") {
               this.latestAgentMap.delete(cachedId);
             }
           }
@@ -10549,6 +10620,14 @@ export class HookRouter {
       await this.reconcileFrontDesk();
     } catch (err) {
       this.log(`[warn] Front Desk startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // Eagerly reconcile enrolled repository orchestrators from the live roster
+    // before serving traffic, so a cold start never demotes live orchestrators
+    // to workers with false divergence warnings (#1143).
+    try {
+      await this.reconcileEnrolledOrchestrators();
+    } catch (err) {
+      this.log(`[warn] Orchestrator startup reconciliation failed: ${err instanceof Error ? err.message : String(err)}`);
     }
     return new Promise((resolve, reject) => {
       this.isClosed = false;

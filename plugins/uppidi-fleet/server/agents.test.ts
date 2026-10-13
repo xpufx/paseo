@@ -44,6 +44,8 @@ import {
   isFleetWorker,
   resolveTeardownAgents,
   handleUppidiAddOrchestrator,
+  categorizeAgent,
+  resolveAgentRole,
 } from "./agents.js";
 import { HookRouter, setActiveHookRouter } from "./hook-router.js";
 import { DEFAULT_PROJECT } from "../shared/contracts.js";
@@ -1939,19 +1941,210 @@ describe("canonical fleet roles from the hook router registry (#1078)", () => {
     assert.equal(res.roleDivergences.length, 0);
   });
 
-  it("marks name-derived roles display-only when no router registry is reachable", async () => {
+  it("leaves unregistered label claims to the registry at output while normalizing from labels (#1143, #1150)", async () => {
+    makeRouter();
+
+    const res = await handleUppidiAgents(
+      {},
+      contextFor([
+        { id: "label-desk", name: "Some Session", status: "idle", labels: { role: "front-desk" } },
+        { id: "label-orch", name: "Another Session", status: "idle", labels: { role: "orchestrator" } },
+      ])
+    );
+
+    // The registry is the only source of truth at output (#1150): unregistered
+    // claims stay coding-agents, while normalize-level classification still
+    // reads their explicit labels (see resolveAgentRole/categorizeAgent below).
+    assert.equal(res.registryAuthoritative, true);
+    assert.equal(res.frontDesk.length, 0);
+    assert.equal(res.orchestrators.length, 0);
+    assert.equal(res.roleDivergences.length, 0);
+    for (const id of ["label-desk", "label-orch"]) {
+      const worker = res.workers.find((a) => a.id === id);
+      assert.ok(worker);
+      assert.equal(worker?.category, "coding-agent");
+      assert.equal(worker?.roleSource, "registry");
+      assert.equal(worker?.roleDivergent, false);
+    }
+    // Normalize-level resolution honors the same labels deterministically.
+    assert.equal(categorizeAgent({ id: "label-desk", labels: { role: "front-desk" } }), "front-desk");
+    assert.equal(categorizeAgent({ id: "label-orch", labels: { role: "orchestrator" } }), "orchestrator");
+  });
+
+  it("lets registry ids win over conflicting labels without divergence alerts (#1143, #1150)", async () => {
+    const router = makeRouter();
+    router.writeOrchestrator("forge.example.com/org/repo", "conflict-id");
+
+    const res = await handleUppidiAgents(
+      {},
+      contextFor([
+        { id: "conflict-id", name: "Some Session", status: "idle", labels: { role: "front-desk" } },
+      ])
+    );
+
+    const conflict = res.orchestrators.find((a) => a.id === "conflict-id");
+    assert.ok(conflict, "the registry id decides the canonical role");
+    assert.equal(conflict?.category, "orchestrator");
+    assert.equal(conflict?.registryRepoKey, "forge.example.com/org/repo");
+    assert.equal(conflict?.roleDivergent, false);
+    assert.equal(res.roleDivergences.length, 0);
+  });
+
+  it("marks label-derived roles display-only when no router registry is reachable", async () => {
     setActiveHookRouter(null);
 
     const res = await handleUppidiAgents(
       {},
-      contextFor([{ id: "desk-no-router", name: "Front Desk", status: "idle" }])
+      contextFor([
+        { id: "desk-no-router", name: "Front Desk", status: "idle" },
+        { id: "labeled-no-router", name: "Some Session", status: "idle", labels: { role: "front-desk" } },
+      ])
     );
 
     assert.equal(res.registryAuthoritative, false);
-    const desk = res.frontDesk.find((a) => a.id === "desk-no-router");
+    // A bare display name grants nothing without roster metadata (#1143).
+    const bare = res.workers.find((a) => a.id === "desk-no-router");
+    assert.ok(bare);
+    assert.equal(bare?.category, "coding-agent");
+    assert.equal(bare?.roleSource, "name-heuristic");
+    assert.equal(bare?.roleDivergent, false);
+    // Explicit labels still resolve, but are marked display-only without a registry.
+    const desk = res.frontDesk.find((a) => a.id === "labeled-no-router");
     assert.ok(desk);
     assert.equal(desk?.roleSource, "name-heuristic");
     assert.equal(desk?.roleDivergent, false);
+    assert.equal(res.roleDivergences.length, 0);
+  });
+
+  it("resolveAgentRole honors registry ids, then explicit labels, then coding-agent fallback (#1143)", () => {
+    const registry = {
+      available: true,
+      frontDeskAgentId: "fd-1",
+      orchestratorAgentIdToRepo: new Map([["orch-1", "forge.example.com/org/repo"]]),
+    } as any;
+
+    // 1. Registry id lookup wins over everything, regardless of display name.
+    assert.equal(resolveAgentRole({ id: "fd-1", labels: { role: "coding-agent" } }, registry), "front-desk");
+    assert.equal(resolveAgentRole({ id: "orch-1", labels: { role: "front-desk" } }, registry), "orchestrator");
+
+    // 2. Explicit label tags grant roles: record category/role, labels, and role=* arrays.
+    assert.equal(resolveAgentRole({ id: "a", labels: { role: "front-desk" } }, registry), "front-desk");
+    assert.equal(resolveAgentRole({ id: "a", labels: { role: "frontdesk" } }, registry), "front-desk");
+    assert.equal(resolveAgentRole({ id: "a", labels: { category: "front-desk" } }, registry), "front-desk");
+    assert.equal(resolveAgentRole({ id: "a", labels: { role: "orchestrator" } }, registry), "orchestrator");
+    assert.equal(resolveAgentRole({ id: "a", labels: ["role=orchestrator"] } as any, registry), "orchestrator");
+    assert.equal(resolveAgentRole({ id: "a", role: "front-desk" } as any, registry), "front-desk");
+    assert.equal(resolveAgentRole({ id: "a", category: "orchestrator" } as any, registry), "orchestrator");
+    // Legacy `worker` spelling maps to the canonical coding-agent category (#1126).
+    assert.equal(resolveAgentRole({ id: "a", labels: { role: "worker" } }, registry), "coding-agent");
+
+    // 3. Retired markers are rejected to coding-agent, even with Front Desk titles.
+    assert.equal(
+      resolveAgentRole({ id: "r", name: "Front Desk (retired)", labels: { role: "retired-front-desk" } } as any, registry),
+      "coding-agent"
+    );
+    assert.equal(resolveAgentRole({ id: "r", labels: { role: "retired" } }, registry), "coding-agent");
+
+    // 4. Fallback is always coding-agent: unknown/empty labels and bare names never
+    // promote, no matter how Front Desk-like the title looks.
+    assert.equal(resolveAgentRole({ id: "w" }, registry), "coding-agent");
+    assert.equal(resolveAgentRole({ id: "w", labels: { role: "bogus" } }, registry), "coding-agent");
+    assert.equal(categorizeAgent("Front Desk (retired)"), "coding-agent");
+    assert.equal(categorizeAgent("Front Desk"), "coding-agent");
+    assert.equal(categorizeAgent("Front Desk · Main"), "coding-agent");
+    assert.equal(categorizeAgent("paseo#1119 Front Desk live recovery"), "coding-agent");
+    assert.equal(categorizeAgent("#1143 fix registry role divergences"), "coding-agent");
+    assert.equal(categorizeAgent("Orchestrator · xpufx-org/paseo"), "coding-agent");
+  });
+
+  it("categorizeAgent never promotes from display names; records resolve via roster metadata (#1143)", () => {
+    // Retired sessions, issue workers, and bare Front Desk / orchestrator
+    // titles are all coding-agents without roster metadata.
+    assert.equal(categorizeAgent("Front Desk (retired)"), "coding-agent");
+    assert.equal(categorizeAgent("Front Desk (retired-front-desk)"), "coding-agent");
+    assert.equal(categorizeAgent("paseo#1119 Front Desk live recovery"), "coding-agent");
+    assert.equal(categorizeAgent("#1143 fix registry role divergences"), "coding-agent");
+    assert.equal(categorizeAgent("Front Desk"), "coding-agent");
+    assert.equal(categorizeAgent("Front Desk · Main"), "coding-agent");
+    assert.equal(categorizeAgent("Orchestrator · xpufx-org/paseo"), "coding-agent");
+    // Full records resolve through explicit labels and registry ids.
+    assert.equal(
+      categorizeAgent({ id: "fd", name: "Front Desk", labels: { role: "front-desk" } }),
+      "front-desk"
+    );
+    assert.equal(
+      categorizeAgent({
+        id: "retired",
+        name: "Front Desk (retired)",
+        labels: { role: "retired-front-desk" },
+      }),
+      "coding-agent"
+    );
+    assert.equal(
+      categorizeAgent({
+        id: "w",
+        name: "paseo#1119 Front Desk live recovery",
+        labels: { role: "coding-agent" },
+      }),
+      "coding-agent"
+    );
+    const registry = {
+      available: true,
+      frontDeskAgentId: "fd-reg",
+      orchestratorAgentIdToRepo: new Map(),
+    } as any;
+    assert.equal(
+      categorizeAgent({ id: "fd-reg", name: "Some Session Title" }, registry),
+      "front-desk"
+    );
+  });
+
+  it("eagerly reconciles missing orchestrators when router has enrolled repos and agentMap is present (#1143)", async () => {
+    const router = makeRouter();
+    // Configure enrolled repos
+    router.enrollRepo("xpufx-org/paseo");
+    // Simulate live agent roster containing the orchestrator
+    const mockContext = contextFor([
+      { id: "orch-paseo", name: "Orchestrator · xpufx-org/paseo", status: "idle" },
+    ]);
+
+    const res = await handleUppidiAgents({}, mockContext);
+    assert.equal(res.orchestrators.length, 1);
+    assert.equal(res.orchestrators[0]?.id, "orch-paseo");
+    assert.equal(res.orchestrators[0]?.category, "orchestrator");
+    assert.equal(res.roleDivergences.length, 0);
+  });
+
+  it("reconciles label-tagged orchestrators without title heuristics and isolates retired desks (#1143)", async () => {
+    const router = makeRouter();
+    router.enrollRepo("xpufx-org/paseo");
+
+    const res = await handleUppidiAgents(
+      {},
+      contextFor([
+        {
+          id: "orch-labeled",
+          name: "some opaque session title",
+          status: "idle",
+          labels: { role: "orchestrator", repo: "xpufx-org/paseo" },
+        },
+        {
+          id: "retired-desk",
+          name: "Front Desk (retired)",
+          status: "idle",
+          updatedAt: new Date(Date.now() + 60_000).toISOString(),
+          labels: { role: "retired-front-desk" },
+        },
+      ])
+    );
+
+    const orch = res.orchestrators.find((a) => a.id === "orch-labeled");
+    assert.ok(orch, "explicit orchestrator labels must resolve without title matching");
+    assert.equal(orch?.category, "orchestrator");
+    const retired = res.workers.find((a) => a.id === "retired-desk");
+    assert.ok(retired, "the retired desk must stay a coding-agent despite its newer timestamp");
+    assert.equal(retired?.category, "coding-agent");
+    assert.equal(res.frontDesk.length, 0, "no registered desk means no canonical Front Desk");
     assert.equal(res.roleDivergences.length, 0);
   });
 });

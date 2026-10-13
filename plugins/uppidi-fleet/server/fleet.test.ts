@@ -70,14 +70,24 @@ import { getUppidiFleetSettingsStorage } from "./settings.js";
 import { buildProjectGroups } from "../shared/sort-filter.js";
 
 describe("fleet and agents classification", () => {
-  it("categorizes agent names accurately", () => {
-    assert.equal(categorizeAgent("Front Desk"), "front-desk");
-    assert.equal(categorizeAgent("frontdesk"), "front-desk");
-    assert.equal(categorizeAgent("Orchestrator · xpufx-org/paseo"), "orchestrator");
-    assert.equal(categorizeAgent("Orchestrator · xpufx/platform"), "orchestrator");
-    // #1126: delegated agents are canonical `coding-agent`, not the legacy `worker`.
+  it("resolves agent roles from registry and labels, never bare names (#1143)", () => {
+    // Bare display names alone never grant a role: without a registry entry or
+    // explicit role metadata every agent is a coding-agent (#1126).
+    assert.equal(categorizeAgent("Front Desk"), "coding-agent");
+    assert.equal(categorizeAgent("frontdesk"), "coding-agent");
+    assert.equal(categorizeAgent("Orchestrator · xpufx-org/paseo"), "coding-agent");
+    assert.equal(categorizeAgent("Orchestrator · xpufx/platform"), "coding-agent");
     assert.equal(categorizeAgent("feat-367-worker"), "coding-agent");
     assert.equal(categorizeAgent("platform #99 caller"), "coding-agent");
+    // Explicit spawn metadata grants roles deterministically.
+    assert.equal(
+      categorizeAgent({ id: "fd", name: "Some Session Title", labels: { role: "front-desk" } }),
+      "front-desk"
+    );
+    assert.equal(
+      categorizeAgent({ id: "orch", name: "whatever", labels: { role: "orchestrator" } }),
+      "orchestrator"
+    );
   });
 
   it("extracts attributed work from titles, names, branches, and labels", () => {
@@ -118,10 +128,11 @@ describe("fleet and agents classification", () => {
     const s2 = deriveDeterministicState({ id: "a2", status: "running" }, null);
     assert.equal(s2.state, "running");
 
-    // 3. Sleeping orchestrator (idle > 15m)
+    // 3. Sleeping orchestrator (idle > 15m) — roles come from explicit
+    // spawn metadata, never the display name (#1143).
     const oldTime = new Date(Date.now() - 20 * 60 * 1000).toISOString();
     const s3 = deriveDeterministicState(
-      { id: "a3", name: "Orchestrator · test", status: "idle", lastActivityAt: oldTime },
+      { id: "a3", name: "Orchestrator · test", status: "idle", lastActivityAt: oldTime, labels: { role: "orchestrator" } },
       null
     );
     assert.equal(s3.state, "sleeping");
@@ -129,7 +140,7 @@ describe("fleet and agents classification", () => {
     // 4. Idle waiting
     const recentTime = new Date(Date.now() - 2 * 60 * 1000).toISOString();
     const s4 = deriveDeterministicState(
-      { id: "a4", name: "Orchestrator · test", status: "idle", lastActivityAt: recentTime },
+      { id: "a4", name: "Orchestrator · test", status: "idle", lastActivityAt: recentTime, labels: { role: "orchestrator" } },
       null
     );
     assert.equal(s4.state, "idle:waiting");
@@ -248,13 +259,13 @@ describe("fleet and agents classification", () => {
 
   it("buildProjectGroups extracts an orchestrator spawned by Front Desk into projectGroups (#430)", () => {
     const agents = [
-      normalizeRawAgent({ id: "root-1", name: "Front Desk", status: "running" }),
+      normalizeRawAgent({ id: "root-1", name: "Front Desk", status: "running", labels: { role: "front-desk" } }),
       normalizeRawAgent({
         id: "orch-1",
         name: "Orchestrator · xpufx-org/paseo",
         status: "running",
         parentId: "root-1",
-        labels: { "forgejo.issue": "430", repo: "xpufx-org/paseo" },
+        labels: { "forgejo.issue": "430", repo: "xpufx-org/paseo", role: "orchestrator" },
       }),
       normalizeRawAgent({
         id: "worker-1",
@@ -291,13 +302,13 @@ describe("fleet and agents classification", () => {
 
   it("assigns parentName and parentCategory to child agents in buildAgentTree (#430)", () => {
     const agents = [
-      normalizeRawAgent({ id: "root-1", name: "Front Desk", status: "running" }),
+      normalizeRawAgent({ id: "root-1", name: "Front Desk", status: "running", labels: { role: "front-desk" } }),
       normalizeRawAgent({
         id: "orch-1",
         name: "Orchestrator · xpufx-org/paseo",
         status: "running",
         parentId: "root-1",
-        labels: { "forgejo.issue": "430", repo: "xpufx-org/paseo" },
+        labels: { "forgejo.issue": "430", repo: "xpufx-org/paseo", role: "orchestrator" },
       }),
       normalizeRawAgent({
         id: "worker-1",
@@ -343,6 +354,7 @@ describe("fleet and agents classification", () => {
       status: "idle",
       provider: "antigravity-acp/gemini-3.8-flash-low",
       cwd: "~/code/meta",
+      labels: { role: "front-desk" },
     });
 
     assert.equal(agent.id, "64d89202-acaa-4071-b658-90db710875bd");
@@ -368,9 +380,9 @@ describe("fleet and agents classification", () => {
         agents: {
           list: async () => ({
             entries: [
-              { agent: { id: "fd-1", name: "Front Desk", status: "idle" } },
-              { agent: { id: "orch-1", name: "Orchestrator · test", status: "running" } },
-              { agent: { id: "orch-2", name: "Orchestrator · platform", status: "idle" } },
+              { agent: { id: "fd-1", name: "Front Desk", status: "idle", labels: { role: "front-desk" } } },
+              { agent: { id: "orch-1", name: "Orchestrator · test", status: "running", labels: { role: "orchestrator" } } },
+              { agent: { id: "orch-2", name: "Orchestrator · platform", status: "idle", labels: { role: "orchestrator" } } },
               { agent: { id: "w-1", name: "Worker fix 1", status: "error" } },
             ],
           }),

@@ -1685,6 +1685,7 @@ describe("hook-router bundled service lifecycle and log buffer", () => {
             {
               id: "fd-older",
               title: "Front Desk",
+              labels: { role: "front-desk" },
               status: "idle",
               updatedAt: "2026-01-01T00:00:00.000Z",
             },
@@ -1709,8 +1710,12 @@ describe("hook-router bundled service lifecycle and log buffer", () => {
     assert.equal(recovered.readFrontDesk()?.agentId, "fd-newer");
     const ordered = findLiveFrontDeskAgents(
       new Map([
-        ["fd-older", { id: "fd-older", title: "Front Desk", status: "idle", updatedAt: "2026-01-01T00:00:00.000Z" }],
+        ["fd-older", { id: "fd-older", title: "Front Desk", labels: { role: "front-desk" }, status: "idle", updatedAt: "2026-01-01T00:00:00.000Z" }],
         ["fd-newer", { id: "fd-newer", labels: { role: "front-desk" }, status: "running", updatedAt: "2026-01-02T00:00:00.000Z" }],
+        // Bare titles never match without explicit role metadata (#1143).
+        ["fd-title-only", { id: "fd-title-only", title: "Front Desk", status: "running", updatedAt: "2026-01-03T00:00:00.000Z" }],
+        // Retired sessions never match, even when newest (#1143).
+        ["fd-retired", { id: "fd-retired", title: "Front Desk (retired)", labels: { role: "retired-front-desk" }, status: "running", updatedAt: "2026-01-04T00:00:00.000Z" }],
       ] as any),
     );
     assert.deepEqual(ordered.map((agent) => agent.id), ["fd-newer", "fd-older"]);
@@ -3102,7 +3107,7 @@ describe("reactive child-lifecycle wakeups (#537)", () => {
     const frontDeskId = "front-desk-895";
     const fdChildLabels = { "paseo.parent-agent-id": frontDeskId };
     const map = new Map<string, WatchdogAgent>([
-      [frontDeskId, { id: frontDeskId, title: "Front Desk", status: "idle" }],
+      [frontDeskId, { id: frontDeskId, title: "Front Desk", status: "idle", labels: { role: "front-desk" } }],
       ["fd-child", { id: "fd-child", title: "Worker", status: "idle", labels: fdChildLabels }],
     ]);
     const audit = await router.runWatchdogAudit({
@@ -7290,12 +7295,29 @@ describe("board sweep auto-reconciliation (#794)", () => {
     assert.equal(isOrchestratorAgent({ title: "Worker: task-1" }), false);
     assert.equal(isOrchestratorAgent({ title: "Front Desk" }), false);
 
-    // 2. isFrontDeskAgent identification by title/name
-    assert.equal(isFrontDeskAgent({ title: "Front Desk" }), true);
-    assert.equal(isFrontDeskAgent({ name: "Front Desk (primary)" }), true);
-    assert.equal(isFrontDeskAgent({ title: "frontdesk" }), true);
+    // 2. isFrontDeskAgent resolves strictly from roster id and explicit role metadata (#1143)
+    assert.equal(isFrontDeskAgent({ role: "front-desk" }), true);
+    assert.equal(isFrontDeskAgent({ labels: { role: "front-desk" } }), true);
+    assert.equal(isFrontDeskAgent({ labels: { category: "front-desk" } }), true);
+    assert.equal(isFrontDeskAgent({ id: "fd-1" } as any, "fd-1"), true);
+    // Bare display names alone never grant the role, no matter how desk-like.
+    assert.equal(isFrontDeskAgent({ title: "Front Desk" }), false);
+    assert.equal(isFrontDeskAgent({ name: "Front Desk (primary)" }), false);
+    assert.equal(isFrontDeskAgent({ title: "frontdesk" }), false);
     assert.equal(isFrontDeskAgent({ title: "Orchestrator · xpufx-org/paseo" }), false);
     assert.equal(isFrontDeskAgent({ title: "Worker: coding" }), false);
+    // Explicit metadata wins over the title either way.
+    assert.equal(isFrontDeskAgent({ title: "Some Session", labels: { role: "front-desk" } }), true);
+    assert.equal(
+      isFrontDeskAgent({ title: "Front Desk", labels: { role: "retired-front-desk" } }),
+      false,
+      "retired sessions are rejected even when the title claims the desk (#1143)"
+    );
+    assert.equal(
+      isFrontDeskAgent({ title: "paseo#1119 Front Desk live recovery" }),
+      false,
+      "workers on front-desk issues are isolated by branch/title (#1143)"
+    );
 
     // 3. isOrchestratorMatchingRepo matches forge-qualified and slug titles without labels
     const orchAgent: WatchdogAgent = {
@@ -7353,6 +7375,72 @@ describe("board sweep auto-reconciliation (#794)", () => {
     const active = await router.getActiveOrchestrator("xpufx-org/platform", liveMapWithCwd);
     assert.ok(active);
     assert.equal(active?.agentId, "orch-cwd-match");
+  });
+});
+
+describe("authoritative deterministic roster roles and eager startup reconciliation (#1143)", () => {
+  it("findLiveFrontDeskAgents returns only live label-tagged desks, newest first", () => {
+    const map = new Map<string, WatchdogAgent>([
+      ["fd-old", { id: "fd-old", title: "Front Desk", labels: { role: "front-desk" }, status: "idle", updatedAt: "2026-01-01T00:00:00.000Z" }],
+      ["fd-new", { id: "fd-new", title: "Front Desk", labels: { role: "front-desk" }, status: "running", updatedAt: "2026-01-02T00:00:00.000Z" }],
+      // Retired sessions are never candidates, even with the newest timestamp.
+      ["fd-retired", { id: "fd-retired", title: "Front Desk (retired)", labels: { role: "retired-front-desk" }, status: "running", updatedAt: "2026-01-03T00:00:00.000Z" }],
+      // Workers whose branch/title mentions Front Desk are isolated.
+      ["w-fd-issue", { id: "w-fd-issue", title: "paseo#1119 Front Desk live recovery", status: "running", updatedAt: "2026-01-04T00:00:00.000Z" }],
+      // Archived desks are not live.
+      ["fd-archived", { id: "fd-archived", title: "Front Desk", labels: { role: "front-desk" }, status: "idle", archivedAt: "2026-01-05T00:00:00.000Z" }],
+    ]);
+    const ordered = findLiveFrontDeskAgents(map);
+    assert.deepEqual(ordered.map((a) => a.id), ["fd-new", "fd-old"]);
+  });
+
+  it("reconcileEnrolledOrchestrators adopts label-tagged live orchestrators per enrolled repo", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "paseo-test-1143-reconcile-"));
+    try {
+      const router = new HookRouter(null, {
+        queueDir: join(tempDir, "queues"),
+        stateDir: join(tempDir, "state"),
+        port: 0,
+      });
+      router.enrollRepo("xpufx-org/paseo");
+      (router as any).fetchAgentMap = async () =>
+        new Map<string, WatchdogAgent>([
+          ["orch-live", { id: "orch-live", title: "some opaque title", labels: { role: "orchestrator", repo: "xpufx-org/paseo" }, status: "running" }],
+        ]);
+      const res = await router.reconcileEnrolledOrchestrators();
+      assert.equal(res.reconciled, 1);
+      assert.ok(res.repos.some((r) => r.includes("xpufx-org/paseo")));
+      assert.equal(router.readOrchestrator("xpufx-org/paseo")?.agentId, "orch-live");
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("start() eagerly reconciles both Front Desk and enrolled orchestrators", async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), "paseo-test-1143-start-"));
+    const router = new HookRouter(null, {
+      queueDir: join(tempDir, "queues"),
+      stateDir: join(tempDir, "state"),
+      port: 0,
+    });
+    try {
+      let frontDeskReconciled = false;
+      let orchestratorsReconciled = false;
+      (router as any).reconcileFrontDesk = async () => {
+        frontDeskReconciled = true;
+        return { ok: true, recovered: false };
+      };
+      (router as any).reconcileEnrolledOrchestrators = async () => {
+        orchestratorsReconciled = true;
+        return { reconciled: 0, repos: [] };
+      };
+      await router.start();
+      assert.equal(frontDeskReconciled, true, "start must reconcile Front Desk");
+      assert.equal(orchestratorsReconciled, true, "start must eagerly reconcile enrolled orchestrators (#1143)");
+    } finally {
+      await router.stop().catch(() => undefined);
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

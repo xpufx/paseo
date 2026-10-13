@@ -143,15 +143,124 @@ export interface RawAgentRecord {
   role?: string;
 }
 
-export function categorizeAgent(name: string): UppidiAgentCategory {
-  const lower = (name || "").toLowerCase();
-  if (lower.includes("front desk") || lower === "frontdesk") {
-    return "front-desk";
+export type AgentRole = "front-desk" | "orchestrator" | "coding-agent";
+
+/** Minimal authoritative role input: registry id + explicit spawn metadata (#1143). */
+export interface AgentRoleInput {
+  id?: string | null;
+  role?: string | null;
+  category?: string | null;
+  labels?: Record<string, string> | string[] | null;
+  name?: string | null;
+  title?: string | null;
+}
+
+export function isValidAgentRole(value: unknown): value is AgentRole {
+  return value === "front-desk" || value === "orchestrator" || value === "coding-agent";
+}
+
+/**
+ * Normalizes one explicit role value from spawn metadata. Operates only on
+ * structured role fields — never on freeform display names (#1143). Any
+ * retired marker resolves to "retired" so callers deterministically reject it
+ * to the coding-agent fallback instead of re-adopting a retired session.
+ * The legacy `worker` spelling maps to the canonical coding-agent category (#1126).
+ */
+function normalizeExplicitRole(value: unknown): AgentRole | "retired" | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim().toLowerCase();
+  if (!v) return null;
+  if (v.includes("retired")) return "retired";
+  if (v === "front-desk" || v === "frontdesk") return "front-desk";
+  if (v === "orchestrator") return "orchestrator";
+  if (v === "worker" || v === "coding-agent" || v === "coding_worker") return CODING_AGENT_CATEGORY;
+  return null;
+}
+
+/**
+ * Reads the explicit role from spawn metadata: record `category`/`role`,
+ * record labels (`role` / `category`), or array-style `role=*` tags. Display
+ * names and titles are never consulted (#1143).
+ */
+function readExplicitLabelRole(agent: AgentRoleInput | null | undefined): AgentRole | "retired" | null {
+  if (!agent || typeof agent !== "object") return null;
+  const candidates: unknown[] = [
+    (agent as { category?: unknown }).category,
+    (agent as { role?: unknown }).role,
+  ];
+  const labels: unknown = (agent as { labels?: unknown }).labels;
+  if (Array.isArray(labels)) {
+    for (const entry of labels) {
+      if (typeof entry !== "string") continue;
+      const tag = entry.match(/^\s*role\s*=\s*(.+?)\s*$/i);
+      candidates.push(tag ? tag[1] : entry);
+    }
+  } else if (labels && typeof labels === "object") {
+    const record = labels as Record<string, unknown>;
+    candidates.push(record.role, record.category);
   }
-  if (lower.includes("orchestrator")) {
-    return "orchestrator";
+  for (const candidate of candidates) {
+    const normalized = normalizeExplicitRole(candidate);
+    if (normalized) return normalized;
   }
+  return null;
+}
+
+/**
+ * Authoritative deterministic role resolver (#1143). Roles resolve strictly
+ * from the roster/registry entry and explicit spawn metadata:
+ * 1. Direct registry ID lookup (highest authority): `frontDeskAgentId` and
+ *    the orchestrator id -> repo map from `readCanonicalFleetRegistry()`.
+ * 2. Explicit agent metadata/label tags set at spawn time (`role=*`).
+ * 3. Fallback: the coding-agent category — never guess `front-desk` or
+ *    `orchestrator` from a display name, title, or branch string.
+ */
+export function resolveAgentRole(
+  agent: AgentRoleInput & { id: string },
+  registry?: CanonicalFleetRegistry | null
+): AgentRole {
+  const id = typeof agent?.id === "string" ? agent.id : "";
+  if (id && registry) {
+    if (registry.frontDeskAgentId && id === registry.frontDeskAgentId) {
+      return "front-desk";
+    }
+    if (registry.orchestratorAgentIdToRepo?.has(id)) {
+      return "orchestrator";
+    }
+  }
+  const labelRole = readExplicitLabelRole(agent);
+  if (labelRole === "retired") return CODING_AGENT_CATEGORY;
+  if (labelRole) return labelRole;
   return CODING_AGENT_CATEGORY;
+}
+
+/**
+ * Authoritative agent classification (#1143). Display names and titles alone
+ * never grant a role: a bare name string with no registry entry or explicit
+ * role metadata resolves to the coding-agent category. Record inputs resolve
+ * through `resolveAgentRole` (registry id -> explicit `role=*` labels ->
+ * coding-agent). Retired sessions and workers whose branch/title merely
+ * mentions Front Desk are always coding-agents.
+ */
+export function categorizeAgent(
+  nameOrAgent:
+    | string
+    | (AgentRoleInput & { name?: string | null; title?: string | null })
+    | null
+    | undefined,
+  registry?: CanonicalFleetRegistry | null
+): AgentRole {
+  if (!nameOrAgent) return CODING_AGENT_CATEGORY;
+  if (typeof nameOrAgent === "string") {
+    return CODING_AGENT_CATEGORY;
+  }
+  const record = nameOrAgent as AgentRoleInput & { id?: unknown };
+  return resolveAgentRole(
+    { ...(record as object), id: typeof record.id === "string" ? record.id : "" } as AgentRoleInput & {
+      id: string;
+    },
+    registry ?? null
+  );
 }
 
 export function extractAttributedWork(raw: RawAgentRecord): UppidiAgentWork | null {
@@ -377,7 +486,8 @@ export function deriveDeterministicState(
       return { state: "idle:quota-exhausted", detail: "Quota cooldown" };
     }
 
-    const category = raw.category || raw.role || raw.labels?.["role"] || raw.labels?.["category"] || categorizeAgent(raw.name || raw.title || "");
+    // Authoritative classification only: registry/label metadata, never the display name (#1143).
+    const category = categorizeAgent(raw);
     const lastActivity = raw.lastActivityAt || raw.updatedAt;
     if ((category === "orchestrator" || category === "front-desk") && lastActivity) {
       const idleMs = Date.now() - new Date(lastActivity).getTime();
@@ -401,7 +511,8 @@ export function normalizeRawAgent(
   const id = raw.id || "";
   const shortId = raw.shortId || id.slice(0, 7);
   const name = raw.name || raw.title || `Agent ${shortId}`;
-  const category = categorizeAgent(name);
+  // Authoritative classification only: registry/label metadata, never the display name (#1143).
+  const category = categorizeAgent(raw);
   const status = raw.status || "idle";
 
   const parentId =
@@ -905,6 +1016,13 @@ export async function handleUppidiAgents(
   try {
     const agents = await fetchPaseoAgents(context);
 
+    // Eagerly reconcile missing orchestrators if router is active but list is empty (#1143).
+    const router = getActiveHookRouter();
+    if (router && router.getCanonicalEnrolledRepos().length > 0 && router.listOrchestratorRecords().length === 0) {
+      const agentMap = new Map<string, any>(agents.map((a) => [a.id, a]));
+      await router.reconcileEnrolledOrchestrators(agentMap).catch(() => {});
+    }
+
     // Identity comes from the router registry, never from agent names (#1078).
     const registry = readCanonicalFleetRegistry();
     const roleDivergences = applyCanonicalRoles(agents, registry);
@@ -1154,14 +1272,12 @@ export function isFleetWorker(
 ): boolean {
   if (!agent) return false;
 
-  // 1. Parentage check: agent's parent is a registered or known orchestrator / front-desk
+  // 1. Parentage check: agent's parent is a registered or known orchestrator / front-desk.
+  // Parent identity is authoritative (registry ids, explicit parent category);
+  // display names are never grepped for role substrings (#1143).
   if (agent.parentId) {
     if (context.orchestratorIds?.has(agent.parentId)) return true;
     if (agent.parentCategory === "orchestrator" || agent.parentCategory === "front-desk") return true;
-    const parentName = agent.parentName?.toLowerCase() ?? "";
-    if (parentName.includes("orchestrator") || parentName.includes("front desk") || parentName === "frontdesk") {
-      return true;
-    }
   }
 
   // 2. Explicit fleet / coding-agent role labels (legacy `worker` accepted, #1126)
