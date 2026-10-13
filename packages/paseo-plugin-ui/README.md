@@ -1,9 +1,8 @@
 # @xpufx/paseo-plugin-ui
 
-Private, in-repo shared UI composition for Paseo plugins (xpufx-org/paseo#976,
-option 3). It is a normal workspace **devDependency** that is bundled (inlined)
-into each consuming plugin's client bundle at build time — it is never published
-to npm, vendored as a source tree, or installed by `paseo plugin add`.
+Shared UI composition and design primitives for Paseo plugins (xpufx-org/paseo#976).
+Published as a standalone npm package consumed as a runtime dependency by Paseo
+plugins and compiled by esbuild at client initialization.
 
 ## Contract
 

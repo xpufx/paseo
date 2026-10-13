@@ -1,4 +1,4 @@
-.PHONY: all doctor reload check test typecheck conformance build clean help migrate-numberless-labels
+.PHONY: all doctor reload check test typecheck conformance build clean help migrate-numberless-labels packages-build packages-publish-dry packages-publish
 
 # Default target: diagnostic freshness check
 all: doctor
@@ -87,6 +87,27 @@ npm-push-x-comms-dry:
 ## npm-push-x-comms: Publish @xpufx/paseo-x-comms to npm
 npm-push-x-comms:
 	@npm publish plugins/x-comms/mcp --access public
+
+## packages-build: Build all headless backend packages and plugin-ui
+packages-build:
+	@npm run build --workspace=packages/backend/tickets
+	@npm run build --workspace=packages/backend/fleet
+	@npm run build --workspace=packages/mcp-gateway
+	@npm run build --workspace=packages/paseo-plugin-ui
+
+## packages-publish-dry: Dry-run publish headless packages
+packages-publish-dry: packages-build
+	@npm publish --workspace=packages/backend/tickets --access public --dry-run
+	@npm publish --workspace=packages/backend/fleet --access public --dry-run
+	@npm publish --workspace=packages/mcp-gateway --access public --dry-run
+	@npm publish --workspace=packages/paseo-plugin-ui --access public --dry-run
+
+## packages-publish: Publish headless packages to npm
+packages-publish: packages-build
+	@npm publish --workspace=packages/backend/tickets --access public
+	@npm publish --workspace=packages/backend/fleet --access public
+	@npm publish --workspace=packages/mcp-gateway --access public
+	@npm publish --workspace=packages/paseo-plugin-ui --access public
 
 ## github-mirror: Synchronize target(s) to GitHub mirror (e.g. make github-mirror TARGET=top,helper DRY=1)
 github-mirror:

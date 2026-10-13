@@ -12,7 +12,7 @@
     "test:tsx": "NODE_ENV=test tsx --test client/entry.test.ts client/render.test.ts client/mobile-layout.test.ts client/mobile-scroll.test.ts client/ui-guard.test.ts"
   },
   "dependencies": {
-    "@xpufx/backend-fleet": "*"
+    "@xpufx/backend-fleet": "^0.1.0"
   },
   "devDependencies": {
     "paseo-plugin-ui-testing": "*",
