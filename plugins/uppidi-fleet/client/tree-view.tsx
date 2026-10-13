@@ -1590,6 +1590,95 @@ export function AgentLabelsRow({ agent, max = 5 }: { agent: UppidiAgent; max?: n
   );
 }
 
+/**
+ * Inventory drawer that groups secondary pill badges out of the main row.
+ * Shows shortId, role/category, model, worktree, parentage, and labels
+ * behind a collapsible chevron so the primary row stays compact (#1192).
+ */
+export function AgentInventoryDrawer({
+  agent,
+  navigation,
+  isOpen,
+  onToggle,
+  colors,
+  typography,
+}: {
+  agent: UppidiAgent;
+  navigation?: PluginSurfaceProps["navigation"];
+  isOpen: boolean;
+  onToggle: () => void;
+  colors: any;
+  typography: any;
+}) {
+  const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
+  const worktree = agent.worktree || extractAgentWorktree(agent);
+  const categoryLabel = isCodingAgentCategory(agent.category)
+    ? null
+    : agent.category;
+
+  // Gather all secondary pills that should live in the drawer
+  const pills: Array<{ label: string; interactive?: boolean }> = [];
+
+  if (agent.shortId) {
+    pills.push({ label: agent.shortId });
+  }
+  if (categoryLabel) {
+    pills.push({ label: categoryLabel });
+  }
+  if (agent.model) {
+    pills.push({ label: agent.model });
+  }
+  if (worktree) {
+    pills.push({ label: worktree });
+  }
+
+  return (
+    <View style={{ overflow: "visible" }}>
+      {/* Drawer toggle — tiny chevron inline after the primary row */}
+      <InteractiveRow
+        onPress={onToggle}
+        pressedOpacity={0.6}
+        style={{
+          paddingVertical: 1,
+          paddingHorizontal: 2,
+          borderRadius: 3,
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={isOpen ? "Collapse inventory details" : "Expand inventory details"}
+      >
+        <Icon name={isOpen ? "ChevronDown" : "ChevronRight"} size={10} color={colors.foregroundMuted} />
+      </InteractiveRow>
+
+      {isOpen && (
+        <View
+          style={{
+            marginTop: 2,
+            paddingLeft: 16,
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 4,
+            alignItems: "center",
+            overflow: "visible",
+          }}
+        >
+          {pills.map((pill) => (
+            <Badge
+              key={pill.label}
+              label={pill.label}
+              variant="neutral"
+              size="sm"
+              textStyle={{ fontFamily: "monospace", fontSize: 9 }}
+            />
+          ))}
+
+          <ParentAgentPill agent={agent} navigation={navigation} />
+          <AgentLabelsRow agent={agent} />
+        </View>
+      )}
+    </View>
+  );
+}
+
 export function getParentBadgeLabel(agent: UppidiAgent): string | null {
   if (!agent.parentId && !agent.parentName) return null;
   if (
@@ -1757,6 +1846,18 @@ export function AgentAttentionBanner({ agent, compact = false }: AgentAttentionB
   );
 }
 
+/**
+ * High-density worker agent row — compact primary line with collapsible
+ * inventory drawer for secondary pills (#1192).
+ *
+ * Primary row: `[Guide Connector + Expand Chevron + Status Light + Icon + AgentTitleLink]`
+ *           then `[#Issue Badge] [State Badge] [Archive Btn]`
+ * Collapsed by default, the drawer reveals: shortId, role/category, model,
+ * worktree, parentage (ParentAgentPill), and custom labels (AgentLabelsRow).
+ *
+ * CRITICAL (#403): Descendants/children MUST NOT use Card containers to avoid wasted space.
+ * Features 4px/8px rhythm, visual tree guide connector, and subtle row hover highlighting.
+ */
 export interface DenseAgentRowProps {
   node: UppidiAgentTreeNode;
   depth?: number;
@@ -1770,11 +1871,6 @@ export interface DenseAgentRowProps {
   onArchiveAgent: (id: string) => Promise<void> | void;
 }
 
-/**
- * High-density agent list row.
- * CRITICAL (#403): Descendants/children MUST NOT use Card containers to avoid wasted space.
- * Features 4px/8px rhythm, visual tree guide connector, and subtle row hover highlighting.
- */
 export function DenseAgentRow({
   node,
   depth = 1,
@@ -1789,6 +1885,7 @@ export function DenseAgentRow({
   const { alpha } = useFleetTheme();
   const [isHovered, setIsHovered] = useState(false);
   const [metricsOpen, setMetricsOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const agent = node.agent;
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
@@ -1826,9 +1923,9 @@ export function DenseAgentRow({
         }}
       >
         <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
-          {/* Left side: Guide connector, status dot, icon, title, shortId */}
+          {/* Left side: Identity cluster (#1192) */}
           <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
-            {/* Identity anchor cluster: never breaks apart on mobile viewports */}
+            {/* Unbreakable identity anchor: Guide Connector + Expand Chevron + Status Light + Icon + Title Link */}
             <Row align="center" gap="xs" wrap={false} style={{ flexShrink: 1, minWidth: 0 }}>
               <View
                 style={{
@@ -1859,40 +1956,8 @@ export function DenseAgentRow({
                 size="sm"
               />
             </Row>
-            <Badge
-              label={agent.shortId}
-              variant="neutral"
-              size="sm"
-              textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
-            />
-            {!isCodingAgentCategory(agent.category) && (
-              <Badge
-                label={agent.category}
-                variant="neutral"
-                size="sm"
-                textStyle={{ fontSize: 10 }}
-              />
-            )}
-            <ParentAgentPill agent={agent} navigation={navigation} />
-            <AgentLabelsRow agent={agent} />
 
-          </Row>
-
-          {/* Right side: State badge, Model, Issue, Worktree, Time, Archive */}
-          <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
-            <Badge
-              label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
-              variant={stateConfig.badgeVariant}
-              size="sm"
-              dot
-              style={{ borderColor: stateConfig.color }}
-              textStyle={{ fontSize: 10 }}
-            />
-
-            {agent.model && (
-              <Badge label={agent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-            )}
-
+            {/* #Issue badge — primary worker info (#1192) */}
             {agent.attributedWork?.issue && (
               <Badge
                 label={`#${agent.attributedWork.issue}`}
@@ -1902,31 +1967,19 @@ export function DenseAgentRow({
               />
             )}
 
-            {worktree && (
-              <Badge
-                label={worktree}
-                variant="neutral"
-                size="sm"
-                textStyle={{ fontFamily: "monospace", fontSize: 10 }}
-              />
-            )}
+            {/* State badge — primary worker info (#1192) */}
+            <Badge
+              label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
+              variant={stateConfig.badgeVariant}
+              size="sm"
+              dot
+              style={{ borderColor: stateConfig.color }}
+              textStyle={{ fontSize: 10 }}
+            />
+          </Row>
 
-            {agent.lastActivityAt && (
-              <Text
-                numberOfLines={1}
-                style={{
-                  color: colors.foregroundMuted,
-                  ...typography.caption,
-                  fontSize: 11,
-                  lineHeight: 14,
-                  flexShrink: 1,
-                  minWidth: 0,
-                }}
-              >
-                {formatRelativeTime(agent.lastActivityAt)}
-              </Text>
-            )}
-
+          {/* Right side: Archive + Health Gauge + Inventory Drawer toggle */}
+          <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
             <Button
               icon="Archive"
               variant="ghost"
@@ -1953,6 +2006,16 @@ export function DenseAgentRow({
               compact
               expanded={metricsOpen}
               onToggle={() => setMetricsOpen((open) => !open)}
+            />
+
+            {/* Inventory drawer toggle for secondary pills (#1192) */}
+            <AgentInventoryDrawer
+              agent={agent}
+              navigation={navigation}
+              isOpen={drawerOpen}
+              onToggle={() => setDrawerOpen((open) => !open)}
+              colors={colors}
+              typography={typography}
             />
           </Row>
         </Row>
@@ -2002,8 +2065,16 @@ export function DenseAgentRow({
 }
 
 /**
- * Orchestrator anchored row with interactive expand/collapse toggle for children.
- * Renders as a clean tree row (no card wrapper) with guide connector (#409).
+ * Orchestrator anchored row — compact primary line with collapsible
+ * inventory drawer for secondary pills (#1192).
+ *
+ * Primary row: `[Guide Connector + Expand Chevron + Status Light + Icon + Title Link]`
+ *           then `[State Badge] [Optional Main Dirty Warning] [Archive Btn]`
+ * Collapsed by default, the drawer reveals: shortId, role/category, model,
+ * worktree, parentage (ParentAgentPill), and custom labels (AgentLabelsRow).
+ *
+ * Orchestrator rows carry a subtle accent tint to distinguish trunk nodes
+ * from worker subagents without box bloat (#1192).
  */
 export function OrchestratorRow({
   node,
@@ -2033,6 +2104,7 @@ export function OrchestratorRow({
   const { alpha } = useFleetTheme();
   const [isHovered, setIsHovered] = useState(false);
   const [metricsOpen, setMetricsOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const agent = node.agent;
   const stateConfig = getDeterministicStateConfig(agent.deterministicState, agent.category);
   const worktree = agent.worktree || extractAgentWorktree(agent);
@@ -2070,9 +2142,9 @@ export function OrchestratorRow({
       }}
     >
       <Row justify="space-between" align="center" wrap gap="xs" style={{ overflow: "visible" }}>
-        {/* Left: Guide connector, Expand toggle, Indicator, Icon, Title Link, Badges */}
+        {/* Left: Identity cluster + State + Dirty warning (#1192) */}
         <Row align="center" gap="xs" wrap style={{ flexShrink: 1, minWidth: 0, overflow: "visible" }}>
-          {/* Identity anchor cluster: never breaks apart on mobile viewports */}
+          {/* Unbreakable identity anchor: Guide Connector + Expand Chevron + Status Light + Icon + Title Link */}
           <Row align="center" gap="xs" wrap={false} style={{ flexShrink: 1, minWidth: 0 }}>
             <View
               style={{
@@ -2125,15 +2197,18 @@ export function OrchestratorRow({
               fontWeight="700"
             />
           </Row>
+
+          {/* State badge — primary orch info (#1192) */}
           <Badge
-            label={agent.shortId}
-            variant="neutral"
+            label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
+            variant={stateConfig.badgeVariant}
             size="sm"
-            textStyle={{ fontFamily: "monospace", fontSize: 10, letterSpacing: 0.2 }}
+            dot
+            style={{ borderColor: stateConfig.color }}
+            textStyle={{ fontSize: 10 }}
           />
-          <Badge label="Orchestrator" variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-          <ParentAgentPill agent={agent} navigation={navigation} />
-          <AgentLabelsRow agent={agent} />
+
+          {/* Optional main dirty warning — only shown when relevant (#1192) */}
           {agent.isMainDirty && (
             <InteractiveRow
               accessibilityRole="button"
@@ -2159,6 +2234,7 @@ export function OrchestratorRow({
               />
             </InteractiveRow>
           )}
+
           {agent.isRepoRootOffMain && (
             <InteractiveRow
               accessibilityRole="button"
@@ -2184,6 +2260,7 @@ export function OrchestratorRow({
               />
             </InteractiveRow>
           )}
+
           {!isExpanded && hasChildren && childCount > 0 && (
             <Badge
               label={`${childCount} subagent${childCount === 1 ? "" : "s"}`}
@@ -2205,45 +2282,8 @@ export function OrchestratorRow({
           )}
         </Row>
 
-        {/* Right: State, Model, Worktree, Activity, Archive */}
+        {/* Right: Archive + Health Gauge + Inventory Drawer toggle */}
         <Row align="center" wrap gap="xs" style={{ flexShrink: 1, minWidth: 0 }}>
-          <Badge
-            label={`${agent.deterministicState}${agent.stateDetail ? `: ${agent.stateDetail}` : ""}`}
-            variant={stateConfig.badgeVariant}
-            size="sm"
-            dot
-            style={{ borderColor: stateConfig.color }}
-            textStyle={{ fontSize: 10 }}
-          />
-
-          {agent.model && (
-            <Badge label={agent.model} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
-          )}
-
-          {worktree && (
-            <Badge
-              label={worktree}
-              variant="neutral"
-              size="sm"
-              textStyle={{ fontFamily: "monospace", fontSize: 10 }}
-            />
-          )}
-
-          {agent.lastActivityAt && (
-            <Text
-              numberOfLines={1}
-              style={{
-                color: colors.foregroundMuted,
-                ...typography.caption,
-                fontSize: 11,
-                flexShrink: 1,
-                minWidth: 0,
-              }}
-            >
-              {formatRelativeTime(agent.lastActivityAt)}
-            </Text>
-          )}
-
           <Button
             icon="Archive"
             variant="ghost"
@@ -2269,6 +2309,16 @@ export function OrchestratorRow({
             agent={agent}
             expanded={metricsOpen}
             onToggle={() => setMetricsOpen((open) => !open)}
+          />
+
+          {/* Inventory drawer toggle for secondary pills (#1192) */}
+          <AgentInventoryDrawer
+            agent={agent}
+            navigation={navigation}
+            isOpen={drawerOpen}
+            onToggle={() => setDrawerOpen((open) => !open)}
+            colors={colors}
+            typography={typography}
           />
         </Row>
       </Row>
