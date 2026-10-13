@@ -38,6 +38,7 @@ let mockPluginSettings: { metricSurfaces?: Record<string, string> } = {
       "tokens",
       "tools",
       "turns",
+      "velocity",
     ].map((id) => [id, "both"]),
   ),
 };
@@ -312,109 +313,122 @@ describe("TopTimelineTelemetryCard compact layout (#1010 mobile)", () => {
   });
 });
 
-describe("TopTimelineTelemetryCard turn throughput badge (#1141)", () => {
-  it("renders the throughput badge next to duration with valid tokens and duration", () => {
-    // 1140 output tokens in 30000ms (30s) = 38 tok/s
+describe("TopTimelineTelemetryCard velocity badge (#1308)", () => {
+  it("renders the velocity badge with icon next to duration with valid tokensPerSecond", () => {
+    // 38 tok/s rendered with ⚡ icon
     const renderer = renderCard(undefined, {
       durationMs: 30000,
-      outputTokens: 1140,
+      tokensPerSecond: 38,
     });
     const text = textOf(renderer.toJSON());
     expect(text).toContain("30.0s");
-    expect(text).toContain("38 tok/s");
+    expect(text).toContain("⚡ 38 tok/s");
   });
 
-  it("preserves 1 decimal place when rate < 10 tok/s", () => {
-    // 74 output tokens in 10000ms (10s) = 7.4 tok/s
+  it("rounds tokensPerSecond to nearest integer in velocity badge", () => {
     const renderer = renderCard(undefined, {
       durationMs: 10000,
-      outputTokens: 74,
+      tokensPerSecond: 7.4,
     });
     const text = textOf(renderer.toJSON());
     expect(text).toContain("10.0s");
-    expect(text).toContain("7.4 tok/s");
+    expect(text).toContain("⚡ 7 tok/s");
   });
 
-  it("omits the badge when durationMs is missing or <= 0", () => {
-    const missingDuration = renderCard(undefined, {
-      durationMs: undefined,
-      outputTokens: 500,
+  it("appends context pressure indicators for warning and high levels", () => {
+    const warnRenderer = renderCard(undefined, {
+      tokensPerSecond: 38,
+      contextPressureLevel: "warning",
     });
-    expect(textOf(missingDuration.toJSON())).not.toContain("tok/s");
+    expect(textOf(warnRenderer.toJSON())).toContain("⚡ 38 tok/s · ⚠️ warn ctx");
 
-    const zeroDuration = renderCard(undefined, {
-      durationMs: 0,
-      outputTokens: 500,
+    const highRenderer = renderCard(undefined, {
+      tokensPerSecond: 38,
+      contextPressureLevel: "high",
     });
-    expect(textOf(zeroDuration.toJSON())).not.toContain("tok/s");
-
-    const negativeDuration = renderCard(undefined, {
-      durationMs: -500,
-      outputTokens: 500,
-    });
-    expect(textOf(negativeDuration.toJSON())).not.toContain("tok/s");
+    expect(textOf(highRenderer.toJSON())).toContain("⚡ 38 tok/s · ⚠️ high ctx");
   });
 
-  it("omits the badge when outputTokens is absent or zero", () => {
+  it("omits the velocity header badge when tokensPerSecond is absent or non-finite", () => {
     const missingTokens = renderCard(undefined, {
       durationMs: 5000,
-      outputTokens: undefined,
+      tokensPerSecond: undefined,
     });
-    expect(textOf(missingTokens.toJSON())).toContain("5.0s");
-    expect(textOf(missingTokens.toJSON())).not.toContain("tok/s");
+    const nodes = styledNodes(missingTokens.toJSON());
+    const headerBadges = nodes.filter(
+      (node) => node.style.flexShrink === 0 && textOf(node.children).includes("⚡"),
+    );
+    expect(headerBadges.length).toBe(0);
 
-    const zeroTokens = renderCard(undefined, {
+    const nanTokens = renderCard(undefined, {
       durationMs: 5000,
-      outputTokens: 0,
+      tokensPerSecond: NaN,
     });
-    expect(textOf(zeroTokens.toJSON())).toContain("5.0s");
-    expect(textOf(zeroTokens.toJSON())).not.toContain("tok/s");
+    const nanNodes = styledNodes(nanTokens.toJSON());
+    const nanHeaderBadges = nanNodes.filter(
+      (node) => node.style.flexShrink === 0 && textOf(node.children).includes("⚡"),
+    );
+    expect(nanHeaderBadges.length).toBe(0);
   });
 
-  it("gates throughput badge behind the tokens setting", () => {
+  it("does not render redundant non-icon throughput badge even with outputTokens and durationMs", () => {
+    const renderer = renderCard(undefined, {
+      durationMs: 30000,
+      outputTokens: 1140,
+      tokensPerSecond: undefined,
+    });
+    const text = textOf(renderer.toJSON());
+    expect(text).toContain("30.0s");
+    expect(text).not.toContain("⚡");
+    expect(text).not.toContain("38 tok/s");
+  });
+
+  it("gates velocity badge behind the velocity setting", () => {
     const orig = mockPluginSettings;
     try {
       mockPluginSettings = {
         metricSurfaces: {
           ...orig.metricSurfaces,
-          tokens: "none",
+          velocity: "none",
         },
       };
       const disabled = renderCard(undefined, {
         durationMs: 30000,
-        outputTokens: 1140,
+        tokensPerSecond: 38,
       });
       const textDisabled = textOf(disabled.toJSON());
       expect(textDisabled).toContain("30.0s");
-      expect(textDisabled).not.toContain("tok/s");
+      expect(textDisabled).not.toContain("⚡ 38 tok/s");
 
       mockPluginSettings = {
         metricSurfaces: {
           ...orig.metricSurfaces,
-          tokens: "timeline",
+          velocity: "timeline",
         },
       };
       const enabled = renderCard(undefined, {
         durationMs: 30000,
-        outputTokens: 1140,
+        tokensPerSecond: 38,
       });
       const textEnabled = textOf(enabled.toJSON());
       expect(textEnabled).toContain("30.0s");
-      expect(textEnabled).toContain("38 tok/s");
+      expect(textEnabled).toContain("⚡ 38 tok/s");
     } finally {
       mockPluginSettings = orig;
     }
   });
 
-  it("ensures duration and throughput badges do not collapse on compact/mobile (flexShrink: 0)", () => {
+  it("ensures duration and velocity badges do not collapse on compact/mobile (flexShrink: 0)", () => {
     const renderer = renderCard(COMPACT, {
       durationMs: 30000,
-      outputTokens: 1140,
+      tokensPerSecond: 38,
     });
     const nodes = styledNodes(renderer.toJSON());
     // Find badge nodes in the title row
     const nonShrinkingBadges = nodes.filter(
-      (node) => node.style.flexShrink === 0 && (textOf(node.children).includes("30.0s") || textOf(node.children).includes("38 tok/s")),
+      (node) =>
+        node.style.flexShrink === 0 &&
+        (textOf(node.children).includes("30.0s") || textOf(node.children).includes("⚡ 38 tok/s")),
     );
     expect(nonShrinkingBadges.length).toBe(2);
   });
