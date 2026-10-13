@@ -1707,6 +1707,150 @@ describe("hook-router in-process dispatch and event-driven draining", () => {
   });
 });
 
+describe("drain() uses noWait: true so it never blocks on target turn (#1329)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-drain-nowait-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("drain delivers batch messages with noWait: true", async () => {
+    const key = "forge.mrs.uppidi.com/xpufx-org/drain-batch-nowait";
+    const targetAgentId = "agent-drain-batch";
+    let agentStatus: "running" | "idle" = "running";
+    const deliveries: Array<{ agentId: string; msg: string; options: any }> = [];
+    let turnEndedHandler: any = null;
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => {
+          assert.equal(id, targetAgentId);
+          return {
+            current: () => ({ id, status: agentStatus, activeTurn: agentStatus === "running" ? { id: "turn-1" } : null }),
+            refresh: async () => ({ agent: { id, status: agentStatus, activeTurn: agentStatus === "running" ? { id: "turn-1" } : null } }),
+            send: async (text: string, options: any) => {
+              deliveries.push({ agentId: targetAgentId, msg: text, options });
+            },
+          };
+        },
+      },
+    } as any;
+
+    const mockServer = {
+      paseo: mockPaseo,
+      events: { on: () => () => {} },
+      on: (name: string, handler: any) => {
+        if (name === "agent.turn_ended") {
+          turnEndedHandler = handler;
+        }
+        return () => {};
+      },
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    const router = new HookRouter(mockServer, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator(key, targetAgentId);
+
+    // Intercept deliverMessage to capture the options passed through drain()
+    const originalDeliver = router.deliverMessage.bind(router);
+    (router as any).deliverMessage = async (agentId: string, msg: string, options?: any) => {
+      deliveries.push({ agentId, msg, options });
+      return true;
+    };
+
+    // Enqueue multiple messages while agent is busy so they accumulate
+    router.enqueue(key, "msg-1");
+    router.enqueue(key, "msg-2");
+    router.enqueue(key, "msg-3");
+
+    // Wait for enqueues to settle (drain attempts while busy are deferred)
+    await new Promise((r) => setTimeout(r, 10));
+    assert.equal(router.getQueue(key).length, 3, "all 3 messages should be queued while busy");
+
+    // Agent finishes turn — trigger drain via turn_ended handler
+    agentStatus = "idle";
+    assert.ok(turnEndedHandler, "turnEndedHandler should have been registered");
+    await turnEndedHandler({ agent: { id: targetAgentId } }, { paseo: mockPaseo });
+
+    assert.equal(deliveries.length, 1, `should deliver exactly one batch (got ${deliveries.length})`);
+    const opts = deliveries[0].options;
+    assert.equal(opts?.noWait, true, "batch drain must pass noWait: true");
+    assert.ok(
+      deliveries[0].msg.includes("Batch notification") || deliveries[0].msg.includes("forgejo-hook"),
+      `should be a combined batch message, got: ${JSON.stringify(deliveries[0].msg.slice(0, 300))}`,
+    );
+    assert.equal(router.getQueue(key).length, 0, "queue should be empty after successful drain");
+    // Restore original
+    (router as any).deliverMessage = originalDeliver;
+  });
+
+  it("drain delivers single messages with noWait: true", async () => {
+    const key = "forge.mrs.uppidi.com/xpufx-org/drain-single-nowait";
+    const targetAgentId = "agent-drain-single";
+    const deliveries: Array<{ agentId: string; msg: string; options: any }> = [];
+
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => {
+          assert.equal(id, targetAgentId);
+          return {
+            current: () => ({ id, status: "idle", activeTurn: null }),
+            refresh: async () => ({ agent: { id, status: "idle", activeTurn: null } }),
+            send: async (text: string, options: any) => {
+              deliveries.push({ agentId: targetAgentId, msg: text, options });
+            },
+          };
+        },
+      },
+    } as any;
+
+    const mockServer = {
+      paseo: mockPaseo,
+      events: { on: () => () => {} },
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+
+    const router = new HookRouter(mockServer, { queueDir, stateDir, port: 0 });
+    router.writeOrchestrator(key, targetAgentId);
+
+    // Intercept deliverMessage to capture the options passed through drain()
+    const originalDeliver = router.deliverMessage.bind(router);
+    (router as any).deliverMessage = async (agentId: string, msg: string, options?: any) => {
+      deliveries.push({ agentId, msg, options });
+      return true;
+    };
+
+    router.enqueue(key, "single-msg");
+
+    await router.drain(key);
+
+    assert.equal(deliveries.length, 1, "should deliver exactly one message");
+    const opts = deliveries[0].options;
+    assert.equal(opts?.noWait, true, "single drain must pass noWait: true");
+    assert.equal(deliveries[0].msg, "single-msg");
+    assert.equal(router.getQueue(key).length, 0);
+    // Restore original
+    (router as any).deliverMessage = originalDeliver;
+  });
+});
+
 describe("hook-router bundled service lifecycle and log buffer", () => {
   let tempDir: string;
   let queueDir: string;
@@ -2969,6 +3113,78 @@ describe("hook-router fleet watchdog audit (#458)", () => {
       audit.anomalies.some((a) => a.type === "QUEUE_UNORCHESTRATED"),
       false,
     );
+  });
+});
+
+describe("watchdog audit does not recursively self-alert wedged frontdesk (#1329)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let router: HookRouter;
+  let fdDeliveries: Array<{ id: string; msg: string }>;
+  const frontDeskId = "fd-wedge-agent";
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-wedge-recursion-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.enrollRepo("test-repo");
+    router.writeFrontDesk(frontDeskId, "test");
+    fdDeliveries = [];
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("drops watchdog alerts when frontdesk queue is wedged instead of re-enqueuing", async () => {
+    // Simulate a wedged frontdesk by adding "frontdesk" to the busy set
+    (router as any).busyQueues.add("frontdesk");
+
+    const anomalyMap = new Map<string, WatchdogAgent>([
+      [
+        "orch-wedge",
+        {
+          id: "orch-wedge",
+          status: "running",
+          lastError: null,
+          role: "orchestrator",
+          labels: { role: "orchestrator" },
+          recentTimeline: Array.from({ length: 15 }, () => ({
+            type: "tool_call",
+            callId: "c",
+            name: "read",
+            status: "completed",
+            detail: { type: "read", filePath: "/etc/hosts" },
+          })) as any,
+        },
+      ],
+    ]);
+
+    // Only capture deliveries to the frontdesk agent
+    const audit = await router.runWatchdogAudit({
+      orchestratorRecords: [{ key: "test-repo", agentId: "orch-wedge" }],
+      agentMap: anomalyMap,
+      deliver: async (id, msg) => {
+        if (id === frontDeskId) {
+          fdDeliveries.push({ id, msg });
+        }
+        return true;
+      },
+    });
+
+    assert.ok(audit.ok);
+    // No watchdog alerts should reach frontdesk when its queue is wedged.
+    assert.equal(
+      fdDeliveries.length,
+      0,
+      "watchdog must not deliver alerts to frontdesk when its queue is wedged",
+    );
+    // The frontdesk queue must remain unchanged — no recursive self-alert entry.
+    assert.equal(router.getQueue("frontdesk").length, 0, "frontdesk queue must not receive recursive alert");
   });
 });
 

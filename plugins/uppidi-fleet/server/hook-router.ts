@@ -6282,6 +6282,15 @@ export class HookRouter {
     const message = withFleetEnvelope(watchdogEnvelope({ repo: opts.repo ?? FLEET_REPO }), alert);
     const isBusy = !isSos && this.isAgentBusy(frontDeskId, opts.agentMap);
     if (isBusy) {
+      // Prevent recursive wedge self-alerts: when the frontdesk queue itself
+      // is wedged (#1329), do not re-enqueue back into it — that would create
+      // an infinite drain loop and a 15 s execFile timeout on every tick.
+      if (this.busyQueues.has("frontdesk")) {
+        this.log(
+          `[warn] Front Desk ${frontDeskId} queue is wedged; dropping watchdog alert to avoid recursive self-alert (#1329)`,
+        );
+        return;
+      }
       this.log(`[info] Front Desk ${frontDeskId} is busy; queueing watchdog alert instead of interrupting active turn`);
       this.enqueue("frontdesk", message, false);
       return;
@@ -10608,7 +10617,7 @@ export class HookRouter {
           list.map((e, idx) => `### Event ${idx + 1}\n${e.msg}`).join("\n\n---\n\n");
         const ok = await this.deliverMessage(targetAgentId, combinedMsg, {
           steer: deliverSteer(isAnySos || forceSteer),
-          noWait: false,
+          noWait: true,
         });
         if (ok) {
           this.lastDeliveryTimes.set(targetAgentId, Date.now());
@@ -10622,7 +10631,7 @@ export class HookRouter {
         const entry = list[0];
         const ok = await this.deliverMessage(targetAgentId, entry.msg, {
           steer: deliverSteer(Boolean(entry.isSos) || forceSteer),
-          noWait: false,
+          noWait: true,
         });
         if (ok) {
           this.lastDeliveryTimes.set(targetAgentId, Date.now());
