@@ -2742,16 +2742,6 @@ function writePersistedOrchestrator(repo: string, agentId: string): void {
   renameSync(tmp, file);
 }
 
-function enrollPersistedRepo(repo: string): void {
-  if (process.env.NODE_ENV === "test") {
-    return;
-  }
-  const config = loadRouterConfig();
-  const enrolled = new Set(config.enrolledRepos ?? []);
-  enrolled.add(repo);
-  saveRouterConfig({ enrolledRepos: Array.from(enrolled) });
-}
-
 /**
  * Builds the Front Desk introduction prompt, appending the resolved hook router
  * endpoint and auth posture (#903). The endpoint comes from the same chain as
@@ -2997,10 +2987,8 @@ export async function handleUppidiAddOrchestrator(
     const router = getActiveHookRouter();
     if (router) {
       router.writeOrchestrator(repo, spawnRes.agentId, "orchestrator");
-      router.enrollRepo(repo);
     } else {
       writePersistedOrchestrator(repo, spawnRes.agentId);
-      enrollPersistedRepo(repo);
     }
 
     return {

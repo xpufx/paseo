@@ -1,6 +1,6 @@
 import { describe, it, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -8,12 +8,14 @@ import {
   handleUppidiEnrollRepo,
   handleUppidiUnenrollRepo,
 } from "./repos.js";
+import { handleUppidiAddOrchestrator } from "./agents.js";
 import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import {
   HookRouter,
   setActiveHookRouter,
   getActiveHookRouter,
   clearHookLogs,
+  loadRouterConfig,
 } from "./hook-router.js";
 import { getUppidiFleetSettingsStorage, resetUppidiFleetSettingsStorageInstance } from "./settings.js";
 
@@ -301,5 +303,92 @@ describe("uppidi-fleet repos handler (#867)", () => {
     const unenrollRes = await handleUppidiUnenrollRepo({ repo: "xpufx-org/standalone-repo" });
     assert.equal(unenrollRes.ok, true);
     assert.ok(!unenrollRes.enrolledRepos.includes("forge.mrs.uppidi.com/xpufx-org/standalone-repo"));
+  });
+
+  it("spawning an orchestrator for an unenrolled repo does not add it to enrolledRepos or mutate settings.json (#1312)", async () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    const unenrolled = "forge.mrs.uppidi.com/xpufx-org/unregistered";
+    assert.equal(router.isEnrolledRepo(unenrolled), false);
+
+    const mockContext: any = {
+      paseo: {
+        agents: {
+          create: async () => ({ id: "agent-orch-1312", status: "running" }),
+          ref: () => ({
+            current: () => ({ id: "agent-orch-1312", status: "running" }),
+            send: async () => {},
+          }),
+        },
+      },
+    };
+
+    const res = await handleUppidiAddOrchestrator(
+      { repo: unenrolled, workspacePath: "/home/user/code/unregistered" },
+      mockContext,
+    );
+    assert.equal(res.ok, true);
+    assert.equal(res.agentId, "agent-orch-1312");
+
+    // Verified: orchestrator record exists, but repo is NOT enrolled in router or settings.json
+    assert.equal(router.readOrchestrator(unenrolled)?.agentId, "agent-orch-1312");
+    assert.equal(router.isEnrolledRepo(unenrolled), false);
+    assert.ok(!router.getEnrolledRepos().includes(unenrolled));
+    const persisted = loadRouterConfig();
+    assert.ok(!(persisted.enrolledRepos ?? []).includes(unenrolled));
+  });
+
+  it("ingesting webhooks for unenrolled repositories drops/ignores the event and does not build queue depth (#1312)", async () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    const unenrolled = "forge.mrs.uppidi.com/xpufx-org/ignored-repo";
+    const payload = {
+      repository: { full_name: "xpufx-org/ignored-repo", html_url: "https://forge.mrs.uppidi.com/xpufx-org/ignored-repo" },
+      sender: { login: "someone" },
+      issue: { number: 10, title: "Test issue" },
+      action: "opened",
+    };
+
+    const res = await router.ingestWebhook("issues", payload);
+    assert.equal(res.result, "ignored");
+    assert.equal(res.frontDesk, false);
+    assert.equal(router.getQueue(unenrolled).length, 0);
+    assert.equal(router.getQueue("xpufx-org/ignored-repo").length, 0);
+  });
+
+  it("unenrolling a repo clears its in-memory and on-disk queue (#1312)", async () => {
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+    });
+    setActiveHookRouter(router);
+
+    const repoKey = "forge.mrs.uppidi.com/xpufx-org/queue-clear-test";
+    router.enrollRepo(repoKey);
+    router.enqueue(repoKey, "Test queued message 1");
+    router.enqueue(repoKey, "Test queued message 2");
+
+    assert.equal(router.getQueue(repoKey).length, 2);
+    assert.equal(existsSync(router.queueFilePath(repoKey)), true);
+
+    const unenrollRes = await handleUppidiUnenrollRepo({ repo: repoKey });
+    assert.equal(unenrollRes.ok, true);
+    assert.ok(!unenrollRes.enrolledRepos.includes(repoKey));
+
+    // In-memory queue is purged
+    assert.equal(router.getQueue(repoKey).length, 0);
+    // On-disk queue file is unlinked
+    assert.equal(existsSync(router.queueFilePath(repoKey)), false);
   });
 });

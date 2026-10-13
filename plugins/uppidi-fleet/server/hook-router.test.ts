@@ -1117,6 +1117,7 @@ describe("hook-router HTTP server endpoints", () => {
   });
 
   it("receives webhook on POST /forgejo and enqueues payload", async () => {
+    router.enrollRepo("forge.mrs.uppidi.com/xpufx-org/paseo");
     const payload = {
       repository: { html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo" },
       sender: { login: "testuser" },
@@ -1141,6 +1142,34 @@ describe("hook-router HTTP server endpoints", () => {
 
     const queue = router.getQueue("forge.mrs.uppidi.com/xpufx-org/paseo");
     assert.equal(queue.length, 1);
+  });
+
+  it("ignores webhook on POST /forgejo for unenrolled repo and does not build queue depth (#1312)", async () => {
+    const unenrolledKey = "forge.mrs.uppidi.com/xpufx-org/unenrolled";
+    const payload = {
+      repository: { html_url: "https://forge.mrs.uppidi.com/xpufx-org/unenrolled" },
+      sender: { login: "testuser" },
+      issue: { number: 381, title: "Ambient webhook" },
+      action: "commented",
+    };
+
+    const res = await fetch(`http://127.0.0.1:${router.port}/forgejo`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forgejo-Event": "issue_comment",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.equal(body.coalesce, "ignored");
+    assert.equal(body.key, unenrolledKey);
+
+    const queue = router.getQueue(unenrolledKey);
+    assert.equal(queue.length, 0);
   });
 
   it("pauses, resumes, and drains queues via POST endpoints", async () => {
@@ -2101,7 +2130,7 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     assert.ok(getFleetRosterInfo().enrolledRepos.includes("xpufx-org/declared-repo"));
   });
 
-  it("stays unenrolled after unenroll even with an active queue and orchestrator (#1154, #1165)", () => {
+  it("purges queue and orchestrator on unenroll (#1154, #1165, #1312)", () => {
     const router = new HookRouter(null, {
       queueDir,
       stateDir,
@@ -2112,13 +2141,18 @@ describe("hook-router per-repository muting circuit breaker and fleet roster (#4
     router.enrollRepo("xpufx-org/durable-repo");
     router.enqueue("xpufx-org/durable-repo", "Queued work");
     router.writeOrchestrator("xpufx-org/durable-repo", "agent-durable");
+    assert.equal(router.getQueue("xpufx-org/durable-repo").length, 1);
+    assert.equal(existsSync(router.queueFilePath("xpufx-org/durable-repo")), true);
+
     router.unenrollRepo("xpufx-org/durable-repo");
 
     assert.ok(!router.getEnrolledRepos().includes("xpufx-org/durable-repo"));
     assert.ok(!getFleetRosterInfo().enrolledRepos.includes("xpufx-org/durable-repo"));
     assert.ok(!(loadRouterConfig().enrolledRepos ?? []).includes("xpufx-org/durable-repo"));
-    // Runtime state is still surfaced as queue depth, just not as enrollment.
-    assert.equal(getFleetRosterInfo().repoQueuedHooks["xpufx-org/durable-repo"], 1);
+    // Queue is purged from memory and disk on unenroll (#1312)
+    assert.equal(router.getQueue("xpufx-org/durable-repo").length, 0);
+    assert.equal(existsSync(router.queueFilePath("xpufx-org/durable-repo")), false);
+    assert.equal(getFleetRosterInfo().repoQueuedHooks["xpufx-org/durable-repo"] ?? 0, 0);
     // Orchestrator record is purged on unenroll (#1214)
     assert.equal(router.readOrchestrator("xpufx-org/durable-repo"), null);
   });
@@ -6671,6 +6705,27 @@ describe("hook-router ensure-orchestrator deterministic resolution and idempoten
     assert.equal(body.ok, false);
     assert.equal(router.readOrchestrator("xpufx-org/paseo"), null);
   });
+
+  it("spawning an orchestrator for an unenrolled repo does not enroll it or mutate settings.json (#1312)", async () => {
+    const unenrolledRepo = "xpufx-org/paseo";
+    assert.equal(router.isEnrolledRepo(unenrolledRepo), false);
+
+    const provRes = await fetch(`http://127.0.0.1:${router.port}/orchestrators/spawn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: unenrolledRepo }),
+    });
+    assert.equal(provRes.status, 200);
+    const provBody = await provRes.json();
+    assert.equal(provBody.ok, true);
+    assert.equal(provBody.status, "provisioned");
+
+    // Orchestrator record is registered, but unenrolledRepo is NOT in enrolledRepos
+    assert.equal(router.readOrchestrator(unenrolledRepo)?.agentId, "agent-1");
+    assert.equal(router.isEnrolledRepo(unenrolledRepo), false);
+    assert.ok(!router.getEnrolledRepos().includes(unenrolledRepo));
+    assert.ok(!(loadRouterConfig().enrolledRepos ?? []).includes(unenrolledRepo));
+  });
 });
 
 describe("orchestrator provider mode resolution (#894)", () => {
@@ -10295,6 +10350,45 @@ describe("unified agent spawning endpoints (#1215)", () => {
       body = await res.json();
       assert.equal(body.ok, false);
       assert.ok(body.error.includes("repo is required"));
+    } finally {
+      await router.stop();
+    }
+  });
+
+  it("POST /agents/spawn with role orchestrator does not enroll unenrolled repo (#1312)", async () => {
+    const mockSpawnAgent = async () => ({ id: "agent-spawn-router-1312" });
+    const server = {
+      events: { on: () => () => {} },
+      on: () => () => {},
+      before: () => () => {},
+      handle: () => {},
+      registerSettings: () => ({} as any),
+      registerProvider: () => {},
+    } as unknown as PluginServerContext;
+    const router = new HookRouter(server, {
+      queueDir,
+      stateDir,
+      port: 0,
+      spawnAgent: mockSpawnAgent,
+    });
+    await router.start();
+    try {
+      const unenrolled = "xpufx-org/unenrolled-agent-spawn";
+      const res = await fetch(`http://127.0.0.1:${router.port}/agents/spawn`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "orchestrator", repo: unenrolled, workspace: tempDir }),
+      });
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.agentId, "agent-spawn-router-1312");
+
+      // Verified: orchestrator record is written, but unenrolled is NOT added to enrolledRepos
+      assert.equal(router.readOrchestrator(unenrolled)?.agentId, "agent-spawn-router-1312");
+      assert.equal(router.isEnrolledRepo(unenrolled), false);
+      assert.ok(!router.getEnrolledRepos().includes(unenrolled));
+      assert.ok(!(loadRouterConfig().enrolledRepos ?? []).includes(unenrolled));
     } finally {
       await router.stop();
     }

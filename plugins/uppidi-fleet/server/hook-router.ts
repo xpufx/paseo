@@ -1409,7 +1409,8 @@ export type CoalesceResult =
   | "window-capped"
   | "deduped"
   | "sos-deduped"
-  | "suppressed";
+  | "suppressed"
+  | "ignored";
 
 export interface CoalesceInput {
   repoKey: string;
@@ -4480,6 +4481,11 @@ export class HookRouter {
       return { key: "frontdesk", result: bypass ? "bypass" : "direct", frontDesk: true, bypass };
     }
 
+    if (!this.isEnrolledRepo(repoKey)) {
+      this.log(`[info] Ambient webhook ignored for unenrolled repo ${repoKey} (${ev})`);
+      return { key: repoKey, result: "ignored", frontDesk: false, bypass: false };
+    }
+
     const result = this.coalesceOrSend({
       repoKey,
       issue,
@@ -5597,13 +5603,25 @@ export class HookRouter {
   }
 
   public unenrollRepo(repoKey: string): string[] {
+    const purgeQueue = (key: string) => {
+      for (const cand of candidateRepoKeys(key)) {
+        this.clearQueue(cand);
+      }
+    };
     for (const enrolled of Array.from(this.enrolledRepos)) {
       if (enrolled === repoKey || isRepoMatching(enrolled, repoKey)) {
         this.enrolledRepos.delete(enrolled);
         this.deleteOrchestrator(enrolled, { source: "unenroll", reason: "repo unenrolled", actor: "unenrollRepo" });
+        purgeQueue(enrolled);
       }
     }
     this.deleteOrchestrator(repoKey, { source: "unenroll", reason: "repo unenrolled", actor: "unenrollRepo" });
+    purgeQueue(repoKey);
+    for (const key of Array.from(this.queues.keys())) {
+      if (key === repoKey || isRepoMatching(key, repoKey)) {
+        this.clearQueue(key);
+      }
+    }
     this.saveConfigState();
     return Array.from(this.enrolledRepos);
   }
@@ -7050,9 +7068,8 @@ export class HookRouter {
     if (targetMode) metadata.mode = targetMode;
     await this.updateAgentMetadata(agentId, title, metadata).catch(() => {});
 
-    // Register in authoritative registry & enrolled repos
+    // Register in authoritative registry
     this.writeOrchestrator(repo, agentId, "spawn");
-    this.enrollRepo(repo);
 
     // Drain pending queues for repository
     for (const cand of candidateRepoKeys(repo)) {
@@ -9379,7 +9396,7 @@ export class HookRouter {
     }
   }
 
-  private queueFilePath(key: string): string {
+  public queueFilePath(key: string): string {
     return join(this.queueDir, `${sanitizeKey(key)}.json`);
   }
 
@@ -11082,7 +11099,6 @@ export class HookRouter {
           // Register in router state
           if (result.role === "orchestrator" && result.repo) {
             this.writeOrchestrator(result.repo, result.agentId!, "spawn-router");
-            this.enrollRepo(result.repo);
           }
           if (result.role === "frontdesk") {
             this.writeFrontDesk(result.agentId!, "spawn-router");
