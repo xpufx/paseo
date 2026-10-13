@@ -15,7 +15,16 @@ import {
   getIssueKanbanColumn,
   getColumnTransitions,
   isRepoMatching,
+  isBackwardKanbanTransition,
+  AUTOMATION_TIERS,
+  AUTOMATION_TIER_META,
+  DEFAULT_REPO_GROUP_ID,
+  isKnownAutomationTier,
+  nextAutomationTier,
+  repoGroupMatches,
+  resolveRepoAutomationTier,
   type ForgeIssue,
+  type RepoGroup,
 } from "../shared/index.js";
 import {
   ForgeGuard,
@@ -263,5 +272,59 @@ describe("Kanban & Repo Matching", () => {
     expect(isRepoMatching("xpufx-org/paseo", "https://github.com/xpufx-org/paseo")).toBe(true);
     expect(isRepoMatching("xpufx/other", "xpufx/paseo")).toBe(false);
     expect(isRepoMatching(null, "xpufx/paseo")).toBe(false);
+  });
+
+  it("flags backward column walks", () => {
+    expect(isBackwardKanbanTransition("review", "in_progress")).toBe(true);
+    expect(isBackwardKanbanTransition("done", "review")).toBe(true);
+    expect(isBackwardKanbanTransition("done", "backlog")).toBe(true);
+    expect(isBackwardKanbanTransition("backlog", "in_progress")).toBe(false);
+    expect(isBackwardKanbanTransition("in_progress", "review")).toBe(false);
+    expect(isBackwardKanbanTransition("review", "review")).toBe(false);
+  });
+});
+
+describe("Automation tiers & repo groups (#1282)", () => {
+  const CORE: RepoGroup = {
+    id: "core",
+    name: "Core",
+    repos: ["xpufx-org/paseo", "xpufx-org/platform"],
+  };
+  const ALL: RepoGroup = { id: DEFAULT_REPO_GROUP_ID, name: "All", repos: [] };
+
+  it("names the three canonical tiers with presentation metadata", () => {
+    expect(AUTOMATION_TIERS).toEqual(["full-active", "paused", "kanban-only"]);
+    expect(AUTOMATION_TIER_META["full-active"].tone).toBe("success");
+    expect(AUTOMATION_TIER_META.paused.tone).toBe("warning");
+    expect(AUTOMATION_TIER_META["kanban-only"].tone).toBe("info");
+    expect(AUTOMATION_TIER_META["kanban-only"].label).toBe("Kanban-Only");
+  });
+
+  it("validates and cycles tiers deterministically", () => {
+    expect(isKnownAutomationTier("full-active")).toBe(true);
+    expect(isKnownAutomationTier("bogus")).toBe(false);
+    expect(nextAutomationTier("full-active")).toBe("paused");
+    expect(nextAutomationTier("paused")).toBe("kanban-only");
+    expect(nextAutomationTier("kanban-only")).toBe("full-active");
+  });
+
+  it("matches groups by id or repo coordinates and treats All as universal", () => {
+    expect(repoGroupMatches(ALL, "anything/at-all")).toBe(true);
+    expect(repoGroupMatches(CORE, "xpufx-org/paseo")).toBe(true);
+    expect(repoGroupMatches(CORE, "https://forge.mrs.uppidi.com/xpufx-org/platform.git")).toBe(true);
+    expect(repoGroupMatches(CORE, "xpufx-org/other")).toBe(false);
+    expect(repoGroupMatches(CORE, null)).toBe(false);
+  });
+
+  it("resolves tiers across key forms and defaults to full-active", () => {
+    const tiers = {
+      "forge.mrs.uppidi.com/xpufx-org/paseo": "paused" as const,
+      "xpufx-org/platform": "kanban-only" as const,
+    };
+    expect(resolveRepoAutomationTier(tiers, "xpufx-org/paseo")).toBe("paused");
+    expect(resolveRepoAutomationTier(tiers, "https://forge.mrs.uppidi.com/xpufx-org/paseo.git")).toBe("paused");
+    expect(resolveRepoAutomationTier(tiers, "xpufx-org/platform")).toBe("kanban-only");
+    expect(resolveRepoAutomationTier(tiers, "xpufx-org/unknown")).toBe("full-active");
+    expect(resolveRepoAutomationTier(undefined, "xpufx-org/unknown")).toBe("full-active");
   });
 });

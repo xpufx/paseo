@@ -31,6 +31,9 @@ import type {
   UppidiReplaceOrchestratorOutput,
   UppidiToggleRepoPauseInput,
   UppidiToggleRepoPauseOutput,
+  UppidiToggleRepoAutomationTierInput,
+  UppidiToggleRepoAutomationTierOutput,
+  AutomationTierValue,
   FleetTeardownInput,
   FleetTeardownOutput,
   FleetResetStateInput,
@@ -929,7 +932,7 @@ export async function handleUppidiAgents(
 
     // Parent-project inheritance already applied in fetchPaseoAgents (#530).
 
-    const { enrolledRepos, pausedRepos, repoQueuedHooks } = getFleetRosterInfo();
+    const { enrolledRepos, pausedRepos, kanbanOnlyRepos, repoQueuedHooks } = getFleetRosterInfo();
 
     for (const a of agents) {
       const proj = a.project || DEFAULT_PROJECT;
@@ -966,6 +969,7 @@ export async function handleUppidiAgents(
       tree,
       enrolledRepos,
       pausedRepos,
+      kanbanOnlyRepos,
       repoQueuedHooks,
       totalCount: agents.length,
       runningCount,
@@ -983,6 +987,7 @@ export async function handleUppidiAgents(
       tree: [],
       enrolledRepos: [],
       pausedRepos: [],
+      kanbanOnlyRepos: [],
       repoQueuedHooks: {},
       totalCount: 0,
       runningCount: 0,
@@ -2972,6 +2977,78 @@ export async function handleUppidiToggleRepoPause(
       repo,
       isPaused: false,
       pausedRepos: [],
+      error: err?.message || String(err),
+    };
+  }
+}
+
+/**
+ * Applies one of the three automation tiers to a repository (#1282). The router
+ * owns live state; when it is not running the same 3-tier posture is computed
+ * against persisted settings and written straight back.
+ */
+export async function handleUppidiToggleRepoAutomationTier(
+  input: UppidiToggleRepoAutomationTierInput,
+  _context?: PluginHandlerContext,
+): Promise<UppidiToggleRepoAutomationTierOutput> {
+  const repo = input.repo?.trim();
+  const tier = input.tier as AutomationTierValue;
+  if (!repo) {
+    return {
+      ok: false,
+      repo: "",
+      tier,
+      isPaused: false,
+      isKanbanOnly: false,
+      pausedRepos: [],
+      kanbanOnlyRepos: [],
+      error: "repo is required",
+    };
+  }
+
+  try {
+    const router = getActiveHookRouter();
+    if (router) {
+      const res = router.toggleRepoAutomationTier(repo, tier);
+      return {
+        ok: true,
+        repo,
+        tier: res.tier,
+        isPaused: res.isPaused,
+        isKanbanOnly: res.isKanbanOnly,
+        pausedRepos: res.pausedRepos,
+        kanbanOnlyRepos: res.kanbanOnlyRepos,
+        message: `Set ${repo} automation tier to ${res.tier}`,
+      };
+    }
+
+    const config = loadRouterConfig();
+    const removeMatches = (list: string[]) => list.filter((m) => !isRepoMatching(m, repo));
+    const pausedRepos = removeMatches(config.pausedRepos ?? []);
+    const kanbanOnlyRepos = removeMatches(config.kanbanOnlyRepos ?? []);
+    if (tier === "paused") pausedRepos.push(repo);
+    else if (tier === "kanban-only") kanbanOnlyRepos.push(repo);
+    saveRouterConfig({ pausedRepos, kanbanOnlyRepos });
+
+    return {
+      ok: true,
+      repo,
+      tier,
+      isPaused: tier === "paused",
+      isKanbanOnly: tier === "kanban-only",
+      pausedRepos,
+      kanbanOnlyRepos,
+      message: `Set ${repo} automation tier to ${tier}`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      repo,
+      tier,
+      isPaused: false,
+      isKanbanOnly: false,
+      pausedRepos: [],
+      kanbanOnlyRepos: [],
       error: err?.message || String(err),
     };
   }

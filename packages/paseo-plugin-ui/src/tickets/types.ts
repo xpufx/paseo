@@ -5,6 +5,8 @@ import type {
   AgentEnvelope,
   IssueComment,
   ForgeLabel,
+  RepoGroup,
+  AutomationTier,
 } from "@xpufx/backend-tickets/client";
 
 export type {
@@ -14,6 +16,8 @@ export type {
   AgentEnvelope,
   IssueComment,
   ForgeLabel,
+  RepoGroup,
+  AutomationTier,
 };
 
 export type PullRequestState = "open" | "draft" | "merged" | "closed" | "unknown";
@@ -113,4 +117,33 @@ export interface KanbanBoardProps {
   onSubmitComment?: (body: string) => void | Promise<void>;
   onSelectLabel?: (label: string) => void;
   activeStateLabel?: string | null;
+  /**
+   * Multi-repo association (#1282): board-toolbar filter pills. The implicit
+   * `All` group is prepended when absent. Omit to hide the group filter.
+   */
+  repoGroups?: readonly RepoGroup[];
+  /** Controlled group selection; leave undefined to let the board own it. */
+  selectedRepoGroup?: string;
+  onSelectRepoGroup?: (groupId: string) => void;
+  /**
+   * Repo -> automation tier map (#1282). When provided, the board renders a
+   * clickable tier pill per repository. Unset repos default to `full-active`.
+   */
+  automationTiers?: Readonly<Record<string, AutomationTier>>;
+  /**
+   * Advances a repository to `tier` when its pill is clicked. The board passes
+   * {@link nextAutomationTier} of the repo's current tier, so repeated clicks
+   * cycle Full Fleet Active → Paused → Kanban-Only.
+   */
+  onToggleAutomationTier?: (repo: string, tier: AutomationTier) => void | Promise<void>;
+  /**
+   * Fires after a card walks the board backward (#1282), e.g. Review → In
+   * Progress. Hosts wire this to change-request steering; it runs after the
+   * state transition itself succeeds.
+   */
+  onBackwardTransition?: (
+    issue: KanbanIssue,
+    from: KanbanColumnId,
+    to: KanbanColumnId,
+  ) => void | Promise<void>;
 }

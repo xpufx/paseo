@@ -58,6 +58,7 @@ import {
 } from "./workspace-lookup.js";
 import { adjudicatePermission, isFleetAgent } from "./permission-adjudication.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
+import type { AutomationTier } from "@xpufx/backend-tickets/shared";
 import {
   DEFAULT_ROLE_MODELS,
   listEnabledProviders,
@@ -107,6 +108,8 @@ export interface RouterConfig {
   host?: string;
   port?: number;
   pausedRepos?: string[];
+  /** Repos where autonomous dispatch is barred entirely (#1282). */
+  kanbanOnlyRepos?: string[];
   enrolledRepos?: string[];
   /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
   mergeEventHooks?: Record<string, MergeEventHook>;
@@ -141,6 +144,7 @@ export function loadRouterConfig(): RouterConfig {
       host: settings.hookHost,
       port: settings.hookPort,
       pausedRepos: mergePausedRepos(settings.pausedRepos, settings.mutedRepos),
+      kanbanOnlyRepos: settings.kanbanOnlyRepos,
       enrolledRepos: settings.enrolledRepos,
       mergeEventHooks: settings.mergeEventHooks,
     };
@@ -182,6 +186,9 @@ export function saveRouterConfig(config: RouterConfig): void {
       // Clearing the pre-#984 key keeps a stale entry from resurrecting a repo
       // the operator just unpaused via the merged read above.
       updateData.mutedRepos = undefined;
+    }
+    if (config.kanbanOnlyRepos !== undefined) {
+      updateData.kanbanOnlyRepos = config.kanbanOnlyRepos;
     }
     if (config.mergeEventHooks !== undefined) {
       updateData.mergeEventHooks = config.mergeEventHooks;
@@ -242,6 +249,11 @@ export interface HookRouterOptions {
   ciFailureEnabled?: boolean;
   /** Enable the repository.created onboarding handler (#847). Defaults off in test mode. */
   repoOnboardingEnabled?: boolean;
+  /**
+   * Enable the backward Review → In Progress change-request steering (#1282).
+   * Defaults off in test mode so fixtures never touch the network.
+   */
+  backwardTransitionSteeringEnabled?: boolean;
   /** Enable the in-router stale-WIP sweep (#920). Defaults off in test mode. */
   staleWipSweepEnabled?: boolean;
   /** Hours with no update before a `state/1-wip` ticket returns to triage (#920). */
@@ -631,6 +643,47 @@ export const CLOSE_GUARD_POLICY_COMMENT = [
   "**Policy Directive**:",
   "Autonomous agents and orchestrators must **never** close issues directly. Upon completing implementation and local verification, agents must transition tickets to `state/2-review` or `state/3-verify` with an envelope report and await operator verification. Only the human operator closes issues upon final review (`state/4-done` / `confirmed-done`).",
 ].join("\n");
+
+/**
+ * Marker embedded in the backward-transition steering comment so operators and
+ * tooling can recognize the automated directive (#1282).
+ */
+export const BACKWARD_TRANSITION_STEERING_MARKER = "<!-- fleet:backward-transition-steering -->";
+
+/** Review-class state labels; removing one means the ticket was under review. */
+export const REVIEW_STATE_LABELS: readonly string[] = [
+  "state/review",
+  "state/2-review",
+  "state/verify",
+  "state/3-verify",
+];
+
+/** WIP-class state labels; adding one returns a card to active work. */
+export const WIP_STATE_LABELS: readonly string[] = ["state/wip", "state/1-wip"];
+
+/** Steering posted to the ticket when a card walks Review → In Progress (#1282). */
+export const BACKWARD_TRANSITION_STEERING_COMMENT = [
+  "### 🔄 Changes requested: Review → In Progress",
+  "",
+  "This card was moved backward from **Review** to **In Progress**.",
+  "The worker must address the review feedback on the linked pull request, re-run the checks, and return the card to Review when the fix is ready.",
+  "",
+  BACKWARD_TRANSITION_STEERING_MARKER,
+].join("\n");
+
+/**
+ * True when an `issues` webhook removes a Review-class state label while the
+ * ticket's post-change labels carry a WIP-class label (#1282). Forgejo delivers
+ * a label swap as an `unlabeled` event whose `issue.labels` already reflect the
+ * new state, so the backward walk is detectable from a single payload.
+ */
+export function isBackwardStateTransition(body: any): boolean {
+  if (String(body?.action ?? "").toLowerCase() !== "unlabeled") return false;
+  const removed = canonicalLabelName(body?.label?.name);
+  if (!REVIEW_STATE_LABELS.includes(removed)) return false;
+  const labels = labelNamesFromIssue(body?.issue).map((name) => canonicalLabelName(name));
+  return labels.some((name) => WIP_STATE_LABELS.includes(name));
+}
 
 /** Labels applied to auto-created CI failure issues (#865). */
 export const CI_FAILURE_LABELS: readonly string[] = ["kind/bug", "priority/high", "attention/orchestrator"];
@@ -3739,6 +3792,8 @@ export class HookRouter {
   private teardownInProgress = false;
   private startedAt: number | null = null;
   private pausedRepos = new Set<string>();
+  /** Repos where autonomous dispatch is barred entirely (#1282). */
+  private kanbanOnlyRepos = new Set<string>();
   private enrolledRepos = new Set<string>();
 
   public readonly coalesceBuffers = new Map<string, CoalesceEntry>();
@@ -3806,6 +3861,7 @@ export class HookRouter {
   /** CI failure issue creator (#865). */
   public readonly ciFailureEnabled: boolean;
   public readonly repoOnboardingEnabled: boolean;
+  public readonly backwardTransitionSteeringEnabled: boolean;
   public readonly staleWipSweepEnabled: boolean;
   public readonly staleWipHours: number;
   private readonly closeGuardTargetActors: string[];
@@ -3851,6 +3907,8 @@ export class HookRouter {
     this.closeGuardEnabled = options?.closeGuardEnabled ?? !this.isTestMode;
     this.ciFailureEnabled = options?.ciFailureEnabled ?? !this.isTestMode;
     this.repoOnboardingEnabled = options?.repoOnboardingEnabled ?? !this.isTestMode;
+    this.backwardTransitionSteeringEnabled =
+      options?.backwardTransitionSteeringEnabled ?? !this.isTestMode;
     this.staleWipSweepEnabled = options?.staleWipSweepEnabled ?? !this.isTestMode;
     this.rotationAutoEnabled = options?.rotationAutoEnabled ?? !this.isTestMode;
     this.staleWipHours =
@@ -3890,6 +3948,11 @@ export class HookRouter {
     if (persisted.pausedRepos) {
       for (const r of persisted.pausedRepos) {
         if (r) this.pausedRepos.add(r);
+      }
+    }
+    if (persisted.kanbanOnlyRepos) {
+      for (const r of persisted.kanbanOnlyRepos) {
+        if (r) this.kanbanOnlyRepos.add(r);
       }
     }
     if (persisted.enrolledRepos) {
@@ -4176,6 +4239,8 @@ export class HookRouter {
         await this.runLabelTriage(body);
       } else if (ev === "issues" && action === "closed") {
         await this.runCloseGuard(body);
+      } else if (ev === "issues" && action === "unlabeled") {
+        await this.runBackwardTransitionSteering(body);
       } else if (ev === "action_run_failure") {
         await this.runCiFailure(body);
       } else if (ev === "repository" && action === "created") {
@@ -4754,6 +4819,59 @@ export class HookRouter {
   }
 
   /**
+   * Bi-directional flight control (#1282): a card dragged from Review back to
+   * In Progress means changes were requested. Post the steering comment on the
+   * ticket and notify the repo's orchestrator so the author agent picks the
+   * rework up. Best-effort: a failed comment or notification still reports the
+   * attempt and never affects webhook acknowledgement.
+   */
+  public async runBackwardTransitionSteering(body: any): Promise<DirectActionResult> {
+    if (!this.backwardTransitionSteeringEnabled) {
+      return { acted: false, reason: "backward transition steering disabled" };
+    }
+    if (!isBackwardStateTransition(body)) {
+      return { acted: false, reason: "not a backward state transition" };
+    }
+    const repo = this.bareRepoFromPayload(body);
+    const issueNumber = issueNumberOf(body);
+    if (!repo || issueNumber == null) {
+      return { acted: false, reason: "missing repo or issue number" };
+    }
+
+    const host = resolveForgejoHost();
+    const token = await this.resolveApiToken(host);
+    const comment = await forgejoApiRequest<any>(
+      "POST",
+      `/api/v1/repos/${repo}/issues/${issueNumber}/comments`,
+      { body: BACKWARD_TRANSITION_STEERING_COMMENT },
+      { host, token },
+    );
+    const commented = comment.outcome === "ok";
+    if (!commented) {
+      this.log(`[warn] backward steering: comment failed for ${repo}#${issueNumber}: ${comment.error}`);
+    }
+
+    let notified = false;
+    try {
+      notified = await this.notifyReopened(repo, body, body?.issue ?? {}, this.actorFromPayload(body));
+    } catch (err) {
+      this.log(
+        `[warn] backward steering: notify failed for ${repo}#${issueNumber}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+
+    this.log(
+      `[info] backward steering: ${repo}#${issueNumber} returned to WIP; commented=${commented} notified=${notified}`,
+    );
+    return {
+      acted: commented || notified,
+      reason: commented ? "change-request steering posted" : "steering comment failed",
+      commented,
+      notified,
+    };
+  }
+
+  /**
    * CI failure handler (#865): create an issue for a failed workflow run,
    * deduplicated by an existing open issue with the same title.
    */
@@ -5117,6 +5235,78 @@ export class HookRouter {
     return Array.from(this.pausedRepos);
   }
 
+  /** True when `repo` is barred from autonomous dispatch entirely (#1282). */
+  public isRepoKanbanOnly(repoKey: string): boolean {
+    if (!repoKey) return false;
+    for (const m of this.kanbanOnlyRepos) {
+      if (m === repoKey || this.isRepoPausedMatch(m, repoKey)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * True when a repository cannot drain or auto-dispatch work (#1282): either
+   * paused (queue buffered) or kanban-only (automation barred entirely).
+   */
+  public isRepoDispatchSuppressed(repoKey: string): boolean {
+    return this.isRepoPaused(repoKey) || this.isRepoKanbanOnly(repoKey);
+  }
+
+  public getKanbanOnlyRepos(): string[] {
+    return Array.from(this.kanbanOnlyRepos);
+  }
+
+  /**
+   * Resolves a repository's automation tier (#1282). `kanban-only` beats
+   * `paused` because it is the stricter bar; an unconfigured repo keeps
+   * dispatching as `full-active` so a new repo never silently goes passive.
+   */
+  public getRepoAutomationTier(repoKey: string): AutomationTier {
+    if (this.isRepoKanbanOnly(repoKey)) return "kanban-only";
+    if (this.isRepoPaused(repoKey)) return "paused";
+    return "full-active";
+  }
+
+  /**
+   * Applies an explicit automation tier to one repository (#1282). The repo is
+   * removed from both restriction sets first so the tier is authoritative
+   * rather than additive, then persisted to plugin settings.
+   */
+  public toggleRepoAutomationTier(
+    repoKey: string,
+    tier: AutomationTier,
+  ): {
+    tier: AutomationTier;
+    isPaused: boolean;
+    isKanbanOnly: boolean;
+    pausedRepos: string[];
+    kanbanOnlyRepos: string[];
+  } {
+    const repo = String(repoKey ?? "").trim();
+    if (repo) {
+      const removeFrom = (set: Set<string>) => {
+        for (const m of Array.from(set)) {
+          if (m === repo || this.isRepoPausedMatch(m, repo)) set.delete(m);
+        }
+      };
+      removeFrom(this.pausedRepos);
+      removeFrom(this.kanbanOnlyRepos);
+      if (tier === "paused") this.pausedRepos.add(repo);
+      else if (tier === "kanban-only") this.kanbanOnlyRepos.add(repo);
+      this.saveConfigState();
+      this.log(`[info] Repository ${repo} automation tier set to ${tier}`);
+      if (this.getRepoAutomationTier(repo) === "full-active") void this.drain(repo);
+    }
+    const resolved = this.getRepoAutomationTier(repo);
+    return {
+      tier: resolved,
+      isPaused: resolved === "paused",
+      isKanbanOnly: resolved === "kanban-only",
+      pausedRepos: this.getPausedRepos(),
+      kanbanOnlyRepos: this.getKanbanOnlyRepos(),
+    };
+  }
+
   public enrollRepo(repoKey: string): string[] {
     this.enrolledRepos.add(repoKey);
     this.saveConfigState();
@@ -5183,7 +5373,7 @@ export class HookRouter {
     if (this.isHaltedState) return null;
     const canonical = canonicalRepoKey(repo) ?? String(repo ?? "").trim();
     if (!canonical) return null;
-    if (this.isRepoPaused(canonical) || this.isPaused(canonical)) return null;
+    if (this.isRepoDispatchSuppressed(canonical) || this.isPaused(canonical)) return null;
     if (!this.isEnrolledRepo(canonical)) return null;
 
     // #987: coalesce overlapping auto-ensure calls per repo. Without this, two
@@ -5226,6 +5416,7 @@ export class HookRouter {
   private saveConfigState(): void {
     saveRouterConfig({
       pausedRepos: Array.from(this.pausedRepos),
+      kanbanOnlyRepos: Array.from(this.kanbanOnlyRepos),
       enrolledRepos: Array.from(this.enrolledRepos),
     });
   }
@@ -7463,7 +7654,7 @@ export class HookRouter {
 
     for (const [key, q] of this.queues.entries()) {
       if (key === "frontdesk" || q.length === 0) continue;
-      if (this.isRepoPaused(key) || this.isPaused(key)) continue;
+      if (this.isRepoDispatchSuppressed(key) || this.isPaused(key)) continue;
       let orch = this.readOrchestrator(key);
       if (!orch) {
         // Lost-registration recovery (#987): adopt a live labelled orchestrator
@@ -8579,6 +8770,33 @@ export class HookRouter {
    * checker instead; it is not the primary path and must not be set in
    * production.
    */
+  /**
+   * Projects a repository's automation tier onto its board candidates (#1282).
+   * `kanban-only` bars every candidate from dispatch, `paused` buffers only the
+   * ones that would otherwise dispatch, and `full-active` is untouched.
+   */
+  private applyRepoAutomationTier(repoKey: string, candidates: BoardCandidate[]): BoardCandidate[] {
+    const tier = this.getRepoAutomationTier(repoKey);
+    if (tier === "full-active") return candidates;
+    return candidates.map((candidate) => {
+      if (tier === "kanban-only") {
+        return {
+          ...candidate,
+          is_dispatchable: false,
+          reason: "Kanban-only passive repository (automation barred)",
+        };
+      }
+      if (candidate.is_dispatchable) {
+        return {
+          ...candidate,
+          is_dispatchable: false,
+          reason: "Repository dispatch is paused (queue buffered)",
+        };
+      }
+      return candidate;
+    });
+  }
+
   public async runBoardCheck(
     repo: string,
     hostname = "forge.mrs.uppidi.com",
@@ -8596,10 +8814,14 @@ export class HookRouter {
           timeout: 30000,
           maxBuffer: 5 * 1024 * 1024,
         });
-        return { repo, ok: true, candidates: this.parseExternalCheckerStdout(stdout) ?? [] };
+        return {
+          repo,
+          ok: true,
+          candidates: this.applyRepoAutomationTier(repo, this.parseExternalCheckerStdout(stdout) ?? []),
+        };
       } catch (err: any) {
         const fromStdout = err?.stdout ? this.parseExternalCheckerStdout(String(err.stdout)) : null;
-        if (fromStdout) return { repo, ok: true, candidates: fromStdout };
+        if (fromStdout) return { repo, ok: true, candidates: this.applyRepoAutomationTier(repo, fromStdout) };
         return { repo, ok: false, candidates: [], error: err instanceof Error ? err.message : String(err) };
       }
     }
@@ -8614,7 +8836,7 @@ export class HookRouter {
     return {
       repo,
       ok: true,
-      candidates: outcome.rankedCandidates,
+      candidates: this.applyRepoAutomationTier(repo, outcome.rankedCandidates),
       staleWipRecovery: outcome.staleWipRecovery,
     };
   }
@@ -8932,10 +9154,10 @@ export class HookRouter {
     this.queues.set(key, list);
     this.persistQueue(key);
     this.log(`[info] Enqueued message ${entry.id} for ${key} (total depth: ${list.length}, sos: ${Boolean(isSos)})`);
-    if (!this.isRepoPaused(key)) {
+    if (!this.isRepoDispatchSuppressed(key)) {
       void this.drain(key);
     } else {
-      this.log(`[info] Drain suppressed for paused repository ${key}`);
+      this.log(`[info] Drain suppressed for paused or kanban-only repository ${key}`);
     }
     return entry;
   }
@@ -8991,7 +9213,7 @@ export class HookRouter {
       this.pausedQueues.clear();
       this.log("[info] All queues resumed");
       for (const k of this.queues.keys()) {
-        if (!this.isRepoPaused(k)) {
+        if (!this.isRepoDispatchSuppressed(k)) {
           void this.drain(k);
         }
       }
@@ -9009,7 +9231,7 @@ export class HookRouter {
       }
       this.pausedQueues.delete(key);
       this.log(`[info] Queue ${key} resumed`);
-      if (!this.isRepoPaused(key)) {
+      if (!this.isRepoDispatchSuppressed(key)) {
         void this.drain(key);
       }
     }
@@ -9562,7 +9784,7 @@ export class HookRouter {
         clearTimeout(timer);
         this.backoffTimers.delete("frontdesk");
       }
-      if (triggerDrain && !this.isRepoPaused("frontdesk") && !this.isPaused("frontdesk")) {
+      if (triggerDrain && !this.isRepoDispatchSuppressed("frontdesk") && !this.isPaused("frontdesk")) {
         void this.drain("frontdesk");
       }
     }
@@ -9578,7 +9800,7 @@ export class HookRouter {
           clearTimeout(timer);
           this.backoffTimers.delete(key);
         }
-        if (triggerDrain && items.length > 0 && !this.isRepoPaused(key) && !this.isPaused(key)) {
+        if (triggerDrain && items.length > 0 && !this.isRepoDispatchSuppressed(key) && !this.isPaused(key)) {
           void this.drain(key);
         }
       }
@@ -9689,15 +9911,15 @@ export class HookRouter {
     if (this.isClosed) return;
     if (!key) {
       for (const k of this.queues.keys()) {
-        if (!this.isRepoPaused(k)) {
+        if (!this.isRepoDispatchSuppressed(k)) {
           void this.drain(k);
         }
       }
       return;
     }
 
-    if (this.isRepoPaused(key)) {
-      this.log(`[info] Drain suppressed for paused repository ${key}`);
+    if (this.isRepoDispatchSuppressed(key)) {
+      this.log(`[info] Drain suppressed for paused or kanban-only repository ${key}`);
       return;
     }
 
@@ -10932,12 +11154,14 @@ export function startHookRouter(
 export function getFleetRosterInfo(): {
   enrolledRepos: string[];
   pausedRepos: string[];
+  kanbanOnlyRepos: string[];
   repoQueuedHooks: Record<string, number>;
 } {
   const router = getActiveHookRouter();
   const home = resolveHostHome();
   const config = loadRouterConfig();
   const pausedRepos = router ? router.getPausedRepos() : (config.pausedRepos ?? []);
+  const kanbanOnlyRepos = router ? router.getKanbanOnlyRepos() : (config.kanbanOnlyRepos ?? []);
 
   const enrolledSet = new Set<string>(router ? router.getEnrolledRepos() : (config.enrolledRepos ?? []));
 
@@ -10978,6 +11202,7 @@ export function getFleetRosterInfo(): {
   return {
     enrolledRepos: Array.from(enrolledSet),
     pausedRepos,
+    kanbanOnlyRepos,
     repoQueuedHooks,
   };
 }

@@ -1,12 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Platform, Text, View } from "react-native";
+import { Platform, Pressable, Text, View } from "react-native";
 import { ScrollView } from "@getpaseo/plugin/client/react-native";
 import {
   KANBAN_COLUMNS,
   getIssueKanbanColumn,
+  isBackwardKanbanTransition,
   isRepoMatching,
+  AUTOMATION_TIER_META,
+  DEFAULT_REPO_GROUP,
+  DEFAULT_REPO_GROUP_ID,
+  nextAutomationTier,
+  repoGroupMatches,
   type KanbanColumnId,
   type KanbanColumnDef,
+  type RepoGroup,
+  type AutomationTier,
 } from "@xpufx/backend-tickets/client";
 import {
   HostBadge,
@@ -47,6 +55,12 @@ export function HostKanbanBoard({
   onSubmitComment,
   onSelectLabel,
   activeStateLabel = null,
+  repoGroups,
+  selectedRepoGroup,
+  onSelectRepoGroup,
+  automationTiers,
+  onToggleAutomationTier,
+  onBackwardTransition,
 }: KanbanBoardProps) {
   const { colors } = useHostTheme();
   const [internalQuery, setInternalQuery] = useState("");
@@ -54,18 +68,46 @@ export function HostKanbanBoard({
   const [dragOverColumn, setDragOverColumn] = useState<KanbanColumnId | null>(null);
   const [internalSelected, setInternalSelected] = useState<number | null>(null);
   const [drawerIssueNumber, setDrawerIssueNumber] = useState<number | null>(null);
+  const [internalRepoGroup, setInternalRepoGroup] = useState<string>(DEFAULT_REPO_GROUP_ID);
   const isWeb = Platform.OS === "web";
   const isSelectionControlled = selectedIssueNumber !== undefined;
   const activeSelected = isSelectionControlled ? selectedIssueNumber ?? null : internalSelected;
 
   const query = externalFilterQuery !== undefined ? externalFilterQuery : internalQuery;
   const setQuery = onFilterQueryChange ?? setInternalQuery;
+  const isGroupControlled = selectedRepoGroup !== undefined;
+  const activeRepoGroup = isGroupControlled ? selectedRepoGroup : internalRepoGroup;
 
-  // Filter issues by search query and repository
+  // Board-toolbar groups (#1282): the implicit `All` group is always first, and
+  // an explicitly-defined `all` is folded into it so the pill never duplicates.
+  const groupTabs = useMemo<RepoGroup[]>(() => {
+    if (!repoGroups || repoGroups.length === 0) return [];
+    const explicitAll = repoGroups.find((group) => group.id === DEFAULT_REPO_GROUP_ID);
+    const rest = repoGroups.filter((group) => group.id !== DEFAULT_REPO_GROUP_ID);
+    return [explicitAll ?? DEFAULT_REPO_GROUP, ...rest];
+  }, [repoGroups]);
+
+  const setRepoGroup = useCallback(
+    (groupId: string) => {
+      if (!isGroupControlled) setInternalRepoGroup(groupId);
+      onSelectRepoGroup?.(groupId);
+    },
+    [isGroupControlled, onSelectRepoGroup],
+  );
+
+  const activeGroup = useMemo(
+    () => groupTabs.find((group) => group.id === activeRepoGroup) ?? null,
+    [groupTabs, activeRepoGroup],
+  );
+
+  // Filter issues by search query, single repository, and repo group
   const filteredIssues = useMemo(() => {
     let list = Array.isArray(issues) ? issues : [];
     if (selectedRepo && selectedRepo !== "all") {
       list = list.filter((i) => isRepoMatching(i.repo, selectedRepo));
+    }
+    if (activeGroup && activeGroup.id !== DEFAULT_REPO_GROUP_ID) {
+      list = list.filter((i) => repoGroupMatches(activeGroup, i.repo));
     }
     const q = query.trim().toLowerCase();
     if (!q) return list;
@@ -76,7 +118,30 @@ export function HostKanbanBoard({
       const matchLabel = (i.labels || []).some((l) => l.toLowerCase().includes(q));
       return matchNum || matchTitle || matchRepo || matchLabel;
     });
-  }, [issues, selectedRepo, query]);
+  }, [issues, selectedRepo, activeGroup, query]);
+
+  // Repos surfaced for tier pills: the group-filtered board plus any repo the
+  // host configured a tier for, sorted for a stable render order.
+  const tierRepos = useMemo(() => {
+    if (!automationTiers) return [];
+    const repos = new Set<string>();
+    for (const issue of filteredIssues) {
+      if (issue.repo) repos.add(issue.repo);
+    }
+    for (const repo of Object.keys(automationTiers)) {
+      if (repo) repos.add(repo);
+    }
+    return Array.from(repos).sort((a, b) => a.localeCompare(b));
+  }, [automationTiers, filteredIssues]);
+
+  const handleToggleAutomationTier = useCallback(
+    (repo: string) => {
+      if (!onToggleAutomationTier) return;
+      const current = automationTiers?.[repo] ?? "full-active";
+      void onToggleAutomationTier(repo, nextAutomationTier(current));
+    },
+    [automationTiers, onToggleAutomationTier],
+  );
 
   // Group issues by column ID
   const issuesByColumn = useMemo(() => {
@@ -111,14 +176,18 @@ export function HostKanbanBoard({
   const handleTransition = useCallback(
     async (issue: KanbanIssue, targetState: KanbanColumnId) => {
       if (!onTransitionIssue) return;
+      const fromState = getIssueKanbanColumn(issue);
       setTransitioningIssueId(issue.number);
       try {
         await onTransitionIssue(issue, targetState);
+        if (isBackwardKanbanTransition(fromState, targetState)) {
+          await onBackwardTransition?.(issue, fromState, targetState);
+        }
       } finally {
         setTransitioningIssueId(null);
       }
     },
-    [onTransitionIssue],
+    [onTransitionIssue, onBackwardTransition],
   );
 
   const selectByOffset = useCallback(
@@ -390,6 +459,90 @@ export function HostKanbanBoard({
           ))}
         </HostRow>
       </View>
+
+      {/* Repo groups & 3-tier automation controls (#1282) */}
+      {groupTabs.length > 0 || tierRepos.length > 0 ? (
+        <View
+          testID="kanban-board-controls"
+          style={{
+            flexDirection: "row",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 8,
+          }}
+        >
+          {groupTabs.length > 0 ? (
+            <HostRow gap="xs" align="center" wrap testID="kanban-repo-groups">
+              {groupTabs.map((group) => {
+                const isActive = group.id === activeRepoGroup;
+                return (
+                  <Pressable
+                    key={group.id}
+                    testID={`kanban-repo-group-${group.id}`}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isActive }}
+                    accessibilityLabel={`Repository group ${group.name}`}
+                    onPress={() => setRepoGroup(group.id)}
+                    style={{
+                      backgroundColor: isActive ? colors.accent : colors.surface1,
+                      borderColor: isActive ? colors.accent : colors.border,
+                      borderWidth: 1,
+                      borderRadius: 999,
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: isActive ? colors.accentForeground : colors.foregroundMuted,
+                        fontSize: 11,
+                        fontWeight: isActive ? "700" : "500",
+                      }}
+                    >
+                      {group.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </HostRow>
+          ) : null}
+
+          {tierRepos.length > 0 ? (
+            <HostRow gap="xs" align="center" wrap testID="kanban-automation-tiers">
+              {tierRepos.map((repo) => {
+                const tier = automationTiers?.[repo] ?? "full-active";
+                const meta = AUTOMATION_TIER_META[tier];
+                return (
+                  <Pressable
+                    key={repo}
+                    testID={`kanban-automation-tier-${repo}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${repo} automation tier ${meta.label}`}
+                    onPress={() => handleToggleAutomationTier(repo)}
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      backgroundColor: colors.surface1,
+                      borderColor: colors.border,
+                      borderWidth: 1,
+                      borderRadius: 999,
+                      paddingHorizontal: 10,
+                      paddingVertical: 4,
+                    }}
+                  >
+                    <HostStatusDot variant={meta.tone} />
+                    <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 11 }}>
+                      {repo}
+                    </Text>
+                    <HostBadge label={meta.label} variant={meta.tone} size="sm" />
+                  </Pressable>
+                );
+              })}
+            </HostRow>
+          ) : null}
+        </View>
+      ) : null}
 
       {/* Horizontal ScrollView across the Columns */}
       <ScrollView

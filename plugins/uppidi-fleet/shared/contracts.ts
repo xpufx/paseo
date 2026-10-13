@@ -903,6 +903,7 @@ export const UppidiAgentsOutputSchema = z.object({
   tree: z.array(UppidiAgentTreeNodeSchema).default([]),
   enrolledRepos: z.array(z.string()).default([]),
   pausedRepos: z.array(z.string()).default([]),
+  kanbanOnlyRepos: z.array(z.string()).default([]),
   repoQueuedHooks: z.record(z.string(), z.number()).default({}),
   totalCount: z.number().default(0),
   runningCount: z.number().default(0),
@@ -1537,6 +1538,40 @@ export const uppidiToggleRepoPauseContract = defineContract({
   output: UppidiToggleRepoPauseOutputSchema,
 });
 
+// Repository Automation Tier (#1282)
+export const AutomationTierSchema = z.enum(["full-active", "paused", "kanban-only"]);
+export type AutomationTierValue = z.infer<typeof AutomationTierSchema>;
+
+export const UppidiToggleRepoAutomationTierInputSchema = z.object({
+  repo: z.string(),
+  tier: AutomationTierSchema,
+});
+export type UppidiToggleRepoAutomationTierInput = z.infer<
+  typeof UppidiToggleRepoAutomationTierInputSchema
+>;
+
+export const UppidiToggleRepoAutomationTierOutputSchema = z.object({
+  ok: z.boolean(),
+  repo: z.string(),
+  tier: AutomationTierSchema,
+  isPaused: z.boolean().default(false),
+  isKanbanOnly: z.boolean().default(false),
+  pausedRepos: z.array(z.string()).default([]),
+  kanbanOnlyRepos: z.array(z.string()).default([]),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type UppidiToggleRepoAutomationTierOutput = z.infer<
+  typeof UppidiToggleRepoAutomationTierOutputSchema
+>;
+
+export const uppidiToggleRepoAutomationTierContract = defineContract({
+  name: "uppidi-fleet.toggle-repo-automation-tier",
+  description: "Set a repository's 3-tier automation posture (full-active, paused, kanban-only)",
+  input: UppidiToggleRepoAutomationTierInputSchema,
+  output: UppidiToggleRepoAutomationTierOutputSchema,
+});
+
 // Repository Enrollment (Issue #867)
 export const UppidiRepoSchema = z.object({
   key: z.string(),
@@ -1548,6 +1583,8 @@ export const UppidiRepoSchema = z.object({
   private: z.boolean(),
   enrolled: z.boolean(),
   paused: z.boolean(),
+  /** 3-tier automation posture (#1282). */
+  automationTier: AutomationTierSchema.default("full-active"),
   hasOrchestrator: z.boolean().default(false).optional(),
   queueDepth: z.number().default(0).optional(),
 });
@@ -1862,6 +1899,8 @@ export const uppidiFleetSettingsSchema = z.object({
   hookPort: z.number().int().min(1).max(65535).default(8099),
   enrolledRepos: z.array(z.string()).default([]),
   pausedRepos: z.array(z.string()).default([]),
+  /** Repos where autonomous dispatch is barred entirely (#1282). */
+  kanbanOnlyRepos: z.array(z.string()).default([]),
   /**
    * Pre-#984 persisted key. Still read (and merged into `pausedRepos`) so an
    * existing install keeps its paused repositories; cleared on the next write.

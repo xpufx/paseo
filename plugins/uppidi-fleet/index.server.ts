@@ -27,6 +27,7 @@ import {
   uppidiAddOrchestratorContract,
   uppidiReplaceOrchestratorContract,
   uppidiToggleRepoPauseContract,
+  uppidiToggleRepoAutomationTierContract,
   uppidiReposContract,
   uppidiEnrollRepoContract,
   uppidiUnenrollRepoContract,
@@ -75,6 +76,7 @@ import {
   handleUppidiAddOrchestrator,
   handleUppidiReplaceOrchestrator,
   handleUppidiToggleRepoPause,
+  handleUppidiToggleRepoAutomationTier,
   handleFleetTeardown,
   handleFleetResetState,
   handleFleetHalt,
@@ -197,6 +199,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiAddOrchestratorContract, handleUppidiAddOrchestrator);
   server.handle(uppidiReplaceOrchestratorContract, handleUppidiReplaceOrchestrator);
   server.handle(uppidiToggleRepoPauseContract, handleUppidiToggleRepoPause);
+  server.handle(uppidiToggleRepoAutomationTierContract, handleUppidiToggleRepoAutomationTier);
   server.handle(uppidiReposContract, handleUppidiRepos);
   server.handle(uppidiEnrollRepoContract, handleUppidiEnrollRepo);
   server.handle(uppidiUnenrollRepoContract, handleUppidiUnenrollRepo);

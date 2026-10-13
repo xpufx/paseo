@@ -39,6 +39,7 @@ const defaultLogger: FleetLogger = {
 export interface FleetHandlerOptions extends ReadFleetOptions {
   log?: FleetLogger;
   pausedRepos?: string[];
+  kanbanOnlyRepos?: string[];
   repoQueuedHooks?: Record<string, number>;
   workspaceProjectMap?: WorkspaceProjectMap;
   workspacesData?: readonly WorkspaceRecord[];
@@ -86,6 +87,7 @@ export function createFleetHandlers(options?: FleetHandlerOptions): FleetHandler
           enrolledRepos: input?.enrolledRepos ?? options?.enrolledRepos,
           mutedRepos: input?.mutedRepos ?? options?.mutedRepos,
           pausedRepos: input?.pausedRepos ?? options?.pausedRepos,
+          kanbanOnlyRepos: input?.kanbanOnlyRepos ?? options?.kanbanOnlyRepos,
         };
         return await readFleetRoster(context, mergedOptions);
       } catch (err) {
@@ -100,6 +102,7 @@ export function createFleetHandlers(options?: FleetHandlerOptions): FleetHandler
           tree: [],
           enrolledRepos: [],
           pausedRepos: [],
+          kanbanOnlyRepos: [],
           mutedRepos: [],
           repoQueuedHooks: {},
           totalCount: 0,

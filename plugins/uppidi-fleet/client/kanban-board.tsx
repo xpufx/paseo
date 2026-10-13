@@ -7,6 +7,8 @@ import {
   type KanbanCardProps,
   type KanbanBoardProps,
   type KanbanIssue,
+  type RepoGroup,
+  type AutomationTier,
 } from "@xpufx/paseo-plugin-ui";
 import {
   KANBAN_COLUMNS,
@@ -29,6 +31,8 @@ export {
   type KanbanColumnDef,
   type KanbanTransitionAction,
   type KanbanCardProps,
+  type RepoGroup,
+  type AutomationTier,
 };
 
 export interface UppidiFleetKanbanBoardProps {
@@ -39,6 +43,14 @@ export interface UppidiFleetKanbanBoardProps {
   filterQuery?: string;
   onFilterQueryChange?: (query: string) => void;
   isLoading?: boolean;
+  /** Multi-repo group filter pills (#1282). */
+  repoGroups?: readonly RepoGroup[];
+  selectedRepoGroup?: string;
+  onSelectRepoGroup?: (groupId: string) => void;
+  /** Repo -> 3-tier automation posture (#1282). */
+  automationTiers?: Readonly<Record<string, AutomationTier>>;
+  onToggleAutomationTier?: (repo: string, tier: AutomationTier) => void | Promise<void>;
+  onBackwardTransition?: KanbanBoardProps["onBackwardTransition"];
 }
 
 export function UppidiFleetKanbanBoard(props: UppidiFleetKanbanBoardProps) {
@@ -51,6 +63,12 @@ export function UppidiFleetKanbanBoard(props: UppidiFleetKanbanBoardProps) {
       filterQuery={props.filterQuery}
       onFilterQueryChange={props.onFilterQueryChange}
       isLoading={props.isLoading}
+      repoGroups={props.repoGroups}
+      selectedRepoGroup={props.selectedRepoGroup}
+      onSelectRepoGroup={props.onSelectRepoGroup}
+      automationTiers={props.automationTiers}
+      onToggleAutomationTier={props.onToggleAutomationTier}
+      onBackwardTransition={props.onBackwardTransition}
     />
   );
 }

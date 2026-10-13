@@ -107,6 +107,9 @@ import {
   CLOSE_GUARD_ACCEPTED_LABELS,
   DEFAULT_CLOSE_GUARD_TARGET_ACTORS,
   CLOSE_GUARD_POLICY_COMMENT,
+  isBackwardStateTransition,
+  BACKWARD_TRANSITION_STEERING_COMMENT,
+  BACKWARD_TRANSITION_STEERING_MARKER,
   CI_FAILURE_LABELS,
   ciFailureIssueTitle,
   ciFailureDetailsFromPayload,
@@ -9559,3 +9562,294 @@ describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
   });
 });
 
+
+describe("repo automation tiers (#1282)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-automation-tier-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    clearSettingsStorage();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  function makeRouter(overrides: Partial<HookRouterOptions> = {}): HookRouter {
+    return new HookRouter(null, { queueDir, stateDir, port: 0, ...overrides });
+  }
+
+  function dispatchableIo(): IssuesCheckIo {
+    return {
+      getOpenIssues: async () => ({
+        ok: true,
+        issues: [
+          {
+            number: 5,
+            title: "t",
+            state: "open",
+            updated_at: "2026-01-01T00:00:00Z",
+            created_at: "2026-01-01T00:00:00Z",
+            comments: 0,
+            labels: [
+              { name: "spec/2-approved" },
+              { name: "attention/1-agent" },
+              { name: "target/uppidi-fleet" },
+            ],
+          },
+        ],
+      }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({
+        5: { updated_at: "2025-12-01T00:00:00Z", labels: ["stale-marker"], comments_count: 0 },
+      }),
+      saveCache: async () => {},
+    };
+  }
+
+  it("defaults to full-active and applies explicit tiers authoritatively", () => {
+    const router = makeRouter();
+    assert.equal(router.getRepoAutomationTier("xpufx-org/paseo"), "full-active");
+
+    const paused = router.toggleRepoAutomationTier("xpufx-org/paseo", "paused");
+    assert.equal(paused.tier, "paused");
+    assert.equal(paused.isPaused, true);
+    assert.deepEqual(router.getPausedRepos(), ["xpufx-org/paseo"]);
+    assert.equal(router.getRepoAutomationTier("forge.mrs.uppidi.com/xpufx-org/paseo"), "paused");
+
+    const kanban = router.toggleRepoAutomationTier("xpufx-org/paseo", "kanban-only");
+    assert.equal(kanban.tier, "kanban-only");
+    assert.equal(kanban.isKanbanOnly, true);
+    assert.deepEqual(router.getPausedRepos(), [], "tier set is authoritative, not additive");
+    assert.deepEqual(router.getKanbanOnlyRepos(), ["xpufx-org/paseo"]);
+
+    const active = router.toggleRepoAutomationTier("xpufx-org/paseo", "full-active");
+    assert.equal(active.tier, "full-active");
+    assert.deepEqual(router.getKanbanOnlyRepos(), []);
+    assert.deepEqual(router.getPausedRepos(), []);
+  });
+
+  it("persists the tier through plugin settings", () => {
+    const router = makeRouter();
+    router.toggleRepoAutomationTier("xpufx-org/paseo", "kanban-only");
+    const config = loadRouterConfig();
+    assert.deepEqual(config.kanbanOnlyRepos, ["xpufx-org/paseo"]);
+    assert.deepEqual(config.pausedRepos, []);
+  });
+
+  it("reports kanban-only and paused repos through getFleetRosterInfo", () => {
+    const router = makeRouter();
+    setActiveHookRouter(router);
+    try {
+      router.toggleRepoAutomationTier("xpufx-org/paseo", "kanban-only");
+      router.toggleRepoAutomationTier("xpufx-org/platform", "paused");
+      const roster = getFleetRosterInfo();
+      assert.deepEqual(roster.kanbanOnlyRepos, ["xpufx-org/paseo"]);
+      assert.deepEqual(roster.pausedRepos, ["xpufx-org/platform"]);
+    } finally {
+      setActiveHookRouter(null);
+    }
+  });
+
+  it("bars every candidate from dispatch for kanban-only repos", async () => {
+    const router = makeRouter();
+    router.toggleRepoAutomationTier("xpufx-org/paseo", "kanban-only");
+    const res = await router.runBoardCheck("xpufx-org/paseo", "forge.test", dispatchableIo());
+    assert.equal(res.candidates.length, 1);
+    assert.equal(res.candidates[0].is_dispatchable, false);
+    assert.equal(
+      res.candidates[0].reason,
+      "Kanban-only passive repository (automation barred)",
+    );
+  });
+
+  it("buffers dispatchable candidates for paused repos", async () => {
+    const router = makeRouter();
+    router.toggleRepoAutomationTier("xpufx-org/paseo", "paused");
+    const res = await router.runBoardCheck("xpufx-org/paseo", "forge.test", dispatchableIo());
+    assert.equal(res.candidates[0].is_dispatchable, false);
+    assert.equal(res.candidates[0].reason, "Repository dispatch is paused (queue buffered)");
+  });
+
+  it("leaves full-active candidates dispatchable", async () => {
+    const router = makeRouter();
+    const res = await router.runBoardCheck("xpufx-org/paseo", "forge.test", dispatchableIo());
+    assert.equal(res.candidates[0].is_dispatchable, true);
+  });
+
+  it("suppresses queue drain and auto-staffing for kanban-only repositories", async () => {
+    const router = makeRouter();
+    router.enrollRepo("xpufx-org/kanban-passive");
+    router.toggleRepoAutomationTier("xpufx-org/kanban-passive", "kanban-only");
+
+    assert.equal(router.isRepoDispatchSuppressed("xpufx-org/kanban-passive"), true);
+    assert.equal(router.isRepoDispatchSuppressed("xpufx-org/other-active"), false);
+
+    // auto-ensure returns null because autonomous dispatch is barred
+    const ensured = await router.ensureUnstaffedEnrolledRepo("xpufx-org/kanban-passive");
+    assert.equal(ensured, null);
+
+    // enqueued work does not trigger drain
+    const entry = router.enqueue("xpufx-org/kanban-passive", "test message", false);
+    assert.ok(entry);
+    assert.equal(router.getQueue("xpufx-org/kanban-passive").length, 1);
+  });
+});
+
+describe("backward transition steering (#1282)", () => {
+  const REPO = "xpufx-org/paseo";
+  const REPO_URL = "https://forge.mrs.uppidi.com/xpufx-org/paseo";
+  const REPO_KEY = "forge.mrs.uppidi.com/xpufx-org/paseo";
+
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let requests: Array<{ url: string; method: string; body: any }>;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-backward-transition-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    requests = [];
+    setTokenResolverForTest(async () => "test-token");
+  });
+
+  afterEach(() => {
+    setFetchForTest(null);
+    setTokenResolverForTest(null);
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  type FetchReply = { status?: number; data?: any };
+  function installFetch(
+    handler: (req: { url: string; method: string; body: any }) => FetchReply | undefined,
+  ) {
+    setFetchForTest(async (input: string, init?: any) => {
+      const method = String(init?.method ?? "GET").toUpperCase();
+      const body = init?.body ? JSON.parse(init.body) : undefined;
+      const req = { url: input, method, body };
+      requests.push(req);
+      const reply = handler(req) ?? {};
+      const status = reply.status ?? 200;
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: "",
+        json: async () => reply.data ?? {},
+      };
+    });
+  }
+
+  function makeRouter(overrides: Partial<HookRouterOptions> = {}): HookRouter {
+    return new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      backwardTransitionSteeringEnabled: true,
+      ...overrides,
+    });
+  }
+
+  function backwardBody() {
+    return {
+      action: "unlabeled",
+      repository: { full_name: REPO, html_url: REPO_URL, clone_url: `${REPO_URL}.git` },
+      sender: { login: "operator" },
+      label: { name: "state/review" },
+      issue: {
+        number: 42,
+        title: "Rework the widget",
+        state: "open",
+        html_url: `${REPO_URL}/issues/42`,
+        labels: [{ name: "state/wip" }],
+      },
+    };
+  }
+
+  it("detects only a review-removal that lands on a wip label", () => {
+    assert.equal(isBackwardStateTransition(backwardBody()), true);
+    assert.equal(
+      isBackwardStateTransition({ ...backwardBody(), action: "labeled" }),
+      false,
+    );
+    assert.equal(
+      isBackwardStateTransition({
+        ...backwardBody(),
+        label: { name: "state/wip" },
+        issue: { labels: [{ name: "state/review" }] },
+      }),
+      false,
+    );
+    assert.equal(
+      isBackwardStateTransition({
+        ...backwardBody(),
+        issue: { labels: [{ name: "kind/bug" }] },
+      }),
+      false,
+    );
+    assert.equal(isBackwardStateTransition({ action: "unlabeled" }), false);
+  });
+
+  it("posts the change-request steering comment and notifies the repo queue", async () => {
+    const router = makeRouter();
+    installFetch((req) => {
+      if (req.method === "POST" && req.url.endsWith("/comments")) return { data: { id: 1 } };
+      return { status: 404 };
+    });
+
+    const res = await router.runBackwardTransitionSteering(backwardBody());
+    assert.equal(res.acted, true);
+    assert.equal(res.commented, true);
+    assert.equal(res.notified, true);
+
+    const comment = requests.find((r) => r.method === "POST" && r.url.endsWith("/comments"));
+    assert.ok(comment);
+    assert.equal(
+      comment!.url,
+      `https://forge.mrs.uppidi.com/api/v1/repos/${REPO}/issues/42/comments`,
+    );
+    assert.ok(comment!.body.body.includes(BACKWARD_TRANSITION_STEERING_MARKER));
+    assert.equal(router.getQueue(REPO_KEY).length, 1);
+  });
+
+  it("still notifies when the steering comment fails", async () => {
+    const router = makeRouter();
+    installFetch(() => ({ status: 500 }));
+    const res = await router.runBackwardTransitionSteering(backwardBody());
+    assert.equal(res.commented, false);
+    assert.equal(res.notified, true);
+    assert.equal(res.acted, true);
+  });
+
+  it("is disabled by default in test mode", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    installFetch(() => ({ data: {} }));
+    const res = await router.runBackwardTransitionSteering(backwardBody());
+    assert.equal(res.acted, false);
+    assert.equal(res.reason, "backward transition steering disabled");
+    assert.equal(requests.length, 0);
+  });
+
+  it("does nothing for non-backward label changes", async () => {
+    const router = makeRouter();
+    installFetch(() => ({ data: {} }));
+    const res = await router.runBackwardTransitionSteering({
+      ...backwardBody(),
+      action: "labeled",
+      label: { name: "state/review" },
+    });
+    assert.equal(res.acted, false);
+    assert.equal(res.reason, "not a backward state transition");
+    assert.equal(requests.length, 0);
+  });
+});

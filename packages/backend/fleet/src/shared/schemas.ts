@@ -42,6 +42,7 @@ export const FleetRosterInputSchema = z
     enrolledRepos: z.array(z.string()).optional(),
     mutedRepos: z.array(z.string()).optional(),
     pausedRepos: z.array(z.string()).optional(),
+    kanbanOnlyRepos: z.array(z.string()).optional(),
   })
   .optional()
   .default({});

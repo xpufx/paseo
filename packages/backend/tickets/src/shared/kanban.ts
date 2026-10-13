@@ -127,6 +127,25 @@ export function getColumnTransitions(currentColumn: KanbanColumnId): KanbanTrans
   }
 }
 
+const KANBAN_COLUMN_RANK: Record<KanbanColumnId, number> = {
+  backlog: 0,
+  in_progress: 1,
+  review: 2,
+  done: 3,
+};
+
+/**
+ * True when moving from `from` to `to` walks the board backward (#1282): the
+ * canonical use is Review → In Progress, which signals change requests rather
+ * than forward progress.
+ */
+export function isBackwardKanbanTransition(
+  from: KanbanColumnId,
+  to: KanbanColumnId,
+): boolean {
+  return KANBAN_COLUMN_RANK[to] < KANBAN_COLUMN_RANK[from];
+}
+
 /**
  * Deterministically checks if two repository coordinates or URL descriptors match.
  */

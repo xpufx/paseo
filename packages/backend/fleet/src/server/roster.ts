@@ -129,6 +129,7 @@ export function buildFleetOutput(
     enrolledRepos?: string[];
     mutedRepos?: string[];
     pausedRepos?: string[];
+    kanbanOnlyRepos?: string[];
     repoQueuedHooks?: Record<string, number>;
   },
 ): FleetOutput {
@@ -142,6 +143,7 @@ export function buildFleetOutput(
   const enrolledRepos = options?.enrolledRepos || [];
   const mutedRepos = options?.mutedRepos || [];
   const pausedRepos = options?.pausedRepos || [];
+  const kanbanOnlyRepos = options?.kanbanOnlyRepos || [];
   const repoQueuedHooks = options?.repoQueuedHooks || {};
 
   for (const agent of agents) {
@@ -174,6 +176,7 @@ export function buildFleetOutput(
     tree,
     enrolledRepos,
     pausedRepos,
+    kanbanOnlyRepos,
     mutedRepos,
     repoQueuedHooks,
     totalCount: agents.length,
@@ -187,6 +190,7 @@ export async function readFleetRoster(
   context?: any,
   options?: ReadFleetOptions & {
     pausedRepos?: string[];
+    kanbanOnlyRepos?: string[];
     repoQueuedHooks?: Record<string, number>;
     workspaceProjectMap?: WorkspaceProjectMap;
     workspacesData?: readonly WorkspaceRecord[];

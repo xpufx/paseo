@@ -63,6 +63,7 @@ import {
   uppidiFleetHaltContract,
   uppidiFleetResumeContract,
   uppidiTransitionIssueContract,
+  uppidiToggleRepoAutomationTierContract,
   uppidiReposContract,
   uppidiEnrollRepoContract,
   uppidiUnenrollRepoContract,
@@ -70,6 +71,7 @@ import {
   type UppidiAgent,
   type UppidiIssue,
   type KanbanColumnId,
+  type AutomationTierValue,
   type AttentionLabel,
   type RoleModelConfig,
   type FleetModelAlert,
@@ -1124,6 +1126,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
 
   // Issue Kanban state transition (#755)
   const transitionIssueMutation = useRpcMutation(uppidiTransitionIssueContract);
+  // 3-tier automation posture (#1282)
+  const toggleAutomationTierMutation = useRpcMutation(uppidiToggleRepoAutomationTierContract);
 
   // Fleet Skills editor (#883)
   const [skillDrafts, setSkillDrafts] = useState<Record<string, string>>({});
@@ -1172,6 +1176,20 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
       }
     } catch (err: any) {
       toast.error(err?.message || `Failed to move #${issue.number}`);
+    }
+  };
+
+  const handleToggleRepoAutomationTier = async (repo: string, tier: AutomationTierValue) => {
+    try {
+      const res = await toggleAutomationTierMutation.mutateAsync({ repo, tier });
+      if (res.ok) {
+        toast.show(res.message || `Set ${repo} automation tier to ${tier}`);
+        void refetchAgents();
+      } else {
+        toast.error(res.error || `Failed to set tier for ${repo}`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || `Failed to set tier for ${repo}`);
     }
   };
 
@@ -1445,6 +1463,21 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     if (selectedRepo === "all") return all;
     return all.filter((i) => isRepoMatching(i?.repo, selectedRepo) || String(i?.repo ?? "").toLowerCase() === selectedRepo.toLowerCase());
   }, [issuesData?.issues, selectedRepo]);
+
+  // Repo -> automation tier, keyed by the repo labels the board renders (#1282).
+  const automationTiers = useMemo<Record<string, AutomationTierValue>>(() => {
+    const map: Record<string, AutomationTierValue> = {};
+    for (const issue of rawIssues) if (issue.repo) map[issue.repo] = "full-active";
+    const apply = (repos: readonly string[] | undefined, tier: AutomationTierValue) => {
+      for (const repo of repos ?? []) {
+        const key = Object.keys(map).find((candidate) => isRepoMatching(candidate, repo)) ?? repo;
+        map[key] = tier;
+      }
+    };
+    apply(agentsData?.pausedRepos, "paused");
+    apply(agentsData?.kanbanOnlyRepos, "kanban-only");
+    return map;
+  }, [rawIssues, agentsData?.pausedRepos, agentsData?.kanbanOnlyRepos]);
 
   const visible = useMemo(() => {
     const filtered = filterIssues(rawIssues, filter, query);
@@ -2812,6 +2845,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             onSelectIssue={(num) => setSelectedNumber(num)}
             onTransitionIssue={handleTransitionIssue}
             isLoading={issuesLoading}
+            automationTiers={automationTiers}
+            onToggleAutomationTier={handleToggleRepoAutomationTier}
           />
         </Card>
       ) : activeTab === "forges" ? (
@@ -2962,6 +2997,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                 filterQuery={query}
                 onFilterQueryChange={setQuery}
                 isLoading={issuesLoading}
+                automationTiers={automationTiers}
+                onToggleAutomationTier={handleToggleRepoAutomationTier}
               />
             ) : (
               <>

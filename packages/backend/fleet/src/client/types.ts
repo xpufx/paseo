@@ -359,6 +359,7 @@ export const FleetOutputSchema = z.object({
   tree: z.array(FleetAgentTreeNodeSchema).default([]),
   enrolledRepos: z.array(z.string()).default([]),
   pausedRepos: z.array(z.string()).default([]),
+  kanbanOnlyRepos: z.array(z.string()).default([]),
   mutedRepos: z.array(z.string()).default([]),
   repoQueuedHooks: z.record(z.string(), z.number()).default({}),
   totalCount: z.number().default(0),
