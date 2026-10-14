@@ -11152,7 +11152,7 @@ describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () 
     const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString(); // 1 hour ago
     const assessment = assessAgentHealth(
       "fd-1",
-      { status: "running", lastActivityAt: stale },
+      { id: "fd-1", status: "running", lastActivityAt: stale },
       null,
       Date.UTC(2026, 5, 15, 12, 0, 0),
       {
@@ -11171,7 +11171,7 @@ describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () 
     const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
     const assessment = assessAgentHealth(
       "orch-1",
-      { status: "running", lastActivityAt: stale },
+      { id: "orch-1", status: "running", lastActivityAt: stale },
       null,
       Date.UTC(2026, 5, 15, 12, 0, 0),
       {
@@ -11190,7 +11190,7 @@ describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () 
     const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
     const assessment = assessAgentHealth(
       "fd-1",
-      { status: "running", lastActivityAt: stale },
+      { id: "fd-1", status: "running", lastActivityAt: stale },
       null,
       Date.UTC(2026, 5, 15, 12, 0, 0),
       {
@@ -11209,7 +11209,7 @@ describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () 
     const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
     const assessment = assessAgentHealth(
       "orch-1",
-      { status: "running", lastActivityAt: stale },
+      { id: "orch-1", status: "running", lastActivityAt: stale },
       null,
       Date.UTC(2026, 5, 15, 12, 0, 0),
       {
@@ -11228,7 +11228,7 @@ describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () 
     const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
     const assessment = assessAgentHealth(
       "worker-1",
-      { status: "running", lastActivityAt: stale },
+      { id: "worker-1", status: "running", lastActivityAt: stale },
       null,
       Date.UTC(2026, 5, 15, 12, 0, 0),
       {
@@ -11247,7 +11247,7 @@ describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () 
     const fresh = new Date(Date.UTC(2026, 5, 15, 11, 59, 0)).toISOString();
     const assessment = assessAgentHealth(
       "fd-1",
-      { status: "running", lastActivityAt: fresh },
+      { id: "fd-1", status: "running", lastActivityAt: fresh },
       null,
       Date.UTC(2026, 5, 15, 12, 0, 0),
       {
