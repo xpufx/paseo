@@ -45,7 +45,7 @@ const FORGEJO_RUN_2 = {
   stopped: null,
   commit_sha: "def5678abc1234",
   title: "wip: draft changes",
-  user: { login: "bob", avatar_url: null },
+  trigger_user: { login: "bob", avatar_url: null },
 };
 
 const FORGEJO_RUN_3 = {
@@ -88,7 +88,7 @@ const FORGEJO_RUN_CANCELLED = {
 
 // ------------------------------------------------------------------ fixtures ---
 
-const MOCK_RUN_1 = {
+const ACTION_RUN_1: ForgeActionRun = {
   id: 1001,
   name: "CI / build-and-test",
   html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo/actions/runs/1001",
@@ -108,7 +108,7 @@ const MOCK_RUN_1 = {
   user: { login: "alice", avatar_url: "https://example.com/alice.png" },
 };
 
-const MOCK_RUN_2 = {
+const ACTION_RUN_2: ForgeActionRun = {
   id: 1002,
   name: "CI / lint",
   html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo/actions/runs/1002",
@@ -128,7 +128,7 @@ const MOCK_RUN_2 = {
   user: { login: "bob", avatar_url: null },
 };
 
-const MOCK_RUN_3 = {
+const ACTION_RUN_3: ForgeActionRun = {
   id: 1003,
   name: "CD / deploy-staging",
   html_url: "https://forge.mrs.uppidi.com/xpufx-org/backend/actions/runs/1003",
@@ -164,7 +164,10 @@ describe("server/actions.ts", () => {
 
   describe("handleForgeActionRuns – single repo", () => {
     test("returns runs for a specific repository", async () => {
-      const mockResponse = [MOCK_RUN_1, MOCK_RUN_3];
+      const mockResponse = {
+        total_count: 2,
+        workflow_runs: [FORGEJO_RUN_1, FORGEJO_RUN_3],
+      };
       setFetchForTest(async (_input: string, _init?: any) => ({
         ok: true,
         json: async () => mockResponse,
@@ -174,13 +177,16 @@ describe("server/actions.ts", () => {
 
       assert.equal(result.ok, true);
       assert.equal(result.runs.length, 2);
-      // Should be sorted newest first
-      assert.equal(result.runs[0].id, 1001);
-      assert.equal(result.runs[1].id, 1003);
+      // Should be sorted newest first (5001 is 2025-01-15, 5003 is 2025-01-14)
+      assert.equal(result.runs[0].id, 5001);
+      assert.equal(result.runs[1].id, 5003);
     });
 
     test("applies status filter for running", async () => {
-      const mockResponse = [MOCK_RUN_1, MOCK_RUN_2];
+      const mockResponse = {
+        total_count: 2,
+        workflow_runs: [FORGEJO_RUN_1, FORGEJO_RUN_2],
+      };
       setFetchForTest(async (_input: string, _init?: any) => ({
         ok: true,
         json: async () => mockResponse,
@@ -194,7 +200,10 @@ describe("server/actions.ts", () => {
     });
 
     test("applies status filter for failed", async () => {
-      const mockResponse = [MOCK_RUN_1, MOCK_RUN_3];
+      const mockResponse = {
+        total_count: 2,
+        workflow_runs: [FORGEJO_RUN_1, FORGEJO_RUN_3],
+      };
       setFetchForTest(async (_input: string, _init?: any) => ({
         ok: true,
         json: async () => mockResponse,
@@ -208,7 +217,10 @@ describe("server/actions.ts", () => {
     });
 
     test("applies status filter for succeeded", async () => {
-      const mockResponse = [MOCK_RUN_1, MOCK_RUN_3];
+      const mockResponse = {
+        total_count: 2,
+        workflow_runs: [FORGEJO_RUN_1, FORGEJO_RUN_3],
+      };
       setFetchForTest(async (_input: string, _init?: any) => ({
         ok: true,
         json: async () => mockResponse,
@@ -242,10 +254,10 @@ describe("server/actions.ts", () => {
       setFetchForTest(async (input: string, _init?: any) => {
         callCount++;
         if (input.includes("xpufx-org/paseo")) {
-          return { ok: true, json: async () => [MOCK_RUN_1] };
+          return { ok: true, json: async () => ({ total_count: 1, workflow_runs: [FORGEJO_RUN_1] }) };
         }
         if (input.includes("xpufx-org/backend")) {
-          return { ok: true, json: async () => [MOCK_RUN_3] };
+          return { ok: true, json: async () => ({ total_count: 1, workflow_runs: [FORGEJO_RUN_3] }) };
         }
         throw new Error("unexpected endpoint");
       });
@@ -264,12 +276,12 @@ describe("server/actions.ts", () => {
 
     test("limits results per repo", async () => {
       const largeMock = Array.from({ length: 200 }, (_, i) => ({
-        ...MOCK_RUN_1,
+        ...FORGEJO_RUN_1,
         id: 2000 + i,
       }));
       setFetchForTest(async (_input: string, _init?: any) => ({
         ok: true,
-        json: async () => largeMock,
+        json: async () => ({ total_count: largeMock.length, workflow_runs: largeMock }),
       }));
 
       const result = await handleForgeActionRuns({ repo: "xpufx-org/paseo", status: "all", limit: 10 });
@@ -284,36 +296,36 @@ describe("server/actions.ts", () => {
 
   describe("filterByStatus", () => {
     test("filters running runs", () => {
-      const runs = [MOCK_RUN_1, MOCK_RUN_2, MOCK_RUN_3] as unknown as ForgeActionRun[];
+      const runs = [ACTION_RUN_1, ACTION_RUN_2, ACTION_RUN_3];
       const filtered = filterByStatus(runs, "running");
       assert.equal(filtered.length, 1);
       assert.equal(filtered[0].id, 1002);
     });
 
     test("filters failed runs", () => {
-      const runs = [MOCK_RUN_1, MOCK_RUN_2, MOCK_RUN_3] as unknown as ForgeActionRun[];
+      const runs = [ACTION_RUN_1, ACTION_RUN_2, ACTION_RUN_3];
       const filtered = filterByStatus(runs, "failed");
       assert.equal(filtered.length, 1);
       assert.equal(filtered[0].id, 1003);
     });
 
     test("filters succeeded runs", () => {
-      const runs = [MOCK_RUN_1, MOCK_RUN_2, MOCK_RUN_3] as unknown as ForgeActionRun[];
+      const runs = [ACTION_RUN_1, ACTION_RUN_2, ACTION_RUN_3];
       const filtered = filterByStatus(runs, "succeeded");
       assert.equal(filtered.length, 1);
       assert.equal(filtered[0].id, 1001);
     });
 
     test("returns all runs via default case", () => {
-      const runs = [MOCK_RUN_1, MOCK_RUN_2, MOCK_RUN_3] as unknown as ForgeActionRun[];
+      const runs = [ACTION_RUN_1, ACTION_RUN_2, ACTION_RUN_3];
       // The function only accepts running/failed/succeeded; unknown values fall through.
       // We test that all three are returned when no filter matches.
       const filteredRunning = filterByStatus(runs, "running");
-      assert.equal(filteredRunning.length, 1); // only MOCK_RUN_2 is in_progress
+      assert.equal(filteredRunning.length, 1); // only ACTION_RUN_2 is in_progress
       const filteredFailed = filterByStatus(runs, "failed");
-      assert.equal(filteredFailed.length, 1); // only MOCK_RUN_3 has conclusion failure
+      assert.equal(filteredFailed.length, 1); // only ACTION_RUN_3 has conclusion failure
       const filteredSucceeded = filterByStatus(runs, "succeeded");
-      assert.equal(filteredSucceeded.length, 1); // only MOCK_RUN_1 has conclusion success
+      assert.equal(filteredSucceeded.length, 1); // only ACTION_RUN_1 has conclusion success
     });
 
     test("handles empty input", () => {
@@ -326,7 +338,7 @@ describe("server/actions.ts", () => {
 
   describe("Forgejo response envelope (#1176)", () => {
     test("extracts workflow_runs from { total_count, workflow_runs } envelope", async () => {
-      // Forgejo returns an object with total_count + workflow_runs, not a bare array.
+      // Forgejo returns an object with total_count + workflow_runs.
       const envelope = {
         total_count: 2,
         workflow_runs: [FORGEJO_RUN_1, FORGEJO_RUN_2],
@@ -340,21 +352,9 @@ describe("server/actions.ts", () => {
 
       assert.equal(result.ok, true);
       assert.equal(result.runs.length, 2);
-      // Sorted newest first by created_at (5002 is at 11:00, 5001 is at 10:00)
+      // Sorted newest first by created (5002 is at 11:00, 5001 is at 10:00)
       assert.equal(result.runs[0].id, 5002);
       assert.equal(result.runs[1].id, 5001);
-    });
-
-    test("still handles a bare array response (backward compat)", async () => {
-      setFetchForTest(async (_input: string, _init?: any) => ({
-        ok: true,
-        json: async () => [MOCK_RUN_1],
-      }));
-
-      const result = await handleForgeActionRuns({ repo: "xpufx-org/paseo", status: "all", limit: 50 });
-
-      assert.equal(result.ok, true);
-      assert.equal(result.runs.length, 1);
     });
 
     test("handles empty workflow_runs array in envelope", async () => {
@@ -424,8 +424,7 @@ describe("server/actions.ts", () => {
       assert.equal(run.conclusion, null);
     });
 
-    test("uses trigger_user over user", async () => {
-      // FORGEJO_RUN_1 has trigger_user; FORGEJO_RUN_2 only has user.
+    test("extracts trigger_user", async () => {
       const envelope = { total_count: 2, workflow_runs: [FORGEJO_RUN_1, FORGEJO_RUN_2] };
       setFetchForTest(async (_input: string, _init?: any) => ({
         ok: true,

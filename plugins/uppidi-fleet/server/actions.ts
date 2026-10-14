@@ -13,74 +13,49 @@ import { getActiveHookRouter, getFleetRosterInfo } from "./hook-router.js";
 /**
  * Map a Forgejo terminal-status value to our canonical status/conclusion pair.
  *
- * Forgejo collapses the GitHub-style two-field model (status + conclusion) into
- * a single `status` that carries both meanings — e.g. `"success"` means the run
- * is completed *and* succeeded.  We translate those into the contract's dual
- * fields so callers never see a mismatch.
- *
- * When `rawConclusion` is explicitly set it overrides the inferred conclusion
- * from `rawStatus` (this preserves backward compatibility with payloads that
- * carry both fields, such as older test fixtures).
+ * Forgejo encodes conclusion into `rawStatus` — e.g. `"success"` means the run
+ * is completed and succeeded. We translate those into the contract's dual
+ * fields.
  */
 function mapForgejoStatus(
   rawStatus: string | undefined,
-  rawConclusion?: string | null,
 ): { status: ForgeActionRun["status"]; conclusion: ForgeActionRun["conclusion"] } {
-  /** Resolve a non-null conclusion string into the typed union, or null. */
-  const parseConclusion = (val: string | null | undefined): ForgeActionRun["conclusion"] => {
-    if (!val || val === "null") return null;
-    return ForgeActionRunConclusionSchema.parse(val) as ForgeActionRun["conclusion"];
-  };
-
   switch (rawStatus) {
     case "success":
-      return { status: "completed", conclusion: parseConclusion(rawConclusion) ?? "success" };
+      return { status: "completed", conclusion: "success" };
     case "failure":
-      return { status: "completed", conclusion: parseConclusion(rawConclusion) ?? "failure" };
+      return { status: "completed", conclusion: "failure" };
     case "cancelled":
-      return { status: "completed", conclusion: parseConclusion(rawConclusion) ?? "cancelled" };
+      return { status: "completed", conclusion: "cancelled" };
     case "in_progress":
-      return { status: "in_progress", conclusion: parseConclusion(rawConclusion) };
+      return { status: "in_progress", conclusion: null };
     case "waiting":
-      return { status: "waiting", conclusion: parseConclusion(rawConclusion) };
+      return { status: "waiting", conclusion: null };
     default:
-      // Legacy / unknown status — honour an explicit conclusion if present.
       return {
         status: ForgeActionRunStatusSchema.parse(String(rawStatus ?? "completed")),
-        conclusion: parseConclusion(rawConclusion),
+        conclusion: null,
       };
   }
 }
 
 /**
- * Parse a raw Forgejo action-run JSON object into our typed shape.
- * Forgejo returns fields with camelCase names; we normalise to the contract
- * schema.  Every field access is defensive because Forgejo's `WorkflowRun`
- * payload differs from GitHub's in several places (#1176).
+ * Parse a raw Forgejo action-run JSON object into our typed shape strictly adhering
+ * to Forgejo's OpenAPI schema (#1176).
  */
 function parseForgejoRun(raw: Record<string, unknown>, repoKey: string): ForgeActionRun {
-  // User: prefer trigger_user (the actor who triggered the run), fall back to user.
-  const rawUser = (raw.trigger_user ?? raw.user ?? {}) as Record<string, unknown>;
-  // Commit SHA: prefer top-level commit_sha, fall back to head_commit.sha.
-  const rawHeadCommit = (raw.head_commit ?? {}) as Record<string, unknown>;
-  const commitSha = String(raw.commit_sha ?? (rawHeadCommit.sha ?? ""));
-  const commitMessage = String(raw.title ?? rawHeadCommit.message ?? "");
+  const rawUser = (raw.trigger_user ?? {}) as Record<string, unknown>;
+  const commitSha = String(raw.commit_sha ?? "");
+  const commitMessage = String(raw.title ?? "");
 
-  // Timestamps: Forgejo may use short aliases alongside the full ISO names.
-  const createdAt = String(raw.created ?? raw.created_at ?? "");
-  const updatedAt = String(raw.updated ?? raw.updated_at ?? "");
-  const startedAt = raw.started ?? raw.run_started_at ?? null;
-  const stoppedAt = raw.stopped ?? raw.completed_at ?? null;
+  const createdAt = String(raw.created ?? "");
+  const updatedAt = String(raw.updated ?? "");
+  const startedAt = raw.started ?? null;
+  const stoppedAt = raw.stopped ?? null;
 
-  // Status/conclusion: Forgejo uses a single `status` field that encodes both,
-  // but honour an explicit `conclusion` for backward compat with payloads
-  // carrying both fields (e.g. older test fixtures).
-  const mapped = mapForgejoStatus(
-    raw.status as string | undefined,
-    raw.conclusion as string | null | undefined,
-  );
+  const mapped = mapForgejoStatus(raw.status as string | undefined);
 
-  // Resolve branch from ref: strip "refs/heads/" prefix.
+  // Resolve branch from prettyref, falling back to stripping "refs/heads/" from ref.
   const ref = String(raw.ref ?? "");
   const branch = raw.prettyref
     ? String(raw.prettyref)
@@ -136,13 +111,10 @@ async function fetchRepoActionRuns(
     return { runs: [], error: res.error };
   }
 
-  // Forgejo returns { total_count, workflow_runs: [...] } — extract the array.
-  const rawList = Array.isArray(res.data)
-    ? res.data
-    : Array.isArray((res.data as any)?.workflow_runs)
-      ? (res.data as any).workflow_runs
-      : [];
-  const runs = rawList.map((r: Record<string, unknown>) => parseForgejoRun(r, repoKey));
+  // Forgejo returns { total_count: number, workflow_runs: [...] } envelope.
+  const rawData = res.data as { total_count?: number; workflow_runs?: unknown[] } | undefined;
+  const rawList = Array.isArray(rawData?.workflow_runs) ? rawData.workflow_runs : [];
+  const runs = rawList.map((r: any) => parseForgejoRun(r as Record<string, unknown>, repoKey));
   return { runs };
 }
 
