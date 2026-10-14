@@ -1,6 +1,6 @@
 {
   "id": "top",
   "name": "Top",
-  "description": "Live host system and workspace monitor for the Paseo composer trackbar",
+  "description": "Live host and session monitor across composer pills, timeline turns, and an interactive dashboard",
   "requirements": { "paseo": ">=0.9.0" }
 }

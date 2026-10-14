@@ -1511,7 +1511,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
           <HostCardHeader {...compactCardTitleProp}
             title="Pill Display Mode"
             icon="LayoutGrid"
-            subtitle="How active items appear in the composer trackbar"
+            subtitle="How active items appear in the composer"
           />
           <ChoiceChips
             options={[
@@ -1766,7 +1766,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
     {activeTab === "about" && (
       <HostAboutSection
         name="paseo-top"
-        description="Live host system and workspace monitor for Paseo composer trackbar."
+        description="Live host and session monitor across composer pills, timeline turns, and an interactive dashboard."
         version={data?.version ?? PLUGIN_VERSION}
         author="xpufx"
         repository="https://github.com/xpufx/paseo-top"

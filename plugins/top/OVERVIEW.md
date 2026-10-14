@@ -1,4 +1,4 @@
-Top adds real-time host resource telemetry and session performance metrics directly to the Paseo composer trackbar, conversation timeline, and an interactive dashboard modal.
+Top brings real-time system and session monitoring to Paseo across three core surfaces: live composer pills, session timeline turn summaries, and an interactive telemetry dashboard.
 
 The plugin displays live CPU and memory utilization, system load averages (1m, 5m, 15m), active agent turns, token consumption, and cost telemetry. An interactive dashboard modal provides visual resource gauges, multi-host fleet telemetry, workspace context, and configurable metric routing.
 
