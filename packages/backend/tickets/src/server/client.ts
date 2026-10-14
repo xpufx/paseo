@@ -127,6 +127,73 @@ export interface ForgejoIssueDetail {
   comments: ForgejoComment[];
 }
 
+// ---------------------------------------------------------------------------
+// Pull Request types
+// ---------------------------------------------------------------------------
+
+export interface ForgejoPullRequest {
+  id: number;
+  number: number;
+  title: string;
+  state: string; // "open" | "closed" | "merged"
+  labels: unknown;
+  head: { ref: string; sha: string; repo: string };
+  base: { ref: string; sha: string; repo: string };
+  user: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  merged_at?: string;
+  closed_at?: string;
+  mergeable: boolean;
+  merge_commit_sha?: string;
+  comments_count: number;
+  review_comments_count: number;
+  commits_count: number;
+  additions: number;
+  deletions: number;
+  changed_files: number;
+  html_url: string;
+  body?: string;
+}
+
+export interface ForgejoReviewComment {
+  id: number;
+  user: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  body: string;
+  html_url: string;
+}
+
+// ---------------------------------------------------------------------------
+// CI / Action Run types
+// ---------------------------------------------------------------------------
+
+export interface ForgejoCiStep {
+  id: number;
+  name: string;
+  status: string;
+  started_at?: string;
+  completed_at?: string;
+  log_url?: string;
+}
+
+export interface ForgejoCiRun {
+  id: number;
+  run_id: number;
+  name: string;
+  status: string;
+  conclusion?: string;
+  created_at: string;
+  updated_at: string;
+  triggered_by?: string;
+  ref: string;
+  workflow_id: number;
+  workflow_name: string;
+  steps?: ForgejoCiStep[];
+  html_url: string;
+}
+
 function toComment(entry: unknown): ForgejoComment | null {
   if (!entry || typeof entry !== "object") return null;
   const record = entry as Record<string, unknown>;
@@ -430,6 +497,149 @@ export class ForgeClient {
     if (!created || typeof created !== "object") return null;
     const number = (created as Record<string, unknown>).number;
     return typeof number === "number" ? number : null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pull Request API methods
+  // ---------------------------------------------------------------------------
+
+  async listPullRequests(
+    repo: string,
+    state: "open" | "closed" | "merged" = "open",
+    page = 1,
+    limit = 50,
+  ): Promise<{ pullRequests: ForgejoPullRequest[]; hasMore: boolean } | null> {
+    const payload = await this.request(
+      `/repos/${repo}/pulls?state=${state}&limit=${limit}&page=${page}`,
+    );
+    if (!Array.isArray(payload)) return null;
+    return { pullRequests: payload as ForgejoPullRequest[], hasMore: payload.length >= limit };
+  }
+
+  async getPullRequest(repo: string, number: number): Promise<ForgejoPullRequest | null> {
+    const payload = await this.request(`/repos/${repo}/pulls/${number}`);
+    if (!payload || typeof payload !== "object") return null;
+    return payload as ForgejoPullRequest;
+  }
+
+  async getPullRequestDiff(repo: string, number: number): Promise<string | null> {
+    const payload = await this.request(`/repos/${repo}/pulls/${number}/diff`);
+    if (!payload || typeof payload !== "string") return null;
+    return payload;
+  }
+
+  async getPullRequestPatch(repo: string, number: number): Promise<string | null> {
+    const payload = await this.request(`/repos/${repo}/pulls/${number}.patch`);
+    if (!payload || typeof payload !== "string") return null;
+    return payload;
+  }
+
+  async getSreviewComments(repo: string, number: number): Promise<ForgejoReviewComment[] | null> {
+    const payload = await this.request(`/repos/${repo}/pulls/${number}/comments`);
+    if (!Array.isArray(payload)) return null;
+    return payload as ForgejoReviewComment[];
+  }
+
+  async mergePullRequest(
+    repo: string,
+    number: number,
+    options?: { title?: string; commit_msg?: string; squash?: boolean },
+  ): Promise<boolean> {
+    const body: Record<string, unknown> = {
+      ...(options?.squash !== false ? { squash: true } : {}),
+      ...(options?.title ? { title: options.title } : {}),
+      ...(options?.commit_msg ? { commit_msg: options.commit_msg } : {}),
+    };
+    const result = await this.request(`/repos/${repo}/pulls/${number}/merge`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return result !== null;
+  }
+
+  async createPullRequest(
+    repo: string,
+    pr: {
+      title: string;
+      head: string;
+      base: string;
+      body?: string;
+      draft?: boolean;
+    },
+  ): Promise<number | null> {
+    const created = await this.request(`/repos/${repo}/pulls`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: pr.title,
+        head: pr.head,
+        base: pr.base,
+        ...(pr.body ? { body: pr.body } : {}),
+        ...(pr.draft !== undefined ? { draft: pr.draft } : {}),
+      }),
+    });
+    if (!created || typeof created !== "object") return null;
+    const number = (created as Record<string, unknown>).number;
+    return typeof number === "number" ? number : null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // CI / Action Run API methods
+  // ---------------------------------------------------------------------------
+
+  async listCiRuns(
+    repo: string,
+    page = 1,
+    limit = 50,
+  ): Promise<{ runs: ForgejoCiRun[]; hasMore: boolean } | null> {
+    const payload = await this.request(
+      `/repos/${repo}/actions/runs?limit=${limit}&page=${page}`,
+    );
+    if (!Array.isArray(payload)) return null;
+    return { runs: payload as ForgejoCiRun[], hasMore: payload.length >= limit };
+  }
+
+  async getCiRun(repo: string, runId: number): Promise<ForgejoCiRun | null> {
+    const payload = await this.request(`/repos/${repo}/actions/runs/${runId}`);
+    if (!payload || typeof payload !== "object") return null;
+    return payload as ForgejoCiRun;
+  }
+
+  async listCiRunSteps(repo: string, runId: number): Promise<ForgejoCiStep[] | null> {
+    const payload = await this.request(`/repos/${repo}/actions/runs/${runId}/jobs`);
+    if (!Array.isArray(payload)) return null;
+    const steps: ForgejoCiStep[] = [];
+    for (const job of payload) {
+      if (!job || typeof job !== "object") continue;
+      const record = job as Record<string, unknown>;
+      const jobSteps = Array.isArray(record.steps) ? record.steps : [];
+      for (const stepEntry of jobSteps) {
+        if (!stepEntry || typeof stepEntry !== "object") continue;
+        const s = stepEntry as Record<string, unknown>;
+        steps.push({
+          id: typeof s.id === "number" ? s.id : 0,
+          name: typeof s.name === "string" ? s.name : `step-${steps.length + 1}`,
+          status: typeof s.status === "string" ? s.status : "completed",
+          started_at: typeof s.started_at === "string" ? s.started_at : undefined,
+          completed_at: typeof s.completed_at === "string" ? s.completed_at : undefined,
+          log_url: typeof s.log_url === "string" ? s.log_url : undefined,
+        });
+      }
+    }
+    return steps.length > 0 ? steps : null;
+  }
+
+  async getStepLog(repo: string, runId: number, stepIndex: number): Promise<string | null> {
+    // Forgejo exposes step logs via the actions log endpoint
+    const payload = await this.request(
+      `/repos/${repo}/actions/runs/${runId}/logs`,
+    );
+    // The response may be structured data; attempt to extract text
+    if (typeof payload === "string") return payload;
+    if (payload && typeof payload === "object") {
+      const text = (payload as Record<string, unknown>)?.log;
+      return typeof text === "string" ? text : null;
+    }
+    return null;
   }
 }
 

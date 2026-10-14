@@ -37,8 +37,8 @@ describe("Typed MCP Tool Schemas", () => {
     expect(FLEET_TOOLS.length).toBe(2);
   });
 
-  it("ALL_MCP_TOOLS contains all 7 tools", () => {
-    expect(ALL_MCP_TOOLS.length).toBe(7);
+  it("ALL_MCP_TOOLS contains all 13 tools", () => {
+    expect(ALL_MCP_TOOLS.length).toBe(13);
   });
 
   it("validates ticket_list input", () => {
@@ -169,7 +169,7 @@ describe("ToolRegistry", () => {
 
   it("returns all typed tool definitions", () => {
     const tools = registry.getTools();
-    expect(tools.length).toBe(7);
+    expect(tools.length).toBe(13);
     const names = tools.map((t) => t.name);
     for (const expected of ["ticket_list", "ticket_view", "ticket_create", "ticket_comment", "ticket_edit", "fleet_status", "fleet_queue_inspect"]) {
       expect(names).toContain(expected);

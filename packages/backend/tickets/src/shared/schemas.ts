@@ -361,3 +361,241 @@ export function parseLabelList(text: string | undefined | null): string[] {
   return names;
 }
 
+// ---------------------------------------------------------------------------
+// Pull Request Schemas & Contracts
+// ---------------------------------------------------------------------------
+
+export const PrStateSchema = z.enum(["open", "closed", "merged"]);
+export type PrState = z.infer<typeof PrStateSchema>;
+
+export const PrReviewCommentSchema = z.object({
+  id: z.number(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  body: z.string(),
+  url: z.string(),
+});
+export type PrReviewComment = z.infer<typeof PrReviewCommentSchema>;
+
+export const PrSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  state: PrStateSchema,
+  labels: z.array(z.string()),
+  labelDetails: z.array(ForgeLabelSchema).default([]),
+  headBranch: z.string(),
+  baseBranch: z.string(),
+  headRepo: z.string().optional(),
+  baseRepo: z.string().optional(),
+  author: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  mergedAt: z.string().nullable().default(null),
+  closedAt: z.string().nullable().default(null),
+  mergeable: z.boolean().nullable().default(null),
+  mergeCommitSha: z.string().nullable().default(null),
+  comments: z.number().int().nonnegative().default(0),
+  reviewComments: z.number().int().nonnegative().default(0),
+  commits: z.number().int().nonnegative().default(0),
+  additions: z.number().int().nonnegative().default(0),
+  deletions: z.number().int().nonnegative().default(0),
+  changedFiles: z.number().int().nonnegative().default(0),
+  url: z.string().optional(),
+  body: z.string().optional(),
+});
+export type Pr = z.infer<typeof PrSchema>;
+
+export const PrViewOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable(),
+  pr: PrSchema.nullable(),
+  reviewComments: z.array(PrReviewCommentSchema).default([]),
+  fetchedAt: z.string().datetime(),
+  repoPublic: z.boolean().nullable().default(null),
+  tokenPresent: z.boolean().default(false),
+  tokenValid: z.boolean().nullable().default(null),
+  repoWritePermission: z.boolean().nullable().default(null),
+  error: z.string().optional(),
+});
+export type PrViewOutput = z.infer<typeof PrViewOutputSchema>;
+
+export const PrListInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  state: PrStateSchema.optional().default("open"),
+  author: z.string().optional(),
+  branch: z.string().optional(),
+  page: z.number().int().positive().default(1),
+});
+export type PrListInput = z.infer<typeof PrListInputSchema>;
+
+export const PrListOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable(),
+  pullRequests: z.array(PrSchema).default([]),
+  page: z.number().int().positive().default(1),
+  hasMore: z.boolean().default(false),
+  derivedRemote: z.string().nullable().default(null),
+  remoteSource: z.enum(["explicit", "derived"]).nullable().default(null),
+  repoPublic: z.boolean().nullable().default(null),
+  tokenPresent: z.boolean().default(false),
+  tokenValid: z.boolean().nullable().default(null),
+  repoWritePermission: z.boolean().nullable().default(null),
+  error: z.string().optional(),
+});
+export type PrListOutput = z.infer<typeof PrListOutputSchema>;
+
+export const PrCreateInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  title: z.string().min(1).max(200),
+  body: z.string().max(10000).optional().default(""),
+  headBranch: z.string().min(1),
+  baseBranch: z.string().min(1),
+  draft: z.boolean().optional().default(false),
+});
+export type PrCreateInput = z.infer<typeof PrCreateInputSchema>;
+
+export const PrCreateOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable(),
+  number: z.number().int().positive().nullable(),
+  url: z.string().nullable(),
+  error: z.string().optional(),
+});
+export type PrCreateOutput = z.infer<typeof PrCreateOutputSchema>;
+
+export const PrDiffInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  pullRequestNumber: z.number().int().positive(),
+});
+export type PrDiffInput = z.infer<typeof PrDiffInputSchema>;
+
+export const PrDiffOutputSchema = z.object({
+  repo: z.string().nullable(),
+  pullRequestNumber: z.number(),
+  diff: z.string(),
+  patch: z.string().optional(),
+  error: z.string().optional(),
+});
+export type PrDiffOutput = z.infer<typeof PrDiffOutputSchema>;
+
+export const PrMergeInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  pullRequestNumber: z.number().int().positive(),
+  title: z.string().optional().default(""),
+  commitMsg: z.string().optional().default(""),
+  squash: z.boolean().optional().default(true),
+});
+export type PrMergeInput = z.infer<typeof PrMergeInputSchema>;
+
+export const PrMergeOutputSchema = z.object({
+  repo: z.string().nullable(),
+  pullRequestNumber: z.number(),
+  merged: z.boolean(),
+  mergeCommitSha: z.string().nullable(),
+  error: z.string().optional(),
+});
+export type PrMergeOutput = z.infer<typeof PrMergeOutputSchema>;
+
+// RPC contracts for PR tools
+export const prListContract = defineContract({
+  name: "forge.pr-list",
+  description: "Query open, closed, or merged pull requests with filtering",
+  input: PrListInputSchema,
+  output: PrListOutputSchema,
+});
+
+export const prViewContract = defineContract({
+  name: "forge.pr-view",
+  description: "Retrieve pull request metadata, review comments, and mergeability",
+  input: PrListInputSchema.extend({ pullRequestNumber: z.number().int().positive() }),
+  output: PrViewOutputSchema,
+});
+
+export const prCreateContract = defineContract({
+  name: "forge.pr-create",
+  description: "Open a new pull request",
+  input: PrCreateInputSchema,
+  output: PrCreateOutputSchema,
+});
+
+export const prDiffContract = defineContract({
+  name: "forge.pr-diff",
+  description: "Fetch raw patch/diff of a pull request",
+  input: PrDiffInputSchema,
+  output: PrDiffOutputSchema,
+});
+
+export const prMergeContract = defineContract({
+  name: "forge.pr-merge",
+  description: "Execute squash merge on an approved pull request",
+  input: PrMergeInputSchema,
+  output: PrMergeOutputSchema,
+});
+
+// ---------------------------------------------------------------------------
+// CI / Action Run Schemas & Contracts
+// ---------------------------------------------------------------------------
+
+export const CiStepStatusSchema = z.enum([
+  "completed", "in_progress", "skipped", "waiting", "cancelled",
+]);
+export type CiStepStatus = z.infer<typeof CiStepStatusSchema>;
+
+export const CiStepSchema = z.object({
+  name: z.string(),
+  status: CiStepStatusSchema,
+  startedAt: z.string().nullable().default(null),
+  completedAt: z.string().nullable().default(null),
+  logUrl: z.string().nullable().default(null),
+});
+export type CiStep = z.infer<typeof CiStepSchema>;
+
+export const CiRunSchema = z.object({
+  id: z.number().int().positive(),
+  runId: z.number().int().positive(),
+  name: z.string(),
+  status: z.string(),
+  conclusion: z.string().nullable().default(null),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  triggeredBy: z.string(),
+  ref: z.string(),
+  workflowName: z.string(),
+  steps: z.array(CiStepSchema).default([]),
+  url: z.string(),
+});
+export type CiRun = z.infer<typeof CiRunSchema>;
+
+export const CiLogsInputSchema = z.object({
+  directory: z.string().optional(),
+  remoteUrl: z.string().optional(),
+  runId: z.number().int().positive(),
+  stepId: z.number().int().positive().optional(),
+  page: z.number().int().positive().default(1),
+});
+export type CiLogsInput = z.infer<typeof CiLogsInputSchema>;
+
+export const CiLogsOutputSchema = z.object({
+  repo: z.string().nullable(),
+  host: z.string().nullable(),
+  run: CiRunSchema.nullable(),
+  stepLog: z.string().nullable().default(null),
+  steps: z.array(CiStepSchema).default([]),
+  page: z.number().int().positive().default(1),
+  hasMore: z.boolean().default(false),
+  error: z.string().optional(),
+});
+export type CiLogsOutput = z.infer<typeof CiLogsOutputSchema>;
+
+export const ciLogsContract = defineContract({
+  name: "forge.ci-logs",
+  description: "Retrieve Forgejo action run status and step logs for automated debugging",
+  input: CiLogsInputSchema,
+  output: CiLogsOutputSchema,
+});
+

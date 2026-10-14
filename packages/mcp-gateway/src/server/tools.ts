@@ -3,6 +3,8 @@ import { createFleetHandlers, type FleetHandlers } from "@xpufx/backend-fleet/se
 import {
   TICKET_TOOLS,
   FLEET_TOOLS,
+  PR_TOOLS,
+  CI_TOOLS,
   ALL_MCP_TOOLS,
   TicketListInputSchema,
   TicketViewInputSchema,
@@ -11,6 +13,12 @@ import {
   TicketEditInputSchema,
   FleetStatusInputSchema,
   FleetQueueInspectInputSchema,
+  PrListInputSchema,
+  PrViewInputSchema,
+  PrCreateInputSchema,
+  PrDiffInputSchema,
+  PrMergeInputSchema,
+  CiLogsInputSchema,
 } from "../shared/tools.js";
 import type { McpToolDefinition } from "../shared/tools.js";
 
@@ -190,6 +198,72 @@ export class ToolRegistry {
           return { ok: false, result: null, error: `Invalid fleet_queue_inspect input: ${parsed.error.message}` };
         }
         const output = await this.fleetHandlers.handleFleetRoster(parsed.data);
+        return { ok: true, result: output };
+      }
+
+      case "pr_list": {
+        const parsed = PrListInputSchema.safeParse(args);
+        if (!parsed.success) {
+          return { ok: false, result: null, error: `Invalid pr_list input: ${parsed.error.message}` };
+        }
+        const output = await this.ticketHandlers.handlePrList(parsed.data);
+        return { ok: true, result: output };
+      }
+
+      case "pr_view": {
+        const parsed = PrViewInputSchema.safeParse(args);
+        if (!parsed.success) {
+          return { ok: false, result: null, error: `Invalid pr_view input: ${parsed.error.message}` };
+        }
+        const output = await this.ticketHandlers.handlePrView({
+          pullRequestNumber: parsed.data.pullRequestNumber,
+          directory: parsed.data.directory,
+          remoteUrl: parsed.data.remoteUrl,
+        });
+        return { ok: true, result: output };
+      }
+
+      case "pr_create": {
+        const parsed = PrCreateInputSchema.safeParse(args);
+        if (!parsed.success) {
+          return { ok: false, result: null, error: `Invalid pr_create input: ${parsed.error.message}` };
+        }
+        const output = await this.ticketHandlers.handlePrCreate({
+          title: parsed.data.title,
+          body: parsed.data.body || "",
+          headBranch: parsed.data.headBranch,
+          baseBranch: parsed.data.baseBranch,
+          draft: parsed.data.draft,
+          directory: parsed.data.directory,
+          remoteUrl: parsed.data.remoteUrl,
+        });
+        return { ok: true, result: output };
+      }
+
+      case "pr_diff": {
+        const parsed = PrDiffInputSchema.safeParse(args);
+        if (!parsed.success) {
+          return { ok: false, result: null, error: `Invalid pr_diff input: ${parsed.error.message}` };
+        }
+        const output = await this.ticketHandlers.handlePrDiff(parsed.data);
+        return { ok: true, result: output };
+      }
+
+      case "pr_merge": {
+        const parsed = PrMergeInputSchema.safeParse(args);
+        if (!parsed.success) {
+          return { ok: false, result: null, error: `Invalid pr_merge input: ${parsed.error.message}` };
+        }
+        const output = await this.ticketHandlers.handlePrMerge(parsed.data);
+        return { ok: true, result: output };
+      }
+
+      case "ci_logs": {
+        const parsed = CiLogsInputSchema.safeParse(args);
+        if (!parsed.success) {
+          return { ok: false, result: null, error: `Invalid ci_logs input: ${parsed.error.message}` };
+        }
+        const output = await this.ticketHandlers.handleCiLogs(parsed.data);
         return { ok: true, result: output };
       }
 

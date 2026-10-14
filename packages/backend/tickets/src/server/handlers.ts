@@ -14,6 +14,12 @@ import {
   setLabelContract,
   addCommentContract,
   createIssueContract,
+  prListContract,
+  prViewContract,
+  prCreateContract,
+  prDiffContract,
+  prMergeContract,
+  ciLogsContract,
   liveScopesFromIssues,
   liveScopesFromLabels,
   normalizeIssueNumber,
@@ -41,10 +47,30 @@ import {
   type SearchIssuesOutput,
   type SetLabelInput,
   type SetLabelOutput,
+  type PrListInput,
+  type PrListOutput,
+  type PrViewOutput,
+  type PrCreateInput,
+  type PrCreateOutput,
+  type PrDiffInput,
+  type PrDiffOutput,
+  type PrMergeInput,
+  type PrMergeOutput,
+  type CiLogsInput,
+  type CiLogsOutput,
+  type CiStep,
+  type CiStepStatus,
+  type Pr,
+  type PrReviewComment,
+  type CiRun,
 } from "../shared/index.js";
 import {
   ForgeClient,
   type ForgejoIssueDetail,
+  type ForgejoPullRequest,
+  type ForgejoReviewComment,
+  type ForgejoCiRun,
+  type ForgejoCiStep,
   resolveForgeToken,
   resolveDefaultForgeHost,
 } from "./client.js";
@@ -126,6 +152,103 @@ function toIssueDetail(detail: ForgejoIssueDetail): IssueDetail | null {
   return parsed.success ? parsed.data : null;
 }
 
+// ---------------------------------------------------------------------------
+// Pull Request & CI transformation helpers
+// ---------------------------------------------------------------------------
+
+function labelNamesFromForge(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const names: string[] = [];
+  for (const entry of value) {
+    if (entry && typeof entry === "object") {
+      const name = (entry as Record<string, unknown>).name;
+      if (typeof name === "string" && name) names.push(name);
+    } else if (typeof entry === "string" && entry) {
+      names.push(entry);
+    }
+  }
+  return names;
+}
+
+function asStr(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function asLogin(value: unknown): string {
+  if (value && typeof value === "object") {
+    const login = (value as Record<string, unknown>).login;
+    if (typeof login === "string" && login) return login;
+  }
+  return "unknown";
+}
+
+function toPr(raw: ForgejoPullRequest): Pr {
+  return {
+    number: raw.number,
+    title: asStr(raw.title),
+    state: (raw.state === "merged" || raw.state === "closed") ? raw.state : "open",
+    labels: labelNamesFromForge(raw.labels),
+    labelDetails: [],
+    headBranch: raw.head?.ref ?? "",
+    baseBranch: raw.base?.ref ?? "",
+    headRepo: raw.head?.repo,
+    baseRepo: raw.base?.repo,
+    author: asLogin(raw.user),
+    createdAt: asStr(raw.created_at),
+    updatedAt: asStr(raw.updated_at),
+    mergedAt: raw.merged_at ?? null,
+    closedAt: raw.closed_at ?? null,
+    mergeable: raw.mergeable ?? null,
+    mergeCommitSha: raw.merge_commit_sha ?? null,
+    comments: raw.comments_count ?? 0,
+    reviewComments: raw.review_comments_count ?? 0,
+    commits: raw.commits_count ?? 0,
+    additions: raw.additions ?? 0,
+    deletions: raw.deletions ?? 0,
+    changedFiles: raw.changed_files ?? 0,
+    url: raw.html_url,
+    body: raw.body,
+  };
+}
+
+function toReviewComment(raw: ForgejoReviewComment): PrReviewComment {
+  return {
+    id: raw.id,
+    author: asLogin(raw.user),
+    createdAt: asStr(raw.created_at),
+    updatedAt: asStr(raw.updated_at, asStr(raw.created_at)),
+    body: asStr(raw.body),
+    url: asStr(raw.html_url),
+  };
+}
+
+function toCiStep(raw: ForgejoCiStep): CiStep {
+  return {
+    name: raw.name,
+    status: (raw.status as CiStepStatus) ?? "completed",
+    startedAt: raw.started_at ?? null,
+    completedAt: raw.completed_at ?? null,
+    logUrl: raw.log_url ?? null,
+  };
+}
+
+function toCiRun(raw: ForgejoCiRun): CiRun {
+  return {
+    id: raw.id,
+    runId: raw.run_id,
+    name: asStr(raw.name),
+    status: asStr(raw.status),
+    conclusion: raw.conclusion ?? null,
+    createdAt: asStr(raw.created_at),
+    updatedAt: asStr(raw.updated_at),
+    triggeredBy: asStr(raw.triggered_by ?? raw.created_at),
+    ref: asStr(raw.ref),
+    workflowName: raw.workflow_name ?? "",
+    steps: (raw.steps ?? []).map(toCiStep),
+    url: asStr(raw.html_url),
+  };
+}
+
 export interface TicketHandlerOptions {
   storagePluginId?: string;
   resolveToken?: (host: string) => Promise<string | undefined | null>;
@@ -143,6 +266,12 @@ export interface TicketHandlers {
   handleAddComment(input: AddCommentInput): Promise<AddCommentOutput>;
   handleCreateIssue(input: CreateIssueInput): Promise<CreateIssueOutput>;
   handleInstallLabels(input: InstallLabelsInput): Promise<InstallLabelsOutput>;
+  handlePrList(input: PrListInput): Promise<PrListOutput>;
+  handlePrView(input: { pullRequestNumber: number; directory?: string; remoteUrl?: string }): Promise<PrViewOutput>;
+  handlePrCreate(input: PrCreateInput): Promise<PrCreateOutput>;
+  handlePrDiff(input: PrDiffInput): Promise<PrDiffOutput>;
+  handlePrMerge(input: PrMergeInput): Promise<PrMergeOutput>;
+  handleCiLogs(input: CiLogsInput): Promise<CiLogsOutput>;
 }
 
 export function createTicketHandlers(options: TicketHandlerOptions = {}): TicketHandlers {
@@ -607,6 +736,255 @@ export function createTicketHandlers(options: TicketHandlerOptions = {}): Ticket
         return { host: null, repo: null, mode, created: [], skipped: [], removed: [], error: "Could not install labels" };
       }
     },
+
+    async handlePrList(input: PrListInput): Promise<PrListOutput> {
+      try {
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return {
+            repo: null, host: null, pullRequests: [], page: 1, hasMore: false,
+            derivedRemote: null, remoteSource: null, repoPublic: null,
+            tokenPresent: false, tokenValid: null, repoWritePermission: null,
+            error: resolved.error,
+          };
+        }
+        const { host, repo, derivedRemote, remoteSource } = resolved;
+        const client = await clientFor(host);
+        if (!(await probeForgeHost(client))) {
+          logAt(guard.skipLogLevel(host), "skipping non-forge remote for PR list", { repo, host });
+          return {
+            repo, host, pullRequests: [], page: 1, hasMore: false,
+            derivedRemote, remoteSource, repoPublic: null,
+            tokenPresent: false, tokenValid: null, repoWritePermission: null,
+            error: `Selected forge ${host}/${repo} is unreachable or not a forge API host`,
+          };
+        }
+        const anonClient = new ForgeClient({ host });
+        const tokenPresent = client.hasToken();
+        const state = input.state ?? "open";
+        const page = input.page ?? 1;
+        const [paged, repoPublic, tokenValid, repoWritePermission] = await Promise.all([
+          client.listPullRequests(repo, state, page),
+          anonClient.repoIsPublic(repo),
+          client.tokenIsValid(),
+          client.repoWritePermission(repo),
+        ]);
+        if (!paged) {
+          logAt(guard.failureLogLevel(host, repo), "PR list failed", { repo, host, state });
+          return {
+            repo, host, pullRequests: [], page, hasMore: false,
+            derivedRemote, remoteSource, repoPublic, tokenPresent,
+            tokenValid, repoWritePermission,
+            error: `Pull request list unavailable for ${host}/${repo}`,
+          };
+        }
+        guard.noteSuccess(host, repo);
+        return {
+          repo, host, pullRequests: paged.pullRequests.map(toPr), page, hasMore: paged.hasMore,
+          derivedRemote, remoteSource, repoPublic, tokenPresent,
+          tokenValid, repoWritePermission,
+        };
+      } catch (error) {
+        log.warn("pr-list failed", { error: String(error) });
+        return {
+          repo: null, host: null, pullRequests: [], page: 1, hasMore: false,
+          derivedRemote: null, remoteSource: null, repoPublic: null,
+          tokenPresent: false, tokenValid: null, repoWritePermission: null,
+          error: "Pull request list unavailable",
+        };
+      }
+    },
+
+    async handlePrView(input: PrListInput & { pullRequestNumber: number }): Promise<PrViewOutput> {
+      const fetchedAt = new Date().toISOString();
+      try {
+        const prNumber = typeof input.pullRequestNumber === "number"
+          ? input.pullRequestNumber : 0;
+        if (prNumber <= 0) {
+          return {
+            repo: null, host: null, pr: null, reviewComments: [], fetchedAt,
+            repoPublic: null, tokenPresent: false, tokenValid: null,
+            repoWritePermission: null, error: "pullRequestNumber is required",
+          };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return {
+            repo: null, host: null, pr: null, reviewComments: [], fetchedAt,
+            repoPublic: null, tokenPresent: false, tokenValid: null,
+            repoWritePermission: null, error: resolved.error,
+          };
+        }
+        const { host, repo } = resolved;
+        const client = await clientFor(host);
+        const tokenPresent = client.hasToken();
+        const [pr, reviewComments, repoPublic, tokenValid, repoWritePermission] = await Promise.all([
+          client.getPullRequest(repo, prNumber),
+          client.getSreviewComments(repo, prNumber),
+          new ForgeClient({ host }).repoIsPublic(repo),
+          client.tokenIsValid(),
+          client.repoWritePermission(repo),
+        ]);
+        if (!pr) {
+          return {
+            repo, host, pr: null, reviewComments: [], fetchedAt,
+            repoPublic, tokenPresent, tokenValid, repoWritePermission,
+            error: `Pull request #${prNumber} not found in ${repo}`,
+          };
+        }
+        return {
+          repo, host, pr: toPr(pr), reviewComments: (reviewComments ?? []).map(toReviewComment), fetchedAt,
+          repoPublic, tokenPresent, tokenValid, repoWritePermission,
+        };
+      } catch (error) {
+        log.warn("pr-view failed", { error: String(error) });
+        return {
+          repo: null, host: null, pr: null, reviewComments: [], fetchedAt,
+          repoPublic: null, tokenPresent: false, tokenValid: null,
+          repoWritePermission: null, error: "Pull request detail unavailable",
+        };
+      }
+    },
+
+    async handlePrCreate(input: PrCreateInput): Promise<PrCreateOutput> {
+      try {
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return { repo: null, host: null, number: null, url: null, error: resolved.error };
+        }
+        const { host, repo } = resolved;
+        const title = (input.title as string).trim();
+        if (!title) {
+          return { repo, host, number: null, url: null, error: "PR title must not be empty" };
+        }
+        const body = typeof input.body === "string" ? input.body.trim() : "";
+        const headBranch = (input.headBranch as string).trim();
+        const baseBranch = (input.baseBranch as string).trim();
+        if (!headBranch || !baseBranch) {
+          return { repo, host, number: null, url: null, error: "headBranch and baseBranch are required" };
+        }
+        const client = await clientFor(host);
+        const number = await client.createPullRequest(repo, {
+          title, head: headBranch, base: baseBranch, body: body || undefined, draft: input.draft,
+        });
+        if (number == null) {
+          log.warn("pr-create failed", { repo });
+          return { repo, host, number: null, url: null, error: "Could not create pull request" };
+        }
+        return { repo, host, number, url: `https://${host}/${repo}/pulls/${number}` };
+      } catch (error) {
+        log.warn("pr-create failed", { error: String(error) });
+        return { repo: null, host: null, number: null, url: null, error: "Could not create pull request" };
+      }
+    },
+
+    async handlePrDiff(input: PrDiffInput): Promise<PrDiffOutput> {
+      try {
+        const prNumber = typeof input.pullRequestNumber === "number"
+          ? input.pullRequestNumber : 0;
+        if (prNumber <= 0) {
+          return { repo: null, pullRequestNumber: 0, diff: "", error: "pullRequestNumber is required" };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return { repo: null, pullRequestNumber: prNumber, diff: "", error: resolved.error };
+        }
+        const { host, repo } = resolved;
+        const client = await clientFor(host);
+        const [diff, patch] = await Promise.all([
+          client.getPullRequestDiff(repo, prNumber),
+          client.getPullRequestPatch(repo, prNumber),
+        ]);
+        if (diff === null) {
+          return {
+            repo, pullRequestNumber: prNumber, diff: "",
+            error: `Could not fetch diff for PR #${prNumber}`,
+          };
+        }
+        return { repo, pullRequestNumber: prNumber, diff, patch: patch ?? undefined };
+      } catch (error) {
+        log.warn("pr-diff failed", { error: String(error) });
+        return { repo: null, pullRequestNumber: 0, diff: "", error: "Could not fetch PR diff" };
+      }
+    },
+
+    async handlePrMerge(input: PrMergeInput): Promise<PrMergeOutput> {
+      try {
+        const prNumber = typeof input.pullRequestNumber === "number"
+          ? input.pullRequestNumber : 0;
+        if (prNumber <= 0) {
+          return { repo: null, pullRequestNumber: 0, merged: false, mergeCommitSha: null, error: "pullRequestNumber is required" };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return { repo: null, pullRequestNumber: prNumber, merged: false, mergeCommitSha: null, error: resolved.error };
+        }
+        const { host, repo } = resolved;
+        const client = await clientFor(host);
+        const merged = await client.mergePullRequest(repo, prNumber, {
+          title: input.title || undefined,
+          commit_msg: input.commitMsg || undefined,
+          squash: input.squash !== false,
+        });
+        if (!merged) {
+          log.warn("pr-merge failed", { repo, prNumber });
+          return {
+            repo, pullRequestNumber: prNumber, merged: false,
+            mergeCommitSha: null, error: `Could not merge PR #${prNumber}`,
+          };
+        }
+        return { repo, pullRequestNumber: prNumber, merged: true, mergeCommitSha: null };
+      } catch (error) {
+        log.warn("pr-merge failed", { error: String(error) });
+        return { repo: null, pullRequestNumber: 0, merged: false, mergeCommitSha: null, error: "Could not merge pull request" };
+      }
+    },
+
+    async handleCiLogs(input: CiLogsInput): Promise<CiLogsOutput> {
+      try {
+        const runId = typeof input.runId === "number" ? input.runId : 0;
+        if (runId <= 0) {
+          return {
+            repo: null, host: null, run: null, stepLog: null, steps: [],
+            page: 1, hasMore: false, error: "runId is required",
+          };
+        }
+        const resolved = await resolveRepo(input?.directory, input?.remoteUrl);
+        if (!resolved.ok) {
+          return {
+            repo: null, host: null, run: null, stepLog: null, steps: [],
+            page: 1, hasMore: false, error: resolved.error,
+          };
+        }
+        const { host, repo } = resolved;
+        const client = await clientFor(host);
+        const [run, steps] = await Promise.all([
+          client.getCiRun(repo, runId),
+          client.listCiRunSteps(repo, runId),
+        ]);
+        if (!run) {
+          return {
+            repo, host, run: null, stepLog: null, steps: [],
+            page: 1, hasMore: false,
+            error: `CI run #${runId} not found in ${repo}`,
+          };
+        }
+        let stepLog: string | null = null;
+        if (input.stepId != null && input.stepId > 0) {
+          stepLog = await client.getStepLog(repo, runId, input.stepId);
+        }
+        return {
+          repo, host, run: toCiRun(run), stepLog, steps: (steps ?? []).map(toCiStep),
+          page: input.page ?? 1, hasMore: false,
+        };
+      } catch (error) {
+        log.warn("ci-logs failed", { error: String(error) });
+        return {
+          repo: null, host: null, run: null, stepLog: null, steps: [],
+          page: 1, hasMore: false, error: "CI logs unavailable",
+        };
+      }
+    },
   };
 
   return handlers;
@@ -622,6 +1000,12 @@ export const handleSetLabel = (input: SetLabelInput) => defaultTicketHandlers.ha
 export const handleAddComment = (input: AddCommentInput) => defaultTicketHandlers.handleAddComment(input);
 export const handleCreateIssue = (input: CreateIssueInput) => defaultTicketHandlers.handleCreateIssue(input);
 export const handleInstallLabels = (input: InstallLabelsInput) => defaultTicketHandlers.handleInstallLabels(input);
+export const handlePrList = (input: PrListInput) => defaultTicketHandlers.handlePrList(input);
+export const handlePrView = (input: { pullRequestNumber: number; directory?: string; remoteUrl?: string }) => defaultTicketHandlers.handlePrView(input);
+export const handlePrCreate = (input: PrCreateInput) => defaultTicketHandlers.handlePrCreate(input);
+export const handlePrDiff = (input: PrDiffInput) => defaultTicketHandlers.handlePrDiff(input);
+export const handlePrMerge = (input: PrMergeInput) => defaultTicketHandlers.handlePrMerge(input);
+export const handleCiLogs = (input: CiLogsInput) => defaultTicketHandlers.handleCiLogs(input);
 
 export interface HandleableServerContext {
   handle(contract: any, handler: (input: any) => Promise<any> | any): void;
@@ -640,6 +1024,12 @@ export function registerTicketHandlers(
   server.handle(setLabelContract, (input: SetLabelInput) => handlers.handleSetLabel(input));
   server.handle(addCommentContract, (input: AddCommentInput) => handlers.handleAddComment(input));
   server.handle(createIssueContract, (input: CreateIssueInput) => handlers.handleCreateIssue(input));
+  server.handle(prListContract, (input: PrListInput) => handlers.handlePrList(input));
+  server.handle(prViewContract, (input: { pullRequestNumber: number; directory?: string; remoteUrl?: string }) => handlers.handlePrView(input));
+  server.handle(prCreateContract, (input: PrCreateInput) => handlers.handlePrCreate(input));
+  server.handle(prDiffContract, (input: PrDiffInput) => handlers.handlePrDiff(input));
+  server.handle(prMergeContract, (input: PrMergeInput) => handlers.handlePrMerge(input));
+  server.handle(ciLogsContract, (input: CiLogsInput) => handlers.handleCiLogs(input));
 
   return handlers;
 }
