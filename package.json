@@ -42,7 +42,9 @@
     "test": "npm run check:fixture-home-paths && npm run check:declared-tooling && npm run check:helper-resolution && npm run check:npm-acquisition-coverage && npm run check:reload-notify && npm run check:plugin-runtime-boundary && npm run check:unreachable-tests && npm run check:migrate-numberless-labels && npm run check:fleet-matrix && npm run check:run-test-jail && npm run test --workspaces --if-present",
     "test:jail": "scripts/run-test-jail.sh npm test",
     "test:npm-acquisition": "node scripts/npm-acquisition-smoke.mjs",
-    "doctor:live": "node scripts/doctor-live.mjs"
+    "doctor:live": "node scripts/doctor-live.mjs",
+    "build": "make packages-build",
+    "prepare": "npm run build"
   },
   "repository": {
     "type": "git",

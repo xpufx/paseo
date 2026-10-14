@@ -2,5 +2,16 @@
   "id": "uppidi-fleet",
   "requirements": {
     "paseo": ">=0.8.0"
-  }
+  },
+  "build": [
+    [
+      "npm",
+      "install",
+      "--omit=dev",
+      "--ignore-scripts",
+      "--no-audit",
+      "--no-fund",
+      "--no-workspaces"
+    ]
+  ]
 }
