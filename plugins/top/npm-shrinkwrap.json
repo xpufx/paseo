@@ -1,12 +1,12 @@
 {
   "name": "@xpufx/paseo-top",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "lockfileVersion": 2,
   "requires": true,
   "packages": {
     "": {
       "name": "@xpufx/paseo-top",
-      "version": "0.4.6",
+      "version": "0.4.7",
       "license": "MIT",
       "dependencies": {
         "@xpufx/paseo-plugin-ui": "^0.1.0"
