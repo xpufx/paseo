@@ -9211,11 +9211,15 @@ describe("HookRouter startModeOnBoot — constructor initialisation (#1112)", ()
       return origReconcileOrchestrators();
     };
 
-    await router.start();
+    try {
+      await router.start();
 
-    assert.equal(frontDeskReconciled, false, "reconcileFrontDesk should be skipped in HALT mode");
-    assert.equal(orchestratorReconciled, false, "reconcileEnrolledOrchestrators should be skipped in HALT mode");
-    assert.equal(router.isHalted(), true);
+      assert.equal(frontDeskReconciled, false, "reconcileFrontDesk should be skipped in HALT mode");
+      assert.equal(orchestratorReconciled, false, "reconcileEnrolledOrchestrators should be skipped in HALT mode");
+      assert.equal(router.isHalted(), true);
+    } finally {
+      await router.stop();
+    }
   });
 
   it("start() under HALT mode does not start background loops", async () => {
@@ -9243,13 +9247,17 @@ describe("HookRouter startModeOnBoot — constructor initialisation (#1112)", ()
       return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
     };
 
-    await router.start();
+    try {
+      await router.start();
 
-    // Wait long enough for timers to fire if they were started
-    await new Promise((resolve) => setTimeout(resolve, 150));
+      // Wait long enough for timers to fire if they were started
+      await new Promise((resolve) => setTimeout(resolve, 150));
 
-    assert.equal(watchdogRan, false, "watchdog should not run when started in HALT mode");
-    assert.equal(sweepRan, false, "board sweep should not run when started in HALT mode");
+      assert.equal(watchdogRan, false, "watchdog should not run when started in HALT mode");
+      assert.equal(sweepRan, false, "board sweep should not run when started in HALT mode");
+    } finally {
+      await router.stop();
+    }
   });
 });
 

@@ -17,6 +17,11 @@ if (!process.env.PASEO_HOME) {
   process.env.PASEO_HOME = path.join(os.tmpdir(), `paseo-test-home-${process.pid}`);
 }
 
+// Ensure HOME and REAL_HOME are anchored to PASEO_HOME during test runs to hermetically
+// isolate resolveHostHome(), legacy role-models config probing, and user config (#955)
+process.env.HOME = process.env.PASEO_HOME;
+process.env.REAL_HOME = process.env.PASEO_HOME;
+
 // Fail fast before `node --test` starts: the fleet suites can unlink live
 // operator state (#1160), so they must not run from main/master (#1161).
 enforceMainBranchGuard();
