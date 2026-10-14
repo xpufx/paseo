@@ -11147,6 +11147,269 @@ describe("zero-dispatch suppression (#1352)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Zero-dispatch gate: Front Desk attention instead of raw triage count (#1354)
+// ---------------------------------------------------------------------------
+
+describe("zero-dispatch gate with explicit frontdesk attention (#1354)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-zero-dispatch-1354-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    clearSettingsStorage();
+    resetSweepDigestStorage();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+    resetSweepDigestStorage();
+  });
+
+  function makeRouter(overrides: Partial<HookRouterOptions> = {}): HookRouter {
+    return new HookRouter(null, { queueDir, stateDir, port: 0, ...overrides });
+  }
+
+  // Helper: create an IssuesCheckIo that returns a single candidate with the
+  // given properties. The candidate is returned as a RankedCandidate-style
+  // object so runIssuesCheck can process it through labelNames / classify.
+  function makeCandidatesIo(
+    issues: Array<Record<string, unknown>>,
+    cached = true,
+  ): IssuesCheckIo {
+    const cache: Record<string, any> = {};
+    if (cached) {
+      for (const issue of issues) {
+        cache[String(issue.number)] = {
+          updated_at: String(issue.updated_at ?? "2026-01-01T00:00:00Z"),
+          labels: ((issue.labels as any[]) ?? []).map((l) => (typeof l === "string" ? l : l.name)),
+          comments_count: Number(issue.comments ?? 0),
+        };
+      }
+    }
+    return {
+      getOpenIssues: async () => ({ ok: true, issues: issues as any }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => cache,
+      saveCache: async () => {},
+    };
+  }
+
+  it("suppresses notification when board has non-dispatchable backlog (state/verify, state/wip) but 0 dispatchable and 0 frontdesk attention", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    // Tickets in state/verify and state/wip — non-dispatchable, no frontdesk attention
+    const io = makeCandidatesIo([
+      {
+        number: 101,
+        title: "In verification",
+        labels: [{ name: "state/verify" }, { name: "attention/orchestrator" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+      {
+        number: 102,
+        title: "In progress",
+        labels: [{ name: "state/wip" }, { name: "attention/orchestrator" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    // Both tickets are actionable (non-empty board), but none have frontdesk attention
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 0, "notification should be suppressed: zero dispatchable and zero frontdesk attention");
+    assert.equal(deliveries.length, 0);
+  });
+
+  it("does NOT suppress notification when ticket has attention/frontdesk label", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    const io = makeCandidatesIo([
+      {
+        number: 201,
+        title: "Needs operator review",
+        labels: [{ name: "state/verify" }, { name: "attention/frontdesk" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 1, "notification should fire: attention/frontdesk label present");
+    assert.equal(deliveries.length, 1);
+  });
+
+  it("does NOT suppress notification when ticket has category 'sos' via priority/sos label", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    const io = makeCandidatesIo([
+      {
+        number: 301,
+        title: "Critical bug in production",
+        labels: [{ name: "priority/sos" }, { name: "state/wip" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 1, "notification should fire: SOS category present");
+    assert.equal(deliveries.length, 1);
+  });
+
+  it("does NOT suppress notification when ticket is new (is_new) — first-seen issue", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    // A brand-new issue (no cache entry → isNew) with no special labels
+    // will be classified as new_unseen and marked is_new: true
+    const io = makeCandidatesIo(
+      [
+        {
+          number: 401,
+          title: "Brand new feature request",
+          labels: [{ name: "kind/feature" }],
+          comments: 0,
+          updated_at: "2026-01-01T00:00:00Z",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      false,
+    );
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 1, "notification should fire: is_new ticket requires frontdesk attention");
+    assert.equal(deliveries.length, 1);
+  });
+
+  it("suppresses notification when reconciliation is due but dispatchable=0 and frontdesk_attention=0", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter({ boardReconciliationIntervalMs: 60_000 });
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    // Non-dispatchable backlog only — no frontdesk attention
+    const io = makeCandidatesIo([
+      {
+        number: 501,
+        title: "Stuck in verify",
+        labels: [{ name: "state/verify" }],
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ]);
+
+    // First sweep at t=0
+    const t0 = Date.now();
+    const first = await router.runBoardSweep(["xpufx-org/paseo"], io, { now: t0 });
+    assert.equal(first.ok, true);
+    // First pass: actionable but zero frontdesk attention → suppressed
+    assert.ok(first.actionable.length > 0, "should have actionable items");
+    assert.equal(first.notified, 0, "first sweep: suppressed (zero frontdesk attention)");
+
+    // Second sweep shortly after — still suppressed (delta unchanged + gate closed)
+    const second = await router.runBoardSweep(["xpufx-org/paseo"], io, { now: t0 + 30_000 });
+    assert.equal(second.ok, true);
+    assert.equal(second.notified, 0, "second sweep: still suppressed");
+
+    // Third sweep after reconciliation interval — reconciliationDue is true,
+    // lastBoardReconciliationAt was updated on first sweep, so this triggers
+    // full reconciliation. But the gate still applies: no dispatchable AND no
+    // frontdesk attention → still suppressed.
+    const reconciled = await router.runBoardSweep(["xpufx-org/paseo"], io, { now: t0 + 120_000 });
+    assert.equal(reconciled.ok, true);
+    assert.ok(reconciled.actionable.length > 0, "should still have actionable items");
+    assert.equal(reconciled.notified, 0, "reconciliation sweep: still suppressed (zero dispatchable AND zero frontdesk attention)");
+  });
+});
+
 describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () => {
   it("exempts front-desk from ZOMBIE_HUNG_TURN when queue depth is 0 and active workers is 0", () => {
     const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString(); // 1 hour ago
