@@ -41,3 +41,4 @@ export * from "./controls.js";
 export * from "./text.js";
 export * from "./data.js";
 export * from "./settings.js";
+export { PluginReloadBanner } from "./plugin-reload-banner.js";

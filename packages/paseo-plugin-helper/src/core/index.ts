@@ -67,3 +67,10 @@ export * from "./settings.js";
 export * from "./shared-settings.js";
 export * from "./snapshot.js";
 export * from "./command-center.js";
+export {
+  bumpPluginLoadCount,
+  getPluginLoadCount,
+  isPluginReloaded,
+  usePluginReloadNotice,
+  type PluginReloadNoticeState,
+} from "./plugin-load-count.js";
