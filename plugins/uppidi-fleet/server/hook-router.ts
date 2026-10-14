@@ -4146,6 +4146,8 @@ export interface BoardCandidate {
   labels: string[];
   category: string;
   is_dispatchable: boolean;
+  /** Present only on first-seen candidates. */
+  is_new?: boolean;
   reason: string;
 }
 
@@ -4164,6 +4166,8 @@ export interface BoardSweepResult {
     repo: string;
     count: number;
     dispatchable: number;
+    /** Tickets requiring explicit Front Desk attention (#1354). */
+    totalFrontDeskAttention?: number;
   }>;
   staleWipRecovered?: StaleWipResult[];
   prunedCount: number;
@@ -9904,7 +9908,19 @@ export class HookRouter {
         sweepDigests.set(repo, res.ok ? this.actionableDigest(res.candidates) : "#board-check-error");
         if (!res.ok || res.candidates.length === 0) continue;
         const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
-        actionable.push({ repo, count: res.candidates.length, dispatchable });
+        // Count tickets that require explicit Front Desk attention (#1354).
+        let totalFrontDeskAttention = 0;
+        for (const c of res.candidates) {
+          if (
+            c.labels?.includes("attention/frontdesk") ||
+            c.category === "feedback" ||
+            c.category === "sos" ||
+            c.is_new === true
+          ) {
+            totalFrontDeskAttention++;
+          }
+        }
+        actionable.push({ repo, count: res.candidates.length, dispatchable, totalFrontDeskAttention });
         this.lastSweepDigests.set(
           repo,
           `${res.candidates.length} candidate(s), ${dispatchable} dispatchable at ${new Date().toISOString()}`,
@@ -9948,13 +9964,16 @@ export class HookRouter {
         }
       }
       const hasWork = actionable.length > 0 || errors.length > 0;
-      // Dispatchable gate (#1352): suppress routine Front Desk sweep notifications
-      // only when dispatchableCount === 0 AND triageCount === 0.
-      // Tickets in triage categories (attention/frontdesk, attention/user,
-      // feedback, new_unseen, sos) still trigger notification.
+      // Dispatchable gate (#1354): suppress routine Front Desk sweep notifications
+      // only when there are zero dispatchable items AND zero Front Desk attention.
+      // Front Desk attention includes: attention/frontdesk label, feedback/sos
+      // categories, and newly seen (is_new) tickets.
       const totalDispatchable = actionable.reduce((sum, a) => sum + a.dispatchable, 0);
-      const totalTriage = actionable.reduce((sum, a) => sum + (a.count - a.dispatchable), 0);
-      const dispatchableGateClosed = totalDispatchable === 0 && totalTriage === 0;
+      const totalFrontDeskAttention = actionable.reduce(
+        (sum, a) => sum + (a.totalFrontDeskAttention ?? 0),
+        0,
+      );
+      const dispatchableGateClosed = totalDispatchable === 0 && totalFrontDeskAttention === 0;
       const shouldNotify = hasWork && !dispatchableGateClosed && (actionableChanged || errorStateChanged);
 
 
