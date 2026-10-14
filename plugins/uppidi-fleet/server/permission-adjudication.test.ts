@@ -100,15 +100,31 @@ describe("safe permission allowlist (#1084)", () => {
   });
 });
 
-describe("fleet agent detection (#1084)", () => {
-  it("recognizes fleet-labelled and registered agents", () => {
-    assert.equal(isFleetAgent({ id: "a", labels: { role: "orchestrator" } }), true);
-    assert.equal(isFleetAgent({ id: "b", labels: { category: "worker" } }), true);
-    assert.equal(isFleetAgent({ id: "c", labels: { repo: "owner/repo" } }), true);
-    assert.equal(isFleetAgent({ id: "d", labels: { "paseo.parent-agent-id": "orch" } }), true);
-    assert.equal(isFleetAgent({ id: "e", title: "Orchestrator · owner/repo" }), true);
+describe("fleet agent detection (#1084, #1151)", () => {
+  // Zero-heuristics: only roster + parentage match. No title regexes, no
+  // generic role="worker" checks, no repo-label guessing.
+  it("matches registered Front Desk and orchestrator ids via context", () => {
     assert.equal(isFleetAgent({ id: "fd" }, { frontDeskId: "fd" }), true);
     assert.equal(isFleetAgent({ id: "orch" }, { orchestratorAgentIds: ["orch"] }), true);
+  });
+
+  it("matches coding agents whose parent is a registered orchestrator", () => {
+    assert.equal(
+      isFleetAgent({ id: "w1", parentId: "orch-1" }, { orchestratorAgentIds: ["orch-1"] }),
+      true,
+    );
+    assert.equal(
+      isFleetAgent({ id: "w2", labels: { "paseo.parent-agent-id": "orch-1" } }, { orchestratorAgentIds: ["orch-1"] }),
+      true,
+    );
+  });
+
+  it("rejects label-only claims without roster entry (zero heuristics)", () => {
+    // These used to match legacy heuristics but must NOT match under #1151.
+    assert.equal(isFleetAgent({ id: "a", labels: { role: "orchestrator" } }), false);
+    assert.equal(isFleetAgent({ id: "b", labels: { category: "worker" } }), false);
+    assert.equal(isFleetAgent({ id: "c", labels: { repo: "owner/repo" } }), false);
+    assert.equal(isFleetAgent({ id: "e", title: "Orchestrator · owner/repo" as any }), false);
   });
 
   it("rejects ad-hoc agents the operator runs by hand", () => {
@@ -116,7 +132,7 @@ describe("fleet agent detection (#1084)", () => {
   });
 });
 
-describe("permission adjudication decisions (#1084)", () => {
+describe("permission adjudication decisions (#1084, #1151)", () => {
   it("auto-allows a fleet heredoc permission through the injected seam", async () => {
     const calls: Array<[string, string]> = [];
     const result = await adjudicatePermission({
@@ -126,6 +142,7 @@ describe("permission adjudication decisions (#1084)", () => {
         tool: "run_command",
         input: { command: "teax issue comment 42 -b \"$(cat <<'EOF'\nbody\nEOF\n)\"" },
       },
+      context: { orchestratorAgentIds: ["orch-1"] },
       allow: async (agentId, permissionId) => {
         calls.push([agentId, permissionId]);
         return true;
@@ -145,14 +162,16 @@ describe("permission adjudication decisions (#1084)", () => {
       const result = await adjudicatePermission({
         agent: { id: "worker-1", title: "worker", labels: { category: "worker" }, cwd: WORKSPACE },
         permission: { id: "perm-2", tool: "bash", input: { command: "rm -rf " + "/" } },
+        context: { orchestratorAgentIds: ["orch-1"] },
         allow: async () => {
           called = true;
           return true;
         },
         logPath,
       });
+      // Worker without parentage is not a fleet agent under #1151 → escalates as non-fleet.
       assert.equal(result.action, "escalate");
-      assert.equal(result.reason, "no safe-pattern match");
+      assert.equal(result.reason, "non-fleet agent");
       assert.equal(called, false, "destructive command must not reach the allow seam");
       const records = readAdjudicationDecisions({ logPath });
       assert.equal(records.length, 1);
@@ -163,12 +182,13 @@ describe("permission adjudication decisions (#1084)", () => {
     }
   });
 
-  it("escalates a teax pr merge command instead of allowing it", async () => {
+  it("escalates a teax pr merge command for a fleet worker with parentage", async () => {
     let called = false;
     const mergeCmd = "teax pr merge 42 -R owner/repo";
     const result = await adjudicatePermission({
-      agent: { id: "worker-1", title: "worker", labels: { category: "worker" }, cwd: WORKSPACE },
+      agent: { id: "worker-1", parentId: "orch-1" },
       permission: { id: "perm-merge", tool: "run_command", input: { command: mergeCmd } },
+      context: { orchestratorAgentIds: ["orch-1"] },
       allow: async () => {
         called = true;
         return true;
@@ -195,9 +215,11 @@ describe("permission adjudication decisions (#1084)", () => {
   });
 
   it("escalates when the allow seam is unavailable or the request has no id", async () => {
+    // Orchestrator in roster but no allow seam → escalate.
     const noSeam = await adjudicatePermission({
       agent: { id: "orch-1", labels: { role: "orchestrator" }, cwd: WORKSPACE },
       permission: { id: "perm-4", input: { command: "git status" } },
+      context: { orchestratorAgentIds: ["orch-1"] },
     });
     assert.equal(noSeam.action, "escalate");
     assert.equal(noSeam.reason, "no allow seam");
@@ -206,6 +228,7 @@ describe("permission adjudication decisions (#1084)", () => {
     const noId = await adjudicatePermission({
       agent: { id: "orch-1", labels: { role: "orchestrator" }, cwd: WORKSPACE },
       permission: { input: { command: "git status" } },
+      context: { orchestratorAgentIds: ["orch-1"] },
       allow: async () => {
         called = true;
         return true;

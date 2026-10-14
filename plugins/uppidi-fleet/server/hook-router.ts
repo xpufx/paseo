@@ -65,6 +65,7 @@ import {
   type WorkspaceLookupOptions,
 } from "./workspace-lookup.js";
 import { adjudicatePermission, isFleetAgent } from "./permission-adjudication.js";
+import { isFleetMember as _isFleetMember, type FleetRoster } from "./fleet-membership.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
 import type { AutomationTier } from "@xpufx/backend-tickets/shared";
 import {
@@ -1556,6 +1557,7 @@ export interface WatchdogAgent {
   lastActivityAt?: string | null;
   updatedAt?: string | null;
   labels?: Record<string, string> | null;
+  parentId?: string | null;
   pendingPermissions?: WatchdogPermission[] | null;
   archivedAt?: string | null;
   config?: { provider?: string | null; model?: string | null; [key: string]: unknown } | null;
@@ -3246,6 +3248,7 @@ export interface SpawnRequest {
   issueIndex?: number;
   model?: string;
   workspace?: string;
+  parentId?: string | null;
 }
 
 /** Result of a spawn request through the Hook Router. */
@@ -3377,19 +3380,26 @@ function buildOrchestratorPrompt(repo: string): string {
 
 /**
  * Labels applied to every worker spawn so the fleet dashboard can identify it.
+ * Stamps authoritative fleet provenance (#1151).
  */
 function buildWorkerLabels(options: {
   repo: string;
   issueIndex?: number;
+  parentId?: string | null;
 }): Record<string, string> {
   const labels: Record<string, string> = {
-    role: "worker",
+    role: "coding-agent",
     category: "coding-agent",
     repo: options.repo,
-    "fleet.role": "worker",
+    "fleet.uppidi.com/role": "coding-agent",
   };
+  if (options.parentId) {
+    labels["fleet.uppidi.com/parent"] = options.parentId;
+    labels["paseo.parent-agent-id"] = options.parentId;
+  }
   if (options.issueIndex) {
-    labels["fleet.issue"] = String(options.issueIndex);
+    labels["fleet.uppidi.com/issue"] = String(options.issueIndex);
+    labels["forgejo.issue"] = String(options.issueIndex);
   }
   return labels;
 }
@@ -3440,7 +3450,11 @@ export async function handleSpawnAgent(
   if (role === "frontdesk") {
     title = "Front Desk";
     prompt = buildFrontDeskPrompt();
-    Object.assign(labels, { role: "front-desk", category: "front-desk" });
+    Object.assign(labels, {
+      role: "front-desk",
+      category: "front-desk",
+      "fleet.uppidi.com/role": "front-desk",
+    });
   } else if (role === "orchestrator") {
     const canonicalRepo = canonicalRepoKey(repo!) ?? repo!;
     title = `Orchestrator · ${canonicalRepo}`;
@@ -3449,6 +3463,7 @@ export async function handleSpawnAgent(
       role: "orchestrator",
       category: "orchestrator",
       repo: canonicalRepo,
+      "fleet.uppidi.com/role": "orchestrator",
     });
   } else {
     // worker
@@ -3456,7 +3471,7 @@ export async function handleSpawnAgent(
     const issueRef = issueIndex ? ` #${issueIndex}` : "";
     title = `Worker · ${canonicalRepo}${issueRef}`;
     prompt = buildWorkerPrompt({ repo: canonicalRepo, issueIndex, model: resolvedModel });
-    Object.assign(labels, buildWorkerLabels({ repo: canonicalRepo, issueIndex }));
+    Object.assign(labels, buildWorkerLabels({ repo: canonicalRepo, issueIndex, parentId: request.parentId }));
   }
 
   // ── Per-provider concurrency limit guard (#1198) ─────────────────────
@@ -8207,7 +8222,9 @@ export class HookRouter {
       for (const agent of agentMap.values()) {
         // Restrict watchdog audits and hook management to fleet-owned agents only.
         // Ad-hoc/user sessions are excluded.
-        if (!isFleetAgent(agent, { frontDeskId, orchestratorAgentIds: fleetAgentIds })) continue;
+        // Deterministic fleet membership via roster + parentage — zero heuristics (#1151).
+        const roster: FleetRoster = { frontDeskId: frontDeskId ?? null, orchestratorIds: fleetAgentIds };
+        if (!_isFleetMember(agent, roster)) continue;
         if (agent.archivedAt) continue;
         if (this.isTeardownSuppressedAgent(agent.id)) continue;
         fleetAuditedAgents += 1;
@@ -8433,7 +8450,9 @@ export class HookRouter {
       }
 
       for (const agent of agentMap.values()) {
-        if (!isFleetAgent(agent, { frontDeskId, orchestratorAgentIds: fleetAgentIds })) continue;
+        // Deterministic fleet membership via roster + parentage — zero heuristics (#1151).
+        const roster: FleetRoster = { frontDeskId: frontDeskId ?? null, orchestratorIds: fleetAgentIds };
+        if (!_isFleetMember(agent, roster)) continue;
         if (agent.archivedAt) continue;
         if (this.isTeardownSuppressedAgent(agent.id)) continue;
 

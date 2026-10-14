@@ -2589,10 +2589,11 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     } catch {}
   });
 
-  it("reports a clean audit when no anomalies are present", async () => {
+  it("reports a clean audit when no anomalies are present (zero-heuristics, #1151)", async () => {
+    // Only roster-matched and parentage-matched agents are fleet members.
     const cleanMap = new Map<string, WatchdogAgent>([
       ["agent-1", { id: "agent-1", status: "idle", lastError: null, role: "orchestrator", labels: { role: "orchestrator" } }],
-      ["agent-2", { id: "agent-2", status: "running", lastError: null, role: "worker", labels: { role: "worker" } }],
+      ["agent-2", { id: "agent-2", status: "running", lastError: null, role: "worker", parentId: "agent-1", labels: { role: "worker" } }],
     ]);
     const audit = await router.runWatchdogAudit({
       orchestratorRecords: [{ key: "test-repo", agentId: "agent-1" }],
@@ -2641,10 +2642,12 @@ describe("hook-router fleet watchdog audit (#458)", () => {
     assert.equal(audit.audited.orchestrators, 1);
   });
 
-  it("includes fleet-labeled agents in watchdog audit", async () => {
+  it("includes fleet-labeled agents in watchdog audit (zero-heuristics, #1151)", async () => {
+    // Only agents whose ids match the roster or whose parent matches are fleet members.
+    // Label-only claims (role="worker") without roster/parentage are excluded.
     const fleetMap = new Map<string, WatchdogAgent>([
       ["orch-1", { id: "orch-1", status: "idle", lastError: null, role: "orchestrator", labels: { role: "orchestrator" } }],
-      ["worker-1", { id: "worker-1", status: "running", lastError: null, role: "worker", labels: { role: "worker" } }],
+      ["worker-1", { id: "worker-1", status: "running", lastError: null, role: "worker", parentId: "orch-1", labels: { role: "worker" } }],
     ]);
     const audit = await router.runWatchdogAudit({
       orchestratorRecords: [{ key: "test-repo", agentId: "orch-1" }],
@@ -5203,6 +5206,7 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
             provider: "opencode",
             model: "muse-spark-1.3-contributor-free",
             recentTimeline: "[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go",
+            labels: { role: "orchestrator" },
           },
         ],
       ]);
@@ -5218,6 +5222,7 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
         now,
         agentMap,
         frontDeskId: "front-desk-1",
+        orchestratorRecords: [{ key: "xpufx-org/paseo", agentId: "agent-quota-exhausted" }],
         deliver: async (_target, msg, opts) => {
           if (opts?.steer) steerAttempted = true;
           alertDelivered = msg;
@@ -5493,6 +5498,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       agentsDir,
       diskMetadata: undefined,
       cancellations: new Map(),
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-zombie" }],
       deliver: fakeDeliver,
       stopAgent: async (id) => {
         stopped.push(id);

@@ -73,6 +73,7 @@ import {
   loadRouterConfig,
   saveRouterConfig,
 } from "./hook-router.js";
+import { isFleetMember, type FleetRoster } from "./fleet-membership.js";
 import { resolveHookAuthPosture, resolveHookEndpoint } from "./hook.js";
 import {
   candidateHostCheckoutDir,
@@ -1313,51 +1314,53 @@ function teardownTargetToCategory(target: string): UppidiAgentCategory {
 }
 
 /**
- * Determines whether a coding-agent belongs to the fleet (#1121).
- * Ad-hoc or detached user sessions that were not created by or attributed to
- * the fleet are preserved and skipped during fleet teardown.
+ * Determines whether a coding-agent belongs to the fleet via the authoritative
+ * roster (#1151). Ad-hoc or detached user sessions that were not created by or
+ * attributed to the fleet are preserved and skipped during fleet teardown.
+ *
+ * This wraps {@link isFleetMember} with legacy context fields so existing
+ * callers continue to work without refactoring every call site.
  */
 export function isFleetWorker(
   agent: Partial<UppidiAgent> | UppidiAgent | null | undefined,
   context: {
     orchestratorIds?: Set<string>;
     enrolledRepos?: string[];
+    /** Registered Front Desk agent id (legacy context extension). */
+    frontDeskId?: string | null;
   } = {}
 ): boolean {
   if (!agent) return false;
 
-  // 1. Parentage check: agent's parent is a registered or known orchestrator / front-desk.
-  // Parent identity is authoritative (registry ids, explicit parent category);
-  // display names are never grepped for role substrings (#1143).
-  if (agent.parentId) {
-    if (context.orchestratorIds?.has(agent.parentId)) return true;
-    if (agent.parentCategory === "orchestrator" || agent.parentCategory === "front-desk") return true;
+  // Build a FleetRoster from the legacy context shape.
+  const orchestratorIds = new Set<string>();
+  if (context.orchestratorIds) {
+    for (const id of context.orchestratorIds) orchestratorIds.add(id);
   }
+  const roster: FleetRoster = { frontDeskId: context.frontDeskId ?? null, orchestratorIds };
 
-  // 2. Explicit fleet / coding-agent role labels (legacy `worker` accepted, #1126)
+  // Direct roster match (parent orchestrator or front desk id).
+  if (isFleetMember({ id: agent.id ?? "", parentId: agent.parentId, labels: agent.labels }, roster)) return true;
+
+  // Legacy fallback: explicit parent-category hint (e.g. parentCategory === "orchestrator")
+  // when the roster does not carry the parent id but the caller knows it.
+  if (agent.parentId && agent.parentCategory === "orchestrator") return true;
+  if (agent.parentId && agent.parentCategory === "front-desk") return true;
+
+  // Legacy fallback: explicit role/category labels (used by pre-#1151 spawns).
   const labels = agent.labels ?? {};
   const roleLabel = String(labels.role ?? labels.category ?? "").trim().toLowerCase();
-  if (isCodingAgentCategory(roleLabel) || roleLabel === "orchestrator" || roleLabel === "front-desk") {
-    return true;
-  }
-  if (labels["paseo.parent-agent-id"]?.trim()) {
-    return true;
-  }
+  if (isCodingAgentCategory(roleLabel) || roleLabel === "orchestrator" || roleLabel === "front-desk") return true;
+  if (labels["paseo.parent-agent-id"]?.trim()) return true;
 
-  // 3. Fleet issue or repo attribution
-  if (labels["forgejo.issue"]?.trim() || labels.issue?.trim() || labels.repo?.trim()) {
-    return true;
-  }
-  if (agent.attributedWork?.issue !== undefined || agent.attributedWork?.repo) {
-    return true;
-  }
+  // Legacy fallback: fleet issue or repo attribution.
+  if (labels["forgejo.issue"]?.trim() || labels.issue?.trim() || labels.repo?.trim()) return true;
+  if (agent.attributedWork?.issue !== undefined || agent.attributedWork?.repo) return true;
 
-  // 4. Enrolled repository membership (not detached / ad-hoc)
+  // Legacy fallback: enrolled repository membership.
   if (context.enrolledRepos && context.enrolledRepos.length > 0) {
     const proj = agent.project || DEFAULT_PROJECT;
-    if (context.enrolledRepos.some((r) => isRepoMatching(r, proj))) {
-      return true;
-    }
+    if (context.enrolledRepos.some((r) => isRepoMatching(r, proj))) return true;
   }
 
   return false;
@@ -1396,12 +1399,19 @@ export function resolveTeardownAgents(
     if (!targetCategories.has(category)) {
       return false;
     }
-    // Front Desk and Orchestrators are matched directly by target category
-    if (category === "front-desk" || category === "orchestrator") {
-      return true;
+    // Front Desk and Orchestrators are matched directly by target category.
+    // If the agent is registered as front-desk or orchestrator in the roster,
+    // it belongs to that group regardless of its current category value
+    // (which may be stale from normalization without registry). Skip it here
+    // so it is not double-counted as a worker.
+    if (registry.frontDeskAgentId && agent.id === registry.frontDeskAgentId) {
+      return targetCategories.has("front-desk");
+    }
+    if (registry.orchestratorAgentIdToRepo.has(agent.id)) {
+      return targetCategories.has("orchestrator");
     }
     // For coding agents, ensure the fleet actually owns them
-    return isFleetWorker(agent, { orchestratorIds, enrolledRepos });
+    return isFleetWorker(agent, { orchestratorIds, enrolledRepos, frontDeskId: registry.frontDeskAgentId });
   });
 }
 
@@ -2841,19 +2851,38 @@ export async function handleUppidiCreateFrontDesk(
     const title = input.title?.trim() || "Front Desk";
     const prompt = buildFrontDeskIntroPrompt(input.prompt);
 
+    // Stamp fleet identity labels on Front Desk spawn (#1151).
+    // The fleet-id will be the agent's own id; we set it via the SDK label-update
+    // after spawn since we don't know the id until then.
+    const fdLabels: Record<string, string> = {
+      role: "front-desk",
+      category: "front-desk",
+      "fleet.uppidi.com/role": "front-desk",
+    };
+
     const spawnRes = await spawnPaseoAgent(
       {
         title,
         prompt,
         category: "front-desk",
         model: input.model,
-        labels: {
-          role: "front-desk",
-          category: "front-desk",
-        },
+        labels: fdLabels,
       },
       context
     );
+
+    // Stamp fleet-id post-spawn via SDK label update (#1151).
+    if (spawnRes.ok && spawnRes.agentId && context?.paseo?.agents?.ref) {
+      try {
+        const handle = context.paseo.agents.ref(spawnRes.agentId);
+        const agentWithUpdate = handle as any;
+        if (typeof agentWithUpdate.update === "function") {
+          await agentWithUpdate.update({ labels: { ...fdLabels, "fleet.uppidi.com/fleet-id": spawnRes.agentId } });
+        }
+      } catch {
+        // Best-effort: stale labels still allow roster-based membership.
+      }
+    }
 
     if (!spawnRes.ok || !spawnRes.agentId) {
       return {
@@ -3011,6 +3040,15 @@ export async function handleUppidiAddOrchestrator(
       workspaceId = resolved.workspaceId;
     }
 
+    // Stamp fleet identity labels on Orchestrator spawn (#1151).
+    const orchLabels: Record<string, string> = {
+      role: "orchestrator",
+      category: "orchestrator",
+      repo,
+      "fleet.uppidi.com/role": "orchestrator",
+      "fleet.uppidi.com/fleet-id": "", // set post-spawn
+    };
+
     const spawnRes = await spawnPaseoAgent(
       {
         title,
@@ -3021,14 +3059,23 @@ export async function handleUppidiAddOrchestrator(
         workspaceId,
         repo,
         callerAgentId: input.callerAgentId,
-        labels: {
-          role: "orchestrator",
-          category: "orchestrator",
-          repo,
-        },
+        labels: orchLabels,
       },
       context
     );
+
+    // Stamp fleet-id post-spawn via SDK label update (#1151).
+    if (spawnRes.ok && spawnRes.agentId && context?.paseo?.agents?.ref) {
+      try {
+        const handle = context.paseo.agents.ref(spawnRes.agentId);
+        const agentWithUpdate = handle as any;
+        if (typeof agentWithUpdate.update === "function") {
+          await agentWithUpdate.update({ labels: { ...orchLabels, "fleet.uppidi.com/fleet-id": spawnRes.agentId } });
+        }
+      } catch {
+        // Best-effort.
+      }
+    }
 
     if (!spawnRes.ok || !spawnRes.agentId) {
       return {

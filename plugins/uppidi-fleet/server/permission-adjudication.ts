@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import os from "node:os";
 import { basename, dirname, join } from "node:path";
 import { resolveHostHome } from "./role-models.js";
+import { isFleetMember as _isFleetMember, type FleetRoster } from "./fleet-membership.js";
 
 /**
  * Conservative, documented safe-pattern allowlist for fleet permission
@@ -38,6 +39,7 @@ export interface FleetAgentLike {
   title?: string | null;
   cwd?: string | null;
   role?: string | null;
+  parentId?: string | null;
   labels?: Record<string, string> | null;
 }
 
@@ -46,6 +48,17 @@ export interface FleetAgentContext {
   orchestratorAgentIds?: Iterable<string>;
   /** Registered Front Desk agent id. */
   frontDeskId?: string | null;
+}
+
+/** Build a {@link FleetRoster} from the legacy context shape for callers that still pass `FleetAgentContext`. */
+function contextToRoster(ctx: FleetAgentContext): FleetRoster {
+  const orchestratorIds = new Set<string>();
+  if (ctx.orchestratorAgentIds) {
+    for (const id of ctx.orchestratorAgentIds) {
+      orchestratorIds.add(id);
+    }
+  }
+  return { frontDeskId: ctx.frontDeskId ?? null, orchestratorIds };
 }
 
 /** A documented allowlist rule and the scope the match applies to. */
@@ -653,29 +666,25 @@ export function extractPermissionCommandText(permission: RawPermissionLike): str
 const FLEET_ROLE_LABELS = new Set(["front-desk", "orchestrator", "coding-agent", "worker"]);
 
 /**
- * True for agents the fleet owns: label-identified orchestrators/workers, their
- * labelled children, or a registered front desk / orchestrator. Ad-hoc agents
- * the operator runs by hand are never auto-allowed (#1084).
+ * Authoritative fleet membership via roster + parentage — zero heuristics (#1151).
+ *
+ * Replaces the legacy `isFleetAgent` which used title regexes (`/^Orchestrator\b/i`,
+ * `/front\s*desk/i`), generic role="worker" checks, and repo-label guessing.
+ * The new predicate only matches:
+ *   - The registered Front Desk agent.
+ *   - Registered orchestrators.
+ *   - Agents whose explicit parent (`fleet.uppidi.com/parent`, `paseo.parent-agent-id`,
+ *     or `parentId`) is a registered orchestrator.
+ *
+ * Ad-hoc user sessions are never auto-allowed (#1084).
  */
 export function isFleetAgent(agent: FleetAgentLike | null | undefined, context: FleetAgentContext = {}): boolean {
   if (!agent) return false;
-  const id = agent.id?.trim();
-  if (id) {
-    if (context.frontDeskId && id === context.frontDeskId) return true;
-    if (context.orchestratorAgentIds) {
-      for (const orchId of context.orchestratorAgentIds) {
-        if (orchId === id) return true;
-      }
-    }
-  }
-  const labels = agent.labels ?? {};
-  const role = String(agent.role ?? labels.role ?? labels.category ?? "").trim().toLowerCase();
-  if (FLEET_ROLE_LABELS.has(role)) return true;
-  if (labels.repo?.trim()) return true;
-  if (labels["paseo.parent-agent-id"]?.trim()) return true;
-  const title = String(agent.title ?? agent.name ?? "").trim();
-  if (/^Orchestrator\b/i.test(title) || /front\s*desk/i.test(title)) return true;
-  return false;
+  const roster = contextToRoster(context);
+  return _isFleetMember(
+    { id: agent.id?.trim() ?? "", parentId: agent.parentId, labels: agent.labels },
+    roster,
+  );
 }
 
 // ---------------------------------------------------------------------------
