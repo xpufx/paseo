@@ -1849,6 +1849,33 @@ export const uppidiFleetResumeContract = defineContract({
   output: FleetResumeOutputSchema,
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// Unified fleet control mode selector (#1373)
+// ──────────────────────────────────────────────────────────────────────────
+
+export const FleetSetModeInputSchema = z.object({
+  mode: FleetModeSchema,
+  confirm: z.boolean().default(true),
+  reason: z.string().optional(),
+});
+export type FleetSetModeInput = z.infer<typeof FleetSetModeInputSchema>;
+
+export const FleetSetModeOutputSchema = z.object({
+  ok: z.boolean(),
+  mode: FleetModeSchema,
+  previousMode: FleetModeSchema.optional(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+});
+export type FleetSetModeOutput = z.infer<typeof FleetSetModeOutputSchema>;
+
+export const uppidiFleetSetModeContract = defineContract({
+  name: "uppidi-fleet.set-fleet-mode",
+  description: "Set unified fleet control mode (RUN, DRAIN, HALT, STOP)",
+  input: FleetSetModeInputSchema,
+  output: FleetSetModeOutputSchema,
+});
+
 // Agent Rotation Policy (Issue #1019)
 //
 // Provider-independent rotation of the long-lived roles. Policy is declared

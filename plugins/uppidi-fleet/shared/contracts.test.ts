@@ -74,6 +74,9 @@ import {
   FleetResumeInputSchema,
   FleetResumeOutputSchema,
   uppidiFleetResumeContract,
+  FleetSetModeInputSchema,
+  FleetSetModeOutputSchema,
+  uppidiFleetSetModeContract,
   uppidiFrontDeskActivityContract,
   UppidiFrontDeskActivityInputSchema,
   UppidiFrontDeskActivityOutputSchema,
@@ -994,6 +997,46 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
     const resume = FleetResumeOutputSchema.parse({ ok: true });
     assert.equal(resume.halted, false);
     assert.equal(resume.teardownInProgress, false);
+  });
+
+  it("validates the unified fleet set-mode contract and schemas (#1373)", () => {
+    assert.equal(uppidiFleetSetModeContract.name, "uppidi-fleet.set-fleet-mode");
+    assert.equal(
+      uppidiFleetSetModeContract.description,
+      "Set unified fleet control mode (RUN, DRAIN, HALT, STOP)",
+    );
+
+    // Input validation: all four modes accepted
+    for (const mode of ["RUN", "DRAIN", "HALT", "STOP"] as const) {
+      const input = FleetSetModeInputSchema.parse({ mode, confirm: true });
+      assert.equal(input.mode, mode);
+      assert.equal(input.confirm, true);
+    }
+
+    // Reason is optional
+    const withReason = FleetSetModeInputSchema.parse({ mode: "HALT", confirm: true, reason: "maintenance" });
+    assert.equal(withReason.reason, "maintenance");
+
+    // Output validation
+    const success = FleetSetModeOutputSchema.parse({
+      ok: true,
+      mode: "DRAIN",
+      previousMode: "RUN",
+      message: "Fleet mode changed to DRAIN",
+    });
+    assert.equal(success.ok, true);
+    assert.equal(success.mode, "DRAIN");
+    assert.equal(success.previousMode, "RUN");
+    assert.equal(success.message, "Fleet mode changed to DRAIN");
+
+    // Error output
+    const failure = FleetSetModeOutputSchema.parse({
+      ok: false,
+      mode: "STOP",
+      error: "router not available",
+    });
+    assert.equal(failure.ok, false);
+    assert.equal(failure.error, "router not available");
   });
 
   describe("Front Desk Watch & Console Drawer (#710)", () => {

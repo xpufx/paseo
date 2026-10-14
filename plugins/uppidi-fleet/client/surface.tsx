@@ -65,6 +65,7 @@ import {
   uppidiFleetResetStateContract,
   uppidiFleetHaltContract,
   uppidiFleetResumeContract,
+  uppidiFleetSetModeContract,
   uppidiTransitionIssueContract,
   uppidiToggleRepoAutomationTierContract,
   uppidiReposContract,
@@ -85,6 +86,7 @@ import {
   type UppidiRunnerSource,
   type CandidateModelMetrics,
   type TaskProfileMetrics,
+  type FleetMode,
   getPendingPermissionAction,
   getPermissionAdjudicationCommand,
   getAgentAttentionReason,
@@ -978,6 +980,147 @@ export function HaltConfirmModal({
   );
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Unified fleet mode selector (#1373)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Fleet modes rendered as pill buttons in the segmented control. */
+const FLEET_MODE_OPTIONS: Array<{
+  value: FleetMode;
+  label: string;
+  icon: string;
+  /** HostButton-compatible variant for the active state. */
+  buttonVariant: "primary" | "danger";
+  description: string;
+}> = [
+  { value: "RUN", label: "RUN", icon: "Play", buttonVariant: "primary", description: "Full operations — all event classes delivered per policy" },
+  { value: "DRAIN", label: "DRAIN", icon: "Clock", buttonVariant: "primary", description: "Finish current work, hold new work queues" },
+  { value: "HALT", label: "HALT", icon: "Ban", buttonVariant: "danger", description: "Pause ingress, stop background loops, suppress auto-provisioning" },
+  { value: "STOP", label: "STOP", icon: "Square", buttonVariant: "danger", description: "Maximum restriction — health events dropped, work held" },
+];
+
+export interface ModeTransitionModalProps {
+  visible: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  isProcessing?: boolean;
+  mode: FleetMode;
+}
+
+/**
+ * Confirmation modal for transitioning to a restricted fleet mode (HALT / STOP).
+ * RUN and DRAIN transition directly without this modal.
+ */
+export function ModeTransitionModal({
+  visible,
+  onClose,
+  onConfirm,
+  isProcessing = false,
+  mode,
+}: ModeTransitionModalProps) {
+  const { colors, typography } = useFleetTheme();
+  const dangerColor = colors.statusDanger;
+  const option = FLEET_MODE_OPTIONS.find((o) => o.value === mode)!;
+
+  return (
+    <Modal
+      open={visible}
+      onOpenChange={(open) => {
+        if (!open && !isProcessing) onClose();
+      }}
+      title={`Transition to ${mode}`}
+    >
+      <ModalContent>
+        <Stack gap="sm">
+          <Card variant="flat" style={{ borderColor: dangerColor, borderWidth: 1 }}>
+            <Stack gap="xs">
+              <Row align="center" gap="xs">
+                <Icon name={option.icon} size={16} color={dangerColor} />
+                <Text style={{ color: dangerColor, ...typography.heading }}>
+                  {mode} Mode
+                </Text>
+              </Row>
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                {option.description}
+              </Text>
+            </Stack>
+          </Card>
+
+          <Row justify="flex-end" gap="xs">
+            <Button
+              label="Cancel"
+              size="sm"
+              variant="secondary"
+              onPress={onClose}
+              disabled={isProcessing}
+            />
+            <Button
+              label={isProcessing ? `${mode}ing...` : `Switch to ${mode}`}
+              icon={option.icon}
+              size="sm"
+              variant="danger"
+              disabled={isProcessing}
+              loading={isProcessing}
+              accessibilityLabel={`Confirm ${mode}`}
+              onPress={onConfirm}
+            />
+          </Row>
+        </Stack>
+      </ModalContent>
+    </Modal>
+  );
+}
+
+export interface ModeBannerProps {
+  mode: FleetMode;
+  isSettingMode?: boolean;
+  onReturnToRun?: () => void;
+}
+
+/**
+ * Active-mode banner shown when the fleet is not in RUN mode (#1373).
+ * Displays queue info for DRAIN, status details for HALT/STOP, and offers
+ * a "Return to RUN" button.
+ */
+export function ModeBanner({ mode, isSettingMode = false, onReturnToRun }: ModeBannerProps) {
+  const { colors, typography } = useFleetTheme();
+  if (mode === "RUN") return null;
+
+  const option = FLEET_MODE_OPTIONS.find((o) => o.value === mode)!;
+  const borderColor = option.buttonVariant === "danger" ? colors.statusDanger : colors.statusWarning;
+  const iconColor = borderColor;
+
+  return (
+    <View testID={`fleet-mode-banner-${mode.toLowerCase()}`}>
+      <Card variant="flat" style={{ borderColor, borderWidth: 1 }}>
+        <Row justify="space-between" align="center" wrap gap="xs">
+          <Row align="center" gap="xs" wrap>
+            <Icon name={option.icon} size={16} color={iconColor} />
+            <Badge label={mode} variant={option.buttonVariant === "danger" ? "danger" : "info"} size="sm" />
+            <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
+              {option.label} mode active
+            </Text>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+              {option.description}
+            </Text>
+          </Row>
+          {onReturnToRun && (
+            <Button
+              label={isSettingMode ? "Running..." : "Return to RUN"}
+              icon="Play"
+              size="sm"
+              variant="primary"
+              disabled={isSettingMode}
+              accessibilityLabel="Return to RUN mode"
+              onPress={onReturnToRun}
+            />
+          )}
+        </Row>
+      </Card>
+    </View>
+  );
+}
+
 export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const { colors, typography } = useFleetTheme();
   const toast = useToast();
@@ -1130,9 +1273,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   // Fleet HALT / RESUME (#1013)
   const haltMutation = useRpcMutation(uppidiFleetHaltContract);
   const resumeHaltMutation = useRpcMutation(uppidiFleetResumeContract);
+  const setModeMutation = useRpcMutation(uppidiFleetSetModeContract);
   const [isHaltModalOpen, setIsHaltModalOpen] = useState(false);
   const [isHalting, setIsHalting] = useState(false);
   const [isResumingHalt, setIsResumingHalt] = useState(false);
+  // Unified fleet mode selector (#1373)
+  const [pendingModeTransition, setPendingModeTransition] = useState<FleetMode | null>(null);
+  const isSettingMode = pendingModeTransition !== null;
+  const currentMode: FleetMode = hookStatus?.mode ?? "RUN";
   const isHalted = hookStatus?.halted ?? false;
   const isTeardownInProgress = hookStatus?.teardownInProgress ?? false;
 
@@ -1706,6 +1854,38 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     }
   };
 
+  /** Unified fleet mode transition (#1373). HALT/STOP open confirmation modal; RUN/DRAIN direct. */
+  const handleModeTransition = async (mode: FleetMode) => {
+    // HALT and STOP require explicit confirmation via the modal
+    if (mode === "HALT" || mode === "STOP") {
+      setPendingModeTransition(mode);
+      return;
+    }
+    // RUN and DRAIN transition directly
+    await executeModeSet(mode);
+  };
+
+  const executeModeSet = async (mode: FleetMode) => {
+    try {
+      setPendingModeTransition(mode);
+      const res = await setModeMutation.mutateAsync({ mode, confirm: true });
+      if (res.ok) {
+        toast.show(res.message || `Fleet mode set to ${mode}`);
+        void refetchHookStatus();
+      } else {
+        toast.error(res.error || `Failed to set mode to ${mode}`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPendingModeTransition(null);
+    }
+  };
+
+  const handleReturnToRun = async () => {
+    await executeModeSet("RUN");
+  };
+
   const handleResetState = async () => {
     try {
       setIsResettingState(true);
@@ -1742,6 +1922,27 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
       headerMode="pinned"
       header={
         <Stack gap={4}>
+          {/* Unified fleet mode selector (#1373) */}
+          <Row justify="center" align="center" wrap gap="xs">
+            {FLEET_MODE_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                label={option.label}
+                icon={option.icon}
+                size="sm"
+                variant={(currentMode === option.value ? option.buttonVariant : "secondary") as "primary" | "danger" | "secondary"}
+                disabled={isSettingMode || (currentMode === option.value)}
+                onPress={() => handleModeTransition(option.value)}
+                accessibilityLabel={`Set fleet mode to ${option.value}`}
+                style={{
+                  paddingHorizontal: 10,
+                  paddingVertical: 2,
+                  minHeight: 22,
+                  minWidth: 56,
+                }}
+              />
+            ))}
+          </Row>
           <UppidiTopHeaderBar
             isConnected={isConnected}
             isServiceRunning={isServiceRunning}
@@ -1762,6 +1963,11 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             teardownInProgress={isTeardownInProgress}
             isResuming={isResumingHalt}
             onResume={handleResumeHalt}
+          />
+          <ModeBanner
+            mode={currentMode}
+            isSettingMode={isSettingMode && currentMode !== "RUN"}
+            onReturnToRun={handleReturnToRun}
           />
           <ModelAlertBanner alerts={fleetAlertsData?.alerts ?? []} />
           <Tabs tabs={tabs} activeTab={activeTab} onTabChange={(id) => setActiveTab(id as SurfaceTab)} />
@@ -3485,6 +3691,17 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
         isProcessing={isHalting}
         isHalted={isHalted}
       />
+      {pendingModeTransition && (
+        <ModeTransitionModal
+          visible={true}
+          onClose={() => setPendingModeTransition(null)}
+          onConfirm={() => {
+            if (pendingModeTransition) executeModeSet(pendingModeTransition);
+          }}
+          isProcessing={isSettingMode}
+          mode={pendingModeTransition}
+        />
+      )}
     </ModalBody>
   );
 }

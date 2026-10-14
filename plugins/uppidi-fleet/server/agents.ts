@@ -42,6 +42,8 @@ import type {
   FleetHaltOutput,
   FleetResumeInput,
   FleetResumeOutput,
+  FleetSetModeInput,
+  FleetSetModeOutput,
   UppidiFrontDeskActivityInput,
   UppidiFrontDeskActivityOutput,
   UppidiFrontDeskActivityItem,
@@ -1900,6 +1902,42 @@ export async function handleFleetResume(
     message: result.resumed ? "Canonical ALL HALT cleared — ingress and auto-provisioning resumed" : undefined,
     error: result.error,
   };
+}
+
+/**
+ * Set unified fleet control mode (#1373). Delegates to the hook router's setMode
+ * which persists the new mode and updates delivery policy.
+ */
+export async function handleFleetSetMode(
+  input: FleetSetModeInput,
+  _context?: PluginHandlerContext
+): Promise<FleetSetModeOutput> {
+  const router = getActiveHookRouter();
+  if (!router) {
+    return {
+      ok: false,
+      mode: input.mode,
+      error: "Hook router is not running; cannot set fleet mode",
+    };
+  }
+
+  const previousMode = router.mode;
+  try {
+    router.setMode(input.mode);
+    return {
+      ok: true,
+      mode: input.mode,
+      previousMode,
+      message: `Fleet mode changed to ${input.mode}`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      mode: input.mode,
+      previousMode,
+      error: err?.message || String(err),
+    };
+  }
 }
 
 /**

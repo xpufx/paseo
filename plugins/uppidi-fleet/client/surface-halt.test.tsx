@@ -47,12 +47,14 @@ const RUNNING_STATUS = {
   teardownInProgress: false,
   totalQueued: 0,
   repoCount: 0,
+  mode: "RUN",
 };
 
 const HALTED_STATUS = {
   ...RUNNING_STATUS,
   paused: ["all"],
   halted: true,
+  mode: "HALT",
 };
 
 /**
@@ -169,5 +171,197 @@ describe("Issue #1013: fleet HALT control and halted-state banner", () => {
     });
 
     assert.equal(haltCalls, 1, "confirming must call the fleet-halt RPC");
+  });
+});
+
+describe("Issue #1373: unified fleet mode selector", () => {
+  it("renders four mode pills (RUN, DRAIN, HALT, STOP) on the dashboard surface", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    harness.payloads[contracts.uppidiHookStatusContract.name] = RUNNING_STATUS;
+
+    const { tree } = await renderSurface(harness);
+    const text = renderedText(tree);
+    assert.match(text, /RUN/);
+    assert.match(text, /DRAIN/);
+    assert.match(text, /HALT/);
+    assert.match(text, /STOP/);
+  });
+
+  it("shows a mode banner when not in RUN mode", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    harness.payloads[contracts.uppidiHookStatusContract.name] = {
+      ...RUNNING_STATUS,
+      mode: "DRAIN",
+    };
+
+    const { tree } = await renderSurface(harness);
+    assert.ok(
+      findByTestID(tree, "fleet-mode-banner-drain").length > 0,
+      "DRAIN mode banner must render",
+    );
+    assert.match(renderedText(tree), /DRAIN.*mode active/);
+    assert.ok(
+      findByAccessibilityLabel(tree, "Return to RUN mode").length > 0,
+      "Return to RUN button must be present",
+    );
+  });
+
+  it("shows a HALT mode banner when mode is HALT", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    harness.payloads[contracts.uppidiHookStatusContract.name] = HALTED_STATUS;
+
+    const { tree } = await renderSurface(harness);
+    assert.ok(
+      findByTestID(tree, "fleet-mode-banner-halt").length > 0,
+      "HALT mode banner must render",
+    );
+    assert.match(renderedText(tree), /HALT.*mode active/);
+  });
+
+  it("does not show a mode banner when mode is RUN", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    harness.payloads[contracts.uppidiHookStatusContract.name] = RUNNING_STATUS;
+
+    const { tree } = await renderSurface(harness);
+    assert.equal(findByTestID(tree, "fleet-mode-banner-run").length, 0);
+  });
+
+  it("calls set-fleet-mode RPC when clicking RUN or DRAIN directly", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    let setModeCalls = 0;
+    harness.payloads[contracts.uppidiHookStatusContract.name] = RUNNING_STATUS;
+    harness.payloads[contracts.uppidiFleetSetModeContract.name] = () => {
+      setModeCalls += 1;
+      return { ok: true, mode: "DRAIN", previousMode: "RUN", message: "Fleet mode changed to DRAIN" };
+    };
+
+    const { tree, root } = await renderSurface(harness);
+
+    // Find the DRAIN pill and click it
+    const drainPill = findByAccessibilityLabel(tree, "Set fleet mode to DRAIN")[0];
+    assert.ok(drainPill, "DRAIN pill must be present");
+
+    await harness.TestRenderer.act(async () => {
+      drainPill.props?.onPress?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    assert.equal(setModeCalls, 1, "DRAIN click must call set-fleet-mode RPC");
+  });
+
+  it("opens ModeTransitionModal when clicking HALT from the pill bar", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    const { ModeTransitionModal } = await import("./surface.js");
+    let setModeCalls = 0;
+    harness.payloads[contracts.uppidiHookStatusContract.name] = RUNNING_STATUS;
+    harness.payloads[contracts.uppidiFleetSetModeContract.name] = () => {
+      setModeCalls += 1;
+      return { ok: true, mode: "HALT", previousMode: "RUN", message: "Fleet mode changed to HALT" };
+    };
+
+    const { tree, root } = await renderSurface(harness);
+
+    const haltPill = findByAccessibilityLabel(tree, "Set fleet mode to HALT")[0];
+    assert.ok(haltPill, "HALT pill must be present");
+
+    await harness.TestRenderer.act(async () => {
+      haltPill.props?.onPress?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    const modal = root.findAllByType(ModeTransitionModal)[0];
+    assert.ok(modal, "ModeTransitionModal must be rendered for HALT");
+    assert.equal(modal?.props?.visible, true, "modal must be visible");
+    assert.equal(modal?.props?.mode, "HALT", "modal must show HALT mode");
+  });
+
+  it("calls set-fleet-mode RPC from the Return to RUN button", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    let setModeCalls = 0;
+    harness.payloads[contracts.uppidiHookStatusContract.name] = {
+      ...RUNNING_STATUS,
+      mode: "DRAIN",
+    };
+    harness.payloads[contracts.uppidiFleetSetModeContract.name] = () => {
+      setModeCalls += 1;
+      return { ok: true, mode: "RUN", previousMode: "DRAIN", message: "Fleet mode changed to RUN" };
+    };
+
+    const { tree } = await renderSurface(harness);
+
+    const returnToRun = findByAccessibilityLabel(tree, "Return to RUN mode")[0];
+    assert.ok(returnToRun, "Return to RUN button must be present");
+
+    await harness.TestRenderer.act(async () => {
+      returnToRun.props?.onPress?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    assert.equal(setModeCalls, 1, "Return to RUN must call set-fleet-mode RPC");
+  });
+
+  it("preserves existing HALT/RESUME contracts still working", async () => {
+    const harness = await getFleetHarness();
+    const contracts = await import("../shared/contracts.js");
+    const { HaltConfirmModal, ModeTransitionModal } = await import("./surface.js");
+    let haltCalls = 0;
+    let resumeCalls = 0;
+    let setModeCalls = 0;
+    harness.payloads[contracts.uppidiHookStatusContract.name] = RUNNING_STATUS;
+    harness.payloads[contracts.uppidiFleetHaltContract.name] = () => {
+      haltCalls += 1;
+      return { ok: true, halted: true, alreadyHalted: false, teardownInProgress: false };
+    };
+    harness.payloads[contracts.uppidiFleetResumeContract.name] = () => {
+      resumeCalls += 1;
+      return { ok: true, halted: false, teardownInProgress: false };
+    };
+    harness.payloads[contracts.uppidiFleetSetModeContract.name] = () => {
+      setModeCalls += 1;
+      return { ok: true, mode: "HALT", previousMode: "RUN", message: "Fleet mode changed to HALT" };
+    };
+
+    const { tree, root } = await renderSurface(harness);
+
+    // Click HALT pill -> opens ModeTransitionModal -> confirm -> calls set-fleet-mode
+    const haltPill = findByAccessibilityLabel(tree, "Set fleet mode to HALT")[0];
+    assert.ok(haltPill);
+    await harness.TestRenderer.act(async () => {
+      haltPill.props?.onPress?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    const modal = root.findAllByType(ModeTransitionModal)[0];
+    assert.ok(modal?.props?.visible);
+    await harness.TestRenderer.act(async () => {
+      modal.props?.onConfirm?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    assert.equal(setModeCalls, 1, "HALT via mode selector must call set-fleet-mode RPC");
+
+    // Now verify the original HALT button from the header bar still works
+    const haltButton = findByAccessibilityLabel(tree, "HALT")[0];
+    assert.ok(haltButton);
+    await harness.TestRenderer.act(async () => {
+      haltButton.props?.onPress?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    const haltModal = root.findAllByType(HaltConfirmModal)[0];
+    assert.ok(haltModal?.props?.visible);
+    await harness.TestRenderer.act(async () => {
+      haltModal.props?.onConfirm?.();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+    assert.equal(haltCalls, 1, "Original HALT button must still work");
   });
 });
