@@ -41,6 +41,7 @@ export interface PeerStatusResult {
   hubDaemonId: string | null;
   hubOrigin: string | null;
   hubLastError: string | null;
+  xCommsInstalled: boolean | null;
 }
 
 function nullableString(value: unknown): string | null {
@@ -76,6 +77,7 @@ export function unreachableResult(
     hubDaemonId: null,
     hubOrigin: null,
     hubLastError: null,
+    xCommsInstalled: null,
   };
 }
 
@@ -210,6 +212,16 @@ export const probePeer: PeerProber = async (daemon) => {
       Object.assign(result, mapHubStatus(await withTimeout(client.getHubStatus(), PROBE_TIMEOUT_MS, `hub status ${daemon.name}`)));
     } catch {
       // Hub relationship is optional; peers without hub support stay null.
+    }
+
+    // Check whether the remote daemon has paseo-x-comms installed.
+    try {
+      const plugins = await withTimeout(client.listPlugins(), PROBE_TIMEOUT_MS, `plugins ${daemon.name}`);
+      const hasXComms = Array.isArray(plugins) && plugins.some((p) => p && typeof p === "object" && "id" in p && typeof p.id === "string" && (p.id === "paseo-x-comms" || p.id.includes("x-comms")));
+      result.xCommsInstalled = hasXComms;
+    } catch {
+      // Plugin list unavailable; leave xCommsInstalled as null (unknown).
+      log.warn(`plugin list for '${daemon.name}' unavailable`);
     }
 
     return result;

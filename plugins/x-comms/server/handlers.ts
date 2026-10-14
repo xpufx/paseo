@@ -84,6 +84,7 @@ export async function handleRegistryRead() {
     ...daemon,
     serverId: identityFor(daemon.name),
     hostname: hostnameFor(daemon.name),
+    xCommsInstalled: null as boolean | null,
   }));
   return { registryPath, exists: current.exists, validJson: current.ok, parseError: current.parseError, daemons };
 }
@@ -185,6 +186,22 @@ export async function handleIntroduceAgents(input: {
   second: { daemon: string; agentId: string; shortId: string; name: string };
   message: string;
 }) {
+  // Two-tier gate: refuse introduces for peers that are not yet paired.
+  // Discovered-but-unpaired hosts may not exchange introductions.
+  const daemons = readRegistry(currentRegistryPath()).daemons;
+  const unpaired = [input.first, input.second].filter(
+    (target) => {
+      const entry = findDaemonByRef(daemons, target.daemon);
+      return !!entry && entry.isPaired === false;
+    },
+  );
+  if (unpaired.length > 0) {
+    return {
+      sends: [],
+      refused: true,
+      refusalReason: `introduction targets must be paired; '${unpaired[0].daemon}' is a discovered candidate, not a paired peer`,
+    };
+  }
   // The introduce picker is a send surface: resolve both targets via the
   // registry before offering a dispatch. An unresolvable entry (missing,
   // invalid, or switched off) is refused here with the #851 diagnostic instead
@@ -326,6 +343,8 @@ export interface ConversationSendResult {
   queueDepth: number;
   /** When a queued item gives up, or null when it was sent/refused outright. */
   expiresAt: string | null;
+  refused?: boolean;
+  refusalReason?: string | null;
 }
 
 /**
@@ -448,6 +467,39 @@ export async function handleConversationSend(
   };
   const paseo = context?.paseo ?? paseoRef;
   const target = { daemon: message.daemon, agentId: message.agentId };
+
+  // Two-tier gate: refuse sends to discovered-but-unpaired candidates.
+  // Only paired peers may receive messages.
+  try {
+    if (await unpairedGate(message.daemon)) {
+      log.warn(`send: refused ${message.messageId} for '${target.daemon}/${target.agentId}': target is not a paired peer`);
+      return {
+        daemon: message.daemon,
+        agentId: message.agentId,
+        ok: false,
+        error: "cannot send to an unpaired candidate; pair the peer first",
+        delivery: "dropped" as const,
+        queueDepth: 0,
+        expiresAt: null,
+        refused: true,
+        refusalReason: "target is not a paired peer",
+      };
+    }
+  } catch (cause) {
+    if (!(cause instanceof UnresolvableTargetError)) throw cause;
+    log.warn(`send: refused ${message.messageId} for '${target.daemon}/${target.agentId}': ${cause.message}`);
+    return {
+      daemon: message.daemon,
+      agentId: message.agentId,
+      ok: false,
+      error: cause.message,
+      delivery: "dropped" as const,
+      queueDepth: 0,
+      expiresAt: null,
+      refused: true,
+      refusalReason: cause.message,
+    };
+  }
 
   // The busy gate. A send starts a turn, and Paseo's daemon sends with
   // replaceRunning: true, so dispatching into a running target cuts its turn
@@ -744,6 +796,18 @@ function chatEnabledDaemon(daemon: RegistryDaemon): RegistryDaemon | null {
   if (resolveDaemonEnabled(readUiPrefs(), daemon.name)) return daemon;
   log.info(`chat: target '${daemon.name}' is disabled in settings; not treating it as reachable`);
   return null;
+}
+
+/**
+ * Two-tier gate: returns true when the named daemon is a discovered-but-
+ * unpaired candidate (isPaired === false). Paired peers and unknown daemons
+ * (not in registry at all) resolve to false so the normal path proceeds.
+ */
+async function unpairedGate(daemonName: string): Promise<boolean> {
+  const daemons = readRegistry(currentRegistryPath()).daemons;
+  const entry = findDaemonByRef(daemons, daemonName);
+  if (!entry) return false; // not in registry — normal resolution handles it
+  return entry.isPaired === false;
 }
 
 async function fetchPeerServerInfo(value: string): Promise<{ serverId: string; hostname: string | null } | null> {

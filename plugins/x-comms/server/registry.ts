@@ -74,6 +74,7 @@ export interface RegistryDaemon {
   source?: "registry" | "configured-host";
   serverId?: string | null;
   status?: string | null;
+  isPaired?: boolean;
 }
 
 export function currentHostsPath(): string {

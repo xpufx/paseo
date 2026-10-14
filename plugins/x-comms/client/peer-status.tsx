@@ -40,6 +40,7 @@ type PeerStatusEntry = {
   hubDaemonId: string | null;
   hubOrigin: string | null;
   hubLastError: string | null;
+  xCommsInstalled?: boolean | null | undefined;
 };
 
 function ReachabilityBadge({ entry }: { entry: PeerStatusEntry }) {
@@ -75,7 +76,14 @@ function PeerCard({ entry }: { entry: PeerStatusEntry }) {
       <Card.Header
         title={formatPeerDisplay(entry.name, entry.serverId)}
         subtitle={entry.hostname && entry.hostname !== entry.name ? entry.hostname : undefined}
-        badge={<ReachabilityBadge entry={entry} />}
+        badge={
+          <>
+            <ReachabilityBadge entry={entry} />
+            {entry.reachable && entry.xCommsInstalled === false && (
+              <Badge label="x-comms missing" variant="warning" dot />
+            )}
+          </>
+        }
       />
       <KeyValue label="Host value" value={entry.value} mono copyable truncate="end" truncateMaxLength={36} />
       <KeyValueGroup>
@@ -91,6 +99,11 @@ function PeerCard({ entry }: { entry: PeerStatusEntry }) {
         <KeyValue label="Providers" value={providersLabel(entry)} mono />
       </KeyValueGroup>
       <KeyValue label="Hub relationship" value={hubLabel(entry)} mono />
+      {entry.reachable && entry.xCommsInstalled === false ? (
+        <Text selectable style={{ color: colors.statusDanger, fontSize: 12 }}>
+          Remote daemon is connected but does not appear to have paseo-x-comms installed. Cross-daemon messaging may be limited.
+        </Text>
+      ) : null}
       {!entry.reachable ? (
         <Text selectable style={{ color: colors.statusDanger, fontSize: 12 }}>
           {entry.error ?? "unreachable"}

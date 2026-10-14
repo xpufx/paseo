@@ -94,5 +94,6 @@ describe("peer status collection", () => {
     assert.equal(result.serverId, null);
     assert.equal(result.relayEnabled, null);
     assert.equal(result.hubState, null);
+    assert.equal(result.xCommsInstalled, null);
   });
 });

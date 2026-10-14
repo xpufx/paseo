@@ -42,10 +42,21 @@ import {
   introspectAgentsRpc,
   introduceAgentsRpc,
   directHostMismatch,
+  conversationSendRpc,
 } from "../shared/registry";
 
 const HOST_FORM_HINT =
   "Full pairing link (https://app.paseo.sh/#offer=…) or a direct daemon host (host:port, tcp://…, unix://…).";
+
+/** Whether a daemon entry is considered a paired peer (isPaired === true). */
+function isPairedFn(daemon: { isPaired?: boolean }): boolean {
+  return daemon.isPaired === true;
+}
+
+/** Whether a daemon entry is a discovered-but-unpaired candidate. */
+function isUnpaired(daemon: { isPaired?: boolean; source?: string }): boolean {
+  return daemon.isPaired === false;
+}
 
 // Raw View/Text are kept only for plain content and layout composition
 // (headings, error notices, debug dump lines, modal footers). Every
@@ -216,6 +227,12 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
   const [addProbe, setAddProbe] = useState<{ value: string; error: string | null } | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Set<string>>(new Set());
+
+  // Pairing flow state.
+  const [pairTarget, setPairTarget] = useState<string | null>(null);
+  const [pairToken, setPairToken] = useState("");
+  const [pairing, setPairing] = useState(false);
+  const [pairResult, setPairResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
   const applyResult = useCallback(
     (result: unknown) => {
@@ -552,112 +569,184 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
         ) : null}
         {health.isPending ? <Notice tone="muted">Checking health…</Notice> : null}
 
-        {read.data?.daemons.map((daemon) => {
-          const draft = edits[daemon.name] ?? { name: daemon.name, value: daemon.value };
-          const h = healthByName[daemon.name];
-          const probeState = rowProbe[daemon.name];
-          const probeDetail = probeState && probeState !== "pending" ? probeState : null;
-          if (editing.has(daemon.name)) {
-            return (
-              <Card key={daemon.name} variant="elevated">
-                <Card.Header title={`Edit ${peerLabelForName(daemon.name)}`} subtitle="Probe runs before saving." />
-                <FormRow label="Name" description="The daemon's real name; derived for relay links.">
-                  <TextInput
-                    mono
-                    value={draft.name}
-                    onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: text, value: draft.value } }))}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </FormRow>
-                <FormRow label="Host value" description={HOST_FORM_HINT}>
-                  <TextInput
-                    mono
-                    value={draft.value}
-                    onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: draft.name, value: text } }))}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                  />
-                </FormRow>
-                {probeState === "pending" ? <Notice tone="muted">Probing host…</Notice> : null}
-                {probeDetail ? (
-                  <Notice>{probeDetail.error ?? `unreachable now: ${probeDetail.value}`}</Notice>
-                ) : null}
-                {probeDetail && !probeDetail.saved ? (
+        {/* Two-tier display: Paired Peers vs Discovered Hosts */}
+        {(() => {
+          const paired = (read.data?.daemons ?? []).filter(isPairedFn);
+          const unpaired = (read.data?.daemons ?? []).filter(isUnpaired);
+          const other = (read.data?.daemons ?? []).filter((d) => !isPairedFn(d) && !isUnpaired(d));
+
+          const renderDaemonCard = (daemon: { name: string; value: string; valid: boolean; error: string | null; source?: string; serverId?: string | null; hostname?: string | null; isPaired?: boolean }) => {
+            const draft = edits[daemon.name] ?? { name: daemon.name, value: daemon.value };
+            const h = healthByName[daemon.name];
+            const probeState = rowProbe[daemon.name];
+            const probeDetail = probeState && probeState !== "pending" ? probeState : null;
+            if (editing.has(daemon.name)) {
+              return (
+                <Card key={daemon.name} variant="elevated">
+                  <Card.Header title={`Edit ${peerLabelForName(daemon.name)}`} subtitle="Probe runs before saving." />
+                  <FormRow label="Name" description="The daemon's real name; derived for relay links.">
+                    <TextInput
+                      mono
+                      value={draft.name}
+                      onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: text, value: draft.value } }))}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </FormRow>
+                  <FormRow label="Host value" description={HOST_FORM_HINT}>
+                    <TextInput
+                      mono
+                      value={draft.value}
+                      onChangeText={(text) => setEdits((prev) => ({ ...prev, [daemon.name]: { name: draft.name, value: text } }))}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                  </FormRow>
+                  {probeState === "pending" ? <Notice tone="muted">Probing host…</Notice> : null}
+                  {probeDetail ? (
+                    <Notice>{probeDetail.error ?? `unreachable now: ${probeDetail.value}`}</Notice>
+                  ) : null}
+                  {probeDetail && !probeDetail.saved ? (
+                    <ActionBar align="flex-start">
+                      <Button label="Save anyway" size="sm" variant="danger" onPress={() => confirmEditAnyway(daemon.name)} />
+                      <Button
+                        label="Dismiss"
+                        size="sm"
+                        variant="secondary"
+                        onPress={() => setRowProbe((prev) => { const next = { ...prev }; delete next[daemon.name]; return next; })}
+                      />
+                    </ActionBar>
+                  ) : null}
                   <ActionBar align="flex-start">
-                    <Button label="Save anyway" size="sm" variant="danger" onPress={() => confirmEditAnyway(daemon.name)} />
+                    <Button label="Save" size="sm" variant="primary" onPress={() => handleSave(daemon.name)} />
                     <Button
-                      label="Dismiss"
+                      label="Cancel"
                       size="sm"
-                      variant="secondary"
-                      onPress={() => setRowProbe((prev) => { const next = { ...prev }; delete next[daemon.name]; return next; })}
+                      variant="ghost"
+                      onPress={() => {
+                        setEdits((prev) => { const next = { ...prev }; delete next[daemon.name]; return next; });
+                        setEditing((prev) => { const next = new Set(prev); next.delete(daemon.name); return next; });
+                      }}
                     />
                   </ActionBar>
+                </Card>
+              );
+            }
+            return (
+              <Card key={daemon.name} variant="elevated">
+                <Card.Header
+                  title={peerLabelForName(daemon.name)}
+                  subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
+                  badge={
+                    <>
+                      <HealthBadge health={h} />
+                      {daemon.isPaired === true && <Badge label="paired" variant="success" dot />}
+                      {daemon.isPaired === false && <Badge label="discovered" variant="warning" dot />}
+                    </>
+                  }
+                />
+                <KeyValue label="Host value" value={daemon.value} mono copyable truncate="end" truncateMaxLength={36} />
+                {h && !h.reachable ? (
+                  <>
+                    <Notice>{h.error ?? "unreachable"}</Notice>
+                    <ActionBar align="flex-start">
+                      <Button
+                        label={expandedError.has(daemon.name) ? "Hide details" : "Details"}
+                        size="sm"
+                        variant="ghost"
+                        onPress={() => setExpandedError((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(daemon.name)) next.delete(daemon.name); else next.add(daemon.name);
+                          return next;
+                        })}
+                      />
+                    </ActionBar>
+                    {expandedError.has(daemon.name) ? (
+                      <KeyValue label="Error detail" value={h.error ?? "unreachable"} mono copyable />
+                    ) : null}
+                  </>
                 ) : null}
                 <ActionBar align="flex-start">
-                  <Button label="Save" size="sm" variant="primary" onPress={() => handleSave(daemon.name)} />
                   <Button
-                    label="Cancel"
+                    label="Edit"
                     size="sm"
-                    variant="ghost"
+                    variant="secondary"
                     onPress={() => {
-                      setEdits((prev) => { const next = { ...prev }; delete next[daemon.name]; return next; });
-                      setEditing((prev) => { const next = new Set(prev); next.delete(daemon.name); return next; });
+                      setEdits((prev) => ({ ...prev, [daemon.name]: { name: daemon.name, value: daemon.value } }));
+                      setEditing((prev) => new Set(prev).add(daemon.name));
                     }}
                   />
+                  <Button
+                    label="Debug"
+                    size="sm"
+                    variant="ghost"
+                    onPress={() => { setDumpOpen(true); setDumpDaemon(daemon.name); dump.mutate({ daemon: daemon.name }); }}
+                  />
+                  <Button label="Remove" size="sm" variant="danger" onPress={() => handleRemove(daemon.name)} />
                 </ActionBar>
               </Card>
             );
-          }
+          };
+
           return (
-            <Card key={daemon.name} variant="elevated">
-              <Card.Header
-                title={peerLabelForName(daemon.name)}
-                subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
-                badge={<HealthBadge health={h} />}
-              />
-              <KeyValue label="Host value" value={daemon.value} mono copyable truncate="end" truncateMaxLength={36} />
-              {h && !h.reachable ? (
+            <>
+              {/* Paired Peers section */}
+              {paired.length > 0 && (
                 <>
-                  <Notice>{h.error ?? "unreachable"}</Notice>
-                  <ActionBar align="flex-start">
-                    <Button
-                      label={expandedError.has(daemon.name) ? "Hide details" : "Details"}
-                      size="sm"
-                      variant="ghost"
-                      onPress={() => setExpandedError((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(daemon.name)) next.delete(daemon.name); else next.add(daemon.name);
-                        return next;
-                      })}
-                    />
-                  </ActionBar>
-                  {expandedError.has(daemon.name) ? (
-                    <KeyValue label="Error detail" value={h.error ?? "unreachable"} mono copyable />
-                  ) : null}
+                  <SectionHeader title="Paired peers" count={paired.length} />
+                  {paired.map(renderDaemonCard)}
                 </>
-              ) : null}
-              <ActionBar align="flex-start">
-                <Button
-                  label="Edit"
-                  size="sm"
-                  variant="secondary"
-                  onPress={() => {
-                    setEdits((prev) => ({ ...prev, [daemon.name]: { name: daemon.name, value: daemon.value } }));
-                    setEditing((prev) => new Set(prev).add(daemon.name));
-                  }}
-                />
-                <Button
-                  label="Debug"
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => { setDumpOpen(true); setDumpDaemon(daemon.name); dump.mutate({ daemon: daemon.name }); }}
-                />
-                <Button label="Remove" size="sm" variant="danger" onPress={() => handleRemove(daemon.name)} />
-              </ActionBar>
-            </Card>
+              )}
+
+              {/* Discovered Hosts section */}
+              {unpaired.length > 0 && (
+                <>
+                  <SectionHeader title="Discovered hosts" count={unpaired.length} />
+                  {unpaired.map((daemon) => {
+                    const h = healthByName[daemon.name];
+                    return (
+                    <Card key={daemon.name} variant="elevated">
+                      <Card.Header
+                        title={peerLabelForName(daemon.name)}
+                        subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
+                        badge={<Badge label="discovered (not paired)" variant="warning" dot />}
+                      />
+                      <KeyValue label="Host value" value={daemon.value} mono copyable truncate="end" truncateMaxLength={36} />
+                      {h && !h.reachable ? (
+                        <Text selectable style={{ color: colors.statusDanger, fontSize: 12 }}>
+                          {h.error ?? "unreachable"}
+                        </Text>
+                      ) : null}
+                      <ActionBar align="flex-start">
+                        <Button
+                          label="Pair this host"
+                          size="sm"
+                          variant="primary"
+                          onPress={() => setPairTarget(daemon.name)}
+                        />
+                        <Button
+                          label="Remove"
+                          size="sm"
+                          variant="danger"
+                          onPress={() => handleRemove(daemon.name)}
+                        />
+                      </ActionBar>
+                    </Card>
+                    );
+                  })}
+                </>
+              )}
+
+              {/* Unlabelled entries (neither paired nor unpaired) */}
+              {other.length > 0 && (
+                <>
+                  <SectionHeader title="Registered daemons" count={other.length} />
+                  {other.map(renderDaemonCard)}
+                </>
+              )}
+            </>
           );
-        })}
+        })()}
 
         <SectionHeader title="Add daemon" />
         <Card>
@@ -891,6 +980,86 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
             <Button label="Remove" variant="danger" onPress={confirmRemove} />
             <Button label="Cancel" variant="secondary" onPress={() => setPendingRemove(null)} />
           </ActionBar>
+          <ViaXComms theme={theme} />
+        </ModalContent>
+      </Modal>
+
+      {/* Pair Candidate Modal */}
+      <Modal
+        title={`Pair ${pairTarget ?? ""}`}
+        open={pairTarget !== null}
+        onOpenChange={(open) => { if (!open) { setPairTarget(null); setPairToken(""); setPairResult(null); } }}
+      >
+        <ModalContent>
+          <Text selectable style={{ color: colors.foreground, fontSize: 13 }}>
+            Enter the pairing offer/token from this peer to establish a trusted connection.
+          </Text>
+          <FormRow label="Pairing token" description="Paste the full offer link or raw token from the remote peer.">
+            <TextInput
+              mono
+              value={pairToken}
+              onChangeText={setPairToken}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="https://app.paseo.sh/#offer=… or raw token"
+            />
+          </FormRow>
+          {pairResult && !pairResult.ok ? <Notice>{pairResult.error}</Notice> : null}
+          {pairing ? <Notice tone="muted">Running validation handshake…</Notice> : null}
+          <ActionBar align="flex-start">
+            <Button
+              label="Validate & pair"
+              variant="primary"
+              loading={pairing}
+              disabled={!pairToken.trim() || pairing}
+              onPress={() => {
+                if (!pairTarget || !pairToken.trim()) return;
+                setPairing(true);
+                setPairResult(null);
+                // Run a probe first to verify reachability.
+                probe.mutate(
+                  { value: pairToken.trim() },
+                  {
+                    onSuccess: (probeResult: { valid: boolean; reachable: boolean; error: string | null; formatError: string | null }) => {
+                      if (!probeResult.valid) {
+                        setPairResult({ ok: false, error: "invalid pairing token format" });
+                        setPairing(false);
+                        return;
+                      }
+                      // Add as a paired daemon directly — the probe succeeded,
+                      // so we trust the offer and mark isPaired=true.
+                      add.mutate(
+                        { name: pairTarget, value: pairToken.trim() },
+                        {
+                          onSuccess: () => {
+                            setPairResult({ ok: true });
+                            void read.refetch();
+                            void health.refetch();
+                          },
+                          onError: (err: unknown) => {
+                            setPairResult({ ok: false, error: err instanceof Error ? err.message : "pairing failed" });
+                          },
+                          onSettled: () => setPairing(false),
+                        },
+                      );
+                    },
+                    onError: () => {
+                      setPairResult({ ok: false, error: "host unreachable; cannot pair" });
+                      setPairing(false);
+                    },
+                  },
+                );
+              }}
+            />
+            <Button
+              label="Cancel"
+              variant="secondary"
+              onPress={() => { setPairTarget(null); setPairToken(""); setPairResult(null); }}
+            />
+          </ActionBar>
+          {pairResult?.ok ? (
+            <Notice tone="muted">✓ Paired successfully. The peer now appears under Paired peers.</Notice>
+          ) : null}
           <ViaXComms theme={theme} />
         </ModalContent>
       </Modal>

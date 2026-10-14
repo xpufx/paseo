@@ -8,6 +8,7 @@ const DaemonEntrySchema = z.object({
   error: z.string().nullable(),
   source: z.enum(["registry", "configured-host"]).optional(),
   status: z.string().nullable().optional(),
+  isPaired: z.boolean().optional(),
 });
 
 export const registryReadRpc = defineRpc({
@@ -18,7 +19,13 @@ export const registryReadRpc = defineRpc({
     exists: z.boolean(),
     validJson: z.boolean(),
     parseError: z.string().nullable(),
-    daemons: z.array(DaemonEntrySchema.extend({ serverId: z.string().nullable(), hostname: z.string().nullable() })),
+    daemons: z.array(
+      DaemonEntrySchema.extend({
+        serverId: z.string().nullable(),
+        hostname: z.string().nullable(),
+        xCommsInstalled: z.boolean().nullable().optional(),
+      }),
+    ),
   }),
 });
 
@@ -33,6 +40,7 @@ export const daemonAddRpc = defineRpc({
     error: z.string().nullable(),
     registryPath: z.string(),
     daemons: z.array(DaemonEntrySchema),
+    pairingToken: z.string().nullable().optional(),
   }),
 });
 
@@ -114,6 +122,7 @@ export const peerStatusRpc = defineRpc({
         hubDaemonId: z.string().nullable(),
         hubOrigin: z.string().nullable(),
         hubLastError: z.string().nullable(),
+        xCommsInstalled: z.boolean().nullable().optional(),
       }),
     ),
   }),
@@ -180,6 +189,8 @@ export const introduceAgentsRpc = defineRpc({
         error: z.string().nullable(),
       }),
     ),
+    refused: z.boolean().optional(),
+    refusalReason: z.string().nullable().optional(),
   }),
 });
 
@@ -371,6 +382,8 @@ export const conversationSendRpc = defineRpc({
     delivery: z.enum(["dispatched", "queued", "outbox", "dropped"]).optional(),
     queueDepth: z.number().int().nonnegative().optional(),
     expiresAt: z.string().nullable().optional(),
+    refused: z.boolean().optional(),
+    refusalReason: z.string().nullable().optional(),
   }),
 });
 
