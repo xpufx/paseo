@@ -504,6 +504,12 @@ export interface BuildAssessmentOptions {
   candidates?: AgentCandidate[];
   attentionTimestamp?: unknown;
   lastHandledCancellationAt?: unknown;
+  /** True when this agent is the registered Front Desk. */
+  isFrontDesk?: boolean;
+  /** True when this agent is a registered orchestrator. */
+  isOrchestrator?: boolean;
+  /** Queue depth for this agent's router queue. */
+  queueDepth?: number;
 }
 
 export function buildHealthAssessment(
@@ -539,7 +545,14 @@ export function buildHealthAssessment(
       activeWorkers, options.assumePendingWork ?? false,
       options.attentionTimestamp, lastActivityAt,
     ),
-    ZOMBIE_HUNG_TURN: detectZombieHungTurn(liveStatus, disk?.lastActivityAt ?? disk?.updatedAt, now, staleSeconds),
+    ZOMBIE_HUNG_TURN: (() => {
+      // Exempt front-desk and registered orchestrators from ZOMBIE_HUNG_TURN
+      // when their router queues are empty (depth === 0) and active workers is 0 (#1364).
+      if ((options.isFrontDesk || options.isOrchestrator) && (options.queueDepth ?? 0) === 0 && activeWorkers === 0) {
+        return false;
+      }
+      return detectZombieHungTurn(liveStatus, disk?.lastActivityAt ?? disk?.updatedAt, now, staleSeconds);
+    })(),
     STALE_ERROR_GHOSTING: detectStaleErrorGhosting(liveStatus, rawLastError),
     PROVIDER_QUOTA_EXHAUSTION: detectProviderQuotaExhaustion(rawLastError),
   };
@@ -583,7 +596,13 @@ export function buildHealthAssessment(
   const deadChecks: Record<string, boolean> = {
     DEAD_ORPHANED_DISK_RECORD: detectDeadOrphanedDiskRecord(livePresent, diskPresent),
     DEAD_TERMINAL_FATAL_ERROR: detectDeadTerminalFatalError(liveStatus, rawLastError),
-    DEAD_WEDGED_RUNNING_TURN: detectDeadWedgedRunningTurn(liveStatus, lastActivityAt, now, staleSeconds),
+    DEAD_WEDGED_RUNNING_TURN: (() => {
+      // Exempt front-desk and registered orchestrators with empty queues (#1364).
+      if ((options.isFrontDesk || options.isOrchestrator) && (options.queueDepth ?? 0) === 0 && activeWorkers === 0) {
+        return false;
+      }
+      return detectDeadWedgedRunningTurn(liveStatus, lastActivityAt, now, staleSeconds);
+    })(),
     DEAD_REGISTRY_WITHOUT_PROCESS: detectDeadRegistryWithoutProcess(registrations, livePresent),
     DEAD_SUPERSEDED_BY_RETRY: detectDeadSupersededByRetry(agentInfo, candidates),
   };

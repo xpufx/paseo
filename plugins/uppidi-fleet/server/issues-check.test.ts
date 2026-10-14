@@ -579,3 +579,48 @@ describe("#1196: attention/* overrides state/verify blocking", () => {
     assert.match(result.reason, /Requires Orchestrator triage/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1364: kind/discussion, kind/idea excluded; unshaped state/triage not dispatchable.
+// ---------------------------------------------------------------------------
+describe("#1364: dispatchable candidate hardening", () => {
+  it("excludes kind/discussion as a dispatchable candidate", () => {
+    assert.equal(isDispatchableCandidate(new Set(["kind/discussion"])), false);
+  });
+
+  it("excludes kind/idea as a dispatchable candidate", () => {
+    assert.equal(isDispatchableCandidate(new Set(["kind/idea"])), false);
+  });
+
+  it("excludes state/triage alone (unshaped ticket)", () => {
+    assert.equal(isDispatchableCandidate(new Set(["state/triage"])), false);
+  });
+
+  it("makes state/triage dispatchable when shaped with spec/approved", () => {
+    assert.equal(
+      isDispatchableCandidate(new Set(["state/triage", "spec/approved"])),
+      true,
+    );
+  });
+
+  it("makes state/triage dispatchable when shaped with spec/checklist", () => {
+    assert.equal(
+      isDispatchableCandidate(new Set(["state/triage", "spec/checklist"])),
+      true,
+    );
+  });
+
+  it("still blocks state/triage without any shaping label", () => {
+    assert.equal(isDispatchableCandidate(new Set(["state/triage", "kind/bug"])), false);
+  });
+
+  it("isActionable(..., 'worker') also excludes kind/discussion and kind/idea", () => {
+    assert.equal(isActionable(new Set(["kind/discussion"]), "worker"), false);
+    assert.equal(isActionable(new Set(["kind/idea"]), "worker"), false);
+  });
+
+  it("isActionable(..., 'worker') excludes unshaped state/triage", () => {
+    assert.equal(isActionable(new Set(["state/triage"]), "worker"), false);
+    assert.equal(isActionable(new Set(["state/triage", "spec/approved"]), "worker"), true);
+  });
+});

@@ -28,6 +28,7 @@ import {
   killGuardReasons,
   planRecovery,
   planPrune,
+  buildHealthAssessment,
 } from "./agent-health.js";
 import type { AgentCandidate } from "./agent-health.js";
 
@@ -486,3 +487,117 @@ describe("prune plan", () => {
 
 // Note: hasMarker, coerceEpochMs, and parseIsoTimestamp are tested in
 // hook-router.test.ts; this file focuses on taxonomy + dead predicates.
+
+describe("buildHealthAssessment — quiescent agent exemption (#1364)", () => {
+  const staleActivity = new Date(NOW - 1900 * 1000).toISOString(); // 1900s ago, past 1800s stale window
+
+  it("does not flag a quiescent Front Desk as ZOMBIE_HUNG_TURN when queueDepth === 0 and activeWorkers === 0", () => {
+    const assessment = buildHealthAssessment(
+      "fd-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: true, isOrchestrator: false, queueDepth: 0, activeWorkers: 0 },
+    );
+    assert.ok(!assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("does not flag a quiescent Orchestrator as ZOMBIE_HUNG_TURN when queueDepth === 0 and activeWorkers === 0", () => {
+    const assessment = buildHealthAssessment(
+      "orch-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: false, isOrchestrator: true, queueDepth: 0, activeWorkers: 0 },
+    );
+    assert.ok(!assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("still flags a non-front-desk, non-orchestrator running agent as ZOMBIE_HUNG_TURN", () => {
+    const assessment = buildHealthAssessment(
+      "worker-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: false, isOrchestrator: false, queueDepth: 0, activeWorkers: 0 },
+    );
+    assert.ok(assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("flags a Front Desk as ZOMBIE_HUNG_TURN when queueDepth > 0", () => {
+    const assessment = buildHealthAssessment(
+      "fd-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: true, isOrchestrator: false, queueDepth: 5, activeWorkers: 0 },
+    );
+    assert.ok(assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("flags an Orchestrator as ZOMBIE_HUNG_TURN when activeWorkers > 0", () => {
+    const assessment = buildHealthAssessment(
+      "orch-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: false, isOrchestrator: true, queueDepth: 0, activeWorkers: 2 },
+    );
+    assert.ok(assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("does not flag a quiescent Front Desk as DEAD_WEDGED_RUNNING_TURN when queueDepth === 0 and activeWorkers === 0", () => {
+    const assessment = buildHealthAssessment(
+      "fd-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: true, isOrchestrator: false, queueDepth: 0, activeWorkers: 0 },
+    );
+    assert.ok(!assessment.deadPredicates.includes("DEAD_WEDGED_RUNNING_TURN"));
+  });
+
+  it("does not flag a quiescent Orchestrator as DEAD_WEDGED_RUNNING_TURN when queueDepth === 0 and activeWorkers === 0", () => {
+    const assessment = buildHealthAssessment(
+      "orch-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: false, isOrchestrator: true, queueDepth: 0, activeWorkers: 0 },
+    );
+    assert.ok(!assessment.deadPredicates.includes("DEAD_WEDGED_RUNNING_TURN"));
+  });
+
+  it("still flags a non-front-desk, non-orchestrator running agent as DEAD_WEDGED_RUNNING_TURN", () => {
+    const assessment = buildHealthAssessment(
+      "worker-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: false, isOrchestrator: false, queueDepth: 0, activeWorkers: 0 },
+    );
+    assert.ok(assessment.deadPredicates.includes("DEAD_WEDGED_RUNNING_TURN"));
+  });
+
+  it("flags a Front Desk as DEAD_WEDGED_RUNNING_TURN when queueDepth > 0", () => {
+    const assessment = buildHealthAssessment(
+      "fd-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: true, isOrchestrator: false, queueDepth: 3, activeWorkers: 0 },
+    );
+    assert.ok(assessment.deadPredicates.includes("DEAD_WEDGED_RUNNING_TURN"));
+  });
+
+  it("flags an Orchestrator as DEAD_WEDGED_RUNNING_TURN when activeWorkers > 0", () => {
+    const assessment = buildHealthAssessment(
+      "orch-1",
+      { status: "running", lastError: "", requiresAttention: false },
+      { lastActivityAt: staleActivity, updatedAt: staleActivity },
+      NOW,
+      { isFrontDesk: false, isOrchestrator: true, queueDepth: 0, activeWorkers: 1 },
+    );
+    assert.ok(assessment.deadPredicates.includes("DEAD_WEDGED_RUNNING_TURN"));
+  });
+});

@@ -512,6 +512,10 @@ export function isDispatchableCandidate(labelSet: Set<string>): boolean {
   if (setIntersects(labelSet, ["flag/stop-work", "flag/wont-do", "attention/ignore", "state/done"])) {
     return false;
   }
+  // Non-actionable kinds: discussion and ideas are not coding tasks
+  if (labelSet.has("kind/discussion") || labelSet.has("kind/idea")) return false;
+  // Unshaped triage tickets without a spec/approved or spec/checklist are not dispatchable
+  if (labelSet.has("state/triage") && !labelSet.has("spec/approved") && !labelSet.has("spec/checklist")) return false;
   // Gated on human attention: orchestrator or front-desk hand-off
   if (setIntersects(labelSet, ["attention/user", "attention/orchestrator", "attention/frontdesk"])) return false;
   // Dependency or upstream blocked
