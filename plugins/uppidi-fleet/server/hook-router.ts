@@ -75,6 +75,7 @@ import {
   resolveRoleModelKey,
   type RoleModelKey,
 } from "./role-models.js";
+import { PluginStorage, resolvePaseoHome } from "paseo-plugin-helper/server";
 import type { RoleModelConfig } from "../shared/contracts.js";
 import {
   getEffectiveSkillContent,
@@ -3891,6 +3892,12 @@ export function assessAgentHealth(
     recentTimeline?: string | unknown[] | null;
     timelineErrors?: Map<string, TimelineRetryError[] | string[] | string> | null;
     repetitiveToolLoopThreshold?: number;
+    /** True when this agent is the registered Front Desk. */
+    isFrontDesk?: boolean;
+    /** True when this agent is a registered orchestrator. */
+    isOrchestrator?: boolean;
+    /** Queue depth for this agent's router queue. */
+    queueDepth?: number;
   } = {},
 ): WatchdogAssessment {
   const liveStatus = String(live?.status ?? disk?.lastStatus ?? "").toLowerCase();
@@ -3977,7 +3984,14 @@ export function assessAgentHealth(
       activeWorkers,
       options.assumePendingWork ?? false,
     ),
-    ZOMBIE_HUNG_TURN: detectZombieHungTurn(liveStatus, lastActivityAt, now, staleSeconds),
+    ZOMBIE_HUNG_TURN: (() => {
+      // Exempt front-desk and registered orchestrators from ZOMBIE_HUNG_TURN
+      // when their router queues are empty (depth === 0) and active workers is 0 (#1352).
+      if ((options.isFrontDesk || options.isOrchestrator) && (options.queueDepth ?? 0) === 0 && activeWorkers === 0) {
+        return false;
+      }
+      return detectZombieHungTurn(liveStatus, lastActivityAt, now, staleSeconds);
+    })(),
     STALE_ERROR_GHOSTING: detectStaleErrorGhosting(liveStatus, rawLastError),
     PROVIDER_QUOTA_EXHAUSTION: quotaDetected,
     REPETITIVE_TOOL_LOOP: repetitiveRun > 0,
@@ -4159,6 +4173,47 @@ export interface BoardSweepResult {
   /** Enrolled repos auto-staffed by this sweep because they were unstaffed with pending work (#889). */
   autoEnsured?: Array<{ repo: string; agentId?: string; status?: string; error?: string }>;
   error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Sweep digest persistence (#1352)
+// ---------------------------------------------------------------------------
+
+/** Shape of the persisted sweep state JSON file. */
+export interface SweepDigestsPayload {
+  digests: Record<string, string>;
+  errorSignature: string;
+  /** Epoch-ms of the last forced full-reconciliation sweep; null when never reconciled. */
+  lastBoardReconciliationAt: number | null;
+}
+
+let _sweepDigestStorage: PluginStorage<SweepDigestsPayload> | null = null;
+
+/**
+ * Resolve (or lazily create) the scoped PluginStorage for sweep digests.
+ * Path: ~/.paseo/plugin-data/xpufx/uppidi-fleet/board-state/sweeps.json
+ */
+export function getSweepDigestStorage(
+  options?: { baseDir?: string },
+): PluginStorage<SweepDigestsPayload> {
+  if (!_sweepDigestStorage || options?.baseDir) {
+    const baseDir = options?.baseDir ?? join(resolvePaseoHome(), "plugin-data", "xpufx");
+    _sweepDigestStorage = new PluginStorage<SweepDigestsPayload>(
+      "uppidi-fleet",
+      "board-state/sweeps.json",
+      {
+        defaultData: { digests: {}, errorSignature: "", lastBoardReconciliationAt: null } as SweepDigestsPayload,
+        baseDir,
+      },
+    );
+    return _sweepDigestStorage;
+  }
+  return _sweepDigestStorage;
+}
+
+/** Reset the singleton so tests get a fresh instance. */
+export function resetSweepDigestStorage(): void {
+  _sweepDigestStorage = null;
 }
 
 /** Append a bare URL so chat linkifiers can pick it up. */
@@ -4597,6 +4652,26 @@ export class HookRouter {
       options?.auditReconciliationsFilePath ??
       process.env.UPPIDI_FLEET_AUDIT_RECONCILIATIONS_FILE ??
       join(dirname(this.stateDir), "audit-reconciliations.jsonl");
+
+    // Load persisted sweep digests on startup (#1352).
+    const testBaseDir = this.isTestMode ? scopedRoot : undefined;
+    try {
+      const sdStorage = getSweepDigestStorage(testBaseDir ? { baseDir: testBaseDir } : undefined);
+      const persisted = sdStorage.read();
+      if (persisted.digests) {
+        for (const [repo, digest] of Object.entries(persisted.digests)) {
+          this.lastSweepActionDigests.set(repo, digest);
+        }
+      }
+      if (persisted.errorSignature) {
+        this.lastSweepErrorSignature = persisted.errorSignature;
+      }
+      if (persisted.lastBoardReconciliationAt != null) {
+        this.lastBoardReconciliationAt = persisted.lastBoardReconciliationAt;
+      }
+    } catch {
+      // Non-fatal: first run has no persisted state.
+    }
 
     const explicitLogDir = options?.logDir;
     const explicitLogFilePath = options?.logFilePath;
@@ -8145,6 +8220,19 @@ export class HookRouter {
           runningStaleSeconds: opts.runningStaleSeconds,
           repetitiveToolLoopThreshold: opts.repetitiveToolLoopThreshold,
           timelineErrors,
+          isFrontDesk: frontDeskId ? isFrontDeskAgent(agent, frontDeskId) : false,
+          isOrchestrator: isOrchestratorAgent(agent),
+          queueDepth: (() => {
+            if (frontDeskId && isFrontDeskAgent(agent, frontDeskId)) {
+              return this.getQueue("frontdesk").length;
+            }
+            if (isOrchestratorAgent(agent)) {
+              const repo = agentRepoKey(agent, orchRecords);
+              const keys = candidateRepoKeys(repo);
+              return keys.reduce((n, key) => n + this.getQueue(key).length, 0);
+            }
+            return 0;
+          })(),
         });
         if (assessment.healthy) continue;
         taxonomyHandled.add(agent.id);
@@ -8379,7 +8467,24 @@ export class HookRouter {
         if (ls === "running" && lastActivityAt) {
           const activityTs = parseIsoTimestamp(lastActivityAt);
           if (activityTs != null && (nowMs - activityTs) / 1000 >= staleSecs) {
-            deadPredicates.push("DEAD_WEDGED_RUNNING_TURN");
+            // Exempt front-desk and registered orchestrators with empty queues (#1352).
+            const isFd = frontDeskId ? isFrontDeskAgent(agent, frontDeskId) : false;
+            const isOrch = isOrchestratorAgent(agent);
+            const qDepth = (() => {
+              if (isFd) return this.getQueue("frontdesk").length;
+              if (isOrch) {
+                const repo = agentRepoKey(agent, orchRecords);
+                const keys = candidateRepoKeys(repo);
+                return keys.reduce((n, key) => n + this.getQueue(key).length, 0);
+              }
+              return 0;
+            })();
+            const activeWorkers = countActiveWorkers(agentMap, agent.id, diskMetadata);
+            if ((isFd || isOrch) && qDepth === 0 && activeWorkers === 0) {
+              // Idle front-desk/orchestrator — not dead.
+            } else {
+              deadPredicates.push("DEAD_WEDGED_RUNNING_TURN");
+            }
           }
         }
 
@@ -9722,8 +9827,11 @@ export class HookRouter {
   private actionableDigest(candidates: readonly BoardCandidate[]): string {
     const parts = candidates
       .map(
-        (c) =>
-          `${c.number}|${(c.labels ?? []).slice().sort().join(",")}|${c.is_dispatchable ? 1 : 0}|${c.category ?? ""}`,
+        (c) => {
+          // Cast to access optional metadata fields for delta detection (#1352).
+          const extra = c as unknown as Record<string, unknown>;
+          return `${c.number}|${(c.labels ?? []).slice().sort().join(",")}|${c.is_dispatchable ? 1 : 0}|${c.category ?? ""}|${extra.comments ?? 0}|${extra.updated_at ?? extra.created_at ?? ""}`;
+        },
       )
       .sort();
     return createHash("sha256").update(parts.join("\n")).digest("hex");
@@ -9822,8 +9930,32 @@ export class HookRouter {
         this.lastSweepActionDigests.set(repo, sweepDigests.get(repo) ?? "");
       }
       this.lastSweepErrorSignature = errorSignature;
+      // Persist updated digests atomically (#1352).
+      if (!this.isTestMode) {
+        try {
+          const sdStorage = getSweepDigestStorage();
+          const payload: SweepDigestsPayload = {
+            digests: {},
+            errorSignature: this.lastSweepErrorSignature,
+            lastBoardReconciliationAt: this.lastBoardReconciliationAt,
+          };
+          for (const [repo, digest] of this.lastSweepActionDigests.entries()) {
+            payload.digests[repo] = digest;
+          }
+          sdStorage.write(payload);
+        } catch {
+          // Non-fatal: disk write failure should not block the sweep.
+        }
+      }
       const hasWork = actionable.length > 0 || errors.length > 0;
-      const shouldNotify = hasWork && (actionableChanged || errorStateChanged);
+      // Dispatchable gate (#1352): suppress routine Front Desk sweep notifications
+      // only when dispatchableCount === 0 AND triageCount === 0.
+      // Tickets in triage categories (attention/frontdesk, attention/user,
+      // feedback, new_unseen, sos) still trigger notification.
+      const totalDispatchable = actionable.reduce((sum, a) => sum + a.dispatchable, 0);
+      const totalTriage = actionable.reduce((sum, a) => sum + (a.count - a.dispatchable), 0);
+      const dispatchableGateClosed = totalDispatchable === 0 && totalTriage === 0;
+      const shouldNotify = hasWork && !dispatchableGateClosed && (actionableChanged || errorStateChanged);
 
 
       // Self-heal staffing (#889): an enrolled repo with actionable board work but
@@ -9870,7 +10002,10 @@ export class HookRouter {
           }
         }
       } else if (frontDeskId && hasWork && !shouldNotify) {
-        this.log("Board sweep actionable set unchanged; suppressing Front Desk notification");
+        const reason = dispatchableGateClosed
+          ? "zero dispatchable items; suppressing Front Desk notification"
+          : "actionable set unchanged; suppressing Front Desk notification";
+        this.log(`Board sweep ${reason}`);
       }
       this.log(
         `[info] Board sweep complete: ${targets.length} repo(s) swept, ${actionable.length} actionable, ${prunedCount} orchestrator record(s) pruned, ${autoEnsured.length} auto-staffed, ${errors.length} failed`,

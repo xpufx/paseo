@@ -136,6 +136,9 @@ import {
   type WatchdogAgentDisk,
   type HookRouterOptions,
   type ProviderModeInfo,
+  type SweepDigestsPayload,
+  getSweepDigestStorage,
+  resetSweepDigestStorage,
 } from "./hook-router.js";
 import { readAdjudicationDecisions } from "./permission-adjudication.js";
 import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
@@ -10901,5 +10904,361 @@ describe("model whitelist verification (#1215)", () => {
       () => resolveSpawnModel("worker", "nemotron-3.5-lightning-free"),
       { message: /not authorized/ },
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sweep digest persistence and gating (#1352)
+// ---------------------------------------------------------------------------
+
+describe("sweep digest persistence (#1352)", () => {
+  let testDir: string;
+
+  beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), "paseo-sweep-digest-test-"));
+    resetSweepDigestStorage();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(testDir, { recursive: true, force: true });
+    } catch {}
+    resetSweepDigestStorage();
+  });
+
+  it("saves and loads sweep digests from disk", () => {
+    const storage = getSweepDigestStorage({ baseDir: testDir });
+    const payload: SweepDigestsPayload = {
+      digests: { "org/repo": "abc123", "org/other": "def456" },
+      errorSignature: "err1|err2",
+      lastBoardReconciliationAt: null,
+    };
+    storage.write(payload);
+
+    // Reset and reload
+    resetSweepDigestStorage();
+    const reloaded = getSweepDigestStorage({ baseDir: testDir });
+    const restored = reloaded.read();
+    assert.deepStrictEqual(restored.digests, payload.digests);
+    assert.strictEqual(restored.errorSignature, payload.errorSignature);
+    assert.strictEqual(restored.lastBoardReconciliationAt, null);
+  });
+
+  it("restores lastBoardReconciliationAt across restarts", () => {
+    const storage = getSweepDigestStorage({ baseDir: testDir });
+    const payload: SweepDigestsPayload = {
+      digests: {},
+      errorSignature: "",
+      lastBoardReconciliationAt: 1_800_000_000_000,
+    };
+    storage.write(payload);
+
+    resetSweepDigestStorage();
+    const reloaded = getSweepDigestStorage({ baseDir: testDir });
+    const restored = reloaded.read();
+    assert.strictEqual(restored.lastBoardReconciliationAt, 1_800_000_000_000);
+  });
+
+  it("returns default empty state when file does not exist", () => {
+    const storage = getSweepDigestStorage({ baseDir: testDir });
+    const data = storage.read();
+    assert.deepStrictEqual(data.digests, {});
+    assert.strictEqual(data.errorSignature, "");
+    assert.strictEqual(data.lastBoardReconciliationAt, null);
+  });
+});
+
+describe("delta suppression when digests are unchanged (#1352)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-delta-suppress-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    clearSettingsStorage();
+    resetSweepDigestStorage();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+    resetSweepDigestStorage();
+  });
+
+  function makeRouter(overrides: Partial<HookRouterOptions> = {}): HookRouter {
+    return new HookRouter(null, { queueDir, stateDir, port: 0, ...overrides });
+  }
+
+  it("suppresses notification when actionable digest matches persisted state", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    const candidates = [
+      {
+        number: 101,
+        title: "Fix issue",
+        labels: [{ name: "attention/orchestrator" }],
+        category: "orchestrator_triage",
+        is_dispatchable: false,
+        comments: 2,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    const io: IssuesCheckIo = {
+      getOpenIssues: async () => ({ ok: true, issues: candidates as any }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    };
+
+    // First sweep: notifies
+    const first = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(first.notified, 1);
+    assert.equal(deliveries.length, 1);
+
+    // Second sweep with identical candidates: suppressed
+    const second = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(second.notified, 0);
+    assert.equal(deliveries.length, 1, "no new delivery after digest match");
+  });
+});
+
+describe("zero-dispatch suppression (#1352)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-zero-dispatch-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    clearSettingsStorage();
+    resetSweepDigestStorage();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+    resetSweepDigestStorage();
+  });
+
+  function makeRouter(overrides: Partial<HookRouterOptions> = {}): HookRouter {
+    return new HookRouter(null, { queueDir, stateDir, port: 0, ...overrides });
+  }
+
+  it("suppresses notification when dispatchableCount === 0 and triageCount === 0", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    // Empty board — no candidates at all
+    const io: IssuesCheckIo = {
+      getOpenIssues: async () => ({ ok: true, issues: [] }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    };
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.equal(result.actionable.length, 0);
+    assert.equal(result.notified, 0);
+    assert.equal(deliveries.length, 0);
+  });
+
+  it("still notifies when there are triage items (dispatchable === 0 but count > 0)", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    const candidates = [
+      {
+        number: 201,
+        title: "Needs triage",
+        labels: [{ name: "attention/orchestrator" }],
+        category: "orchestrator_triage",
+        is_dispatchable: false,
+        comments: 0,
+        updated_at: "2026-01-01T00:00:00Z",
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    const io: IssuesCheckIo = {
+      getOpenIssues: async () => ({ ok: true, issues: candidates as any }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    };
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.equal(result.notified, 1, "triage items should trigger notification");
+    assert.equal(deliveries.length, 1);
+  });
+});
+
+describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () => {
+  it("exempts front-desk from ZOMBIE_HUNG_TURN when queue depth is 0 and active workers is 0", () => {
+    const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString(); // 1 hour ago
+    const assessment = assessAgentHealth(
+      "fd-1",
+      { status: "running", lastActivityAt: stale },
+      null,
+      Date.UTC(2026, 5, 15, 12, 0, 0),
+      {
+        isFrontDesk: true,
+        isOrchestrator: false,
+        queueDepth: 0,
+        activeWorkers: 0,
+        runningStaleSeconds: 1800,
+      },
+    );
+    assert.ok(assessment.healthy, "front-desk with empty queue should not be flagged zombie");
+    assert.ok(!assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"), "ZOMBIE_HUNG_TURN should be suppressed");
+  });
+
+  it("exempts registered orchestrator from ZOMBIE_HUNG_TURN when queue depth is 0 and active workers is 0", () => {
+    const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
+    const assessment = assessAgentHealth(
+      "orch-1",
+      { status: "running", lastActivityAt: stale },
+      null,
+      Date.UTC(2026, 5, 15, 12, 0, 0),
+      {
+        isFrontDesk: false,
+        isOrchestrator: true,
+        queueDepth: 0,
+        activeWorkers: 0,
+        runningStaleSeconds: 1800,
+      },
+    );
+    assert.ok(assessment.healthy, "orchestrator with empty queue should not be flagged zombie");
+    assert.ok(!assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"), "ZOMBIE_HUNG_TURN should be suppressed");
+  });
+
+  it("does NOT exempt when queue depth > 0", () => {
+    const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
+    const assessment = assessAgentHealth(
+      "fd-1",
+      { status: "running", lastActivityAt: stale },
+      null,
+      Date.UTC(2026, 5, 15, 12, 0, 0),
+      {
+        isFrontDesk: true,
+        isOrchestrator: false,
+        queueDepth: 5,
+        activeWorkers: 0,
+        runningStaleSeconds: 1800,
+      },
+    );
+    assert.ok(!assessment.healthy, "front-desk with backlog should be flagged zombie");
+    assert.ok(assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("does NOT exempt when active workers > 0", () => {
+    const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
+    const assessment = assessAgentHealth(
+      "orch-1",
+      { status: "running", lastActivityAt: stale },
+      null,
+      Date.UTC(2026, 5, 15, 12, 0, 0),
+      {
+        isFrontDesk: false,
+        isOrchestrator: true,
+        queueDepth: 0,
+        activeWorkers: 3,
+        runningStaleSeconds: 1800,
+      },
+    );
+    assert.ok(!assessment.healthy, "orchestrator with active workers should be flagged zombie");
+    assert.ok(assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("does NOT exempt non-fleet agents", () => {
+    const stale = new Date(Date.UTC(2026, 5, 15, 11, 0, 0)).toISOString();
+    const assessment = assessAgentHealth(
+      "worker-1",
+      { status: "running", lastActivityAt: stale },
+      null,
+      Date.UTC(2026, 5, 15, 12, 0, 0),
+      {
+        isFrontDesk: false,
+        isOrchestrator: false,
+        queueDepth: 0,
+        activeWorkers: 0,
+        runningStaleSeconds: 1800,
+      },
+    );
+    assert.ok(!assessment.healthy, "non-fleet agent should still be flagged zombie");
+    assert.ok(assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
+  });
+
+  it("allows fresh activity to pass even without exemption", () => {
+    const fresh = new Date(Date.UTC(2026, 5, 15, 11, 59, 0)).toISOString();
+    const assessment = assessAgentHealth(
+      "fd-1",
+      { status: "running", lastActivityAt: fresh },
+      null,
+      Date.UTC(2026, 5, 15, 12, 0, 0),
+      {
+        isFrontDesk: false,
+        isOrchestrator: false,
+        queueDepth: 0,
+        activeWorkers: 0,
+        runningStaleSeconds: 1800,
+      },
+    );
+    assert.ok(assessment.healthy, "fresh activity should pass regardless of exemption");
+    assert.ok(!assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
   });
 });
