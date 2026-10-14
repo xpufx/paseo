@@ -1,16 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
+import { HostThemeProvider, FALLBACK_COLORS } from "../index.js";
 import {
-  HostThemeProvider,
   HostMarkdownLite,
   HostAgentEnvelopeCard,
   HostCommentCard,
   HostScopedLabelGroup,
   HostKanbanBoard,
   HostKanbanCard,
-  FALLBACK_COLORS,
-} from "../index.js";
+} from "../tickets/index.js";
 import type { KanbanIssue } from "../tickets/types.js";
 
 vi.mock("@getpaseo/plugin/client/react-native", () => ({

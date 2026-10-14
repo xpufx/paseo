@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import TestRenderer, { act } from "react-test-renderer";
-import { FALLBACK_COLORS, HostKanbanBoard, HostThemeProvider } from "../index.js";
+import { FALLBACK_COLORS, HostThemeProvider } from "../index.js";
+import { HostKanbanBoard } from "../tickets/index.js";
 import type { AutomationTier, RepoGroup } from "../tickets/types.js";
 import type { KanbanIssue } from "../tickets/types.js";
 

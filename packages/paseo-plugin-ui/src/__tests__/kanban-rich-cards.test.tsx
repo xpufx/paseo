@@ -4,13 +4,15 @@ import { Linking } from "react-native";
 import TestRenderer, { act } from "react-test-renderer";
 import {
   FALLBACK_COLORS,
+  HostStatusDot,
+  HostThemeProvider,
+} from "../index.js";
+import {
   HostKanbanBoard,
   HostKanbanCard,
   HostIssueDetailDrawer,
   HostScopedLabelGroup,
-  HostStatusDot,
-  HostThemeProvider,
-} from "../index.js";
+} from "../tickets/index.js";
 import {
   describeCiStatus,
   describePullRequest,

@@ -56,6 +56,10 @@ import {
   HostThemeProvider,
   HostToggle as Toggle,
   type HostToggleProps as ToggleProps,
+  type ScrollViewInstance,
+  useHostTheme,
+} from "@xpufx/paseo-plugin-ui";
+import {
   KanbanBoard,
   type KanbanBoardProps,
   KanbanCard,
@@ -71,9 +75,7 @@ import {
   type HostCommentCardProps as CommentCardProps,
   ScopedLabelGroup,
   type HostScopedLabelGroupProps as ScopedLabelGroupProps,
-  type ScrollViewInstance,
-  useHostTheme,
-} from "@xpufx/paseo-plugin-ui";
+} from "@xpufx/paseo-plugin-ui/tickets";
 
 export {
   ActionBar,

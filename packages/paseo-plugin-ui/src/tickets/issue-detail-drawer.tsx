@@ -9,15 +9,15 @@ import {
 import {
   HostBadge,
   HostButton,
-  HostCommentCard,
-  HostMarkdownLite,
   HostRow,
-  HostScopedLabelGroup,
   HostStack,
   HostStatusDot,
   HostTextInput,
   useHostTheme,
 } from "../index.js";
+import { HostCommentCard } from "./comment-card.js";
+import { HostMarkdownLite } from "./markdown-lite.js";
+import { HostScopedLabelGroup } from "./scoped-label-group.js";
 import {
   describeCiStatus,
   describePullRequest,

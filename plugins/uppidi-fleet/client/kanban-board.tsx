@@ -9,7 +9,7 @@ import {
   type KanbanIssue,
   type RepoGroup,
   type AutomationTier,
-} from "@xpufx/paseo-plugin-ui";
+} from "@xpufx/paseo-plugin-ui/tickets";
 import {
   KANBAN_COLUMNS,
   getIssueKanbanColumn,

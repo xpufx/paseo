@@ -3371,7 +3371,4 @@ export {
   type ListActionHeaderAction,
 } from "./templates/list-action.js";
 
-// --- ticket & kanban presentation components ------------------------------
-
-export * from "./tickets/index.js";
 
