@@ -108,7 +108,7 @@ export function TopDashboardSurface(props: PluginSurfaceProps) {
                     <Text
                       style={{ fontSize: 12, fontWeight: "600", color: colors.foregroundMuted }}
                     >
-                      Composer pill is hidden in trackbar. You can re-enable it from the Settings
+                      Composer pill is hidden. You can re-enable it from the Settings
                       tab above.
                     </Text>
                   </HostCard>
@@ -182,7 +182,7 @@ export function TopDashboardSurface(props: PluginSurfaceProps) {
                   <HostCardHeader
                     title="Pill Display Mode"
                     icon="LayoutGrid"
-                    subtitle="How active items appear in the composer trackbar"
+                    subtitle="How active items appear in the composer"
                   />
                   <ChoiceChips
                     options={[
@@ -353,7 +353,7 @@ export function TopDashboardSurface(props: PluginSurfaceProps) {
             {activeTab === "about" && (
               <HostAboutSection
                 name="paseo-top"
-                description="Live host system and workspace monitor for Paseo composer trackbar."
+                description="Live host and session monitor across composer pills, timeline turns, and an interactive dashboard."
                 version={data?.version ?? PLUGIN_VERSION}
                 author="xpufx"
                 repository="https://github.com/xpufx/paseo-top"
