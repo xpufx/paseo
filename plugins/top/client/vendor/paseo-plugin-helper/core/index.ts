@@ -67,3 +67,10 @@ export * from "./settings";
 export * from "./shared-settings";
 export * from "./snapshot";
 export * from "./command-center";
+export {
+  bumpPluginLoadCount,
+  getPluginLoadCount,
+  isPluginReloaded,
+  usePluginReloadNotice,
+  type PluginReloadNoticeState,
+} from "./plugin-load-count";

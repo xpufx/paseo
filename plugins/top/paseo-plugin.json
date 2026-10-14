@@ -1,4 +1,6 @@
 {
   "id": "top",
+  "name": "Top",
+  "description": "Live host system and workspace monitor for the Paseo composer trackbar",
   "requirements": { "paseo": ">=0.9.0" }
 }
