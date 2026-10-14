@@ -90,6 +90,13 @@ export class HookEventQueue {
   }
 
   /**
+   * Get current queue state.
+   */
+  getState(): QueueState {
+    return this.state;
+  }
+
+  /**
    * Purge all pending events from the queue.
    */
   purge(): number {

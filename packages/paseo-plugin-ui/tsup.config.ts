@@ -3,6 +3,7 @@ import { defineConfig } from "tsup";
 export default defineConfig({
   entry: {
     index: "src/index.tsx",
+    "tickets/index": "src/tickets/index.ts",
   },
   format: ["esm", "cjs"],
   dts: true,

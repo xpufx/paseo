@@ -1,5 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { createHmac } from "node:crypto";
 import {
   resolveHookUrl,
   resolveHookEndpoint,
@@ -402,6 +403,58 @@ describe("uppidi-fleet hook server handlers", () => {
       await handleHookServiceAction({ action: "stop" });
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("mounts @xpufx/backend-hook ingress and validates HMAC signatures (#1295)", async () => {
+    const secret = "test-secret-mount-1295";
+    const router = new HookRouter(null, {
+      port: 0,
+      host: "127.0.0.1",
+      secret,
+      queueDir: join(stateDir, "queues"),
+      stateDir: join(stateDir, "orchestrators"),
+    });
+    await router.start();
+    try {
+      const payload = JSON.stringify({
+        action: "opened",
+        issue: { number: 1295, title: "mount backend-hook" },
+        repository: { full_name: "xpufx-org/paseo", html_url: "https://forge.mrs.uppidi.com/xpufx-org/paseo" },
+        sender: { login: "okcode" },
+      });
+      const validSig = `sha256=${createHmac("sha256", secret).update(payload).digest("hex")}`;
+
+      // 1. Valid signature succeeds
+      const resValid = await fetch(`http://127.0.0.1:${router.port}/forgejo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forgejo-Event": "issues",
+          "X-Hub-Signature-256": validSig,
+        },
+        body: payload,
+      });
+      assert.equal(resValid.status, 200);
+      const dataValid = (await resValid.json()) as any;
+      assert.equal(dataValid.ok, true);
+      assert.equal(router.eventQueue.inspect().totalEnqueued, 1);
+
+      // 2. Invalid signature rejected with 401
+      const resInvalid = await fetch(`http://127.0.0.1:${router.port}/forgejo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forgejo-Event": "issues",
+          "X-Hub-Signature-256": "sha256=badhex0000000000000000000000000000000000000000000000000000000000",
+        },
+        body: payload,
+      });
+      assert.equal(resInvalid.status, 401);
+      const dataInvalid = (await resInvalid.json()) as any;
+      assert.equal(dataInvalid.ok, false);
+    } finally {
+      await router.stop();
     }
   });
 });

@@ -79,6 +79,17 @@ import {
 import { PluginStorage, resolvePaseoHome } from "paseo-plugin-helper/server";
 import type { RoleModelConfig } from "../shared/contracts.js";
 import {
+  handleHookIngress,
+  handleQueueAdmin,
+  validateForgejoSignature,
+  validateGitHubSignature,
+  validateGitLabSignature,
+  normalizeForgejoEvent,
+  normalizeGitHubEvent,
+  normalizeGitLabEvent,
+  HookEventQueue,
+} from "@xpufx/backend-hook";
+import {
   getEffectiveSkillContent,
   getEffectiveSkillPath,
   renderSkillDirective,
@@ -235,6 +246,7 @@ export interface HookRouterOptions {
   stateDir?: string;
   metricsFilePath?: string;
   secret?: string;
+  requireSignature?: boolean;
   paseo?: PaseoApi;
   debounceMs?: number;
   coalesceDisable?: boolean;
@@ -4497,6 +4509,8 @@ export class HookRouter {
   public readonly diskLogger: DiskLogger;
   public readonly logDir: string;
   public readonly logFilePath: string;
+  /** Standalone event queue engine from @xpufx/backend-hook (#1295). */
+  public readonly eventQueue: HookEventQueue = new HookEventQueue();
 
   constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
     this.server = server ?? null;
@@ -11993,8 +12007,26 @@ export class HookRouter {
 
       // Webhook receiver ingress: POST /forgejo or POST /hook
       if (req.method === "POST" && (pathname === "/forgejo" || pathname === "/hook")) {
-        const event = (req.headers["x-forgejo-event"] as string | undefined) ?? "unknown";
-        const body = await this.readJsonBody(req);
+        const { raw, body } = await this.readBodyWithRaw(req);
+
+        // Ingress signature validation and normalization via @xpufx/backend-hook (#1295)
+        const ingress = handleHookIngress(
+          req.headers as Record<string, string | string[] | undefined>,
+          raw,
+          body,
+          {
+            secret: this.secret,
+            requireSignature: Boolean(this.options?.requireSignature),
+          },
+        );
+
+        if (!ingress.ok) {
+          this.log(`[warn] Webhook rejected: ${ingress.error}`);
+          this.sendJson(res, ingress.status, { ok: false, error: ingress.error });
+          return;
+        }
+
+        const event = (req.headers["x-forgejo-event"] as string | undefined) ?? ingress.event ?? "unknown";
 
         if (event === "ping") {
           this.log("[info] Webhook ping received on POST /forgejo");
@@ -12011,6 +12043,10 @@ export class HookRouter {
 
         this.log(`[info] Webhook received: event=${event} repo=${isFrontDeskEvent(body) ? "frontdesk" : repoKey}`);
         const outcome = await this.ingestWebhook(event, body);
+        if (ingress.normalized) {
+          this.eventQueue.enqueue(ingress.normalized);
+        }
+
         this.sendJson(res, 200, {
           ok: true,
           queued: true,
@@ -12038,23 +12074,23 @@ export class HookRouter {
     res.end(payload);
   }
 
-  private readJsonBody(req: IncomingMessage): Promise<any> {
+  private readBodyWithRaw(req: IncomingMessage): Promise<{ raw: string; body: any }> {
     return new Promise((resolve, reject) => {
-      let data = "";
+      let raw = "";
       req.setEncoding("utf8");
       req.on("data", (chunk) => {
-        data += chunk;
-        if (data.length > 5 * 1024 * 1024) {
+        raw += chunk;
+        if (raw.length > 5 * 1024 * 1024) {
           reject(new Error("Payload too large"));
         }
       });
       req.on("end", () => {
-        if (!data.trim()) {
-          resolve({});
+        if (!raw.trim()) {
+          resolve({ raw: "", body: {} });
           return;
         }
         try {
-          resolve(JSON.parse(data));
+          resolve({ raw, body: JSON.parse(raw) });
         } catch (err) {
           reject(err);
         }
@@ -12062,7 +12098,25 @@ export class HookRouter {
       req.on("error", reject);
     });
   }
+
+  private async readJsonBody(req: IncomingMessage): Promise<any> {
+    const { body } = await this.readBodyWithRaw(req);
+    return body;
+  }
 }
+
+export {
+  handleHookIngress,
+  handleQueueAdmin,
+  validateForgejoSignature,
+  validateGitHubSignature,
+  validateGitLabSignature,
+  normalizeForgejoEvent,
+  normalizeGitHubEvent,
+  normalizeGitLabEvent,
+  HookEventQueue,
+};
+
 
 let activeRouter: HookRouter | null = null;
 
