@@ -77,8 +77,6 @@ import {
   QUOTA_MARKERS,
   assessAgentHealth,
   planWatchdogRecovery,
-  clearAgentDiskFields,
-  setAgentDiskFields,
   loadAgentDiskMetadata,
   scanCancellationTimeouts,
   coerceEpochMs,
@@ -5353,63 +5351,6 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     assert.match(quota.blockedReason ?? "", /circuit-break/);
   });
 
-  it("atomically wipes metadata keys and tolerates missing files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "paseo-health-disk-"));
-    try {
-      const file = join(dir, "agent.json");
-      writeFileSync(
-        file,
-        JSON.stringify({ id: "agent-1", lastError: "boom", requiresAttention: true, attentionReason: "error", attentionTimestamp: "x", keep: 1 }),
-      );
-      assert.equal(clearAgentDiskFields(file, ["lastError"]), true);
-      const afterError = JSON.parse(readFileSync(file, "utf8"));
-      assert.equal("lastError" in afterError, false);
-      assert.equal(afterError.keep, 1);
-      assert.equal(
-        clearAgentDiskFields(file, ["requiresAttention", "attentionReason", "attentionTimestamp"]),
-        true,
-      );
-      const afterAttention = JSON.parse(readFileSync(file, "utf8"));
-      assert.equal("requiresAttention" in afterAttention, false);
-      assert.equal("attentionReason" in afterAttention, false);
-      assert.equal("attentionTimestamp" in afterAttention, false);
-      assert.equal(clearAgentDiskFields(file, ["lastError"]), false);
-      assert.equal(clearAgentDiskFields(join(dir, "missing.json"), ["lastError"]), false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("atomically merges metadata keys and tolerates missing or corrupt files", () => {
-    const dir = mkdtempSync(join(tmpdir(), "paseo-health-disk-set-"));
-    try {
-      const file = join(dir, "agent.json");
-      writeFileSync(file, JSON.stringify({ id: "agent-1", status: "idle", keep: 42 }));
-      assert.equal(
-        setAgentDiskFields(file, { lastHandledCancellationAt: 1790000000000, extra: "yes" }),
-        true,
-      );
-      const after = JSON.parse(readFileSync(file, "utf8"));
-      assert.equal(after.id, "agent-1");
-      assert.equal(after.keep, 42);
-      assert.equal(after.lastHandledCancellationAt, 1790000000000);
-      assert.equal(after.extra, "yes");
-
-      // No-op update returns true without error
-      assert.equal(setAgentDiskFields(file, { extra: "yes" }), true);
-
-      // Missing file returns false
-      assert.equal(setAgentDiskFields(join(dir, "nonexistent.json"), { foo: "bar" }), false);
-
-      // Corrupted file returns false
-      const corrupt = join(dir, "corrupt.json");
-      writeFileSync(corrupt, "{ invalid-json");
-      assert.equal(setAgentDiskFields(corrupt, { foo: "bar" }), false);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   it("loads persisted metadata from the agents directory subfolders", () => {
     const dir = mkdtempSync(join(tmpdir(), "paseo-health-metadata-"));
     try {
@@ -5493,6 +5434,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
     };
     const map = new Map<string, WatchdogAgent>([["agent-zombie", { id: "agent-zombie", status: "running", role: "orchestrator", labels: { role: "orchestrator" } }]]);
 
+    router.enqueue("test-repo", { id: "item-1" } as any);
     const audit = await router.runWatchdogAudit({
       agentMap: map,
       agentsDir,
@@ -5508,9 +5450,9 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
 
     assert.ok(audit.anomalies.some((a) => a.type === "ZOMBIE_HUNG_TURN" && a.agentId === "agent-zombie"));
     assert.deepEqual(stopped, ["agent-zombie"]);
-    // lastError was wiped from disk by step 2.
+    // Agent records on disk must not be mutated (#1186).
     const persisted = JSON.parse(readFileSync(join(agentsDir, "agent-zombie", "agent-zombie.json"), "utf8"));
-    assert.equal("lastError" in persisted, false);
+    assert.equal(persisted.lastError, "hung", "disk records must not be mutated directly");
     // Step 4 steers the wake pulse at the agent itself.
     assert.ok(delivered.some((d) => d.id === "agent-zombie" && d.steer === true && /Health check/.test(d.msg)));
     assert.ok(
@@ -5532,6 +5474,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       agentMap: map,
       agentsDir,
       cancellations: new Map(),
+      orchestratorRecords: [{ key: "test-repo", agentId: "agent-quota" }],
       deliver: fakeDeliver,
       stopAgent: async (id) => {
         stopped.push(id);
@@ -5559,6 +5502,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
         agentMap: map,
         agentsDir,
         cancellations: new Map(),
+        orchestratorRecords: [{ key: "test-repo", agentId: "agent-ghost" }],
         deliver: fakeDeliver,
         stopAgent: async () => ({ ok: true }),
         frontDeskId,
@@ -5591,6 +5535,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       agentMap: map,
       agentsDir,
       cancellations: new Map([["orch-healthy", cancelTime]]),
+      orchestratorRecords: [{ key: "test-repo", agentId: "orch-healthy" }],
       deliver: fakeDeliver,
       stopAgent: async () => ({ ok: true }),
       frontDeskId,
@@ -5601,7 +5546,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
     assert.equal(delivered.some((d) => d.id === "orch-healthy"), false, "healthy agent must not be steered");
   });
 
-  it("recovers a genuinely wedged agent and persists lastHandledCancellationAt", async () => {
+  it("recovers a genuinely wedged agent without modifying daemon disk records (#1186)", async () => {
     const cancelTime = Date.now() - 30 * 60 * 1000;
     const staleActivity = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
     writeMetadata("wedged-1", {
@@ -5622,6 +5567,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       agentMap: map,
       agentsDir,
       cancellations: new Map([["wedged-1", cancelTime]]),
+      orchestratorRecords: [{ key: "test-repo", agentId: "wedged-1" }],
       deliver: fakeDeliver,
       stopAgent: async () => ({ ok: true }),
       frontDeskId,
@@ -5630,8 +5576,9 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
 
     assert.ok(audit.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT" && a.agentId === "wedged-1"));
     assert.ok(delivered.some((d) => d.id === "wedged-1" && d.steer === true));
+    // Agent records on disk must not be mutated (#1186).
     const persisted = JSON.parse(readFileSync(join(agentsDir, "wedged-1", "wedged-1.json"), "utf8"));
-    assert.equal(persisted.lastHandledCancellationAt, cancelTime);
+    assert.equal(persisted.lastHandledCancellationAt, undefined, "disk records must not be mutated");
   });
 
   it("second watchdog pass after successful recovery produces NO re-steer (idempotency)", async () => {
@@ -5657,6 +5604,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       agentMap: map,
       agentsDir,
       cancellations,
+      orchestratorRecords: [{ key: "test-repo", agentId: "orch-loop" }],
       deliver: fakeDeliver,
       stopAgent: async () => ({ ok: true }),
       frontDeskId,
@@ -5665,17 +5613,17 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
     assert.ok(audit1.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT"));
     assert.ok(delivered.some((d) => d.id === "orch-loop"));
 
-    // Verify handled marker was saved to disk
+    // Verify disk record was not mutated (#1186)
     const persisted1 = JSON.parse(readFileSync(join(agentsDir, "orch-loop", "orch-loop.json"), "utf8"));
-    assert.equal(persisted1.lastHandledCancellationAt, cancelTime);
+    assert.equal(persisted1.lastHandledCancellationAt, undefined);
 
-    // Pass 2: simulate subsequent watchdog pass (use fresh router / empty cooldowns)
-    const router2 = new HookRouter(null, { queueDir: join(tempDir, "queues2"), stateDir: join(tempDir, "state2"), port: 0 });
+    // Pass 2: second watchdog pass within cooldown produces NO re-steer
     const delivered2: Array<{ id: string; msg: string; steer?: boolean }> = [];
-    const audit2 = await router2.runWatchdogAudit({
+    const audit2 = await router.runWatchdogAudit({
       agentMap: map,
       agentsDir,
       cancellations,
+      orchestratorRecords: [{ key: "test-repo", agentId: "orch-loop" }],
       deliver: async (id, msg, o) => {
         delivered2.push({ id, msg, steer: o?.steer });
         return true;
@@ -5685,8 +5633,7 @@ describe("hook-router taxonomy recovery pipeline (#529)", () => {
       cancellationRecencySeconds: 86400,
     });
 
-    assert.equal(audit2.anomalies.some((a) => a.type === "TURN_CANCELLATION_TIMEOUT"), false);
-    assert.equal(delivered2.some((d) => d.id === "orch-loop"), false, "second watchdog pass must not steer");
+    assert.equal(delivered2.some((d) => d.id === "orch-loop"), false, "second watchdog pass within cooldown must not steer");
   });
 
   it("marker persists across separate invocations", async () => {

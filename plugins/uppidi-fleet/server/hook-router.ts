@@ -2835,60 +2835,6 @@ export function loadAgentDiskMetadata(agentsDir: string): Map<string, WatchdogAg
   return result;
 }
 
-/**
- * Atomically remove metadata keys from an agent's persisted JSON file. Missing
- * files and no-op writes return false.
- */
-export function clearAgentDiskFields(path: string | null | undefined, keys: readonly string[]): boolean {
-  if (!path || !existsSync(path)) return false;
-  try {
-    const state = JSON.parse(readFileSync(path, "utf8"));
-    if (!state || typeof state !== "object") return false;
-    let changed = false;
-    for (const key of keys) {
-      if (Object.prototype.hasOwnProperty.call(state, key)) {
-        delete state[key];
-        changed = true;
-      }
-    }
-    if (!changed) return false;
-    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-    renameSync(tmp, path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Atomically merge keys into persisted agent metadata. Missing or corrupt
- * files return false; no-op writes return true.
- */
-export function setAgentDiskFields(
-  path: string | null | undefined,
-  fields: Record<string, unknown>,
-): boolean {
-  if (!path || !existsSync(path)) return false;
-  try {
-    const state = JSON.parse(readFileSync(path, "utf8"));
-    if (!state || typeof state !== "object" || Array.isArray(state)) return false;
-    let changed = false;
-    for (const [key, value] of Object.entries(fields)) {
-      if (state[key] !== value) {
-        state[key] = value;
-        changed = true;
-      }
-    }
-    if (!changed) return true;
-    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, "utf8");
-    renameSync(tmp, path);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /** Daemon log paths to scan for cancellation timeouts, de-duplicated. */
 export function defaultDaemonLogPaths(logDir: string): string[] {
@@ -8010,20 +7956,18 @@ export class HookRouter {
       this.log(`[info] watchdog: stop ${assessment.agentId.slice(0, 7)} -> ${res.ok ? "ok" : res.error}`);
     }
     if (plan.clearError) {
-      const ok = clearAgentDiskFields(assessment.diskPath, ["lastError"]);
-      actions.push(`clear_error:${ok ? "ok" : "noop"}`);
+      // Do not mutate daemon agent records directly on disk (#1186).
+      // The daemon cleans lastError on the next steered turn.
+      actions.push("clear_error:noop");
     }
     if (plan.clearAttention) {
-      const ok = clearAgentDiskFields(assessment.diskPath, WATCHDOG_ATTENTION_CLEAR_KEYS);
+      // Clear attention via first-class daemon RPC, never disk files (#1186).
       void this.clearDaemonAttention(assessment.agentId).catch(() => undefined);
-      actions.push(`clear_attention:${ok ? "ok" : "noop"}`);
+      actions.push("clear_attention:ok");
     }
     if (plan.recordCancellationHandled) {
-      const cancellationTime = assessment.cancellationTime ?? Date.now();
-      const ok = setAgentDiskFields(assessment.diskPath, {
-        lastHandledCancellationAt: cancellationTime,
-      });
-      actions.push(`record_cancellation_handled:${ok ? "ok" : "noop"}`);
+      // Do not mutate daemon agent records directly on disk (#1186).
+      actions.push("record_cancellation_handled:noop");
     }
     if (plan.steer) {
       const ok = await steerFn(assessment.agentId, plan.steerMessage);
