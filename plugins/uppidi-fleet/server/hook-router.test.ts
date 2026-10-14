@@ -11181,6 +11181,7 @@ describe("zero-dispatch gate with explicit frontdesk attention (#1354)", () => {
   function makeCandidatesIo(
     issues: Array<Record<string, unknown>>,
     cached = true,
+    comments: Array<Record<string, unknown>> = [],
   ): IssuesCheckIo {
     const cache: Record<string, any> = {};
     if (cached) {
@@ -11194,8 +11195,8 @@ describe("zero-dispatch gate with explicit frontdesk attention (#1354)", () => {
     }
     return {
       getOpenIssues: async () => ({ ok: true, issues: issues as any }),
-      getLatestComments: async () => [],
-      getIssueComments: async () => [],
+      getLatestComments: async () => comments as any,
+      getIssueComments: async () => comments as any,
       runStaleWipCommand: async () => true,
       loadCache: async () => cache,
       saveCache: async () => {},
@@ -11317,7 +11318,7 @@ describe("zero-dispatch gate with explicit frontdesk attention (#1354)", () => {
     assert.equal(deliveries.length, 1);
   });
 
-  it("does NOT suppress notification when ticket is new (is_new) — first-seen issue", async () => {
+  it("suppresses notification when ticket has category 'feedback' on orchestrator issue without attention/frontdesk (#1357)", async () => {
     const deliveries: Array<{ agentId: string; prompt: string }> = [];
     const mockPaseo = {
       agents: {
@@ -11334,14 +11335,93 @@ describe("zero-dispatch gate with explicit frontdesk attention (#1354)", () => {
     router.setActivePaseo(mockPaseo);
     router.writeFrontDesk("fd-1", "operator");
 
-    // A brand-new issue (no cache entry → isNew) with no special labels
-    // will be classified as new_unseen and marked is_new: true
+    // Human feedback on an orchestrator issue (isChanged=true via cache comments_count=0 vs issue comments=1)
+    const io = makeCandidatesIo(
+      [
+        {
+          number: 350,
+          title: "Orchestrator issue with human feedback",
+          labels: [{ name: "state/wip" }, { name: "attention/orchestrator" }],
+          comments: 1,
+          updated_at: "2026-01-01T01:00:00Z",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      true,
+      [{ user: { login: "okcode" }, body: "Do it again." }],
+    );
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    // Candidate has category: 'feedback', but lacks attention/frontdesk -> suppressed
+    assert.equal(result.notified, 0, "orchestrator feedback must NOT wake Front Desk on board sweep");
+    assert.equal(deliveries.length, 0);
+  });
+
+  it("does NOT suppress notification when ticket has category 'feedback' AND attention/frontdesk (#1357)", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    const io = makeCandidatesIo(
+      [
+        {
+          number: 351,
+          title: "Frontdesk issue with human feedback",
+          labels: [{ name: "state/verify" }, { name: "attention/frontdesk" }],
+          comments: 1,
+          updated_at: "2026-01-01T01:00:00Z",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      true,
+      [{ user: { login: "okcode" }, body: "Operator feedback for frontdesk." }],
+    );
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 1, "frontdesk feedback MUST wake Front Desk");
+    assert.equal(deliveries.length, 1);
+  });
+
+  it("suppresses notification when ticket is new (is_new) but lacks attention/frontdesk and dispatchable=0 (#1357)", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    // A brand-new issue with no special labels (not dispatchable, not attention/frontdesk)
     const io = makeCandidatesIo(
       [
         {
           number: 401,
           title: "Brand new feature request",
-          labels: [{ name: "kind/feature" }],
+          labels: [{ name: "kind/feature" }, { name: "attention/orchestrator" }],
           comments: 0,
           updated_at: "2026-01-01T00:00:00Z",
           created_at: "2026-01-01T00:00:00Z",
@@ -11353,7 +11433,45 @@ describe("zero-dispatch gate with explicit frontdesk attention (#1354)", () => {
     const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
     assert.equal(result.ok, true);
     assert.ok(result.actionable.length > 0, "should have actionable items");
-    assert.equal(result.notified, 1, "notification should fire: is_new ticket requires frontdesk attention");
+    assert.equal(result.notified, 0, "untargeted new ticket must not wake Front Desk on board sweep");
+    assert.equal(deliveries.length, 0);
+  });
+
+  it("does NOT suppress notification when new ticket has attention/frontdesk (#1357)", async () => {
+    const deliveries: Array<{ agentId: string; prompt: string }> = [];
+    const mockPaseo = {
+      agents: {
+        ref: (id: string) => ({
+          send: async (prompt: string) => {
+            deliveries.push({ agentId: id, prompt });
+            return { ok: true };
+          },
+        }),
+      },
+    } as any;
+
+    const router = makeRouter();
+    router.setActivePaseo(mockPaseo);
+    router.writeFrontDesk("fd-1", "operator");
+
+    const io = makeCandidatesIo(
+      [
+        {
+          number: 402,
+          title: "New issue targeted at Front Desk",
+          labels: [{ name: "kind/feature" }, { name: "attention/frontdesk" }],
+          comments: 0,
+          updated_at: "2026-01-01T00:00:00Z",
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      false,
+    );
+
+    const result = await router.runBoardSweep(["xpufx-org/paseo"], io);
+    assert.equal(result.ok, true);
+    assert.ok(result.actionable.length > 0, "should have actionable items");
+    assert.equal(result.notified, 1, "new ticket with attention/frontdesk must wake Front Desk");
     assert.equal(deliveries.length, 1);
   });
 

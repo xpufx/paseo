@@ -9908,14 +9908,16 @@ export class HookRouter {
         sweepDigests.set(repo, res.ok ? this.actionableDigest(res.candidates) : "#board-check-error");
         if (!res.ok || res.candidates.length === 0) continue;
         const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
-        // Count tickets that require explicit Front Desk attention (#1354).
+        // Count tickets that require explicit Front Desk attention (#1354, #1357).
+        // Front Desk attention requires explicit targeting (attention/frontdesk)
+        // or fleet-wide emergency (category === "sos"). Routine orchestrator
+        // feedback or untargeted new tickets are delivered directly to the
+        // repository orchestrators via webhooks and must not wake Front Desk.
         let totalFrontDeskAttention = 0;
         for (const c of res.candidates) {
           if (
             c.labels?.includes("attention/frontdesk") ||
-            c.category === "feedback" ||
-            c.category === "sos" ||
-            c.is_new === true
+            c.category === "sos"
           ) {
             totalFrontDeskAttention++;
           }
