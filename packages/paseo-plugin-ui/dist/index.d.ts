@@ -3,6 +3,31 @@ import { StyleProp, ViewStyle, TextStyle, GestureResponderEvent, AccessibilityRo
 import { T as ThemeColors, S as StatusVariant, R as ResponsiveLayout, M as MetricThresholds } from './types-bzCBod7A.js';
 export { P as PluginTheme } from './types-bzCBod7A.js';
 
+interface PluginUiTheme {
+    colors: ThemeColors;
+    alpha: (color: string, opacity: number) => string;
+    getStatusColor: (variant: StatusVariant) => string;
+    getVariantPalette: (variant: StatusVariant) => {
+        bg: string;
+        text: string;
+        border: string;
+    };
+}
+declare const FALLBACK_COLORS: ThemeColors;
+declare function alpha(color: string, opacity: number): string;
+declare function getStatusColor(variant: StatusVariant, colors: ThemeColors, customAccent?: string): string;
+declare function resolveHostColors(colors?: Partial<ThemeColors> | null): ThemeColors;
+interface HostThemeProviderProps {
+    theme?: {
+        colors: ThemeColors;
+    } | {
+        colors?: Partial<ThemeColors>;
+    };
+    children: ReactNode;
+}
+declare function HostThemeProvider({ theme, children }: HostThemeProviderProps): React.JSX.Element;
+declare function useHostTheme(): PluginUiTheme;
+
 interface ListActionHeaderAction {
     id: string;
     label: string;
@@ -55,62 +80,6 @@ interface ListActionPageTemplateProps<T> {
  */
 declare function ListActionPageTemplate<T>({ title, subtitle, icon, badge, headerActions, filterSlot, bannerSlot, data, keyExtractor, renderItem, emptyState, isLoading, footerSlot, style, contentContainerStyle, }: ListActionPageTemplateProps<T>): React.JSX.Element;
 
-/**
- * Canonical shared composition of the presentational pieces every plugin used
- * to hand-roll in its local `client/host-ui.tsx` (xpufx-org/paseo#937, #976).
- *
- * The host SDK owns the design language and provides the primitives that carry
- * host behaviour (`Icon`, `ScrollView`, `useToast`, `copyText`); everything
- * here is plain React Native layout and color-token composition on top of the
- * host `theme` prop.
- *
- * This package is private and bundled (inlined) into each consuming plugin at
- * build time, so it deliberately imports only the host plugin allowlist:
- * `@getpaseo/plugin/client/react-native`, `react`, and `react-native`. It has
- * no root provider and no `react-native-svg`.
- *
- * Components keep the `Host*` names and prop shapes the plugins already use so
- * call sites only change the import path.
-
-// --- theme -----------------------------------------------------------------
-
-/** Converts a hex/rgb color and opacity (0..1) into an alpha-applied color. */
-declare function alpha(color: string, opacity: number): string;
-/** Resolves a status variant to a host theme color. */
-declare function getStatusColor(variant: StatusVariant, colors: ThemeColors, customAccent?: string): string;
-
-interface PluginUiTheme {
-    colors: ThemeColors;
-    alpha: (color: string, opacity: number) => string;
-    getStatusColor: (variant: StatusVariant) => string;
-    getVariantPalette: (variant: StatusVariant) => {
-        bg: string;
-        text: string;
-        border: string;
-    };
-}
-declare const FALLBACK_COLORS: ThemeColors;
-/**
- * Fills a possibly-partial host `theme.colors` from FALLBACK_COLORS.
- * Ensures no color token evaluates to undefined on platforms providing partial palettes.
- */
-declare function resolveHostColors(colors?: Partial<ThemeColors> | null): ThemeColors;
-interface HostThemeProviderProps {
-    theme?: {
-        colors: ThemeColors;
-    } | {
-        colors?: Partial<ThemeColors>;
-    };
-    children: ReactNode;
-}
-/**
- * Carries the host `theme` prop colors to every local adapter below it. Falls
- * back to the static neutral palette when no host theme is supplied (tests,
- * previews) so adapters still render.
- */
-declare function HostThemeProvider({ theme, children }: HostThemeProviderProps): React.JSX.Element;
-/** Reads the host theme supplied by {@link HostThemeProvider}. */
-declare function useHostTheme(): PluginUiTheme;
 interface HostLayoutProviderProps {
     layout: ResponsiveLayout;
     children: ReactNode;

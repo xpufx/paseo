@@ -10,8 +10,8 @@ import {
   HostInteractiveRow,
   HostRow,
   HostStatusDot,
-  useHostTheme,
 } from "../index.js";
+import { useHostTheme } from "../theme-context.js";
 import {
   describeCiStatus,
   describePullRequest,

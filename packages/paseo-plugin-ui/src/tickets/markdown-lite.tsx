@@ -11,8 +11,8 @@ import {
   HostHighlightedText,
   HostRow,
   HostStack,
-  useHostTheme,
 } from "../index.js";
+import { useHostTheme } from "../theme-context.js";
 
 function renderInlineSpans(
   spans: MarkdownLiteSpan[],

@@ -8,8 +8,8 @@ import {
   HostButton,
   HostRow,
   HostStack,
-  useHostTheme,
 } from "../index.js";
+import { useHostTheme } from "../theme-context.js";
 
 export interface HostScopedLabelGroupProps {
   title: string;

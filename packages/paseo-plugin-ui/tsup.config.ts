@@ -10,7 +10,7 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   minify: true,
-  splitting: false,
+  splitting: true,
   treeshake: true,
   target: "es2022",
   external: [

@@ -6,8 +6,8 @@ import {
   HostBadge,
   HostRow,
   HostStatusDot,
-  useHostTheme,
 } from "../index.js";
+import { useHostTheme } from "../theme-context.js";
 import type { KanbanIssue } from "./types.js";
 
 /** Grouping mode for swimlane rows. */
