@@ -65,12 +65,28 @@ describe("contractSchemaToFields", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const schema = z.object({
       keep: z.boolean().default(true),
-      nested: z.object({ a: z.string() }),
-      tags: z.array(z.string()),
+      unsupported: z.union([z.string(), z.number()]),
     });
     const fields = contractSchemaToFields(schema);
     expect(fields.map((f) => f.key)).toEqual(["keep"]);
     expect(warn).toHaveBeenCalled();
+  });
+
+  it("maps array and object/record fields instead of skipping them (#1386)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const schema = z.object({
+      enrolledRepos: z.array(z.string()).default([]),
+      rotationPolicy: z.object({ roles: z.record(z.string(), z.string()) }).optional(),
+      providerConcurrencyLimits: z.record(z.string(), z.number()).default({}),
+    });
+    const fields = contractSchemaToFields(schema);
+    expect(fields.map((f) => f.key)).toEqual([
+      "enrolledRepos",
+      "rotationPolicy",
+      "providerConcurrencyLimits",
+    ]);
+    expect(fields.map((f) => f.kind)).toEqual(["array", "object", "object"]);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("returns an empty list for non-object schemas with a warning", () => {

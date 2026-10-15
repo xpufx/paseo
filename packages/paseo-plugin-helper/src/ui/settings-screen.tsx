@@ -69,7 +69,7 @@ export interface HelperSettingsScreenRegistrar {
   addSettingsScreen(contribution: HelperSettingsScreenContribution): PluginCleanup;
 }
 
-export type HelperSettingsFieldKind = "boolean" | "enum" | "string" | "number";
+export type HelperSettingsFieldKind = "boolean" | "enum" | "string" | "number" | "array" | "object";
 
 export interface HelperSettingsField {
   key: string;
@@ -161,7 +161,62 @@ function leafKind(leaf: any): HelperSettingsFieldKind | undefined {
   ) {
     return "string";
   }
+  if (type === "array" || type === "ZodArray" || ctor === "ZodArray") return "array";
+  if (
+    type === "object" ||
+    type === "ZodObject" ||
+    ctor === "ZodObject" ||
+    type === "record" ||
+    type === "ZodRecord" ||
+    ctor === "ZodRecord" ||
+    (typeof ctor === "string" &&
+      (ctor === "$ZodArray" ||
+        ctor === "$ZodObject" ||
+        ctor === "$ZodRecord" ||
+        ctor.endsWith("Array") ||
+        ctor.endsWith("Object") ||
+        ctor.endsWith("Record")))
+  ) {
+    // Distinguish arrays (handled above) from objects/records.
+    if (type === "array" || type === "ZodArray") return "array";
+    if (typeof ctor === "string" && ctor.endsWith("Array")) return "array";
+    return "object";
+  }
   return undefined;
+}
+
+function arrayValueToText(raw: unknown): string {
+  if (raw === undefined || raw === null) return "";
+  if (Array.isArray(raw)) {
+    return raw.map((item) => String(item)).join(", ");
+  }
+  return String(raw);
+}
+
+function textToArrayValue(text: string): string[] {
+  return text
+    .split(/[,\n]/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function objectValueToText(raw: unknown): string {
+  if (raw === undefined || raw === null) return "";
+  if (typeof raw === "string") return raw;
+  try {
+    return JSON.stringify(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
+function textToObjectValue(text: string): { ok: boolean; value?: unknown } {
+  if (text.trim() === "") return { ok: false };
+  try {
+    return { ok: true, value: JSON.parse(text) };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function enumValues(leaf: any): string[] | undefined {
@@ -313,6 +368,38 @@ function createSettingsScreenComponent<TSettings extends Record<string, any>>(
                   onValueChange={(value: string) =>
                     updateSettings({ [field.key]: value } as Partial<TSettings>)
                   }
+                />
+              );
+            }
+            if (field.kind === "array") {
+              const raw = settings[field.key];
+              const currentText = arrayValueToText(raw);
+              return (
+                <ui.SettingsInput
+                  key={field.key}
+                  label={field.label}
+                  hint={field.description}
+                  initialValue={currentText}
+                  onChangeText={(text: string) =>
+                    updateSettings({ [field.key]: textToArrayValue(text) } as Partial<TSettings>)
+                  }
+                />
+              );
+            }
+            if (field.kind === "object") {
+              const raw = settings[field.key];
+              const currentText = objectValueToText(raw);
+              return (
+                <ui.SettingsInput
+                  key={field.key}
+                  label={field.label}
+                  hint={field.description}
+                  initialValue={currentText}
+                  onChangeText={(text: string) => {
+                    const parsed = textToObjectValue(text);
+                    if (!parsed.ok) return;
+                    updateSettings({ [field.key]: parsed.value } as Partial<TSettings>);
+                  }}
                 />
               );
             }
