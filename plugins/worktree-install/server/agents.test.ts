@@ -1,6 +1,25 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { categorize, deriveState, inheritProjectFromParents, normalizeAgent, normalizeMetrics, resetWorkspaceProjectCache, workspaceProjectMap } from "./agents.js";
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { PluginStorage, installStorageGuard, ScopedStorageViolationError } from "paseo-plugin-helper/server";
+import contribute from "../index.server.js";
+import {
+  categorize,
+  deriveState,
+  getMutedReposStorage,
+  handleMuteRepo,
+  inheritProjectFromParents,
+  migrateLegacyMutedRepos,
+  normalizeAgent,
+  normalizeMetrics,
+  readMutedRepos,
+  resetWorkspaceProjectCache,
+  setMutedReposStorageForTesting,
+  workspaceProjectMap,
+} from "./agents.js";
 import { DEFAULT_PROJECT } from "../shared/derive.js";
 
 /**
@@ -198,5 +217,173 @@ describe("workspaceProjectMap", () => {
     const map = workspaceProjectMap({ forceRefresh: true });
     assert.equal(typeof map, "object");
     resetWorkspaceProjectCache();
+  });
+});
+
+describe("muted repos scoped storage", () => {
+  let tmpHome: string;
+  let prevPaseoHome: string | undefined;
+
+  beforeEach(() => {
+    prevPaseoHome = process.env.PASEO_HOME;
+    tmpHome = mkdtempSync(join(tmpdir(), "worktree-install-storage-test-"));
+    process.env.PASEO_HOME = tmpHome;
+    setMutedReposStorageForTesting(null);
+  });
+
+  afterEach(() => {
+    setMutedReposStorageForTesting(null);
+    if (prevPaseoHome !== undefined) {
+      process.env.PASEO_HOME = prevPaseoHome;
+    } else {
+      delete process.env.PASEO_HOME;
+    }
+    try {
+      rmSync(tmpHome, { recursive: true, force: true });
+    } catch {}
+  });
+
+  it("reads empty list when storage is newly initialized", () => {
+    const repos = readMutedRepos();
+    assert.deepEqual(repos, []);
+  });
+
+  it("writes and reads muted repos inside scoped storage", async () => {
+    const res = await handleMuteRepo({ repo: "xpufx-org/repo-a" });
+    assert.equal(res.ok, true);
+    assert.equal(res.isMuted, true);
+    assert.deepEqual(res.mutedRepos, ["xpufx-org/repo-a"]);
+
+    const storage = getMutedReposStorage();
+    assert.equal(storage.exists(), true);
+    assert.ok(storage.filePath.includes("worktree-install"));
+    assert.ok(storage.filePath.includes("muted-repos.json"));
+    assert.deepEqual(storage.read(), ["xpufx-org/repo-a"]);
+
+    // read back via readMutedRepos
+    assert.deepEqual(readMutedRepos(), ["xpufx-org/repo-a"]);
+
+    // unmute
+    const res2 = await handleMuteRepo({ repo: "xpufx-org/repo-a" });
+    assert.equal(res2.ok, true);
+    assert.equal(res2.isMuted, false);
+    assert.deepEqual(res2.mutedRepos, []);
+    assert.deepEqual(readMutedRepos(), []);
+  });
+
+  it("migrates legacy muted-repos file when scoped storage does not exist", () => {
+    const legacyDir = join(tmpHome, "plugin-state", "worktree-install");
+    mkdirSync(legacyDir, { recursive: true });
+    const legacyFile = join(legacyDir, "muted-repos.json");
+    writeFileSync(legacyFile, JSON.stringify(["xpufx-org/legacy-repo"]), "utf-8");
+
+    assert.equal(existsSync(legacyFile), true);
+
+    const migrated = readMutedRepos();
+    assert.deepEqual(migrated, ["xpufx-org/legacy-repo"]);
+
+    // Verify scoped storage was written
+    const storage = getMutedReposStorage();
+    assert.equal(storage.exists(), true);
+    assert.deepEqual(storage.read(), ["xpufx-org/legacy-repo"]);
+
+    // Verify legacy file was safely unlinked
+    assert.equal(existsSync(legacyFile), false);
+  });
+
+  it("does not overwrite scoped storage if scoped file already exists", () => {
+    const storage = getMutedReposStorage();
+    storage.write(["xpufx-org/new-repo"]);
+
+    const legacyDir = join(tmpHome, "plugin-state", "worktree-install");
+    mkdirSync(legacyDir, { recursive: true });
+    const legacyFile = join(legacyDir, "muted-repos.json");
+    writeFileSync(legacyFile, JSON.stringify(["xpufx-org/stale-repo"]), "utf-8");
+
+    migrateLegacyMutedRepos(storage);
+
+    assert.deepEqual(storage.read(), ["xpufx-org/new-repo"]);
+  });
+});
+
+describe("worktree-install storage guard", () => {
+  it("enables storage guard without throwing runtime exceptions", () => {
+    const tmpBase = mkdtempSync(join(tmpdir(), "worktree-guard-test-"));
+    let uninstall: (() => void) | null = null;
+    try {
+      uninstall = installStorageGuard({
+        pluginId: "worktree-install",
+        baseDir: tmpBase,
+        allowTmp: true,
+        mode: "enforce",
+      });
+      assert.equal(typeof uninstall, "function");
+
+      // Scoped write is allowed
+      const scopedDir = join(tmpBase, "worktree-install");
+      fs.mkdirSync(scopedDir, { recursive: true });
+      const testFile = join(scopedDir, "muted-repos.json");
+      fs.writeFileSync(testFile, JSON.stringify(["test/repo"]), "utf-8");
+      assert.equal(existsSync(testFile), true);
+    } finally {
+      if (uninstall) uninstall();
+      try {
+        rmSync(tmpBase, { recursive: true, force: true });
+      } catch {}
+    }
+  });
+
+  it("blocks writes outside permitted scopes when guard is active", () => {
+    const tmpBase = mkdtempSync(join(tmpdir(), "worktree-guard-blocked-"));
+    const fakeHome = mkdtempSync(join(tmpdir(), "fake-home-"));
+    let uninstall: (() => void) | null = null;
+    try {
+      uninstall = installStorageGuard({
+        pluginId: "worktree-install",
+        baseDir: tmpBase,
+        allowTmp: false,
+        mode: "enforce",
+      });
+
+      const forbiddenFile = join(fakeHome, ".paseo", "stray.json");
+      assert.throws(
+        () => {
+          fs.writeFileSync(forbiddenFile, "forbidden");
+        },
+        (err: unknown) => {
+          return (
+            err instanceof ScopedStorageViolationError &&
+            err.code === "ERR_SCOPED_STORAGE_VIOLATION" &&
+            err.message.includes("Scoped storage violation")
+          );
+        },
+      );
+    } finally {
+      if (uninstall) uninstall();
+      try {
+        rmSync(tmpBase, { recursive: true, force: true });
+        rmSync(fakeHome, { recursive: true, force: true });
+      } catch {}
+    }
+  });
+});
+
+describe("worktree-install index.server contribute", () => {
+  it("initializes server contribution and disposal hook cleanly", () => {
+    const handledContracts: unknown[] = [];
+    const mockContext = {
+      handle: (contract: unknown) => {
+        handledContracts.push(contract);
+      },
+    } as unknown as PluginServerContext;
+
+    const cleanup = contribute(mockContext);
+    assert.equal(typeof cleanup, "function");
+    assert.equal(handledContracts.length, 14);
+
+    // Call cleanup hook to verify uninstall hook runs without throwing
+    assert.doesNotThrow(() => {
+      cleanup();
+    });
   });
 });

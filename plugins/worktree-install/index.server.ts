@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { installStorageGuard } from "paseo-plugin-helper/server";
 import {
   addOrchestratorContract,
   archiveAgentContract,
@@ -24,6 +25,7 @@ import {
   handleMuteRepo,
   handleReplaceFrontDesk,
   handleReplaceOrchestrator,
+  migrateLegacyMutedRepos,
 } from "./server/agents.js";
 import { handleTickets } from "./server/tickets.js";
 import {
@@ -35,6 +37,9 @@ import {
 } from "./server/queue.js";
 
 export default function contribute(server: PluginServerContext) {
+  migrateLegacyMutedRepos();
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "worktree-install" });
+
   server.handle(fleetContract, handleFleet);
   server.handle(ticketBoardContract, handleTickets);
   server.handle(routerStatusContract, handleRouterStatus);
@@ -50,10 +55,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(replaceOrchestratorContract, handleReplaceOrchestrator);
   server.handle(muteRepoContract, handleMuteRepo);
 
-  // The host throws "Plugin contribution must return a cleanup function" when a
-  // server contribution returns undefined (packages/server/src/server/plugins/
-  // plugin-process.ts). `PluginServerContext.handle` returns void and exposes no
-  // unregister, so there is nothing to tear down; returning a no-op satisfies the
-  // contract the same way the plugin scaffold does.
-  return () => {};
+  return () => {
+    uninstallStorageGuard();
+  };
 }

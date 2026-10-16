@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmdirSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
+import { PluginStorage } from "paseo-plugin-helper/server";
 import type {
   AgentCategory,
   AgentMetrics,
@@ -339,6 +340,54 @@ export async function handleReplaceOrchestrator(
   return handleAddOrchestrator(input, context);
 }
 
+let _mutedReposStorage: PluginStorage<string[]> | null = null;
+
+export function getMutedReposStorage(): PluginStorage<string[]> {
+  if (!_mutedReposStorage) {
+    _mutedReposStorage = new PluginStorage<string[]>("worktree-install", "muted-repos.json", {
+      defaultData: [],
+    });
+  }
+  return _mutedReposStorage;
+}
+
+export function setMutedReposStorageForTesting(storage: PluginStorage<string[]> | null): void {
+  _mutedReposStorage = storage;
+}
+
+function getLegacyMutedFile(): string {
+  if (process.env.PASEO_HOME) {
+    const fromPaseoHome = join(process.env.PASEO_HOME, "plugin-state", "worktree-install", "muted-repos.json");
+    if (existsSync(fromPaseoHome)) return fromPaseoHome;
+  }
+  return join(homedir(), ".paseo", "plugin-state", "worktree-install", "muted-repos.json");
+}
+
+export function migrateLegacyMutedRepos(storage: PluginStorage<string[]> = getMutedReposStorage()): void {
+  try {
+    if (storage.exists()) return;
+    const legacyPath = getLegacyMutedFile();
+    if (!existsSync(legacyPath)) return;
+
+    const raw = readFileSync(legacyPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    const repos = Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === "string") : [];
+    storage.write(repos);
+
+    try {
+      unlinkSync(legacyPath);
+      const legacyDir = join(legacyPath, "..");
+      if (existsSync(legacyDir) && readdirSync(legacyDir).length === 0) {
+        rmdirSync(legacyDir);
+      }
+    } catch {
+      // Non-fatal if legacy cleanup fails
+    }
+  } catch {
+    // Non-fatal if legacy migration fails
+  }
+}
+
 export async function handleMuteRepo(input: {
   repo: string;
   muted?: boolean;
@@ -348,28 +397,22 @@ export async function handleMuteRepo(input: {
   const next = input.muted ?? !current.includes(input.repo);
   const updated = next ? Array.from(new Set([...current, input.repo])) : current.filter((r) => r !== input.repo);
   try {
-    const { mkdirSync, writeFileSync } = await import("node:fs");
-    mkdirSync(stateDir(), { recursive: true });
-    writeFileSync(mutedFile(), `${JSON.stringify(updated, null, 2)}\n`, "utf-8");
+    const storage = getMutedReposStorage();
+    storage.write(updated);
   } catch (err: unknown) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
   return { ok: true, isMuted: next, mutedRepos: updated, message: `Repo ${input.repo} ${next ? "muted" : "unmuted"}` };
 }
 
-function stateDir(): string {
-  return join(homedir(), ".paseo", "plugin-state", "worktree-install");
-}
-
-function mutedFile(): string {
-  return join(stateDir(), "muted-repos.json");
-}
-
 export function readMutedRepos(): string[] {
   try {
-    if (!existsSync(mutedFile())) return [];
-    const parsed = JSON.parse(readFileSync(mutedFile(), "utf-8"));
-    return Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === "string") : [];
+    const storage = getMutedReposStorage();
+    if (!storage.exists()) {
+      migrateLegacyMutedRepos(storage);
+    }
+    const data = storage.read();
+    return Array.isArray(data) ? data.filter((r): r is string => typeof r === "string") : [];
   } catch {
     return [];
   }

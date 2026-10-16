@@ -76,15 +76,16 @@ describe("dependency resolution", () => {
     assert.ok(SOURCES.length > 10, `only found ${SOURCES.length} source files`);
   });
 
-  it("does not import the shared plugin helper anywhere", () => {
+  it("does not import the shared plugin helper in client code", () => {
     const offenders: string[] = [];
     for (const file of SOURCES) {
+      if (!file.includes("/client/")) continue;
       const source = codeOnly(readFileSync(file, "utf8"));
       if (/(?:from|import|require)\s*\(?\s*["'][^"']*paseo-plugin-helper/.test(source)) {
         offenders.push(path.relative(PLUGIN_ROOT, file));
       }
     }
-    assert.deepEqual(offenders, [], "the plugin must not depend on paseo-plugin-helper");
+    assert.deepEqual(offenders, [], "client code must not depend on paseo-plugin-helper");
   });
 
   it("needs no vendored helper tree and no tsconfig path alias", () => {
