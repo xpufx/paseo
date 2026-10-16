@@ -1,7 +1,7 @@
 import React from "react";
 import { Platform, Pressable, Text, type StyleProp, type ViewStyle, View } from "react-native";
 import { scopeOfLabel } from "@xpufx/backend-tickets/client";
-import { useHostTheme } from "../index.js";
+import { useHostTheme } from "../theme-context.js";
 
 /**
  * Scoped label chip rendered as a GitLab-style two-tone pill.
