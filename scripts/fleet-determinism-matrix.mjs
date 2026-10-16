@@ -554,7 +554,7 @@ const PARTS = [
   },
   {
     file: `${PLUGIN}/server/playbooks.ts`,
-    part: "Playbook state machine profiles, canonical stage progression model, and storage (#1403)",
+    part: "Playbook state machine profiles, canonical stage progression model, transition guards, and storage (#1403, #1404)",
     layer: "server",
     label: DETERMINISTIC,
     anchors: {
@@ -562,6 +562,10 @@ const PARTS = [
         "DEFAULT_LIGHT_STAGES",
         "DEFAULT_MEDIUM_STAGES",
         "DEFAULT_PLAYBOOKS_CONFIG",
+        "DEFAULT_AUTHORIZED_OPERATORS",
+        "isStageLabel",
+        "isAuthorizedOperator",
+        "evaluateStageTransition",
         "loadSavedPlaybooks",
         "savePlaybooks",
         "validatePlaybookProfile",
@@ -571,8 +575,9 @@ const PARTS = [
       [`playbooks.ts:19-214`, "static stage definitions mapping actor, preconditions, artifacts, and next stage"],
       [`playbooks.ts:241-280`, "pure stage progression and actor classification predicates"],
       [`playbooks.ts:285-304`, "deterministic stage validation ensuring complete canonical pipeline"],
+      [`playbooks.ts:511-820`, "deterministic stage transition evaluator, artifact verifier, and sender check (#1404)"],
     ],
-    note: "Defines declarative playbook profiles (Light full autonomy, Medium human-in-the-loop gates) and typed stage progression contracts.",
+    note: "Defines declarative playbook profiles (Light full autonomy, Medium human-in-the-loop gates), typed stage progression contracts, deterministic transition guards, artifact verification, and authorized operator sender checks.",
   },
   {
     file: `${PLUGIN}/server/rotation.ts`,
@@ -1362,7 +1367,7 @@ const SUITE_NOTES = {
   "shared/contracts.test.ts": "Contract schema validation",
   "shared/sort-filter.test.ts": "Filter, sort, gauge and grouping functions",
   "server/actions.test.ts": "Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing",
-  "server/playbooks.test.ts": "Playbook profiles, canonical stage progression, actor classification, and RPC handlers (#1403)"
+  "server/playbooks.test.ts": "Playbook profiles, canonical stage progression, transition guards, human-in-the-loop gates, and RPC handlers (#1403, #1404)"
 };
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import {
   DEFAULT_LIGHT_STAGES,
   DEFAULT_MEDIUM_STAGES,
   DEFAULT_PLAYBOOKS_CONFIG,
+  DEFAULT_AUTHORIZED_OPERATORS,
   defaultPlaybooksConfigPath,
   getOrderedStages,
   getPlaybookProfile,
@@ -26,13 +27,26 @@ import {
   isAutonomousStage,
   isHumanActor,
   isHumanGatedStage,
+  isStageLabel,
+  isAuthorizedOperator,
+  getStagePredecessor,
+  getStageSuccessor,
+  getStageRejection,
+  verifyStageArtifact,
+  evaluateStageTransition,
+  formatTransitionRejectionComment,
+  formatHumanGateSummaryComment,
+  handleUppidiEvaluateTransition,
   loadSavedPlaybooks,
   parseActor,
   resetPlaybooksStorageInstance,
   resolveNextStage,
   savePlaybooks,
   validatePlaybookProfile,
+  type ArtifactVerificationContext,
 } from "./playbooks.js";
+import { HookRouter, handleSpawnAgent } from "./hook-router.js";
+import { appendAuditReceipt } from "./audit-receipts.js";
 
 const WORKSPACE_TMP = path.join(process.cwd(), ".tmp");
 const tempDirs: string[] = [];
@@ -433,5 +447,629 @@ describe("RPC handlers: handleUppidiPlaybooks & handleUppidiSetPlaybook (#1403)"
     });
     assert.equal(res.ok, false);
     assert.ok(res.error);
+  });
+});
+
+describe("deterministic stage transition guards & artifact enforcement (#1404)", () => {
+  const light = DEFAULT_PLAYBOOKS_CONFIG.profiles.Light;
+  const medium = DEFAULT_PLAYBOOKS_CONFIG.profiles.Medium;
+
+  it("distinguishes valid stage labels with isStageLabel", () => {
+    assert.equal(isStageLabel("stage/spec"), true);
+    assert.equal(isStageLabel("stage/merge"), true);
+    assert.equal(isStageLabel("stage/verify"), true);
+    assert.equal(isStageLabel("stage/unknown"), false);
+    assert.equal(isStageLabel("state/review"), false);
+    assert.equal(isStageLabel(null), false);
+    assert.equal(isStageLabel(123), false);
+  });
+
+  it("verifies authorized operator identity with isAuthorizedOperator", () => {
+    assert.equal(isAuthorizedOperator("okcode"), true);
+    assert.equal(isAuthorizedOperator("oktay"), true);
+    assert.equal(isAuthorizedOperator("OKCODE"), true);
+    assert.equal(isAuthorizedOperator("xpufx"), false);
+    assert.equal(isAuthorizedOperator("autonomous-agent"), false);
+    assert.equal(isAuthorizedOperator("random-user"), false);
+    assert.equal(isAuthorizedOperator("alice", ["alice", "bob"]), true);
+    assert.equal(isAuthorizedOperator("xpufx", ["xpufx"]), false);
+  });
+
+  it("resolves stage predecessors, successors, and rejections correctly", () => {
+    assert.equal(getStagePredecessor("stage/spec", light), null);
+    assert.equal(getStagePredecessor("stage/spec-audit", light), "stage/spec");
+    assert.equal(getStagePredecessor("stage/merge", light), "stage/review");
+    assert.equal(getStagePredecessor("stage/verify", light), "stage/merge");
+
+    assert.equal(getStageSuccessor("stage/spec", light), "stage/spec-audit");
+    assert.equal(getStageSuccessor("stage/review", light), "stage/merge");
+    assert.equal(getStageRejection("stage/review", light), "stage/code");
+    assert.equal(getStageRejection("stage/spec", light), null);
+  });
+
+  it("validates exit artifact: spec_checklist requires markdown checklist", () => {
+    const emptyCtx: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42, issueBody: "No checklist here" };
+    const validCtx: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42, issueBody: "## Spec\n- [ ] Task 1\n- [x] Task 2" };
+    const commentCtx: ArtifactVerificationContext = {
+      repo: "org/repo",
+      issueNumber: 42,
+      issueBody: "Details",
+      comments: [{ body: "Here is the plan:\n- [ ] Step 1" }],
+    };
+
+    assert.equal(verifyStageArtifact("spec_checklist", "stage/spec", emptyCtx, light).verified, false);
+    assert.equal(verifyStageArtifact("spec_checklist", "stage/spec", validCtx, light).verified, true);
+    assert.equal(verifyStageArtifact("spec_checklist", "stage/spec", commentCtx, light).verified, true);
+  });
+
+  it("validates exit artifact: spec_audit_approval requires operator in Medium and auditor in Light", () => {
+    const unapprovedCtx: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42 };
+    const operatorCtx: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42, actor: "okcode" };
+    const auditorCtx: ArtifactVerificationContext = {
+      repo: "org/repo",
+      issueNumber: 42,
+      actor: "xpufx",
+      comments: [{ body: "<!-- spec-audit:approved --> LGTM" }],
+    };
+
+    // In Medium, spec-audit is human-gated
+    assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", unapprovedCtx, medium).verified, false);
+    assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", auditorCtx, medium).verified, false);
+    assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", operatorCtx, medium).verified, true);
+
+    // In Light, spec-audit is autonomous
+    assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", unapprovedCtx, light).verified, false);
+    assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", auditorCtx, light).verified, true);
+  });
+
+  it("validates exit artifact: worktree_provisioned requires wip label or worktree comment", () => {
+    const unprovisioned: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42 };
+    const withLabel: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42, labels: ["state/wip"] };
+    const withComment: ArtifactVerificationContext = {
+      repo: "org/repo",
+      issueNumber: 42,
+      comments: [{ body: "Workspace: /home/dev-user/.paseo/worktrees/abc/feat-1404" }],
+    };
+
+    assert.equal(verifyStageArtifact("worktree_provisioned", "stage/dispatch", unprovisioned, light).verified, false);
+    assert.equal(verifyStageArtifact("worktree_provisioned", "stage/dispatch", withLabel, light).verified, true);
+    assert.equal(verifyStageArtifact("worktree_provisioned", "stage/dispatch", withComment, light).verified, true);
+  });
+
+  it("validates exit artifact: pull_request requires linked PR", () => {
+    const noPr: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42 };
+    const withPr: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42, pullRequest: { number: 101, merged: false } };
+    const withPrNum: ArtifactVerificationContext = { repo: "org/repo", issueNumber: 42, prNumber: 101 };
+
+    assert.equal(verifyStageArtifact("pull_request", "stage/code", noPr, light).verified, false);
+    assert.equal(verifyStageArtifact("pull_request", "stage/code", withPr, light).verified, true);
+    assert.equal(verifyStageArtifact("pull_request", "stage/code", withPrNum, light).verified, true);
+  });
+
+  it("validates exit artifact: audit_receipt requires approved aud_* receipt", () => {
+    const tempDir = makeTempDir("playbooks-audit-art-");
+    const auditsFile = path.join(tempDir, "audits.jsonl");
+
+    const unapproved: ArtifactVerificationContext = {
+      repo: "xpufx-org/paseo",
+      issueNumber: 42,
+      prNumber: 99,
+      headCommit: "commit-abc",
+      auditsFilePath: auditsFile,
+    };
+    assert.equal(verifyStageArtifact("audit_receipt", "stage/review", unapproved, light).verified, false);
+
+    // Record non-approved receipt (changes_requested)
+    appendAuditReceipt(
+      {
+        repo: "xpufx-org/paseo",
+        pr: 99,
+        headCommit: "commit-abc",
+        iteration: 1,
+        actors: {
+          auditor: { agentId: "auditor-1", role: "reviewer", model: "test" },
+          author: { agentId: "worker-1", role: "coding-agent" },
+        },
+        verdict: "changes_requested",
+        taxonomy: ["test_failure"],
+        summary: "Need changes",
+        verification: {
+          workerClaimed: "passed",
+          auditorVerified: "failed",
+          checksRun: ["typecheck"],
+          isolatedEnv: true,
+        },
+      },
+      { filePath: auditsFile },
+    );
+    assert.equal(verifyStageArtifact("audit_receipt", "stage/review", unapproved, light).verified, false);
+
+    // Record approved receipt
+    appendAuditReceipt(
+      {
+        repo: "xpufx-org/paseo",
+        pr: 99,
+        headCommit: "commit-abc",
+        iteration: 1,
+        actors: {
+          auditor: { agentId: "auditor-1", role: "reviewer", model: "test" },
+          author: { agentId: "worker-1", role: "coding-agent" },
+        },
+        verdict: "approved",
+        taxonomy: [],
+        summary: "Looks good",
+        verification: {
+          workerClaimed: "passed",
+          auditorVerified: "passed",
+          checksRun: ["typecheck"],
+          isolatedEnv: true,
+        },
+      },
+      { filePath: auditsFile },
+    );
+    assert.equal(verifyStageArtifact("audit_receipt", "stage/review", unapproved, light).verified, true);
+  });
+
+  it("rejects illegal stage skip from stage/spec to stage/merge", () => {
+    const decision = evaluateStageTransition({
+      profile: light,
+      fromStage: "stage/spec",
+      toStage: "stage/merge",
+      actor: "xpufx",
+      context: { repo: "org/repo", issueNumber: 1 },
+    });
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.actionTaken, "rejected");
+    assert.match(decision.reason, /Illegal stage transition from stage\/spec to stage\/merge/);
+  });
+
+  it("rejects transition to stage/merge when audit receipt is missing", () => {
+    const decision = evaluateStageTransition({
+      profile: light,
+      fromStage: "stage/review",
+      toStage: "stage/merge",
+      actor: "xpufx",
+      context: { repo: "org/repo", issueNumber: 1, prNumber: 5, headCommit: "sha-1" },
+    });
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.missingArtifact, "audit_receipt");
+    assert.match(decision.reason, /missing required exit artifact 'audit_receipt'/);
+  });
+
+  it("approves transition to stage/merge when approved aud_* receipt is provided", () => {
+    const decision = evaluateStageTransition({
+      profile: light,
+      fromStage: "stage/review",
+      toStage: "stage/merge",
+      actor: "xpufx",
+      context: {
+        repo: "org/repo",
+        issueNumber: 1,
+        prNumber: 5,
+        headCommit: "sha-1",
+        auditReceipt: {
+          v: 1,
+          auditId: "aud_12345",
+          timestamp: new Date().toISOString(),
+          repo: "org/repo",
+          pr: 5,
+          headCommit: "sha-1",
+          iteration: 1,
+          actors: {
+            auditor: { agentId: "aud-1", role: "reviewer", model: "model" },
+            author: { agentId: "worker-1", role: "coding-agent" },
+          },
+          verdict: "approved",
+          taxonomy: [],
+          verification: {
+            workerClaimed: "passed",
+            auditorVerified: "passed",
+            checksRun: ["typecheck"],
+            isolatedEnv: true,
+          },
+          summary: "Pre-flight audit passed",
+        },
+      },
+    });
+    assert.equal(decision.allowed, true);
+    assert.equal(decision.actionTaken, "allowed");
+    assert.equal(decision.verifiedArtifact, "audit_receipt");
+  });
+
+  it("allows backward stage rejection transitions", () => {
+    const decision = evaluateStageTransition({
+      profile: light,
+      fromStage: "stage/review",
+      toStage: "stage/code",
+      actor: "xpufx",
+      context: { repo: "org/repo", issueNumber: 1 },
+    });
+    assert.equal(decision.allowed, true);
+    assert.match(decision.reason, /rejection transition/);
+  });
+
+  it("formats clean rejection and human gate summary comments", () => {
+    const rejection = formatTransitionRejectionComment({
+      allowed: false,
+      reason: "Missing aud_* receipt",
+      fromStage: "stage/review",
+      toStage: "stage/merge",
+      profile: "Light",
+      requiresHumanGate: false,
+      actor: "xpufx",
+      isOperatorAuthorized: false,
+      missingArtifact: "audit_receipt",
+    });
+    assert.match(rejection, /### 🛑 Stage Transition Rejected: Illegal Transition to `stage\/merge`/);
+    assert.match(rejection, /Missing Required Artifact/);
+
+    const humanGate = formatHumanGateSummaryComment("stage/spec-audit", medium);
+    assert.match(humanGate, /### ⏸️ Human Gate Active: `stage\/spec-audit` Awaiting Operator Action/);
+    assert.match(humanGate, /human:operator/);
+  });
+
+  it("handleUppidiEvaluateTransition RPC evaluates transitions correctly", async () => {
+    const res = await handleUppidiEvaluateTransition({
+      repo: "xpufx-org/paseo",
+      issue: 42,
+      fromStage: "stage/spec",
+      toStage: "stage/merge",
+      actor: "xpufx",
+      profile: "Light",
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.decision.allowed, false);
+    assert.match(res.decision.reason, /Illegal stage transition/);
+  });
+});
+
+describe("human-in-the-loop gating & sender verification (#1404)", () => {
+  const medium = DEFAULT_PLAYBOOKS_CONFIG.profiles.Medium;
+
+  it("identifies human-gated stages in Medium profile (spec-audit, review, verify)", () => {
+    assert.equal(isHumanGatedStage(medium.stages["stage/spec-audit"]), true);
+    assert.equal(isHumanGatedStage(medium.stages["stage/review"]), true);
+    assert.equal(isHumanGatedStage(medium.stages["stage/verify"]), true);
+    assert.equal(isHumanGatedStage(medium.stages["stage/spec"]), false);
+    assert.equal(isHumanGatedStage(medium.stages["stage/dispatch"]), false);
+    assert.equal(isHumanGatedStage(medium.stages["stage/code"]), false);
+    assert.equal(isHumanGatedStage(medium.stages["stage/merge"]), false);
+  });
+
+  it("flags target stage as human_gated when entering spec-audit in Medium profile", () => {
+    const decision = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/spec",
+      toStage: "stage/spec-audit",
+      actor: "xpufx",
+      context: {
+        repo: "org/repo",
+        issueNumber: 1,
+        issueBody: "- [ ] Write specs",
+      },
+    });
+    assert.equal(decision.allowed, true);
+    assert.equal(decision.requiresHumanGate, true);
+    assert.equal(decision.actionTaken, "human_gated");
+    assert.match(decision.reason, /human-gated/);
+  });
+
+  it("rejects unauthorized actor (xpufx) attempting to advance out of human-gated stage in Medium profile", () => {
+    const decision = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/spec-audit",
+      toStage: "stage/dispatch",
+      actor: "xpufx",
+      context: {
+        repo: "org/repo",
+        issueNumber: 1,
+        comments: [{ body: "- [x] Done" }],
+      },
+    });
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.isOperatorAuthorized, false);
+    assert.equal(decision.actionTaken, "unauthorized");
+    assert.match(decision.reason, /requires an authorized operator signature; actor 'xpufx' is unauthorized/);
+  });
+
+  it("allows authorized operator (okcode / oktay) to advance out of human-gated stage in Medium profile", () => {
+    const decision = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/spec-audit",
+      toStage: "stage/dispatch",
+      actor: "okcode",
+      context: {
+        repo: "org/repo",
+        issueNumber: 1,
+        actor: "okcode",
+        comments: [{ body: "/approve spec checklist" }],
+      },
+    });
+    assert.equal(decision.allowed, true);
+    assert.equal(decision.isOperatorAuthorized, true);
+    assert.equal(decision.actionTaken, "allowed");
+    assert.match(decision.reason, /approved/);
+  });
+});
+
+describe("HookRouter stage guard & human gate integration (#1404)", () => {
+  it("intercepts illegal stage skip via runStageTransitionGuard and returns rejection result", async () => {
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const payload = {
+      action: "labeled",
+      repository: { full_name: "xpufx-org/paseo" },
+      issue: { number: 42, labels: [{ name: "stage/spec" }, { name: "playbook/light" }] },
+      label: { name: "stage/merge" },
+      sender: { login: "xpufx" },
+    };
+
+    const outcome = await router.runStageTransitionGuard(payload, "issues");
+    assert.equal(outcome.acted, true);
+    assert.equal(outcome.allowed, false);
+    assert.equal(outcome.rejected, true);
+    assert.match(outcome.reason, /Illegal stage transition/);
+  });
+
+  it("intercepts stage/merge transition without audit receipt and rejects", async () => {
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const payload = {
+      action: "labeled",
+      repository: { full_name: "xpufx-org/paseo" },
+      issue: { number: 42, labels: [{ name: "stage/review" }, { name: "playbook/light" }] },
+      label: { name: "stage/merge" },
+      sender: { login: "xpufx" },
+    };
+
+    const outcome = await router.runStageTransitionGuard(payload, "issues");
+    assert.equal(outcome.acted, true);
+    assert.equal(outcome.allowed, false);
+    assert.equal(outcome.rejected, true);
+    assert.match(outcome.reason, /missing required exit artifact 'audit_receipt'/);
+  });
+
+  it("activates human gate on human-gated stage transition and halts worker spawning", async () => {
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const payload = {
+      action: "labeled",
+      repository: { full_name: "xpufx-org/paseo" },
+      issue: {
+        number: 100,
+        body: "- [ ] Checklist item 1",
+        labels: [{ name: "stage/spec" }, { name: "playbook/medium" }],
+      },
+      label: { name: "stage/spec-audit" },
+      sender: { login: "xpufx" },
+    };
+
+    const outcome = await router.runStageTransitionGuard(payload, "issues");
+    assert.equal(outcome.acted, true);
+    assert.equal(outcome.allowed, true);
+    assert.equal(outcome.humanGated, true);
+    assert.equal(router.isIssueHumanGated("xpufx-org/paseo", 100), true);
+
+    // Attempting to spawn worker on this gated ticket is halted
+    let spawnAttempted = false;
+    const spawnResult = await handleSpawnAgent(
+      { role: "worker", repo: "xpufx-org/paseo", issueIndex: 100 },
+      {
+        spawnAgent: async () => {
+          spawnAttempted = true;
+          return { id: "should-not-spawn" };
+        },
+        isIssueHumanGated: (r, idx) => router.isIssueHumanGated(r, idx),
+      },
+    );
+
+    assert.equal(spawnResult.ok, false);
+    assert.equal(spawnResult.errorCode, "human_gate_active");
+    assert.match(spawnResult.error || "", /gated by human:operator; autonomous agent spawning halted/);
+    assert.equal(spawnAttempted, false);
+  });
+
+  it("clears human gate when authorized operator advances the stage", async () => {
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    router.setHumanGate("xpufx-org/paseo", 100, "stage/spec-audit", "Medium");
+    assert.equal(router.isIssueHumanGated("xpufx-org/paseo", 100), true);
+
+    const advancePayload = {
+      action: "labeled",
+      repository: { full_name: "xpufx-org/paseo" },
+      issue: {
+        number: 100,
+        labels: [{ name: "stage/spec-audit" }, { name: "playbook/medium" }],
+      },
+      label: { name: "stage/dispatch" },
+      sender: { login: "okcode" },
+    };
+
+    const outcome = await router.runStageTransitionGuard(advancePayload, "issues");
+    assert.equal(outcome.acted, true);
+    assert.equal(outcome.allowed, true);
+    assert.equal(router.isIssueHumanGated("xpufx-org/paseo", 100), false);
+  });
+});
+
+describe("Light vs Medium simulated end-to-end lifecycle harness (#1404)", () => {
+  const light = DEFAULT_PLAYBOOKS_CONFIG.profiles.Light;
+  const medium = DEFAULT_PLAYBOOKS_CONFIG.profiles.Medium;
+
+  it("simulates full Light profile stage progression from spec to done with autonomous actors", () => {
+    let currentStage: any = "stage/spec";
+    const context: ArtifactVerificationContext = {
+      repo: "xpufx-org/paseo",
+      issueNumber: 50,
+      issueBody: "- [ ] Step 1\n- [ ] Step 2",
+      actor: "xpufx",
+      comments: [
+        { body: "<!-- spec-audit:approved --> Specification approved by auditor" },
+        { body: "Workspace: /worktrees/wks_123" },
+        { body: "PR Opened: #200" },
+        { body: "Squash merge completed to main" },
+      ],
+      labels: ["state/wip", "confirmed-done"],
+      pullRequest: { number: 200, headCommit: "head-sha", merged: true },
+      auditReceipt: {
+        v: 1,
+        auditId: "aud_full_light",
+        timestamp: new Date().toISOString(),
+        repo: "xpufx-org/paseo",
+        pr: 200,
+        headCommit: "head-sha",
+        iteration: 1,
+        actors: {
+          auditor: { agentId: "auditor-1", role: "reviewer", model: "flash" },
+          author: { agentId: "worker-1", role: "coding-agent" },
+        },
+        verdict: "approved",
+        taxonomy: [],
+        verification: {
+          workerClaimed: "passed",
+          auditorVerified: "passed",
+          checksRun: ["typecheck"],
+          isolatedEnv: true,
+        },
+        summary: "Audit approved",
+      },
+    };
+
+    // Progression: spec -> spec-audit -> dispatch -> code -> review -> merge -> verify
+    const steps: Array<[any, any]> = [
+      ["stage/spec", "stage/spec-audit"],
+      ["stage/spec-audit", "stage/dispatch"],
+      ["stage/dispatch", "stage/code"],
+      ["stage/code", "stage/review"],
+      ["stage/review", "stage/merge"],
+      ["stage/merge", "stage/verify"],
+    ];
+
+    for (const [from, to] of steps) {
+      const decision = evaluateStageTransition({
+        profile: light,
+        fromStage: from,
+        toStage: to,
+        actor: "xpufx",
+        context,
+      });
+      assert.equal(decision.allowed, true, `Transition ${from} -> ${to} should be allowed in Light`);
+      assert.equal(decision.requiresHumanGate, false, `Stage ${to} should not be human gated in Light`);
+      currentStage = to;
+    }
+    assert.equal(currentStage, "stage/verify");
+  });
+
+  it("simulates full Medium profile stage progression with human gates at spec-audit, review, verify", () => {
+    const context: ArtifactVerificationContext = {
+      repo: "xpufx-org/paseo",
+      issueNumber: 60,
+      issueBody: "- [ ] Step 1\n- [ ] Step 2",
+      comments: [
+        { body: "Workspace: /worktrees/wks_456" },
+        { body: "PR Opened: #300" },
+      ],
+      labels: ["state/wip", "confirmed-done"],
+      pullRequest: { number: 300, headCommit: "head-300", merged: true, approved: true },
+      auditReceipt: {
+        v: 1,
+        auditId: "aud_medium_1",
+        timestamp: new Date().toISOString(),
+        repo: "xpufx-org/paseo",
+        pr: 300,
+        headCommit: "head-300",
+        iteration: 1,
+        actors: {
+          auditor: { agentId: "operator", role: "operator", model: "human" },
+          author: { agentId: "worker-1", role: "coding-agent" },
+        },
+        verdict: "approved",
+        taxonomy: [],
+        verification: {
+          workerClaimed: "passed",
+          auditorVerified: "passed",
+          checksRun: ["typecheck"],
+          isolatedEnv: true,
+        },
+        summary: "Operator PR audit approved",
+      },
+    };
+
+    // Step 1: spec -> spec-audit (human gate activates)
+    const step1 = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/spec",
+      toStage: "stage/spec-audit",
+      actor: "xpufx",
+      context,
+    });
+    assert.equal(step1.allowed, true);
+    assert.equal(step1.requiresHumanGate, true);
+    assert.equal(step1.actionTaken, "human_gated");
+
+    // Step 2: Attempting advance by xpufx fails
+    const step2Unauth = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/spec-audit",
+      toStage: "stage/dispatch",
+      actor: "xpufx",
+      context,
+    });
+    assert.equal(step2Unauth.allowed, false);
+    assert.equal(step2Unauth.actionTaken, "unauthorized");
+
+    // Step 2: Authorized operator advances to dispatch
+    const step2Auth = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/spec-audit",
+      toStage: "stage/dispatch",
+      actor: "okcode",
+      context: { ...context, actor: "okcode" },
+    });
+    assert.equal(step2Auth.allowed, true);
+    assert.equal(step2Auth.requiresHumanGate, false);
+
+    // Step 3: dispatch -> code (autonomous)
+    const step3 = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/dispatch",
+      toStage: "stage/code",
+      actor: "xpufx",
+      context,
+    });
+    assert.equal(step3.allowed, true);
+    assert.equal(step3.requiresHumanGate, false);
+
+    // Step 4: code -> review (human gate activates)
+    const step4 = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/code",
+      toStage: "stage/review",
+      actor: "xpufx",
+      context,
+    });
+    assert.equal(step4.allowed, true);
+    assert.equal(step4.requiresHumanGate, true);
+    assert.equal(step4.actionTaken, "human_gated");
+
+    // Step 5: Advance review -> merge by authorized operator
+    const step5 = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/review",
+      toStage: "stage/merge",
+      actor: "oktay",
+      context: { ...context, actor: "oktay" },
+    });
+    assert.equal(step5.allowed, true);
+    assert.equal(step5.requiresHumanGate, false);
+
+    // Step 6: merge -> verify (human gate activates)
+    const step6 = evaluateStageTransition({
+      profile: medium,
+      fromStage: "stage/merge",
+      toStage: "stage/verify",
+      actor: "xpufx",
+      context,
+    });
+    assert.equal(step6.allowed, true);
+    assert.equal(step6.requiresHumanGate, true);
+    assert.equal(step6.actionTaken, "human_gated");
   });
 });

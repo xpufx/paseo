@@ -122,6 +122,27 @@ import {
   type AuditMergeReconciliation,
 } from "./audit-receipts.js";
 import { getActiveAgentCountByProvider, normalizeProviderKey } from "./agents.js";
+import {
+  DEFAULT_AUTHORIZED_OPERATORS,
+  isAuthorizedOperator,
+  isStageLabel,
+  getStagePredecessor,
+  getPlaybookProfile,
+  loadSavedPlaybooks,
+  evaluateStageTransition,
+  verifyStageArtifact,
+  formatTransitionRejectionComment,
+  formatHumanGateSummaryComment,
+  isHumanGatedStage,
+  type ArtifactVerificationContext,
+  type StageTransitionDecision,
+} from "./playbooks.js";
+import {
+  type PlaybookStageName,
+  type PlaybookProfile,
+  PlaybookStageNameSchema,
+  CANONICAL_PLAYBOOK_STAGES,
+} from "../shared/contracts.js";
 
 const defaultExecFileAsync = promisify(execFile);
 let execFileAsync = defaultExecFileAsync;
@@ -314,6 +335,10 @@ export interface HookRouterOptions {
   closeGuardAcceptedLabels?: string[];
   /** Shared agent account treated as automated. Defaults to `xpufx`. */
   sharedActor?: string;
+  /** Authorized operator identities for human gate signoffs (#1404). */
+  authorizedOperators?: string[];
+  /** Playbook stage transition guard enabled (#1404). Defaults to true. */
+  stageGuardEnabled?: boolean;
   /** Explicit circuit breaker cache path; defaults to ~/.paseo/model-health.json */
   circuitBreakerPath?: string;
   modelHealthPath?: string;
@@ -410,7 +435,7 @@ export interface EnsureOrchestratorResult {
   workspaceId?: string;
   cwd?: string;
   /** Machine-readable failure kind so callers can pick an HTTP status (#973). */
-  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted" | "provider_concurrency_limit";
+  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted" | "provider_concurrency_limit" | "human_gate_active";
   /** Model the spawn resolved to, surfaced so intent and reality can be compared (#1011). */
   resolvedModelKey?: string;
   /** Configured entries skipped as dead before the resolved model (#1011). */
@@ -921,6 +946,10 @@ export interface DirectActionResult {
   notified?: boolean;
   /** Issue number created by the handler, when it creates one (#865). */
   createdIssue?: number | null;
+  allowed?: boolean;
+  rejected?: boolean;
+  humanGated?: boolean;
+  decision?: StageTransitionDecision;
 }
 
 // ---------------------------------------------------------------------------
@@ -3226,7 +3255,7 @@ export interface SpawnResult {
   repo?: string;
   error?: string;
   /** Machine-readable failure kind so callers can pick an HTTP status (#973). */
-  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted" | "provider_concurrency_limit";
+  errorCode?: "workspace_not_found" | "spawn_failed" | "cli_disabled" | "model_exhausted" | "provider_concurrency_limit" | "human_gate_active";
 }
 
 /**
@@ -3474,9 +3503,25 @@ export async function handleSpawnAgent(
     archiveAgent?: HookRouterOptions["archiveAgent"];
     queueDir?: string;
     stateDir?: string;
+    isIssueHumanGated?: (repo: string, issue: number) => boolean;
   } = {},
 ): Promise<SpawnResult> {
   const { role, repo, issueIndex, model, workspace } = request;
+
+  // Human gate check (#1404): halt autonomous worker/auditor spawning when stage maps to human:operator
+  if (role === "worker" && issueIndex && repo) {
+    const canonicalRepo = canonicalRepoKey(repo) ?? repo;
+    const isGated = typeof options.isIssueHumanGated === "function"
+      ? options.isIssueHumanGated(canonicalRepo, issueIndex)
+      : false;
+    if (isGated) {
+      return {
+        ok: false,
+        errorCode: "human_gate_active",
+        error: `Issue ${canonicalRepo}#${issueIndex} is currently gated by human:operator; autonomous agent spawning halted`,
+      };
+    }
+  }
 
   // Validate required fields per role
   if (role === "orchestrator" && (!repo || !repo.trim())) {
@@ -4664,6 +4709,12 @@ export class HookRouter {
   private readonly closeGuardTargetActors: string[];
   private readonly closeGuardAcceptedLabels: string[];
   private readonly sharedAgentActor: string;
+  /** Authorized operator identities for human gate signoffs (#1404). */
+  public readonly authorizedOperators: string[];
+  /** Playbook stage transition guard enabled (#1404). */
+  public readonly stageGuardEnabled: boolean;
+  /** Active human gates keyed by `${repo}#${issue}` (#1404). */
+  private readonly activeHumanGates = new Map<string, { stage: PlaybookStageName; profile: string; activatedAt: string }>();
   /** Opt-in repo -> checkout/plugin bindings for the merge-event hook (#1076). */
   private mergeEventHooks: Record<string, MergeEventHook>;
   /** Durable append-only merge-event log path (#1076). */
@@ -4726,6 +4777,8 @@ export class HookRouter {
         ? options.closeGuardAcceptedLabels.map(normalizeLabelName)
         : [...CLOSE_GUARD_ACCEPTED_LABELS];
     this.sharedAgentActor = options?.sharedActor ?? SHARED_AGENT_ACTOR;
+    this.authorizedOperators = options?.authorizedOperators ?? [...DEFAULT_AUTHORIZED_OPERATORS];
+    this.stageGuardEnabled = options?.stageGuardEnabled !== undefined ? options.stageGuardEnabled : !this.isTestMode;
     this.mergeEventHooks = options?.mergeEventHooks ?? persisted.mergeEventHooks ?? {};
 
     this.configuredPort =
@@ -5102,12 +5155,16 @@ export class HookRouter {
     try {
       if (ev === "issues" && action === "opened") {
         await this.runLabelTriage(body);
+        await this.runStageTransitionGuard(body, ev);
       } else if (ev === "issue_comment" && action === "created") {
         await this.runLabelTriage(body);
+        await this.runStageTransitionGuard(body, ev);
       } else if (ev === "issues" && action === "closed") {
         await this.runCloseGuard(body);
       } else if (ev === "issues" && action === "unlabeled") {
         await this.runBackwardTransitionSteering(body);
+      } else if ((ev === "issues" || ev === "pull_request") && action === "labeled") {
+        await this.runStageTransitionGuard(body, ev);
       } else if (ev === "action_run_failure") {
         await this.runCiFailure(body);
       } else if (ev === "repository" && action === "created") {
@@ -5121,6 +5178,48 @@ export class HookRouter {
         `[warn] direct-action handler failed for ${ev}:${action || "event"}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Human gate management & Playbook State Machine (#1404)
+  // -------------------------------------------------------------------------
+
+  public isIssueHumanGated(repo: string, issue: number): boolean {
+    const canonical = canonicalRepoKey(repo) ?? repo;
+    return this.activeHumanGates.has(`${canonical}#${issue}`);
+  }
+
+  public getHumanGate(repo: string, issue: number): { stage: PlaybookStageName; profile: string; activatedAt: string } | null {
+    const canonical = canonicalRepoKey(repo) ?? repo;
+    return this.activeHumanGates.get(`${canonical}#${issue}`) ?? null;
+  }
+
+  public setHumanGate(repo: string, issue: number, stage: PlaybookStageName, profile: string): void {
+    const canonical = canonicalRepoKey(repo) ?? repo;
+    this.activeHumanGates.set(`${canonical}#${issue}`, {
+      stage,
+      profile,
+      activatedAt: new Date().toISOString(),
+    });
+  }
+
+  public clearHumanGate(repo: string, issue: number): void {
+    const canonical = canonicalRepoKey(repo) ?? repo;
+    this.activeHumanGates.delete(`${canonical}#${issue}`);
+  }
+
+  public listActiveHumanGates(): Array<{ key: string; repo: string; issue: number; stage: PlaybookStageName; profile: string; activatedAt: string }> {
+    const list: Array<{ key: string; repo: string; issue: number; stage: PlaybookStageName; profile: string; activatedAt: string }> = [];
+    for (const [key, gate] of this.activeHumanGates.entries()) {
+      const [repo, issueStr] = key.split("#");
+      list.push({
+        key,
+        repo,
+        issue: Number(issueStr),
+        ...gate,
+      });
+    }
+    return list;
   }
 
   /** Bare `owner/repo` from a webhook payload (API path form). */
@@ -5735,6 +5834,213 @@ export class HookRouter {
       reason: commented ? "change-request steering posted" : "steering comment failed",
       commented,
       notified,
+    };
+  }
+
+  /**
+   * Playbook state machine transition guard & human gate handler (#1404).
+   * Intercepts stage transitions; rejects/invalidates illegal transitions lacking
+   * required exit artifacts (e.g. attempting stage/merge without an approved aud_* receipt).
+   * For human-gated stages (e.g. spec-audit or review in Medium profile): halts
+   * autonomous worker/auditor spawning, sets attention/user, delivers stage summary,
+   * and yields execution until a verified operator webhook event arrives.
+   * Verifies sender signature against authorized operator identities.
+   */
+  public async runStageTransitionGuard(body: any, event?: string): Promise<DirectActionResult> {
+    if (!this.stageGuardEnabled) {
+      return { acted: false, reason: "stage guard disabled" };
+    }
+    const repo = this.bareRepoFromPayload(body);
+    const issueNumber = issueNumberOf(body);
+    const actor = this.actorFromPayload(body);
+    if (!repo || issueNumber == null) {
+      return { acted: false, reason: "missing repo or issue number" };
+    }
+
+    // Determine target stage
+    const addedLabel = typeof body?.label?.name === "string" ? body.label.name : null;
+    let toStage: PlaybookStageName | null = null;
+    if (addedLabel && isStageLabel(addedLabel)) {
+      toStage = addedLabel;
+    } else if (typeof body?.toStage === "string" && isStageLabel(body.toStage)) {
+      toStage = body.toStage;
+    } else if (typeof body?.stage === "string" && isStageLabel(body.stage)) {
+      toStage = body.stage;
+    }
+
+    if (!toStage) {
+      return { acted: false, reason: "not a stage label transition event" };
+    }
+
+    const isTest = this.isTestMode || process.env.NODE_ENV === "test";
+    const host = resolveForgejoHost();
+    const token = !isTest ? await this.resolveApiToken(host) : null;
+    let issue: any = body?.issue ?? body?.pull_request ?? {};
+    if (token) {
+      const issueRes = await forgejoApiGet<any>(`/api/v1/repos/${repo}/issues/${issueNumber}`, { host, token });
+      if (issueRes.outcome === "ok") {
+        issue = issueRes.data;
+      }
+    }
+    const existingLabels = labelNamesFromIssue(issue);
+
+    // Determine playbook profile from issue labels or defaults
+    let profileName = "Medium";
+    if (existingLabels.some((l) => l.toLowerCase() === "playbook/light" || l.toLowerCase() === "profile/light")) {
+      profileName = "Light";
+    } else if (existingLabels.some((l) => l.toLowerCase() === "playbook/medium" || l.toLowerCase() === "profile/medium")) {
+      profileName = "Medium";
+    }
+    const config = loadSavedPlaybooks();
+    const profile = getPlaybookProfile(profileName, config);
+
+    // Determine fromStage
+    let fromStage: PlaybookStageName | null = null;
+    if (typeof body?.fromStage === "string" && isStageLabel(body.fromStage)) {
+      fromStage = body.fromStage;
+    } else {
+      const stageLabels = existingLabels.filter((l) => isStageLabel(l) && l !== toStage) as PlaybookStageName[];
+      if (stageLabels.length > 0) {
+        fromStage = stageLabels[0];
+      } else {
+        fromStage = getStagePredecessor(toStage, profile);
+      }
+    }
+
+    // Retrieve comments for artifact validation
+    let comments: Array<{ body?: string; user?: { login?: string }; created_at?: string }> = [];
+    if (token) {
+      const commentsRes = await forgejoApiGet<any[]>(`/api/v1/repos/${repo}/issues/${issueNumber}/comments`, { host, token });
+      if (commentsRes.outcome === "ok" && Array.isArray(commentsRes.data)) {
+        comments = commentsRes.data;
+      }
+    }
+    if (comments.length === 0 && Array.isArray(body?.comments)) {
+      comments = body.comments;
+    } else if (comments.length === 0 && body?.comment) {
+      comments = [body.comment];
+    }
+
+    const pullRequest = body?.pull_request ?? (isPullRequestSubject(issue) ? issue : null);
+
+    const context: ArtifactVerificationContext = {
+      repo,
+      issueNumber,
+      issueBody: issue?.body ?? "",
+      comments,
+      pullRequest: pullRequest
+        ? {
+            number: pullRequest.number ?? issueNumber,
+            headCommit: pullRequest.head?.sha ?? pullRequest.headCommit,
+            merged: Boolean(pullRequest.merged),
+            state: pullRequest.state,
+            approved: Boolean(pullRequest.approved),
+          }
+        : null,
+      prNumber: pullRequest?.number ?? (typeof body?.prNumber === "number" ? body.prNumber : undefined),
+      headCommit: pullRequest?.head?.sha ?? pullRequest?.headCommit ?? (typeof body?.headCommit === "string" ? body.headCommit : undefined),
+      auditsFilePath: this.auditsFilePath,
+      labels: existingLabels,
+      actor,
+      auditReceipt: body?.auditReceipt ?? null,
+    };
+
+    const decision = evaluateStageTransition({
+      profile,
+      fromStage,
+      toStage,
+      actor,
+      context,
+      authorizedOperators: this.authorizedOperators,
+    });
+
+    if (!decision.allowed) {
+      // Revert/reset label: remove the illegal toStage label and restore fromStage
+      if (token) {
+        await forgejoApiRequest<any>(
+          "DELETE",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/labels/${encodeURIComponent(toStage)}`,
+          null,
+          { host, token },
+        );
+        if (fromStage) {
+          await forgejoApiRequest<any>(
+            "POST",
+            `/api/v1/repos/${repo}/issues/${issueNumber}/labels`,
+            { labels: [fromStage] },
+            { host, token },
+          );
+        }
+        const commentBody = formatTransitionRejectionComment(decision);
+        await forgejoApiRequest<any>(
+          "POST",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/comments`,
+          { body: commentBody },
+          { host, token },
+        );
+      }
+      this.log(`[warn] stage guard: rejected illegal transition ${fromStage ?? "unknown"} -> ${toStage} on ${repo}#${issueNumber}: ${decision.reason}`);
+      return {
+        acted: true,
+        reason: decision.reason,
+        allowed: false,
+        rejected: true,
+        decision,
+        commented: Boolean(token),
+      };
+    }
+
+    // Allowed transition:
+    // If fromStage was human gated and is advancing to next stage via operator signoff:
+    if (fromStage && isHumanGatedStage(profile.stages[fromStage])) {
+      this.clearHumanGate(repo, issueNumber);
+      if (token) {
+        await forgejoApiRequest<any>(
+          "DELETE",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/labels/${encodeURIComponent("attention/user")}`,
+          null,
+          { host, token },
+        );
+      }
+    }
+
+    // Check if target stage is human gated
+    if (decision.requiresHumanGate) {
+      this.setHumanGate(repo, issueNumber, toStage, profile.name);
+      if (token) {
+        await forgejoApiRequest<any>(
+          "POST",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/labels`,
+          { labels: ["attention/user"] },
+          { host, token },
+        );
+        const summaryComment = formatHumanGateSummaryComment(toStage, profile, decision);
+        await forgejoApiRequest<any>(
+          "POST",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/comments`,
+          { body: summaryComment },
+          { host, token },
+        );
+      }
+      this.log(`[info] stage guard: activated human gate for ${toStage} on ${repo}#${issueNumber} (profile: ${profile.name})`);
+      return {
+        acted: true,
+        reason: "human gate activated; attention/user applied and summary delivered",
+        allowed: true,
+        humanGated: true,
+        decision,
+        appliedLabel: "attention/user",
+        commented: Boolean(token),
+      };
+    }
+
+    this.log(`[info] stage guard: accepted transition ${fromStage ?? "unknown"} -> ${toStage} on ${repo}#${issueNumber}`);
+    return {
+      acted: true,
+      reason: decision.reason,
+      allowed: true,
+      humanGated: false,
+      decision,
     };
   }
 
@@ -12127,6 +12433,7 @@ export class HookRouter {
               archiveAgent: this.options?.archiveAgent,
               queueDir: this.options?.queueDir,
               stateDir: this.options?.stateDir,
+              isIssueHumanGated: (r, idx) => this.isIssueHumanGated(r, idx),
             },
           );
           if (!result.ok) {
@@ -12197,6 +12504,7 @@ export class HookRouter {
               archiveAgent: this.options?.archiveAgent,
               queueDir: this.options?.queueDir,
               stateDir: this.options?.stateDir,
+              isIssueHumanGated: (r, idx) => this.isIssueHumanGated(r, idx),
             },
           );
           if (!result.ok) {
@@ -12316,6 +12624,60 @@ export class HookRouter {
           reconciliationsPath: this.auditReconciliationsFilePath,
         });
         this.sendJson(res, 200, out);
+        return;
+      }
+
+      // Playbook stage transition & evaluation endpoints (#1404)
+      if (req.method === "POST" && pathname === "/stage/evaluate") {
+        const body = await this.readJsonBody(req);
+        const repo = String(body?.repo ?? "").trim();
+        const issue = Number(body?.issue);
+        const toStage = String(body?.toStage ?? "").trim();
+        const actor = String(body?.actor ?? "").trim();
+        if (!repo || !Number.isInteger(issue) || issue <= 0 || !toStage || !actor) {
+          this.sendJson(res, 400, { ok: false, error: "repo, issue (positive int), toStage, and actor are required" });
+          return;
+        }
+        if (!isStageLabel(toStage)) {
+          this.sendJson(res, 400, { ok: false, error: `Invalid toStage: "${toStage}" is not a canonical playbook stage` });
+          return;
+        }
+        const fromStage = body?.fromStage && isStageLabel(body.fromStage) ? body.fromStage : null;
+        const config = loadSavedPlaybooks();
+        const profile = getPlaybookProfile(body?.profile, config);
+        const decision = evaluateStageTransition({
+          profile,
+          fromStage,
+          toStage,
+          actor,
+          context: {
+            repo,
+            issueNumber: issue,
+            issueBody: typeof body?.issueBody === "string" ? body.issueBody : undefined,
+            comments: Array.isArray(body?.comments) ? body.comments : undefined,
+            prNumber: typeof body?.prNumber === "number" ? body.prNumber : undefined,
+            headCommit: typeof body?.headCommit === "string" ? body.headCommit : undefined,
+            labels: Array.isArray(body?.labels) ? body.labels : undefined,
+            auditsFilePath: this.auditsFilePath,
+            actor,
+            auditReceipt: body?.auditReceipt ?? null,
+          },
+          authorizedOperators: this.authorizedOperators,
+        });
+        this.sendJson(res, 200, { ok: true, decision });
+        return;
+      }
+
+      if (req.method === "POST" && pathname === "/stage/transition") {
+        const body = await this.readJsonBody(req);
+        const outcome = await this.runStageTransitionGuard(body, "api");
+        this.sendJson(res, outcome.allowed ? 200 : 422, outcome);
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/stage/human-gates") {
+        const gates = this.listActiveHumanGates();
+        this.sendJson(res, 200, { ok: true, count: gates.length, gates });
         return;
       }
 

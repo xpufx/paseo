@@ -18,7 +18,14 @@ import {
   type UppidiPlaybooksOutput,
   type UppidiSetPlaybookInput,
   type UppidiSetPlaybookOutput,
+  type StageTransitionDecision,
+  type UppidiEvaluateTransitionInput,
+  type UppidiEvaluateTransitionOutput,
+  type UppidiFleetAuditReceipt,
 } from "../shared/contracts.js";
+import { findAuditReceipt } from "./audit-receipts.js";
+
+export type { StageTransitionDecision };
 
 export const PLAYBOOKS_CONFIG_FILENAME = "playbooks.json";
 
@@ -419,6 +426,480 @@ export async function handleUppidiSetPlaybook(
   } catch (err: any) {
     return {
       ok: false,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Transition guards, artifact enforcement & human gate handling (#1404)
+// ──────────────────────────────────────────────────────────────────────────
+
+export const DEFAULT_AUTHORIZED_OPERATORS = ["okcode", "oktay"] as const;
+
+export function isStageLabel(label: unknown): label is PlaybookStageName {
+  return typeof label === "string" && (CANONICAL_PLAYBOOK_STAGES as readonly string[]).includes(label);
+}
+
+export function isAuthorizedOperator(
+  actor: string,
+  authorizedOperators: readonly string[] = DEFAULT_AUTHORIZED_OPERATORS,
+): boolean {
+  if (!actor || typeof actor !== "string") return false;
+  const normalized = actor.trim().toLowerCase();
+  // Shared agent actor xpufx is never an authorized human operator
+  if (normalized === "xpufx") return false;
+  return authorizedOperators.some((op) => op.trim().toLowerCase() === normalized);
+}
+
+export function getStagePredecessor(
+  stage: PlaybookStageName,
+  _profile?: PlaybookProfile,
+): PlaybookStageName | null {
+  const index = CANONICAL_PLAYBOOK_STAGES.indexOf(stage);
+  if (index <= 0) return null;
+  return CANONICAL_PLAYBOOK_STAGES[index - 1];
+}
+
+export function getStageSuccessor(
+  stage: PlaybookStageName,
+  profile: PlaybookProfile,
+): PlaybookStageName | null {
+  const stageDef = profile.stages[stage];
+  return (stageDef?.next_stage.success as PlaybookStageName) ?? null;
+}
+
+export function getStageRejection(
+  stage: PlaybookStageName,
+  profile: PlaybookProfile,
+): PlaybookStageName | null {
+  const stageDef = profile.stages[stage];
+  return (stageDef?.next_stage.rejection as PlaybookStageName) ?? null;
+}
+
+export interface ArtifactVerificationContext {
+  repo: string;
+  issueNumber: number;
+  issueBody?: string;
+  comments?: Array<{ body?: string; user?: { login?: string }; created_at?: string }>;
+  pullRequest?: {
+    number: number;
+    headCommit?: string;
+    merged?: boolean;
+    state?: string;
+    approved?: boolean;
+  } | null;
+  prNumber?: number;
+  headCommit?: string;
+  auditsFilePath?: string;
+  labels?: string[];
+  actor?: string;
+  auditReceipt?: UppidiFleetAuditReceipt | null;
+}
+
+export function verifyStageArtifact(
+  artifact: string,
+  stage: PlaybookStageName,
+  context: ArtifactVerificationContext,
+  profile: PlaybookProfile,
+  authorizedOperators: readonly string[] = DEFAULT_AUTHORIZED_OPERATORS,
+): { verified: boolean; detail?: string } {
+  switch (artifact) {
+    case "assigned_issue": {
+      if (context.issueNumber && context.issueNumber > 0) {
+        return { verified: true, detail: `Issue #${context.issueNumber} assigned` };
+      }
+      return { verified: false, detail: "No valid assigned issue found" };
+    }
+    case "spec_checklist": {
+      const CHECKLIST_REGEX = /-\s*\[[ xX]\]\s+/;
+      const hasInBody = typeof context.issueBody === "string" && CHECKLIST_REGEX.test(context.issueBody);
+      const hasInComments = Array.isArray(context.comments) && context.comments.some((c) => typeof c.body === "string" && CHECKLIST_REGEX.test(c.body));
+      if (hasInBody || hasInComments) {
+        return { verified: true, detail: "Specification checklist present in ticket body or comments" };
+      }
+      return { verified: false, detail: "Specification checklist (- [ ] or - [x]) missing in ticket body and comments" };
+    }
+    case "spec_audit_approval": {
+      const stageDef = profile.stages[stage];
+      if (stageDef && isHumanGatedStage(stageDef)) {
+        // Human operator approval required
+        const isOperatorActor = Boolean(context.actor && isAuthorizedOperator(context.actor, authorizedOperators));
+        const hasApprovalLabel = Boolean(context.labels?.includes("spec/approved"));
+        const hasOperatorComment = Array.isArray(context.comments) && context.comments.some((c) => {
+          const author = c.user?.login ?? "";
+          if (!isAuthorizedOperator(author, authorizedOperators)) return false;
+          const body = c.body?.toLowerCase() ?? "";
+          return (
+            body.includes("/approve") ||
+            body.includes("lgtm") ||
+            body.includes("approved") ||
+            body.includes("spec-audit:approved") ||
+            body.includes("green-light")
+          );
+        });
+        if (isOperatorActor || hasApprovalLabel || hasOperatorComment) {
+          return { verified: true, detail: "Specification audit approved by authorized operator" };
+        }
+        return { verified: false, detail: "Specification audit approval missing from authorized operator" };
+      } else {
+        // Autonomous auditor approval
+        const hasApprovalLabel = Boolean(context.labels?.includes("spec/approved"));
+        const hasApprovalComment = Array.isArray(context.comments) && context.comments.some((c) => {
+          const body = c.body?.toLowerCase() ?? "";
+          return body.includes("spec-audit:approved") || body.includes("spec audit approved") || body.includes("specification audit approved");
+        });
+        if (hasApprovalLabel || hasApprovalComment) {
+          return { verified: true, detail: "Specification audit approved by autonomous auditor" };
+        }
+        return { verified: false, detail: "Specification audit approval comment or label missing" };
+      }
+    }
+    case "worktree_provisioned": {
+      const hasWipLabel = Boolean(context.labels?.includes("state/wip"));
+      const hasWorktreeComment = Array.isArray(context.comments) && context.comments.some((c) => {
+        const body = c.body ?? "";
+        return body.includes("Workspace:") || body.includes("Worktree:") || body.includes("wks_") || body.includes("/worktrees/");
+      });
+      if (hasWipLabel || hasWorktreeComment) {
+        return { verified: true, detail: "Worktree workspace provisioned" };
+      }
+      return { verified: false, detail: "Worktree provisioning artifact missing (expected state/wip label or worktree allocation record)" };
+    }
+    case "pull_request": {
+      const hasPrObject = Boolean(context.pullRequest && context.pullRequest.number > 0);
+      const hasPrNumber = Boolean(context.prNumber && context.prNumber > 0);
+      const hasPrComment = Array.isArray(context.comments) && context.comments.some((c) => {
+        const body = c.body ?? "";
+        return body.includes("PR Opened") || body.includes("Pull Request:") || body.includes("pull_request");
+      });
+      if (hasPrObject || hasPrNumber || hasPrComment) {
+        return { verified: true, detail: "Pull request linked and verified" };
+      }
+      return { verified: false, detail: "Pull request artifact missing" };
+    }
+    case "audit_receipt": {
+      // 1. Direct receipt object in context
+      if (context.auditReceipt) {
+        if (context.auditReceipt.verdict === "approved" && context.auditReceipt.auditId.startsWith("aud_")) {
+          return { verified: true, detail: `Approved audit receipt ${context.auditReceipt.auditId}` };
+        }
+        return { verified: false, detail: `Audit receipt ${context.auditReceipt.auditId} has verdict '${context.auditReceipt.verdict}', not 'approved'` };
+      }
+      // 2. Lookup in audits file if repo and commit/pr are present
+      const pr = context.prNumber ?? context.pullRequest?.number;
+      const commit = context.headCommit ?? context.pullRequest?.headCommit;
+      if (context.repo && pr && commit) {
+        try {
+          const receipt = findAuditReceipt({ repo: context.repo, pr, commit }, { filePath: context.auditsFilePath });
+          if (receipt) {
+            if (receipt.verdict === "approved" && receipt.auditId.startsWith("aud_")) {
+              return { verified: true, detail: `Approved audit receipt ${receipt.auditId}` };
+            }
+            return { verified: false, detail: `Audit receipt ${receipt.auditId} has verdict '${receipt.verdict}', not 'approved'` };
+          }
+        } catch {
+          // ignore lookup failure and continue to operator check
+        }
+      }
+      // 3. In Medium profile with human review gate: operator direct approval
+      const stageDef = profile.stages[stage];
+      if (stageDef && isHumanGatedStage(stageDef)) {
+        if (context.actor && isAuthorizedOperator(context.actor, authorizedOperators)) {
+          if (context.pullRequest?.approved || context.pullRequest?.merged) {
+            return { verified: true, detail: `Operator ${context.actor} approved pull request directly` };
+          }
+        }
+      }
+      return { verified: false, detail: "Missing approved audit receipt (aud_*) or operator PR approval" };
+    }
+    case "squash_commit": {
+      if (context.pullRequest?.merged === true || context.labels?.includes("stage/verify")) {
+        return { verified: true, detail: "Squash commit merged to main" };
+      }
+      const hasMergeComment = Array.isArray(context.comments) && context.comments.some((c) => {
+        const body = c.body?.toLowerCase() ?? "";
+        return body.includes("squash merge") || body.includes("merged pr") || body.includes("merge completed");
+      });
+      if (hasMergeComment) {
+        return { verified: true, detail: "Squash merge recorded in comments" };
+      }
+      return { verified: false, detail: "Squash commit artifact missing (pull request not merged)" };
+    }
+    case "acceptance_verification": {
+      const hasDoneLabel = Boolean(context.labels?.includes("confirmed-done") || context.labels?.includes("state/done"));
+      const isOperator = Boolean(context.actor && isAuthorizedOperator(context.actor, authorizedOperators));
+      if (hasDoneLabel || isOperator) {
+        return { verified: true, detail: "Acceptance verification confirmed" };
+      }
+      return { verified: false, detail: "Acceptance verification missing (expected confirmed-done label or operator signoff)" };
+    }
+    default:
+      return { verified: false, detail: `Unknown exit artifact "${artifact}"` };
+  }
+}
+
+export interface EvaluateTransitionInput {
+  profile: PlaybookProfile;
+  fromStage: PlaybookStageName | null;
+  toStage: PlaybookStageName;
+  actor: string;
+  context: ArtifactVerificationContext;
+  authorizedOperators?: readonly string[];
+}
+
+export function evaluateStageTransition(
+  input: EvaluateTransitionInput,
+): StageTransitionDecision {
+  const { profile, toStage, actor, context } = input;
+  const authorizedOperators = input.authorizedOperators ?? DEFAULT_AUTHORIZED_OPERATORS;
+  const isOperatorAuthorized = isAuthorizedOperator(actor, authorizedOperators);
+
+  let fromStage = input.fromStage;
+  if (!fromStage) {
+    if (toStage === "stage/spec") {
+      const targetIsHumanGated = isHumanGatedStage(profile.stages[toStage]);
+      return {
+        allowed: true,
+        reason: "Initial entry into canonical pipeline at stage/spec",
+        fromStage: null,
+        toStage,
+        profile: profile.name,
+        requiresHumanGate: targetIsHumanGated,
+        actor,
+        isOperatorAuthorized,
+        verifiedArtifact: "assigned_issue",
+        actionTaken: targetIsHumanGated ? "human_gated" : "allowed",
+      };
+    }
+    fromStage = getStagePredecessor(toStage, profile);
+    if (!fromStage) {
+      return {
+        allowed: false,
+        reason: `Cannot infer source stage for "${toStage}"`,
+        fromStage: null,
+        toStage,
+        profile: profile.name,
+        requiresHumanGate: false,
+        actor,
+        isOperatorAuthorized,
+        verifiedArtifact: null,
+        actionTaken: "rejected",
+      };
+    }
+  }
+
+  if (fromStage === toStage) {
+    const targetIsHumanGated = isHumanGatedStage(profile.stages[toStage]);
+    return {
+      allowed: true,
+      reason: `Already at stage ${toStage}`,
+      fromStage,
+      toStage,
+      profile: profile.name,
+      requiresHumanGate: targetIsHumanGated,
+      actor,
+      isOperatorAuthorized,
+      verifiedArtifact: null,
+      actionTaken: "allowed",
+    };
+  }
+
+  const fromStageDef = profile.stages[fromStage];
+  const toStageDef = profile.stages[toStage];
+  if (!fromStageDef || !toStageDef) {
+    return {
+      allowed: false,
+      reason: `Invalid stage: "${!fromStageDef ? fromStage : toStage}" not found in profile "${profile.name}"`,
+      fromStage,
+      toStage,
+      profile: profile.name,
+      requiresHumanGate: false,
+      actor,
+      isOperatorAuthorized,
+      verifiedArtifact: null,
+      actionTaken: "rejected",
+    };
+  }
+
+  const isSuccessTransition = toStage === fromStageDef.next_stage.success;
+  const isRejectionTransition = toStage === fromStageDef.next_stage.rejection;
+
+  if (!isSuccessTransition && !isRejectionTransition) {
+    return {
+      allowed: false,
+      reason: `Illegal stage transition from ${fromStage} to ${toStage}: expected next stage ${fromStageDef.next_stage.success}${fromStageDef.next_stage.rejection ? ` or rejection to ${fromStageDef.next_stage.rejection}` : ""}`,
+      fromStage,
+      toStage,
+      profile: profile.name,
+      requiresHumanGate: false,
+      actor,
+      isOperatorAuthorized,
+      verifiedArtifact: null,
+      actionTaken: "rejected",
+    };
+  }
+
+  // Rejection backward transition
+  if (isRejectionTransition) {
+    const targetIsHumanGated = isHumanGatedStage(toStageDef);
+    return {
+      allowed: true,
+      reason: `Stage rejection transition from ${fromStage} back to ${toStage}`,
+      fromStage,
+      toStage,
+      profile: profile.name,
+      requiresHumanGate: targetIsHumanGated,
+      actor,
+      isOperatorAuthorized,
+      verifiedArtifact: null,
+      actionTaken: targetIsHumanGated ? "human_gated" : "allowed",
+    };
+  }
+
+  // Forward transition:
+  // 1. Sender verification on human-gated fromStage
+  if (isHumanGatedStage(fromStageDef)) {
+    if (!isOperatorAuthorized) {
+      return {
+        allowed: false,
+        reason: `Stage ${fromStage} is gated by human:operator. Transition to ${toStage} requires an authorized operator signature; actor '${actor}' is unauthorized`,
+        fromStage,
+        toStage,
+        profile: profile.name,
+        requiresHumanGate: true,
+        actor,
+        isOperatorAuthorized: false,
+        verifiedArtifact: null,
+        actionTaken: "unauthorized",
+      };
+    }
+  }
+
+  // 2. Required exit artifact enforcement
+  const requiredArtifact = fromStageDef.exit_artifact;
+  const artifactResult = verifyStageArtifact(requiredArtifact, fromStage, context, profile, authorizedOperators);
+  if (!artifactResult.verified) {
+    return {
+      allowed: false,
+      reason: `Transition from ${fromStage} to ${toStage} rejected: missing required exit artifact '${requiredArtifact}' (${artifactResult.detail ?? "not satisfied"})`,
+      fromStage,
+      toStage,
+      profile: profile.name,
+      requiresHumanGate: false,
+      actor,
+      isOperatorAuthorized,
+      verifiedArtifact: null,
+      missingArtifact: requiredArtifact,
+      actionTaken: "rejected",
+    };
+  }
+
+  // 3. Target stage human-gate evaluation
+  const targetIsHumanGated = isHumanGatedStage(toStageDef);
+  if (targetIsHumanGated) {
+    return {
+      allowed: true,
+      reason: `Transition to ${toStage} accepted; stage is human-gated (human:operator) awaiting operator action`,
+      fromStage,
+      toStage,
+      profile: profile.name,
+      requiresHumanGate: true,
+      actor,
+      isOperatorAuthorized,
+      verifiedArtifact: requiredArtifact,
+      actionTaken: "human_gated",
+    };
+  }
+
+  return {
+    allowed: true,
+    reason: `Transition from ${fromStage} to ${toStage} approved; verified artifact '${requiredArtifact}'`,
+    fromStage,
+    toStage,
+    profile: profile.name,
+    requiresHumanGate: false,
+    actor,
+    isOperatorAuthorized,
+    verifiedArtifact: requiredArtifact,
+    actionTaken: "allowed",
+  };
+}
+
+export function formatTransitionRejectionComment(decision: StageTransitionDecision): string {
+  return [
+    `### 🛑 Stage Transition Rejected: Illegal Transition to \`${decision.toStage}\``,
+    "",
+    `The transition from \`${decision.fromStage ?? "unknown"}\` to \`${decision.toStage}\` was rejected by the Playbook State Machine:`,
+    `- **Profile**: \`${decision.profile}\``,
+    `- **Actor**: \`${decision.actor}\``,
+    `- **Reason**: ${decision.reason}`,
+    decision.missingArtifact ? `- **Missing Required Artifact**: \`${decision.missingArtifact}\`` : "",
+    "",
+    "The label has been reset to preserve deterministic stage progression.",
+  ].filter(Boolean).join("\n");
+}
+
+export function formatHumanGateSummaryComment(
+  stage: PlaybookStageName,
+  profile: PlaybookProfile,
+  decision?: StageTransitionDecision,
+): string {
+  const stageDef = profile.stages[stage];
+  return [
+    `### ⏸️ Human Gate Active: \`${stage}\` Awaiting Operator Action`,
+    "",
+    `This stage maps to \`human:operator\` under profile **\`${profile.name}\`**. Autonomous agent spawning is halted until operator verification.`,
+    "",
+    `- **Stage**: \`${stage}\``,
+    `- **Actor**: \`human:operator\``,
+    `- **Entry Precondition Verified**: \`${stageDef?.entry_precondition ?? "verified"}\``,
+    `- **Required Exit Artifact**: \`${stageDef?.exit_artifact ?? "operator_approval"}\``,
+    stageDef?.description ? `- **Stage Description**: ${stageDef.description}` : "",
+    decision?.verifiedArtifact ? `- **Preceding Artifact**: \`${decision.verifiedArtifact}\`` : "",
+    "",
+    "Execution is yielded. Please inspect the deliverable and verify or advance the workflow to unblock the next stage.",
+  ].filter(Boolean).join("\n");
+}
+
+export async function handleUppidiEvaluateTransition(
+  input: UppidiEvaluateTransitionInput,
+  _context?: PluginHandlerContext,
+): Promise<UppidiEvaluateTransitionOutput> {
+  try {
+    const config = loadSavedPlaybooks();
+    const profile = getPlaybookProfile(input.profile, config);
+    const decision = evaluateStageTransition({
+      profile,
+      fromStage: input.fromStage ?? null,
+      toStage: input.toStage,
+      actor: input.actor,
+      context: {
+        repo: input.repo,
+        issueNumber: input.issue,
+        prNumber: input.prNumber,
+        headCommit: input.headCommit,
+        actor: input.actor,
+      },
+    });
+    return {
+      ok: true,
+      decision,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      decision: {
+        allowed: false,
+        reason: err?.message || String(err),
+        fromStage: input.fromStage ?? null,
+        toStage: input.toStage,
+        profile: input.profile ?? "Medium",
+        requiresHumanGate: false,
+        actor: input.actor,
+        isOperatorAuthorized: false,
+        actionTaken: "rejected",
+      },
       error: err?.message || String(err),
     };
   }

@@ -2901,3 +2901,44 @@ export const uppidiSetPlaybookContract = defineContract({
   input: UppidiSetPlaybookInputSchema,
   output: UppidiSetPlaybookOutputSchema,
 });
+
+export const StageTransitionDecisionSchema = z.object({
+  allowed: z.boolean(),
+  reason: z.string(),
+  fromStage: PlaybookStageNameSchema.nullable(),
+  toStage: PlaybookStageNameSchema,
+  profile: z.string(),
+  requiresHumanGate: z.boolean(),
+  actor: z.string(),
+  isOperatorAuthorized: z.boolean(),
+  verifiedArtifact: z.string().nullable().optional(),
+  missingArtifact: z.string().optional(),
+  actionTaken: z.enum(["allowed", "rejected", "human_gated", "unauthorized"]).optional(),
+}).strict();
+export type StageTransitionDecision = z.infer<typeof StageTransitionDecisionSchema>;
+
+export const UppidiEvaluateTransitionInputSchema = z.object({
+  repo: z.string().min(1),
+  issue: z.number().int().positive(),
+  toStage: PlaybookStageNameSchema,
+  fromStage: PlaybookStageNameSchema.nullable().optional(),
+  actor: z.string().min(1),
+  profile: z.string().optional(),
+  headCommit: z.string().optional(),
+  prNumber: z.number().int().positive().optional(),
+}).strict();
+export type UppidiEvaluateTransitionInput = z.infer<typeof UppidiEvaluateTransitionInputSchema>;
+
+export const UppidiEvaluateTransitionOutputSchema = z.object({
+  ok: z.boolean(),
+  decision: StageTransitionDecisionSchema,
+  error: z.string().optional(),
+}).strict();
+export type UppidiEvaluateTransitionOutput = z.infer<typeof UppidiEvaluateTransitionOutputSchema>;
+
+export const uppidiEvaluateTransitionContract = defineContract({
+  name: "uppidi-fleet.evaluate-transition",
+  description: "Evaluate a playbook stage transition against artifact and human gate guards",
+  input: UppidiEvaluateTransitionInputSchema,
+  output: UppidiEvaluateTransitionOutputSchema,
+});
