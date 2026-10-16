@@ -8,6 +8,7 @@
       "paseo-plugin-helper/shared": ["../../packages/paseo-plugin-helper/src/shared/index.ts"],
       "paseo-plugin-helper/mcp": ["../../packages/paseo-plugin-helper/src/mcp/index.ts"],
       "@xpufx/paseo-plugin-ui": ["../../packages/paseo-plugin-ui/src/index.tsx"],
+      "@xpufx/paseo-plugin-ui/tickets": ["../../packages/paseo-plugin-ui/src/tickets/index.ts"],
       "@xpufx/backend-tickets": ["../../packages/backend/tickets/src/index.ts"],
       "@xpufx/backend-tickets/client": ["../../packages/backend/tickets/src/client/index.ts"],
       "@xpufx/backend-tickets/shared": ["../../packages/backend/tickets/src/shared/index.ts"],

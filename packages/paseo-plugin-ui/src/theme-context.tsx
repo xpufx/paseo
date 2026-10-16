@@ -88,7 +88,11 @@ function createPluginUiTheme(colors: ThemeColors): PluginUiTheme {
   };
 }
 
-const ThemeContext = createContext<PluginUiTheme>(createPluginUiTheme(FALLBACK_COLORS));
+export const THEME_CONTEXT_KEY = Symbol.for("paseo.pluginUiThemeContext");
+
+const ThemeContext: React.Context<PluginUiTheme> =
+  (globalThis as any)[THEME_CONTEXT_KEY] ??
+  ((globalThis as any)[THEME_CONTEXT_KEY] = createContext<PluginUiTheme>(createPluginUiTheme(FALLBACK_COLORS)));
 
 export interface HostThemeProviderProps {
   theme?: { colors: ThemeColors } | { colors?: Partial<ThemeColors> };

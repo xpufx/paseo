@@ -32,4 +32,15 @@ describe("built entry point theme sharing", () => {
 
     expect(JSON.stringify(renderer.toJSON())).toContain(lightColors.foreground);
   });
+
+  it("preserves ThemeContext identity via Symbol.for('paseo.pluginUiThemeContext')", async () => {
+    const symbolKey = Symbol.for("paseo.pluginUiThemeContext");
+    const root = await import("../../dist/index.js");
+
+    expect(root.THEME_CONTEXT_KEY).toBe(symbolKey);
+    const globalContext = (globalThis as any)[symbolKey];
+    expect(globalContext).toBeDefined();
+    expect(globalContext.Provider).toBeDefined();
+    expect(globalContext.Consumer).toBeDefined();
+  });
 });

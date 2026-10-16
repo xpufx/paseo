@@ -21,6 +21,7 @@ import {
   ModalBodyScrollOwnerContext,
   FALLBACK_COLORS,
   resolveHostColors,
+  THEME_CONTEXT_KEY,
   type ThemeColors,
 } from "../index.js";
 
@@ -408,6 +409,15 @@ describe("@xpufx/paseo-plugin-ui invariants", () => {
     expect(resolved.border).toBe(FALLBACK_COLORS.border);
     expect(resolved.statusSuccess).toBe(FALLBACK_COLORS.statusSuccess);
     expect(resolved.statusDanger).toBe(FALLBACK_COLORS.statusDanger);
+  });
+
+  it("preserves ThemeContext identity via Symbol.for('paseo.pluginUiThemeContext')", () => {
+    const symbolKey = Symbol.for("paseo.pluginUiThemeContext");
+    expect(THEME_CONTEXT_KEY).toBe(symbolKey);
+    const context = (globalThis as any)[symbolKey];
+    expect(context).toBeDefined();
+    expect(context.Provider).toBeDefined();
+    expect(context.Consumer).toBeDefined();
   });
 });
 

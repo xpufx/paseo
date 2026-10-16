@@ -49,6 +49,7 @@ export {
   HostThemeProvider,
   resolveHostColors,
   useHostTheme,
+  THEME_CONTEXT_KEY,
   type HostThemeProviderProps,
   type PluginUiTheme,
 } from "./theme-context.js";
