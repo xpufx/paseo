@@ -327,6 +327,14 @@ function SlashConsoleInner() {
               onChangeText={(val) => updateSettings({ prefix: val })}
             />
           </HostFormRow>
+          {settings.hasPromptManager ? (
+            <HostFormRow label="Include Prompt Manager prompts in slash commands">
+              <HostToggle
+                value={settings.includePromptManagerPrompts ?? false}
+                onValueChange={(val) => updateSettings({ includePromptManagerPrompts: val })}
+              />
+            </HostFormRow>
+          ) : null}
           {form ? null : (
             <HostActionBar align="start" direction="row" style={{ marginTop: spacing.sm }}>
               <HostButton

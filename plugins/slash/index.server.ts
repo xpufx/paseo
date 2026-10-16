@@ -22,10 +22,10 @@ import {
 } from "./server/resources";
 
 export default function contribute(server: PluginServerContext) {
-  server.handle(slashSettingsContract.get, handleGetSettings);
-  server.handle(slashSettingsContract.update, handleUpdateSettings);
-  server.handle(slashSettingsContract.reset, handleResetSettings);
-  server.handle(listCommandsRpc, handleListCommands);
+  server.handle(slashSettingsContract.get, (_input, context) => handleGetSettings(context));
+  server.handle(slashSettingsContract.update, (input, context) => handleUpdateSettings(input, context));
+  server.handle(slashSettingsContract.reset, (_input, context) => handleResetSettings(context));
+  server.handle(listCommandsRpc, (_input, context) => handleListCommands(context));
   server.handle(catalogRpc, handleListCatalog);
   server.handle(operationsListRpc, handleListOperations);
   server.handle(runCommandRpc, (input, context) => handleRunCommand(input, context));

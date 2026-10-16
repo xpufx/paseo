@@ -21,6 +21,11 @@ import {
   resolveHookUrl,
 } from "./orchestrate";
 import { DEFAULT_SLASH_SETTINGS, getSlashSettingsStorage } from "./settings";
+import {
+  fetchPromptManagerContent,
+  isPromptManagerRunning,
+  loadPromptManagerSlashCommands,
+} from "./prompt-manager";
 
 export const log = createPluginLogger("slash", { version: SLASH_PLUGIN_VERSION });
 
@@ -36,25 +41,59 @@ async function readSettings(): Promise<SlashSettings> {
   return data;
 }
 
-export async function handleGetSettings(): Promise<SlashSettings> {
-  return readSettings();
+export async function handleGetSettings(context?: PluginHandlerContext): Promise<SlashSettings> {
+  const settings = await readSettings();
+  const hasPromptManager = await isPromptManagerRunning(context);
+  return { ...settings, hasPromptManager };
 }
 
-export async function handleUpdateSettings(patch: Partial<SlashSettings>): Promise<SlashSettings> {
+export async function handleUpdateSettings(
+  patch: Partial<SlashSettings>,
+  context?: PluginHandlerContext,
+): Promise<SlashSettings> {
   if (patch.prefix !== undefined && !/^[a-z0-9-]*$/.test(patch.prefix)) {
     throw new Error("prefix may only contain lowercase letters, digits, and dashes");
   }
-  return settingsStorage.updateAsync((prev) => ({ ...prev, ...patch }));
+  const { hasPromptManager: _, ...persistable } = patch;
+  const updated = await settingsStorage.updateAsync((prev) => ({ ...prev, ...persistable }));
+  const hasPromptManager = await isPromptManagerRunning(context);
+  return { ...updated, hasPromptManager };
 }
 
-export async function handleResetSettings(): Promise<SlashSettings> {
+export async function handleResetSettings(context?: PluginHandlerContext): Promise<SlashSettings> {
   settingsStorage.reset();
-  return DEFAULTS;
+  const hasPromptManager = await isPromptManagerRunning(context);
+  return { ...DEFAULTS, hasPromptManager };
 }
 
-export async function handleListCommands(): Promise<{ commands: SlashCommand[] }> {
+export async function handleListCommands(
+  context?: PluginHandlerContext,
+): Promise<{ commands: SlashCommand[] }> {
   const settings = await readSettings();
-  return { commands: settings.commands.filter((c) => c.enabled) };
+  const baseCommands = settings.commands.filter((c) => c.enabled);
+  if (!settings.includePromptManagerPrompts) {
+    return { commands: baseCommands };
+  }
+
+  const hasPromptManager = await isPromptManagerRunning(context);
+  if (!hasPromptManager) {
+    return { commands: baseCommands };
+  }
+
+  try {
+    const pmCommands = await loadPromptManagerSlashCommands(context);
+    const baseNames = new Set(baseCommands.map((c) => c.name));
+    const merged = [...baseCommands];
+    for (const cmd of pmCommands) {
+      if (!baseNames.has(cmd.name)) {
+        merged.push(cmd);
+      }
+    }
+    return { commands: merged };
+  } catch (err) {
+    log.warn("Failed to load Prompt Manager prompts for slash catalog", { error: String(err) });
+    return { commands: baseCommands };
+  }
 }
 
 export function handleListCatalog(): { commands: SlashCommand[] } {
@@ -411,17 +450,41 @@ export async function handleRunCommand(
   input: { name: string; args: string; agentId?: string },
   context?: PluginHandlerContext,
 ) {
-  const settings = await readSettings();
-  const command = settings.commands.find((c) => c.enabled && c.name === input.name);
+  const { commands } = await handleListCommands(context);
+  const command = commands.find((c) => c.enabled && c.name === input.name);
   if (!command) {
     throw new Error(`unknown or disabled command: ${input.name}`);
   }
   if (command.action.verb === "send") {
-    const prompt = interpolateTemplate(command.action.template, input.args);
-    if (input.agentId && context?.paseo?.agents?.ref) {
-      await context.paseo.agents.ref(input.agentId).send(prompt);
+    try {
+      let rawTemplate = command.action.template;
+      if (command.source === "paseo-prompt-manager" && command.promptId) {
+        rawTemplate = await fetchPromptManagerContent(command.promptId, context);
+      }
+      const prompt = interpolateTemplate(rawTemplate, input.args);
+      if (input.agentId && context?.paseo?.agents?.ref) {
+        await context.paseo.agents.ref(input.agentId).send(prompt);
+      }
+      return { verb: "send" as const, prompt };
+    } catch (err: unknown) {
+      const errMessage = err instanceof Error ? err.message : String(err);
+      if (input.agentId && context?.paseo?.agents?.ref) {
+        try {
+          await context.paseo.agents.ref(input.agentId).timeline.append({
+            type: "plugin",
+            id: `slash-${command.name}-${Date.now()}`,
+            kind: "slash-command-result",
+            version: 1,
+            data: {
+              command: command.name,
+              status: "error",
+              body: errMessage,
+            },
+          });
+        } catch {}
+      }
+      throw err;
     }
-    return { verb: "send" as const, prompt };
   }
   if (command.action.verb === "open") {
     return { verb: "open" as const, target: command.action.target };

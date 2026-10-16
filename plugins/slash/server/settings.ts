@@ -14,6 +14,7 @@ export const DEFAULT_SLASH_SETTINGS: SlashSettings = {
   operationBindings: SEED_OPERATION_BINDINGS,
   hookUrl: "",
   hookSecretFile: "",
+  includePromptManagerPrompts: false,
 };
 
 let settingsStorageInstance: PluginStorage<SlashSettings> | null = null;

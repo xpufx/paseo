@@ -50,6 +50,8 @@ export const SlashCommandSchema = z.object({
   description: z.string().max(500).default(""),
   enabled: z.boolean().default(true),
   action: SlashActionSchema,
+  source: z.string().optional(),
+  promptId: z.string().optional(),
 });
 export type SlashCommand = z.infer<typeof SlashCommandSchema>;
 
@@ -132,6 +134,8 @@ export const SlashSettingsSchema = z.object({
   // or env, never stored here.
   hookUrl: z.string().max(2000).default(""),
   hookSecretFile: z.string().max(2000).default(""),
+  includePromptManagerPrompts: z.boolean().default(false),
+  hasPromptManager: z.boolean().optional(),
 });
 export type SlashSettings = z.infer<typeof SlashSettingsSchema>;
 
