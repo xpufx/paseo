@@ -426,4 +426,23 @@ describe("Issue #791: Uppidi Fleet sidebar issues tab and repo dropdown", () => 
       assert.match(b, /2fado$/);
     });
   });
+
+  it("successfully parses server response when tokenValid, repoWritePermission, and repoPublic are null (#1395)", async () => {
+    const { forgeOpenIssuesContract } = await import("./forges-tab.js");
+
+    const parsed = forgeOpenIssuesContract.output.safeParse({
+      repo: "xpufx-org/paseo",
+      host: "forge.mrs.uppidi.com",
+      remoteUrl: "https://forge.mrs.uppidi.com/xpufx-org/paseo.git",
+      repoPublic: null,
+      tokenPresent: false,
+      tokenValid: null,
+      repoWritePermission: null,
+      issues: [],
+      totalOpenCount: 0,
+    });
+
+    assert.equal(parsed.success, true, "Schema must parse null tokenValid, repoWritePermission, and repoPublic");
+  });
 });
+

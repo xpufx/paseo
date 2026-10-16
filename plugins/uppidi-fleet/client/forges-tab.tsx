@@ -47,10 +47,10 @@ export const forgeOpenIssuesContract = defineContract({
     repo: z.string().nullable().default(null),
     host: z.string().nullable().default(null),
     remoteUrl: z.string().nullable().default(null),
-    repoPublic: z.boolean().default(false),
+    repoPublic: z.boolean().nullable().default(null),
     tokenPresent: z.boolean().default(false),
-    tokenValid: z.boolean().default(false),
-    repoWritePermission: z.boolean().default(false),
+    tokenValid: z.boolean().nullable().default(null),
+    repoWritePermission: z.boolean().nullable().default(null),
     issues: z
       .array(
         z.object({
