@@ -55,8 +55,10 @@ import {
   createDefaultIssuesCheckIo,
   runIssuesCheck,
   renderIssuesCheckMarkdown,
+  renderDecisionTraceComment,
   ISSUES_CHECK_DEFAULT_HOSTNAME,
   ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS,
+  type DecisionTrace,
   type IssuesCheckIo,
   type IssuesCheckRole,
   type StaleWipResult,
@@ -4226,6 +4228,8 @@ export interface BoardCheckResult {
   candidates: BoardCandidate[];
   staleWipRecovery?: StaleWipResult[];
   error?: string;
+  /** Structured per-issue decision traces from the board check (#1415). */
+  decisionTraces?: DecisionTrace[];
 }
 
 export interface BoardSweepResult {
@@ -10011,6 +10015,7 @@ export class HookRouter {
       ok: true,
       candidates: this.applyRepoAutomationTier(repo, outcome.rankedCandidates),
       staleWipRecovery: outcome.staleWipRecovery,
+      decisionTraces: outcome.decisionTraces,
     };
   }
 
@@ -11945,6 +11950,11 @@ export class HookRouter {
         const allParam = url.searchParams.get("all");
         const all = allParam !== null && allParam !== "false" && allParam !== "0";
         const format = url.searchParams.get("format")?.trim().toLowerCase() || "json";
+        // #1415: opt-in structured decision traces and diagnostic comments.
+        const traceParam = url.searchParams.get("trace");
+        const includeTraces = traceParam !== null && traceParam !== "false" && traceParam !== "0";
+        const commentParam = url.searchParams.get("comment") ?? url.searchParams.get("diagnostic_comment");
+        const postDiagnosticComments = commentParam !== null && commentParam !== "false" && commentParam !== "0";
 
         const parts = repo.split("/").filter(Boolean);
         let hostname = resolveForgejoHost();
@@ -11983,14 +11993,47 @@ export class HookRouter {
             return;
           }
 
-          this.sendJson(res, 200, {
+          const payload: Record<string, unknown> = {
             ok: true,
             repo,
             candidates: outcome.rankedCandidates,
             exitCode: outcome.exitCode,
             staleWip: outcome.staleWipRecovery,
             stateTriage: outcome.stateTriage,
-          });
+          };
+
+          if (includeTraces || postDiagnosticComments) {
+            const traces = outcome.decisionTraces ?? [];
+            if (includeTraces) {
+              payload.decisionTraces = traces;
+            }
+            if (postDiagnosticComments && traces.length > 0) {
+              const token = await this.resolveApiToken(hostname);
+              let posted = 0;
+              for (const trace of traces) {
+                try {
+                  const comment = await forgejoApiRequest<any>(
+                    "POST",
+                    `/api/v1/repos/${ownerRepo}/issues/${trace.number}/comments`,
+                    { body: renderDecisionTraceComment(trace) },
+                    { host: hostname, token },
+                  );
+                  if (comment.outcome === "ok") {
+                    posted++;
+                  } else {
+                    this.log(`[warn] diagnostic comment failed for ${ownerRepo}#${trace.number}: ${comment.error}`);
+                  }
+                } catch (err) {
+                  this.log(
+                    `[warn] diagnostic comment failed for ${ownerRepo}#${trace.number}: ${err instanceof Error ? err.message : String(err)}`,
+                  );
+                }
+              }
+              payload.diagnosticComments = { attempted: traces.length, posted };
+            }
+          }
+
+          this.sendJson(res, 200, payload);
         } catch (err: any) {
           this.sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : (err?.message ?? String(err)) });
         }

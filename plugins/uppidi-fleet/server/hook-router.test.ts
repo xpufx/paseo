@@ -1004,6 +1004,166 @@ describe("hook-router HTTP server endpoints", () => {
         router.setIssuesCheckIoForTest(null);
       }
     });
+
+    it("includes decisionTraces in the JSON response when trace=true (#1415)", async () => {
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1415,
+              title: "Decision tree logging",
+              state: "open",
+              labels: [{ name: "kind/feature" }, { name: "priority/normal" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      router.setIssuesCheckIoForTest(mockIo);
+      try {
+        const res = await fetch(`http://127.0.0.1:${router.port}/board/sweep?repo=xpufx-org/paseo&trace=true`);
+        assert.equal(res.status, 200);
+        const body = await res.json();
+        assert.equal(body.ok, true);
+        assert.ok(Array.isArray(body.decisionTraces));
+        assert.equal(body.decisionTraces.length, 1);
+        assert.equal(body.decisionTraces[0].number, 1415);
+        assert.equal(body.decisionTraces[0].path, "new");
+        assert.ok(Array.isArray(body.decisionTraces[0].guards));
+        assert.ok(body.decisionTraces[0].guards.length > 0);
+      } finally {
+        router.setIssuesCheckIoForTest(null);
+      }
+    });
+
+    it("omits decisionTraces from the JSON response by default (#1415)", async () => {
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1415,
+              title: "Decision tree logging",
+              state: "open",
+              labels: [{ name: "kind/feature" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      router.setIssuesCheckIoForTest(mockIo);
+      try {
+        const res = await fetch(`http://127.0.0.1:${router.port}/board/sweep?repo=xpufx-org/paseo`);
+        assert.equal(res.status, 200);
+        const body = await res.json();
+        assert.equal(body.ok, true);
+        assert.equal(body.decisionTraces, undefined);
+      } finally {
+        router.setIssuesCheckIoForTest(null);
+      }
+    });
+
+    it("posts diagnostic comments onto each evaluated issue when comment=true (#1415)", async () => {
+      const posted: Array<{ url: string; method: string; body: any }> = [];
+      setFetchForTest(async (input: string, init?: any) => {
+        const method = String(init?.method ?? "GET").toUpperCase();
+        const body = init?.body ? JSON.parse(init.body) : undefined;
+        posted.push({ url: input, method, body });
+        return { ok: true, status: 200, statusText: "", json: async () => ({ id: 1 }) };
+      });
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1415,
+              title: "Decision tree logging",
+              state: "open",
+              labels: [{ name: "kind/feature" }, { name: "priority/normal" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      router.setIssuesCheckIoForTest(mockIo);
+      try {
+        const res = await fetch(`http://127.0.0.1:${router.port}/board/sweep?repo=xpufx-org/paseo&comment=true`);
+        assert.equal(res.status, 200);
+        const body = await res.json();
+        assert.equal(body.ok, true);
+        assert.equal(body.diagnosticComments.attempted, 1);
+        assert.equal(body.diagnosticComments.posted, 1);
+        assert.equal(posted.length, 1);
+        assert.equal(posted[0].method, "POST");
+        assert.ok(posted[0].url.includes("/issues/1415/comments"));
+        assert.ok(posted[0].body.body.includes("Board Sweep Decision Trace"));
+      } finally {
+        router.setIssuesCheckIoForTest(null);
+        setFetchForTest(null);
+      }
+    });
+
+    it("supports diagnostic_comment as an alias for comment (#1415)", async () => {
+      const posted: Array<{ url: string; method: string; body: any }> = [];
+      setFetchForTest(async (input: string, init?: any) => {
+        const method = String(init?.method ?? "GET").toUpperCase();
+        const body = init?.body ? JSON.parse(init.body) : undefined;
+        posted.push({ url: input, method, body });
+        return { ok: true, status: 200, statusText: "", json: async () => ({ id: 1 }) };
+      });
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1415,
+              title: "Decision tree logging",
+              state: "open",
+              labels: [{ name: "kind/feature" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      router.setIssuesCheckIoForTest(mockIo);
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:${router.port}/board/sweep?repo=xpufx-org/paseo&diagnostic_comment=true`,
+        );
+        assert.equal(res.status, 200);
+        const body = await res.json();
+        assert.equal(body.diagnosticComments.posted, 1);
+        assert.equal(posted.length, 1);
+      } finally {
+        router.setIssuesCheckIoForTest(null);
+        setFetchForTest(null);
+      }
+    });
   });
 
   it("records, checks and summarizes audits over the HTTP gateway (#1172)", async () => {

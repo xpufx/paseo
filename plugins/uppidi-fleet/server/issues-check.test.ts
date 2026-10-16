@@ -32,6 +32,8 @@ import {
   runIssuesCheck,
   sweepStatelessIssues,
   renderIssuesCheckMarkdown,
+  renderDecisionTraceComment,
+  type DecisionTrace,
   type ForgejoComment,
   type ForgejoIssue,
   type IssueSignature,
@@ -393,6 +395,7 @@ describe("state/verify vs state/review separation (#1194)", () => {
       staleWipRecovery: [],
       stateTriage: [],
       savedState: {},
+      decisionTraces: [],
       rankedCandidates: [
         {
           number: 101,
@@ -622,5 +625,231 @@ describe("#1364: dispatchable candidate hardening", () => {
   it("isActionable(..., 'worker') excludes unshaped state/triage", () => {
     assert.equal(isActionable(new Set(["state/triage"]), "worker"), false);
     assert.equal(isActionable(new Set(["state/triage", "spec/approved"]), "worker"), true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #1415: structured decision tree tracing
+// ---------------------------------------------------------------------------
+describe("#1415: decision tree tracing", () => {
+  function tracedIo(issues: ForgejoIssue[], cache: Record<string, IssueSignature> = {}): IssuesCheckIo {
+    return {
+      getOpenIssues: async () => ({ ok: true, issues }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => cache,
+      saveCache: async () => {},
+    };
+  }
+
+  function cachedSignature(issue: ForgejoIssue): IssueSignature {
+    const rawLabels: unknown = issue.labels ?? [];
+    const labels = (Array.isArray(rawLabels) ? rawLabels : [])
+      .map((l) => (typeof l === "string" ? l : (l as { name?: unknown })?.name ?? ""))
+      .filter((n): n is string => typeof n === "string")
+      .sort();
+    return {
+      updated_at: issue.updated_at ?? "",
+      labels,
+      comments_count: issue.comments ?? 0,
+    };
+  }
+
+  it("produces one trace per evaluated issue with number, title, and labels", async () => {
+    const dispatchable: ForgejoIssue = {
+      number: 2001,
+      title: "Dispatchable feature",
+      state: "open",
+      updated_at: "2026-10-10T10:00:00Z",
+      created_at: "2026-10-10T10:00:00Z",
+      comments: 0,
+      labels: [{ name: "kind/feature" }, { name: "priority/normal" }],
+    };
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      io: tracedIo([dispatchable], { "2001": cachedSignature(dispatchable) }),
+    });
+    assert.equal(outcome.decisionTraces.length, 1);
+    const trace = outcome.decisionTraces[0];
+    assert.equal(trace.number, 2001);
+    assert.equal(trace.title, "Dispatchable feature");
+    assert.ok(trace.labels.includes("kind/feature"));
+    assert.ok(trace.labels.includes("priority/normal"));
+  });
+
+  it("records the full guard sequence and matched rule for a dispatchable issue", async () => {
+    const dispatchable: ForgejoIssue = {
+      number: 2002,
+      title: "Ready task",
+      state: "open",
+      updated_at: "2026-10-10T10:00:00Z",
+      created_at: "2026-10-10T10:00:00Z",
+      comments: 0,
+      labels: [{ name: "kind/feature" }, { name: "priority/normal" }],
+    };
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      io: tracedIo([dispatchable], { "2002": cachedSignature(dispatchable) }),
+    });
+    const trace = outcome.decisionTraces[0];
+    assert.equal(trace.path, "actionable");
+    assert.equal(trace.category, "dispatchable");
+    assert.equal(trace.is_dispatchable, true);
+    assert.equal(trace.matched_rule, "dispatchable");
+    const rules = trace.guards.map((g) => g.rule);
+    assert.ok(rules.includes("is-actionable"));
+    assert.ok(rules.includes("hard-stop"));
+    assert.ok(rules.includes("dispatchable"));
+    assert.ok(rules.indexOf("is-actionable") < rules.indexOf("hard-stop"));
+  });
+
+  it("records the blocking guard for a non-actionable issue", async () => {
+    const wip: ForgejoIssue = {
+      number: 2003,
+      title: "Work in progress",
+      state: "open",
+      updated_at: "2026-10-10T10:00:00Z",
+      created_at: "2026-10-10T10:00:00Z",
+      comments: 0,
+      labels: [{ name: "state/wip" }, { name: "kind/feature" }],
+    };
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      io: tracedIo([wip], { "2003": cachedSignature(wip) }),
+    });
+    const trace = outcome.decisionTraces[0];
+    assert.equal(trace.path, "not-actionable");
+    assert.equal(trace.is_dispatchable, false);
+    assert.equal(trace.category, "not-actionable");
+  });
+
+  it("records the skip path for an attention/ignore issue", async () => {
+    const ignored: ForgejoIssue = {
+      number: 2004,
+      title: "Ignored ticket",
+      state: "open",
+      updated_at: "2026-10-10T10:00:00Z",
+      created_at: "2026-10-10T10:00:00Z",
+      comments: 0,
+      labels: [{ name: "attention/ignore" }],
+    };
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      io: tracedIo([ignored]),
+    });
+    const trace = outcome.decisionTraces[0];
+    assert.equal(trace.path, "skipped");
+    assert.equal(trace.category, "skipped");
+    assert.equal(trace.matched_rule, "attention-ignore");
+  });
+
+  it("records the new path for a first-seen issue", async () => {
+    const fresh: ForgejoIssue = {
+      number: 2005,
+      title: "Brand new",
+      state: "open",
+      updated_at: "2026-10-10T10:00:00Z",
+      created_at: "2026-10-10T10:00:00Z",
+      comments: 0,
+      labels: [{ name: "kind/bug" }],
+    };
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      io: tracedIo([fresh]),
+    });
+    const trace = outcome.decisionTraces[0];
+    assert.equal(trace.path, "new");
+    assert.equal(trace.category, "new_unseen");
+    assert.equal(trace.matched_rule, "new-first-seen");
+  });
+
+  it("records the feedback path for an issue with human feedback", async () => {
+    const feedbackIssue: ForgejoIssue = {
+      number: 2006,
+      title: "Needs attention",
+      state: "open",
+      updated_at: "2026-10-10T10:00:00Z",
+      created_at: "2026-10-10T10:00:00Z",
+      comments: 1,
+      labels: [{ name: "kind/feature" }],
+    };
+    const io: IssuesCheckIo = {
+      getOpenIssues: async () => ({ ok: true, issues: [feedbackIssue] }),
+      getLatestComments: async () => [{ user: { login: "alice" }, body: "please fix this" }],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    };
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      io,
+    });
+    const trace = outcome.decisionTraces[0];
+    assert.equal(trace.path, "feedback");
+    assert.equal(trace.category, "feedback");
+    assert.equal(trace.matched_rule, "feedback-precedence");
+  });
+
+  it("records the unchanged path for an actionable issue with no delta", async () => {
+    const stable: ForgejoIssue = {
+      number: 2007,
+      title: "Stable task",
+      state: "open",
+      updated_at: "2026-10-10T10:00:00Z",
+      created_at: "2026-10-10T10:00:00Z",
+      comments: 0,
+      labels: [{ name: "kind/feature" }],
+    };
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: false,
+      io: tracedIo([stable], { "2007": cachedSignature(stable) }),
+    });
+    const trace = outcome.decisionTraces[0];
+    assert.equal(trace.path, "unchanged");
+    assert.equal(trace.category, "unchanged");
+  });
+
+  it("renderDecisionTraceComment formats the breakdown as a Forgejo comment", () => {
+    const trace: DecisionTrace = {
+      number: 2001,
+      title: "Dispatchable feature",
+      labels: ["kind/feature", "priority/normal"],
+      guards: [
+        { rule: "is-actionable", description: "isActionable(role=orchestrator)", matched: true },
+        { rule: "hard-stop", description: "Hard stop or ignore flags", matched: false },
+        { rule: "dispatchable", description: "Natural autonomous dispatch (no blockers)", matched: true },
+      ],
+      path: "actionable",
+      is_dispatchable: true,
+      category: "dispatchable",
+      reason: "Dispatchable task (unblocked, ready for autonomous execution)",
+      matched_rule: "dispatchable",
+    };
+    const body = renderDecisionTraceComment(trace);
+    assert.ok(body.includes("#2001"));
+    assert.ok(body.includes("Dispatchable feature"));
+    assert.ok(body.includes("kind/feature"));
+    assert.ok(body.includes("`actionable`"));
+    assert.ok(body.includes("`dispatchable`"));
+    assert.ok(body.includes("[x] `is-actionable`"));
+    assert.ok(body.includes("[ ] `hard-stop`"));
+    assert.ok(body.includes("[x] `dispatchable`"));
+    assert.ok(body.includes("#1415"));
   });
 });

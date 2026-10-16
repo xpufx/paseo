@@ -168,6 +168,91 @@ export interface IssuesCheckOutcome {
   /** Open issues filed under state/triage because they carried no board state. */
   stateTriage: StateTriageResult[];
   savedState: Record<string, IssueSignature>;
+  /** Structured per-issue decision traces (#1415). */
+  decisionTraces: DecisionTrace[];
+}
+
+// ---------------------------------------------------------------------------
+// Decision tree tracing (#1415)
+//
+// The board sweep's candidate evaluation is a decision tree: feedback
+// precedence, first-seen, SOS, lifecycle stage, then the dispatchable guards.
+// These types capture that tree so a sweep can explain *why* each issue was
+// classified the way it was, both in the JSON response (`decisionTraces`) and
+// as a per-issue diagnostic comment.
+// ---------------------------------------------------------------------------
+
+export interface DecisionTraceGuard {
+  /** Stable rule id, e.g. `hard-stop`, `dispatchable`. */
+  rule: string;
+  /** One-line human-readable description of the guard. */
+  description: string;
+  /** True when the guard's condition held. */
+  matched: boolean;
+  /** Labels that triggered the guard, when label-driven. */
+  labels?: string[];
+}
+
+export interface DecisionTrace {
+  number: number;
+  title: string;
+  labels: string[];
+  /** Guards in evaluation order. */
+  guards: DecisionTraceGuard[];
+  /**
+   * Top-level evaluation path: `feedback`, `new`, `actionable`, `skipped`,
+   * `not-actionable`, or `unchanged`.
+   */
+  path: string;
+  is_dispatchable: boolean;
+  category: string;
+  reason: string;
+  /** The guard whose evaluation decided the outcome; null when undecided. */
+  matched_rule: string | null;
+}
+
+/**
+ * Accumulates {@link DecisionTraceGuard} entries as the decision tree is
+ * evaluated, then builds the immutable trace. Passed by reference into the
+ * pure classifier functions so they record guards as a side effect of their
+ * normal evaluation — no decision logic is duplicated.
+ */
+export class DecisionTraceBuilder {
+  private readonly guards: DecisionTraceGuard[] = [];
+  private readonly issue: ForgejoIssue;
+
+  constructor(issue: ForgejoIssue) {
+    this.issue = issue;
+  }
+
+  /** Record one evaluated guard; returns `matched` so call sites stay readable. */
+  guard(rule: string, description: string, matched: boolean, labels?: string[]): boolean {
+    const entry: DecisionTraceGuard = { rule, description, matched };
+    if (labels && labels.length > 0) entry.labels = [...labels];
+    this.guards.push(entry);
+    return matched;
+  }
+
+  build(path: string, classification: { category: string; is_dispatchable: boolean; reason: string }): DecisionTrace {
+    const matchedGuards = this.guards.filter((g) => g.matched);
+    const matchedRule =
+      matchedGuards.length > 0
+        ? matchedGuards[matchedGuards.length - 1].rule
+        : this.guards.length > 0
+          ? this.guards[this.guards.length - 1].rule
+          : null;
+    return {
+      number: this.issue.number,
+      title: typeof this.issue.title === "string" ? this.issue.title : "",
+      labels: labelNames(this.issue).filter((label): label is string => typeof label === "string"),
+      guards: [...this.guards],
+      path,
+      is_dispatchable: classification.is_dispatchable,
+      category: classification.category,
+      reason: classification.reason,
+      matched_rule: matchedRule,
+    };
+  }
 }
 
 export type IssuesCheckRole = "orchestrator" | "worker";
@@ -507,35 +592,57 @@ export function calculatePriorityTuple(issue: ForgejoIssue, isFeedbackDelta = fa
   return [tier, urgency, effort, createdAt];
 }
 
-export function isDispatchableCandidate(labelSet: Set<string>): boolean {
+export function isDispatchableCandidate(labelSet: Set<string>, trace?: DecisionTraceBuilder): boolean {
   // Hard stop or ignore flags
-  if (setIntersects(labelSet, ["flag/stop-work", "flag/wont-do", "attention/ignore", "state/done"])) {
+  const hardStopLabels = ["flag/stop-work", "flag/wont-do", "attention/ignore", "state/done"];
+  const hardStop = setIntersects(labelSet, hardStopLabels);
+  trace?.guard("hard-stop", "Hard stop or ignore flags", hardStop, hardStopLabels.filter((l) => labelSet.has(l)));
+  if (hardStop) {
     return false;
   }
   // Non-actionable kinds: discussion and ideas are not coding tasks
-  if (labelSet.has("kind/discussion") || labelSet.has("kind/idea")) return false;
+  const nonActionableKinds = ["kind/discussion", "kind/idea"].filter((l) => labelSet.has(l));
+  trace?.guard("non-actionable-kind", "Non-actionable kinds (discussion, idea)", nonActionableKinds.length > 0, nonActionableKinds);
+  if (nonActionableKinds.length > 0) return false;
   // Unshaped triage tickets without a spec/approved or spec/checklist are not dispatchable
-  if (labelSet.has("state/triage") && !labelSet.has("spec/approved") && !labelSet.has("spec/checklist")) return false;
+  const unshapedTriage = labelSet.has("state/triage") && !labelSet.has("spec/approved") && !labelSet.has("spec/checklist");
+  trace?.guard("unshaped-triage", "Unshaped state/triage without spec/approved or spec/checklist", unshapedTriage, unshapedTriage ? ["state/triage"] : undefined);
+  if (unshapedTriage) return false;
   // Gated on human attention: orchestrator or front-desk hand-off
-  if (setIntersects(labelSet, ["attention/user", "attention/orchestrator", "attention/frontdesk"])) return false;
+  const humanAttention = ["attention/user", "attention/orchestrator", "attention/frontdesk"].filter((l) => labelSet.has(l));
+  trace?.guard("human-attention", "Gated on human attention (user/orchestrator/frontdesk)", humanAttention.length > 0, humanAttention);
+  if (humanAttention.length > 0) return false;
   // Dependency or upstream blocked
-  if (setIntersects(labelSet, ["dep/blocked", "upstream/blocked"])) return false;
+  const depBlocked = ["dep/blocked", "upstream/blocked"].filter((l) => labelSet.has(l));
+  trace?.guard("dependency-blocked", "Dependency or upstream blocked", depBlocked.length > 0, depBlocked);
+  if (depBlocked.length > 0) return false;
   // Oversized or needs splitting
-  if (setIntersects(labelSet, ["size/chunk", "linked/needs-split"])) return false;
+  const oversized = ["size/chunk", "linked/needs-split"].filter((l) => labelSet.has(l));
+  trace?.guard("oversized", "Oversized or needs splitting", oversized.length > 0, oversized);
+  if (oversized.length > 0) return false;
   // Pre-code shaping
-  if (labelSet.has("spec/needed")) return false;
+  const specNeeded = labelSet.has("spec/needed");
+  trace?.guard("pre-code-shaping", "Pre-code shaping required (spec/needed)", specNeeded, specNeeded ? ["spec/needed"] : undefined);
+  if (specNeeded) return false;
   // Active WIP (worker already assigned and actively executing)
-  if (labelSet.has("state/wip")) return false;
+  const activeWip = labelSet.has("state/wip");
+  trace?.guard("active-wip", "Active WIP (worker executing)", activeWip, activeWip ? ["state/wip"] : undefined);
+  if (activeWip) return false;
   // Deliverable review stage (pending orchestrator PR pre-flight audit)
-  if (labelSet.has("state/review")) return false;
+  const inReview = labelSet.has("state/review");
+  trace?.guard("deliverable-review", "Deliverable review stage (state/review)", inReview, inReview ? ["state/review"] : undefined);
+  if (inReview) return false;
 
   // state/verify is only non-dispatchable when no attention/* signal overrides it.
   // When attention/agent is attached the operator has explicitly handed the ticket
   // to an agent — that driving signal trumps the lifecycle stage and lets a worker
   // pick it up for verification work.
-  if (labelSet.has("state/verify") && !labelSet.has("attention/agent")) return false;
+  const verifyGated = labelSet.has("state/verify") && !labelSet.has("attention/agent");
+  trace?.guard("state-verify", "state/verify without attention/agent", verifyGated, verifyGated ? ["state/verify"] : undefined);
+  if (verifyGated) return false;
 
   // Natural autonomous dispatch: Open tickets without user blockers or hard stops
+  trace?.guard("dispatchable", "Natural autonomous dispatch (no blockers)", true);
   return true;
 }
 
@@ -551,13 +658,15 @@ export interface FeedbackInfo {
 export function classifyCandidate(
   issue: ForgejoIssue,
   labelSet: Set<string>,
-  { isNew = false, isFeedback = false, feedbackInfo = null }: {
+  { isNew = false, isFeedback = false, feedbackInfo = null, trace }: {
     isNew?: boolean;
     isFeedback?: boolean;
     feedbackInfo?: FeedbackInfo | null;
+    trace?: DecisionTraceBuilder;
   } = {},
 ): { category: string; is_dispatchable: boolean; reason: string } {
   if (isFeedback) {
+    trace?.guard("feedback-precedence", "Universal human feedback precedence rule", true);
     const author = feedbackInfo?.author ?? "operator";
     const snip = feedbackInfo?.snippet ?? "";
     return {
@@ -568,13 +677,16 @@ export function classifyCandidate(
   }
 
   if (isNew) {
-    if (setIntersects(labelSet, ["attention/user"])) {
+    const userAttention = setIntersects(labelSet, ["attention/user"]);
+    trace?.guard("new-user-attention", "New issue with attention/user", userAttention, userAttention ? ["attention/user"] : undefined);
+    if (userAttention) {
       return {
         category: "user_attention",
         is_dispatchable: false,
         reason: "[NEW ISSUE - USER ATTENTION REQUIRED] Newly filed issue requires operator input or decision",
       };
     }
+    trace?.guard("new-first-seen", "New issue first-seen (requires ingestion)", true);
     return {
       category: "new_unseen",
       is_dispatchable: false,
@@ -583,8 +695,10 @@ export function classifyCandidate(
   }
 
   if (labelSet.has("priority/sos")) {
-    const isDisp = isDispatchableCandidate(labelSet);
+    trace?.guard("sos", "SOS priority (preempt all work)", true);
+    const isDisp = isDispatchableCandidate(labelSet, trace);
     if (labelSet.has("state/review")) {
+      trace?.guard("sos-state-review", "SOS deliverable in state/review", true);
       return {
         category: "sos",
         is_dispatchable: false,
@@ -592,6 +706,7 @@ export function classifyCandidate(
       };
     }
     if (labelSet.has("state/verify")) {
+      trace?.guard("sos-state-verify", "SOS deliverable in state/verify", true);
       return {
         category: "sos",
         is_dispatchable: false,
@@ -600,6 +715,7 @@ export function classifyCandidate(
           : "Preempt all work (SOS deliverable merged; awaiting operator verification)",
       };
     }
+    trace?.guard("sos-dispatch", "SOS dispatchable decision", isDisp);
     return {
       category: "sos",
       is_dispatchable: isDisp,
@@ -611,6 +727,7 @@ export function classifyCandidate(
 
   // Follow-up on verified deliverable directed to Orchestrator
   if (labelSet.has("state/verify") && labelSet.has("attention/orchestrator")) {
+    trace?.guard("verify-orchestrator-followup", "state/verify follow-up directed to Orchestrator", true);
     return {
       category: "orchestrator_triage",
       is_dispatchable: false,
@@ -620,6 +737,7 @@ export function classifyCandidate(
 
   // Merged deliverable awaiting operator verification
   if (labelSet.has("state/verify")) {
+    trace?.guard("operator-verify", "Merged deliverable awaiting operator verification", true);
     return {
       category: "operator_verify",
       is_dispatchable: false,
@@ -628,7 +746,9 @@ export function classifyCandidate(
   }
 
   // User attention needed
-  if (setIntersects(labelSet, ["attention/user"])) {
+  const userAttention = setIntersects(labelSet, ["attention/user"]);
+  trace?.guard("user-attention", "Requires user attention", userAttention, userAttention ? ["attention/user"] : undefined);
+  if (userAttention) {
     return {
       category: "user_attention",
       is_dispatchable: false,
@@ -638,6 +758,7 @@ export function classifyCandidate(
 
   // Deliverable PR review
   if (labelSet.has("state/review")) {
+    trace?.guard("deliverable-review", "Deliverable PR review (state/review)", true);
     return {
       category: "verification",
       is_dispatchable: false,
@@ -647,6 +768,7 @@ export function classifyCandidate(
 
   // Active WIP
   if (labelSet.has("state/wip")) {
+    trace?.guard("in-progress", "Active work in progress (state/wip)", true);
     return {
       category: "in_progress",
       is_dispatchable: false,
@@ -655,7 +777,9 @@ export function classifyCandidate(
   }
 
   // Decomposition
-  if (labelSet.has("size/chunk") || labelSet.has("linked/needs-split")) {
+  const decomposition = ["size/chunk", "linked/needs-split"].filter((l) => labelSet.has(l));
+  trace?.guard("decomposition", "Decomposition required", decomposition.length > 0, decomposition);
+  if (decomposition.length > 0) {
     return {
       category: "decomposition",
       is_dispatchable: false,
@@ -664,7 +788,9 @@ export function classifyCandidate(
   }
 
   // Dependency blocked
-  if (labelSet.has("dep/blocked") || labelSet.has("upstream/blocked")) {
+  const depBlocked = ["dep/blocked", "upstream/blocked"].filter((l) => labelSet.has(l));
+  trace?.guard("dependency-blocked", "Blocked on dependency / upstream", depBlocked.length > 0, depBlocked);
+  if (depBlocked.length > 0) {
     return {
       category: "blocked",
       is_dispatchable: false,
@@ -673,7 +799,9 @@ export function classifyCandidate(
   }
 
   // Pre-code shaping
-  if (labelSet.has("spec/needed")) {
+  const specNeeded = labelSet.has("spec/needed");
+  trace?.guard("pre-code-shaping", "Pre-code shaping required (spec/needed)", specNeeded, specNeeded ? ["spec/needed"] : undefined);
+  if (specNeeded) {
     return {
       category: "shaping",
       is_dispatchable: false,
@@ -683,7 +811,9 @@ export function classifyCandidate(
 
   // Orchestrator explicit triage. Evaluated before the dispatchable fallthrough:
   // an attention/orchestrator ticket is Layer 2 work even when nothing else blocks it.
-  if (labelSet.has("attention/orchestrator")) {
+  const orch = labelSet.has("attention/orchestrator");
+  trace?.guard("orchestrator-triage", "Orchestrator explicit triage", orch, orch ? ["attention/orchestrator"] : undefined);
+  if (orch) {
     return {
       category: "orchestrator_triage",
       is_dispatchable: false,
@@ -692,7 +822,9 @@ export function classifyCandidate(
   }
 
   // Front-desk hand-off: the front desk owns routing, not a coding worker.
-  if (labelSet.has("attention/frontdesk")) {
+  const frontdesk = labelSet.has("attention/frontdesk");
+  trace?.guard("frontdesk-handoff", "Front-desk hand-off", frontdesk, frontdesk ? ["attention/frontdesk"] : undefined);
+  if (frontdesk) {
     return {
       category: "orchestrator_triage",
       is_dispatchable: false,
@@ -701,7 +833,7 @@ export function classifyCandidate(
   }
 
   // Fully dispatchable worker task
-  if (isDispatchableCandidate(labelSet)) {
+  if (isDispatchableCandidate(labelSet, trace)) {
     const target = labelNames(issue).find((label) => typeof label === "string" && label.startsWith("target/"));
     const targetStr = target ? ` [${target}]` : "";
     return {
@@ -711,6 +843,7 @@ export function classifyCandidate(
     };
   }
 
+  trace?.guard("actionable-fallthrough", "Actionable task (orchestrator triage fallthrough)", true);
   return {
     category: "orchestrator_triage",
     is_dispatchable: false,
@@ -979,7 +1112,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
   }
   const issues = fetched.issues;
   if (issues.length === 0) {
-    return { exitCode: 0, rankedCandidates: [], staleWipRecovery: [], stateTriage: [], savedState: {} };
+    return { exitCode: 0, rankedCandidates: [], staleWipRecovery: [], stateTriage: [], savedState: {}, decisionTraces: [] };
   }
 
   const staleWipResults = sweepStaleWip
@@ -996,6 +1129,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
   const cache = await io.loadCache(repo);
   const newState: Record<string, IssueSignature> = {};
   const candidates: RankedCandidate[] = [];
+  const traces: DecisionTrace[] = [];
   const { trusted: trustedLogins, nonHuman: nonHumanLogins } = boardIdentityConfig();
 
   for (const issue of issues) {
@@ -1020,10 +1154,14 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
     const isNew = cachedSig == null;
     const isChanged = force ? true : !signaturesEqual(cachedSig, issueSig);
 
+    const trace = new DecisionTraceBuilder(issue);
+
     if (
       setIntersects(labelsSet, ["attention/ignore"]) &&
       !labelsSet.has("priority/sos")
     ) {
+      trace.guard("attention-ignore", "Issue carries attention/ignore (skipped)", true, ["attention/ignore"]);
+      traces.push(trace.build("skipped", { category: "skipped", is_dispatchable: false, reason: "attention/ignore" }));
       continue;
     }
 
@@ -1051,6 +1189,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
       const cl = classifyCandidate(issue, labelsSet, {
         isFeedback: true,
         feedbackInfo: { author: feedbackAuthor, snippet: feedbackSnippet },
+        trace,
       });
       candidates.push({
         number: num,
@@ -1063,13 +1202,14 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
         last_comment_snippet: feedbackSnippet,
         reason: cl.reason,
       });
+      traces.push(trace.build("feedback", cl));
       continue;
     }
 
     // Check brand new (first-seen) issue — highest priority for orchestrator triage
     if (isNew) {
       const pTuple = calculatePriorityTuple(issue, true);
-      const cl = classifyCandidate(issue, labelsSet, { isNew: true });
+      const cl = classifyCandidate(issue, labelsSet, { isNew: true, trace });
       candidates.push({
         number: num,
         title,
@@ -1080,13 +1220,16 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
         is_dispatchable: cl.is_dispatchable,
         reason: cl.reason,
       });
+      traces.push(trace.build("new", cl));
       continue;
     }
 
-    if (isActionable(labelsSet, role)) {
+    const actionable = isActionable(labelsSet, role);
+    trace.guard("is-actionable", `isActionable(role=${role})`, actionable);
+    if (actionable) {
       if (isChanged || all) {
         const pTuple = calculatePriorityTuple(issue);
-        const cl = classifyCandidate(issue, labelsSet);
+        const cl = classifyCandidate(issue, labelsSet, { trace });
         candidates.push({
           number: num,
           title,
@@ -1096,7 +1239,12 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
           is_dispatchable: cl.is_dispatchable,
           reason: cl.reason,
         });
+        traces.push(trace.build("actionable", cl));
+      } else {
+        traces.push(trace.build("unchanged", { category: "unchanged", is_dispatchable: false, reason: "unchanged since last sweep" }));
       }
+    } else {
+      traces.push(trace.build("not-actionable", { category: "not-actionable", is_dispatchable: false, reason: `not actionable for role ${role}` }));
     }
   }
 
@@ -1109,6 +1257,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
       staleWipRecovery: staleWipResults,
       stateTriage: stateTriageResults,
       savedState: newState,
+      decisionTraces: traces,
     };
   }
 
@@ -1121,6 +1270,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
     staleWipRecovery: staleWipResults,
     stateTriage: stateTriageResults,
     savedState: newState,
+    decisionTraces: traces,
   };
 }
 
@@ -1275,4 +1425,30 @@ export function renderIssuesCheckMarkdown(
   lines.push("", "---", "");
   lines.push("Dispatchable items can be executed immediately. Orchestrator reasons about the rest.");
   return `${lines.join("\n")}\n`;
+}
+
+/**
+ * Render one {@link DecisionTrace} as a Forgejo comment body (#1415). Used by
+ * the hook router's diagnostic comment mode to post the decision breakdown
+ * onto each evaluated issue's timeline. Pure: the router performs the I/O.
+ */
+export function renderDecisionTraceComment(trace: DecisionTrace): string {
+  const lines: string[] = [];
+  lines.push("### Board Sweep Decision Trace");
+  lines.push("");
+  lines.push(`**Issue:** #${trace.number} — ${trace.title}`);
+  lines.push(`**Labels:** ${trace.labels.length > 0 ? trace.labels.join(", ") : "_(none)_"}`);
+  lines.push(`**Path:** \`${trace.path}\``);
+  lines.push(`**Classification:** \`${trace.category}\` (dispatchable: ${trace.is_dispatchable ? "yes" : "no"})`);
+  if (trace.matched_rule) lines.push(`**Matched rule:** \`${trace.matched_rule}\``);
+  lines.push(`**Reason:** ${trace.reason}`);
+  lines.push("");
+  lines.push("**Evaluated guards:**");
+  for (const g of trace.guards) {
+    const mark = g.matched ? "[x]" : "[ ]";
+    const labelStr = g.labels && g.labels.length > 0 ? ` [${g.labels.join(", ")}]` : "";
+    lines.push(`- ${mark} \`${g.rule}\` — ${g.description}${labelStr}`);
+  }
+  lines.push("", "---", "_Posted automatically by the board sweep diagnostic mode (#1415)._");
+  return lines.join("\n");
 }
