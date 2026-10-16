@@ -7,7 +7,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "stamp": "node -e \"import('./server/vendor/paseo-plugin-helper/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
-    "test": "npm run typecheck && node --import ./test/register-ts-hooks.mjs --test shared/updates.test.ts server/updates.test.ts client/orphans.test.ts client/helper-client-imports.test.ts && vitest run client/ui-guard.palette.test.tsx"
+    "test": "npm run typecheck && node --import ./test/register-ts-hooks.mjs --test shared/updates.test.ts server/updates.test.ts server/storage-guard.test.ts client/orphans.test.ts client/helper-client-imports.test.ts && vitest run client/ui-guard.palette.test.tsx"
   },
   "dependencies": {
     "@xpufx/paseo-plugin-ui": "^0.1.0"

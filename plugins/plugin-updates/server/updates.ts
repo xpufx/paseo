@@ -2,7 +2,14 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
-import { listPlugins, safeSpawn, type PaseoPluginInfo, type SafeSpawnResult } from "paseo-plugin-helper/server";
+import {
+  listPlugins,
+  resolvePaseoHome,
+  safeSpawn,
+  ScopedStorageViolationError,
+  type PaseoPluginInfo,
+  type SafeSpawnResult,
+} from "paseo-plugin-helper/server";
 import { deriveSourceUrl, shortHash } from "../shared/updates";
 import type {
   PluginUpdate,
@@ -61,6 +68,10 @@ export interface ProbeDeps {
 
 function defaultPluginsRoot(): string {
   return path.join(homedir(), ".paseo", "plugins");
+}
+
+function defaultCacheRoot(): string {
+  return path.join(resolvePaseoHome(), "plugin-data", "xpufx", "plugin-updates", "cache");
 }
 
 function outputOf(result: SafeSpawnResult): string {
@@ -449,7 +460,10 @@ async function fetchIntoCache(
   const mkdir = deps.mkdir ?? defaultMkdir;
   try {
     await mkdir(path.dirname(cacheDir));
-  } catch {
+  } catch (error) {
+    if (error instanceof ScopedStorageViolationError || (error as any)?.code === "ERR_SCOPED_STORAGE_VIOLATION") {
+      throw error;
+    }
     // git init below will surface a real failure if the directory is unusable.
   }
   const init = await git(runner, ["init", "--bare", "-q", cacheDir], undefined);
@@ -878,8 +892,7 @@ async function probeInstalled(
   deps: ProbeDeps = {},
 ): Promise<PluginUpdate[]> {
   const records = await loadManagedRecords(deps);
-  const home = deps.homeDir ?? homedir();
-  const cacheRoot = deps.cacheRoot ?? path.join(home, ".paseo", "plugins", ".cache", "plugin-updates");
+  const cacheRoot = deps.cacheRoot ?? defaultCacheRoot();
 
   const identities: PluginIdentity[] = [];
   for (const plugin of installed) {
@@ -925,6 +938,9 @@ export async function checkInstalledPlugins(
     const plugins = await probeInstalled(installed, runner, deps);
     return { checkedAt: new Date().toISOString(), plugins };
   } catch (error) {
+    if (error instanceof ScopedStorageViolationError || (error as any)?.code === "ERR_SCOPED_STORAGE_VIOLATION") {
+      throw error;
+    }
     return {
       checkedAt: new Date().toISOString(),
       plugins: [
@@ -1325,6 +1341,7 @@ export const testing = {
   resolveRef,
   classifyBranch,
   classifyTag,
+  defaultCacheRoot,
   SELF_PLUGIN_ID,
   PROBE_TIMEOUT_MS,
   FETCH_TIMEOUT_MS,

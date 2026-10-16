@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { installStorageGuard } from "paseo-plugin-helper/server";
 import {
   pluginUpdatesCheckRpc,
   pluginUpdatesUpdateAllRpc,
@@ -11,6 +12,8 @@ import {
 } from "./server/updates";
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "plugin-updates" });
+
   server.handle(pluginUpdatesCheckRpc, ({ workspaceId }) => checkInstalledPlugins(workspaceId));
   server.handle(pluginUpdatesUpdateRpc, ({ workspaceId, pluginId, force }) =>
     updatePlugin(pluginId, workspaceId, { force }),
@@ -18,5 +21,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(pluginUpdatesUpdateAllRpc, ({ workspaceId, force }) =>
     updateAllPlugins(workspaceId, { force }),
   );
-  return () => {};
+  return () => {
+    uninstallStorageGuard();
+  };
 }

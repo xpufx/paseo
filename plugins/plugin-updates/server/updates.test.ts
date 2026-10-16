@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
-import type { PaseoPluginInfo, SafeSpawnResult } from "paseo-plugin-helper/server";
+import { resolvePaseoHome, type PaseoPluginInfo, type SafeSpawnResult } from "paseo-plugin-helper/server";
 import { testing } from "./updates";
 
 function result(stdout = "", code = 0, stderr = ""): SafeSpawnResult {
@@ -756,6 +757,54 @@ test("flags a dirty subdir and reports a working-tree version hash", async () =>
 // ---------------------------------------------------------------------------
 // Cache / fetch semantics
 // ---------------------------------------------------------------------------
+
+test("default cacheRoot targets scoped plugin storage (#1408)", () => {
+  const expectedRoot = path.join(resolvePaseoHome(), "plugin-data", "xpufx", "plugin-updates", "cache");
+  assert.equal(testing.defaultCacheRoot(), expectedRoot);
+});
+
+test("cache operations default to scoped plugin storage path (#1408)", async () => {
+  const calls: Call[] = [];
+  const mkdirCalls: string[] = [];
+  const runner = makeRunner({
+    toplevel: "/repo",
+    head: LOCAL,
+    lsRemote: () => branchRemote(REMOTE),
+    trees: {
+      [`${LOCAL}:plugins/demo`]: TREE_LOCAL,
+      [`${REMOTE}:plugins/demo`]: TREE_REMOTE,
+    },
+    isAncestor: () => 0,
+    calls,
+  });
+
+  const checked = await testing.checkInstalledPlugins(
+    undefined,
+    runner,
+    [plugin("demo", "/repo/plugins/demo")],
+    {
+      scanOrphans: false,
+      readFile: NO_FILES,
+      mkdir: async (dir) => {
+        mkdirCalls.push(dir);
+      },
+    },
+  );
+
+  const expectedRoot = path.join(resolvePaseoHome(), "plugin-data", "xpufx", "plugin-updates", "cache");
+  assert.equal(checked.plugins.length, 1);
+  assert.equal(mkdirCalls.length > 0, true);
+  assert.equal(mkdirCalls[0], expectedRoot);
+
+  const initCall = calls.find((call) => call.command === "git" && call.args[0] === "init");
+  assert.ok(initCall);
+  const initDir = initCall.args[3];
+  assert.ok(initDir?.startsWith(expectedRoot));
+
+  const fetchCall = calls.find((call) => call.command === "git" && call.args[0] === "-C" && call.args[2] === "fetch");
+  assert.ok(fetchCall);
+  assert.ok(fetchCall.args[1]?.startsWith(expectedRoot));
+});
 
 test("fetches once per (remote, ref) for plugins sharing a repo and ref", async () => {
   const calls: Call[] = [];
