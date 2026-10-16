@@ -154,7 +154,6 @@ describe("host contributions", () => {
     const source = readFileSync(path.join(PLUGIN_ROOT, "index.client.tsx"), "utf8");
     assert.match(source, /addSidebarItem\(/);
     assert.match(source, /addSurface\(/);
-    assert.match(source, /addSidebarHeaderItem\(/);
     assert.match(source, /addScreen\(/);
     assert.match(source, /addWorkspacePanel\(/);
     // Registration goes through the host, not a helper registrar that would
@@ -163,7 +162,7 @@ describe("host contributions", () => {
     assert.ok(!/registerSidebarSurface|registerWorkspacePanel/.test(source), "no helper registrar");
   });
 
-  it("feature-detects addScreen and addSidebarHeaderItem with fallback to legacy methods", () => {
+  it("feature-detects addScreen with fallback to legacy methods, and registers addSidebarItem", () => {
     const source = readFileSync(path.join(PLUGIN_ROOT, "index.client.tsx"), "utf8");
     assert.match(
       source,
@@ -171,15 +170,11 @@ describe("host contributions", () => {
     );
     assert.match(
       source,
-      /client\.addSidebarHeaderItem\s*\(\s*\{[\s\S]*id:\s*["']worktree-install["'][\s\S]*screen:\s*["']worktree-install["'][\s\S]*\}\s*\)/,
-    );
-    assert.match(
-      source,
       /client\.addSurface\s*\(\s*["']worktree-install["']\s*,\s*Themed\s*\)/,
     );
     assert.match(
       source,
-      /client\.addSidebarItem\s*\(\s*\{[\s\S]*id:\s*["']worktree-install["'][\s\S]*surface:\s*["']worktree-install["'][\s\S]*\}\s*\)/,
+      /client\.addSidebarItem\s*\(\s*\{[\s\S]*id:\s*["']worktree-install["'][\s\S]*surface:\s*["']worktree-install["'][\s\S]*screen:\s*["']worktree-install["'][\s\S]*\}\s*\)/,
     );
   });
 

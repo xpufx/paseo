@@ -126,24 +126,18 @@ export function registerSidebarSurface(
     </RegistrarThemeScope>
   );
 
-  let surfaceRegistration: any;
-  let itemRegistration: any;
+  const surfaceRegistration =
+    typeof plugin.addScreen === "function"
+      ? plugin.addScreen({ id, title, Component: WrappedComponent })
+      : plugin.addSurface?.(id, WrappedComponent);
 
-  if (
-    typeof plugin.addScreen === "function" &&
-    typeof plugin.addSidebarHeaderItem === "function"
-  ) {
-    surfaceRegistration = plugin.addScreen({ id, title, Component: WrappedComponent });
-    itemRegistration = plugin.addSidebarHeaderItem({ id, title, icon, screen: id });
-  } else {
-    surfaceRegistration = plugin.addSurface?.(id, WrappedComponent);
-    itemRegistration = plugin.addSidebarItem?.({
-      id,
-      title,
-      icon,
-      surface: id,
-    });
-  }
+  const itemRegistration = plugin.addSidebarItem?.({
+    id,
+    title,
+    icon,
+    surface: id,
+    screen: id,
+  });
 
   let disposed = false;
   return () => {

@@ -124,7 +124,7 @@ describe("registerSidebarSurface disposer", () => {
     expect(() => dispose()).not.toThrow();
   });
 
-  it("prefers addScreen and addSidebarHeaderItem when present (Paseo 0.11+)", () => {
+  it("prefers addScreen when present, but always uses addSidebarItem (Paseo 0.11+)", () => {
     const screens: any[] = [];
     const headerItems: any[] = [];
     const legacySurfaces: any[] = [];
@@ -162,21 +162,25 @@ describe("registerSidebarSurface disposer", () => {
     expect(screens[0].title).toBe("Modern Surface");
     expect(screens[0].Component).toBeDefined();
 
-    expect(headerItems).toHaveLength(1);
-    expect(headerItems[0]).toEqual({
+    // addSidebarHeaderItem must NOT be called for sidebar surfaces (strictly for custom header components)
+    expect(headerItems).toHaveLength(0);
+
+    // addSidebarItem must always be called with both surface and screen keys
+    expect(legacyItems).toHaveLength(1);
+    expect(legacyItems[0]).toEqual({
       id: "modern-surface",
       title: "Modern Surface",
       icon: "Terminal",
+      surface: "modern-surface",
       screen: "modern-surface",
     });
 
-    // Legacy methods must not be called when modern ones are present
+    // Legacy surface method must not be called when addScreen is present
     expect(legacySurfaces).toHaveLength(0);
-    expect(legacyItems).toHaveLength(0);
 
     // Disposer removes both
     dispose();
-    expect(removed.sort()).toEqual(["headerItem:modern-surface", "screen:modern-surface"]);
+    expect(removed.sort()).toEqual(["screen:modern-surface", "sidebarItem:modern-surface"]);
   });
 });
 
