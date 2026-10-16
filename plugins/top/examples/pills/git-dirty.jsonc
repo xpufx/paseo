@@ -1,5 +1,5 @@
 // Uncommitted git changes in current workspace
-// Drop into ~/.paseo/top/pills/ to enable
+// Drop into ~/.paseo/plugin-data/xpufx/top/pills/ to enable
 {
   "id": "git-dirty",
   "title": "Dirty Files",

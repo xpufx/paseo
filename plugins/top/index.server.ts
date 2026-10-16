@@ -3,6 +3,7 @@ import {
   guardRpcHandler,
   createCustomPillsFeature,
   createTimelineTelemetryFeature,
+  installStorageGuard,
 } from "paseo-plugin-helper/server";
 import { composeFeatureModules } from "paseo-plugin-helper/shared";
 import { createPermissionAuditFeature } from "./server/vendor/permission-audit";
@@ -33,6 +34,7 @@ import {
   isInterruptEcho,
   isStaleTurnEnd,
   setLastLiveUsage,
+  migrateLegacyCustomPills,
   log,
 } from "./server/resources";
 import { resolveTimelineCadence, shouldAppendTimelineForTurn } from "./shared/resources";
@@ -315,5 +317,15 @@ const topFeatures = composeFeatureModules<PluginServerContext>([
 ]);
 
 export default function contribute(server: PluginServerContext) {
-  return topFeatures.contributeServer(server);
+  migrateLegacyCustomPills();
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "top" });
+  const disposeFeatures = topFeatures.contributeServer(server);
+
+  return () => {
+    try {
+      disposeFeatures?.();
+    } finally {
+      uninstallStorageGuard();
+    }
+  };
 }

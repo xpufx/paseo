@@ -1,5 +1,5 @@
 // Count of running Docker containers
-// Drop into ~/.paseo/top/pills/ to enable
+// Drop into ~/.paseo/plugin-data/xpufx/top/pills/ to enable
 {
   "id": "docker-containers",
   "title": "Docker",

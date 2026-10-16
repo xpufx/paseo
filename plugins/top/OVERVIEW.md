@@ -8,7 +8,7 @@ The plugin displays live CPU and memory utilization, system load averages (1m, 5
 - **Agent and Turn Telemetry**: Monitors active agent session metadata (model, provider, turn counts, input/output/cached tokens, execution error counts) and can stamp a summary card into the session timeline upon turn completion.
 - **Display Modes**: Supports Cycle Mode (rotates through metrics on a configurable interval), All-in-One Mode (unified ticker), and Multiple Mode (side-by-side pills).
 - **Multi-Host Telemetry**: When configured with multiple daemon hosts, queries registered hosts bounded to one probe per host on a 15-second cadence with a 4-second timeout to report online/offline status and host latency.
-- **Custom Metrics**: Supports user-defined metrics via declarative `.jsonc` definitions in `~/.paseo/top/pills` with optional periodic command execution and threshold status mapping. Executed commands inherit the daemon environment.
+- **Custom Metrics**: Supports user-defined metrics via declarative `.jsonc` definitions in `~/.paseo/plugin-data/xpufx/top/pills` with optional periodic command execution and threshold status mapping. Executed commands inherit the daemon environment.
 - **Local Audit Log**: Persists turn-end tool inputs, execution results, and permission decisions to a local JSONL audit log queryable through the Top dashboard and RPC interfaces.
 
 ## Setup and Requirements

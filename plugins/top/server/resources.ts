@@ -13,6 +13,7 @@ import {
   isPluginRunning,
   CustomPillPoller,
   discoverCustomPillConfigs,
+  resolvePaseoHome,
 } from "paseo-plugin-helper/server";
 import {
   type SystemResources,
@@ -118,7 +119,73 @@ export const log = createPluginLogger("top", { version: PLUGIN_VERSION });
 
 log.info("Initialized host system resources monitor", { version: PLUGIN_VERSION });
 
-const CUSTOM_PILLS_DIR = path.join(os.homedir(), ".paseo", "top", "pills");
+export const CUSTOM_PILLS_DIR = path.join(
+  resolvePaseoHome(),
+  "plugin-data",
+  "xpufx",
+  "top",
+  "pills",
+);
+
+export function getLegacyPillsDir(): string {
+  if (process.env.PASEO_HOME) {
+    const fromPaseoHome = path.join(process.env.PASEO_HOME, "top", "pills");
+    if (fs.existsSync(fromPaseoHome)) return fromPaseoHome;
+  }
+  return path.join(os.homedir(), ".paseo", "top", "pills");
+}
+
+export function migrateLegacyCustomPills(
+  legacyDir: string = getLegacyPillsDir(),
+  targetDir: string = CUSTOM_PILLS_DIR,
+): void {
+  try {
+    if (!fs.existsSync(legacyDir)) return;
+    const entries = fs.readdirSync(legacyDir, { withFileTypes: true });
+    const files = entries.filter((entry) => entry.isFile());
+    if (files.length === 0) return;
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    for (const file of files) {
+      const src = path.join(legacyDir, file.name);
+      const dest = path.join(targetDir, file.name);
+      fs.copyFileSync(src, dest);
+      try {
+        fs.unlinkSync(src);
+      } catch {
+        // Non-fatal if unlinking individual legacy file fails
+      }
+    }
+
+    try {
+      if (fs.readdirSync(legacyDir).length === 0) {
+        fs.rmdirSync(legacyDir);
+      }
+      const parentDir = path.dirname(legacyDir);
+      if (fs.existsSync(parentDir) && fs.readdirSync(parentDir).length === 0) {
+        fs.rmdirSync(parentDir);
+      }
+    } catch {
+      // Non-fatal if legacy directory cleanup fails
+    }
+
+    log.info("Migrated legacy custom pills to scoped storage", {
+      from: legacyDir,
+      to: targetDir,
+      count: files.length,
+    });
+  } catch (err) {
+    log.warn("Failed to migrate legacy custom pills", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// Migrate legacy custom pills into scoped storage if present
+migrateLegacyCustomPills();
 
 try {
   if (!fs.existsSync(CUSTOM_PILLS_DIR)) {

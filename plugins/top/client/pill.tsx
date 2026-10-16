@@ -1321,7 +1321,7 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
           <HostCard variant="elevated">
             <HostCardHeader {...compactCardTitleProp}
               title="Custom Metric Pills"
-              subtitle="Discovered from ~/.paseo/top/pills"
+              subtitle="Discovered from ~/.paseo/plugin-data/xpufx/top/pills"
               icon="Sliders"
               value={
                 <HostBadge {...compactBadgeProp}
@@ -1590,12 +1590,12 @@ function ResourceModalBody({ workspaceId, agentId, initialTab, payload, theme, l
           <HostCardHeader {...compactCardTitleProp}
             title="Custom Metric Pills"
             icon="Sliders"
-            subtitle="Standalone pills discovered from ~/.paseo/top/pills"
+            subtitle="Standalone pills discovered from ~/.paseo/plugin-data/xpufx/top/pills"
           />
           <View style={styles.settingsToggles}>
             <HostToggle
               label="Show Custom Metric Pills"
-              description="Display pills defined in ~/.paseo/top/pills as standalone composer pills"
+              description="Display pills defined in ~/.paseo/plugin-data/xpufx/top/pills as standalone composer pills"
               style={styles.toggleFullWidth}
               labelStyle={styles.compactToggleLabel}
               value={settings.showCustomPills ?? true}
