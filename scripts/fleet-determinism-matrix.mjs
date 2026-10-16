@@ -608,6 +608,26 @@ const PARTS = [
     note: "Reads and writes skill Markdown on disk and resolves it for spawn prompts. No inference: the operator, the canonical `platform` checkout, or the bundled fallback supplies every byte.",
   },
   {
+    file: `${PLUGIN}/server/fleet-membership.ts`,
+    part: "Authoritative zero-heuristic fleet membership check and role label stampers (#1151)",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "FleetRoster",
+        "isFleetMember",
+        "stampFrontDeskLabels",
+        "stampOrchestratorLabels",
+        "stampWorkerLabels",
+      ],
+    },
+    evidence: [
+      [`fleet-membership.ts:37-50`, "authoritative fleet membership predicate based on explicit roster and parentage metadata"],
+      [`fleet-membership.ts:61-92`, "endpoint stamping helpers for front-desk, orchestrator, and worker roles"],
+    ],
+    note: "Pure predicate and label mutators. Relies exclusively on authoritative roster IDs and explicit parentage metadata with no heuristics or LLM involvement.",
+  },
+  {
     file: `${PLUGIN}/server/permission-adjudication.ts`,
     part: "Conservative safe-pattern allowlist, shell scanner, fleet detection, and durable permission-decision log (#1084)",
     layer: "server",
@@ -1295,6 +1315,7 @@ const PARTS = [
 const SUITE_NOTES = {
   "server/agents.test.ts": "Agent normalisation, state derivation, spawn-authority and archive paths",
   "server/fleet.test.ts": "Cross-surface fleet behaviour",
+  "server/fleet-membership.test.ts": "Authoritative roster matching, parentage resolution, ad-hoc rejection, and zero-heuristic semantics (#1151)",
   "server/hook.test.ts": "Hook-service handlers, endpoint resolution, unreachable-path shapes",
   "server/hook-router.test.ts": "Webhook classification, coalescing, queueing, watchdog taxonomy, handoff",
   "server/issues-check.test.ts": "Ported stale-WIP sweep fixtures, checker retirement guard (#733)",

@@ -102,12 +102,12 @@ describe("PluginStorage host-home resolution (#1158)", () => {
 
   it("prefers REAL_HOME over an agent-mux profile HOME", () => {
     expect(
-      resolveHostHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/pufaysokt", REAL_HOME: "/home/user" }),
+      resolveHostHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/default-profile", REAL_HOME: "/home/user" }),
     ).toBe("/home/user");
   });
 
   it("derives the host home by stripping the agent-mux profile prefix", () => {
-    expect(resolveHostHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/pufaysokt" })).toBe("/home/user");
+    expect(resolveHostHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/default-profile" })).toBe("/home/user");
   });
 
   it("passes a normal home through unchanged", () => {
@@ -116,12 +116,12 @@ describe("PluginStorage host-home resolution (#1158)", () => {
 
   it("prefers PASEO_HOME for the canonical paseo root", () => {
     expect(
-      resolvePaseoHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/pufaysokt", PASEO_HOME: "/srv/paseo/.paseo" }),
+      resolvePaseoHome({ HOME: "/home/user/.agent-mux/profiles/antigravity/default-profile", PASEO_HOME: "/srv/paseo/.paseo" }),
     ).toBe("/srv/paseo/.paseo");
   });
 
   it("anchors the default path to the host paseo home, not the agent-mux profile", () => {
-    process.env.HOME = "/home/user/.agent-mux/profiles/antigravity/pufaysokt";
+    process.env.HOME = "/home/user/.agent-mux/profiles/antigravity/default-profile";
     process.env.REAL_HOME = "/home/user";
     delete process.env.PASEO_HOME;
 

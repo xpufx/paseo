@@ -34,7 +34,7 @@ afterEach(() => {
 describe("uppidi-fleet settings storage host-home anchoring (#1158)", () => {
   it("anchors the default file to the host plugin-data dir when HOME is an agent-mux profile", () => {
     process.env.NODE_ENV = "production";
-    process.env.HOME = "/home/user/.agent-mux/profiles/antigravity/pufaysokt";
+    process.env.HOME = "/home/user/.agent-mux/profiles/antigravity/default-profile";
     process.env.REAL_HOME = "/home/user";
     delete process.env.PASEO_HOME;
     resetUppidiFleetSettingsStorageInstance();

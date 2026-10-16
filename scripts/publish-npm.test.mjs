@@ -78,6 +78,7 @@ const ids = pluginIds();
 // already happened twice (b3897f08 bumped 9->10 for the same reason).
 // The named plugins below are the ones discovery must never silently drop.
 const EXPECTED_PLUGINS = [
+  "agent-mux",
   "antigravity-claude",
   "demo",
   "forges",
