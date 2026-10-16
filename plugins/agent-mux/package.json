@@ -1,0 +1,47 @@
+{
+  "name": "@xpufx/paseo-agent-mux",
+  "private": false,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && vitest run --config client/vitest.config.ts"
+  },
+  "dependencies": {
+    "@xpufx/paseo-plugin-ui": "^0.1.0"
+  },
+  "devDependencies": {
+    "@getpaseo/plugin": "^0.9.0",
+    "@tanstack/react-query": "^5.90.11",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.10",
+    "@types/react-test-renderer": "^19.3.0",
+    "paseo-plugin-ui-testing": "*",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-test-renderer": "^19.1.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0",
+    "zod": "^4.4.3"
+  },
+  "files": [
+    "paseo-plugin.json",
+    "README.md",
+    "LICENSE",
+    "index.client.tsx",
+    "index.server.ts",
+    "client",
+    "server",
+    "shared",
+    "!**/*.test.ts",
+    "!**/*.test.tsx",
+    "!**/*.test.mjs",
+    "!client/vitest.config.ts",
+    "!**/.DS_Store"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://forge.mrs.uppidi.com/xpufx-org/paseo.git"
+  }
+}

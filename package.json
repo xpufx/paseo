@@ -25,7 +25,8 @@
     "plugins/worktree-install",
     "plugins/wellbeing",
     "plugins/permission-logger",
-    "plugins/antigravity-claude"
+    "plugins/antigravity-claude",
+    "plugins/agent-mux"
   ],
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",

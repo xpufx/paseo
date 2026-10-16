@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "paths": {
+      "paseo-plugin-helper": ["../../packages/paseo-plugin-helper/src/index.ts"],
+      "paseo-plugin-helper/core": ["../../packages/paseo-plugin-helper/src/core/index.ts"],
+      "paseo-plugin-helper/lifecycle": ["../../packages/paseo-plugin-helper/src/lifecycle/index.ts"],
+      "paseo-plugin-helper/server": ["../../packages/paseo-plugin-helper/src/server/index.ts"],
+      "paseo-plugin-helper/shared": ["../../packages/paseo-plugin-helper/src/shared/index.ts"],
+      "paseo-plugin-helper/ui": ["../../packages/paseo-plugin-helper/src/ui/index.tsx"],
+      "@xpufx/paseo-plugin-ui": ["../../packages/paseo-plugin-ui/src/index.tsx"]
+    },
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["client/vitest.config.ts"]
+}
