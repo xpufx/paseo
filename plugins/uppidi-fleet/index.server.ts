@@ -128,14 +128,6 @@ import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 import { PLUGIN_VERSION } from "./shared/version.js";
 import { HELPER_VERSION, HELPER_SERVED_FROM } from "./shared/helper-version.js";
 
-// #1186: install storage guard to migrate file writes into scoped plugin storage
-  installStorageGuard({
-    pluginId: "uppidi-fleet",
-    namespace: "plugin-data/xpufx",
-    allowTmp: true,
-    mode: "enforce",
-  });
-
 // The checkout revision both the plugin and the resolved helper were read from.
 // `PLUGIN_VERSION` is generated as `<plugin version>+<git sha>` by the helper's
 // own stampVersion, so this is that sha and nothing invented here.
@@ -156,6 +148,14 @@ const log = createPluginLogger("uppidi-fleet", {
 });
 
 export default function contribute(server: PluginServerContext) {
+  // #1186, #1423: install storage guard to ensure all fleet writes stay inside scoped storage
+  const uninstallStorageGuard = installStorageGuard({
+    pluginId: "uppidi-fleet",
+    namespace: "plugin-data/xpufx",
+    allowTmp: true,
+    mode: "enforce",
+  });
+
   if ((server as any)?.paseo) {
     HookRouter.setActivePaseo((server as any).paseo);
   }
@@ -282,6 +282,7 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     log.info("Unloading; disposing hook router, telemetry tap, and MCP injection");
+    uninstallStorageGuard();
     if (stopTelemetryTap) void stopTelemetryTap();
     void stopHookRouter();
     mcpInjectionStop();

@@ -1325,6 +1325,7 @@ const SUITE_NOTES = {
   "server/permission-adjudication.test.ts": "Safe-pattern allowlist, shell scanner, fleet detection, and durable decision log (#1084)",
   "server/mcp-tools.test.ts": "MCP tool definitions, schema validation, and dispatch fixtures",
   "server/mcp-injection.test.ts": "Profile shape, fleet agent filter scoping, and lifecycle registration",
+  "server/storage-guard.test.ts": "Scoped storage write guard installation, allowed and blocked path enforcement, and teardown lifecycle (#1423)",
   "test/fleet-board-check-cli.test.mjs": "Standalone fleet-board-check CLI options and exit codes",
   "test/fleet-watchdog-cli.test.mjs": "Standalone fleet-watchdog CLI options, recency validation, and diagnostic run",
   "test/fleet-mcp-server.test.mjs": "MCP stdio protocol handshake, tools/list and execution over stdin/stdout",

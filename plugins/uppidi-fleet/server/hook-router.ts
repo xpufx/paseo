@@ -2996,9 +2996,10 @@ export function defaultCircuitBreakerPath(): string {
   if (process.env.NODE_ENV === "test" && !process.env.MODEL_HEALTH_PATH) {
     return join(os.tmpdir(), `paseo-model-health-test-${process.pid}.json`);
   }
-  const custom = (process.env.PASEO_HOME || "").trim();
-  const root = custom || join(resolveHostHome(), ".paseo");
-  return process.env.MODEL_HEALTH_PATH || join(root, "plugin-data", "xpufx", "uppidi-fleet", "model-health.json");
+  return (
+    process.env.MODEL_HEALTH_PATH ||
+    join(resolvePaseoHome(), "plugin-data", "xpufx", "uppidi-fleet", "model-health.json")
+  );
 }
 
 export interface ModelHealthEntry {
@@ -3702,9 +3703,7 @@ export const MODEL_EXHAUSTION_ALERT_LABELS: readonly string[] = [
 export function defaultModelAlertsPath(home: string = resolveHostHome()): string {
   const override = process.env.UPPIDI_FLEET_ALERTS_PATH?.trim();
   if (override) return override;
-  const custom = (process.env.PASEO_HOME || "").trim();
-  const root = custom || join(home, ".paseo");
-  return join(root, "plugin-data", "xpufx", "uppidi-fleet", "model-alerts.json");
+  return join(resolvePaseoHome(), "plugin-data", "xpufx", "uppidi-fleet", "model-alerts.json");
 }
 
 export function readModelAlerts(
@@ -4790,9 +4789,7 @@ export class HookRouter {
       this.allQueuesPaused = true;
     }
 
-    const home = resolveHostHome();
-    const custom = (process.env.PASEO_HOME || "").trim();
-    const root = custom || join(home, ".paseo");
+    const root = resolvePaseoHome();
     const scopedRoot = this.isTestMode
       ? join(os.tmpdir(), `paseo-test-hook-router-${process.pid}`)
       : join(root, "plugin-data", "xpufx", "uppidi-fleet");
@@ -6403,9 +6400,7 @@ export class HookRouter {
     const persistedDir =
       custom && custom.trim().length > 0
         ? custom.trim()
-        : process.env.NODE_ENV === "test"
-          ? join(os.tmpdir(), `paseo-uppidi-fleet-state-${process.pid}`)
-          : join(process.env.HOME ?? os.homedir(), ".paseo", "forgejo-hook");
+        : parentDir;
     const preferred = custom && custom.trim().length > 0 ? [join(persistedDir, "frontdesk.json")] : [join(parentDir, "frontdesk.json")];
     return [
       ...new Set([
@@ -6414,9 +6409,7 @@ export class HookRouter {
         join(parentDir, "frontdesk.json"),
         join(this.stateDir, "frontdesk.json"),
         join(this.queueDir, "frontdesk.json"),
-        join(persistedDir, "frontdesk.json"),
         join(persistedDir, "orchestrators", "frontdesk.json"),
-        join(dirname(persistedDir), "frontdesk.json"),
       ]),
     ];
   }
@@ -12729,7 +12722,9 @@ export function getFleetRosterInfo(): {
       }
     }
   } else {
-    const queueDir = process.env.HOOK_QUEUE_DIR ?? join(home, ".config", "uppidi-fleet", "queues");
+    const queueDir =
+      process.env.HOOK_QUEUE_DIR ??
+      join(resolvePaseoHome(), "plugin-data", "xpufx", "uppidi-fleet", "queues");
     if (existsSync(queueDir)) {
       try {
         const files = readdirSync(queueDir);
