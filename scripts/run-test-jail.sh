@@ -16,6 +16,15 @@ if [[ -x /opt/podman/current/bin/podman ]]; then
 	PODMAN="/opt/podman/current/bin/podman"
 fi
 
+if ! command -v "$PODMAN" >/dev/null 2>&1; then
+	if [[ "${CI:-}" == "true" ]]; then
+		echo "[test-jail] podman unavailable in CI runner environment, executing test command directly" >&2
+		exec "$@"
+	fi
+	echo "[test-jail] podman is required but not installed" >&2
+	exit 1
+fi
+
 # The jail mounts exactly this directory; refuse to bake the wrong checkout.
 WORKTREE_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"

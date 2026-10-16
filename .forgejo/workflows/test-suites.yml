@@ -259,3 +259,11 @@ jobs:
         run: |
           set -euo pipefail
           npm run typecheck
+
+  test-jail:
+    name: Hermetic container test jail
+    uses: xpufx-org/platform/.forgejo/workflows/reusable/container-test-jail.yml@main
+    with:
+      test_command: node --test scripts/declared-tooling.test.mjs scripts/fixture-home-paths.test.mjs scripts/helper-resolution.test.mjs scripts/npm-acquisition-coverage.test.mjs scripts/reload-notify.test.mjs scripts/plugin-runtime-boundary.test.mjs scripts/unreachable-tests.test.mjs scripts/migrate-numberless-labels.test.mjs scripts/fleet-determinism-matrix.test.mjs
+      test_image: docker.io/library/node:22-bookworm-slim
+
