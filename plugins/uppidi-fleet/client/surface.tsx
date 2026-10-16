@@ -63,8 +63,6 @@ import {
   uppidiArchiveInactiveAgentsContract,
   uppidiFleetTeardownContract,
   uppidiFleetResetStateContract,
-  uppidiFleetHaltContract,
-  uppidiFleetResumeContract,
   uppidiFleetSetModeContract,
   uppidiTransitionIssueContract,
   uppidiToggleRepoAutomationTierContract,
@@ -357,10 +355,6 @@ export interface UppidiTopHeaderBarProps {
   onTeardown?: () => void;
   onResetState?: () => void;
   isResetting?: boolean;
-  /** Engage the canonical ALL HALT (#1013). */
-  onHalt?: () => void;
-  /** True once the canonical ALL HALT is engaged; disables the HALT action. */
-  isHalted?: boolean;
   /** Number of agents blocked on a pending permission prompt (#534). */
   permissionAttentionCount?: number;
   /** Number of agents awaiting operator input (#534). */
@@ -383,8 +377,6 @@ export function UppidiTopHeaderBar({
   onTeardown,
   onResetState,
   isResetting = false,
-  onHalt,
-  isHalted = false,
   permissionAttentionCount = 0,
   inputAttentionCount = 0,
 }: UppidiTopHeaderBarProps) {
@@ -473,21 +465,6 @@ export function UppidiTopHeaderBar({
               minHeight: 22,
             }}
             onPress={onResetState}
-          />
-        )}
-        {onHalt && (
-          <Button
-            label={isHalted ? "Halted" : "HALT"}
-            icon="Ban"
-            size="sm"
-            variant="danger"
-            disabled={isHalted}
-            style={{
-              paddingHorizontal: 8,
-              paddingVertical: 2,
-              minHeight: 22,
-            }}
-            onPress={onHalt}
           />
         )}
         {onTeardown && (
@@ -801,63 +778,6 @@ export function ResetStateModal({ visible, onClose, onConfirm, isProcessing = fa
   );
 }
 
-// --- Fleet HALT / RESUME (#1013) ---
-
-export interface HaltedBannerProps {
-  isHalted: boolean;
-  teardownInProgress?: boolean;
-  isResuming?: boolean;
-  onResume?: () => void;
-}
-
-/**
- * Persistent halted-state indicator (#1013). Rendered inside the pinned header
- * so it stays visible on every surface tab while the canonical ALL HALT is
- * engaged. RESUME is disabled while a teardown is mid-flight because the halt
- * must remain in force until archiving completes (#994).
- */
-export function HaltedBanner({
-  isHalted,
-  teardownInProgress = false,
-  isResuming = false,
-  onResume,
-}: HaltedBannerProps) {
-  const { colors, typography } = useFleetTheme();
-  if (!isHalted) return null;
-
-  return (
-    <View testID="fleet-halted-banner">
-      <Card variant="flat" style={{ borderColor: colors.statusDanger, borderWidth: 1 }}>
-        <Row justify="space-between" align="center" wrap gap="xs">
-          <Row align="center" gap="xs" wrap>
-            <Icon name="Ban" size={16} color={colors.statusDanger} />
-            <Badge label="HALTED" variant="danger" size="sm" />
-            <Text style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}>
-              Canonical ALL HALT engaged
-            </Text>
-            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-              {teardownInProgress
-                ? "Teardown in progress — RESUME unlocks when it completes."
-                : "Ingress paused, background loops stopped, auto-provisioning disabled."}
-            </Text>
-          </Row>
-          {onResume && (
-            <Button
-              label={isResuming ? "Resuming..." : "Resume"}
-              icon="Play"
-              size="sm"
-              variant="primary"
-              disabled={teardownInProgress || isResuming}
-              accessibilityLabel="Resume fleet from halt"
-              onPress={onResume}
-            />
-          )}
-        </Row>
-      </Card>
-    </View>
-  );
-}
-
 // --- Fleet model-resolution alerts (#1011) ---
 
 export interface ModelAlertBannerProps {
@@ -905,80 +825,6 @@ export function ModelAlertBanner({ alerts }: ModelAlertBannerProps) {
   );
 }
 
-export interface HaltConfirmModalProps {
-  visible: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  isProcessing?: boolean;
-  /** True when the router already reports halted; the confirm action is inert. */
-  isHalted?: boolean;
-}
-
-/**
- * Confirmation for engaging the canonical ALL HALT (#1013). HALT is reversible
- * enough that a single explicit confirm is used rather than the type-to-arm
- * teardown flow, but it still requires a deliberate second action.
- */
-export function HaltConfirmModal({
-  visible,
-  onClose,
-  onConfirm,
-  isProcessing = false,
-  isHalted = false,
-}: HaltConfirmModalProps) {
-  const { colors, typography } = useFleetTheme();
-  const dangerColor = colors.statusDanger;
-
-  return (
-    <Modal
-      open={visible}
-      onOpenChange={(open) => {
-        if (!open && !isProcessing) onClose();
-      }}
-      title="Engage Fleet HALT"
-    >
-      <ModalContent>
-        <Stack gap="sm">
-          <Card variant="flat" style={{ borderColor: dangerColor, borderWidth: 1 }}>
-            <Stack gap="xs">
-              <Row align="center" gap="xs">
-                <Icon name="Ban" size={16} color={dangerColor} />
-                <Text style={{ color: dangerColor, ...typography.heading }}>
-                  Canonical ALL HALT
-                </Text>
-              </Row>
-              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
-                Engages the same halt used by fleet teardown: webhook ingress and queue
-                processing pause, background watchdog/board loops stop, and auto-provisioning
-                is suppressed. Already-running agents keep running. Reversible with RESUME.
-              </Text>
-            </Stack>
-          </Card>
-
-          <Row justify="flex-end" gap="xs">
-            <Button
-              label="Cancel"
-              size="sm"
-              variant="secondary"
-              onPress={onClose}
-              disabled={isProcessing}
-            />
-            <Button
-              label={isProcessing ? "Halting..." : "Engage HALT"}
-              icon="Ban"
-              size="sm"
-              variant="danger"
-              disabled={isProcessing || isHalted}
-              loading={isProcessing}
-              accessibilityLabel="Confirm HALT"
-              onPress={onConfirm}
-            />
-          </Row>
-        </Stack>
-      </ModalContent>
-    </Modal>
-  );
-}
 
 // ──────────────────────────────────────────────────────────────────────────
 // Unified fleet mode selector (#1373)
@@ -1270,19 +1116,11 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const [isResetStateModalOpen, setIsResetStateModalOpen] = useState(false);
   const [isResettingState, setIsResettingState] = useState(false);
 
-  // Fleet HALT / RESUME (#1013)
-  const haltMutation = useRpcMutation(uppidiFleetHaltContract);
-  const resumeHaltMutation = useRpcMutation(uppidiFleetResumeContract);
-  const setModeMutation = useRpcMutation(uppidiFleetSetModeContract);
-  const [isHaltModalOpen, setIsHaltModalOpen] = useState(false);
-  const [isHalting, setIsHalting] = useState(false);
-  const [isResumingHalt, setIsResumingHalt] = useState(false);
   // Unified fleet mode selector (#1373)
+  const setModeMutation = useRpcMutation(uppidiFleetSetModeContract);
   const [pendingModeTransition, setPendingModeTransition] = useState<FleetMode | null>(null);
   const isSettingMode = pendingModeTransition !== null;
   const currentMode: FleetMode = hookStatus?.mode ?? "RUN";
-  const isHalted = hookStatus?.halted ?? false;
-  const isTeardownInProgress = hookStatus?.teardownInProgress ?? false;
 
   // Issue Kanban state transition (#755)
   const transitionIssueMutation = useRpcMutation(uppidiTransitionIssueContract);
@@ -1819,40 +1657,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     }
   };
 
-  const handleHalt = async () => {
-    try {
-      setIsHalting(true);
-      const res = await haltMutation.mutateAsync({ confirm: true });
-      if (res.ok) {
-        toast.show(res.message || (res.alreadyHalted ? "Fleet already halted" : "Canonical ALL HALT engaged"));
-        setIsHaltModalOpen(false);
-      } else {
-        toast.error(res.error || "Failed to engage halt");
-      }
-      void refetchHookStatus();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIsHalting(false);
-    }
-  };
-
-  const handleResumeHalt = async () => {
-    try {
-      setIsResumingHalt(true);
-      const res = await resumeHaltMutation.mutateAsync({ confirm: true });
-      if (res.ok) {
-        toast.show(res.message || "Fleet resumed");
-      } else {
-        toast.error(res.error || "Failed to resume fleet");
-      }
-      void refetchHookStatus();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setIsResumingHalt(false);
-    }
-  };
 
   /** Unified fleet mode transition (#1373). HALT/STOP open confirmation modal; RUN/DRAIN direct. */
   const handleModeTransition = async (mode: FleetMode) => {
@@ -1953,16 +1757,8 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
             onResetState={() => setIsResetStateModalOpen(true)}
             isResetting={isResettingState}
             onTeardown={() => setIsTeardownModalOpen(true)}
-            onHalt={() => setIsHaltModalOpen(true)}
-            isHalted={isHalted}
             permissionAttentionCount={permissionAgentCount}
             inputAttentionCount={attentionAgents.length - permissionAgentCount}
-          />
-          <HaltedBanner
-            isHalted={isHalted}
-            teardownInProgress={isTeardownInProgress}
-            isResuming={isResumingHalt}
-            onResume={handleResumeHalt}
           />
           <ModeBanner
             mode={currentMode}
@@ -3683,13 +3479,6 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
         onClose={() => setIsResetStateModalOpen(false)}
         onConfirm={handleResetState}
         isProcessing={isResettingState}
-      />
-      <HaltConfirmModal
-        visible={isHaltModalOpen}
-        onClose={() => setIsHaltModalOpen(false)}
-        onConfirm={handleHalt}
-        isProcessing={isHalting}
-        isHalted={isHalted}
       />
       {pendingModeTransition && (
         <ModeTransitionModal
