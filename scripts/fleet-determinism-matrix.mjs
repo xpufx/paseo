@@ -553,6 +553,28 @@ const PARTS = [
     note: "Performs no inference and takes no decision that depends on one, so by the test used everywhere else in this table it is deterministic. It is contested because it is the plugin's only surface whose entire purpose is choosing which model other rows spawn -- the AI/LLM character of the fleet is set here and executed in `agents.ts`. The bucket depends on whether you classify a control surface or the thing it controls.",
   },
   {
+    file: `${PLUGIN}/server/playbooks.ts`,
+    part: "Playbook state machine profiles, canonical stage progression model, and storage (#1403)",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "DEFAULT_LIGHT_STAGES",
+        "DEFAULT_MEDIUM_STAGES",
+        "DEFAULT_PLAYBOOKS_CONFIG",
+        "loadSavedPlaybooks",
+        "savePlaybooks",
+        "validatePlaybookProfile",
+      ],
+    },
+    evidence: [
+      [`playbooks.ts:19-214`, "static stage definitions mapping actor, preconditions, artifacts, and next stage"],
+      [`playbooks.ts:241-280`, "pure stage progression and actor classification predicates"],
+      [`playbooks.ts:285-304`, "deterministic stage validation ensuring complete canonical pipeline"],
+    ],
+    note: "Defines declarative playbook profiles (Light full autonomy, Medium human-in-the-loop gates) and typed stage progression contracts.",
+  },
+  {
     file: `${PLUGIN}/server/rotation.ts`,
     part: "Long-lived role rotation: layered policy resolution, trigger evaluation, brief rendering, one-at-a-time lock (#1019)",
     layer: "server",
@@ -1339,7 +1361,8 @@ const SUITE_NOTES = {
   "shared/agent-links.test.ts": "Multi-client agent deep link resolvers and URI templates",
   "shared/contracts.test.ts": "Contract schema validation",
   "shared/sort-filter.test.ts": "Filter, sort, gauge and grouping functions",
-  "server/actions.test.ts": "Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing"
+  "server/actions.test.ts": "Multi-repo RPC aggregation, error resilience (Promise.allSettled), status filter logic, and run parsing",
+  "server/playbooks.test.ts": "Playbook profiles, canonical stage progression, actor classification, and RPC handlers (#1403)"
 };
 
 // ---------------------------------------------------------------------------

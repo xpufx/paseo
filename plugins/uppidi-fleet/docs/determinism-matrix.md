@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 118 |
+| `deterministic` | 120 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **122** |
+| **total** | **124** |
 
-Inventory: 114 tracked source files in scope — 65 described above as source (57 files, some carrying several parts) and 57 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 116 tracked source files in scope — 66 described above as source (58 files, some carrying several parts) and 58 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -49,7 +49,7 @@ See *What this table does not cover* below for the sessions themselves.
 
 | Moving part | File | File exports | File loc | Classification | Anchors | Evidence |
 | --- | --- | ---: | ---: | --- | --- | --- |
-| RPC registration and plugin lifecycle | `index.server.ts` | 2 | 291 | `deterministic` | `server.handle`, `startHookRouter`, `registerSettingsRpc` | index.server.ts:146-189 — 44 `server.handle(contract, handler)` bindings, one per RPC contract<br>index.server.ts:219 — `startHookRouter(server)` starts the HTTP listener<br>index.server.ts:228-231 — teardown returns a disposer, no model call |
+| RPC registration and plugin lifecycle | `index.server.ts` | 2 | 296 | `deterministic` | `server.handle`, `startHookRouter`, `registerSettingsRpc` | index.server.ts:146-189 — 44 `server.handle(contract, handler)` bindings, one per RPC contract<br>index.server.ts:219 — `startHookRouter(server)` starts the HTTP listener<br>index.server.ts:228-231 — teardown returns a disposer, no model call |
 | Sidebar surface, workspace panel, helper settings screen registration | `index.client.tsx` | 10 | 115 | `deterministic` | `registerSidebarSurface`, `addWorkspacePanel`, `registerHelperSettingsScreen` | index.client.tsx:26-62 — three registrations, each returning a disposer<br>index.client.tsx:64-83 — teardown calls each disposer, tolerating either shape |
 
 - **RPC registration and plugin lifecycle** (`index.server.ts`) — Binds contracts to handlers and owns load/unload. Every handler it registers is classified on its own row below.
@@ -79,6 +79,7 @@ See *What this table does not cover* below for the sessions themselves.
 | In-process telemetry tap, streaming JSONL store, and composite index metrics aggregation (#1173) | `server/telemetry.ts` | 10 | 471 | `deterministic` | `setTelemetryStorePathForTest`, `defaultTelemetryStorePath`, `getTelemetryStorePath`, `appendTelemetryRecord`, `readTelemetryRecords`, `aggregateModelTelemetry`, +2 more | telemetry.ts:88-97 — appends immutable normalized JSONL turn records to scoped plugin-data file<br>telemetry.ts:111-157 — reads streaming JSONL records with exact provider/model/window filtering<br>telemetry.ts:177-335 — aggregates counts, percentiles, cache ratios, and composite indices via pure arithmetic<br>telemetry.ts:348-429 — in-process event listeners capture turn lifecycle timestamps and usage without inference<br>telemetry.ts:434-465 — RPC query handler projects precomputed aggregations from stored turn telemetry |
 | Model rollup receipts and candidate derivation from daemon counters | `server/metrics.ts` | 23 | 861 | `deterministic` | `computeModelRollups`, `deriveCandidatesFromReceipts`, `appendRollupReceipt`, `loadFleetMetrics`, `median` | metrics.ts:409-480 — groups by `provider::model`, reduces with a median over per-agent counters<br>metrics.ts:489-532 — candidate rows are sums and a completion rate over stored receipts<br>metrics.ts:559-613 — append is a read-modify-write with a tmp file + rename<br>metrics.ts:483-488 — comment states task-profile attribution is deliberately absent: minimized receipts cannot carry it |
 | Role-to-model assignment, persistence, and available-model discovery | `server/role-models.ts` | 16 | 376 | `contested` | `DEFAULT_ROLE_MODELS`, `loadSavedRoleModels`, `saveRoleModels`, `discoverAvailableModels`, `handleUppidiSetRoleModel` | role-models.ts:18-54 — defaults are a literal role -> model map<br>role-models.ts:56-69 — load merges saved JSON over defaults<br>role-models.ts:98-101 — discovery shells `paseo provider list --json`<br>agents.ts:1455-1468 — but the consumer uses this to pick the model a spawned session runs on |
+| Playbook state machine profiles, canonical stage progression model, and storage (#1403) | `server/playbooks.ts` | 20 | 425 | `deterministic` | `DEFAULT_LIGHT_STAGES`, `DEFAULT_MEDIUM_STAGES`, `DEFAULT_PLAYBOOKS_CONFIG`, `loadSavedPlaybooks`, `savePlaybooks`, `validatePlaybookProfile` | playbooks.ts:19-214 — static stage definitions mapping actor, preconditions, artifacts, and next stage<br>playbooks.ts:241-280 — pure stage progression and actor classification predicates<br>playbooks.ts:285-304 — deterministic stage validation ensuring complete canonical pipeline |
 | Long-lived role rotation: layered policy resolution, trigger evaluation, brief rendering, one-at-a-time lock (#1019) | `server/rotation.ts` | 16 | 411 | `deterministic` | `DEFAULT_ROTATION_ROLE_POLICY`, `resolveRotationPolicy`, `evaluateRotationTrigger`, `buildRotationBrief`, `RotationLock` | rotation.ts:18-69 — role defaults are a literal role -> threshold table (2h/50 and 3h/75 per the approved spec)<br>rotation.ts:89-116 — effective policy is a fixed merge of defaults -> global role -> per-repo role<br>rotation.ts:177-268 — trigger evaluation is timestamp/turn arithmetic over fixed thresholds; manual/in-flight/cooldown guards are literal branches<br>rotation.ts:304-341 — the rotation brief is string concatenation over caller-supplied board state<br>rotation.ts:343-364 — the one-at-a-time guard is a Set keyed by role+repo |
 | Fleet skill effective resolution, canonical platform root, override persistence, and Settings RPC handlers | `server/skills.ts` | 25 | 528 | `deterministic` | `FLEET_SKILL_DEFINITIONS`, `resolveEffectiveSkill`, `getEffectiveSkillPath`, `getEffectiveSkillContent`, `renderSkillDirective`, `canonicalSkillsRootCandidates`, +6 more | skills.ts:149-183 — the canonical `platform/skills` root is explicit-option, env override, then the sibling checkout of each plugin root<br>skills.ts:198-221 — the three fleet skills are a literal id/title/bundled-path table<br>skills.ts:254-261 — override storage is a PluginStorage path under plugin-data, never the checkout or ~/.agents<br>skills.ts:304-341 — canonical path/content reads are filesystem existence checks under `platform/skills/<id>/SKILL.md`<br>skills.ts:359-408 — effective text is override-else-canonical-else-bundled, a filesystem existence check with no model<br>skills.ts:428-450 — renderSkillDirective inlines the effective bytes for a spawn prompt instead of a permission-gated path<br>skills.ts:462-490 — save writes raw Markdown with a tmp-file rename; null unlinks the override |
 | Authoritative zero-heuristic fleet membership check and role label stampers (#1151) | `server/fleet-membership.ts` | 5 | 92 | `deterministic` | `FleetRoster`, `isFleetMember`, `stampFrontDeskLabels`, `stampOrchestratorLabels`, `stampWorkerLabels` | fleet-membership.ts:37-50 — authoritative fleet membership predicate based on explicit roster and parentage metadata<br>fleet-membership.ts:61-92 — endpoint stamping helpers for front-desk, orchestrator, and worker roles |
@@ -112,6 +113,7 @@ See *What this table does not cover* below for the sessions themselves.
 - **In-process telemetry tap, streaming JSONL store, and composite index metrics aggregation (#1173)** (`server/telemetry.ts`) — Measures LLM turn performance, tool thrashing, FDSI, and worker ROI. All numbers and composite indices are deterministic arithmetic over counters and turn timestamps.
 - **Model rollup receipts and candidate derivation from daemon counters** (`server/metrics.ts`) — THE ROW THAT IS EASY TO GET WRONG, and it is deterministic. It measures LLM sessions -- token use, cache ratio, turn duration, cost -- and every number is arithmetic over counters the daemon already computed. Nothing here is a model. The privacy posture is explicit too (34-35): no transcripts, prompts or code are stored.
 - **Role-to-model assignment, persistence, and available-model discovery** (`server/role-models.ts`) — Performs no inference and takes no decision that depends on one, so by the test used everywhere else in this table it is deterministic. It is contested because it is the plugin's only surface whose entire purpose is choosing which model other rows spawn -- the AI/LLM character of the fleet is set here and executed in `agents.ts`. The bucket depends on whether you classify a control surface or the thing it controls.
+- **Playbook state machine profiles, canonical stage progression model, and storage (#1403)** (`server/playbooks.ts`) — Defines declarative playbook profiles (Light full autonomy, Medium human-in-the-loop gates) and typed stage progression contracts.
 - **Long-lived role rotation: layered policy resolution, trigger evaluation, brief rendering, one-at-a-time lock (#1019)** (`server/rotation.ts`) — The whole trigger decision is deterministic: same observation and policy, same verdict. It drives a model-backed respawn (classified under `hook-router.ts` / `agents.ts`) but performs no inference of its own.
 - **Fleet skill effective resolution, canonical platform root, override persistence, and Settings RPC handlers** (`server/skills.ts`) — Reads and writes skill Markdown on disk and resolves it for spawn prompts. No inference: the operator, the canonical `platform` checkout, or the bundled fallback supplies every byte.
 - **Authoritative zero-heuristic fleet membership check and role label stampers (#1151)** (`server/fleet-membership.ts`) — Pure predicate and label mutators. Relies exclusively on authoritative roster IDs and explicit parentage metadata with no heuristics or LLM involvement.
@@ -167,7 +169,7 @@ See *What this table does not cover* below for the sessions themselves.
 
 | Moving part | File | File exports | File loc | Classification | Anchors | Evidence |
 | --- | --- | ---: | ---: | --- | --- | --- |
-| 45 RPC contracts (zod schemas + input/output types) and the fleet settings contract | `shared/contracts.ts` | 363 | 2811 | `deterministic` | `uppidiFleetSettingsContract`, `uppidiFleetSettingsSchema` | contracts.ts:54-2348 — 45 `defineContract`/`defineSettingsContract` objects across the file<br>contracts.ts:1739-1754 — the fleet settings schema is a `z.object`<br>index.server.ts:135-189 — every one of them is bound to a handler there |
+| 45 RPC contracts (zod schemas + input/output types) and the fleet settings contract | `shared/contracts.ts` | 386 | 2903 | `deterministic` | `uppidiFleetSettingsContract`, `uppidiFleetSettingsSchema` | contracts.ts:54-2348 — 45 `defineContract`/`defineSettingsContract` objects across the file<br>contracts.ts:1739-1754 — the fleet settings schema is a `z.object`<br>index.server.ts:135-189 — every one of them is bound to a handler there |
 | Settings re-export barrel | `shared/settings.ts` | 3 | 5 | `deterministic` | whole file | shared/settings.ts:1-5 — re-exports three names from `contracts.js` |
 | Filtering, sorting, health-gauge derivation, project grouping, bulk-archive eligibility | `shared/sort-filter.ts` | 46 | 1233 | `deterministic` | `filterIssues`, `sortIssues`, `filterQueues`, `sortAgents`, `filterRunners`, `filterMetricCandidates`, +4 more | sort-filter.ts:148 — health gauge buckets counters against fixed thresholds<br>sort-filter.ts:484-540 — bulk-archive eligibility is an explicit ordered rule list<br>sort-filter.ts:875 — project grouping is set/dict work over agent records |
 | Canonical repository identity resolution: normalization, coordinate splitting, single-name resolver (#888) | `shared/repo-identity.ts` | 11 | 191 | `deterministic` | `normalizeRepoKey`, `canonicalRepoKey`, `resolveCanonicalRepo`, `canonicalRepoName`, `compactRepoName` | repo-identity.ts:14-30 — `normalizeRepoKey` strips protocol, scp, port and `.git` deterministically<br>repo-identity.ts:83-115 — `repoCoordinates` splits a fully-qualified key into host/owner/repo<br>repo-identity.ts:135-176 — `resolveCanonicalRepo` matches a bare name against the known roster or returns null |
@@ -250,6 +252,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `server/mcp-tools.test.ts` | MCP tool definitions, schema validation, and dispatch fixtures | `test:node` | 400 | `deterministic` |
 | `server/metrics.test.ts` | Rollup arithmetic, candidate derivation, receipt persistence | `test:node` | 279 | `deterministic` |
 | `server/permission-adjudication.test.ts` | Safe-pattern allowlist, shell scanner, fleet detection, and durable decision log (#1084) | `test:node` | 268 | `deterministic` |
+| `server/playbooks.test.ts` | Playbook profiles, canonical stage progression, actor classification, and RPC handlers (#1403) | `test:node` | 437 | `deterministic` |
 | `server/registry.test.ts` | server/registry | `test:node` | 44 | `deterministic` |
 | `server/repos.test.ts` | server/repos | `test:node` | 394 | `deterministic` |
 | `server/role-models.test.ts` | server/role-models | `test:node` | 236 | `deterministic` |
@@ -262,7 +265,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `server/workspace-guard.test.ts` | server/workspace-guard | `test:node` | 282 | `deterministic` |
 | `server/workspace-lookup.test.ts` | server/workspace-lookup | `test:node` | 299 | `deterministic` |
 | `shared/agent-links.test.ts` | Multi-client agent deep link resolvers and URI templates | `test:node` | 80 | `deterministic` |
-| `shared/contracts.test.ts` | Contract schema validation | `test:node` | 1480 | `deterministic` |
+| `shared/contracts.test.ts` | Contract schema validation | `test:node` | 1497 | `deterministic` |
 | `shared/fleet-control.test.ts` | shared/fleet-control | `test:node` | 290 | `deterministic` |
 | `shared/repo-identity.test.ts` | shared/repo-identity | `test:node` | 132 | `deterministic` |
 | `shared/sort-filter.test.ts` | Filter, sort, gauge and grouping functions | `test:node` | 1684 | `deterministic` |
@@ -336,7 +339,7 @@ matrix above is the judgement half.
 | `client/tree-zebra.test.tsx` | client | 47 | 0 | — |
 | `client/ui-guard.test.ts` | client | 155 | 0 | — |
 | `index.client.tsx` | entry | 115 | 10 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentSwitcherJumpScreen`, `AgentSwitcherSidebarItem`, `UppidiFleetPanel`, `UppidiFleetSidebar`, `UppidiFleetSurface`, `UppidiForgePanel`, `UppidiForgeSurface`, `contribute`, `registerWorkspacePanel` |
-| `index.server.ts` | entry | 291 | 2 | `contribute`, `registerHookRouterEnvInjection` |
+| `index.server.ts` | entry | 296 | 2 | `contribute`, `registerHookRouterEnvInjection` |
 | `server/actions.test.ts` | server | 518 | 0 | — |
 | `server/actions.ts` | server | 200 | 2 | `filterByStatus`, `handleForgeActionRuns` |
 | `server/agent-health.test.ts` | server | 603 | 0 | — |
@@ -369,6 +372,8 @@ matrix above is the judgement half.
 | `server/metrics.ts` | server | 861 | 23 | `AppendRollupResult`, `BASELINE_CANDIDATES`, `DEFAULT_TASK_PROFILES`, `FleetMetrics`, `MAX_ROLLUP_RECEIPTS`, `METRICS_PRIVACY_NOTICE`, `ModelRollup`, `RollupAgentInput`, `RollupAgentMetrics`, `appendRollupReceipt`, `computeModelRollups`, `computeSlidingAggregations` …+11 more |
 | `server/permission-adjudication.test.ts` | server | 268 | 0 | — |
 | `server/permission-adjudication.ts` | server | 898 | 16 | `AdjudicatePermissionInput`, `AdjudicatePermissionResult`, `AdjudicationDecisionRecord`, `AdjudicationLogOptions`, `FleetAgentContext`, `FleetAgentLike`, `RawPermissionLike`, `SAFE_PERMISSION_RULES`, `SafePermissionMatch`, `adjudicatePermission`, `appendAdjudicationDecision`, `classifySafeCommand` …+4 more |
+| `server/playbooks.test.ts` | server | 437 | 0 | — |
+| `server/playbooks.ts` | server | 425 | 20 | `DEFAULT_LIGHT_STAGES`, `DEFAULT_MEDIUM_STAGES`, `DEFAULT_PLAYBOOKS_CONFIG`, `PLAYBOOKS_CONFIG_FILENAME`, `defaultPlaybooksConfigPath`, `getOrderedStages`, `getPlaybookProfile`, `getPlaybooksStorage`, `handleUppidiPlaybooks`, `handleUppidiSetPlaybook`, `isAutonomousActor`, `isAutonomousStage` …+8 more |
 | `server/registry.test.ts` | server | 44 | 0 | — |
 | `server/repos.test.ts` | server | 394 | 0 | — |
 | `server/repos.ts` | server | 213 | 3 | `handleUppidiEnrollRepo`, `handleUppidiRepos`, `handleUppidiUnenrollRepo` |
@@ -391,8 +396,8 @@ matrix above is the judgement half.
 | `server/workspace-lookup.ts` | server | 326 | 12 | `CanonicalWorkspaceDescriptor`, `ProjectRecord`, `ResolvedWorkspace`, `WORKSPACE_NOT_FOUND_REMEDIATION`, `WorkspaceLookupOptions`, `WorkspaceRecord`, `WorkspaceResolutionError`, `candidateHostCheckoutDir`, `canonicalDescriptorsToRegistry`, `resolveWorkspaceForRepo`, `resolveWorkspaceForRepoViaDaemon`, `workspaceNotFoundError` |
 | `shared/agent-links.test.ts` | shared | 80 | 0 | — |
 | `shared/agent-links.ts` | shared | 145 | 11 | `AgentLinkConfig`, `AgentLinkScheme`, `AgentLinkTarget`, `buildAgentLink`, `buildDashboardAgentLink`, `buildHappierAgentLink`, `buildPaseoAgentLink`, `createAgentLinkResolver`, `defaultAgentLink`, `resolveAgentLinkConfig`, `resolveEnvelopeAgentLink` |
-| `shared/contracts.test.ts` | shared | 1480 | 0 | — |
-| `shared/contracts.ts` | shared | 2811 | 363 | `AgentAttentionReason`, `AgentAttentionReasonSchema`, `AgentBlockDetail`, `AgentBlockDetailSchema`, `AgentLifecycleState`, `AgentLifecycleStateSchema`, `AgentRoleDivergence`, `AgentRoleDivergenceSchema`, `AttentionLabel`, `AttentionLabelSchema`, `AutomationTierSchema`, `AutomationTierValue` …+351 more |
+| `shared/contracts.test.ts` | shared | 1497 | 0 | — |
+| `shared/contracts.ts` | shared | 2903 | 386 | `AgentAttentionReason`, `AgentAttentionReasonSchema`, `AgentBlockDetail`, `AgentBlockDetailSchema`, `AgentLifecycleState`, `AgentLifecycleStateSchema`, `AgentRoleDivergence`, `AgentRoleDivergenceSchema`, `AttentionLabel`, `AttentionLabelSchema`, `AutomationTierSchema`, `AutomationTierValue` …+374 more |
 | `shared/fleet-control.test.ts` | shared | 290 | 0 | — |
 | `shared/helper-version.ts` | shared | 29 | 3 | `HELPER_REVISION`, `HELPER_SERVED_FROM`, `HELPER_VERSION` |
 | `shared/repo-identity.test.ts` | shared | 132 | 0 | — |

@@ -60,3 +60,4 @@ opencode.jsonc
 # Serena per-project state (memories, caches — per-machine, never committed)
 .serena/
 scratch/
+.tmp/

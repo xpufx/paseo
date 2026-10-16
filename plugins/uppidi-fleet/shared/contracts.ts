@@ -2809,3 +2809,95 @@ export function parseTranscriptToActivityItems(
   commitCurrent();
   return items;
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Playbook state machine & stage progression contracts (#1403, #1270)
+// ──────────────────────────────────────────────────────────────────────────
+
+export const CANONICAL_PLAYBOOK_STAGES = [
+  "stage/spec",
+  "stage/spec-audit",
+  "stage/dispatch",
+  "stage/code",
+  "stage/review",
+  "stage/merge",
+  "stage/verify",
+] as const;
+
+export const PlaybookStageNameSchema = z.enum(CANONICAL_PLAYBOOK_STAGES);
+export type PlaybookStageName = z.infer<typeof PlaybookStageNameSchema>;
+
+export const StageSuccessorSchema = z.object({
+  success: z.string().nullable(),
+  rejection: z.string().nullable().optional(),
+}).strict();
+export type StageSuccessor = z.infer<typeof StageSuccessorSchema>;
+
+export const PlaybookActorSchema = z.string().refine(
+  (val) => val === "human:operator" || /^autonomous:[a-z0-9_-]+$/.test(val),
+  { message: 'Actor must be "human:operator" or "autonomous:<role>"' }
+);
+export type PlaybookActor = z.infer<typeof PlaybookActorSchema>;
+
+export const PlaybookStageDefinitionSchema = z.object({
+  stage: PlaybookStageNameSchema,
+  actor: PlaybookActorSchema,
+  entry_precondition: z.string().min(1),
+  exit_artifact: z.string().min(1),
+  next_stage: StageSuccessorSchema,
+  description: z.string().optional(),
+}).strict();
+export type PlaybookStageDefinition = z.infer<typeof PlaybookStageDefinitionSchema>;
+
+export const PlaybookProfileSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  stages: z.record(PlaybookStageNameSchema, PlaybookStageDefinitionSchema),
+}).strict();
+export type PlaybookProfile = z.infer<typeof PlaybookProfileSchema>;
+
+export const PlaybooksConfigSchema = z.object({
+  defaultProfile: z.string().default("Medium"),
+  profiles: z.record(z.string(), PlaybookProfileSchema),
+}).strict();
+export type PlaybooksConfig = z.infer<typeof PlaybooksConfigSchema>;
+
+export const UppidiPlaybooksInputSchema = z.object({
+  profile: z.string().optional(),
+}).strict();
+export type UppidiPlaybooksInput = z.infer<typeof UppidiPlaybooksInputSchema>;
+
+export const UppidiPlaybooksOutputSchema = z.object({
+  ok: z.boolean(),
+  defaultProfile: z.string(),
+  profiles: z.record(z.string(), PlaybookProfileSchema),
+  error: z.string().optional(),
+}).strict();
+export type UppidiPlaybooksOutput = z.infer<typeof UppidiPlaybooksOutputSchema>;
+
+export const uppidiPlaybooksContract = defineContract({
+  name: "uppidi-fleet.playbooks",
+  description: "Get playbook profiles and stage progression schemas",
+  input: UppidiPlaybooksInputSchema,
+  output: UppidiPlaybooksOutputSchema,
+});
+
+export const UppidiSetPlaybookInputSchema = z.object({
+  profile: PlaybookProfileSchema,
+  setDefault: z.boolean().optional(),
+}).strict();
+export type UppidiSetPlaybookInput = z.infer<typeof UppidiSetPlaybookInputSchema>;
+
+export const UppidiSetPlaybookOutputSchema = z.object({
+  ok: z.boolean(),
+  message: z.string().optional(),
+  error: z.string().optional(),
+}).strict();
+export type UppidiSetPlaybookOutput = z.infer<typeof UppidiSetPlaybookOutputSchema>;
+
+export const uppidiSetPlaybookContract = defineContract({
+  name: "uppidi-fleet.set-playbook",
+  description: "Update or create a playbook profile configuration",
+  input: UppidiSetPlaybookInputSchema,
+  output: UppidiSetPlaybookOutputSchema,
+});

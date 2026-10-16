@@ -97,6 +97,8 @@ import {
   uppidiAuditCheckContract,
   UppidiAuditSummaryOutputSchema,
   uppidiAuditSummaryContract,
+  uppidiPlaybooksContract,
+  uppidiSetPlaybookContract,
 } from "./contracts.js";
 
 
@@ -1474,6 +1476,21 @@ describe("audit receipts & quality RPC contracts (#1172)", () => {
     assert.equal(
       uppidiAuditSummaryContract.description,
       "Query server-projected PR audit telemetry and quality metrics",
+    );
+  });
+});
+
+describe("uppidiPlaybooksContract and uppidiSetPlaybookContract (#1403)", () => {
+  it("defines typed RPC contracts for playbook profiles and settings", () => {
+    assert.equal(uppidiPlaybooksContract.name, "uppidi-fleet.playbooks");
+    assert.equal(
+      uppidiPlaybooksContract.description,
+      "Get playbook profiles and stage progression schemas",
+    );
+    assert.equal(uppidiSetPlaybookContract.name, "uppidi-fleet.set-playbook");
+    assert.equal(
+      uppidiSetPlaybookContract.description,
+      "Update or create a playbook profile configuration",
     );
   });
 });
