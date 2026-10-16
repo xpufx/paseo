@@ -8483,6 +8483,12 @@ export class HookRouter {
         }
 
         if (!frontDeskId || !eligible) continue;
+        // Suppress watchdog alert delivery to frontDeskId when the assessed agent is Front Desk (#1400).
+        // Front Desk is an interactive session with the operator and the destination of alerts,
+        // not a background worker to be alerted to itself.
+        if (frontDeskId && (agent.id === frontDeskId || isFrontDeskAgent(agent, frontDeskId))) {
+          continue;
+        }
         const label = assessment.name || assessment.agentId.slice(0, 7);
         if (assessment.taxonomy.includes("PROVIDER_QUOTA_EXHAUSTION")) {
           const alert = `[Fleet Watchdog] Agent ${label} (${assessment.agentId.slice(0, 7)}) hit provider/quota exhaustion: "${assessment.lastError}". Circuit-break: no auto-steer; operator required.`;

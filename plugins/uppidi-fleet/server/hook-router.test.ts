@@ -5253,6 +5253,107 @@ describe("fleet agent health taxonomy classifier (#529)", () => {
     }
   });
 
+  it("runWatchdogAudit suppresses watchdog alert delivery when assessed agent is Front Desk (#1400)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "paseo-watchdog-fd-cb-"));
+    try {
+      const cbPath = join(dir, "model-health.json");
+      const frontDeskId = "front-desk-1";
+      const agentMap = new Map<string, WatchdogAgent>([
+        [
+          frontDeskId,
+          {
+            id: frontDeskId,
+            title: "Front Desk",
+            status: "error",
+            lastError: "",
+            provider: "opencode",
+            model: "muse-spark-1.3-contributor-free",
+            recentTimeline: "[Error] provider-retry: Provider retry (attempt 1): Free usage exceeded, subscribe to Go",
+            labels: { role: "frontdesk" },
+          },
+        ],
+      ]);
+
+      let steerAttempted = false;
+      let alertDelivered: string | null = null;
+      const testRouter = new HookRouter(null, {
+        isTestMode: true,
+        circuitBreakerPath: cbPath,
+      });
+
+      const result = await testRouter.runWatchdogAudit({
+        now,
+        agentMap,
+        frontDeskId,
+        orchestratorRecords: [],
+        deliver: async (_target, msg, opts) => {
+          if (opts?.steer) steerAttempted = true;
+          alertDelivered = msg;
+          return true;
+        },
+        circuitBreakerPath: cbPath,
+      });
+
+      // 1. Anomaly was classified as PROVIDER_QUOTA_EXHAUSTION
+      const quotaAnomaly = result.anomalies.find((a) => a.type === "PROVIDER_QUOTA_EXHAUSTION");
+      assert.ok(quotaAnomaly, "quota anomaly must be recorded in telemetry anomalies");
+      assert.equal(quotaAnomaly?.agentId, frontDeskId);
+
+      // 2. Steer was NOT attempted
+      assert.equal(steerAttempted, false);
+
+      // 3. Watchdog alert delivery to Front Desk was suppressed (#1400)
+      assert.equal(alertDelivered, null, "watchdog alert to Front Desk must be suppressed");
+
+      // 4. Circuit breaker record was still written to cbPath
+      const cached = getCachedModelHealth("opencode/muse-spark-1.3-contributor-free", cbPath, Math.floor(now / 1000));
+      assert.ok(cached, "circuit breaker record must still be written");
+      assert.equal(cached?.status, "quota_exhausted");
+      assert.match(cached?.error ?? "", /Free usage exceeded/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runWatchdogAudit suppresses watchdog alert delivery when assessed agent is Front Desk with non-quota anomaly (#1400)", async () => {
+    const frontDeskId = "front-desk-2";
+    const agentMap = new Map<string, WatchdogAgent>([
+      [
+        frontDeskId,
+        {
+          id: frontDeskId,
+          title: "Front Desk",
+          status: "idle",
+          lastError: "Internal parser unexpected token error",
+          labels: { role: "frontdesk" },
+        },
+      ],
+    ]);
+
+    let alertDelivered: string | null = null;
+    const testRouter = new HookRouter(null, {
+      isTestMode: true,
+    });
+
+    const result = await testRouter.runWatchdogAudit({
+      now,
+      agentMap,
+      frontDeskId,
+      orchestratorRecords: [],
+      deliver: async (_target, msg, opts) => {
+        if (!opts?.steer) alertDelivered = msg;
+        return true;
+      },
+    });
+
+    // Anomaly is recorded in telemetry
+    assert.ok(result.anomalies.length > 0, "anomalies must be recorded in telemetry");
+    assert.ok(result.anomalies.some((a) => a.agentId === frontDeskId));
+
+    // Watchdog alert to Front Desk was suppressed
+    assert.equal(alertDelivered, null, "watchdog alert to Front Desk must be suppressed");
+  });
+
   it("ensureOrchestrator falls back to healthy model when configured primary is cooling down (#890)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "paseo-ensure-cb-"));
     try {
