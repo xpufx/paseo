@@ -6334,9 +6334,10 @@ describe("hook-router stale latestAgentMap cache invalidation and live verificat
     const mockPaseo = {
       agents: {
         ref: (id: string) => ({
-          current: () => ({ id, status: "running", activeTurn: { id: "turn-stalled" } }),
+          capabilities: ["prompt.steer"],
+          current: () => ({ id, status: "running", activeTurn: { id: "turn-stalled" }, capabilities: ["prompt.steer"] }),
           refresh: async () => ({
-            agent: { id, status: "running", activeTurn: { id: "turn-stalled" } },
+            agent: { id, status: "running", activeTurn: { id: "turn-stalled" }, capabilities: ["prompt.steer"] },
           }),
           send: async (text: string, options: any) => {
             sentMessages.push({ text, options });
@@ -6382,9 +6383,10 @@ describe("hook-router stale latestAgentMap cache invalidation and live verificat
     const mockPaseo = {
       agents: {
         ref: (id: string) => ({
-          current: () => ({ id, status: "running", activeTurn: { id: "turn-runaway" } }),
+          capabilities: ["prompt.steer"],
+          current: () => ({ id, status: "running", activeTurn: { id: "turn-runaway" }, capabilities: ["prompt.steer"] }),
           refresh: async () => ({
-            agent: { id, status: "running", activeTurn: { id: "turn-runaway" } },
+            agent: { id, status: "running", activeTurn: { id: "turn-runaway" }, capabilities: ["prompt.steer"] },
           }),
           send: async (text: string, options: any) => {
             sentMessages.push({ text, options });
@@ -10015,7 +10017,7 @@ describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
         {
           number: 101,
           title: "Fix issue",
-          labels: [{ name: "attention/orchestrator" }],
+          labels: [{ name: "attention/frontdesk" }],
           category: "actionable",
           is_dispatchable: true,
           created_at: new Date().toISOString(),
@@ -10109,7 +10111,7 @@ describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
         updated_at: "2026-10-06T17:11:38Z",
         created_at: "2026-10-06T17:11:38Z",
         comments: 0,
-        labels: [{ name: "attention/orchestrator" }, { name: "kind/feature" }],
+        labels: [{ name: "attention/frontdesk" }, { name: "kind/feature" }],
       };
       const io: IssuesCheckIo = {
         getOpenIssues: async () => ({ ok: true, issues: [issue] as any }),
@@ -10120,7 +10122,7 @@ describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
         loadCache: async () => ({
           "1020": {
             updated_at: "2026-10-06T17:11:38Z",
-            labels: ["attention/orchestrator", "kind/feature"],
+            labels: ["attention/frontdesk", "kind/feature"],
             comments_count: 0,
           },
         }),
@@ -10974,7 +10976,7 @@ describe("delta suppression when digests are unchanged (#1352)", () => {
       {
         number: 101,
         title: "Fix issue",
-        labels: [{ name: "attention/orchestrator" }],
+        labels: [{ name: "attention/frontdesk" }],
         category: "orchestrator_triage",
         is_dispatchable: false,
         comments: 2,
@@ -11083,7 +11085,7 @@ describe("zero-dispatch suppression (#1352)", () => {
       {
         number: 201,
         title: "Needs triage",
-        labels: [{ name: "attention/orchestrator" }],
+        labels: [{ name: "attention/frontdesk" }],
         category: "orchestrator_triage",
         is_dispatchable: false,
         comments: 0,
@@ -11604,3 +11606,112 @@ describe("watchdog exemption for idle front-desk and orchestrators (#1352)", () 
     assert.ok(!assessment.taxonomy.includes("ZOMBIE_HUNG_TURN"));
   });
 });
+
+describe("deliverMessage provider capabilities and steer harmonization (#1394)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-deliver-capabilities-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("delivers with activeTurnBehavior: 'steer' when provider supports prompt.steer", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const payloads: Array<{ text: string; options: Record<string, unknown> }> = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          capabilities: ["prompt.steer"],
+          send: async (text: string, options: Record<string, unknown>) => {
+            payloads.push({ text, options });
+          },
+        }),
+      },
+    };
+
+    const ok = await router.deliverMessage("agent-steerable", "hello steer", { steer: true });
+    assert.equal(ok, true);
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].options.activeTurnBehavior, "steer");
+  });
+
+  it("downgrades to activeTurnBehavior: 'interrupt' when provider declares capabilities lacking prompt.steer", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const payloads: Array<{ text: string; options: Record<string, unknown> }> = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          capabilities: ["model.reasoning"],
+          send: async (text: string, options: Record<string, unknown>) => {
+            payloads.push({ text, options });
+          },
+        }),
+      },
+    };
+
+    const ok = await router.deliverMessage("agent-no-steer", "hello interrupt", { steer: true });
+    assert.equal(ok, true);
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].options.activeTurnBehavior, "interrupt");
+  });
+
+  it("downgrades to activeTurnBehavior: 'interrupt' when provider is antigravity-provider", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const payloads: Array<{ text: string; options: Record<string, unknown> }> = [];
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          provider: "antigravity-provider",
+          send: async (text: string, options: Record<string, unknown>) => {
+            payloads.push({ text, options });
+          },
+        }),
+      },
+    };
+
+    const ok = await router.deliverMessage("agent-antigravity", "hello antigravity", { steer: true });
+    assert.equal(ok, true);
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].options.activeTurnBehavior, "interrupt");
+  });
+
+  it("retries with interrupt via SDK when send throws Provider does not support prompt.steer without CLI fallback", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    const calls: Array<{ text: string; options: Record<string, unknown> }> = [];
+    const logMessages: string[] = [];
+    (router as any).log = (msg: string) => logMessages.push(msg);
+
+    (router as any).activePaseo = {
+      agents: {
+        ref: () => ({
+          send: async (text: string, options: Record<string, unknown>) => {
+            calls.push({ text, options: { ...options } });
+            if (options.activeTurnBehavior === "steer") {
+              throw new Error("Provider does not support prompt.steer");
+            }
+            return { ok: true };
+          },
+        }),
+      },
+    };
+
+    const ok = await router.deliverMessage("agent-fallback", "prompt text", { steer: true });
+    assert.equal(ok, true);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].options.activeTurnBehavior, "steer");
+    assert.equal(calls[1].options.activeTurnBehavior, "interrupt");
+    // Should NOT log SDK send failure warning or fall back to CLI
+    assert.ok(
+      !logMessages.some((msg) => msg.includes("SDK send failed") && msg.includes("falling back to CLI")),
+      "must not log SDK send failure fallback warning when cleanly recovering from prompt.steer rejection",
+    );
+  });
+});
+

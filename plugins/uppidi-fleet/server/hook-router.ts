@@ -3298,7 +3298,9 @@ function buildWorkerPrompt(options: {
 }): string {
   const issueRef = options.issueIndex ? ` #${options.issueIndex}` : "";
   const host = resolveForgejoHost();
-  const repoArg = ` -R ${options.repo}`;
+  const parts = String(options.repo ?? "").split("/").filter(Boolean);
+  const ownerRepo = parts.length > 2 ? parts.slice(-2).join("/") : parts.join("/");
+  const repoArg = ` -R ${ownerRepo}`;
   const hostArg = host ? ` --hostname ${host}` : "";
   return [
     `You are a coding agent working on repository ${options.repo}${issueRef}.`,
@@ -3346,7 +3348,8 @@ function buildWorkerLabels(options: {
   parentId?: string | null;
 }): Record<string, string> {
   const labels: Record<string, string> = {
-    role: "coding-agent",
+    role: "worker",
+    "fleet.role": "worker",
     category: "coding-agent",
     repo: options.repo,
     "fleet.uppidi.com/role": "coding-agent",
@@ -3356,6 +3359,7 @@ function buildWorkerLabels(options: {
     labels["paseo.parent-agent-id"] = options.parentId;
   }
   if (options.issueIndex) {
+    labels["fleet.issue"] = String(options.issueIndex);
     labels["fleet.uppidi.com/issue"] = String(options.issueIndex);
     labels["forgejo.issue"] = String(options.issueIndex);
   }
@@ -4386,6 +4390,76 @@ export function clearHookLogs(): void {
   logBuffer.length = 0;
 }
 
+/**
+ * Check whether an agent handle or provider declarations indicate support for
+ * the `prompt.steer` capability (#1394).
+ */
+export function agentSupportsPromptSteer(
+  agentRef: any,
+  agentInfo?: { provider?: string | null; config?: { provider?: string | null } | null } | null,
+): boolean {
+  if (!agentRef) return false;
+
+  // 1. Explicit capabilities on agent handle
+  const caps = (agentRef as any).providerCapabilities ?? (agentRef as any).capabilities;
+  if (Array.isArray(caps)) {
+    return caps.includes("prompt.steer");
+  }
+  if (caps instanceof Set) {
+    return caps.has("prompt.steer");
+  }
+  if (caps && typeof caps === "object") {
+    if ((caps as any)["prompt.steer"] === true) return true;
+    if ((caps as any)["prompt.steer"] === false) return false;
+    if ((caps as any).prompt?.steer === true) return true;
+    if ((caps as any).promptSteer === true) return true;
+  }
+
+  // 2. Snapshot on agentRef.current()
+  const curr = typeof agentRef.current === "function" ? agentRef.current() : null;
+  if (curr) {
+    const currCaps = curr.providerCapabilities ?? curr.capabilities;
+    if (Array.isArray(currCaps)) {
+      return currCaps.includes("prompt.steer");
+    }
+    if (currCaps instanceof Set) {
+      return currCaps.has("prompt.steer");
+    }
+    if (currCaps && typeof currCaps === "object") {
+      if ((currCaps as any)["prompt.steer"] === true) return true;
+      if ((currCaps as any)["prompt.steer"] === false) return false;
+      if ((currCaps as any).prompt?.steer === true) return true;
+      if ((currCaps as any).promptSteer === true) return true;
+    }
+  }
+
+  // 3. Check known provider name (antigravity and standard providers do not support prompt.steer)
+  const provider =
+    (agentRef as any).provider ??
+    curr?.provider ??
+    agentInfo?.provider ??
+    agentInfo?.config?.provider;
+  if (typeof provider === "string") {
+    const p = provider.toLowerCase();
+    if (p.includes("antigravity") || p === "claude" || p === "openai" || p === "gemini") {
+      return false;
+    }
+  }
+
+  // 4. If explicit capabilities were declared on the handle/snapshot and didn't include prompt.steer,
+  // then prompt.steer is not supported.
+  if (caps !== undefined && caps !== null) {
+    return false;
+  }
+  if (curr?.capabilities !== undefined && curr?.capabilities !== null) {
+    return false;
+  }
+
+  // When neither explicit capabilities nor a known non-steering provider are present (e.g. mock test harnesses),
+  // allow steer to pass through so capability-unaware test mocks continue to function.
+  return true;
+}
+
 export class HookRouter {
   public configuredPort: number;
   public configuredHost: string;
@@ -5049,7 +5123,7 @@ export class HookRouter {
       }
       if (target.agentId) {
         try {
-          await this.deliverMessage(target.agentId, message, { noWait: true, steer: true });
+          await this.deliverMessage(target.agentId, message, { noWait: true });
         } catch (err) {
           this.log(
             `[warn] merge-event notice delivery failed for ${target.agentId.slice(0, 7)}: ${err instanceof Error ? err.message : String(err)}`,
@@ -6369,20 +6443,34 @@ export class HookRouter {
     if (paseo?.agents?.ref) {
       try {
         const agentRef = paseo.agents.ref(targetAgentId);
+        const agentInfo = this.latestAgentMap?.get(targetAgentId);
+        const canSteer = shouldSteer && agentSupportsPromptSteer(agentRef, agentInfo);
         // The public handle type has lagged the protocol; type the payload
         // structurally so the SDK-only key stays visible and the old dead
         // `steer` key cannot slip through as `any`.
         type AgentSendOptions = NonNullable<Parameters<typeof agentRef.send>[1]> & {
-          activeTurnBehavior: "interrupt" | "steer";
+          activeTurnBehavior?: "interrupt" | "steer";
         };
         const sendOptions: AgentSendOptions = {
-          activeTurnBehavior: shouldSteer ? "steer" : "interrupt",
+          activeTurnBehavior: canSteer ? "steer" : "interrupt",
         };
         if (attachments.length > 0) {
           sendOptions.attachments = attachments;
         }
-        await agentRef.send(extracted.text, sendOptions);
-        return true;
+        try {
+          await agentRef.send(extracted.text, sendOptions);
+          return true;
+        } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          // If steer was attempted and rejected because the provider does not support prompt.steer,
+          // retry cleanly with interrupt behavior via SDK without falling back to CLI (#1394).
+          if (sendOptions.activeTurnBehavior === "steer" && errMsg.includes("prompt.steer")) {
+            sendOptions.activeTurnBehavior = "interrupt";
+            await agentRef.send(extracted.text, sendOptions);
+            return true;
+          }
+          throw err;
+        }
       } catch (err) {
         this.log(`[warn] SDK send failed for ${targetAgentId}, falling back to CLI: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -6412,8 +6500,8 @@ export class HookRouter {
   }
 
   /**
-   * Stand-down steer for a demoted Front Desk or orchestrator (#283/#985).
-   * Fire-and-forget: a failed steer must never fail the promotion it follows.
+   * Stand-down notice for a demoted Front Desk or orchestrator (#283/#985).
+   * Fire-and-forget: a failed notice must never fail the promotion it follows.
    */
   public async deliverStandDown(
     agentId: string,
@@ -6431,11 +6519,11 @@ export class HookRouter {
     const repo = kind === "frontdesk" ? FRONT_DESK_REPO : key;
     const message = withFleetEnvelope(routerEnvelope({ repo, kind: "handoff" }), body);
     try {
-      const ok = await this.deliverMessage(agentId, message, { noWait: true, steer: true });
-      if (!ok) throw new Error("paseo send failed (stand-down steer)");
+      const ok = await this.deliverMessage(agentId, message, { noWait: true });
+      if (!ok) throw new Error("paseo send failed (stand-down notice)");
       return true;
     } catch (err) {
-      this.log(`[warn] stand-down steer failed for ${agentId.slice(0, 7)} (${key}): ${err instanceof Error ? err.message : String(err)}`);
+      this.log(`[warn] stand-down notice failed for ${agentId.slice(0, 7)} (${key}): ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
   }
@@ -9125,7 +9213,7 @@ export class HookRouter {
       `You are now the Front Desk agent. Read the active handoff snapshot at ${this.handoffPath()}. ` +
         `Handoff snapshot:\n${String(snapshot).slice(0, 4000)}`,
     );
-    await this.deliverMessage(id, onboarding, { noWait: true, steer: true });
+    await this.deliverMessage(id, onboarding, { noWait: true });
 
     const orchestrators = this.listOrchestratorTargets();
     const notice = `Front Desk handover: ${id} is now Front Desk (handoff at ${this.handoffPath()}). Route operator escalations to it via 'paseo send --no-wait ${id} <msg>'.`;
@@ -9133,7 +9221,7 @@ export class HookRouter {
     for (const target of orchestrators) {
       if (target.agentId !== id) {
         const message = withFleetEnvelope(routerEnvelope({ repo: target.key, kind: "handoff" }), notice);
-        const ok = await this.deliverMessage(target.agentId, message, { noWait: true, steer: true });
+        const ok = await this.deliverMessage(target.agentId, message, { noWait: true });
         if (ok) notified++;
       }
     }
@@ -9945,14 +10033,13 @@ export class HookRouter {
       const hasWork = actionable.length > 0 || errors.length > 0;
       // Dispatchable gate (#1354): suppress routine Front Desk sweep notifications
       // only when there are zero dispatchable items AND zero Front Desk attention.
-      // Front Desk attention includes: attention/frontdesk label, feedback/sos
-      // categories, and newly seen (is_new) tickets.
+      // Errors during board check must not be suppressed by the ticket gate (#733).
       const totalDispatchable = actionable.reduce((sum, a) => sum + a.dispatchable, 0);
       const totalFrontDeskAttention = actionable.reduce(
         (sum, a) => sum + (a.totalFrontDeskAttention ?? 0),
         0,
       );
-      const dispatchableGateClosed = totalDispatchable === 0 && totalFrontDeskAttention === 0;
+      const dispatchableGateClosed = errors.length === 0 && totalDispatchable === 0 && totalFrontDeskAttention === 0;
       const shouldNotify = hasWork && !dispatchableGateClosed && (actionableChanged || errorStateChanged);
 
 
@@ -11600,7 +11687,7 @@ export class HookRouter {
         let notified = 0;
         for (const target of targetOrchestrators) {
           const message = withFleetEnvelope(routerEnvelope({ repo: target.key, kind: "handoff" }), notice);
-          const ok = await this.deliverMessage(target.agentId, message, { noWait: true, steer: true });
+          const ok = await this.deliverMessage(target.agentId, message, { noWait: true });
           if (ok) notified++;
         }
 

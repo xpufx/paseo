@@ -745,6 +745,7 @@ export function isActionable(labelSet: Set<string>, role: IssuesCheckRole = "orc
     return true; // Orchestrator watches user-attention items to notify the operator
   }
   if (labelSet.has("attention/orchestrator")) return true;
+  if (labelSet.has("attention/frontdesk")) return true;
   if (labelSet.has("size/chunk") || labelSet.has("linked/needs-split")) return true; // Orchestrator action needed to chunk/split
   if (labelSet.has("spec/needed") || labelSet.has("spec/checklist")) return true; // Shaping / gate tracking
   if (labelSet.has("state/verify") || labelSet.has("state/review")) return true; // Deliverable pre-flight verification

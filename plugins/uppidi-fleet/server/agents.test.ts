@@ -49,6 +49,21 @@ import {
 } from "./agents.js";
 import { HookRouter, setActiveHookRouter } from "./hook-router.js";
 import { DEFAULT_PROJECT } from "../shared/contracts.js";
+import { getUppidiFleetSettingsStorage, resetUppidiFleetSettingsStorageInstance } from "./settings.js";
+
+function clearSettingsStorage(): void {
+  try {
+    const targetPath = getUppidiFleetSettingsStorage().filePath;
+    const resolvedTarget = path.resolve(targetPath);
+    const resolvedTmp = path.resolve(os.tmpdir());
+    if (resolvedTarget.startsWith(resolvedTmp) || resolvedTarget.includes("test")) {
+      fs.rmSync(resolvedTarget, { force: true });
+    }
+  } catch {
+    // ignore missing file
+  }
+  resetUppidiFleetSettingsStorageInstance();
+}
 
 describe("authoritative agent project resolution (#530)", () => {
   it("resolves a worktree worker from workspaceId metadata without title/cwd heuristics", () => {
@@ -911,6 +926,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
   let prevHome: string | undefined;
 
   beforeEach(() => {
+    clearSettingsStorage();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "uppidi-fleet-teardown-test-"));
     prevHookStateDir = process.env.HOOK_STATE_DIR;
     prevHookQueueDir = process.env.HOOK_QUEUE_DIR;
@@ -924,6 +940,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
   });
 
   afterEach(() => {
+    clearSettingsStorage();
     setExecFileAsyncForTest(null);
     setActiveHookRouter(null);
     if (prevHome !== undefined) process.env.HOME = prevHome;
@@ -1723,6 +1740,7 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
   let prevHookQueueDir: string | undefined;
 
   beforeEach(() => {
+    clearSettingsStorage();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "uppidi-fleet-halt-rpc-test-"));
     prevHookStateDir = process.env.HOOK_STATE_DIR;
     prevHookQueueDir = process.env.HOOK_QUEUE_DIR;
@@ -1732,6 +1750,7 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
   });
 
   afterEach(() => {
+    clearSettingsStorage();
     setExecFileAsyncForTest(null);
     setActiveHookRouter(null);
     if (prevHookStateDir !== undefined) process.env.HOOK_STATE_DIR = prevHookStateDir;
