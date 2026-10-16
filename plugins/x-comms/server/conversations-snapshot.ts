@@ -227,19 +227,32 @@ function capThreads(snapshot: XCommsConversationsSnapshot): XCommsConversationsS
   return { ...snapshot, threads };
 }
 
-const conversationsStore = new PluginStorage<XCommsConversationsSnapshot>(
-  "paseo-x-comms",
-  CONVERSATIONS_SNAPSHOT_FILE,
-  { defaultData: emptyConversationsSnapshot() },
-);
+function getConversationsStore(): PluginStorage<XCommsConversationsSnapshot> {
+  return new PluginStorage<XCommsConversationsSnapshot>(
+    "x-comms",
+    CONVERSATIONS_SNAPSHOT_FILE,
+    { defaultData: emptyConversationsSnapshot() },
+  );
+}
+
+function getLegacyConversationsStore(): PluginStorage<XCommsConversationsSnapshot> {
+  return new PluginStorage<XCommsConversationsSnapshot>(
+    "paseo-x-comms",
+    CONVERSATIONS_SNAPSHOT_FILE,
+    { defaultData: emptyConversationsSnapshot() },
+  );
+}
 
 export function conversationsSnapshotPath(): string {
-  return conversationsStore.filePath;
+  return getConversationsStore().filePath;
 }
 
 export function readConversationsSnapshot(): XCommsConversationsSnapshot {
   try {
-    const data = conversationsStore.read();
+    const store = getConversationsStore();
+    const legacyStore = getLegacyConversationsStore();
+    const targetStore = !store.exists() && legacyStore.exists() ? legacyStore : store;
+    const data = targetStore.read();
     if (data && typeof data === "object" && Array.isArray((data as { threads?: unknown }).threads)) {
       return data as XCommsConversationsSnapshot;
     }
@@ -250,5 +263,5 @@ export function readConversationsSnapshot(): XCommsConversationsSnapshot {
 }
 
 export function writeConversationsSnapshot(snapshot: XCommsConversationsSnapshot): void {
-  conversationsStore.write(snapshot);
+  getConversationsStore().write(snapshot);
 }

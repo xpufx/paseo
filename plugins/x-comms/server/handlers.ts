@@ -700,11 +700,22 @@ interface UiPrefsState {
   serverPathSet?: boolean;
 }
 
-const uiPrefsStore = new PluginStorage<UiPrefsState>("paseo-x-comms", "plugin.json", { defaultData: {} });
+function getUiPrefsStore(): PluginStorage<UiPrefsState> {
+  return new PluginStorage<UiPrefsState>("x-comms", "plugin.json", { defaultData: {} });
+}
+
+function getLegacyUiPrefsStore(): PluginStorage<UiPrefsState> {
+  return new PluginStorage<UiPrefsState>("paseo-x-comms", "plugin.json", { defaultData: {} });
+}
 
 function readUiPrefs(): UiPrefsState {
   try {
-    return uiPrefsStore.read();
+    const store = getUiPrefsStore();
+    const legacyStore = getLegacyUiPrefsStore();
+    if (!store.exists() && legacyStore.exists()) {
+      return legacyStore.read();
+    }
+    return store.read();
   } catch (err) {
     log.error(`corrupt ${UI_PREFS_FILE}, ignoring: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -712,7 +723,7 @@ function readUiPrefs(): UiPrefsState {
 }
 
 function writeUiPrefs(state: UiPrefsState): void {
-  uiPrefsStore.write(state);
+  getUiPrefsStore().write(state);
 }
 
 export function identityFor(daemon: string): string | null {

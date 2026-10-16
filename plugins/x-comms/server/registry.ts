@@ -1,67 +1,107 @@
-import { readFileSync, writeFileSync, existsSync, renameSync, mkdirSync, rmSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  rmSync,
+  readdirSync,
+  watch,
+  type FSWatcher,
+} from "node:fs";
 export { directHostMismatch } from "../shared/registry.ts";
 import { homedir } from "node:os";
 import { join, dirname, basename } from "node:path";
 import { PluginStorage } from "paseo-plugin-helper/server";
 
 // All plugin state lives under the plugin-scoped storage root
-// (~/.paseo/plugin-data/xpufx/paseo-x-comms/) via PluginStorage.
+// (~/.paseo/plugin-data/xpufx/x-comms/) via PluginStorage.
 // A fresh instance per call keeps stateDir() honest under test HOME sandboxing.
 export function stateDir(): string {
+  return new PluginStorage("x-comms", "registry.json").pluginDir;
+}
+
+export function legacyStateDir(): string {
   return new PluginStorage("paseo-x-comms", "registry.json").pluginDir;
 }
 
-export const REGISTRY_DEFAULT = join(stateDir(), "registry.json");
+export function defaultRegistryPath(): string {
+  return join(stateDir(), "registry.json");
+}
 
-// One-time migration: move a file from the old ~/.paseo root location into the
-// namespaced state dir. Deterministic and forward-only; never a fallback path.
+export function legacyDefaultRegistryPath(): string {
+  return join(legacyStateDir(), "registry.json");
+}
+
+export function oldStateDir(): string {
+  return join(homedir(), ".paseo", "paseo-x-comms");
+}
+
+export const REGISTRY_DEFAULT = defaultRegistryPath();
+export const LEGACY_REGISTRY_DEFAULT = legacyDefaultRegistryPath();
+export const OLD_STATE_DIR = oldStateDir();
+
+// One-time migration: copy a file from the old ~/.paseo root location into the
+// namespaced state dir. Deterministic and forward-only; never unlinks outside scoped storage.
 export function migrateFromRoot(oldName: string, newPath: string): void {
   const oldPath = join(homedir(), ".paseo", oldName);
   if (!existsSync(oldPath) || existsSync(newPath)) return;
   mkdirSync(stateDir(), { recursive: true });
-  renameSync(oldPath, newPath);
+  try {
+    copyFileSync(oldPath, newPath);
+  } catch {
+    // Non-fatal if legacy migration copy fails
+  }
 }
 
-// Old state dir before the plugin-scoped storage migration (#841).
-const OLD_STATE_DIR = join(homedir(), ".paseo", "paseo-x-comms");
-
 // One-time migration: move state from the old ~/.paseo/paseo-x-comms/ directory
-// into the plugin-scoped storage root. Deterministic and forward-only.
+// and legacy paseo-x-comms storage into the plugin-scoped storage root.
+// Deterministic and forward-only; avoids unlinks outside scoped plugin storage.
 export function migrateStateFromOldDir(): void {
-  if (!existsSync(OLD_STATE_DIR)) return;
   const newStateDir = stateDir();
   mkdirSync(newStateDir, { recursive: true });
 
-  for (const name of ["registry.json", "snapshot.json"]) {
-    const oldPath = join(OLD_STATE_DIR, name);
-    const newPath = join(newStateDir, name);
-    if (existsSync(oldPath) && !existsSync(newPath)) {
-      renameSync(oldPath, newPath);
+  const oldDirs = [oldStateDir(), legacyStateDir()];
+
+  for (const oldDir of oldDirs) {
+    if (!existsSync(oldDir)) continue;
+
+    for (const name of [
+      "registry.json",
+      "snapshot.json",
+      "plugin.json",
+      "presence.json",
+      "outbox.json",
+      "conversations.json",
+    ]) {
+      const oldPath = join(oldDir, name);
+      const newPath = join(newStateDir, name);
+      if (existsSync(oldPath) && !existsSync(newPath)) {
+        try {
+          copyFileSync(oldPath, newPath);
+        } catch {}
+      }
+    }
+
+    for (const name of ["pending", "bin", "extensions"]) {
+      const oldPath = join(oldDir, name);
+      const newPath = join(newStateDir, name);
+      if (existsSync(oldPath) && !existsSync(newPath)) {
+        try {
+          cpSync(oldPath, newPath, { recursive: true });
+        } catch {}
+      }
     }
   }
 
-  for (const name of ["pending", "bin", "extensions"]) {
-    const oldPath = join(OLD_STATE_DIR, name);
-    const newPath = join(newStateDir, name);
-    if (existsSync(oldPath) && !existsSync(newPath)) {
-      renameSync(oldPath, newPath);
-    }
-  }
-
-  // Delete stale mesh-key.json (left by the mesh-removal ticket #840)
-  for (const dir of [OLD_STATE_DIR, newStateDir]) {
-    const meshKeyPath = join(dir, "mesh-key.json");
-    if (existsSync(meshKeyPath)) {
+  // Delete stale mesh-key.json in newStateDir only (left by the mesh-removal ticket #840)
+  const meshKeyPath = join(newStateDir, "mesh-key.json");
+  if (existsSync(meshKeyPath)) {
+    try {
       rmSync(meshKeyPath, { force: true });
-    }
+    } catch {}
   }
-
-  // Remove the old dir if empty
-  try {
-    if (readdirSync(OLD_STATE_DIR).length === 0) {
-      rmSync(OLD_STATE_DIR, { recursive: true, force: true });
-    }
-  } catch {}
 }
 
 migrateStateFromOldDir();
@@ -301,7 +341,7 @@ export function parseRegistry(content: string): {
 export function currentRegistryPath(): string {
   const env = process.env.PASEO_X_COMMS_REMOTES;
   if (env && env.length > 0) return env;
-  return REGISTRY_DEFAULT;
+  return defaultRegistryPath();
 }
 
 export function validateDaemonName(name: string): { valid: boolean; error: string | null } {
@@ -324,11 +364,18 @@ export function readRegistry(
   options?: ReadRegistryOptions,
 ): { ok: boolean; exists: boolean; parseError: string | null; daemons: RegistryDaemon[] } {
   const includeHosts = options?.includeConfiguredHosts !== false;
-  if (!existsSync(path)) {
-    const configuredHosts = includeHosts ? loadConfiguredHosts(options?.hostsPath) : [];
-    return { ok: true, exists: false, parseError: null, daemons: configuredHosts };
+  let targetPath = path;
+  if (!existsSync(targetPath)) {
+    const defaultRegistry = defaultRegistryPath();
+    const legacyRegistry = legacyDefaultRegistryPath();
+    if ((path === defaultRegistry || path === REGISTRY_DEFAULT) && existsSync(legacyRegistry)) {
+      targetPath = legacyRegistry;
+    } else {
+      const configuredHosts = includeHosts ? loadConfiguredHosts(options?.hostsPath) : [];
+      return { ok: true, exists: false, parseError: null, daemons: configuredHosts };
+    }
   }
-  const content = readFileSync(path, "utf8");
+  const content = readFileSync(targetPath, "utf8");
   const parsed = parseRegistry(content);
   if (!parsed.ok) {
     return { ok: false, exists: true, parseError: parsed.parseError, daemons: [] };

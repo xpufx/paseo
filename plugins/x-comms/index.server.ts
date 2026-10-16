@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { installStorageGuard } from "paseo-plugin-helper/server";
 import {
   handleRegistryRead,
   handleDaemonAdd,
@@ -53,6 +54,7 @@ import {
 } from "./shared/registry";
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "x-comms" });
   server.handle(registryReadRpc, handleRegistryRead);
   server.handle(daemonAddRpc, handleDaemonAdd);
   server.handle(daemonUpdateRpc, handleDaemonUpdate);
@@ -95,6 +97,7 @@ export default function contribute(server: PluginServerContext) {
   const removeInjection = maybeRegisterInjection(toInjectionServer(server), { enabled: injectionEnabled() });
   const stopHostsWatcher = startConfiguredHostsWatcher();
   return () => {
+    uninstallStorageGuard();
     offTurnStarted();
     offTurnEnded();
     stopHostsWatcher();

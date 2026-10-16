@@ -6,8 +6,11 @@ import { currentRegistryPath, readRegistry, stateDir, migrateFromRoot } from "./
 const snapLog = createPluginLogger("paseo-x-comms", { subsystem: "snapshot" });
 
 const PROBE_TIMEOUT_MS = 15000;
-const SNAPSHOT_FILE = join(stateDir(), "snapshot.json");
-migrateFromRoot("paseo-x-comms-snapshot.json", SNAPSHOT_FILE);
+export function snapshotFile(): string {
+  return join(stateDir(), "snapshot.json");
+}
+export const SNAPSHOT_FILE = snapshotFile();
+migrateFromRoot("paseo-x-comms-snapshot.json", snapshotFile());
 const STALE_MS = 60_000;
 
 export interface SnapshotAgent {
@@ -135,7 +138,7 @@ function doRefresh(): Promise<DaemonSnapshot> {
     const next: DaemonSnapshot = { updatedAt: new Date().toISOString(), daemons };
     snapshot = next;
     try {
-      writeFileSync(SNAPSHOT_FILE, JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
+      writeFileSync(snapshotFile(), JSON.stringify(next, null, 2), { encoding: "utf8", mode: 0o600 });
     } catch {
       // The in-memory snapshot is authoritative; a failed state file write is not fatal.
     }

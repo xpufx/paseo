@@ -114,7 +114,7 @@ before(async () => {
   // the plugin reads it through rather than hardcoding a path: `handlers.ts`
   // builds its `UI_PREFS_FILE` constant from the state dir, but that constant is
   // only used for the one-time migration and the corrupt-file log line.
-  prefs = new PluginStorage<{ injectionEnabled?: boolean }>("paseo-x-comms", "plugin.json", {
+  prefs = new PluginStorage<{ injectionEnabled?: boolean }>("x-comms", "plugin.json", {
     defaultData: {},
   });
 });

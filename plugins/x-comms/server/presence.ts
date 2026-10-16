@@ -178,13 +178,24 @@ export function pendingForPeer(state: PresenceState, peer: string): PendingRetra
   return state.pendingRetracts.filter((p) => p.peer === peer);
 }
 
-const presenceStore = new PluginStorage<PresenceState>("paseo-x-comms", "presence.json", {
-  defaultData: emptyPresenceState(),
-});
+function getPresenceStore(): PluginStorage<PresenceState> {
+  return new PluginStorage<PresenceState>("x-comms", "presence.json", {
+    defaultData: emptyPresenceState(),
+  });
+}
+
+function getLegacyPresenceStore(): PluginStorage<PresenceState> {
+  return new PluginStorage<PresenceState>("paseo-x-comms", "presence.json", {
+    defaultData: emptyPresenceState(),
+  });
+}
 
 export function readPresence(): PresenceState {
   try {
-    const data = presenceStore.read();
+    const store = getPresenceStore();
+    const legacyStore = getLegacyPresenceStore();
+    const activeStore = !store.exists() && legacyStore.exists() ? legacyStore : store;
+    const data = activeStore.read();
     if (data && typeof data === "object") {
       return {
         live: data.live ?? {},
@@ -200,5 +211,5 @@ export function readPresence(): PresenceState {
 }
 
 export function writePresence(state: PresenceState): void {
-  presenceStore.write(state);
+  getPresenceStore().write(state);
 }

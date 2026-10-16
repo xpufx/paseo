@@ -222,17 +222,28 @@ export async function runOutboxPass(
   return result;
 }
 
-const outboxStore = new PluginStorage<OutboxState>("paseo-x-comms", OUTBOX_FILE, {
-  defaultData: emptyOutboxState(),
-});
+function getOutboxStore(): PluginStorage<OutboxState> {
+  return new PluginStorage<OutboxState>("x-comms", OUTBOX_FILE, {
+    defaultData: emptyOutboxState(),
+  });
+}
+
+function getLegacyOutboxStore(): PluginStorage<OutboxState> {
+  return new PluginStorage<OutboxState>("paseo-x-comms", OUTBOX_FILE, {
+    defaultData: emptyOutboxState(),
+  });
+}
 
 export function outboxPath(): string {
-  return outboxStore.filePath;
+  return getOutboxStore().filePath;
 }
 
 export function readOutbox(): OutboxState {
   try {
-    const data = outboxStore.read();
+    const store = getOutboxStore();
+    const legacyStore = getLegacyOutboxStore();
+    const activeStore = !store.exists() && legacyStore.exists() ? legacyStore : store;
+    const data = activeStore.read();
     if (data && typeof data === "object" && Array.isArray(data.entries)) {
       return { entries: data.entries as OutboxEntry[] };
     }
@@ -243,5 +254,5 @@ export function readOutbox(): OutboxState {
 }
 
 export function writeOutbox(state: OutboxState): void {
-  outboxStore.write(state);
+  getOutboxStore().write(state);
 }

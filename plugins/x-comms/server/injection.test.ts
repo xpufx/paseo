@@ -218,7 +218,7 @@ describe("mcp injection", () => {
       const [script] = config.args ?? [];
       assert.ok(script, "injected config must carry the server script");
       assert.ok(!script.includes("/checkout/"), `injected path must not rot on update: ${script}`);
-      assert.equal(script, join(home, ".paseo", "plugin-data", "xpufx", "paseo-x-comms", "bin", "paseo-x-comms.bundled.mjs"));
+      assert.equal(script, join(home, ".paseo", "plugin-data", "xpufx", "x-comms", "bin", "paseo-x-comms.bundled.mjs"));
       assert.ok(existsSync(script), "stable server must exist after sync");
     });
   });
