@@ -137,6 +137,8 @@ import {
   type SweepDigestsPayload,
   getSweepDigestStorage,
   resetSweepDigestStorage,
+  buildOrchestratorPrompt,
+  resolveCodingAgentModel,
 } from "./hook-router.js";
 import { readAdjudicationDecisions } from "./permission-adjudication.js";
 import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
@@ -11714,4 +11716,104 @@ describe("deliverMessage provider capabilities and steer harmonization (#1394)",
     );
   });
 });
+
+describe("Hook Router Launch Contract & Prompt Embedding (#1398)", () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-prompt-contract-"));
+  });
+
+  afterEach(() => {
+    if (existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("buildOrchestratorPrompt embeds dynamic Launch Contract with defaults", () => {
+    const prompt = buildOrchestratorPrompt("xpufx-org/test-repo");
+    assert.ok(prompt.includes("### Launch Contract"), "must include Launch Contract section");
+    assert.ok(prompt.includes("- Hook Router: http://"), "must format Hook Router URL");
+    assert.ok(prompt.includes("- Resolved Coding-Agent Model: "), "must format Resolved Coding-Agent Model");
+    assert.ok(prompt.includes("You are the project orchestrator for xpufx-org/test-repo."));
+  });
+
+  it("buildOrchestratorPrompt respects explicitly provided routerUrl and codingModel", () => {
+    const prompt = buildOrchestratorPrompt("xpufx-org/test-repo", {
+      routerUrl: "http://10.20.30.40:8099",
+      codingModel: "antigravity/gemini-3.8-flash-medium",
+    });
+
+    assert.ok(
+      prompt.includes(
+        "### Launch Contract\n- Hook Router: http://10.20.30.40:8099\n- Resolved Coding-Agent Model: antigravity/gemini-3.8-flash-medium",
+      ),
+      "must format contract exactly matching provided routerUrl and codingModel",
+    );
+  });
+
+  it("resolveCodingAgentModel bypasses circuit-broken models and selects next healthy fallback", () => {
+    const cbPath = join(tempDir, "model-health.json");
+    recordModelQuotaFailure(
+      "codex",
+      "gpt-5.6-terra",
+      "quota exceeded",
+      cbPath,
+      3600,
+      Math.floor(Date.now() / 1000),
+    );
+
+    const model = resolveCodingAgentModel({
+      fallbackList: [
+        "codex/gpt-5.6-terra",
+        "codex/gpt-5.6-luna",
+        "uppidi/opencode-go/deepseek-v4.1-flash",
+      ],
+      circuitBreakerPath: cbPath,
+    });
+
+    assert.equal(model, "codex/gpt-5.6-luna");
+  });
+
+  it("provisionOrchestrator passes routerUrl and resolved coding-agent model into buildOrchestratorPrompt", async () => {
+    const cbPath = join(tempDir, "model-health.json");
+    const spawned: any[] = [];
+    const testRouter = new HookRouter(null, {
+      isTestMode: true,
+      port: 8150,
+      host: "10.0.0.42",
+      circuitBreakerPath: cbPath,
+      orchestratorModelFallback: ["antigravity-acp/gemini-3.8-flash-low"],
+      workspacesData: [
+        {
+          workspaceId: "ws-contract",
+          projectId: "proj-contract",
+          cwd: tempDir,
+          displayName: "Test Repo",
+          isolation: "local",
+        },
+      ],
+      projectsData: [
+        {
+          projectId: "proj-contract",
+          projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/contract-repo",
+        },
+      ],
+      spawnAgent: async (opts) => {
+        spawned.push(opts);
+        return { id: "agent-contract-orch" };
+      },
+    });
+
+    const res = await testRouter.ensureOrchestrator({ repo: "xpufx-org/contract-repo" });
+    assert.equal(res.ok, true);
+    assert.equal(spawned.length, 1);
+
+    const prompt = spawned[0].prompt;
+    assert.ok(prompt.includes("### Launch Contract"));
+    assert.ok(prompt.includes("- Hook Router: http://10.0.0.42:8150"));
+    assert.ok(prompt.includes("- Resolved Coding-Agent Model: "));
+  });
+});
+
 

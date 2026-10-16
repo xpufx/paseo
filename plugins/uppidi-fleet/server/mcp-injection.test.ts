@@ -4,6 +4,7 @@ import { SERENA_MCP_PROFILE } from "../shared/contracts.js";
 import {
   FLEET_ROLE_ENV_KEY,
   registerFleetMcpInjection,
+  registerHookRouterEnvInjection,
   resolveActiveProfiles,
 } from "./mcp-injection.js";
 
@@ -181,3 +182,101 @@ describe("registerFleetMcpInjection fleet scoping (#1313)", () => {
     assert.equal(handlers.length, 0);
   });
 });
+
+describe("registerHookRouterEnvInjection (#1398)", () => {
+  function createStubServer() {
+    const handlers: ((input: { request: any }) => any)[] = [];
+    return {
+      handlers,
+      server: {
+        before: (name: string, handler: (input: { request: any }) => any) => {
+          if (name === "agent.create") {
+            handlers.push(handler);
+            return () => {
+              const idx = handlers.indexOf(handler);
+              if (idx >= 0) handlers.splice(idx, 1);
+            };
+          }
+          return () => {};
+        },
+      },
+      dispatch: (initialRequest: any) => {
+        let current = initialRequest;
+        for (const handler of [...handlers]) {
+          const result = handler({ request: current });
+          if (result !== undefined) {
+            current = result;
+          }
+        }
+        return current;
+      },
+    };
+  }
+
+  it("injects HOOK_ROUTER_BASE_URL into request.config.env and request.env", () => {
+    const { server, dispatch } = createStubServer();
+    const cleanup = registerHookRouterEnvInjection(server as any, () => ({
+      hookHost: "192.168.1.100",
+      hookPort: 8123,
+    } as any));
+
+    const initialRequest = {
+      config: { provider: "claude", cwd: "/test" },
+      env: { USER: "xpufx" },
+    };
+
+    const finalRequest = dispatch(initialRequest);
+    assert.equal(finalRequest.config.env?.HOOK_ROUTER_BASE_URL, "http://192.168.1.100:8123");
+    assert.equal(finalRequest.env?.HOOK_ROUTER_BASE_URL, "http://192.168.1.100:8123");
+    assert.equal(finalRequest.env?.USER, "xpufx");
+
+    cleanup();
+  });
+
+  it("initializes missing config.env and env if undefined", () => {
+    const { server, dispatch } = createStubServer();
+    const cleanup = registerHookRouterEnvInjection(server as any, () => ({
+      hookHost: "10.0.0.5",
+      hookPort: 9000,
+    } as any));
+
+    const initialRequest = {};
+
+    const finalRequest = dispatch(initialRequest);
+    assert.equal(finalRequest.config.env?.HOOK_ROUTER_BASE_URL, "http://10.0.0.5:9000");
+    assert.equal(finalRequest.env?.HOOK_ROUTER_BASE_URL, "http://10.0.0.5:9000");
+
+    cleanup();
+  });
+
+  it("falls back to default host and port when settings fields are absent", () => {
+    const { server, dispatch } = createStubServer();
+    const cleanup = registerHookRouterEnvInjection(server as any, () => ({} as any));
+
+    const initialRequest = { config: {}, env: {} };
+    const finalRequest = dispatch(initialRequest);
+
+    assert.equal(finalRequest.config.env?.HOOK_ROUTER_BASE_URL, "http://127.0.0.1:8099");
+    assert.equal(finalRequest.env?.HOOK_ROUTER_BASE_URL, "http://127.0.0.1:8099");
+
+    cleanup();
+  });
+
+  it("cleanup function unregisters the hook", () => {
+    const { server, handlers, dispatch } = createStubServer();
+    const cleanup = registerHookRouterEnvInjection(server as any, () => ({
+      hookHost: "127.0.0.1",
+      hookPort: 8099,
+    } as any));
+
+    assert.equal(handlers.length, 1);
+    cleanup();
+    assert.equal(handlers.length, 0);
+
+    const initialRequest = { config: {}, env: {} };
+    const finalRequest = dispatch(initialRequest);
+    assert.equal(finalRequest.config.env?.HOOK_ROUTER_BASE_URL, undefined);
+    assert.equal(finalRequest.env?.HOOK_ROUTER_BASE_URL, undefined);
+  });
+});
+

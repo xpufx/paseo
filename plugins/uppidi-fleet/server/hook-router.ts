@@ -3326,11 +3326,98 @@ function buildFrontDeskPrompt(): string {
 }
 
 /**
- * Build the prompt body for an orchestrator spawn.
+ * Dynamically resolve the active coding-agent model from saved role-models and
+ * circuit-breaker health status (#1398).
  */
-function buildOrchestratorPrompt(repo: string): string {
+export function resolveCodingAgentModel(
+  options: {
+    fallbackList?: readonly string[];
+    circuitBreakerPath?: string | null;
+    nowSec?: number;
+    availableProviders?: ReadonlySet<string> | null;
+  } = {},
+): string {
+  const circuitBreakerPath =
+    options.circuitBreakerPath !== undefined
+      ? options.circuitBreakerPath
+      : process.env.NODE_ENV === "test" && !process.env.MODEL_HEALTH_PATH
+        ? null
+        : defaultCircuitBreakerPath();
+  const nowSec = options.nowSec ?? Math.floor(Date.now() / 1000);
+
+  let roleConfig: RoleModelConfig;
+  try {
+    const roles = loadSavedRoleModels();
+    roleConfig = roles?.["coding-agent"] ?? DEFAULT_ROLE_MODELS["coding-agent"];
+  } catch {
+    roleConfig = DEFAULT_ROLE_MODELS["coding-agent"];
+  }
+
+  const rawList =
+    options.fallbackList && options.fallbackList.length > 0
+      ? options.fallbackList
+      : [roleConfig.primaryModel, ...(roleConfig.fallbackGroup ?? [])];
+
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+  for (const c of rawList) {
+    const trimmed = String(c ?? "").trim();
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      candidates.push(trimmed);
+    }
+  }
+
+  const isAvailable = (provider: string): boolean =>
+    !options.availableProviders || options.availableProviders.has(provider);
+
+  for (const candidate of candidates) {
+    const parsed = parseModelKey(candidate);
+    if (!isAvailable(parsed.provider)) {
+      continue;
+    }
+    const health = circuitBreakerPath
+      ? getCachedModelHealth(candidate, circuitBreakerPath, nowSec)
+      : null;
+    if (health && health.status === "quota_exhausted") {
+      continue;
+    }
+    return candidate;
+  }
+
+  return candidates[0] ?? roleConfig.primaryModel ?? "codex/gpt-5.6-terra";
+}
+
+/**
+ * Build the prompt body for an orchestrator spawn.
+ * Dynamically resolves routerUrl and codingModel into the Launch Contract section (#1398).
+ */
+export function buildOrchestratorPrompt(
+  repo: string,
+  options?: {
+    routerUrl?: string;
+    codingModel?: string;
+  },
+): string {
+  let routerUrl = options?.routerUrl;
+  if (!routerUrl) {
+    try {
+      const s = getUppidiFleetSettingsStorage().read();
+      const host = s?.hookHost || "127.0.0.1";
+      const port = s?.hookPort || 8099;
+      routerUrl = `http://${host}:${port}`;
+    } catch {
+      routerUrl = "http://127.0.0.1:8099";
+    }
+  }
+  const codingModel = options?.codingModel || resolveCodingAgentModel();
+
   return [
     `You are the project orchestrator for ${repo}. Coordinate tasks, supervise coding agents, and manage pull requests and issues for this repository using the forge CLI (teax) and Paseo conventions.`,
+    "",
+    "### Launch Contract",
+    `- Hook Router: ${routerUrl}`,
+    `- Resolved Coding-Agent Model: ${codingModel}`,
     "",
     renderSkillDirective("orchestrator"),
     "",
@@ -4790,6 +4877,19 @@ export class HookRouter {
 
     this.loadPersistedQueues();
     this.bindLifecycleEvents();
+  }
+
+  public get publicBaseUrl(): string {
+    let host = this.boundHost || this.configuredHost;
+    let port = this.boundPort || this.configuredPort;
+    try {
+      const s = getUppidiFleetSettingsStorage().read();
+      if (!this.options?.host && s?.hookHost) host = s.hookHost;
+      if (!this.options?.port && s?.hookPort) port = s.hookPort;
+    } catch {
+      // fall back to configured
+    }
+    return `http://${host || "127.0.0.1"}:${port || 8099}`;
   }
 
   // -------------------------------------------------------------------------
@@ -7362,7 +7462,15 @@ export class HookRouter {
     const providerModeInfo = await this.getProviderModeInfo(targetProvider);
     const targetMode = resolveProviderSpawnMode(providerModeInfo, requestedMode);
     const title = `Orchestrator · ${canonicalKey}`;
-    const prompt = `You are the project orchestrator for ${repo}. Coordinate tasks, supervise worker agents, and manage pull requests and issues.\n\n${renderSkillDirective("orchestrator")}`;
+    const codingModel = resolveCodingAgentModel({
+      circuitBreakerPath,
+      availableProviders,
+    });
+    const routerUrl = this.publicBaseUrl;
+    const prompt = buildOrchestratorPrompt(repo, {
+      routerUrl,
+      codingModel,
+    });
     const labels: Record<string, string> = {
       role: "orchestrator",
       category: "orchestrator",

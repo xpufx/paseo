@@ -121,7 +121,8 @@ import {
   installStorageGuard,
   createTimelineTelemetryFeature,
 } from "paseo-plugin-helper/server";
-import { registerFleetMcpInjection } from "./server/mcp-injection.js";
+import { registerFleetMcpInjection, registerHookRouterEnvInjection } from "./server/mcp-injection.js";
+export { registerHookRouterEnvInjection };
 import { fleetRosterContract } from "@xpufx/backend-fleet/shared";
 import { getUppidiFleetSettingsStorage } from "./server/settings.js";
 import { PLUGIN_VERSION } from "./shared/version.js";
@@ -276,10 +277,14 @@ export default function contribute(server: PluginServerContext) {
     profiles: settingsStorage.read()?.mcpInjection?.profiles ?? {},
   });
 
+  // #1398: register HOOK_ROUTER_BASE_URL environment injection hook
+  const envInjectionStop = registerHookRouterEnvInjection(server, () => settingsStorage.read());
+
   return () => {
     log.info("Unloading; disposing hook router, telemetry tap, and MCP injection");
     if (stopTelemetryTap) void stopTelemetryTap();
     void stopHookRouter();
     mcpInjectionStop();
+    envInjectionStop();
   };
 }

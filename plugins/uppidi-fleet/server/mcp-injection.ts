@@ -16,7 +16,9 @@ import {
 import {
   SERENA_MCP_PROFILE,
   type McpInjectionProfile,
+  type UppidiFleetSettings,
 } from "../shared/contracts.js";
+import { getUppidiFleetSettingsStorage } from "./settings.js";
 
 const log = createPluginLogger("uppidi-fleet", { subsystem: "mcp-injection" });
 
@@ -158,6 +160,41 @@ export function registerFleetMcpInjection(
   return () => {
     for (const fn of removeHooks) fn();
   };
+}
+
+/**
+ * Register an agent.create before-hook that injects HOOK_ROUTER_BASE_URL
+ * into request.config.env and request.env (#1398).
+ */
+export function registerHookRouterEnvInjection(
+  server: McpInjectionServer | any,
+  getSettings: () => UppidiFleetSettings = () => getUppidiFleetSettingsStorage().read(),
+): () => void {
+  if (typeof (server as any)?.before !== "function") {
+    return () => {};
+  }
+
+  return server.before("agent.create", ({ request }: { request: any }) => {
+    const settings = getSettings();
+    const host = settings?.hookHost || "127.0.0.1";
+    const port = settings?.hookPort || 8099;
+    const routerUrl = `http://${host}:${port}`;
+
+    if (!request.config) {
+      request.config = {};
+    }
+    if (!request.config.env) {
+      request.config.env = {};
+    }
+    request.config.env.HOOK_ROUTER_BASE_URL = routerUrl;
+
+    if (!request.env) {
+      request.env = {};
+    }
+    request.env.HOOK_ROUTER_BASE_URL = routerUrl;
+
+    return request;
+  });
 }
 
 /**
