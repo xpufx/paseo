@@ -660,7 +660,7 @@ interface HelperSettingsScreenContribution {
 interface HelperSettingsScreenRegistrar {
     addSettingsScreen(contribution: HelperSettingsScreenContribution): PluginCleanup;
 }
-type HelperSettingsFieldKind = "boolean" | "enum" | "string" | "number";
+type HelperSettingsFieldKind = "boolean" | "enum" | "string" | "number" | "array" | "object";
 interface HelperSettingsField {
     key: string;
     kind: HelperSettingsFieldKind;
@@ -683,4 +683,32 @@ interface RegisterHelperSettingsScreenOptions {
 }
 declare function registerHelperSettingsScreen<TSettings extends Record<string, any>>(client: HelperSettingsScreenRegistrar, contract: SettingsContract<TSettings>, options: RegisterHelperSettingsScreenOptions): PluginCleanup;
 
-export { type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, type HostDataColumn, HostDataTable, type HostDataTableProps, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostInteractiveRow, type HostInteractiveRowProps, HostKeyValue, type HostKeyValueProps, type HostKeyValueTruncateMode, HostMetricGauge, type HostMetricGaugeProps, HostModalContent, HostModalSection, HostProgressBar, type HostProgressBarProps, HostResponsive, type HostResponsiveLayout, type HostResponsiveProps, HostRow, type HostRowProps, HostScroll, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostToggle, type HostToggleProps, type HostTruncateMode, HostTruncatedText, type HostTruncatedTextProps, type RegisterHelperSettingsScreenOptions, type SpacingValue, contractSchemaToFields, formatCommandLine, registerHelperSettingsScreen, resolveHostSurface, resolveSpacing, spacing };
+/**
+ * Paseo Plugin Helper — UI Kit (`paseo-plugin-helper/ui`).
+ *
+ * Banner that notifies the user when a plugin bundle was reloaded by the
+ * daemon.  Renders a styled row with an ⚡ icon, a warning message, and two
+ * buttons (Reload / Dismiss).
+ */
+
+interface PluginReloadBannerProps {
+    /** Unique plugin identifier (used for reload tracking). */
+    pluginId: string;
+    /** Optional callback invoked when the user taps Reload. */
+    onReload?: () => void;
+    /** Optional custom children to render instead of the default content. */
+    children?: ReactNode;
+    /** Optional inline style override. */
+    style?: StyleProp<ViewStyle>;
+}
+/**
+ * Inline banner shown at the top of a plugin view after the daemon has
+ * hot-reloaded the plugin bundle.
+ *
+ * ```tsx
+ * <PluginReloadBanner pluginId="my-plugin" onReload={() => queryClient.invalidateQueries()} />
+ * ```
+ */
+declare function PluginReloadBanner({ pluginId, onReload, children, style, }: PluginReloadBannerProps): React__default.JSX.Element | null;
+
+export { type HelperSettingsCardProps, type HelperSettingsField, type HelperSettingsFieldKind, type HelperSettingsFieldOverrides, type HelperSettingsInputProps, type HelperSettingsRowBaseProps, type HelperSettingsScreenContribution, type HelperSettingsScreenRegistrar, type HelperSettingsSectionProps, type HelperSettingsSelectComponent, type HelperSettingsSelectProps, type HelperSettingsSwitchProps, type HelperSettingsUiBundle, type HostAboutLink, HostAboutSection, type HostAboutSectionProps, HostActionBar, type HostActionBarProps, HostAttentionBeacon, type HostAttentionBeaconMode, type HostAttentionBeaconProps, type HostAttentionBeaconTone, HostBadge, type HostBadgeProps, type HostBadgeSize, type HostBadgeStyle, HostButton, type HostButtonProps, type HostButtonSize, type HostButtonVariant, HostCard, HostCardHeader, type HostCardHeaderProps, type HostCardProps, HostCodeBlock, type HostCodeBlockProps, HostCollapsible, type HostCollapsibleProps, HostCommandBox, type HostCommandBoxProps, HostCopyButton, type HostCopyButtonProps, type HostCopyButtonSize, type HostCopyButtonVariant, type HostDataColumn, HostDataTable, type HostDataTableProps, HostEmptyState, type HostEmptyStateProps, HostFormRow, type HostFormRowProps, HostGrid, type HostGridProps, HostHighlightedText, type HostHighlightedTextProps, HostInlineButton, type HostInlineButtonProps, HostInteractiveRow, type HostInteractiveRowProps, HostKeyValue, type HostKeyValueProps, type HostKeyValueTruncateMode, HostMetricGauge, type HostMetricGaugeProps, HostModalContent, HostModalSection, HostProgressBar, type HostProgressBarProps, HostResponsive, type HostResponsiveLayout, type HostResponsiveProps, HostRow, type HostRowProps, HostScroll, HostSearchInput, type HostSearchInputProps, HostSectionHeader, type HostSectionHeaderProps, HostSelect, type HostSelectOption, type HostSelectProps, HostStack, type HostStackProps, HostStatusDot, type HostStatusDotProps, type HostSurfaceVariant, type HostTabItem, HostTabs, type HostTabsProps, HostTextInput, type HostTextInputProps, HostToggle, type HostToggleProps, type HostTruncateMode, HostTruncatedText, type HostTruncatedTextProps, PluginReloadBanner, type RegisterHelperSettingsScreenOptions, type SpacingValue, contractSchemaToFields, formatCommandLine, registerHelperSettingsScreen, resolveHostSurface, resolveSpacing, spacing };

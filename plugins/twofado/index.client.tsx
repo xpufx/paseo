@@ -49,8 +49,12 @@ export default function contribute(client: PluginClientContext) {
     title: "Open 2fado",
     icon: "ShieldCheck",
     context: "global",
-    onSelect({ openSurface }) {
-      openSurface("approvals");
+    onSelect(ctx) {
+      if (typeof (ctx as any).openScreen === "function") {
+        (ctx as any).openScreen({ screenId: "approvals" });
+      } else {
+        ctx.openSurface("approvals");
+      }
     },
   });
 
@@ -63,7 +67,16 @@ export default function contribute(client: PluginClientContext) {
       button: {
         title: "2fado",
         icon: ApprovalHeaderIcon,
-        behavior: { kind: "action", onPress: () => client.openSurface("approvals") },
+        behavior: {
+          kind: "action",
+          onPress: () => {
+            if (typeof (client as any).openScreen === "function") {
+              (client as any).openScreen({ screenId: "approvals" });
+            } else {
+              client.openSurface("approvals");
+            }
+          },
+        },
       },
     });
     buttons.set(workspaceId, () => {

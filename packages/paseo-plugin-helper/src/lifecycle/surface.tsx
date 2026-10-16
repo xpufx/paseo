@@ -6,12 +6,24 @@ import { ModalBodyScrollOwnerContext } from "./scroll-owner.js";
 import { RegistrarThemeScope } from "./providers.js";
 
 /**
- * Structural registrar interface satisfied by both Paseo v0.7 PluginContext
- * and Paseo v0.8 PluginClientContext.
+ * Structural registrar interface satisfied by both Paseo v0.7 PluginContext,
+ * Paseo v0.8 PluginClientContext, and Paseo v0.11+ PluginClientContext.
  */
 export interface SidebarSurfaceRegistrar {
-  addSurface(surfaceId: string, Component: ComponentType<PluginSurfaceProps>): any;
-  addSidebarItem(contribution: any): any;
+  addSurface?(surfaceId: string, Component: ComponentType<PluginSurfaceProps>): any;
+  addSidebarItem?(contribution: any): any;
+  addScreen?(screen: {
+    id: string;
+    title: string | ((params: any) => string);
+    Component: ComponentType<any>;
+  }): any;
+  addSidebarHeaderItem?(item: {
+    id: string;
+    title: string;
+    icon: string;
+    screen?: string;
+    [key: string]: any;
+  }): any;
 }
 
 export interface RegisterSidebarSurfaceOptions {
@@ -114,13 +126,24 @@ export function registerSidebarSurface(
     </RegistrarThemeScope>
   );
 
-  const surfaceRegistration = plugin.addSurface(id, WrappedComponent);
-  const itemRegistration = plugin.addSidebarItem({
-    id,
-    title,
-    icon,
-    surface: id,
-  });
+  let surfaceRegistration: any;
+  let itemRegistration: any;
+
+  if (
+    typeof plugin.addScreen === "function" &&
+    typeof plugin.addSidebarHeaderItem === "function"
+  ) {
+    surfaceRegistration = plugin.addScreen({ id, title, Component: WrappedComponent });
+    itemRegistration = plugin.addSidebarHeaderItem({ id, title, icon, screen: id });
+  } else {
+    surfaceRegistration = plugin.addSurface?.(id, WrappedComponent);
+    itemRegistration = plugin.addSidebarItem?.({
+      id,
+      title,
+      icon,
+      surface: id,
+    });
+  }
 
   let disposed = false;
   return () => {

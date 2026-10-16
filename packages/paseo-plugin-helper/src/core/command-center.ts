@@ -19,6 +19,7 @@ export type CommandCenterContext = "global" | "workspace" | "agent";
 export interface CommandCenterCapabilities {
   openSurface(id: string): void;
   openSettings(id: string): void;
+  openScreen?(input: string | { screenId: string; params?: Record<string, string> }): void;
 }
 
 export interface CommandCenterItemContribution {

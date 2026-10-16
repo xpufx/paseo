@@ -1,7 +1,7 @@
 import { ComponentType } from 'react';
 import { H as HostAgentRef, a as HostSurfaceProps, P as PluginCleanup, b as HostAgentUpdate } from '../host-D31sreow.js';
 import { PluginComposerPillContribution, PluginButtonRegistration } from '@getpaseo/plugin/client';
-import { C as CommandCenterItemContribution } from '../command-center-DQU96J5s.js';
+import { C as CommandCenterItemContribution } from '../command-center-YlMPTclY.js';
 import { P as PluginRpcContract, R as RpcInput, a as RpcOutput } from '../rpc-D27pph91.js';
 import 'react-native';
 import 'zod';
@@ -15,24 +15,50 @@ interface MockSettingsScreenContribution {
     icon: string;
     Component: ComponentType<HostSurfaceProps>;
 }
+interface MockScreenContribution {
+    id: string;
+    title: string | ((params: any) => string);
+    Component: ComponentType<HostSurfaceProps>;
+}
+interface MockSidebarHeaderItemContribution {
+    id: string;
+    title: string;
+    icon: string;
+    screen?: string;
+    [key: string]: any;
+}
 interface MockClientContext {
     registeredPills: PluginComposerPillContribution[];
     registeredSurfaces: Array<{
         id: string;
         Component: ComponentType<HostSurfaceProps>;
     }>;
+    registeredScreens: MockScreenContribution[];
+    registeredSidebarHeaderItems: MockSidebarHeaderItemContribution[];
+    registeredSidebarItems: any[];
     registeredSettingsScreens: MockSettingsScreenContribution[];
     registeredCommandCenterItems: CommandCenterItemContribution[];
+    openedSurfaces: string[];
+    openedScreens: Array<{
+        screenId: string;
+        params?: Record<string, string>;
+    }>;
     addComposerPill(contribution: PluginComposerPillContribution): PluginButtonRegistration;
     openPanel(id: string, options?: unknown): void;
     rpc(contract: {
         name: string;
     }, input: unknown): Promise<unknown>;
     openSurface(id: string): void;
+    openScreen(target: string | {
+        screenId: string;
+        params?: Record<string, string>;
+    }): void;
     openSettings(id: string): void;
     addSettingsScreen(contribution: MockSettingsScreenContribution): PluginCleanup;
     addSurface(id: string, component: unknown): PluginCleanup;
+    addScreen(contribution: MockScreenContribution): PluginCleanup;
     addSidebarItem(contribution: unknown): PluginCleanup;
+    addSidebarHeaderItem(contribution: MockSidebarHeaderItemContribution): PluginCleanup;
     addWorkspacePanel(contribution: unknown): PluginCleanup;
     addCommandCenterItem(contribution: unknown): PluginCleanup;
     addSlashCommand(contribution: unknown): PluginCleanup;
@@ -102,4 +128,4 @@ interface MockServerContext {
  */
 declare function createMockServerContext(): MockServerContext;
 
-export { type MockAgent, type MockClientContext, type MockRpcHandler, type MockServerContext, type MockSettingsScreenContribution, createMockClientContext, createMockServerContext };
+export { type MockAgent, type MockClientContext, type MockRpcHandler, type MockScreenContribution, type MockServerContext, type MockSettingsScreenContribution, type MockSidebarHeaderItemContribution, createMockClientContext, createMockServerContext };

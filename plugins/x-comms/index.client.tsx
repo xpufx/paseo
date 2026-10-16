@@ -41,7 +41,16 @@ export default function contribute(client: PluginClientContext) {
       button: {
         title: "X-comms",
         icon: "PhoneOutgoing",
-        behavior: { kind: "action", onPress: () => client.openSurface("main") },
+        behavior: {
+          kind: "action",
+          onPress: () => {
+            if (typeof (client as any).openScreen === "function") {
+              (client as any).openScreen({ screenId: "main" });
+            } else {
+              client.openSurface("main");
+            }
+          },
+        },
       },
     });
     headerButtons.set(workspaceId, () => registration.remove());

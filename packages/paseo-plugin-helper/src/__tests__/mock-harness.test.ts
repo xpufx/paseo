@@ -76,4 +76,39 @@ describe("Testing Mock Harness", () => {
     cleanup();
     expect(client.registeredPills).toHaveLength(0);
   });
+
+  it("provides mock implementations for addScreen, addSidebarHeaderItem, and openScreen", () => {
+    const client = createMockClientContext();
+
+    const removeScreen = client.addScreen({
+      id: "test-screen",
+      title: "Test Screen",
+      Component: () => null,
+    });
+    expect(client.registeredScreens).toHaveLength(1);
+    expect(client.registeredScreens[0].id).toBe("test-screen");
+
+    const removeHeaderItem = client.addSidebarHeaderItem({
+      id: "test-header-item",
+      title: "Test Header Item",
+      icon: "Terminal",
+      screen: "test-screen",
+    });
+    expect(client.registeredSidebarHeaderItems).toHaveLength(1);
+    expect(client.registeredSidebarHeaderItems[0].id).toBe("test-header-item");
+
+    client.openScreen("test-screen");
+    client.openScreen({ screenId: "test-screen-2", params: { foo: "bar" } });
+    expect(client.openedScreens).toEqual([
+      { screenId: "test-screen" },
+      { screenId: "test-screen-2", params: { foo: "bar" } },
+    ]);
+
+    removeHeaderItem();
+    expect(client.registeredSidebarHeaderItems).toHaveLength(0);
+
+    removeScreen();
+    expect(client.registeredScreens).toHaveLength(0);
+  });
 });
+

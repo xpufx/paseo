@@ -23,19 +23,41 @@ export interface MockSettingsScreenContribution {
   Component: ComponentType<HostSurfaceProps>;
 }
 
+export interface MockScreenContribution {
+  id: string;
+  title: string | ((params: any) => string);
+  Component: ComponentType<HostSurfaceProps>;
+}
+
+export interface MockSidebarHeaderItemContribution {
+  id: string;
+  title: string;
+  icon: string;
+  screen?: string;
+  [key: string]: any;
+}
+
 export interface MockClientContext {
   registeredPills: PluginComposerPillContribution[];
   registeredSurfaces: Array<{ id: string; Component: ComponentType<HostSurfaceProps> }>;
+  registeredScreens: MockScreenContribution[];
+  registeredSidebarHeaderItems: MockSidebarHeaderItemContribution[];
+  registeredSidebarItems: any[];
   registeredSettingsScreens: MockSettingsScreenContribution[];
   registeredCommandCenterItems: CommandCenterItemContribution[];
+  openedSurfaces: string[];
+  openedScreens: Array<{ screenId: string; params?: Record<string, string> }>;
   addComposerPill(contribution: PluginComposerPillContribution): PluginButtonRegistration;
   openPanel(id: string, options?: unknown): void;
   rpc(contract: { name: string }, input: unknown): Promise<unknown>;
   openSurface(id: string): void;
+  openScreen(target: string | { screenId: string; params?: Record<string, string> }): void;
   openSettings(id: string): void;
   addSettingsScreen(contribution: MockSettingsScreenContribution): PluginCleanup;
   addSurface(id: string, component: unknown): PluginCleanup;
+  addScreen(contribution: MockScreenContribution): PluginCleanup;
   addSidebarItem(contribution: unknown): PluginCleanup;
+  addSidebarHeaderItem(contribution: MockSidebarHeaderItemContribution): PluginCleanup;
   addWorkspacePanel(contribution: unknown): PluginCleanup;
   addCommandCenterItem(contribution: unknown): PluginCleanup;
   addSlashCommand(contribution: unknown): PluginCleanup;
@@ -78,16 +100,26 @@ const noopCleanup: PluginCleanup = () => {};
 export function createMockClientContext(): MockClientContext {
   const registeredPills: PluginComposerPillContribution[] = [];
   const registeredSurfaces: Array<{ id: string; Component: ComponentType<HostSurfaceProps> }> = [];
+  const registeredScreens: MockScreenContribution[] = [];
+  const registeredSidebarHeaderItems: MockSidebarHeaderItemContribution[] = [];
+  const registeredSidebarItems: any[] = [];
   const registeredSettingsScreens: MockSettingsScreenContribution[] = [];
   const registeredCommandCenterItems: CommandCenterItemContribution[] = [];
+  const openedSurfaces: string[] = [];
+  const openedScreens: Array<{ screenId: string; params?: Record<string, string> }> = [];
   const agentSubscribers = new Set<(update: HostAgentUpdate) => void>();
   const agents = new Map<string, MockAgent>();
 
   const mock: MockClientContext = {
     registeredPills,
     registeredSurfaces,
+    registeredScreens,
+    registeredSidebarHeaderItems,
+    registeredSidebarItems,
     registeredSettingsScreens,
     registeredCommandCenterItems,
+    openedSurfaces,
+    openedScreens,
 
     addComposerPill(contribution: PluginComposerPillContribution): PluginButtonRegistration {
       registeredPills.push(contribution);
@@ -102,7 +134,17 @@ export function createMockClientContext(): MockClientContext {
 
     rpc: async () => ({} as any),
 
-    openSurface: () => {},
+    openSurface: (id: string) => {
+      openedSurfaces.push(id);
+    },
+
+    openScreen: (target: string | { screenId: string; params?: Record<string, string> }) => {
+      if (typeof target === "string") {
+        openedScreens.push({ screenId: target });
+      } else {
+        openedScreens.push(target);
+      }
+    },
 
     openSettings: () => {},
 
@@ -113,8 +155,35 @@ export function createMockClientContext(): MockClientContext {
         if (index >= 0) registeredSettingsScreens.splice(index, 1);
       };
     },
-    addSurface: () => noopCleanup,
-    addSidebarItem: () => noopCleanup,
+    addSurface: (id: string, component: unknown): PluginCleanup => {
+      const entry = { id, Component: component as ComponentType<HostSurfaceProps> };
+      registeredSurfaces.push(entry);
+      return () => {
+        const index = registeredSurfaces.indexOf(entry);
+        if (index >= 0) registeredSurfaces.splice(index, 1);
+      };
+    },
+    addScreen: (contribution: MockScreenContribution): PluginCleanup => {
+      registeredScreens.push(contribution);
+      return () => {
+        const index = registeredScreens.indexOf(contribution);
+        if (index >= 0) registeredScreens.splice(index, 1);
+      };
+    },
+    addSidebarItem: (contribution: unknown): PluginCleanup => {
+      registeredSidebarItems.push(contribution);
+      return () => {
+        const index = registeredSidebarItems.indexOf(contribution);
+        if (index >= 0) registeredSidebarItems.splice(index, 1);
+      };
+    },
+    addSidebarHeaderItem: (contribution: MockSidebarHeaderItemContribution): PluginCleanup => {
+      registeredSidebarHeaderItems.push(contribution);
+      return () => {
+        const index = registeredSidebarHeaderItems.indexOf(contribution);
+        if (index >= 0) registeredSidebarHeaderItems.splice(index, 1);
+      };
+    },
     addWorkspacePanel: () => noopCleanup,
     addCommandCenterItem(contribution: CommandCenterItemContribution): PluginCleanup {
       registeredCommandCenterItems.push(contribution);

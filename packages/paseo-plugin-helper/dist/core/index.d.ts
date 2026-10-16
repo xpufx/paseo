@@ -11,7 +11,7 @@ export { C as ClientHostDeps, c as ComposerPillRegistrar, H as HostAgentRef, b a
 import { UseMutationOptions, UseQueryOptions, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import * as _tanstack_query_core from '@tanstack/query-core';
 import * as React from 'react';
-export { a as CommandCenterCapabilities, b as CommandCenterContext, C as CommandCenterItemContribution, c as CommandCenterItemRegistrar, r as registerCommandCenterItem } from '../command-center-DQU96J5s.js';
+export { a as CommandCenterCapabilities, b as CommandCenterContext, C as CommandCenterItemContribution, c as CommandCenterItemRegistrar, r as registerCommandCenterItem } from '../command-center-YlMPTclY.js';
 import 'zod';
 import 'react-native';
 import '@getpaseo/plugin/client';
@@ -366,4 +366,55 @@ declare function shallowEqualRecord(a: Record<string, unknown> | null | undefine
  */
 declare function shouldEmitSnapshotUpdate(prev: Record<string, unknown> | null | undefined, next: Record<string, unknown> | null | undefined): boolean;
 
-export { PluginRpcContract, REFRESH_INTERVALS, type RefreshRate, RpcInput, type RpcMutationOptions, RpcOutput, type RpcQueryOptions, SettingsContract, SuiteSettings, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseSharedPluginSettingsOptions, normalizeSnapshotScope, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, useAutoRefreshQuery, usePluginSettings, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };
+/**
+ * Paseo Plugin Helper — Bundle Re-Evaluation Tracking (`paseo-plugin-helper/core`).
+ *
+ * Tracks how many times each plugin bundle has been re-evaluated by the host
+ * daemon.  Useful for detecting hot-reload / reload cycles so plugins can
+ * surface a notice to the user.
+ *
+ * Contract — headless & client-safe:
+ * - No `node:*` imports.
+ * - No React Native or DOM scraping.
+ * - The only React dependency is the exported hook (used inside React trees).
+ */
+declare global {
+    var __PASEO_PLUGIN_LOAD_COUNT__: Record<string, number>;
+}
+/**
+ * Increment and return the load count for *pluginId*.
+ *
+ * Call this from your plugin's entry-point (or wherever the bundle first
+ * executes) so the daemon-side reload counter advances on every evaluation.
+ */
+declare function bumpPluginLoadCount(pluginId: string): number;
+/**
+ * Return the current load count for *pluginId* (0 if never bumped).
+ */
+declare function getPluginLoadCount(pluginId: string): number;
+/**
+ * Return `true` when the plugin has been reloaded at least once
+ * (i.e. load count > 1).
+ */
+declare function isPluginReloaded(pluginId: string): boolean;
+interface PluginReloadNoticeState {
+    /** Whether the plugin was reloaded (load count > 1). */
+    isReloaded: boolean;
+    /** Current load count for the plugin. */
+    loadCount: number;
+    /** Dismiss the reload notice locally. */
+    dismiss: () => void;
+}
+/**
+ * React hook that tracks whether a plugin bundle was reloaded.
+ *
+ * ```ts
+ * const { isReloaded, loadCount, dismiss } = usePluginReloadNotice("my-plugin");
+ * ```
+ *
+ * The `dismiss` callback toggles local state only — it does not affect the
+ * global counter.
+ */
+declare function usePluginReloadNotice(pluginId: string): PluginReloadNoticeState;
+
+export { type PluginReloadNoticeState, PluginRpcContract, REFRESH_INTERVALS, type RefreshRate, RpcInput, type RpcMutationOptions, RpcOutput, type RpcQueryOptions, SettingsContract, SuiteSettings, type UseAutoRefreshQueryOptions, type UsePluginSettingsOptions, type UsePluginSettingsResult, type UseSharedPluginSettingsOptions, bumpPluginLoadCount, getPluginLoadCount, isPluginReloaded, normalizeSnapshotScope, shallowEqualRecord, sharedSnapshotKey, shouldEmitSnapshotUpdate, useAutoRefreshQuery, usePluginReloadNotice, usePluginSettings, useRpcMutation, useRpcQuery, useSharedPluginSettings, useSuiteSettings };

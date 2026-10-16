@@ -40,8 +40,12 @@ export default function contribute(client: PluginClientContext) {
     icon: "Terminal",
     keywords: ["slash", "console", "settings", "commands"],
     context: "global",
-    onSelect({ openSurface }) {
-      openSurface(SLASH_CONSOLE_SURFACE);
+    onSelect(ctx) {
+      if (typeof ctx.openScreen === "function") {
+        ctx.openScreen({ screenId: SLASH_CONSOLE_SURFACE });
+      } else {
+        ctx.openSurface(SLASH_CONSOLE_SURFACE);
+      }
     },
   });
   const removeCommands = registerSlashCommands(client);

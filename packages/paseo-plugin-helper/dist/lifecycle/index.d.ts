@@ -184,12 +184,24 @@ interface RegisterComposerPillOptions<TPayload = any> {
 declare function registerComposerPill<TPayload = any>(client: ComposerPillRegistrar, options: RegisterComposerPillOptions<TPayload>): PluginCleanup;
 
 /**
- * Structural registrar interface satisfied by both Paseo v0.7 PluginContext
- * and Paseo v0.8 PluginClientContext.
+ * Structural registrar interface satisfied by both Paseo v0.7 PluginContext,
+ * Paseo v0.8 PluginClientContext, and Paseo v0.11+ PluginClientContext.
  */
 interface SidebarSurfaceRegistrar {
-    addSurface(surfaceId: string, Component: ComponentType<HostSurfaceProps>): any;
-    addSidebarItem(contribution: any): any;
+    addSurface?(surfaceId: string, Component: ComponentType<HostSurfaceProps>): any;
+    addSidebarItem?(contribution: any): any;
+    addScreen?(screen: {
+        id: string;
+        title: string | ((params: any) => string);
+        Component: ComponentType<any>;
+    }): any;
+    addSidebarHeaderItem?(item: {
+        id: string;
+        title: string;
+        icon: string;
+        screen?: string;
+        [key: string]: any;
+    }): any;
 }
 interface RegisterSidebarSurfaceOptions {
     id: string;
