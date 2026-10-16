@@ -226,11 +226,10 @@ test("the reported identity is a real measurement, not a passthrough", () => {
 });
 
 test("a plugin that resolves no helper is not asked to declare one", () => {
-  // worktree-install exists to prove the shared UI kit is not required (#629)
-  // and enforces the absence of any helper import in its own client test, so
-  // requiring a declaration from it would invert the intent of that plugin.
+  // antigravity-claude serves no helper copy from a source that can drift,
+  // so requiring a declaration from it would be wrong.
   const identity = evaluateHelperIdentity(
-    path.join(REPO_ROOT, "plugins", "worktree-install"),
+    path.join(REPO_ROOT, "plugins", "antigravity-claude"),
     REPO_ROOT,
   );
   assert.equal(identity.servedFrom, "none");

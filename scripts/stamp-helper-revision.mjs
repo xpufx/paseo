@@ -37,7 +37,8 @@ if (!digest) {
 }
 console.log(`[stamp-helper-revision] helper content digest: ${digest}`);
 
-for (const plugin of plugins) {
+for (const rawPlugin of plugins) {
+  const plugin = rawPlugin.replace(/^(?:\.\/)?plugins\//, "").replace(/\/+$/, "");
   const pluginDir = path.join(REPO_ROOT, "plugins", plugin);
   // Decide from what the plugin *resolves*, not from whether a declaration file
   // happens to exist. A plugin can carry a committed vendored tree AND still be
