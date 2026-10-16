@@ -81,6 +81,14 @@ declare class PluginStorage<T extends Record<string, any>> {
      */
     writeAsync(data: T): Promise<void>;
     /**
+     * Writes data atomically using a temporary file and atomic rename. Alias for write().
+     */
+    save(data: T): void;
+    /**
+     * Writes data atomically using async filesystem operations. Alias for writeAsync().
+     */
+    saveAsync(data: T): Promise<void>;
+    /**
      * Updates state synchronously using an updater function.
      */
     update(updater: (prev: T) => T): T;

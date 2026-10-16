@@ -64,4 +64,16 @@ describe("PluginStorage", () => {
     storage.reset();
     expect(storage.exists()).toBe(false);
   });
+
+  it("supports save and saveAsync as aliases for atomic write", async () => {
+    const storage = new PluginStorage<{ key: string }>("test-plugin", "save.json", {
+      baseDir: testDir,
+    });
+
+    storage.save({ key: "sync-saved" });
+    expect(storage.read()).toEqual({ key: "sync-saved" });
+
+    await storage.saveAsync({ key: "async-saved" });
+    expect(await storage.readAsync()).toEqual({ key: "async-saved" });
+  });
 });

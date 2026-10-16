@@ -28,6 +28,7 @@ export default defineConfig({
     alias: {
       "paseo-plugin-helper/core": path.resolve(helperSrc, "core/index.ts"),
       "paseo-plugin-helper/lifecycle": path.resolve(helperSrc, "lifecycle/index.ts"),
+      "paseo-plugin-helper/server": path.resolve(helperSrc, "server/index.ts"),
     },
   },
 });

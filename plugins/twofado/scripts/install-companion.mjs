@@ -13,9 +13,12 @@ import { existsSync, mkdirSync, chmodSync, readFileSync, rmSync } from "node:fs"
 import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { resolvePaseoHome } from "paseo-plugin-helper/server";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = resolve(__dirname, "..");
+
+export { resolvePaseoHome };
 
 export const SUPPORTED_TARGETS = {
   "linux-x64": { os: "linux", arch: "amd64" },
@@ -69,13 +72,18 @@ export function parseChecksumManifest(manifestText, filename) {
   throw new Error(`Checksum for ${filename} not found in SHA256SUMS manifest`);
 }
 
+export function resolveCompanionBinDir(options = {}) {
+  const defaultBinDir = join(resolvePaseoHome(), "plugin-data", "xpufx", "twofado", "bin");
+  return resolve(options.binDir || process.env.TWOFADO_BIN_DIR || defaultBinDir);
+}
+
 export async function installCompanion(options = {}) {
   const emit = options.log || ((msg) => console.log(msg));
   const target = detectPlatform();
   const exeSuffix = target.exe || target.os === "windows" ? ".exe" : "";
   const version = options.version || process.env.TWOFADO_VERSION || "0.1.3";
   const binName = `2fado${exeSuffix}`;
-  const binDir = resolve(options.binDir || process.env.TWOFADO_BIN_DIR || join(ROOT_DIR, "bin"));
+  const binDir = resolveCompanionBinDir(options);
   const binPath = join(binDir, binName);
   const force = Boolean(options.force || process.env.TWOFADO_FORCE_INSTALL === "1");
 
@@ -167,7 +175,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   const soft = process.argv.includes("--soft") || process.argv.includes("--optional") || process.env.TWOFADO_INSTALL_OPTIONAL === "1";
   installCompanion({ force })
     .then((res) => {
-      emit(`[2fado-install] Done: ${res.binPath} (${res.status})`);
+      console.log(`[2fado-install] Done: ${res.binPath} (${res.status})`);
       process.exit(0);
     })
     .catch((err) => {

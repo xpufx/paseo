@@ -1,7 +1,12 @@
 import fs from "node:fs";
 import { join } from "node:path";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { PluginStorage, createPluginLogger, registerSettingsRpc } from "paseo-plugin-helper/server";
+import {
+  PluginStorage,
+  createPluginLogger,
+  installStorageGuard,
+  registerSettingsRpc,
+} from "paseo-plugin-helper/server";
 import {
   approvalAck,
   approvalSelect,
@@ -42,12 +47,12 @@ import {
 
 const log = createPluginLogger("twofado");
 
-function migrateLegacySettingsFile(storage: PluginStorage<ApprovalSettingsValues>): void {
+export function migrateLegacySettingsFile(storage: PluginStorage<ApprovalSettingsValues>): void {
   try {
     const raw = fs.readFileSync(storage.filePath, "utf8");
     const { data, changed } = migrateLegacyNotificationTarget(JSON.parse(raw));
     if (!changed) return;
-    fs.writeFileSync(storage.filePath, JSON.stringify(data, null, 2));
+    storage.save(data as ApprovalSettingsValues);
     log.info("migrated legacy telegramFallback to notificationTarget");
   } catch (err) {
     // Missing or unreadable file: schema defaults apply.
@@ -56,6 +61,7 @@ function migrateLegacySettingsFile(storage: PluginStorage<ApprovalSettingsValues
 }
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "twofado" });
   const storage = new PluginStorage("twofado", "settings.json", {
     defaultData: approvalSettings.defaultSettings,
     schema: approvalSettings.schema,
@@ -147,5 +153,6 @@ export default function contribute(server: PluginServerContext) {
     // Only a child this plugin spawned is stopped; an adopted external daemon
     // is left running for its own supervisor (systemd or standalone).
     void companion.shutdown();
+    uninstallStorageGuard();
   };
 }
