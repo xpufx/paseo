@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createPluginLogger } from "paseo-plugin-helper/server";
+import { createPluginLogger, installStorageGuard } from "paseo-plugin-helper/server";
 import { registerTicketHandlers } from "@xpufx/backend-tickets/server";
 import { forgeSettingsContract } from "./shared/issues.js";
 import { settingsHandlers } from "./server/settings.js";
@@ -7,6 +7,8 @@ import { settingsHandlers } from "./server/settings.js";
 const log = createPluginLogger("forges");
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "forges" });
+
   registerTicketHandlers(server);
 
   // forge.install-labels is operator-only: the optional label-set install is
@@ -16,5 +18,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(forgeSettingsContract.update, settingsHandlers.update);
   server.handle(forgeSettingsContract.reset, settingsHandlers.reset);
   log.info("forges server handlers registered");
-  return () => {};
+  return () => {
+    uninstallStorageGuard();
+  };
 }

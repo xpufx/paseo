@@ -11,7 +11,10 @@ function registeredContractNames(): string[] {
       names.push(contract.name);
     },
   };
-  contribute(server as never);
+  const dispose = contribute(server as never);
+  if (typeof dispose === "function") {
+    dispose();
+  }
   return names;
 }
 

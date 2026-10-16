@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { installStorageGuard } from "./server/vendor/paseo-plugin-helper";
 import {
   catalogRpc,
   exportBundleRpc,
@@ -22,6 +23,8 @@ import {
 } from "./server/resources";
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "slash" });
+
   server.handle(slashSettingsContract.get, (_input, context) => handleGetSettings(context));
   server.handle(slashSettingsContract.update, (input, context) => handleUpdateSettings(input, context));
   server.handle(slashSettingsContract.reset, (_input, context) => handleResetSettings(context));
@@ -32,5 +35,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(exportBundleRpc, handleExportBundle);
   server.handle(importBundleRpc, handleImportBundle);
   log.info("slash plugin contributed: send/open/rpc verbs over settings-doc storage");
-  return () => {};
+  return () => {
+    uninstallStorageGuard();
+  };
 }

@@ -226,16 +226,21 @@ test("the reported identity is a real measurement, not a passthrough", () => {
 });
 
 test("a plugin that resolves no helper is not asked to declare one", () => {
-  // antigravity-claude serves no helper copy from a source that can drift,
-  // so requiring a declaration from it would be wrong.
-  const identity = evaluateHelperIdentity(
-    path.join(REPO_ROOT, "plugins", "antigravity-claude"),
-    REPO_ROOT,
+  // A plugin that serves no helper copy from a source that can drift must not
+  // be asked for a declaration. Tested against a synthetic plugin since all
+  // workspace plugins now consume the helper (#1412).
+  withScratchPlugin(
+    "no-helper-",
+    (dir) => {
+      fs.writeFileSync(path.join(dir, "index.client.tsx"), "export default {};\n");
+    },
+    (identity) => {
+      assert.equal(identity.servedFrom, "none");
+      assert.equal(identity.declared, null);
+      assert.deepEqual(identity.reasons, []);
+      assert.equal(identity.status, "ok");
+    },
   );
-  assert.equal(identity.servedFrom, "none");
-  assert.equal(identity.declared, null);
-  assert.deepEqual(identity.reasons, []);
-  assert.equal(identity.status, "ok");
 });
 
 test("a committed vendored tree is the publish artifact, not the runtime resolution", () => {

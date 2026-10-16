@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { installStorageGuard } from "paseo-plugin-helper/server";
 import {
   demoSettingsContract,
   getDemoDataRpc,
@@ -28,6 +29,8 @@ import {
 } from "./server/server-settings.js";
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "demo" });
+
   // TEMP DEMO (issue #62): upstream registerSettings() -> read()/subscribe().
   const serverSettings = registerDemoServerSettings(server);
   server.handle(demoSettingsSnapshotContract, handleGetServerSettingsSnapshot);
@@ -50,6 +53,7 @@ export default function contribute(server: PluginServerContext) {
     backgroundWorker.stop();
     demoBeacon.stopAll();
     serverSettings.dispose();
+    uninstallStorageGuard();
     log.info("Helper demo server background task stopped");
   };
 }

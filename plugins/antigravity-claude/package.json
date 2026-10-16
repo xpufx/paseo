@@ -6,7 +6,9 @@
   "private": false,
   "license": "MIT",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "stamp": "node -e \"import('../../packages/paseo-plugin-helper/src/server/version.ts').then(m => m.stampVersion({ targetFile: 'shared/version.ts' }))\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
   },
   "keywords": [
     "paseo",
@@ -21,7 +23,8 @@
   "devDependencies": {
     "@getpaseo/plugin": "^0.11.0-beta.3",
     "@types/node": "^22.20.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^3.0.0"
   },
   "repository": {
     "type": "git",
@@ -34,6 +37,8 @@
     "LICENSE",
     "icon.svg",
     "index.server.ts",
-    "server"
+    "server",
+    "shared",
+    "!**/*.test.ts"
   ]
 }

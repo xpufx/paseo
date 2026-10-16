@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createPluginLogger } from "paseo-plugin-helper/server";
+import { createPluginLogger, installStorageGuard } from "paseo-plugin-helper/server";
 import { composeFeatureModules } from "paseo-plugin-helper/shared";
 import { createPermissionAuditFeature } from "permission-audit/server";
 
@@ -18,8 +18,14 @@ const features = composeFeatureModules<PluginServerContext>([
 ]);
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "permission-logger" });
   const dispose = features.contributeServer(server);
   log.info("permission-logger plugin contributed: audit log live", { path: logStorePath });
-  return dispose;
+  return () => {
+    if (typeof dispose === "function") {
+      dispose();
+    }
+    uninstallStorageGuard();
+  };
 }
 

@@ -1,4 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import { installStorageGuard } from "paseo-plugin-helper/server";
 import {
   createCallMcpToolHandler,
   createDiagnoseMcpHandler,
@@ -22,6 +23,8 @@ import { GATEWAY_SERVER_NAME, injectGatewayIntoCreateRequest } from "./server/in
 import { startGateway, stopGateway } from "./server/gateway";
 
 export default function contribute(server: PluginServerContext) {
+  const uninstallStorageGuard = installStorageGuard({ pluginId: "mcp-tools" });
+
   server.handle(listMcp, createListMcpHandler());
   server.handle(readMcp, createReadMcpHandler());
   server.handle(checkMcpHealth, createHealthHandler());
@@ -52,5 +55,6 @@ export default function contribute(server: PluginServerContext) {
 
   return () => {
     void stopGateway();
+    uninstallStorageGuard();
   };
 }
