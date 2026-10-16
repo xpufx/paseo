@@ -296,9 +296,10 @@ routine webhook or dismiss it because it lacks a conventional command verb.
 
 Board ranking, triage, and dispatch are the Orchestrator's responsibility (workers never scan or self-claim). Evaluate the board using a two-step approach:
 
-1. **Deterministic Baseline (`forgejo-issues-check`)**:
-   - Run `scripts/forgejo-issues-check` to get the ranked list of unblocked, prioritized candidates. The script ranks open issues by `(tier, urgency, effort, age)` and returns actionable candidates; use `--role orchestrator` when sweeping for dispatch.
-   - Respect the script's output ordering as the operational baseline.
+1. **Deterministic Baseline (`GET /board/sweep`)**:
+   - Query `GET <hook-endpoint>/board/sweep?repo=<repoKey>` (using curl / fetch, e.g. `curl -s "http://127.0.0.1:8099/board/sweep?repo=<repoKey>&format=markdown"` or json) as the primary baseline. The hook router runs the native board sweep, ranking open issues by `(tier, urgency, effort, age)` and returning actionable candidates; use `role=orchestrator` (the default) when sweeping for dispatch.
+   - Note: `forgejo-issues-check` is the legacy CLI wrapper.
+   - Respect the output ordering as the operational baseline.
 
 2. **Agent Reasoning & Contextual Augmentation**:
    - **Do NOT blind-trust a "0 items" return from the script**: Deterministic checks evaluate labels and comment deltas, but cannot infer unstated context or emergent priorities.

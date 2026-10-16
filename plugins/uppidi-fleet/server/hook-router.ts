@@ -54,8 +54,11 @@ import { appendRollupReceipt } from "./metrics.js";
 import {
   createDefaultIssuesCheckIo,
   runIssuesCheck,
+  renderIssuesCheckMarkdown,
+  ISSUES_CHECK_DEFAULT_HOSTNAME,
   ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS,
   type IssuesCheckIo,
+  type IssuesCheckRole,
   type StaleWipResult,
 } from "./issues-check.js";
 import {
@@ -380,6 +383,8 @@ export interface HookRouterOptions {
    * Defaults off in test mode, matching the other direct-action guards.
    */
   rotationAutoEnabled?: boolean;
+  /** Injected IssuesCheckIo for deterministic board checks and sweeps (#1413). */
+  issuesCheckIo?: IssuesCheckIo;
 }
 
 export interface EnsureOrchestratorInput {
@@ -4672,10 +4677,17 @@ export class HookRouter {
   public readonly logFilePath: string;
   /** Standalone event queue engine from @xpufx/backend-hook (#1295). */
   public readonly eventQueue: HookEventQueue = new HookEventQueue();
+  /** Injected or overridden IssuesCheckIo for deterministic board checks (#1413). */
+  public issuesCheckIo?: IssuesCheckIo;
+
+  public setIssuesCheckIoForTest(io: IssuesCheckIo | null): void {
+    this.issuesCheckIo = io ?? undefined;
+  }
 
   constructor(server?: PluginServerContext | null, options?: HookRouterOptions) {
     this.server = server ?? null;
     this.options = options;
+    this.issuesCheckIo = options?.issuesCheckIo;
     const persisted = loadRouterConfig();
     const settings = (() => {
       try {
@@ -9992,7 +10004,7 @@ export class HookRouter {
       all: true,
       sweepStaleWip: this.staleWipSweepEnabled,
       staleWipHours: this.staleWipHours,
-      io: io ?? createDefaultIssuesCheckIo(),
+      io: io ?? this.issuesCheckIo ?? createDefaultIssuesCheckIo(),
     });
     return {
       repo,
@@ -11916,6 +11928,71 @@ export class HookRouter {
           this.sendJson(res, 200, result);
         } catch (err: any) {
           this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
+        return;
+      }
+
+      if (req.method === "GET" && pathname === "/board/sweep") {
+        const repo = url.searchParams.get("repo")?.trim();
+        if (!repo) {
+          this.sendJson(res, 400, { ok: false, error: "repo parameter is required" });
+          return;
+        }
+
+        const role = (url.searchParams.get("role")?.trim() || "orchestrator") as IssuesCheckRole;
+        const forceParam = url.searchParams.get("force");
+        const force = forceParam !== null && forceParam !== "false" && forceParam !== "0";
+        const allParam = url.searchParams.get("all");
+        const all = allParam !== null && allParam !== "false" && allParam !== "0";
+        const format = url.searchParams.get("format")?.trim().toLowerCase() || "json";
+
+        const parts = repo.split("/").filter(Boolean);
+        let hostname = resolveForgejoHost();
+        let ownerRepo = repo;
+        if (parts.length > 2) {
+          hostname = parts[0];
+          ownerRepo = parts.slice(1).join("/");
+        }
+
+        try {
+          const outcome = await runIssuesCheck({
+            hostname,
+            repo: ownerRepo,
+            role,
+            force,
+            all,
+            sweepStaleWip: this.staleWipSweepEnabled,
+            staleWipHours: this.staleWipHours,
+            io: this.issuesCheckIo ?? this.options?.issuesCheckIo,
+          });
+
+          if (format === "markdown") {
+            const md = renderIssuesCheckMarkdown(outcome, {
+              hostname,
+              repo: ownerRepo,
+              role,
+              staleWipHours: this.staleWipHours ?? ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS,
+              dryRun: false,
+            });
+            const buf = Buffer.from(md, "utf-8");
+            res.writeHead(200, {
+              "Content-Type": "text/markdown; charset=utf-8",
+              "Content-Length": buf.length,
+            });
+            res.end(buf);
+            return;
+          }
+
+          this.sendJson(res, 200, {
+            ok: true,
+            repo,
+            candidates: outcome.rankedCandidates,
+            exitCode: outcome.exitCode,
+            staleWip: outcome.staleWipRecovery,
+            stateTriage: outcome.stateTriage,
+          });
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err instanceof Error ? err.message : (err?.message ?? String(err)) });
         }
         return;
       }

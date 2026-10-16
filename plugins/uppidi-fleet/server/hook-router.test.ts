@@ -917,6 +917,95 @@ describe("hook-router HTTP server endpoints", () => {
     assert.ok(Array.isArray(body.queues));
   });
 
+  describe("GET /board/sweep (#1413)", () => {
+    it("responds to GET /board/sweep with 400 when repo is missing", async () => {
+      const res = await fetch(`http://127.0.0.1:${router.port}/board/sweep`);
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.ok, false);
+      assert.match(body.error, /repo/i);
+    });
+
+    it("responds to GET /board/sweep with 200 JSON payload and candidate list on successful sweep", async () => {
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1413,
+              title: "Fold board sweep into hook router",
+              state: "open",
+              labels: [{ name: "spec/approved" }, { name: "state/wip" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+              user: { login: "xpufx" },
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      router.setIssuesCheckIoForTest(mockIo);
+      try {
+        const res = await fetch(`http://127.0.0.1:${router.port}/board/sweep?repo=xpufx-org/paseo`);
+        assert.equal(res.status, 200);
+        assert.equal(res.headers.get("content-type"), "application/json");
+        const body = await res.json();
+        assert.equal(body.ok, true);
+        assert.equal(body.repo, "xpufx-org/paseo");
+        assert.ok(Array.isArray(body.candidates));
+        assert.equal(typeof body.exitCode, "number");
+        assert.ok(Array.isArray(body.staleWip));
+        assert.ok(Array.isArray(body.stateTriage));
+        assert.ok(body.candidates.length > 0);
+        assert.equal(body.candidates[0].number, 1413);
+      } finally {
+        router.setIssuesCheckIoForTest(null);
+      }
+    });
+
+    it("responds to GET /board/sweep with 200 text/markdown when format=markdown", async () => {
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1413,
+              title: "Fold board sweep into hook router",
+              state: "open",
+              labels: [{ name: "spec/approved" }, { name: "state/wip" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+              user: { login: "xpufx" },
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      router.setIssuesCheckIoForTest(mockIo);
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:${router.port}/board/sweep?repo=xpufx-org/paseo&format=markdown`,
+        );
+        assert.equal(res.status, 200);
+        assert.ok(res.headers.get("content-type")?.includes("text/markdown"));
+        const text = await res.text();
+        assert.ok(text.includes("# Forgejo Deterministic Board Ranking"));
+        assert.ok(text.includes("xpufx-org/paseo"));
+        assert.ok(text.includes("#1413"));
+      } finally {
+        router.setIssuesCheckIoForTest(null);
+      }
+    });
+  });
+
   it("records, checks and summarizes audits over the HTTP gateway (#1172)", async () => {
     const payload = {
       repo: "forge.mrs.uppidi.com/xpufx-org/paseo",

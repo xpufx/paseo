@@ -1191,11 +1191,18 @@ function formatPythonG(value: number): string {
  */
 export function renderIssuesCheckMarkdown(
   outcome: IssuesCheckOutcome,
-  opts: { hostname: string; repo: string; role: IssuesCheckRole; staleWipHours: number; dryRun: boolean },
+  opts?: { hostname?: string; repo?: string; role?: IssuesCheckRole; staleWipHours?: number; dryRun?: boolean },
 ): string {
+  const resolvedOpts = {
+    hostname: opts?.hostname ?? ISSUES_CHECK_DEFAULT_HOSTNAME,
+    repo: opts?.repo ?? ISSUES_CHECK_DEFAULT_REPO,
+    role: opts?.role ?? "orchestrator",
+    staleWipHours: opts?.staleWipHours ?? ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS,
+    dryRun: opts?.dryRun ?? false,
+  };
   const lines: string[] = [];
   const candidates = outcome.rankedCandidates;
-  const issueLink = (c: RankedCandidate) => `[#${c.number}](https://${opts.hostname}/${opts.repo}/issues/${c.number})`;
+  const issueLink = (c: RankedCandidate) => `[#${c.number}](https://${resolvedOpts.hostname}/${resolvedOpts.repo}/issues/${c.number})`;
 
   const sosIdx = new Set<number>();
   const userAttentionIdx = new Set<number>();
@@ -1246,13 +1253,13 @@ export function renderIssuesCheckMarkdown(
   };
 
   lines.push("# Forgejo Deterministic Board Ranking");
-  lines.push("", `**${candidates.length} actionable** · role \`${opts.role}\` · repo \`${opts.repo}\``);
+  lines.push("", `**${candidates.length} actionable** · role \`${resolvedOpts.role}\` · repo \`${resolvedOpts.repo}\``);
   if (outcome.staleWipRecovery.length > 0) {
     const recovered = outcome.staleWipRecovery.filter((result) => result.recovered).length;
-    const mode = opts.dryRun ? "would recover" : "recovered";
+    const mode = resolvedOpts.dryRun ? "would recover" : "recovered";
     lines.push(
       "",
-      `**Stale WIP:** ${mode} ${recovered}/${outcome.staleWipRecovery.length} issue(s) after ${formatPythonG(opts.staleWipHours)}h`,
+      `**Stale WIP:** ${mode} ${recovered}/${outcome.staleWipRecovery.length} issue(s) after ${formatPythonG(resolvedOpts.staleWipHours)}h`,
     );
   }
 
