@@ -4853,6 +4853,9 @@ export class HookRouter {
     if (this._mode === "HALT" || this._mode === "STOP") {
       this.isHaltedState = true;
       this.allQueuesPaused = true;
+    } else if (this._mode === "RUN") {
+      this.isHaltedState = false;
+      this.allQueuesPaused = false;
     }
 
     const root = resolvePaseoHome();
@@ -5070,7 +5073,7 @@ export class HookRouter {
     }
     const isFd = isFrontDeskEvent(body);
     const targetKey = isFd ? "frontdesk" : repoKey;
-    if (this.isHaltedState) {
+    if (this.isHalted()) {
       this.log(`[info] Webhook ingress suppressed for ${targetKey} (hook router halted)`);
       return { key: targetKey, result: "suppressed", frontDesk: isFd, bypass: false };
     }
@@ -6884,7 +6887,7 @@ export class HookRouter {
     repo: string,
     opts: { reason?: string; agentMap?: Map<string, WatchdogAgent> | null } = {},
   ): Promise<EnsureOrchestratorResult | null> {
-    if (this.isHaltedState) return null;
+    if (this.isHalted()) return null;
     const canonical = canonicalRepoKey(repo) ?? String(repo ?? "").trim();
     if (!canonical) return null;
     if (this.isRepoDispatchSuppressed(canonical) || this.isPaused(canonical)) return null;
@@ -7358,7 +7361,7 @@ export class HookRouter {
    * waking. A halted router is never "dormant" (it is deliberately offline).
    */
   public isDormant(agentMap?: Map<string, WatchdogAgent> | null): boolean {
-    if (this.isHaltedState) return false;
+    if (this.isHalted()) return false;
     if (this.getTotalQueued() !== 0) return false;
     if (this.countUnstaffedEnrolledQueues() > 0) return false;
     if (this.hasLiveRunningTurns(agentMap)) return false;
@@ -8002,7 +8005,7 @@ export class HookRouter {
   public async ensureOrchestrator(
     input: EnsureOrchestratorInput,
   ): Promise<EnsureOrchestratorResult> {
-    if (this.isHaltedState) {
+    if (this.isHalted()) {
       return { ok: false, error: "Hook router is halted; orchestrator provisioning is disabled", errorCode: "spawn_failed" };
     }
     const rawRepo = input?.repo;
@@ -8842,7 +8845,7 @@ export class HookRouter {
    * conservative 4-step recovery pipeline for eligible findings.
    */
   public async runWatchdogAudit(opts: WatchdogAuditOptions = {}): Promise<WatchdogAuditResult> {
-    if (this.isHaltedState) {
+    if (this.isHalted()) {
       return {
         ok: true,
         timestamp: opts.now ?? Date.now(),
@@ -10508,7 +10511,7 @@ export class HookRouter {
    * Called from the periodic board sweep; a no-op unless `rotationAutoEnabled`.
    */
   public async evaluateAutomaticRotations(): Promise<UppidiRotateRoleOutput[]> {
-    if (!this.rotationAutoEnabled || this.isHaltedState) return [];
+    if (!this.rotationAutoEnabled || this.isHalted()) return [];
     const agentMap = await this.fetchAgentMap().catch(() => null);
     const out: UppidiRotateRoleOutput[] = [];
     for (const record of this.listOrchestratorRecords()) {
@@ -10682,7 +10685,7 @@ export class HookRouter {
     io?: IssuesCheckIo,
     opts: { explicit?: boolean; now?: number; stage?: PlaybookStageName; profile?: string } = {},
   ): Promise<BoardSweepResult> {
-    if (this.isHaltedState) {
+    if (this.isHalted()) {
       return { ok: true, swept: 0, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
     }
     const liveAgentMap = await this.fetchAgentMap().catch(() => null);
@@ -10930,7 +10933,7 @@ export class HookRouter {
   }
 
   public startBackgroundLoops(): void {
-    if (this.isHaltedState) return;
+    if (this.isHalted()) return;
     if (this.watchdogIntervalMs > 0 && !this.watchdogTimer) {
       this.watchdogTimer = setInterval(() => {
         void this.runWatchdogAudit().catch(() => {});
@@ -11112,8 +11115,14 @@ export class HookRouter {
     }
     if (!key || key === "all") {
       this.isHaltedState = false;
+      if (this._mode === "HALT" || this._mode === "STOP") {
+        this._mode = "RUN";
+        this.saveConfigState();
+        this.log("[info] Fleet mode changed → RUN");
+      }
       this.allQueuesPaused = false;
       this.pausedQueues.clear();
+      this.startBackgroundLoops();
       this.log("[info] All queues resumed");
       for (const k of this.queues.keys()) {
         if (!this.isRepoDispatchSuppressed(k)) {
@@ -11142,14 +11151,14 @@ export class HookRouter {
   }
 
   public isPaused(key: string): boolean {
-    if (this.isHaltedState) return true;
+    if (this.isHalted()) return true;
     if (key === "all") return this.allQueuesPaused || this.pausedQueues.has(key);
     return this.allQueuesPaused || this.pausedQueues.has(key);
   }
 
   /** True while a global `pause('all')` is in effect (#877). */
   public isAllPaused(): boolean {
-    return this.isHaltedState || this.allQueuesPaused;
+    return this.isHalted() || this.allQueuesPaused;
   }
 
   /**
@@ -11168,7 +11177,7 @@ export class HookRouter {
 
   /** Returns true when the canonical ALL HALT state is engaged (#994). */
   public isHalted(): boolean {
-    return this.isHaltedState;
+    return this._mode === "HALT" || this._mode === "STOP" || this.isHaltedState;
   }
 
   // ── Unified fleet control (§1034) ────────────────────────────────────────
@@ -11181,10 +11190,31 @@ export class HookRouter {
   /** Set fleet mode, coercing `HOLD` → `HALT` per §4.3. Persists to config. */
   public setMode(mode: string): void {
     const resolved = coerceFleetMode(mode);
-    if (resolved !== this._mode) {
+    const modeChanged = resolved !== this._mode;
+    const wasHalted = this.isHalted();
+
+    if (modeChanged) {
       this._mode = resolved;
       this.saveConfigState();
       this.log(`[info] Fleet mode changed → ${resolved}`);
+    }
+
+    if (resolved === "HALT") {
+      this.halt();
+    } else if (resolved === "STOP") {
+      this.isHaltedState = true;
+      this.pause("all");
+      this.stopBackgroundLoops();
+      this.saveConfigState();
+    } else if (resolved === "RUN" && (wasHalted || this.isHaltedState)) {
+      if (this.teardownInProgress) {
+        this.log("[warn] setMode('RUN') lifecycle resume ignored: fleet teardown in progress");
+        return;
+      }
+      this.isHaltedState = false;
+      this.resume("all");
+      this.startBackgroundLoops();
+      this.saveConfigState();
     }
   }
 
@@ -12151,7 +12181,7 @@ export class HookRouter {
     for (const k of this.queues.keys()) allKeys.add(k);
 
     // Derive `halted` from mode for backward compatibility (§8.2)
-    const halted = this._mode === "HALT" || this.isHaltedState;
+    const halted = this.isHalted();
     // Merge per-class overrides with the mode defaults (§5.2)
     const modeDefaults = defaultEventClassPolicyByMode[this._mode as keyof typeof defaultEventClassPolicyByMode];
     const eventClassPolicy = this._eventClassPolicy
@@ -12248,7 +12278,7 @@ export class HookRouter {
   }
 
   public async start(): Promise<void> {
-    const isHalted = this._mode === "HALT" || this._mode === "STOP" || this.isHaltedState;
+    const isHalted = this.isHalted();
     if (isHalted) {
       this.log(`[info] HookRouter started in ${this._mode} mode; background loops and auto-provisioning suspended until resume`);
     } else {

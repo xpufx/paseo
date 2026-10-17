@@ -9591,6 +9591,236 @@ describe("HookRouter startModeOnBoot — constructor initialisation (#1112)", ()
   });
 });
 
+describe("HookRouter mode and halt lifecycle synchronization (#1443)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-halt-sync-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    resetUppidiFleetSettingsStorageInstance();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+    resetUppidiFleetSettingsStorageInstance();
+  });
+
+  it("transitions RUN -> HALT: engages halt, pauses queues, stops loops, and suppresses webhooks", async () => {
+    let auditRan = false;
+    let sweepRan = false;
+
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      watchdogIntervalMs: 50,
+      boardSweepIntervalMs: 50,
+    });
+
+    (router as any).runWatchdogAudit = async () => {
+      auditRan = true;
+      return { ok: true, now: Date.now(), anomalies: [], actions: [] };
+    };
+    (router as any).runBoardSweep = async () => {
+      sweepRan = true;
+      return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
+    };
+
+    router.startBackgroundLoops();
+    assert.equal(router.isHalted(), false);
+    assert.equal(router.mode, "RUN");
+
+    router.setMode("HALT");
+
+    assert.equal(router.mode, "HALT");
+    assert.equal(router.isHalted(), true);
+    assert.equal((router as any).isHaltedState, true);
+    assert.equal((router as any).allQueuesPaused, true);
+    assert.equal(router.isAllPaused(), true);
+
+    // Verify background loop timers were stopped
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(auditRan, false, "watchdog should not run while halted");
+    assert.equal(sweepRan, false, "board sweep should not run while halted");
+
+    // Ingress should be suppressed
+    const payload = {
+      repository: { full_name: "xpufx-org/test-repo" },
+      issue: { number: 1, title: "Test" },
+      sender: { login: "someone" },
+    };
+    const res = await router.ingestWebhook("issues", payload);
+    assert.equal(res.result, "suppressed");
+  });
+
+  it("transitions RUN -> STOP: sets mode STOP, engages halt, pauses queues, and stops loops", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    assert.equal(router.mode, "RUN");
+    assert.equal(router.isHalted(), false);
+
+    router.setMode("STOP");
+
+    assert.equal(router.mode, "STOP");
+    assert.equal(router.isHalted(), true);
+    assert.equal((router as any).isHaltedState, true);
+    assert.equal((router as any).allQueuesPaused, true);
+    assert.equal(router.isAllPaused(), true);
+  });
+
+  it("transitions HALT -> RUN: clears isHaltedState, resumes queues, restarts loops, and accepts webhooks", async () => {
+    let auditRan = false;
+    let sweepRan = false;
+
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      watchdogIntervalMs: 50,
+      boardSweepIntervalMs: 50,
+    });
+
+    (router as any).runWatchdogAudit = async () => {
+      auditRan = true;
+      return { ok: true, now: Date.now(), anomalies: [], actions: [] };
+    };
+    (router as any).runBoardSweep = async () => {
+      sweepRan = true;
+      return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
+    };
+
+    router.setMode("HALT");
+    router.enrollRepo("xpufx-org/test-repo");
+    assert.equal(router.isHalted(), true);
+    assert.equal((router as any).isHaltedState, true);
+    assert.equal((router as any).allQueuesPaused, true);
+
+    // Transition HALT -> RUN
+    router.setMode("RUN");
+
+    assert.equal(router.mode, "RUN");
+    assert.equal(router.isHalted(), false);
+    assert.equal((router as any).isHaltedState, false);
+    assert.equal((router as any).allQueuesPaused, false);
+    assert.equal(router.isAllPaused(), false);
+
+    // Loops should restart and execute
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(auditRan, true, "watchdog should run after returning to RUN");
+    assert.equal(sweepRan, true, "board sweep should run after returning to RUN");
+
+    // Ingress should now be accepted and enqueued, not suppressed
+    const payload = {
+      repository: { full_name: "xpufx-org/test-repo" },
+      issue: { number: 42, title: "Test issue" },
+      sender: { login: "someone" },
+    };
+    const res = await router.ingestWebhook("issues", payload);
+    assert.notEqual(res.result, "suppressed");
+    assert.equal(res.result, "disabled");
+    assert.equal(router.getQueue(res.key).length, 1);
+  });
+
+  it("clears isHaltedState on setMode('RUN') even if _mode was already RUN", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    // Simulate desynchronized state where isHaltedState was true but _mode was RUN
+    (router as any)._mode = "RUN";
+    (router as any).isHaltedState = true;
+    (router as any).allQueuesPaused = true;
+    assert.equal(router.isHalted(), true);
+
+    router.setMode("RUN");
+
+    assert.equal(router.mode, "RUN");
+    assert.equal(router.isHalted(), false);
+    assert.equal((router as any).isHaltedState, false);
+    assert.equal((router as any).allQueuesPaused, false);
+  });
+
+  it("resumeAll() from HALT mode synchronizes _mode to RUN and restarts background loops", async () => {
+    let auditRan = false;
+    let sweepRan = false;
+
+    const router = new HookRouter(null, {
+      queueDir,
+      stateDir,
+      port: 0,
+      watchdogIntervalMs: 50,
+      boardSweepIntervalMs: 50,
+    });
+
+    (router as any).runWatchdogAudit = async () => {
+      auditRan = true;
+      return { ok: true, now: Date.now(), anomalies: [], actions: [] };
+    };
+    (router as any).runBoardSweep = async () => {
+      sweepRan = true;
+      return { ok: true, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
+    };
+
+    router.halt();
+    assert.equal(router.mode, "HALT");
+    assert.equal(router.isHalted(), true);
+
+    const res = router.resumeAll();
+    assert.equal(res.ok, true);
+    assert.equal(res.resumed, true);
+
+    assert.equal(router.mode, "RUN");
+    assert.equal(router.isHalted(), false);
+    assert.equal((router as any).isHaltedState, false);
+    assert.equal((router as any).allQueuesPaused, false);
+
+    // Loops should run after resumeAll()
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(auditRan, true, "watchdog should run after resumeAll()");
+    assert.equal(sweepRan, true, "board sweep should run after resumeAll()");
+  });
+
+  it("resume('all') from STOP mode synchronizes _mode to RUN and clears halt", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.setMode("STOP");
+    assert.equal(router.mode, "STOP");
+    assert.equal(router.isHalted(), true);
+
+    router.resume("all");
+
+    assert.equal(router.mode, "RUN");
+    assert.equal(router.isHalted(), false);
+    assert.equal((router as any).isHaltedState, false);
+    assert.equal((router as any).allQueuesPaused, false);
+  });
+
+  it("isHalted() reflects _mode === 'HALT' || _mode === 'STOP' || isHaltedState", () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    assert.equal(router.isHalted(), false);
+
+    (router as any)._mode = "HALT";
+    (router as any).isHaltedState = false;
+    assert.equal(router.isHalted(), true);
+
+    (router as any)._mode = "STOP";
+    (router as any).isHaltedState = false;
+    assert.equal(router.isHalted(), true);
+
+    (router as any)._mode = "RUN";
+    (router as any).isHaltedState = true;
+    assert.equal(router.isHalted(), true);
+
+    (router as any)._mode = "RUN";
+    (router as any).isHaltedState = false;
+    assert.equal(router.isHalted(), false);
+
+    (router as any)._mode = "DRAIN";
+    (router as any).isHaltedState = false;
+    assert.equal(router.isHalted(), false);
+  });
+});
+
 
 describe("HookRouter role rotation (#1019)", () => {
   let tempDir: string;

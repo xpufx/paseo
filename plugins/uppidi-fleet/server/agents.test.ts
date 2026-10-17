@@ -1358,6 +1358,11 @@ describe("Fleet teardown state cleanup (#774)", () => {
     const ensureOrchRes = await router.ensureOrchestrator({ repo: "xpufx-org/test-repo" });
     assert.equal(ensureOrchRes.ok, false);
     assert.match(ensureOrchRes.error || "", /halted/i);
+
+    // Transitioning back to RUN mode clears halt and allows operational lifecycle to resume (#1443)
+    router.setMode("RUN");
+    assert.equal(router.isHalted(), false);
+    assert.equal(router.mode, "RUN");
   });
 
   it("handles fleet teardown with drain: true waiting for running agent to become idle (#995)", async () => {
