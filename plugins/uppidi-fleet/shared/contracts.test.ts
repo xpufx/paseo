@@ -65,6 +65,10 @@ import {
   UppidiUnenrollRepoOutputSchema,
   uppidiFleetSettingsSchema,
   uppidiFleetSettingsContract,
+  FleetRoleSchema,
+  FleetAuthSettingsSchema,
+  DEFAULT_ROLE_USERNAMES,
+  DEFAULT_FLEET_USER,
   FleetResetStateInputSchema,
   FleetResetStateOutputSchema,
   uppidiFleetResetStateContract,
@@ -811,6 +815,39 @@ describe("uppidi-fleet shared contracts", () => {
     });
     assert.deepEqual(legacy.mutedRepos, ["xpufx-org/legacy"]);
     assert.deepEqual(legacy.pausedRepos, []);
+
+    // #1428 multi-PAT auth routing schema defaults
+    assert.equal(defaults.auth.mode, "auto");
+    assert.equal(defaults.auth.defaultUser, DEFAULT_FLEET_USER);
+    assert.equal(defaults.auth.defaultToken, "env:FORGEJO_TOKEN");
+    assert.deepEqual(defaults.auth.roles, {});
+
+    // #1428 customized auth roles with full and shorthand configs
+    const authConfigured = uppidiFleetSettingsSchema.parse({
+      auth: {
+        mode: "auto",
+        defaultUser: "custom-user",
+        defaultToken: "env:MY_TOKEN",
+        roles: {
+          system: { username: "bot-sys", token: "tok-sys" },
+          "front-desk": { username: "bot-fd", token: "tok-fd" },
+          orchestrator: { username: "bot-orch", token: "tok-orch" },
+          worker: "tok-worker-shorthand",
+        },
+      },
+    });
+    assert.equal(authConfigured.auth.defaultUser, "custom-user");
+    assert.equal(authConfigured.auth.defaultToken, "env:MY_TOKEN");
+    assert.deepEqual(authConfigured.auth.roles["system"], { username: "bot-sys", token: "tok-sys" });
+    assert.equal(authConfigured.auth.roles["worker"], "tok-worker-shorthand");
+  });
+
+  it("validates FleetRoleSchema and default usernames (#1428)", () => {
+    assert.deepEqual(FleetRoleSchema.options, ["system", "front-desk", "orchestrator", "worker"]);
+    assert.equal(DEFAULT_ROLE_USERNAMES.system, "fleet-bot");
+    assert.equal(DEFAULT_ROLE_USERNAMES["front-desk"], "fleet-frontdesk");
+    assert.equal(DEFAULT_ROLE_USERNAMES.orchestrator, "fleet-orchestrator");
+    assert.equal(DEFAULT_ROLE_USERNAMES.worker, "fleet-worker");
   });
 });
 

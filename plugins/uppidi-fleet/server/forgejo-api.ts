@@ -12,40 +12,168 @@ export function resolveForgejoHost(): string {
 export const FORGEJO_API_TIMEOUT_MS = 6000;
 
 import { PluginStorage } from "paseo-plugin-helper/server";
+import {
+  type FleetRole,
+  DEFAULT_ROLE_USERNAMES,
+  DEFAULT_FLEET_USER,
+} from "../shared/contracts.js";
+
+export function resolveTokenValue(val: unknown): string {
+  if (typeof val !== "string") return "";
+  const trimmed = val.trim();
+  if (trimmed.startsWith("env:")) {
+    const envVar = trimmed.slice(4).trim();
+    return (process.env[envVar] ?? "").trim();
+  }
+  return trimmed;
+}
+
+export interface ResolveForgejoIdentityOptions {
+  host?: string | null;
+  role?: FleetRole | string | null;
+  settings?: any;
+  pluginSettingsPath?: string;
+  routerConfigPath?: string;
+}
+
+export interface ForgejoIdentity {
+  role: string | null;
+  username: string;
+  token: string | null;
+  isFallback: boolean;
+}
+
+function loadUppidiFleetSettings(opts?: ResolveForgejoIdentityOptions): any {
+  if (opts?.settings && typeof opts.settings === "object") return opts.settings;
+  try {
+    const storage = new PluginStorage<any>("uppidi-fleet", "settings.json");
+    return storage.read() ?? {};
+  } catch {
+    return {};
+  }
+}
 
 /**
- * Resolves the Forgejo API token from explicit env vars or the uppidi-fleet
- * plugin's own settings. Never falls back to 'forges' settings or
- * ~/.config/tea/config.yml.
+ * Resolve Forgejo identity supporting role-based multi-PAT routing with
+ * independent single-user fallback (#1428).
+ */
+export function resolveForgejoIdentity(
+  hostOrOpts?: string | null | ResolveForgejoIdentityOptions,
+  maybeRole?: FleetRole | string | null,
+  maybeOpts?: ResolveForgejoIdentityOptions,
+): ForgejoIdentity {
+  let host: string | null = null;
+  let role: string | null = null;
+  let opts: ResolveForgejoIdentityOptions = {};
+
+  if (typeof hostOrOpts === "object" && hostOrOpts !== null && !maybeRole) {
+    ({ host = null, role = null, ...opts } = hostOrOpts);
+  } else {
+    host = typeof hostOrOpts === "string" ? hostOrOpts : null;
+    role = typeof maybeRole === "string" ? maybeRole : null;
+    opts = maybeOpts ?? {};
+  }
+
+  role = role ? role.trim() : null;
+  host = host ? host.trim() : null;
+
+  // Normalize role aliases (e.g. coding-agent -> worker)
+  const normalizedRole = role ? (role === "coding-agent" ? "worker" : role) : null;
+
+  const settings = loadUppidiFleetSettings(opts);
+  const auth = settings?.auth ?? {};
+  const roles = auth?.roles ?? {};
+
+  // 1. Role-specific token resolution (if role is provided)
+  if (normalizedRole) {
+    const envRoleKey = `FORGEJO_TOKEN_${normalizedRole.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+    const envRoleToken = (process.env[envRoleKey] ?? "").trim();
+
+    const roleConfig = roles[normalizedRole] ?? (role ? roles[role] : undefined);
+    let roleToken = "";
+    let roleUsername = "";
+
+    if (typeof roleConfig === "string") {
+      roleToken = resolveTokenValue(roleConfig);
+      roleUsername = DEFAULT_ROLE_USERNAMES[normalizedRole as FleetRole] ?? normalizedRole;
+    } else if (roleConfig && typeof roleConfig === "object") {
+      roleToken = resolveTokenValue(roleConfig.token);
+      roleUsername = (roleConfig.username ?? DEFAULT_ROLE_USERNAMES[normalizedRole as FleetRole] ?? normalizedRole).trim();
+    }
+
+    if (envRoleToken) {
+      return {
+        role: normalizedRole,
+        username: roleUsername || DEFAULT_ROLE_USERNAMES[normalizedRole as FleetRole] || normalizedRole,
+        token: envRoleToken,
+        isFallback: false,
+      };
+    }
+
+    if (roleToken) {
+      return {
+        role: normalizedRole,
+        username: roleUsername || DEFAULT_ROLE_USERNAMES[normalizedRole as FleetRole] || normalizedRole,
+        token: roleToken,
+        isFallback: false,
+      };
+    }
+  }
+
+  // 2. Single-user collapse
+  // Independent fallback: collapse cleanly to auth.defaultToken / FORGEJO_TOKEN / GITEA_TOKEN / tokensByHost[host] / forgejoToken
+  const defaultUsername = (auth.defaultUser ?? DEFAULT_FLEET_USER).trim();
+
+  let defaultToken = "";
+  if (auth.defaultToken) {
+    defaultToken = resolveTokenValue(auth.defaultToken);
+  }
+  if (!defaultToken) {
+    defaultToken = (process.env.FORGEJO_TOKEN ?? "").trim();
+  }
+  if (!defaultToken) {
+    defaultToken = (process.env.GITEA_TOKEN ?? "").trim();
+  }
+  const targetHost = host ?? DEFAULT_FORGEJO_HOST;
+  if (!defaultToken && settings?.tokensByHost && typeof settings.tokensByHost === "object") {
+    defaultToken = resolveTokenValue(settings.tokensByHost[targetHost]);
+  }
+  if (!defaultToken && typeof settings?.forgejoToken === "string") {
+    defaultToken = resolveTokenValue(settings.forgejoToken);
+  }
+
+  return {
+    role: null,
+    username: defaultUsername,
+    token: defaultToken ? defaultToken : null,
+    isFallback: true,
+  };
+}
+
+/**
+ * Resolves the Forgejo API token supporting role-based multi-PAT routing with
+ * independent single-user fallback (#1428). Never falls back to 'forges'
+ * settings or ~/.config/tea/config.yml.
  *
  * A null return means "no usable token", which callers must surface as an
  * authorization failure — never as a reason to serve substitute data.
  */
-export async function resolveForgejoToken(host: string): Promise<string | null> {
-  if (process.env.FORGEJO_TOKEN?.trim()) return process.env.FORGEJO_TOKEN.trim();
-  if (process.env.GITEA_TOKEN?.trim()) return process.env.GITEA_TOKEN.trim();
+export async function resolveForgejoToken(
+  hostOrOpts?: string | null | ResolveForgejoIdentityOptions,
+  maybeRole?: FleetRole | string | null,
+  maybeOpts?: ResolveForgejoIdentityOptions,
+): Promise<string | null> {
+  const identity = resolveForgejoIdentity(hostOrOpts, maybeRole, maybeOpts);
+  return identity.token;
+}
 
-  // Read ONLY from the uppidi-fleet plugin's own settings.
-  try {
-    const storage = new PluginStorage<{ tokensByHost?: Record<string, string>; forgejoToken?: string }>(
-      "uppidi-fleet",
-      "settings.json",
-    );
-    const data = await storage.readAsync();
-    const token = data?.tokensByHost?.[host];
-    if (typeof token === "string" && token.trim()) {
-      return token.trim();
-    }
-    // Fallback to a single forgejoToken field if no per-host map exists.
-    const singleToken = data?.forgejoToken;
-    if (typeof singleToken === "string" && singleToken.trim()) {
-      return singleToken.trim();
-    }
-  } catch {
-    // uppidi-fleet settings unavailable — fail closed.
-  }
-
-  return null;
+export function resolveForgejoTokenSync(
+  hostOrOpts?: string | null | ResolveForgejoIdentityOptions,
+  maybeRole?: FleetRole | string | null,
+  maybeOpts?: ResolveForgejoIdentityOptions,
+): string | null {
+  const identity = resolveForgejoIdentity(hostOrOpts, maybeRole, maybeOpts);
+  return identity.token;
 }
 
 export type FetchLike = (input: string, init?: any) => Promise<any>;
@@ -56,7 +184,10 @@ export function setFetchForTest(fn: FetchLike | null): void {
   fetchImpl = fn ?? ((input, init) => fetch(input, init));
 }
 
-export type TokenResolverFn = (host: string) => Promise<string | null>;
+export type TokenResolverFn = (
+  host: string,
+  role?: FleetRole | string | null,
+) => Promise<string | null>;
 
 let tokenResolver: TokenResolverFn = resolveForgejoToken;
 
@@ -67,12 +198,14 @@ export function setTokenResolverForTest(fn: TokenResolverFn | null): void {
 /**
  * The token every Forgejo read goes through. Indirected so a test can pin the
  * token instead of inheriting the operator's: `resolveForgejoToken` reads
- * `~/.config/tea/config.yml`, which is host state that differs between a
- * workstation and a CI runner, and a guard that only passes where that file
- * happens to be absent is not a guard.
+ * uppidi-fleet settings/env, which is host state that differs between a
+ * workstation and a CI runner.
  */
-export function forgejoToken(host: string): Promise<string | null> {
-  return tokenResolver(host);
+export function forgejoToken(
+  host: string,
+  role?: FleetRole | string | null,
+): Promise<string | null> {
+  return tokenResolver(host, role);
 }
 
 export type ForgejoApiResult<T> =

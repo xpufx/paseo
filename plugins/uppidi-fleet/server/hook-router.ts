@@ -31,6 +31,7 @@ import type {
   UppidiSetRotationPolicyOutput,
   UppidiAuditSummaryInput,
   MergeEventHook,
+  FleetRole,
 } from "../shared/contracts.js";
 import {
   UppidiAuditRecordInputSchema,
@@ -6633,9 +6634,9 @@ export class HookRouter {
     return ids;
   }
 
-  private async resolveApiToken(host: string): Promise<string | null> {
+  private async resolveApiToken(host: string, role: FleetRole = "system"): Promise<string | null> {
     try {
-      return await forgejoToken(host);
+      return await forgejoToken(host, role);
     } catch {
       return null;
     }

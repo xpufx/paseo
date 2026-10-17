@@ -181,6 +181,21 @@ function normalizeExplicitRole(value: unknown): AgentRole | "retired" | null {
 }
 
 /**
+ * Resolves the UPPIDI_FLEET_ROLE identity environment value from a spawn category (#1428).
+ * Maps coding-agent / worker to "worker", orchestrator to "orchestrator", and front-desk to "front-desk".
+ */
+export function resolveFleetRoleFromCategory(
+  category?: string | null,
+): "orchestrator" | "worker" | "front-desk" | undefined {
+  if (!category) return undefined;
+  const normalized = category.trim().toLowerCase();
+  if (normalized === "orchestrator") return "orchestrator";
+  if (normalized === "front-desk" || normalized === "frontdesk") return "front-desk";
+  if (isCodingAgentCategory(normalized) || normalized === "worker") return "worker";
+  return undefined;
+}
+
+/**
  * Reads the explicit role from spawn metadata: record `category`/`role`,
  * record labels (`role` / `category`), or array-style `role=*` tags. Display
  * names and titles are never consulted (#1143).
@@ -2690,9 +2705,14 @@ export async function spawnPaseoAgent(
       }
       // #1020: stamp fleet role so the agent.create hook can select per-class
       // MCP servers. The marker is consumed and stripped by the hook.
+      // #1428: inject UPPIDI_FLEET_ROLE for multi-PAT process identity routing.
       if (options.category) {
         sdkConfig.env = sdkConfig.env ?? {};
         sdkConfig.env.PASEO_FLEET_ROLE = options.category;
+        const fleetRole = resolveFleetRoleFromCategory(options.category);
+        if (fleetRole) {
+          sdkConfig.env.UPPIDI_FLEET_ROLE = fleetRole;
+        }
       }
       createPayload.config = sdkConfig;
       if (sdkConfig.env) {
@@ -2762,10 +2782,16 @@ export async function spawnPaseoAgent(
           )
         : undefined;
     // #1020: stamp fleet role for CLI path too.
+    // #1428: inject UPPIDI_FLEET_ROLE for CLI path too.
     if (options.category) {
       spawnEnv = spawnEnv ?? {};
       spawnEnv.PASEO_FLEET_ROLE = options.category;
       args.push("--env", `PASEO_FLEET_ROLE=${options.category}`);
+      const fleetRole = resolveFleetRoleFromCategory(options.category);
+      if (fleetRole) {
+        spawnEnv.UPPIDI_FLEET_ROLE = fleetRole;
+        args.push("--env", `UPPIDI_FLEET_ROLE=${fleetRole}`);
+      }
     }
 
     const { stdout } = await execFileAsync("paseo", args, {

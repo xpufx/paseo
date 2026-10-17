@@ -8582,6 +8582,35 @@ describe("hook-router direct-action guards (#847)", () => {
       assert.equal(res.acted, true);
     });
 
+    it("internal daemon calls (close-guard, label-triage) pass role 'system' (#1428)", async () => {
+      let resolvedRole: string | null | undefined;
+      setTokenResolverForTest(async (_host, role) => {
+        resolvedRole = role;
+        return "tok-system-123";
+      });
+
+      let authHeader = "";
+      setFetchForTest(async (_input: string, init?: any) => {
+        authHeader = init?.headers?.Authorization ?? "";
+        const method = String(init?.method ?? "GET").toUpperCase();
+        let data: any = { id: 1 };
+        if (method === "GET") data = { number: 7, title: "Bug", labels: [] };
+        if (method === "PATCH") data = { number: 7, state: "open" };
+        return {
+          ok: true,
+          status: 200,
+          statusText: "",
+          json: async () => data,
+        };
+      });
+
+      const router = makeRouter({ closeGuardTargetActors: ["bot-actor"] });
+      const res = await router.runCloseGuard(issueBody("closed", { actor: "bot-actor", number: 7 }));
+      assert.equal(res.acted, true);
+      assert.equal(resolvedRole, "system");
+      assert.equal(authHeader, "token tok-system-123");
+    });
+
     it("is disabled by default in test mode", async () => {
       const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
       installFetch(() => ({ data: {} }));

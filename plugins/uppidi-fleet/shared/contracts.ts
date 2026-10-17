@@ -2010,7 +2010,46 @@ export type MergeEventHook = z.infer<typeof MergeEventHookSchema>;
 /** Repo key (`host/owner/repo`, `owner/repo`, or a URL) -> merge-event binding. */
 export const MergeEventHooksSchema = z.record(z.string(), MergeEventHookSchema);
 
-// Uppidi Fleet Plugin Settings Contract (Issue #444)
+// Uppidi Fleet Plugin Settings Contract (Issue #444, #1428)
+
+/** Canonical fleet roles for multi-PAT identity routing (#1428). */
+export const FleetRoleSchema = z.enum([
+  "system",
+  "front-desk",
+  "orchestrator",
+  "worker",
+]);
+export type FleetRole = z.infer<typeof FleetRoleSchema>;
+
+export const DEFAULT_ROLE_USERNAMES: Record<FleetRole, string> = {
+  system: "fleet-bot",
+  "front-desk": "fleet-frontdesk",
+  orchestrator: "fleet-orchestrator",
+  worker: "fleet-worker",
+};
+
+export const DEFAULT_FLEET_USER = "xpufx";
+
+export const FleetRoleAuthEntrySchema = z.object({
+  username: z.string().min(1).optional(),
+  token: z.string().min(1),
+});
+export type FleetRoleAuthEntry = z.infer<typeof FleetRoleAuthEntrySchema>;
+
+export const FleetRoleAuthValueSchema = z.union([
+  z.string(),
+  FleetRoleAuthEntrySchema,
+]);
+export type FleetRoleAuthValue = z.infer<typeof FleetRoleAuthValueSchema>;
+
+export const FleetAuthSettingsSchema = z.object({
+  mode: z.enum(["auto", "manual"]).default("auto"),
+  defaultUser: z.string().default(DEFAULT_FLEET_USER),
+  defaultToken: z.string().optional(),
+  roles: z.record(z.string(), FleetRoleAuthValueSchema).default({}),
+});
+export type FleetAuthSettings = z.infer<typeof FleetAuthSettingsSchema>;
+
 /**
  * Available MCP injection profiles. Each profile names a server config that
  * will be injected into agent sessions via the `agent.create` lifecycle hook.
@@ -2091,10 +2130,6 @@ export const uppidiFleetSettingsSchema = z.object({
   /**
    * Per-class delivery overrides for the current mode (#1034).
    * Absent entries fall back to the defaults from `defaultEventClassPolicyByMode[mode]`.
-   */
-  /**
-   * Per-class delivery overrides for the current mode (#1034).
-   * Absent entries fall back to the defaults from `defaultEventClassPolicyByMode[mode]`.
    * Keys are validated as valid event classes; values must be valid actions.
    */
   eventClassPolicy: z
@@ -2120,6 +2155,18 @@ export const uppidiFleetSettingsSchema = z.object({
     .record(z.string(), z.number().int().min(1))
     .optional()
     .default({}),
+  /**
+   * Multi-PAT identity and auth routing (#1428).
+   * Maps fleet roles to service account tokens and credentials with single-user collapse.
+   */
+  auth: FleetAuthSettingsSchema.default({
+    mode: "auto",
+    defaultUser: DEFAULT_FLEET_USER,
+    defaultToken: "env:FORGEJO_TOKEN",
+    roles: {},
+  }),
+  tokensByHost: z.record(z.string(), z.string()).optional(),
+  forgejoToken: z.string().optional(),
 });
 export type UppidiFleetSettings = z.infer<typeof uppidiFleetSettingsSchema>;
 

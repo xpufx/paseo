@@ -46,6 +46,7 @@ import {
   handleUppidiAddOrchestrator,
   categorizeAgent,
   resolveAgentRole,
+  resolveFleetRoleFromCategory,
 } from "./agents.js";
 import { HookRouter, setActiveHookRouter } from "./hook-router.js";
 import { DEFAULT_PROJECT } from "../shared/contracts.js";
@@ -2256,6 +2257,8 @@ describe("coding-agent role model resolution (#1126)", () => {
     assert.equal(payload().config.provider, "coding/provider-model");
     assert.equal(payload().env?.PASEO_FLEET_ROLE, "worker");
     assert.equal(payload().config.env?.PASEO_FLEET_ROLE, "worker");
+    assert.equal(payload().env?.UPPIDI_FLEET_ROLE, "worker");
+    assert.equal(payload().config.env?.UPPIDI_FLEET_ROLE, "worker");
   });
 
   it("uses the coding-agent role model for the canonical `coding-agent` category", async () => {
@@ -2273,6 +2276,46 @@ describe("coding-agent role model resolution (#1126)", () => {
     assert.equal(res.ok, true, res.error ?? "");
     assert.equal(payload().provider, "codex");
     assert.equal(payload().model, "gpt-5.6-terra");
+    assert.equal(payload().env?.PASEO_FLEET_ROLE, "coding-agent");
+    assert.equal(payload().config.env?.PASEO_FLEET_ROLE, "coding-agent");
+    assert.equal(payload().env?.UPPIDI_FLEET_ROLE, "worker");
+    assert.equal(payload().config.env?.UPPIDI_FLEET_ROLE, "worker");
+  });
+
+  it("injects UPPIDI_FLEET_ROLE for orchestrator and front-desk spawns (#1428)", async () => {
+    writeRoleModels({
+      orchestrator: { role: "orchestrator", primaryModel: "orch/provider-model", fallbackGroup: ["orch/provider-model"] },
+      "front-desk": { role: "front-desk", primaryModel: "desk/provider-model", fallbackGroup: ["desk/provider-model"] },
+    });
+    const { context, payload } = captureSpawn();
+
+    // Orchestrator spawn
+    const orchRes = await spawnPaseoAgent(
+      { title: "orch", prompt: "manage repo", category: "orchestrator", workspaceId: "wks-123" },
+      context,
+    );
+    assert.equal(orchRes.ok, true, orchRes.error ?? "");
+    assert.equal(payload().env?.UPPIDI_FLEET_ROLE, "orchestrator");
+    assert.equal(payload().config.env?.UPPIDI_FLEET_ROLE, "orchestrator");
+
+    // Front-desk spawn
+    const deskRes = await spawnPaseoAgent(
+      { title: "desk", prompt: "intake work", category: "front-desk" },
+      context,
+    );
+    assert.equal(deskRes.ok, true, deskRes.error ?? "");
+    assert.equal(payload().env?.UPPIDI_FLEET_ROLE, "front-desk");
+    assert.equal(payload().config.env?.UPPIDI_FLEET_ROLE, "front-desk");
+  });
+
+  it("resolves fleet roles via resolveFleetRoleFromCategory (#1428)", () => {
+    assert.equal(resolveFleetRoleFromCategory("orchestrator"), "orchestrator");
+    assert.equal(resolveFleetRoleFromCategory("front-desk"), "front-desk");
+    assert.equal(resolveFleetRoleFromCategory("frontdesk"), "front-desk");
+    assert.equal(resolveFleetRoleFromCategory("worker"), "worker");
+    assert.equal(resolveFleetRoleFromCategory("coding-agent"), "worker");
+    assert.equal(resolveFleetRoleFromCategory(undefined), undefined);
+    assert.equal(resolveFleetRoleFromCategory("unknown-role"), undefined);
   });
 
   it("rejects a front-desk coding-agent spawn for both spellings", () => {
