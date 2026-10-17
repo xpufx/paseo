@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { COMMAND_NAME_PATTERN, type SlashCommand } from "../shared/resources";
 import { isPluginRunning } from "./vendor/paseo-plugin-helper";
@@ -6,7 +9,7 @@ export const PROMPT_MANAGER_PLUGIN_ID = "paseo-prompt-manager";
 
 export interface PromptManagerSettings {
   directory: string;
-  gitEnabled: boolean;
+  gitEnabled?: boolean;
   syncMode?: string;
   syncInterval?: number;
 }
@@ -24,6 +27,16 @@ export interface PromptDetail {
   title?: string;
   content: string;
   description?: string;
+}
+
+export interface PromptFileMetadata {
+  description?: string;
+  tags?: string[];
+}
+
+export interface ParsedPromptFile {
+  body: string;
+  metadata?: PromptFileMetadata;
 }
 
 /**
@@ -66,97 +79,209 @@ export async function isPromptManagerRunning(
 }
 
 /**
- * Invokes an RPC method on paseo-prompt-manager over plugin RPC.
+ * Resolves the configuration file path for paseo-prompt-manager.
  */
-export async function callPromptManagerRpc<T = unknown>(
-  method: string,
-  input: unknown = {},
-  context?: PluginHandlerContext,
-): Promise<T> {
-  const pluginId = PROMPT_MANAGER_PLUGIN_ID;
-  const paseo = context?.paseo as any;
-  if (typeof paseo?.invokePluginRpc === "function") {
-    return paseo.invokePluginRpc(pluginId, method, input);
-  }
-  if (typeof paseo?.plugins?.invoke === "function") {
-    return paseo.plugins.invoke(pluginId, method, input);
-  }
-  if (typeof paseo?.plugins?.rpc === "function") {
-    return paseo.plugins.rpc(pluginId, method, input);
-  }
-  if (typeof (context as any)?.invokePluginRpc === "function") {
-    return (context as any).invokePluginRpc(pluginId, method, input);
-  }
-  if (typeof paseo?.daemonClient?.invokePluginRpc === "function") {
-    return paseo.daemonClient.invokePluginRpc(pluginId, method, input);
-  }
-  throw new Error(`Plugin RPC invocation unavailable for ${pluginId}:${method}`);
+export function getPromptManagerConfigPath(): string {
+  return process.env.XDG_CONFIG_HOME
+    ? path.join(process.env.XDG_CONFIG_HOME, "paseo", "prompt-manager.json")
+    : path.join(os.homedir(), ".config", "paseo", "prompt-manager.json");
 }
 
 /**
- * Discovers prompt manager settings and configured directory via library.settings RPC.
+ * Resolves the default prompt library directory.
+ */
+export function getDefaultPromptDirectory(): string {
+  const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+  return path.join(configHome, "paseo", "prompt-lib");
+}
+
+/**
+ * Resolves ~ to os.homedir() and normalizes directory path.
+ */
+export function resolvePromptDirectory(dir: string): string {
+  const home = os.homedir();
+  if (dir === "~") {
+    return home;
+  }
+  if (dir.startsWith("~/")) {
+    return path.join(home, dir.slice(2));
+  }
+  return path.resolve(dir);
+}
+
+/**
+ * Reads prompt manager settings directly from disk.
+ * If config file exists and is valid JSON with `directory: string`, uses that directory.
+ * If missing or invalid, falls back to default prompt-lib directory.
  */
 export async function getPromptManagerSettings(
-  context?: PluginHandlerContext,
+  _context?: PluginHandlerContext,
 ): Promise<PromptManagerSettings> {
-  return callPromptManagerRpc<PromptManagerSettings>("library.settings", {}, context);
+  const configPath = getPromptManagerConfigPath();
+  const defaultDir = getDefaultPromptDirectory();
+
+  try {
+    const raw = await fs.readFile(configPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed.directory === "string" && parsed.directory.trim()) {
+      return {
+        directory: resolvePromptDirectory(parsed.directory.trim()),
+        gitEnabled: Boolean(parsed.gitEnabled),
+        syncMode: typeof parsed.syncMode === "string" ? parsed.syncMode : undefined,
+        syncInterval: typeof parsed.syncInterval === "number" ? parsed.syncInterval : undefined,
+      };
+    }
+  } catch {
+    // Missing, unreadable, or invalid JSON falls back to default directory
+  }
+
+  return {
+    directory: defaultDir,
+    gitEnabled: false,
+  };
 }
 
 /**
- * Lists external prompts from paseo-prompt-manager via prompts.list RPC,
- * mapping each prompt into an executable send slash command.
+ * Parses frontmatter header (---\npaseo: ({[^\n]*})\n---\n) if present.
+ */
+export function parsePromptFile(raw: string): ParsedPromptFile {
+  const match = /^---\r?\npaseo: (\{[^\r\n]*\})\r?\n---\r?\n/.exec(raw);
+  if (!match) {
+    return { body: raw };
+  }
+  let metadata: PromptFileMetadata | undefined;
+  try {
+    metadata = JSON.parse(match[1]);
+  } catch {
+    // Malformed JSON in frontmatter header: treat as unparsed metadata
+  }
+  return {
+    body: raw.slice(match[0].length),
+    metadata,
+  };
+}
+
+/**
+ * Extracts the first `# <heading>` or falls back to prompt name.
+ */
+export function extractPromptTitle(content: string, fallback: string): string {
+  const match = /^#{1,6}\s+(.+?)\s*#*\s*$/m.exec(content);
+  return match?.[1]?.trim() || fallback;
+}
+
+/**
+ * Recursively scans directory for `.md` files, skipping `versions` or any hidden dotfiles/dotdirs.
+ */
+async function scanDirectoryForPrompts(dir: string): Promise<string[]> {
+  const results: string[] = [];
+  async function walk(currentDir: string, relativePrefix: string) {
+    let entries;
+    try {
+      entries = await fs.readdir(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+      if (entry.isDirectory()) {
+        if (entry.name === "versions") {
+          continue;
+        }
+        const nextRel = relativePrefix ? `${relativePrefix}/${entry.name}` : entry.name;
+        await walk(path.join(currentDir, entry.name), nextRel);
+      } else if (entry.isFile() && entry.name.endsWith(".md")) {
+        const relPath = relativePrefix ? `${relativePrefix}/${entry.name}` : entry.name;
+        results.push(relPath);
+      }
+    }
+  }
+  await walk(dir, "");
+  return results;
+}
+
+/**
+ * Loads prompt files directly from disk following paseo-prompt-manager's canonical storage contract.
  */
 export async function loadPromptManagerSlashCommands(
   context?: PluginHandlerContext,
 ): Promise<SlashCommand[]> {
-  // Call library.settings RPC over plugin RPC to discover its configured directory/settings
-  await getPromptManagerSettings(context);
+  const settings = await getPromptManagerSettings(context);
+  const directory = settings.directory;
 
-  // Discover prompts dynamically via prompts.list RPC
-  const prompts = await callPromptManagerRpc<PromptSummary[]>(
-    "prompts.list",
-    { archived: false },
-    context,
-  );
+  try {
+    const st = await fs.stat(directory);
+    if (!st.isDirectory()) {
+      return [];
+    }
+  } catch {
+    return [];
+  }
 
-  if (!Array.isArray(prompts)) return [];
-
+  const relFiles = await scanDirectoryForPrompts(directory);
   const commands: SlashCommand[] = [];
-  for (const prompt of prompts) {
-    if (!prompt.id || prompt.archived) continue;
-    const name = promptIdToCommandName(prompt.id);
-    if (!name || !COMMAND_NAME_PATTERN.test(name)) continue;
+  const seen = new Set<string>();
+
+  for (const relPath of relFiles) {
+    const promptId = relPath.replace(/\.md$/i, "");
+    if (!promptId) continue;
+    const name = promptIdToCommandName(promptId);
+    if (!name || !COMMAND_NAME_PATTERN.test(name) || seen.has(name)) continue;
+    seen.add(name);
+
+    const filePath = path.join(directory, relPath);
+    let rawContent = "";
+    try {
+      rawContent = await fs.readFile(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+
+    const { body, metadata } = parsePromptFile(rawContent);
+    const title = extractPromptTitle(body, name);
+    const description =
+      metadata?.description &&
+      typeof metadata.description === "string" &&
+      metadata.description.trim()
+        ? metadata.description.trim()
+        : "Prompt Manager prompt";
 
     commands.push({
       name,
-      title: prompt.title || name,
-      description: prompt.description || "Prompt Manager prompt",
+      title,
+      description,
       enabled: true,
       source: PROMPT_MANAGER_PLUGIN_ID,
-      promptId: prompt.id,
+      promptId,
       action: {
         verb: "send",
         template: "{args}",
       },
     });
   }
+
   return commands;
 }
 
 /**
- * Dynamically fetches the fresh Markdown content of a prompt via prompts.read RPC.
+ * Dynamically fetches the fresh Markdown content of a prompt from disk,
+ * stripping frontmatter header if present.
  */
 export async function fetchPromptManagerContent(
   promptId: string,
   context?: PluginHandlerContext,
 ): Promise<string> {
-  const result = await callPromptManagerRpc<PromptDetail>(
-    "prompts.read",
-    { id: promptId },
-    context,
-  );
-  if (!result || typeof result.content !== "string") {
-    throw new Error(`Failed to read prompt "${promptId}" from ${PROMPT_MANAGER_PLUGIN_ID}`);
+  const settings = await getPromptManagerSettings(context);
+  const filePath = path.join(settings.directory, `${promptId}.md`);
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    const { body } = parsePromptFile(raw);
+    return body;
+  } catch (err) {
+    throw new Error(
+      `Failed to read prompt "${promptId}" from ${PROMPT_MANAGER_PLUGIN_ID}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
-  return result.content;
 }
