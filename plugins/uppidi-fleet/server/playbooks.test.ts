@@ -40,11 +40,27 @@ import {
   loadSavedPlaybooks,
   parseActor,
   resetPlaybooksStorageInstance,
+  resetPlaybookMetricsStorageInstance,
   resolveNextStage,
   savePlaybooks,
   validatePlaybookProfile,
+  extractStageFromLabels,
+  evaluatePrecondition,
+  canAdvanceStage,
+  recordPlaybookTransitionMetric,
+  getPlaybookMetricsReport,
+  handleUppidiPlaybookMetrics,
   type ArtifactVerificationContext,
 } from "./playbooks.js";
+import {
+  uppidiPlaybookMetricsContract,
+} from "../shared/contracts.js";
+import {
+  runIssuesCheck,
+  classifyCandidate,
+  type ForgejoIssue,
+  type IssuesCheckIo,
+} from "./issues-check.js";
 import { HookRouter, handleSpawnAgent } from "./hook-router.js";
 import { appendAuditReceipt } from "./audit-receipts.js";
 
@@ -62,7 +78,9 @@ function makeTempDir(prefix: string): string {
 
 afterEach(() => {
   resetPlaybooksStorageInstance();
+  resetPlaybookMetricsStorageInstance();
   delete process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR;
+  delete process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR;
   for (const dir of tempDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -1071,5 +1089,383 @@ describe("Light vs Medium simulated end-to-end lifecycle harness (#1404)", () =>
     assert.equal(step6.allowed, true);
     assert.equal(step6.requiresHumanGate, true);
     assert.equal(step6.actionTaken, "human_gated");
+  });
+});
+
+describe("playbook stage extraction and precondition evaluation (Phase 3 #1405)", () => {
+  it("extracts canonical stage from labels accurately", () => {
+    assert.equal(extractStageFromLabels(["stage/spec", "priority/urgent"]), "stage/spec");
+    assert.equal(extractStageFromLabels(["STAGE/CODE", "kind/bug"]), "stage/code");
+    assert.equal(extractStageFromLabels(["state/review", "stage/review"]), "stage/review");
+    assert.equal(extractStageFromLabels(["kind/feature", "attention/user"]), null);
+    assert.equal(extractStageFromLabels([]), null);
+  });
+
+  it("evaluates entry preconditions across Light and Medium stages", () => {
+    const light = DEFAULT_PLAYBOOKS_CONFIG.profiles.Light;
+    const medium = DEFAULT_PLAYBOOKS_CONFIG.profiles.Medium;
+
+    // stage/spec entry precondition is assigned_issue
+    assert.equal(evaluatePrecondition("stage/spec", { issueNumber: 1 }, light).satisfied, true);
+    assert.equal(evaluatePrecondition("stage/spec", { issueNumber: 1 }, medium).satisfied, true);
+
+    // stage/spec-audit in Light (autonomous:spec-auditor) requires spec_checklist
+    assert.equal(evaluatePrecondition("stage/spec-audit", { issueNumber: 1 }, light).satisfied, false);
+    assert.equal(evaluatePrecondition("stage/spec-audit", { issueNumber: 1, specChecklist: true }, light).satisfied, true);
+    assert.equal(evaluatePrecondition("stage/spec-audit", { issueNumber: 1, artifacts: ["spec_checklist"] }, light).satisfied, true);
+
+    // stage/spec-audit in Medium also requires spec_checklist
+    assert.equal(evaluatePrecondition("stage/spec-audit", { issueNumber: 1 }, medium).satisfied, false);
+    assert.equal(evaluatePrecondition("stage/spec-audit", { issueNumber: 1, specChecklist: true }, medium).satisfied, true);
+
+    // stage/dispatch requires spec_audit_pass / operator_approval
+    assert.equal(evaluatePrecondition("stage/dispatch", { issueNumber: 1 }, medium).satisfied, false);
+    assert.equal(evaluatePrecondition("stage/dispatch", { issueNumber: 1, operatorApproval: true }, medium).satisfied, true);
+
+    // stage/code requires issue_dispatched
+    assert.equal(evaluatePrecondition("stage/code", { issueNumber: 1, issueDispatched: true }, medium).satisfied, true);
+
+    // stage/review requires code_worker_pr
+    assert.equal(evaluatePrecondition("stage/review", { issueNumber: 1 }, medium).satisfied, false);
+    assert.equal(evaluatePrecondition("stage/review", { issueNumber: 1, pullRequestNumber: 123 }, medium).satisfied, true);
+
+    // stage/merge requires audit_receipt
+    assert.equal(evaluatePrecondition("stage/merge", { issueNumber: 1 }, medium).satisfied, false);
+    assert.equal(evaluatePrecondition("stage/merge", { issueNumber: 1, auditReceipt: { auditId: "aud_test", verdict: "approved" } as any }, medium).satisfied, true);
+
+    // stage/verify requires pr_merged
+    assert.equal(evaluatePrecondition("stage/verify", { issueNumber: 1 }, medium).satisfied, false);
+    assert.equal(evaluatePrecondition("stage/verify", { issueNumber: 1, prMerged: true }, medium).satisfied, true);
+  });
+
+  it("evaluates canAdvanceStage and identifies next stage and human gate requirements", () => {
+    const light = DEFAULT_PLAYBOOKS_CONFIG.profiles.Light;
+    const medium = DEFAULT_PLAYBOOKS_CONFIG.profiles.Medium;
+
+    // stage/spec with spec_checklist satisfied -> advances to stage/spec-audit
+    const specAdvanceLight = canAdvanceStage("stage/spec", { issueNumber: 1, specChecklist: true }, light);
+    assert.equal(specAdvanceLight.canAdvance, true);
+    assert.equal(specAdvanceLight.nextStage, "stage/spec-audit");
+    assert.equal(specAdvanceLight.requiresHumanGate, false);
+
+    const specAdvanceMedium = canAdvanceStage("stage/spec", { issueNumber: 1, specChecklist: true }, medium);
+    assert.equal(specAdvanceMedium.canAdvance, true);
+    assert.equal(specAdvanceMedium.nextStage, "stage/spec-audit");
+    assert.equal(specAdvanceMedium.requiresHumanGate, true); // spec-audit is human-gated in Medium
+
+    // stage/code with worker PR opened -> advances to stage/review
+    const codeAdvanceLight = canAdvanceStage("stage/code", { issueNumber: 1, pullRequestNumber: 42, pullRequest: { number: 42, merged: false } }, light);
+    assert.equal(codeAdvanceLight.canAdvance, true);
+    assert.equal(codeAdvanceLight.nextStage, "stage/review");
+    assert.equal(codeAdvanceLight.requiresHumanGate, false);
+
+    const codeAdvanceMedium = canAdvanceStage("stage/code", { issueNumber: 1, pullRequestNumber: 42, pullRequest: { number: 42, merged: false } }, medium);
+    assert.equal(codeAdvanceMedium.canAdvance, true);
+    assert.equal(codeAdvanceMedium.nextStage, "stage/review");
+    assert.equal(codeAdvanceMedium.requiresHumanGate, true); // review is human-gated in Medium
+  });
+});
+
+describe("issues-check stage filtering and candidate classification (Phase 3 #1405)", () => {
+  function makeIssue(
+    number: number,
+    labels: string[],
+    updatedAt = "2026-09-20T10:00:00Z",
+  ): ForgejoIssue {
+    return {
+      number,
+      state: "open",
+      updated_at: updatedAt,
+      labels: labels.map((name) => ({ name })),
+    };
+  }
+
+  function mockIo(issues: ForgejoIssue[]): IssuesCheckIo {
+    return {
+      getOpenIssues: async () => ({ ok: true, issues }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    };
+  }
+
+  it("filters board check issues by playbook stage", async () => {
+    const issues = [
+      makeIssue(1, ["stage/code", "kind/feature"]),
+      makeIssue(2, ["stage/spec", "kind/feature"]),
+      makeIssue(3, ["stage/code", "state/1-wip"]),
+      makeIssue(4, ["stage/review", "kind/feature"]),
+    ];
+
+    const outcome = await runIssuesCheck({
+      hostname: "forge.test",
+      repo: "org/repo",
+      all: true,
+      stage: "stage/code",
+      io: mockIo(issues),
+    });
+
+    const candidateNumbers = outcome.rankedCandidates.map((c) => c.number);
+    assert.ok(candidateNumbers.includes(1));
+    assert.ok(candidateNumbers.includes(3));
+    assert.equal(candidateNumbers.includes(2), false);
+    assert.equal(candidateNumbers.includes(4), false);
+  });
+
+  it("classifies candidate dispatchability based on entry preconditions", () => {
+    // Autonomous stage/code without preconditions satisfied
+    const issueCode = makeIssue(10, ["stage/code"]);
+    const classification1 = classifyCandidate(issueCode, new Set(["stage/code"]));
+    // stage/code without context dispatch info is not dispatchable yet
+    assert.equal(classification1.is_dispatchable, false);
+
+    // Autonomous stage/spec (initial stage) has entry precondition met
+    const issueSpec = makeIssue(11, ["stage/spec"]);
+    const classification2 = classifyCandidate(issueSpec, new Set(["stage/spec"]));
+    assert.equal(classification2.is_dispatchable, true);
+    assert.equal(classification2.category, "dispatchable");
+
+    // Human-gated stage (stage/spec-audit in Medium) activates user_attention
+    const issueAudit = makeIssue(12, ["stage/spec-audit"]);
+    const classification3 = classifyCandidate(issueAudit, new Set(["stage/spec-audit"]));
+    assert.equal(classification3.is_dispatchable, false);
+    assert.equal(classification3.category, "user_attention");
+  });
+});
+
+describe("HookRouter board sweep integration & automated stage progression (Phase 3 #1405)", () => {
+  it("sweepBoard populates queuedCandidates and stageTransitions", async () => {
+    const tempDir = makeTempDir("sweep-test-");
+    process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
+    process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
+
+    const router = new HookRouter();
+    const testIssues: ForgejoIssue[] = [
+      {
+        number: 101,
+        state: "open",
+        updated_at: "2026-09-20T10:00:00Z",
+        labels: [{ name: "stage/spec" }, { name: "playbook/light" }],
+      },
+      {
+        number: 102,
+        state: "open",
+        updated_at: "2026-09-20T10:00:00Z",
+        labels: [{ name: "stage/spec-audit" }],
+      },
+    ];
+
+    const io: IssuesCheckIo = {
+      getOpenIssues: async () => ({ ok: true, issues: testIssues }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    };
+
+    const result = await router.sweepBoard(["org/repo"], io, { explicit: true });
+    assert.equal(result.ok, true);
+    assert.equal(result.swept, 1);
+    assert.ok(result.queuedCandidates);
+    assert.ok(result.queuedCandidates.some((q) => q.number === 101 && q.stage === "stage/spec"));
+  });
+
+  it("advances stage autonomously from stage/code to stage/review in Light profile on PR open", async () => {
+    const tempDir = makeTempDir("advance-light-");
+    process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
+    process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
+
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const result = await router.advanceStageOnArtifact("org/repo", 201, {
+      type: "pull_request.opened",
+      actor: "worker-agent-1",
+      labels: ["stage/code", "playbook/light"],
+      pullRequestNumber: 50,
+    });
+
+    assert.equal(result.acted, true);
+    assert.equal(result.allowed, true);
+    assert.equal(result.humanGated, false);
+    assert.equal(result.decision?.fromStage, "stage/code");
+    assert.equal(result.decision?.toStage, "stage/review");
+  });
+
+  it("advances stage to human gate from stage/code to stage/review in Medium profile on PR open", async () => {
+    const tempDir = makeTempDir("advance-medium-");
+    process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
+    process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
+
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const result = await router.advanceStageOnArtifact("org/repo", 202, {
+      type: "pull_request.opened",
+      actor: "worker-agent-1",
+      labels: ["stage/code"], // Medium is default
+      pullRequestNumber: 51,
+    });
+
+    assert.equal(result.acted, true);
+    assert.equal(result.allowed, true);
+    assert.equal(result.humanGated, true);
+    assert.equal(result.decision?.fromStage, "stage/code");
+    assert.equal(result.decision?.toStage, "stage/review");
+
+    // Check active human gates
+    assert.equal(router.isIssueHumanGated("org/repo", 202), true);
+    const gates = router.listActiveHumanGates();
+    assert.ok(gates.some((g) => (g.repo === "org/repo" || g.repo.endsWith("/org/repo")) && g.issue === 202 && g.stage === "stage/review"));
+  });
+
+  it("advances stage from stage/merge to stage/verify on PR merge", async () => {
+    const tempDir = makeTempDir("advance-merge-");
+    process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
+    process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
+
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const result = await router.advanceStageOnArtifact("org/repo", 203, {
+      type: "pull_request.closed",
+      actor: "orchestrator",
+      labels: ["stage/merge", "playbook/light"],
+      merged: true,
+      pullRequestNumber: 52,
+    });
+
+    assert.equal(result.acted, true);
+    assert.equal(result.allowed, true);
+    assert.equal(result.decision?.fromStage, "stage/merge");
+    assert.equal(result.decision?.toStage, "stage/verify");
+  });
+});
+
+describe("playbook telemetry & metrics reporting (Phase 3 #1405)", () => {
+  it("records stage transition metrics across Light and Medium playbooks", () => {
+    const tempDir = makeTempDir("metrics-test-");
+    resetPlaybookMetricsStorageInstance();
+    process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
+
+    // Record Light transition (autonomous)
+    recordPlaybookTransitionMetric({
+      repo: "org/repo",
+      issue: 301,
+      profile: "Light",
+      fromStage: "stage/code",
+      toStage: "stage/review",
+      actor: "worker-agent",
+      isHumanGate: false,
+      durationMs: 120000,
+    });
+
+    // Record Medium transition (human-gated with latency)
+    recordPlaybookTransitionMetric({
+      repo: "org/repo",
+      issue: 302,
+      profile: "Medium",
+      fromStage: "stage/code",
+      toStage: "stage/review",
+      actor: "worker-agent",
+      isHumanGate: true,
+      durationMs: 150000,
+      gateLatencyMs: 300000,
+    });
+
+    // Record rework transition in Medium
+    recordPlaybookTransitionMetric({
+      repo: "org/repo",
+      issue: 302,
+      profile: "Medium",
+      fromStage: "stage/review",
+      toStage: "stage/code",
+      actor: "okcode",
+      isHumanGate: false,
+      isRework: true,
+      durationMs: 60000,
+    });
+
+    const report = getPlaybookMetricsReport();
+    assert.equal(report.ok, true);
+    assert.equal(report.eventsCount, 3);
+
+    // Verify Light profile metrics
+    const lightSummary = report.profiles.Light;
+    assert.ok(lightSummary);
+    assert.equal(lightSummary.totalTransitions, 1);
+    assert.equal(lightSummary.totalDurationMs, 120000);
+    assert.equal(lightSummary.reworkCount, 0);
+
+    // Verify Medium profile metrics
+    const mediumSummary = report.profiles.Medium;
+    assert.ok(mediumSummary);
+    assert.equal(mediumSummary.totalTransitions, 2);
+    assert.equal(mediumSummary.reworkCount, 1);
+    assert.equal(mediumSummary.totalGateLatencyMs, 300000);
+  });
+
+  it("answers uppidiPlaybookMetricsContract RPC handler", async () => {
+    const tempDir = makeTempDir("rpc-metrics-");
+    resetPlaybookMetricsStorageInstance();
+    process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
+
+    recordPlaybookTransitionMetric({
+      repo: "org/repo",
+      issue: 401,
+      profile: "Light",
+      fromStage: "stage/spec",
+      toStage: "stage/spec-audit",
+      actor: "spec-agent",
+      isHumanGate: false,
+      durationMs: 45000,
+    });
+
+    const result = await handleUppidiPlaybookMetrics({ profile: "Light" });
+    assert.equal(result.ok, true);
+    assert.equal(result.eventsCount, 1);
+    assert.ok(result.profiles.Light);
+    assert.equal(result.profiles.Light.totalTransitions, 1);
+  });
+});
+
+describe("human gate non-stalling invariant (Phase 3 #1405)", () => {
+  it("human-gated stage marks user_attention on specific issue without stalling other candidates in sweep", async () => {
+    const tempDir = makeTempDir("non-stalling-");
+    process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
+    process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
+
+    const router = new HookRouter();
+    const testIssues: ForgejoIssue[] = [
+      // Issue 501: human-gated stage (stage/spec-audit in Medium)
+      {
+        number: 501,
+        state: "open",
+        updated_at: "2026-09-20T10:00:00Z",
+        labels: [{ name: "stage/spec-audit" }],
+      },
+      // Issue 502: autonomous stage with precondition met (stage/spec in Light)
+      {
+        number: 502,
+        state: "open",
+        updated_at: "2026-09-20T10:00:00Z",
+        labels: [{ name: "stage/spec" }, { name: "playbook/light" }],
+      },
+    ];
+
+    const io: IssuesCheckIo = {
+      getOpenIssues: async () => ({ ok: true, issues: testIssues }),
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+    };
+
+    const sweepResult = await router.sweepBoard(["org/repo"], io, { explicit: true });
+    assert.equal(sweepResult.ok, true);
+
+    // Issue 502 must be queued and ready to dispatch even though Issue 501 is human-gated
+    assert.ok(sweepResult.queuedCandidates);
+    const queuedNumbers = sweepResult.queuedCandidates.map((q) => q.number);
+    assert.ok(queuedNumbers.includes(502), "Autonomous issue 502 must be queued despite human gate on 501");
+    assert.equal(queuedNumbers.includes(501), false, "Human-gated issue 501 must not be queued for autonomous dispatch");
   });
 });

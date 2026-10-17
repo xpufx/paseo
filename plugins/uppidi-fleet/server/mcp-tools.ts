@@ -4,6 +4,7 @@ import {
   type UppidiFleetToolListOutput,
   type UppidiFleetToolExecuteInput,
   type UppidiFleetToolExecuteOutput,
+  type PlaybookStageName,
 } from "../shared/contracts.js";
 import {
   runIssuesCheck,
@@ -78,6 +79,14 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
           description: "Output machine-readable JSON instead of markdown",
           default: false,
         },
+        stage: {
+          type: "string",
+          description: "Canonical playbook stage to filter issues (e.g. stage/spec, stage/code, stage/review)",
+        },
+        profile: {
+          type: "string",
+          description: "Playbook profile name (e.g. Light, Medium)",
+        },
       },
     },
   },
@@ -138,6 +147,14 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
           type: "boolean",
           description: "Output machine-readable JSON instead of markdown",
           default: false,
+        },
+        stage: {
+          type: "string",
+          description: "Canonical playbook stage to filter issues (e.g. stage/spec, stage/code, stage/review)",
+        },
+        profile: {
+          type: "string",
+          description: "Playbook profile name (e.g. Light, Medium)",
         },
       },
     },
@@ -375,6 +392,8 @@ export async function executeFleetCheckBoard(args: Record<string, unknown> = {})
   }
   const dryRun = Boolean(args.dryRun);
   const json = Boolean(args.json);
+  const stage = typeof args.stage === "string" && args.stage.trim() ? (args.stage.trim() as PlaybookStageName) : undefined;
+  const profile = typeof args.profile === "string" && args.profile.trim() ? args.profile.trim() : undefined;
 
   try {
     const outcome = await runIssuesCheck({
@@ -385,6 +404,8 @@ export async function executeFleetCheckBoard(args: Record<string, unknown> = {})
       all,
       staleWipHours,
       dryRun,
+      stage,
+      profile,
     });
 
     const text = json
@@ -521,6 +542,8 @@ export async function executeFleetBoardSweep(
   args: Record<string, unknown> = {},
 ): Promise<FleetToolCallResult> {
   const json = Boolean(args.json);
+  const stage = typeof args.stage === "string" && args.stage.trim() ? (args.stage.trim() as PlaybookStageName) : undefined;
+  const profile = typeof args.profile === "string" && args.profile.trim() ? args.profile.trim() : undefined;
   let parsedRepos: string[] | undefined;
   if (Array.isArray(args.repos)) {
     parsedRepos = args.repos.map((r) => String(r).trim()).filter(Boolean);
@@ -530,7 +553,7 @@ export async function executeFleetBoardSweep(
 
   try {
     const router = getActiveHookRouter() ?? new HookRouter();
-    const result = await router.runBoardSweep(parsedRepos);
+    const result = await router.runBoardSweep(parsedRepos, undefined, { stage, profile });
 
     if (json) {
       return {
@@ -551,6 +574,20 @@ export async function executeFleetBoardSweep(
       lines.push("", "### Actionable Repositories");
       for (const a of result.actionable) {
         lines.push(`- **${a.repo}**: ${a.count} actionable (${a.dispatchable} dispatchable)`);
+      }
+    }
+
+    if (result.queuedCandidates && result.queuedCandidates.length > 0) {
+      lines.push("", "### Queued Candidates");
+      for (const q of result.queuedCandidates) {
+        lines.push(`- **${q.repo}#${q.number}**: stage=${q.stage ?? "none"}${q.reason ? ` (${q.reason})` : ""}`);
+      }
+    }
+
+    if (result.stageTransitions && result.stageTransitions.length > 0) {
+      lines.push("", "### Stage Transitions");
+      for (const t of result.stageTransitions) {
+        lines.push(`- **${t.repo}#${t.issue}**: ${t.fromStage} -> ${t.toStage}`);
       }
     }
 

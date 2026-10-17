@@ -2942,3 +2942,72 @@ export const uppidiEvaluateTransitionContract = defineContract({
   input: UppidiEvaluateTransitionInputSchema,
   output: UppidiEvaluateTransitionOutputSchema,
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// Playbook stage telemetry & metrics contracts (#1405, #1270)
+// ──────────────────────────────────────────────────────────────────────────
+
+export const PlaybookTransitionEventSchema = z.object({
+  id: z.string().min(1),
+  repo: z.string().min(1),
+  issue: z.number().int().positive(),
+  profile: z.string().min(1),
+  fromStage: PlaybookStageNameSchema.nullable(),
+  toStage: PlaybookStageNameSchema,
+  actor: z.string().min(1),
+  timestamp: z.number().int().positive(),
+  durationMs: z.number().nonnegative().optional(),
+  isHumanGate: z.boolean().default(false),
+  gateLatencyMs: z.number().nonnegative().optional(),
+  isRework: z.boolean().default(false),
+}).strict();
+export type PlaybookTransitionEvent = z.infer<typeof PlaybookTransitionEventSchema>;
+
+export const PlaybookStageMetricSummarySchema = z.object({
+  stage: PlaybookStageNameSchema,
+  count: z.number().nonnegative().default(0),
+  totalDurationMs: z.number().nonnegative().default(0),
+  avgDurationMs: z.number().nonnegative().default(0),
+  reworkCount: z.number().nonnegative().default(0),
+  gateLatencyMs: z.number().nonnegative().default(0),
+  avgGateLatencyMs: z.number().nonnegative().default(0),
+}).strict();
+export type PlaybookStageMetricSummary = z.infer<typeof PlaybookStageMetricSummarySchema>;
+
+export const PlaybookProfileMetricSummarySchema = z.object({
+  profile: z.string().min(1),
+  totalTransitions: z.number().nonnegative().default(0),
+  totalDurationMs: z.number().nonnegative().default(0),
+  avgDurationMs: z.number().nonnegative().default(0),
+  reworkCount: z.number().nonnegative().default(0),
+  totalGateLatencyMs: z.number().nonnegative().default(0),
+  avgGateLatencyMs: z.number().nonnegative().default(0),
+  stages: z.record(z.string(), PlaybookStageMetricSummarySchema).default({}),
+}).strict();
+export type PlaybookProfileMetricSummary = z.infer<typeof PlaybookProfileMetricSummarySchema>;
+
+export const PlaybookMetricsReportSchema = z.object({
+  ok: z.boolean(),
+  profiles: z.record(z.string(), PlaybookProfileMetricSummarySchema).default({}),
+  eventsCount: z.number().nonnegative().default(0),
+  updatedAt: z.string(),
+  error: z.string().optional(),
+}).strict();
+export type PlaybookMetricsReport = z.infer<typeof PlaybookMetricsReportSchema>;
+
+export const UppidiPlaybookMetricsInputSchema = z.object({
+  profile: z.string().optional(),
+  stage: PlaybookStageNameSchema.optional(),
+}).strict();
+export type UppidiPlaybookMetricsInput = z.infer<typeof UppidiPlaybookMetricsInputSchema>;
+
+export const UppidiPlaybookMetricsOutputSchema = PlaybookMetricsReportSchema;
+export type UppidiPlaybookMetricsOutput = z.infer<typeof UppidiPlaybookMetricsOutputSchema>;
+
+export const uppidiPlaybookMetricsContract = defineContract({
+  name: "uppidi-fleet.playbook-metrics",
+  description: "Query playbook telemetry tracking stage duration, rework iterations, and gate latency across Light vs Medium playbooks",
+  input: UppidiPlaybookMetricsInputSchema,
+  output: UppidiPlaybookMetricsOutputSchema,
+});
+

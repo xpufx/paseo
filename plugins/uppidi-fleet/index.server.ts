@@ -53,6 +53,7 @@ import {
   uppidiPlaybooksContract,
   uppidiSetPlaybookContract,
   uppidiEvaluateTransitionContract,
+  uppidiPlaybookMetricsContract,
 } from "./shared/contracts.js";
 import { handleUppidiIssues, handleUppidiTransitionIssue } from "./server/issues.js";
 import {
@@ -101,7 +102,12 @@ import {
   handleUppidiAuditCheck,
   handleUppidiAuditSummary,
 } from "./server/audit-receipts.js";
-import { handleUppidiPlaybooks, handleUppidiSetPlaybook, handleUppidiEvaluateTransition } from "./server/playbooks.js";
+import {
+  handleUppidiPlaybooks,
+  handleUppidiSetPlaybook,
+  handleUppidiEvaluateTransition,
+  handleUppidiPlaybookMetrics,
+} from "./server/playbooks.js";
 import {
   handleUppidiModelTelemetryQuery,
   setupTelemetryTap,
@@ -230,6 +236,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(uppidiPlaybooksContract, handleUppidiPlaybooks);
   server.handle(uppidiSetPlaybookContract, handleUppidiSetPlaybook);
   server.handle(uppidiEvaluateTransitionContract, handleUppidiEvaluateTransition);
+  server.handle(uppidiPlaybookMetricsContract, handleUppidiPlaybookMetrics);
 
   const settingsStorage = getUppidiFleetSettingsStorage();
   registerSettingsRpc(server, uppidiFleetSettingsContract, settingsStorage, {

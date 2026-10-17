@@ -30,8 +30,18 @@ import {
   LABEL_ALIASES,
   canonicalLabel,
 } from "@xpufx/backend-tickets/shared";
+import type { PlaybookStageName, PlaybookProfile } from "../shared/contracts.js";
+import {
+  extractStageFromLabels,
+  evaluatePrecondition,
+  isHumanGatedStage,
+  loadSavedPlaybooks,
+  getPlaybookProfile,
+  type ArtifactVerificationContext,
+} from "./playbooks.js";
 
 export { LABEL_ALIASES, canonicalLabel };
+
 
 
 export const STALE_WIP_LABEL = "state/wip";
@@ -658,16 +668,20 @@ export interface FeedbackInfo {
 export function classifyCandidate(
   issue: ForgejoIssue,
   labelSet: Set<string>,
-  { isNew = false, isFeedback = false, feedbackInfo = null, trace }: {
+  { isNew = false, isFeedback = false, feedbackInfo = null, trace, repo, profile: profileOption, stageContext }: {
     isNew?: boolean;
     isFeedback?: boolean;
     feedbackInfo?: FeedbackInfo | null;
     trace?: DecisionTraceBuilder;
+    repo?: string;
+    profile?: string;
+    stageContext?: ArtifactVerificationContext;
   } = {},
 ): { category: string; is_dispatchable: boolean; reason: string } {
   if (isFeedback) {
     trace?.guard("feedback-precedence", "Universal human feedback precedence rule", true);
     const author = feedbackInfo?.author ?? "operator";
+
     const snip = feedbackInfo?.snippet ?? "";
     return {
       category: "feedback",
@@ -832,6 +846,60 @@ export function classifyCandidate(
     };
   }
 
+  // Playbook stage state machine evaluation (#1405)
+  const issueStage = extractStageFromLabels(labelNames(issue).filter((l): l is string => typeof l === "string"));
+  if (issueStage) {
+    const profileName = labelSet.has("playbook/light") || labelSet.has("profile/light")
+      ? "Light"
+      : (profileOption ?? "Medium");
+    let profile: PlaybookProfile;
+    try {
+      profile = getPlaybookProfile(profileName, loadSavedPlaybooks());
+    } catch {
+      profile = getPlaybookProfile("Medium");
+    }
+    const stageDef = profile.stages[issueStage];
+    if (stageDef) {
+      if (isHumanGatedStage(stageDef)) {
+        trace?.guard("human-gate-stage", `Stage ${issueStage} is human-gated (${stageDef.actor})`, true, [issueStage]);
+        return {
+          category: "user_attention",
+          is_dispatchable: false,
+          reason: `Playbook stage ${issueStage} is human-gated (${stageDef.actor}) awaiting operator action (attention/user)`,
+        };
+      }
+      const context: ArtifactVerificationContext = stageContext ?? {
+        repo: repo ?? "",
+        issueNumber: issue.number,
+        issueBody: typeof issue.body === "string" ? issue.body : undefined,
+        labels: Array.from(labelSet),
+      };
+      const precon = evaluatePrecondition(issueStage, context, profile);
+      trace?.guard("stage-precondition", `Precondition '${stageDef.entry_precondition}' for ${issueStage}`, precon.satisfied, [issueStage]);
+      if (precon.satisfied) {
+        if (labelSet.has("state/wip")) {
+          trace?.guard("active-wip", `Active WIP in ${issueStage}`, true, ["state/wip"]);
+          return {
+            category: "in_progress",
+            is_dispatchable: false,
+            reason: `Playbook stage ${issueStage} in progress (active WIP)`,
+          };
+        }
+        return {
+          category: "dispatchable",
+          is_dispatchable: true,
+          reason: `Playbook stage ${issueStage} dispatchable: precondition '${stageDef.entry_precondition}' satisfied (ready for ${stageDef.actor})`,
+        };
+      } else {
+        return {
+          category: "precondition_pending",
+          is_dispatchable: false,
+          reason: `Playbook stage ${issueStage} waiting for precondition '${stageDef.entry_precondition}' (${precon.detail ?? "unverified"})`,
+        };
+      }
+    }
+  }
+
   // Fully dispatchable worker task
   if (isDispatchableCandidate(labelSet, trace)) {
     const target = labelNames(issue).find((label) => typeof label === "string" && label.startsWith("target/"));
@@ -863,6 +931,17 @@ export function isActionable(labelSet: Set<string>, role: IssuesCheckRole = "orc
     return false;
   }
   if (labelSet.has("state/done")) return false;
+
+  // Playbook stages are actionable for orchestrator and for workers when dispatchable (#1405)
+  const stage = extractStageFromLabels(Array.from(labelSet));
+  if (stage) {
+    if (role === "worker") {
+      if (labelSet.has("attention/agent")) return true;
+      return isDispatchableCandidate(labelSet);
+    }
+    return true;
+  }
+
 
   if (role === "worker") {
     // Workers can ONLY pick up dispatchable tasks.
@@ -1045,7 +1124,12 @@ export interface IssuesCheckOptions {
   /** Injectable clock; defaults to the real current time. */
   now?: number;
   io?: IssuesCheckIo;
+  /** Query open issues filtered by playbook stage (#1405). */
+  stage?: PlaybookStageName;
+  /** Playbook profile name (e.g. Light, Medium) for stage evaluation (#1405). */
+  profile?: string;
 }
+
 
 export const ISSUES_CHECK_DEFAULT_HOSTNAME = "forge.mrs.uppidi.com";
 export const ISSUES_CHECK_DEFAULT_REPO = "xpufx/paseo-plugin-helper";
@@ -1143,6 +1227,12 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
     const labelStrings = labels.filter((label): label is string => typeof label === "string");
     const labelsSet = new Set<string>(labelStrings);
 
+    // Playbook stage filter (#1405)
+    const issueStage = extractStageFromLabels(labelStrings);
+    if (options.stage && issueStage !== options.stage && !labelsSet.has(options.stage)) {
+      continue;
+    }
+
     const issueSig: IssueSignature = {
       updated_at: updatedAt,
       labels: sortedLabels(labels),
@@ -1190,6 +1280,8 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
         isFeedback: true,
         feedbackInfo: { author: feedbackAuthor, snippet: feedbackSnippet },
         trace,
+        repo,
+        profile: options.profile,
       });
       candidates.push({
         number: num,
@@ -1207,9 +1299,9 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
     }
 
     // Check brand new (first-seen) issue — highest priority for orchestrator triage
-    if (isNew) {
+    if (isNew && !issueStage) {
       const pTuple = calculatePriorityTuple(issue, true);
-      const cl = classifyCandidate(issue, labelsSet, { isNew: true, trace });
+      const cl = classifyCandidate(issue, labelsSet, { isNew: true, trace, repo, profile: options.profile });
       candidates.push({
         number: num,
         title,
@@ -1227,9 +1319,9 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
     const actionable = isActionable(labelsSet, role);
     trace.guard("is-actionable", `isActionable(role=${role})`, actionable);
     if (actionable) {
-      if (isChanged || all) {
+      if (isChanged || all || isNew) {
         const pTuple = calculatePriorityTuple(issue);
-        const cl = classifyCandidate(issue, labelsSet, { trace });
+        const cl = classifyCandidate(issue, labelsSet, { trace, repo, profile: options.profile });
         candidates.push({
           number: num,
           title,
@@ -1247,6 +1339,7 @@ export async function runIssuesCheck(options: IssuesCheckOptions = {}): Promise<
       traces.push(trace.build("not-actionable", { category: "not-actionable", is_dispatchable: false, reason: `not actionable for role ${role}` }));
     }
   }
+
 
   await io.saveCache(newState, repo);
 

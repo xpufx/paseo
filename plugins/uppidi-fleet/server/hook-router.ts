@@ -134,6 +134,12 @@ import {
   formatTransitionRejectionComment,
   formatHumanGateSummaryComment,
   isHumanGatedStage,
+  extractStageFromLabels,
+  evaluatePrecondition,
+  canAdvanceStage,
+  recordPlaybookTransitionMetric,
+  getPlaybookMetricsReport,
+  handleUppidiPlaybookMetrics,
   type ArtifactVerificationContext,
   type StageTransitionDecision,
 } from "./playbooks.js";
@@ -143,6 +149,7 @@ import {
   PlaybookStageNameSchema,
   CANONICAL_PLAYBOOK_STAGES,
 } from "../shared/contracts.js";
+
 
 const defaultExecFileAsync = promisify(execFile);
 let execFileAsync = defaultExecFileAsync;
@@ -4293,8 +4300,13 @@ export interface BoardSweepResult {
   errors?: Array<{ repo: string; error: string }>;
   /** Enrolled repos auto-staffed by this sweep because they were unstaffed with pending work (#889). */
   autoEnsured?: Array<{ repo: string; agentId?: string; status?: string; error?: string }>;
+  /** Candidates automatically queued during the sweep because their preconditions are satisfied (#1405). */
+  queuedCandidates?: Array<{ repo: string; number: number; stage?: string; reason?: string }>;
+  /** Stages automatically advanced during the sweep upon receipt of exit artifacts (#1405). */
+  stageTransitions?: Array<{ repo: string; issue: number; fromStage: string; toStage: string }>;
   error?: string;
 }
+
 
 // ---------------------------------------------------------------------------
 // Sweep digest persistence (#1352)
@@ -5159,6 +5171,40 @@ export class HookRouter {
       } else if (ev === "issue_comment" && action === "created") {
         await this.runLabelTriage(body);
         await this.runStageTransitionGuard(body, ev);
+        const repo = this.bareRepoFromPayload(body);
+        const issueNum = issueNumberOf(body);
+        const commentBody = body?.comment?.body ?? "";
+        const actor = this.actorFromPayload(body);
+        if (repo && issueNum) {
+          if (/-\s*\[[ xX]\]\s+/.test(commentBody)) {
+            await this.advanceStageOnArtifact(repo, issueNum, {
+              type: "checklist_created",
+              actor,
+              comment: body?.comment,
+            });
+          } else if (
+            isAuthorizedOperator(actor, this.authorizedOperators) &&
+            (commentBody.toLowerCase().includes("/approve") || commentBody.toLowerCase().includes("lgtm") || commentBody.toLowerCase().includes("approved"))
+          ) {
+            await this.advanceStageOnArtifact(repo, issueNum, {
+              type: "spec_audit_approved",
+              actor,
+              comment: body?.comment,
+            });
+          }
+        }
+      } else if (ev === "pull_request" && action === "opened") {
+        const repo = this.bareRepoFromPayload(body);
+        const refMatches = (body?.pull_request?.body ?? "").match(/(?:Refs|Fixes|closes|part of)\s+#(\d+)/i) ??
+                           (body?.pull_request?.title ?? "").match(/#(\d+)/);
+        const targetIssueNumber = refMatches ? Number(refMatches[1]) : (body?.pull_request?.number ?? issueNumberOf(body));
+        if (repo && targetIssueNumber) {
+          await this.advanceStageOnArtifact(repo, targetIssueNumber, {
+            type: "pull_request_opened",
+            actor: this.actorFromPayload(body),
+            pullRequest: body?.pull_request,
+          });
+        }
       } else if (ev === "issues" && action === "closed") {
         await this.runCloseGuard(body);
       } else if (ev === "issues" && action === "unlabeled") {
@@ -5172,7 +5218,19 @@ export class HookRouter {
       } else if (ev === "pull_request" && action === "closed" && body?.pull_request?.merged === true) {
         this.reconcileMergeAudit(body);
         await this.runMergeEvent(body);
+        const repo = this.bareRepoFromPayload(body);
+        const refMatches = (body?.pull_request?.body ?? "").match(/(?:Refs|Fixes|closes|part of)\s+#(\d+)/i) ??
+                           (body?.pull_request?.title ?? "").match(/#(\d+)/);
+        const targetIssueNumber = refMatches ? Number(refMatches[1]) : (body?.pull_request?.number ?? issueNumberOf(body));
+        if (repo && targetIssueNumber) {
+          await this.advanceStageOnArtifact(repo, targetIssueNumber, {
+            type: "pull_request_merged",
+            actor: this.actorFromPayload(body),
+            pullRequest: body?.pull_request,
+          });
+        }
       }
+
     } catch (err) {
       this.log(
         `[warn] direct-action handler failed for ${ev}:${action || "event"}: ${err instanceof Error ? err.message : String(err)}`,
@@ -6022,6 +6080,17 @@ export class HookRouter {
           { host, token },
         );
       }
+      try {
+        recordPlaybookTransitionMetric({
+          repo,
+          issue: issueNumber,
+          profile: profile.name,
+          fromStage,
+          toStage,
+          actor,
+          isHumanGate: true,
+        });
+      } catch {}
       this.log(`[info] stage guard: activated human gate for ${toStage} on ${repo}#${issueNumber} (profile: ${profile.name})`);
       return {
         acted: true,
@@ -6034,6 +6103,17 @@ export class HookRouter {
       };
     }
 
+    try {
+      recordPlaybookTransitionMetric({
+        repo,
+        issue: issueNumber,
+        profile: profile.name,
+        fromStage,
+        toStage,
+        actor,
+        isHumanGate: false,
+      });
+    } catch {}
     this.log(`[info] stage guard: accepted transition ${fromStage ?? "unknown"} -> ${toStage} on ${repo}#${issueNumber}`);
     return {
       acted: true,
@@ -6043,6 +6123,254 @@ export class HookRouter {
       decision,
     };
   }
+
+  /**
+   * Automated stage progression upon receipt of exit artifacts (#1405).
+   * Automatically advances autonomous stages when their exit artifacts are received
+   * (e.g. advances stage/code -> stage/review when worker PR opens).
+   * Surfaces human-gated stages to operator via attention/user without stalling autonomous queues.
+   */
+  public async advanceStageOnArtifact(
+    repo: string,
+    issueNumber: number,
+    artifactEvent: {
+      type: string;
+      actor: string;
+      pullRequest?: any;
+      pullRequestNumber?: number;
+      merged?: boolean;
+      comment?: any;
+      auditReceipt?: any;
+      labels?: string[];
+      issue?: any;
+    },
+  ): Promise<DirectActionResult> {
+    if (!this.stageGuardEnabled) {
+      return { acted: false, reason: "stage guard disabled" };
+    }
+    const isTest = this.isTestMode || process.env.NODE_ENV === "test";
+    const host = resolveForgejoHost();
+    const token = !isTest ? await this.resolveApiToken(host) : null;
+
+    let issue: any = artifactEvent.issue ?? {};
+    if (token && !artifactEvent.labels) {
+      const issueRes = await forgejoApiGet<any>(`/api/v1/repos/${repo}/issues/${issueNumber}`, { host, token });
+      if (issueRes.outcome === "ok") {
+        issue = issueRes.data;
+      }
+    }
+    const existingLabels = artifactEvent.labels ?? labelNamesFromIssue(issue);
+    const currentStage = extractStageFromLabels(existingLabels);
+    if (!currentStage) {
+      return { acted: false, reason: "no active playbook stage label found on issue" };
+    }
+
+    let profileName = "Medium";
+    if (existingLabels.some((l) => l.toLowerCase() === "playbook/light" || l.toLowerCase() === "profile/light")) {
+      profileName = "Light";
+    } else if (existingLabels.some((l) => l.toLowerCase() === "playbook/medium" || l.toLowerCase() === "profile/medium")) {
+      profileName = "Medium";
+    }
+    const config = loadSavedPlaybooks();
+    const profile = getPlaybookProfile(profileName, config);
+
+    const eventType =
+      artifactEvent.type === "pull_request.opened" || artifactEvent.type === "pull_request_opened"
+        ? "pull_request_opened"
+        : artifactEvent.type === "pull_request.merged" ||
+          artifactEvent.type === "pull_request_merged" ||
+          (artifactEvent.type === "pull_request.closed" && artifactEvent.merged)
+        ? "pull_request_merged"
+        : artifactEvent.type;
+
+    let targetStage: PlaybookStageName | null = null;
+    if (eventType === "pull_request_opened") {
+      if (currentStage === "stage/code") {
+        targetStage = "stage/review";
+      }
+    } else if (eventType === "pull_request_merged") {
+      if (currentStage === "stage/merge") {
+        targetStage = "stage/verify";
+      }
+    } else if (eventType === "checklist_created") {
+      if (currentStage === "stage/spec") {
+        targetStage = "stage/spec-audit";
+      }
+    } else if (eventType === "spec_audit_approved") {
+      if (currentStage === "stage/spec-audit") {
+        targetStage = "stage/dispatch";
+      }
+    } else if (eventType === "audit_receipt_created") {
+      if (currentStage === "stage/review") {
+        targetStage = "stage/merge";
+      }
+    }
+
+    if (!targetStage) {
+      return {
+        acted: false,
+        reason: `Artifact event "${artifactEvent.type}" does not trigger progression from stage "${currentStage}"`,
+      };
+    }
+
+    // Retrieve comments for artifact validation if token present
+    let comments: Array<{ body?: string; user?: { login?: string }; created_at?: string }> = [];
+    if (token) {
+      const commentsRes = await forgejoApiGet<any[]>(`/api/v1/repos/${repo}/issues/${issueNumber}/comments`, { host, token });
+      if (commentsRes.outcome === "ok" && Array.isArray(commentsRes.data)) {
+        comments = commentsRes.data;
+      }
+    }
+    if (artifactEvent.comment) {
+      comments.push(artifactEvent.comment);
+    }
+
+    const prNumber = artifactEvent.pullRequestNumber ?? artifactEvent.pullRequest?.number;
+    const isMerged = Boolean(artifactEvent.merged || artifactEvent.pullRequest?.merged || eventType === "pull_request_merged");
+    const pullRequestObj = prNumber
+      ? {
+          number: prNumber,
+          headCommit: artifactEvent.pullRequest?.head?.sha ?? artifactEvent.pullRequest?.headCommit ?? "abc1234",
+          merged: isMerged,
+          state: isMerged ? "closed" : "open",
+          approved: Boolean(artifactEvent.pullRequest?.approved),
+        }
+      : artifactEvent.pullRequest
+      ? {
+          number: artifactEvent.pullRequest.number ?? issueNumber,
+          headCommit: artifactEvent.pullRequest.head?.sha ?? artifactEvent.pullRequest.headCommit ?? "abc1234",
+          merged: isMerged,
+          state: artifactEvent.pullRequest.state ?? (isMerged ? "closed" : "open"),
+          approved: Boolean(artifactEvent.pullRequest.approved),
+        }
+      : null;
+
+    const context: ArtifactVerificationContext = {
+      repo,
+      issueNumber,
+      issueBody: issue?.body ?? "",
+      comments,
+      pullRequest: pullRequestObj,
+      prNumber: prNumber ?? pullRequestObj?.number,
+      headCommit: pullRequestObj?.headCommit,
+      auditsFilePath: this.auditsFilePath,
+      labels: existingLabels,
+      actor: artifactEvent.actor,
+      auditReceipt: artifactEvent.auditReceipt ?? null,
+    };
+
+    const decision = evaluateStageTransition({
+      profile,
+      fromStage: currentStage,
+      toStage: targetStage,
+      actor: artifactEvent.actor,
+      context,
+      authorizedOperators: this.authorizedOperators,
+    });
+
+    if (!decision.allowed) {
+      this.log(`[warn] stage progression guard: cannot advance ${currentStage} -> ${targetStage} on ${repo}#${issueNumber}: ${decision.reason}`);
+      return {
+        acted: false,
+        reason: decision.reason,
+        allowed: false,
+        rejected: true,
+        decision,
+      };
+    }
+
+    // Apply stage label update on Forgejo
+    if (token) {
+      await forgejoApiRequest<any>(
+        "DELETE",
+        `/api/v1/repos/${repo}/issues/${issueNumber}/labels/${encodeURIComponent(currentStage)}`,
+        null,
+        { host, token },
+      );
+      await forgejoApiRequest<any>(
+        "POST",
+        `/api/v1/repos/${repo}/issues/${issueNumber}/labels`,
+        { labels: [targetStage] },
+        { host, token },
+      );
+    }
+
+    // If leaving a human gate, clear gate and remove attention/user
+    if (isHumanGatedStage(profile.stages[currentStage])) {
+      this.clearHumanGate(repo, issueNumber);
+      if (token) {
+        await forgejoApiRequest<any>(
+          "DELETE",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/labels/${encodeURIComponent("attention/user")}`,
+          null,
+          { host, token },
+        );
+      }
+    }
+
+    // If target stage is human gated (e.g. Medium spec-audit, review, verify):
+    if (decision.requiresHumanGate) {
+      this.setHumanGate(repo, issueNumber, targetStage, profile.name);
+      if (token) {
+        await forgejoApiRequest<any>(
+          "POST",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/labels`,
+          { labels: ["attention/user"] },
+          { host, token },
+        );
+        const summaryComment = formatHumanGateSummaryComment(targetStage, profile, decision);
+        await forgejoApiRequest<any>(
+          "POST",
+          `/api/v1/repos/${repo}/issues/${issueNumber}/comments`,
+          { body: summaryComment },
+          { host, token },
+        );
+      }
+      try {
+        recordPlaybookTransitionMetric({
+          repo,
+          issue: issueNumber,
+          profile: profile.name,
+          fromStage: currentStage,
+          toStage: targetStage,
+          actor: artifactEvent.actor,
+          isHumanGate: true,
+        });
+      } catch {}
+      this.log(`[info] stage progression: advanced ${currentStage} -> ${targetStage} on ${repo}#${issueNumber}; human gate active (attention/user applied)`);
+      return {
+        acted: true,
+        reason: `advanced to ${targetStage}; human gate active (attention/user applied)`,
+        allowed: true,
+        humanGated: true,
+        decision,
+        appliedLabel: "attention/user",
+        commented: Boolean(token),
+      };
+    }
+
+    // Autonomous target stage
+    try {
+      recordPlaybookTransitionMetric({
+        repo,
+        issue: issueNumber,
+        profile: profile.name,
+        fromStage: currentStage,
+        toStage: targetStage,
+        actor: artifactEvent.actor,
+        isHumanGate: false,
+      });
+    } catch {}
+    this.log(`[info] stage progression: advanced ${currentStage} -> ${targetStage} on ${repo}#${issueNumber} autonomously`);
+    return {
+      acted: true,
+      reason: `advanced to ${targetStage} autonomously`,
+      allowed: true,
+      humanGated: false,
+      decision,
+    };
+  }
+
 
   /**
    * CI failure handler (#865): create an issue for a failed workflow run,
@@ -10277,6 +10605,7 @@ export class HookRouter {
     repo: string,
     hostname = "forge.mrs.uppidi.com",
     io?: IssuesCheckIo,
+    opts?: { stage?: PlaybookStageName; profile?: string },
   ): Promise<BoardCheckResult> {
     // Enrolled keys may be `owner/repo` or the forge-qualified `host/owner/repo`;
     // the checker's `-R` argument always wants the trailing `owner/repo`.
@@ -10308,6 +10637,8 @@ export class HookRouter {
       sweepStaleWip: this.staleWipSweepEnabled,
       staleWipHours: this.staleWipHours,
       io: io ?? this.issuesCheckIo ?? createDefaultIssuesCheckIo(),
+      stage: opts?.stage,
+      profile: opts?.profile,
     });
     return {
       repo,
@@ -10317,6 +10648,7 @@ export class HookRouter {
       decisionTraces: outcome.decisionTraces,
     };
   }
+
 
   /**
    * Deterministic SHA256 digest of a repo's actionable candidate set (#1181).
@@ -10336,10 +10668,18 @@ export class HookRouter {
     return createHash("sha256").update(parts.join("\n")).digest("hex");
   }
 
+  public async sweepBoard(
+    repos?: string[],
+    io?: IssuesCheckIo,
+    opts: { explicit?: boolean; now?: number; stage?: PlaybookStageName; profile?: string } = {},
+  ): Promise<BoardSweepResult> {
+    return this.runBoardSweep(repos, io, opts);
+  }
+
   public async runBoardSweep(
     repos?: string[],
     io?: IssuesCheckIo,
-    opts: { explicit?: boolean; now?: number } = {},
+    opts: { explicit?: boolean; now?: number; stage?: PlaybookStageName; profile?: string } = {},
   ): Promise<BoardSweepResult> {
     if (this.isHaltedState) {
       return { ok: true, swept: 0, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
@@ -10377,6 +10717,8 @@ export class HookRouter {
       const actionable: BoardSweepResult["actionable"] = [];
       const staleWipRecovered: StaleWipResult[] = [];
       const errors: Array<{ repo: string; error: string }> = [];
+      const queuedCandidates: Array<{ repo: string; number: number; stage?: string; reason?: string }> = [];
+      const stageTransitions: Array<{ repo: string; issue: number; fromStage: string; toStage: string }> = [];
       // Per-repo actionable-set digest for the delta gate (#1181).
       const sweepDigests = new Map<string, string>();
       const pruneResult = await this.pruneOrchestrators();
@@ -10387,7 +10729,7 @@ export class HookRouter {
       for (const repo of targets) {
         let res: BoardCheckResult;
         try {
-          res = await this.runBoardCheck(repo, undefined, io);
+          res = await this.runBoardCheck(repo, undefined, io, { stage: opts.stage, profile: opts.profile });
         } catch (err) {
           // A failed check is loud: logged, returned, and reported to Front
           // Desk, because an unreported failure looks exactly like a clean board.
@@ -10403,6 +10745,40 @@ export class HookRouter {
         sweepDigests.set(repo, res.ok ? this.actionableDigest(res.candidates) : "#board-check-error");
         if (!res.ok || res.candidates.length === 0) continue;
         const dispatchable = res.candidates.filter((c) => c.is_dispatchable).length;
+
+        for (const c of res.candidates) {
+          if (c.is_dispatchable) {
+            const st = extractStageFromLabels(c.labels ?? []);
+            queuedCandidates.push({
+              repo,
+              number: c.number,
+              stage: st ?? undefined,
+              reason: c.reason,
+            });
+          }
+          const candStage = extractStageFromLabels(c.labels ?? []);
+          if (candStage) {
+            const profileName = (c.labels ?? []).some((l) => l.toLowerCase() === "playbook/light" || l.toLowerCase() === "profile/light")
+              ? "Light"
+              : (opts.profile ?? "Medium");
+            const profile = getPlaybookProfile(profileName, loadSavedPlaybooks());
+            const candContext: ArtifactVerificationContext = {
+              repo,
+              issueNumber: c.number,
+              labels: c.labels,
+            };
+            const advanceCheck = canAdvanceStage(candStage, candContext, profile, this.authorizedOperators);
+            if (advanceCheck.canAdvance && advanceCheck.nextStage) {
+              stageTransitions.push({
+                repo,
+                issue: c.number,
+                fromStage: candStage,
+                toStage: advanceCheck.nextStage,
+              });
+            }
+          }
+        }
+
         // Count tickets that require explicit Front Desk attention (#1354, #1357).
         // Front Desk attention requires explicit targeting (attention/frontdesk)
         // or fleet-wide emergency (category === "sos"). Routine orchestrator
@@ -10538,8 +10914,11 @@ export class HookRouter {
         prunedCount,
         ...(errors.length > 0 ? { errors } : {}),
         ...(autoEnsured.length > 0 ? { autoEnsured } : {}),
+        ...(queuedCandidates.length > 0 ? { queuedCandidates } : {}),
+        ...(stageTransitions.length > 0 ? { stageTransitions } : {}),
       };
     })();
+
 
     this.inFlightBoardSweep.set(sweepKey, promise);
     try {
@@ -12228,7 +12607,9 @@ export class HookRouter {
           const repos = Array.isArray(body?.repos)
             ? body.repos.filter((r: unknown) => typeof r === "string")
             : undefined;
-          const result = await this.runBoardSweep(repos, undefined, { explicit: true });
+          const stage = typeof body?.stage === "string" ? (body.stage as PlaybookStageName) : undefined;
+          const profile = typeof body?.profile === "string" ? body.profile : undefined;
+          const result = await this.runBoardSweep(repos, undefined, { explicit: true, stage, profile });
           this.sendJson(res, 200, result);
         } catch (err: any) {
           this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
@@ -12249,6 +12630,9 @@ export class HookRouter {
         const allParam = url.searchParams.get("all");
         const all = allParam !== null && allParam !== "false" && allParam !== "0";
         const format = url.searchParams.get("format")?.trim().toLowerCase() || "json";
+        const stageParam = url.searchParams.get("stage")?.trim();
+        const stage = stageParam ? (stageParam as PlaybookStageName) : undefined;
+        const profile = url.searchParams.get("profile")?.trim() || undefined;
         // #1415: opt-in structured decision traces and diagnostic comments.
         const traceParam = url.searchParams.get("trace");
         const includeTraces = traceParam !== null && traceParam !== "false" && traceParam !== "0";
@@ -12273,6 +12657,8 @@ export class HookRouter {
             sweepStaleWip: this.staleWipSweepEnabled,
             staleWipHours: this.staleWipHours,
             io: this.issuesCheckIo ?? this.options?.issuesCheckIo,
+            stage,
+            profile,
           });
 
           if (format === "markdown") {
@@ -12678,6 +13064,15 @@ export class HookRouter {
       if (req.method === "GET" && pathname === "/stage/human-gates") {
         const gates = this.listActiveHumanGates();
         this.sendJson(res, 200, { ok: true, count: gates.length, gates });
+        return;
+      }
+
+      if (req.method === "GET" && (pathname === "/stage/metrics" || pathname === "/playbook/metrics" || pathname === "/playbooks/metrics")) {
+        const stageParam = url.searchParams.get("stage")?.trim();
+        const stage = stageParam ? (stageParam as PlaybookStageName) : undefined;
+        const profile = url.searchParams.get("profile")?.trim() || undefined;
+        const report = getPlaybookMetricsReport({ stage, profile });
+        this.sendJson(res, 200, report);
         return;
       }
 
