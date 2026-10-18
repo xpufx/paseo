@@ -150,6 +150,35 @@ import {
   PlaybookStageNameSchema,
   CANONICAL_PLAYBOOK_STAGES,
 } from "../shared/contracts.js";
+import {
+  classifyRecoveryRootCause,
+  formatWatchdogRecoveryAlert,
+  appendWatchdogRecoveryRecord,
+  readWatchdogRecoveryRecords,
+  defaultWatchdogRecoveriesPath,
+  setWatchdogRecoveriesPathForTest,
+  type WatchdogRecoveryRootCause,
+  type WatchdogRecoveryRecord,
+  type WatchdogRecoveryAgentDiagnostics,
+  type WatchdogRecoveryQueueTelemetry,
+  type WatchdogRecoveryActionResult,
+  type ClassifyRecoveryRootCauseInput,
+} from "./watchdog-recovery.js";
+
+export {
+  classifyRecoveryRootCause,
+  formatWatchdogRecoveryAlert,
+  appendWatchdogRecoveryRecord,
+  readWatchdogRecoveryRecords,
+  defaultWatchdogRecoveriesPath,
+  setWatchdogRecoveriesPathForTest,
+  type WatchdogRecoveryRootCause,
+  type WatchdogRecoveryRecord,
+  type WatchdogRecoveryAgentDiagnostics,
+  type WatchdogRecoveryQueueTelemetry,
+  type WatchdogRecoveryActionResult,
+  type ClassifyRecoveryRootCauseInput,
+};
 
 
 const defaultExecFileAsync = promisify(execFile);
@@ -358,6 +387,8 @@ export interface HookRouterOptions {
   auditsFilePath?: string;
   /** Explicit audit merge-reconciliation log path (platform#348). */
   auditReconciliationsFilePath?: string;
+  /** Durable append-only watchdog auto-recovery telemetry log path (#1429). */
+  recoveryLogPath?: string;
   /** Explicit log directory path for hook router disk logging (#1115). */
   logDir?: string;
   /** Explicit hook log file path (#1115). */
@@ -1700,6 +1731,8 @@ export interface WatchdogAuditOptions {
   allowFleetPermission?: (agentId: string, permissionId: string) => Promise<boolean>;
   /** Durable auto-adjudication JSONL path; defaults to `<stateDir>/permission-decisions.jsonl`. */
   adjudicationLogPath?: string;
+  /** Durable append-only watchdog auto-recovery telemetry log path (#1429). */
+  recoveryLogPath?: string;
   /**
    * Persist per-provider/model rollup receipts on this tick (#560). Defaults to
    * `true` in production and `false` for injected fixtures, so unit tests never
@@ -4738,6 +4771,8 @@ export class HookRouter {
   public readonly auditsFilePath: string;
   /** Durable append-only audit merge-reconciliation log (platform#348). */
   public readonly auditReconciliationsFilePath: string;
+  /** Durable append-only watchdog auto-recovery telemetry log path (#1429). */
+  public readonly recoveryLogPath: string;
   /** Scoped rotating disk logger (#1115). */
   public readonly diskLogger: DiskLogger;
   public readonly logDir: string;
@@ -4874,6 +4909,10 @@ export class HookRouter {
       options?.auditReconciliationsFilePath ??
       process.env.UPPIDI_FLEET_AUDIT_RECONCILIATIONS_FILE ??
       join(dirname(this.stateDir), "audit-reconciliations.jsonl");
+    this.recoveryLogPath =
+      options?.recoveryLogPath ??
+      process.env.UPPIDI_FLEET_WATCHDOG_RECOVERIES_FILE ??
+      join(dirname(this.stateDir), "watchdog-recoveries.jsonl");
 
     // Load persisted sweep digests on startup (#1352).
     const testBaseDir = this.isTestMode ? scopedRoot : undefined;
@@ -9146,12 +9185,25 @@ export class HookRouter {
             repo: agentRepoKey(agent, orchRecords),
           });
         } else if (recovery.steered) {
-          const alert = `[Fleet Watchdog] Auto-recovered agent ${label} (${assessment.agentId.slice(0, 7)}) [${assessment.taxonomy.join(", ")}] via ${recovery.actions.join(" -> ")}.`;
+          const repo = agentRepoKey(agent, orchRecords);
+          const q = this.getQueue(repo);
+          const qDepth = q.length;
+          const attempts = this.busyAttempts.get(repo) ?? 0;
+          const status = agent.status ?? "unknown";
+          const rootCause = classifyRecoveryRootCause({
+            kind: "agent",
+            status: agent.status,
+            lastError: agent.lastError,
+            attentionReason: agent.attentionReason,
+            taxonomy: assessment.taxonomy,
+            lockState: detectTurnConcurrencyLock(agent.status, agent.lastError),
+          });
+          const alert = `[Fleet Watchdog] [${rootCause}] Auto-recovered agent ${label} (${assessment.agentId.slice(0, 7)}) [${assessment.taxonomy.join(", ")}] via ${recovery.actions.join(" -> ")} (queue=${qDepth}p/${attempts}a status=${status}).`;
           this.deliverWatchdogAlert(frontDeskId, alert, {
             deliverFn,
             agentMap,
             isSos: false,
-            repo: agentRepoKey(agent, orchRecords),
+            repo,
           });
         } else {
           const alert = `[Fleet Watchdog] Agent ${label} (${assessment.agentId.slice(0, 7)}) unhealthy [${assessment.taxonomy.join(", ")}]. Operator attention may be required.`;
@@ -9408,14 +9460,81 @@ export class HookRouter {
 
           if (!isUnrecoverable) {
             this.log(`[info] watchdog: attempting auto-recovery reload for ${agentId.slice(0, 7)} (${key})`);
+            const q = this.getQueue(key);
+            const qDepth = q.length;
+            const attempts = this.busyAttempts.get(key) ?? 0;
+            const lastAttemptedDeliveryTimestamp =
+              this.lastDeliveryTimes.get(agentId) ??
+              this.lastDeliveryTimes.get(key) ??
+              (q[0]?.ts ?? null);
+            const lockState = detectTurnConcurrencyLock(agent.status, agent.lastError);
+            const rootCause = classifyRecoveryRootCause({
+              kind: "agent",
+              status: agent.status,
+              lastError: agent.lastError,
+              attentionReason: agent.attentionReason,
+              lockState,
+              attempts,
+              busyThreshold: this.watchdogBusyThreshold,
+            });
+
             const reloadRes = await reloadFn(agentId);
+
+            try {
+              appendWatchdogRecoveryRecord({
+                timestamp: new Date(now).toISOString(),
+                repo: key,
+                kind: "agent",
+                rootCause,
+                agentDiagnostics: {
+                  agentId,
+                  targetAgentId: agentId,
+                  role: agent.role ?? (agent.labels?.role as string) ?? "orchestrator",
+                  status: agent.status ?? "unknown",
+                  activeTurnState: agent.activeTurn ?? (agent.metrics?.activeTurnStartedAt ? { startedAt: agent.metrics.activeTurnStartedAt } : null),
+                  attentionReason: agent.attentionReason ?? null,
+                  lastError: agent.lastError ?? null,
+                  lockState,
+                },
+                queueTelemetry: {
+                  queueDepth: qDepth,
+                  deliveryAttemptCount: attempts,
+                  attempts,
+                  lastAttemptedDeliveryTimestamp,
+                  lastAttemptedDelivery: lastAttemptedDeliveryTimestamp,
+                },
+                recoveryActionResult: {
+                  action: "reload",
+                  ok: Boolean(reloadRes.ok),
+                },
+                actionResult: {
+                  action: "reload",
+                  ok: Boolean(reloadRes.ok),
+                },
+              }, {
+                logPath: opts.recoveryLogPath ?? this.recoveryLogPath,
+                context: opts.recoveryLogPath ? { storage: opts.recoveryLogPath } : (this.server as any),
+              });
+            } catch (logErr) {
+              this.log(`[warn] watchdog: failed to write recovery telemetry: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
+            }
+
             if (reloadRes.ok) {
               this.log(`[info] watchdog: successfully reloaded ${agentId.slice(0, 7)}`);
               const alertKey = `recovered:${agentId}`;
               if (frontDeskId && this.canWatchdogAlert(alertKey, now)) {
                 this.watchdogAlerts.set(alertKey, now);
                 const reasonDesc = isTurnLock ? "clearing foreground turn lock" : "reloading agent";
-                const alert = `[Fleet Watchdog] Auto-recovered orchestrator for ${key} (${agentId.slice(0, 7)}) by ${reasonDesc}.`;
+                const alert = formatWatchdogRecoveryAlert({
+                  kind: "agent",
+                  rootCause,
+                  repo: key,
+                  agentId,
+                  reasonDesc,
+                  queueDepth: qDepth,
+                  attempts,
+                  status: agent.status ?? "error",
+                });
                 this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
               }
               continue;
@@ -9522,12 +9641,79 @@ export class HookRouter {
         }
         anomalies.push({ type: "QUEUE_WEDGED", key, attempts, queueDepth: q.length });
         const orchId = orchRecords.find((r) => r.key === key)?.agentId;
+        const targetAgent = orchId ? agentMap?.get(orchId) : undefined;
         let reloaded = false;
         // Snapshot depth before drain so alerts report the real pre-drain count.
         const initialDepth = q.length;
+        const lastAttemptedDeliveryTimestamp =
+          (orchId ? this.lastDeliveryTimes.get(orchId) : null) ??
+          this.lastDeliveryTimes.get(key) ??
+          (q[0]?.ts ?? null);
+        const lockState = targetAgent
+          ? detectTurnConcurrencyLock(targetAgent.status, targetAgent.lastError)
+          : false;
+        const rootCause = classifyRecoveryRootCause({
+          kind: "queue",
+          status: targetAgent?.status,
+          lastError: targetAgent?.lastError,
+          attentionReason: targetAgent?.attentionReason,
+          lockState,
+          attempts,
+          busyThreshold: this.watchdogBusyThreshold,
+        });
+
         if (orchId && reloadFn) {
           this.log(`[info] watchdog: attempting auto-recovery reload for wedged orchestrator ${orchId.slice(0, 7)} (${key})`);
           const reloadRes = await reloadFn(orchId);
+
+          try {
+            appendWatchdogRecoveryRecord({
+              timestamp: new Date(now).toISOString(),
+              repo: key,
+              kind: "queue",
+              rootCause,
+              agentDiagnostics: targetAgent ? {
+                agentId: orchId,
+                targetAgentId: orchId,
+                role: targetAgent.role ?? (targetAgent.labels?.role as string) ?? "orchestrator",
+                status: targetAgent.status ?? "unknown",
+                activeTurnState: targetAgent.activeTurn ?? (targetAgent.metrics?.activeTurnStartedAt ? { startedAt: targetAgent.metrics.activeTurnStartedAt } : null),
+                attentionReason: targetAgent.attentionReason ?? null,
+                lastError: targetAgent.lastError ?? null,
+                lockState,
+              } : {
+                agentId: orchId,
+                targetAgentId: orchId,
+                role: "orchestrator",
+                status: "unknown",
+                activeTurnState: null,
+                attentionReason: null,
+                lastError: null,
+                lockState: false,
+              },
+              queueTelemetry: {
+                queueDepth: initialDepth,
+                deliveryAttemptCount: attempts,
+                attempts,
+                lastAttemptedDeliveryTimestamp,
+                lastAttemptedDelivery: lastAttemptedDeliveryTimestamp,
+              },
+              recoveryActionResult: {
+                action: "reload",
+                ok: Boolean(reloadRes.ok),
+              },
+              actionResult: {
+                action: "reload",
+                ok: Boolean(reloadRes.ok),
+              },
+            }, {
+              logPath: opts.recoveryLogPath ?? this.recoveryLogPath,
+              context: opts.recoveryLogPath ? { storage: opts.recoveryLogPath } : (this.server as any),
+            });
+          } catch (logErr) {
+            this.log(`[warn] watchdog: failed to write recovery telemetry: ${logErr instanceof Error ? logErr.message : String(logErr)}`);
+          }
+
           if (reloadRes.ok) {
             this.busyAttempts.delete(key);
             this.busyQueues.delete(key);
@@ -9547,7 +9733,15 @@ export class HookRouter {
           this.watchdogWedgeAlerts.add(key);
           this.watchdogAlerts.set(alertKey, now);
           const alert = reloaded
-            ? `[Fleet Watchdog] Auto-recovered wedged queue for ${key} (${initialDepth} pending, ${attempts} failed attempts) by reloading orchestrator ${orchId?.slice(0, 7)}.`
+            ? formatWatchdogRecoveryAlert({
+                kind: "queue",
+                rootCause,
+                repo: key,
+                agentId: orchId,
+                queueDepth: initialDepth,
+                attempts,
+                status: targetAgent?.status ?? "unknown",
+              })
             : `[Fleet Watchdog] Queue for ${key} has ${initialDepth} pending message(s) and has failed delivery ${attempts} times.`;
           this.deliverWatchdogAlert(frontDeskId, alert, { deliverFn, agentMap, isSos: false, repo: key });
         }
