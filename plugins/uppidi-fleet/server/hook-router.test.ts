@@ -56,6 +56,12 @@ import {
   FORGEJO_DIGEST_PREFIX,
   envelopeAgentId,
   detectTurnConcurrencyLock,
+  classifyRecoveryRootCause,
+  formatWatchdogRecoveryAlert,
+  appendWatchdogRecoveryRecord,
+  readWatchdogRecoveryRecords,
+  defaultWatchdogRecoveriesPath,
+  setWatchdogRecoveriesPathForTest,
   detectCancellationTimeout,
   detectIdlePostErrorAmnesia,
   detectZombieHungTurn,
@@ -3369,6 +3375,339 @@ describe("hook-router fleet watchdog audit (#458)", () => {
       audit.anomalies.some((a) => a.type === "QUEUE_UNORCHESTRATED"),
       false,
     );
+  });
+});
+
+describe("watchdog structured recovery telemetry and root cause data (#1429)", () => {
+  let tempDir: string;
+  let queueDir: string;
+  let stateDir: string;
+  let recoveryLogPath: string;
+  let router: HookRouter;
+  let delivered: Array<{ id: string; msg: string; options?: any }>;
+  let reloaded: string[];
+  const frontDeskId = "fd-telemetry-agent";
+
+  const fakeDeliver = async (id: string, msg: string, options?: any) => {
+    delivered.push({ id, msg, options });
+    return true;
+  };
+  const fakeReload = async (id: string) => {
+    reloaded.push(id);
+    return { ok: true };
+  };
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "paseo-recovery-telemetry-test-"));
+    queueDir = join(tempDir, "queues");
+    stateDir = join(tempDir, "state");
+    recoveryLogPath = join(tempDir, "watchdog-recoveries.jsonl");
+    router = new HookRouter(null, { queueDir, stateDir, port: 0, recoveryLogPath });
+    router.enrollRepo("test-repo");
+    router.writeFrontDesk(frontDeskId, "test");
+    delivered = [];
+    reloaded = [];
+    setWatchdogRecoveriesPathForTest(recoveryLogPath);
+  });
+
+  afterEach(() => {
+    setWatchdogRecoveriesPathForTest(null);
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  });
+
+  describe("root cause classification taxonomy", () => {
+    it("classifies TURN_LOCK from turn concurrency lock, markers, or attention stalls", () => {
+      assert.equal(classifyRecoveryRootCause({ status: "error", lastError: "A foreground turn is already active" }), "TURN_LOCK");
+      assert.equal(classifyRecoveryRootCause({ status: "error", lastError: "concurrent turn detected" }), "TURN_LOCK");
+      assert.equal(classifyRecoveryRootCause({ status: "error", lastError: "turn concurrency failure" }), "TURN_LOCK");
+      assert.equal(classifyRecoveryRootCause({ lockState: true }), "TURN_LOCK");
+      assert.equal(classifyRecoveryRootCause({ status: "running", attentionReason: "error" }), "TURN_LOCK");
+      assert.equal(classifyRecoveryRootCause({ taxonomy: ["TURN_CONCURRENCY_LOCK"] }), "TURN_LOCK");
+    });
+
+    it("classifies SOCKET_HANG from broken socket and reset errors", () => {
+      assert.equal(classifyRecoveryRootCause({ lastError: "socket hang up" }), "SOCKET_HANG");
+      assert.equal(classifyRecoveryRootCause({ lastError: "read ECONNRESET" }), "SOCKET_HANG");
+      assert.equal(classifyRecoveryRootCause({ lastError: "connection reset by peer" }), "SOCKET_HANG");
+      assert.equal(classifyRecoveryRootCause({ lastError: "broken socket" }), "SOCKET_HANG");
+      assert.equal(classifyRecoveryRootCause({ lastError: "write EPIPE" }), "SOCKET_HANG");
+    });
+
+    it("classifies DAEMON_DISCONNECT from unreachable or refused daemon connections", () => {
+      assert.equal(classifyRecoveryRootCause({ lastError: "connect ECONNREFUSED 127.0.0.1:6767" }), "DAEMON_DISCONNECT");
+      assert.equal(classifyRecoveryRootCause({ lastError: "connection refused" }), "DAEMON_DISCONNECT");
+      assert.equal(classifyRecoveryRootCause({ lastError: "daemon unreachable" }), "DAEMON_DISCONNECT");
+      assert.equal(classifyRecoveryRootCause({ lastError: "cannot connect to daemon" }), "DAEMON_DISCONNECT");
+      assert.equal(classifyRecoveryRootCause({ lastError: "daemon died" }), "DAEMON_DISCONNECT");
+    });
+
+    it("classifies BUSY_TIMEOUT from threshold attempts, deadline, or wedged queues", () => {
+      assert.equal(classifyRecoveryRootCause({ attempts: 12, busyThreshold: 10 }), "BUSY_TIMEOUT");
+      assert.equal(classifyRecoveryRootCause({ deliveryDeadlineExceeded: true }), "BUSY_TIMEOUT");
+      assert.equal(classifyRecoveryRootCause({ lastError: "delivery deadline exceeded" }), "BUSY_TIMEOUT");
+      assert.equal(classifyRecoveryRootCause({ lastError: "busy timeout exceeded" }), "BUSY_TIMEOUT");
+      assert.equal(classifyRecoveryRootCause({ kind: "queue" }), "BUSY_TIMEOUT");
+    });
+  });
+
+  describe("alert payload enrichment", () => {
+    it("formats agent auto-recovery alerts with root cause tag and state summary", () => {
+      const alert = formatWatchdogRecoveryAlert({
+        kind: "agent",
+        rootCause: "TURN_LOCK",
+        repo: "test-repo",
+        agentId: "agent-12345678",
+        reasonDesc: "clearing foreground turn lock",
+        queueDepth: 3,
+        attempts: 11,
+        status: "error",
+      });
+      assert.ok(alert.includes("[TURN_LOCK]"));
+      assert.ok(alert.includes("Auto-recovered orchestrator for test-repo (agent-1) by clearing foreground turn lock"));
+      assert.ok(alert.includes("queue=3p/11a status=error"));
+    });
+
+    it("formats wedged queue auto-recovery alerts with root cause tag and state summary", () => {
+      const alert = formatWatchdogRecoveryAlert({
+        kind: "queue",
+        rootCause: "BUSY_TIMEOUT",
+        repo: "test-repo",
+        agentId: "orch-12345678",
+        queueDepth: 3,
+        attempts: 11,
+        status: "running",
+      });
+      assert.ok(alert.includes("[BUSY_TIMEOUT]"));
+      assert.ok(alert.includes("Auto-recovered wedged queue for test-repo (3 pending, 11 failed attempts) by reloading orchestrator orch-12"));
+      assert.ok(alert.includes("queue=3p/11a status=running"));
+    });
+  });
+
+  describe("disk logging and end-to-end watchdog recovery", () => {
+    it("logs structured recovery telemetry and sends enriched alert on wedged queue auto-recovery", async () => {
+      (router as any).busyAttempts.set("test-repo", 12);
+      (router as any).queues.set("test-repo", [{ id: "m1", key: "test-repo", msg: "pending task", ts: 1729290000000 }]);
+
+      const audit = await router.runWatchdogAudit({
+        orchestratorRecords: [{ key: "test-repo", agentId: "agent-wedged" }],
+        agentMap: new Map([
+          [
+            "agent-wedged",
+            {
+              id: "agent-wedged",
+              role: "orchestrator",
+              status: "running",
+              activeTurn: { startedAt: "2026-10-18T22:00:00.000Z" },
+              lastError: null,
+              labels: { role: "orchestrator" },
+            },
+          ],
+        ]),
+        deliver: fakeDeliver,
+        reloadAgent: fakeReload,
+        recoveryLogPath,
+      });
+
+      assert.ok(audit.anomalies.some((a) => a.type === "QUEUE_WEDGED" && a.key === "test-repo"));
+      assert.ok(reloaded.includes("agent-wedged"));
+
+      // Alert enrichment verification
+      const alert = delivered.find((d) => d.id === frontDeskId && d.msg.includes("Auto-recovered wedged queue"));
+      assert.ok(alert, "expected frontdesk alert for wedged queue auto-recovery");
+      assert.ok(alert.msg.includes("[BUSY_TIMEOUT]"));
+      assert.ok(alert.msg.includes("queue=1p/12a status=running"));
+
+      // Disk logging verification
+      const records = readWatchdogRecoveryRecords({ logPath: recoveryLogPath });
+      assert.equal(records.length, 1);
+      const rec = records[0]!;
+      assert.equal(rec.repo, "test-repo");
+      assert.equal(rec.kind, "queue");
+      assert.equal(rec.rootCause, "BUSY_TIMEOUT");
+      assert.equal(rec.agentDiagnostics?.agentId, "agent-wedged");
+      assert.equal(rec.agentDiagnostics?.role, "orchestrator");
+      assert.equal(rec.agentDiagnostics?.status, "running");
+      assert.equal(rec.queueTelemetry.queueDepth, 1);
+      assert.equal(rec.queueTelemetry.deliveryAttemptCount, 12);
+      assert.equal(rec.recoveryActionResult.action, "reload");
+      assert.equal(rec.recoveryActionResult.ok, true);
+    });
+
+    it("logs structured recovery telemetry and sends enriched alert on wedged queue with TURN_LOCK", async () => {
+      (router as any).busyAttempts.set("test-repo", 12);
+      (router as any).queues.set("test-repo", [
+        { id: "m1", key: "test-repo", msg: "msg 1", ts: 1729290000000 },
+        { id: "m2", key: "test-repo", msg: "msg 2", ts: 1729290000000 },
+        { id: "m3", key: "test-repo", msg: "msg 3", ts: 1729290000000 },
+      ]);
+
+      const audit = await router.runWatchdogAudit({
+        orchestratorRecords: [{ key: "test-repo", agentId: "agent-turn-lock" }],
+        agentMap: new Map([
+          [
+            "agent-turn-lock",
+            {
+              id: "agent-turn-lock",
+              role: "orchestrator",
+              status: "error",
+              lastError: "A foreground turn is already active",
+              labels: { role: "orchestrator" },
+            },
+          ],
+        ]),
+        deliver: fakeDeliver,
+        reloadAgent: fakeReload,
+        recoveryLogPath,
+      });
+
+      assert.ok(audit.anomalies.some((a) => a.type === "QUEUE_WEDGED" && a.key === "test-repo"));
+      assert.ok(reloaded.includes("agent-turn-lock"));
+
+      const alert = delivered.find((d) => d.id === frontDeskId && d.msg.includes("Auto-recovered wedged queue"));
+      assert.ok(alert, "expected frontdesk alert for wedged queue auto-recovery");
+      assert.ok(alert.msg.includes("[TURN_LOCK]"));
+      assert.ok(alert.msg.includes("queue=3p/12a status=error"));
+
+      const records = readWatchdogRecoveryRecords({ logPath: recoveryLogPath });
+      assert.equal(records.length, 1);
+      const rec = records[0]!;
+      assert.equal(rec.repo, "test-repo");
+      assert.equal(rec.kind, "queue");
+      assert.equal(rec.rootCause, "TURN_LOCK");
+      assert.equal(rec.agentDiagnostics?.agentId, "agent-turn-lock");
+      assert.equal(rec.agentDiagnostics?.lockState, true);
+      assert.equal(rec.agentDiagnostics?.status, "error");
+      assert.equal(rec.queueTelemetry.queueDepth, 3);
+      assert.equal(rec.queueTelemetry.deliveryAttemptCount, 12);
+      assert.equal(rec.recoveryActionResult.action, "reload");
+      assert.equal(rec.recoveryActionResult.ok, true);
+    });
+
+    it("logs structured recovery telemetry and sends enriched alert on agent error auto-recovery", async () => {
+      const map = new Map<string, any>([
+        [
+          "agent-crash-err",
+          {
+            id: "agent-crash-err",
+            role: "orchestrator",
+            status: "error",
+            lastError: "fatal connection crash during turn",
+            labels: { role: "orchestrator" },
+          },
+        ],
+      ]);
+
+      await router.runWatchdogAudit({
+        orchestratorRecords: [{ key: "test-repo", agentId: "agent-crash-err" }],
+        agentMap: map,
+        deliver: fakeDeliver,
+        reloadAgent: fakeReload,
+        recoveryLogPath,
+      });
+
+      assert.ok(reloaded.includes("agent-crash-err"));
+
+      const alert = delivered.find((d) => d.id === frontDeskId && d.msg.includes("Auto-recovered orchestrator for test-repo"));
+      assert.ok(alert, "expected frontdesk alert for agent auto-recovery");
+      assert.ok(alert.msg.includes("Auto-recovered orchestrator for test-repo (agent-c) by reloading agent"));
+      assert.ok(alert.msg.includes("status=error"));
+
+      const records = readWatchdogRecoveryRecords({ logPath: recoveryLogPath });
+      assert.equal(records.length, 1);
+      const rec = records[0]!;
+      assert.equal(rec.repo, "test-repo");
+      assert.equal(rec.kind, "agent");
+      assert.equal(rec.agentDiagnostics?.agentId, "agent-crash-err");
+      assert.equal(rec.agentDiagnostics?.status, "error");
+      assert.equal(rec.recoveryActionResult.action, "reload");
+      assert.equal(rec.recoveryActionResult.ok, true);
+    });
+
+    it("classifies and logs SOCKET_HANG when agent lastError is broken socket or reset", async () => {
+      const map = new Map<string, any>([
+        [
+          "agent-sock-err",
+          {
+            id: "agent-sock-err",
+            role: "orchestrator",
+            status: "error",
+            lastError: "read ECONNRESET - connection reset by peer",
+            labels: { role: "orchestrator" },
+          },
+        ],
+      ]);
+
+      await router.runWatchdogAudit({
+        orchestratorRecords: [{ key: "test-repo", agentId: "agent-sock-err" }],
+        agentMap: map,
+        deliver: fakeDeliver,
+        reloadAgent: fakeReload,
+        recoveryLogPath,
+      });
+
+      const records = readWatchdogRecoveryRecords({ logPath: recoveryLogPath });
+      assert.equal(records.length, 1);
+      assert.equal(records[0]!.rootCause, "SOCKET_HANG");
+      assert.equal(records[0]!.recoveryActionResult.ok, true);
+    });
+
+    it("classifies and logs DAEMON_DISCONNECT when agent lastError is connection refused", async () => {
+      const map = new Map<string, any>([
+        [
+          "agent-daemon-err",
+          {
+            id: "agent-daemon-err",
+            role: "orchestrator",
+            status: "error",
+            lastError: "connect ECONNREFUSED 127.0.0.1:6767",
+            labels: { role: "orchestrator" },
+          },
+        ],
+      ]);
+
+      await router.runWatchdogAudit({
+        orchestratorRecords: [{ key: "test-repo", agentId: "agent-daemon-err" }],
+        agentMap: map,
+        deliver: fakeDeliver,
+        reloadAgent: fakeReload,
+        recoveryLogPath,
+      });
+
+      const records = readWatchdogRecoveryRecords({ logPath: recoveryLogPath });
+      assert.equal(records.length, 1);
+      assert.equal(records[0]!.rootCause, "DAEMON_DISCONNECT");
+      assert.equal(records[0]!.recoveryActionResult.ok, true);
+    });
+
+    it("records failure in recoveryActionResult when reloadAgent fails", async () => {
+      const map = new Map<string, any>([
+        [
+          "agent-fail-reload",
+          {
+            id: "agent-fail-reload",
+            role: "orchestrator",
+            status: "error",
+            lastError: "fatal worker crash",
+            labels: { role: "orchestrator" },
+          },
+        ],
+      ]);
+
+      await router.runWatchdogAudit({
+        orchestratorRecords: [{ key: "test-repo", agentId: "agent-fail-reload" }],
+        agentMap: map,
+        deliver: fakeDeliver,
+        reloadAgent: async () => ({ ok: false, error: "daemon died" }),
+        recoveryLogPath,
+      });
+
+      const records = readWatchdogRecoveryRecords({ logPath: recoveryLogPath });
+      assert.equal(records.length, 1);
+      assert.equal(records[0]!.recoveryActionResult.action, "reload");
+      assert.equal(records[0]!.recoveryActionResult.ok, false);
+    });
   });
 });
 
