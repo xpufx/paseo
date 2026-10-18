@@ -10,9 +10,8 @@
  * three plugins (#609), a hoisted `vitest` in plugin-updates (#613).
  *
  * Scope: every package.json under the repo root outside an ignored directory.
- * Symlinked plugin directories are skipped — `plugins/uppidi-forge` is an alias
- * symlink to `plugins/uppidi-fleet`, so following it would check one manifest
- * twice under two paths and report findings under the alias.
+ * Symlinked plugin directories are skipped, so following an alias would check
+ * one manifest twice under two paths.
  *
  * Deliberately NOT checked: whether a *declared* dependency is exact-pinned.
  * Every `typescript` and `vitest` in this repo is `^`-ranged, so enforcing

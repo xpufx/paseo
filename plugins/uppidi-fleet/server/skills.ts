@@ -12,8 +12,8 @@ import type {
   UppidiSkillsOutput,
 } from "../shared/contracts.js";
 
-/** Plugin ids this plugin may be installed under (`uppidi-forge` is an alias). */
-const SELF_PLUGIN_IDS = ["uppidi-fleet", "uppidi-forge"];
+/** Plugin ids this plugin may be installed under. */
+const SELF_PLUGIN_IDS = ["uppidi-fleet"];
 
 /** Bundled defaults live under `<pluginRoot>/examples/skills`. */
 const BUNDLED_SKILLS_DIR = path.join("examples", "skills");

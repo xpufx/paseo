@@ -329,7 +329,7 @@ test("the guard reads test and fixture files only", () => {
 });
 
 test("a committed symlinked plugin is scanned once, not twice", () => {
-  // `plugins/uppidi-forge` is a committed alias for `uppidi-fleet`. Following it
+  // `plugins/uppidi-forge` was a committed alias for `uppidi-fleet`. Following it
   // would report every finding in the fleet tree twice under two paths, which
   // trains people to read past duplicates -- and the day a real finding lands,
   // the second copy is the one they scroll past.
@@ -340,7 +340,7 @@ test("a committed symlinked plugin is scanned once, not twice", () => {
   assert.deepEqual(
     FIXTURE_FILES.filter((f) => f.startsWith("plugins/uppidi-forge/")),
     [],
-    "plugins/uppidi-forge is a symlink alias and must stay out of the sweep",
+    "plugins/uppidi-forge must stay out of the sweep",
   );
 });
 

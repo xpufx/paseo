@@ -584,7 +584,7 @@ helper kit. This is the blind spot that must not grow:
 | mcp-tools | `no-bespoke-react-native-interactions` | `client/host-ui.tsx` local presentation layer |
 | slash, demo, plugin-updates, wellbeing | `no-bespoke-react-native-interactions` | local composition |
 | x-comms | `no-bare-react-native-ui`, `no-bespoke-react-native-interactions` | local composition |
-| twofado, uppidi-fleet, uppidi-forge | `no-bare-react-native-ui`, `no-bespoke-react-native-interactions` | local composition |
+| twofado, uppidi-fleet | `no-bare-react-native-ui`, `no-bespoke-react-native-interactions` | local composition |
 | worktree-install | `no-bare-react-native-ui`, `no-bespoke-react-native-interactions` | deliberate non-shared-kit proof (#684 era) |
 
 Implication for the guard: because every plugin already owns a raw

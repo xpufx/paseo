@@ -11,7 +11,7 @@ export function parseGatewayPort(url: string, defaultPort = 37374): number {
     const parsed = new URL(url);
     if (parsed.port) {
       const p = parseInt(parsed.port, 10);
-      if (!isNaN(p) && p > 0) return p;
+      if (!isNaN(p) && p >= 0) return p;
     }
   } catch {
     // ignore

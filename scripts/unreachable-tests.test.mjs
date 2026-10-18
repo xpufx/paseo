@@ -28,11 +28,8 @@
  * and a suite named either way is equally runnable.
  *
  * Files are enumerated with `git ls-files`, never by walking the filesystem.
- * Walking skips symlinked directories, and `plugins/uppidi-forge` is a tracked
- * symlink to `plugins/uppidi-fleet`; a `find`-based count would either miss
- * the alias or double-count the fifteen fleet suites under it. `git ls-files`
- * reports the symlink as one entry and never descends into it, which is the
- * behaviour we want: the suites are seen once, under their real path.
+ * Walking skips symlinked directories; `git ls-files` reports tracked files
+ * directly so suites are seen once, under their real path.
  *
  * ## No directory is excluded
  *
@@ -552,11 +549,10 @@ test("test discovery is not vacuous", () => {
     assert.ok(ownerOf(file) !== null, `${file} has no owning package.json, so nothing could name it`);
   }
 
-  // The `plugins/uppidi-forge` symlink to `plugins/uppidi-fleet` must not make
-  // the fleet's suites appear twice, and must not hide them.
+  // Verify no suite was discovered under plugins/uppidi-forge.
   assert.ok(
     !testFiles.some((file) => file.startsWith("plugins/uppidi-forge/")),
-    "a suite was discovered under the plugins/uppidi-forge symlink alias; `git ls-files` should never descend into it",
+    "a suite was discovered under plugins/uppidi-forge",
   );
   assert.ok(
     testFiles.filter((file) => file === "plugins/uppidi-fleet/client/entry.test.ts").length === 1,
