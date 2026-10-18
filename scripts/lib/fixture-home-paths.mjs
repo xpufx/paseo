@@ -262,9 +262,8 @@ export function isDocPath(relPath) {
 
 function walk(dir, acc) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    // `plugins/uppidi-forge` is a committed alias symlink to `uppidi-fleet`.
-    // Following it would scan one tree twice under two paths and report every
-    // finding twice.
+    // Symlinks are skipped so an alias is not scanned twice under two paths and
+    // every finding reported twice.
     if (entry.isSymbolicLink()) continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {

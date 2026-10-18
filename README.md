@@ -27,7 +27,6 @@ Monorepo for xpufx [Paseo](https://github.com/getpaseo/paseo) tooling: shared ru
 | Plugin | Description |
 |--------|-------------|
 | [`plugins/uppidi-fleet/`](plugins/uppidi-fleet/) | Fleet supervision, watchdog auto-recovery, and multi-repo orchestrator coordination. Turns a Forgejo/Gitea board into an autonomous engineering fleet control plane. |
-| [`plugins/uppidi-forge/`](plugins/uppidi-forge/) | Embedded Forgejo integration surface and ticket management. *(Symlink → `uppidi-fleet`)* |
 | [`plugins/top/`](plugins/top/) | Live host system resource monitor, timeline telemetry, and metric pills. |
 | [`plugins/x-comms/`](plugins/x-comms/) | Cross-daemon agent conversation mesh and two-tier peer discovery. |
 | [`plugins/forges/`](plugins/forges/) | Forge/Gitea-family issue tracker and workflow integration — list issues, read bodies and comments, change labels, post comments from inside Paseo. |

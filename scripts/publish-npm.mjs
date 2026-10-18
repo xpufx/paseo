@@ -94,10 +94,10 @@ export function parseArgs(argv) {
 export function pluginIds() {
   return fs
     .readdirSync(PLUGIN_DIR, { withFileTypes: true })
-    // Symlinked plugin aliases (e.g. `uppidi-forge` -> `uppidi-fleet`) are not
-    // distinct publishable packages. `isDirectory()` is already false for a
-    // symlink under `withFileTypes`, but that is incidental: skip links
-    // explicitly so the alias can never be staged and published twice.
+    // Symlinked plugin aliases are not distinct publishable packages.
+    // `isDirectory()` is already false for a symlink under `withFileTypes`, but
+    // that is incidental: skip links explicitly so an alias can never be staged
+    // and published twice.
     .filter((e) => !e.isSymbolicLink() && e.isDirectory())
     .filter((e) => fs.existsSync(path.join(PLUGIN_DIR, e.name, "paseo-plugin.json")))
     .filter((e) => {

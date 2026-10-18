@@ -97,9 +97,9 @@ check(
   JSON.stringify(ids) === JSON.stringify(EXPECTED_PLUGINS),
   `expected ${EXPECTED_PLUGINS.join(",")} — got ${ids.join(",")}`
 );
-// `uppidi-forge` is a committed symlink alias of `uppidi-fleet`, not a
+// `uppidi-forge` was a legacy symlink alias of `uppidi-fleet`, not a
 // distinct package. Publishing it would ship the same plugin under two names.
-check("excludes the uppidi-forge symlink alias", !ids.includes("uppidi-forge"));
+check("excludes the uppidi-forge alias", !ids.includes("uppidi-forge"));
 check("excludes private plugins like worktree-install", !ids.includes("worktree-install"));
 check("discovers the plugins that matter", ids.includes("top") && ids.includes("mcp-tools") && ids.includes("uppidi-fleet") && ids.includes("wellbeing"));
 const top = manifestFor("top");

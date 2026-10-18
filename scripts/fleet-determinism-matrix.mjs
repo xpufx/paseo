@@ -76,9 +76,8 @@ const SOURCE_EXT = /\.(ts|tsx|mjs)$/;
 /**
  * Tracked files under the plugin, by layer. `git ls-files` rather than a
  * filesystem walk for the reason scripts/unreachable-tests.test.mjs gives: the
- * walk skips symlinked directories, and `plugins/uppidi-forge` is a tracked
- * symlink to this plugin, so a walk-based count would either miss the alias or
- * double-count every file under it.
+ * walk skips symlinked directories, so a walk-based count would either miss
+ * or double-count files under symlinks.
  */
 function trackedFiles() {
   const out = execFileSync("git", ["ls-files", PLUGIN], {
@@ -470,6 +469,29 @@ const PARTS = [
       [`audit-receipts.ts:420-437`, "the record-audit RPC handler stamps the envelope and appends"],
     ],
     note: "Append-only stores and a pure CQRS projection. No input from any live model: the receipts are what the orchestrator reported, read back verbatim.",
+  },
+  {
+    file: `${PLUGIN}/server/watchdog-recovery.ts`,
+    part: "Structured watchdog auto-recovery telemetry logging and root cause classification (#1429)",
+    layer: "server",
+    label: DETERMINISTIC,
+    anchors: {
+      exports: [
+        "TURN_LOCK_MARKERS",
+        "classifyRecoveryRootCause",
+        "setWatchdogRecoveriesPathForTest",
+        "defaultWatchdogRecoveriesPath",
+        "appendWatchdogRecoveryRecord",
+        "readWatchdogRecoveryRecords",
+        "formatWatchdogRecoveryAlert",
+      ],
+    },
+    evidence: [
+      [`watchdog-recovery.ts:73-135`, "pure pattern matching over error text and status strings into standard taxonomy"],
+      [`watchdog-recovery.ts:189-199`, "appends immutable JSONL telemetry records to scoped plugin-data file"],
+      [`watchdog-recovery.ts:214-233`, "deterministic alert string interpolation for auto-recovery telemetry"],
+    ],
+    note: "Pure taxonomy classification and append-only JSONL recovery telemetry logging in scoped plugin storage. Deterministic formatting and IO with zero inference.",
   },
   {
     file: `${PLUGIN}/server/telemetry.ts`,

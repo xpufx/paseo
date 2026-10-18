@@ -45,9 +45,8 @@ const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HELPER_VERSION = readHelperVersion(path.join(REPO_ROOT, HELPER_ROOT));
 
 /**
- * Plugins discovered on disk, minus the committed alias symlink
- * `plugins/uppidi-forge -> uppidi-fleet`. Following it would evaluate one tree
- * twice under two names and report its findings twice.
+ * Plugins discovered on disk. Symlinks are skipped so following an alias would
+ * not evaluate one tree twice under two names and report its findings twice.
  */
 const PLUGIN_DIRS = fs
   .readdirSync(path.join(REPO_ROOT, "plugins"), { withFileTypes: true })
@@ -116,7 +115,7 @@ test("plugin discovery is not vacuous: every workspace plugin is evaluated", () 
   }
   assert.ok(
     !PLUGIN_DIRS.includes("uppidi-forge"),
-    "plugins/uppidi-forge is a symlink alias of uppidi-fleet and must stay out of the sweep",
+    "plugins/uppidi-forge must stay out of the sweep",
   );
 });
 

@@ -242,7 +242,7 @@ The complete documentation suite for building UI surfaces, components, forms, pi
 
 ## 9. Hook Router Discovery & Front Desk Registration
 
-The bundled Forgejo webhook router ([`plugins/uppidi-forge/server/hook-router.ts`](../plugins/uppidi-forge/server/hook-router.ts)) is a plain Node `http` server started by the plugin's daemon subprocess. Agents interacting with the Forgejo fleet must be able to find it and register themselves with it. Full router architecture, queueing, and security notes live in [`plugins/uppidi-forge/README.md` §7](../plugins/uppidi-forge/README.md#7-the-webhook-router-backend-daemon); this section covers only **self-discovery and registration** for agents.
+The bundled Forgejo webhook router ([`plugins/uppidi-fleet/server/hook-router.ts`](../plugins/uppidi-fleet/server/hook-router.ts)) is a plain Node `http` server started by the plugin's daemon subprocess. Agents interacting with the Forgejo fleet must be able to find it and register themselves with it. Full router architecture, queueing, and security notes live in [`plugins/uppidi-fleet/README.md` §7](../plugins/uppidi-fleet/README.md#7-the-webhook-router-backend-daemon); this section covers only **self-discovery and registration** for agents.
 
 > [!IMPORTANT]
 > **Do not assume loopback.** The router binds to whatever `hookHost` is configured, which is frequently a LAN interface, not `127.0.0.1`. Always resolve the bind address first (below). `127.0.0.1:<port>` works **only if** the router is actually bound to loopback (`hookHost` = `127.0.0.1`, or a wildcard bind covering loopback); otherwise curl fails with connection refused.
@@ -287,7 +287,7 @@ curl -fsS "http://<hook-host>:<port>/enrolled"  # canonical enrolled repository 
 If `/health` times out on your first guess, do not retry against loopback blindly — **ask the operator** which interface the router binds, or call `uppidi-fleet.hook.info` and use the returned `url`.
 
 > [!NOTE]
-> **Operators/debugging only — agents must not parse these files.** The router's bind address *does* originate from `hookHost` / `hookPort` in `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json`. These are **writable runtime state**, not a discovery API: reading them races with live reconfiguration, and an agent that can write them can silently redirect the router. The plugin runtime ID is `uppidi-fleet` (declared in `paseo-plugin.json`), so the data directory is `uppidi-fleet` even though the source tree directory is `uppidi-forge`. Environment overrides (`FORGE_HOOK_HOST`, `FORGE_HOOK_PORT` / `HOOK_PORT`) are read by the plugin subprocess at startup. Use the RPC/`GET /info` path instead.
+> **Operators/debugging only — agents must not parse these files.** The router's bind address *does* originate from `hookHost` / `hookPort` in `~/.paseo/plugin-data/xpufx/uppidi-fleet/settings.json`. These are **writable runtime state**, not a discovery API: reading them races with live reconfiguration, and an agent that can write them can silently redirect the router. The plugin runtime ID is `uppidi-fleet` (declared in `paseo-plugin.json`), so the data directory is `uppidi-fleet`. Environment overrides (`FORGE_HOOK_HOST`, `FORGE_HOOK_PORT` / `HOOK_PORT`) are read by the plugin subprocess at startup. Use the RPC/`GET /info` path instead.
 
 ### 9.2 Offline registry files (operator-readable state)
 
