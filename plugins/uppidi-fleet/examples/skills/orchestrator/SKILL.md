@@ -298,12 +298,11 @@ Board ranking, triage, and dispatch are the Orchestrator's responsibility (worke
 
 1. **Deterministic Baseline (`GET /board/sweep`)**:
    - Query `GET <hook-endpoint>/board/sweep?repo=<repoKey>` (using curl / fetch, e.g. `curl -s "http://127.0.0.1:8099/board/sweep?repo=<repoKey>&format=markdown"` or json) as the primary baseline. The hook router runs the native board sweep, ranking open issues by `(tier, urgency, effort, age)` and returning actionable candidates; use `role=orchestrator` (the default) when sweeping for dispatch.
-   - Note: `forgejo-issues-check` is the legacy CLI wrapper.
    - Respect the output ordering as the operational baseline.
 
 2. **Agent Reasoning & Contextual Augmentation**:
-   - **Do NOT blind-trust a "0 items" return from the script**: Deterministic checks evaluate labels and comment deltas, but cannot infer unstated context or emergent priorities.
-   - When the script returns 0 items or when higher-level user directives take precedence, apply agent reasoning:
+   - **Do NOT blind-trust a "0 items" return from `GET /board/sweep`**: Deterministic checks evaluate labels and comment deltas, but cannot infer unstated context or emergent priorities.
+   - When the sweep returns 0 items or when higher-level user directives take precedence, apply agent reasoning:
      - Check discussions (`kind/discussion`) with operator guidance to shape into actionable specifications (`spec/0-needed` → `spec/1-checklist`).
      - Check tickets unblocked by recent commits or sibling issues (`dep/blocked`).
      - Advance tickets blocked on clarifying questions.

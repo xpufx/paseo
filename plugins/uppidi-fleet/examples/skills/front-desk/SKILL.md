@@ -330,7 +330,7 @@ Each rule is verified against this repo's code or the orchestrator skill.
 - **Never relay a `/frontdesk` request the hook already delivered.** The hook
   suppresses the orchestrator for those events precisely to avoid duplicate
   wakes (orchestrator skill §13).
-- **Never treat a bare `0 items` from `forgejo-issues-check` as "board is
+- **Never treat a bare `0 items` from `GET /board/sweep` as "board is
   empty"** — labels and comment deltas cannot see unstated context. Reason
   about the board yourself (orchestrator skill §12).
 - **Never spawn into a checkout the operator is hands-on in.** Queue instead.
@@ -370,7 +370,7 @@ Each rule is verified against this repo's code or the orchestrator skill.
 | --- | --- |
 | `scripts/frontdesk-info` | **Run this first.** Deterministic read-only fleet briefing. `--json` for machine use. |
 | `scripts/agent-health-check` | Fleet health taxonomy (wedged, quota, ghosting, amnesia). `--json`. Exits `1` on findings, `0` healthy, `2` daemon unreachable. |
-| `scripts/forgejo-issues-check` | Deterministic board ranking by `(tier, urgency, effort, age)`. `--role orchestrator\|worker`. Stale-WIP recovery sweeps by default — use `--dry-run` to preview. |
+| `GET /board/sweep` | Hook router endpoint for deterministic board ranking by `(tier, urgency, effort, age)`. Query with `?repo=<repo>&role=orchestrator\|worker`. Stale-WIP recovery sweeps by default. |
 | `teax` | The only Forgejo CLI for agents: envelope stamping, label normalization, and label-aware list output. Use it for every issue, PR, label, and comment operation. |
 | `paseo ls --json` / `paseo workspace ls --json` | Live agents / workspaces. |
 | `paseo send --no-wait <id> <msg>` | Deliver a message without waiting for the target turn to complete. |
@@ -401,7 +401,7 @@ Each rule is verified against this repo's code or the orchestrator skill.
 `POST /hook` (Forgejo delivery) · `POST /frontdesk` · `GET /frontdesk` ·
 `POST /frontdesk-handoff` · `POST|GET|DELETE /orchestrator(s)` ·
 `POST /orchestrators/prune` · `POST /orchestrators/spawn` · `GET /status` · `GET /queues` ·
-`POST /queue/pause|resume|drain`.
+`POST /queue/pause|resume|drain` · `GET /board/sweep`.
 
 ### 10.4 Label namespaces (`forgejo/agent-workflow.yaml`)
 Every scope below is `exclusive: true` — applying one evicts its siblings at the
