@@ -549,10 +549,10 @@ test("no paseo-plugin-helper/client imports remain in the plugin", () => {
   );
 });
 
-test("no paseo-plugin-helper/ui imports remain in the plugin", () => {
-  // #937 / #924: the helper ui/ entry is deleted; plugin UI is local
-  // composition over the host SDK now. Vendored copies are refreshed by
-  // vendor-sync and are not plugin imports.
+test("no paseo-plugin-helper/ui imports remain in the plugin (except PluginReloadBanner, #1343)", () => {
+  // #937 / #924: the helper ui/ entry was replaced; plugin UI is local
+  // composition over the host SDK now. #1343 introduced PluginReloadBanner
+  // in paseo-plugin-helper/ui as the standard client reload primitive.
   const clientDir = path.join(__dirname, "..", "client");
   const offenders = fs
     .readdirSync(clientDir, { recursive: true })
@@ -563,15 +563,23 @@ test("no paseo-plugin-helper/ui imports remain in the plugin", () => {
         !entry.split(path.sep).includes("vendor") &&
         !/\.test\.(ts|tsx)$/.test(entry),
     )
-    .filter((entry) =>
-      /from\s+["']paseo-plugin-helper\/ui["']/.test(
-        fs.readFileSync(path.join(clientDir, entry), "utf8"),
-      ),
-    );
+    .filter((entry) => {
+      const content = fs.readFileSync(path.join(clientDir, entry), "utf8");
+      const disallowed = content
+        .split("\n")
+        .filter((line) => /from\s+["']paseo-plugin-helper\/ui["']/.test(line))
+        .filter(
+          (line) =>
+            !/import\s*\{\s*PluginReloadBanner\s*\}\s*from\s+["']paseo-plugin-helper\/ui["']/.test(
+              line,
+            ),
+        );
+      return disallowed.length > 0;
+    });
   assert.deepEqual(
     offenders,
     [],
-    `paseo-plugin-helper/ui imports remain: ${offenders.join(", ")}`,
+    `disallowed paseo-plugin-helper/ui imports remain: ${offenders.join(", ")}`,
   );
 });
 

@@ -46,6 +46,10 @@ export default defineConfig({
         root,
         "../../packages/paseo-plugin-helper/src/lifecycle/index.ts",
       ),
+      "paseo-plugin-helper/ui": path.resolve(
+        root,
+        "../../packages/paseo-plugin-helper/src/ui/index.ts",
+      ),
     },
   },
   test: {

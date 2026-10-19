@@ -17,7 +17,8 @@ import {
   HostThemeProvider,
   HostToggle,
 } from "./host-ui";
-import { usePluginSettings } from "paseo-plugin-helper/core";
+import { usePluginReloadNotice, usePluginSettings } from "paseo-plugin-helper/core";
+import { PluginReloadBanner } from "paseo-plugin-helper/ui";
 import { formatBytes, formatUptime } from "paseo-plugin-helper/shared";
 import { PermissionAuditView } from "./vendor/permission-audit";
 import {
@@ -56,6 +57,7 @@ export function TopDashboardSurface(props: PluginSurfaceProps) {
   const { settings, updateSettings, resetSettings } = usePluginSettings(
     topSettingsContract,
   );
+  const { isReloaded } = usePluginReloadNotice("top");
   // The dashboard surface carries no workspace scope, so it reads the
   // host-wide entry of the same shared snapshot path the pill and modal use
   // per workspace (see useTopResourceQuery).
@@ -78,6 +80,7 @@ export function TopDashboardSurface(props: PluginSurfaceProps) {
     <HostThemeProvider theme={theme}>
       <HostLayoutProvider layout={layout}>
         <View style={[styles.root, { backgroundColor: colors.surface0 }]}>
+          {isReloaded && <PluginReloadBanner pluginId="top" />}
           {/*
            * The sidebar host supplies no scroller for plugin surfaces, so the
            * dashboard owns exactly one: HostScroll below the pinned tab
