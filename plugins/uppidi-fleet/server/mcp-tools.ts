@@ -10,11 +10,18 @@ import {
   runIssuesCheck,
   renderIssuesCheckJson,
   renderIssuesCheckMarkdown,
+  renderDecisionTraceComment,
   ISSUES_CHECK_DEFAULT_HOSTNAME,
   ISSUES_CHECK_DEFAULT_REPO,
   ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS,
   type IssuesCheckRole,
+  type IssuesCheckIo,
+  type DecisionTrace,
 } from "./issues-check.js";
+import {
+  forgejoApiRequest,
+  resolveForgejoToken,
+} from "./forgejo-api.js";
 import {
   HookRouter,
   getActiveHookRouter,
@@ -87,6 +94,16 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
           type: "string",
           description: "Playbook profile name (e.g. Light, Medium)",
         },
+        trace: {
+          type: "boolean",
+          description: "Include structured per-issue decision traces in output",
+          default: false,
+        },
+        diagnosticComment: {
+          type: "boolean",
+          description: "Post decision breakdown comments directly to evaluated issue timelines",
+          default: false,
+        },
       },
     },
   },
@@ -155,6 +172,16 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
         profile: {
           type: "string",
           description: "Playbook profile name (e.g. Light, Medium)",
+        },
+        trace: {
+          type: "boolean",
+          description: "Include structured per-issue decision traces in output",
+          default: false,
+        },
+        diagnosticComment: {
+          type: "boolean",
+          description: "Post decision breakdown comments directly to evaluated issue timelines",
+          default: false,
         },
       },
     },
@@ -368,9 +395,16 @@ export interface FleetToolCallResult {
 /**
  * Execute fleet_check_board with validated parameters.
  */
-export async function executeFleetCheckBoard(args: Record<string, unknown> = {}): Promise<FleetToolCallResult> {
+export async function executeFleetCheckBoard(
+  args: Record<string, unknown> = {},
+  io?: IssuesCheckIo,
+): Promise<FleetToolCallResult> {
   const hostname = typeof args.hostname === "string" && args.hostname.trim() ? args.hostname.trim() : ISSUES_CHECK_DEFAULT_HOSTNAME;
-  const repo = typeof args.repo === "string" && args.repo.trim() ? args.repo.trim() : ISSUES_CHECK_DEFAULT_REPO;
+  const rawRepo = typeof args.repo === "string" && args.repo.trim() ? args.repo.trim() : ISSUES_CHECK_DEFAULT_REPO;
+  const parts = rawRepo.split("/").filter(Boolean);
+  const repo = parts.length > 2 ? parts.slice(-2).join("/") : parts.join("/");
+  const targetHost = parts.length > 2 ? parts[0] : hostname;
+
   const rawRole = typeof args.role === "string" ? args.role.trim() : "orchestrator";
   const validRoles = ["orchestrator", "coding-agent", "worker", "coding_worker"] as const;
   if (!validRoles.includes(rawRole as (typeof validRoles)[number])) {
@@ -392,12 +426,16 @@ export async function executeFleetCheckBoard(args: Record<string, unknown> = {})
   }
   const dryRun = Boolean(args.dryRun);
   const json = Boolean(args.json);
+  const trace = Boolean(args.trace);
+  const diagnosticComment = Boolean(args.diagnosticComment);
   const stage = typeof args.stage === "string" && args.stage.trim() ? (args.stage.trim() as PlaybookStageName) : undefined;
   const profile = typeof args.profile === "string" && args.profile.trim() ? args.profile.trim() : undefined;
 
   try {
+    const router = getActiveHookRouter();
+    const effectiveIo = io ?? router?.issuesCheckIo;
     const outcome = await runIssuesCheck({
-      hostname,
+      hostname: targetHost,
       repo,
       role,
       force,
@@ -406,11 +444,46 @@ export async function executeFleetCheckBoard(args: Record<string, unknown> = {})
       dryRun,
       stage,
       profile,
+      io: effectiveIo,
     });
 
-    const text = json
-      ? renderIssuesCheckJson(outcome)
-      : renderIssuesCheckMarkdown(outcome, { hostname, repo, role, staleWipHours, dryRun });
+    if (diagnosticComment && outcome.decisionTraces && outcome.decisionTraces.length > 0 && !dryRun) {
+      const token = await resolveForgejoToken(targetHost);
+      for (const t of outcome.decisionTraces) {
+        try {
+          await forgejoApiRequest(
+            "POST",
+            `/api/v1/repos/${repo}/issues/${t.number}/comments`,
+            { body: renderDecisionTraceComment(t) },
+            { host: targetHost, token },
+          );
+        } catch {
+          // non-fatal
+        }
+      }
+    }
+
+    let text: string;
+    if (json) {
+      if (trace) {
+        const payload: Record<string, unknown> = {
+          timestamp: new Date().toISOString(),
+          stale_wip_recovery: outcome.staleWipRecovery,
+          ranked_candidates: outcome.rankedCandidates,
+          decision_traces: outcome.decisionTraces,
+        };
+        text = JSON.stringify(payload, null, 2);
+      } else {
+        text = renderIssuesCheckJson(outcome);
+      }
+    } else {
+      let md = renderIssuesCheckMarkdown(outcome, { hostname: targetHost, repo, role, staleWipHours, dryRun });
+      if (trace && outcome.decisionTraces && outcome.decisionTraces.length > 0) {
+        md += "\n\n## Decision Traces\n\n";
+        md += outcome.decisionTraces.map((t) => renderDecisionTraceComment(t)).join("\n\n");
+      }
+      text = md;
+    }
 
     return {
       content: [{ type: "text", text }],
@@ -542,6 +615,8 @@ export async function executeFleetBoardSweep(
   args: Record<string, unknown> = {},
 ): Promise<FleetToolCallResult> {
   const json = Boolean(args.json);
+  const trace = Boolean(args.trace);
+  const diagnosticComment = Boolean(args.diagnosticComment);
   const stage = typeof args.stage === "string" && args.stage.trim() ? (args.stage.trim() as PlaybookStageName) : undefined;
   const profile = typeof args.profile === "string" && args.profile.trim() ? args.profile.trim() : undefined;
   let parsedRepos: string[] | undefined;
@@ -553,7 +628,12 @@ export async function executeFleetBoardSweep(
 
   try {
     const router = getActiveHookRouter() ?? new HookRouter();
-    const result = await router.runBoardSweep(parsedRepos, undefined, { stage, profile });
+    const result = await router.runBoardSweep(parsedRepos, undefined, {
+      stage,
+      profile,
+      trace,
+      diagnosticComment,
+    });
 
     if (json) {
       return {
@@ -595,6 +675,13 @@ export async function executeFleetBoardSweep(
       lines.push("", "### Errors");
       for (const e of result.errors) {
         lines.push(`- **${e.repo}**: ${e.error}`);
+      }
+    }
+
+    if (trace && result.decisionTraces && result.decisionTraces.length > 0) {
+      lines.push("", "### Decision Traces");
+      for (const t of result.decisionTraces) {
+        lines.push(`- **#${t.number}** (${t.path}): category=\`${t.category}\`, dispatchable=${t.is_dispatchable ? "yes" : "no"} — ${t.reason}`);
       }
     }
 
