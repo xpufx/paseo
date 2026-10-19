@@ -33,6 +33,9 @@ import {
   sweepStatelessIssues,
   renderIssuesCheckMarkdown,
   renderDecisionTraceComment,
+  resolveAlertDestination,
+  type AlertDestination,
+  type DispatchCategory,
   type DecisionTrace,
   type ForgejoComment,
   type ForgejoIssue,
@@ -331,7 +334,7 @@ describe("state/verify vs state/review separation (#1194)", () => {
 
     // state/review: pre-flight PR verification
     const reviewResult = classifyCandidate(testIssue, new Set(["state/review", "attention/orchestrator"]));
-    assert.equal(reviewResult.category, "verification");
+    assert.equal(reviewResult.category, "review");
     assert.equal(reviewResult.is_dispatchable, false);
     assert.match(reviewResult.reason, /pre-flight hygiene audit required/i);
 
@@ -343,13 +346,13 @@ describe("state/verify vs state/review separation (#1194)", () => {
 
     // state/verify with attention/user: awaiting operator verification
     const verifyUserResult = classifyCandidate(testIssue, new Set(["state/verify", "attention/user"]));
-    assert.equal(verifyUserResult.category, "operator_verify");
+    assert.equal(verifyUserResult.category, "verification");
     assert.equal(verifyUserResult.is_dispatchable, false);
     assert.match(verifyUserResult.reason, /awaiting human operator acceptance/i);
 
     // state/verify alone: awaiting operator verification
     const verifyAloneResult = classifyCandidate(testIssue, new Set(["state/verify"]));
-    assert.equal(verifyAloneResult.category, "operator_verify");
+    assert.equal(verifyAloneResult.category, "verification");
     assert.equal(verifyAloneResult.is_dispatchable, false);
     assert.match(verifyAloneResult.reason, /awaiting human operator acceptance/i);
   });
@@ -402,7 +405,7 @@ describe("state/verify vs state/review separation (#1194)", () => {
           title: "PR ready for audit",
           labels: ["state/review"],
           priority_tuple: [2, 2, 2, "2026-10-01"],
-          category: "verification",
+          category: "review",
           is_dispatchable: false,
           reason: "Deliverable complete: worker completed implementation; Orchestrator pre-flight hygiene audit required",
         },
@@ -411,7 +414,7 @@ describe("state/verify vs state/review separation (#1194)", () => {
           title: "Merged deliverable awaiting verification",
           labels: ["state/verify", "attention/user"],
           priority_tuple: [2, 2, 2, "2026-10-01"],
-          category: "operator_verify",
+          category: "verification",
           is_dispatchable: false,
           reason: "Merged deliverable: awaiting human operator acceptance / live verification",
         },
@@ -853,3 +856,388 @@ describe("#1415: decision tree tracing", () => {
     assert.ok(body.includes("#1415"));
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1414: Formal declarative matrix of dispatchability and triage rules
+// ---------------------------------------------------------------------------
+describe("declarative dispatchability and triage matrix (#1414)", () => {
+  interface MatrixFixture {
+    id: string;
+    labels: string[];
+    expectedDispatchable: boolean;
+    expectedCategory: string;
+    expectedAlert: AlertDestination;
+    description: string;
+  }
+
+  const MATRIX_FIXTURES: MatrixFixture[] = [
+    // 1. Hard stop and ignore flags
+    {
+      id: "R-STOP-1",
+      labels: ["flag/stop-work"],
+      expectedDispatchable: false,
+      expectedCategory: "ignored",
+      expectedAlert: "silent",
+      description: "flag/stop-work halts all work immediately",
+    },
+    {
+      id: "R-STOP-1-override-sos",
+      labels: ["flag/stop-work", "priority/sos", "spec/approved"],
+      expectedDispatchable: false,
+      expectedCategory: "ignored",
+      expectedAlert: "silent",
+      description: "flag/stop-work overrides priority/sos",
+    },
+    {
+      id: "R-STOP-2",
+      labels: ["flag/wont-do"],
+      expectedDispatchable: false,
+      expectedCategory: "ignored",
+      expectedAlert: "silent",
+      description: "flag/wont-do marks ticket abandoned",
+    },
+    {
+      id: "R-STOP-3",
+      labels: ["attention/ignore"],
+      expectedDispatchable: false,
+      expectedCategory: "ignored",
+      expectedAlert: "silent",
+      description: "attention/ignore suppresses sweeps",
+    },
+    {
+      id: "R-STOP-4",
+      labels: ["state/done"],
+      expectedDispatchable: false,
+      expectedCategory: "ignored",
+      expectedAlert: "silent",
+      description: "state/done indicates completed issue",
+    },
+
+    // 2. User attention
+    {
+      id: "R-USER-1",
+      labels: ["attention/user"],
+      expectedDispatchable: false,
+      expectedCategory: "user_attention",
+      expectedAlert: "Orchestrator",
+      description: "attention/user gates execution on human input",
+    },
+    {
+      id: "R-USER-1-with-spec",
+      labels: ["attention/user", "spec/approved"],
+      expectedDispatchable: false,
+      expectedCategory: "user_attention",
+      expectedAlert: "Orchestrator",
+      description: "attention/user gates execution even when spec is approved",
+    },
+
+    // 3. Active execution (WIP)
+    {
+      id: "R-WIP-1",
+      labels: ["state/wip"],
+      expectedDispatchable: false,
+      expectedCategory: "wip",
+      expectedAlert: "silent",
+      description: "state/wip indicates active execution by a worker",
+    },
+    {
+      id: "R-WIP-1-with-agent",
+      labels: ["state/wip", "attention/agent"],
+      expectedDispatchable: false,
+      expectedCategory: "wip",
+      expectedAlert: "silent",
+      description: "state/wip is not dispatchable even with attention/agent",
+    },
+
+    // 4. Deliverable PR review
+    {
+      id: "R-REV-1",
+      labels: ["state/review"],
+      expectedDispatchable: false,
+      expectedCategory: "review",
+      expectedAlert: "Orchestrator",
+      description: "state/review indicates implementation complete, PR audit required",
+    },
+    {
+      id: "R-REV-1-with-orchestrator",
+      labels: ["state/review", "attention/orchestrator"],
+      expectedDispatchable: false,
+      expectedCategory: "review",
+      expectedAlert: "Orchestrator",
+      description: "state/review with attention/orchestrator routes to PR audit",
+    },
+
+    // 5. Merged deliverable verification
+    {
+      id: "R-VER-1",
+      labels: ["state/verify", "attention/agent"],
+      expectedDispatchable: true,
+      expectedCategory: "dispatchable",
+      expectedAlert: "silent",
+      description: "state/verify with attention/agent is dispatchable for agent verification",
+    },
+    {
+      id: "R-VER-1-blocked",
+      labels: ["state/verify", "attention/agent", "dep/blocked"],
+      expectedDispatchable: false,
+      expectedCategory: "blocked",
+      expectedAlert: "Orchestrator",
+      description: "state/verify with attention/agent is blocked if dependency is blocked",
+    },
+    {
+      id: "R-VER-2",
+      labels: ["state/verify", "attention/orchestrator"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "state/verify with attention/orchestrator routes to Orchestrator triage",
+    },
+    {
+      id: "R-VER-3",
+      labels: ["state/verify"],
+      expectedDispatchable: false,
+      expectedCategory: "verification",
+      expectedAlert: "Orchestrator",
+      description: "state/verify alone awaits operator/live verification",
+    },
+    {
+      id: "R-VER-3-user",
+      labels: ["state/verify", "attention/user"],
+      expectedDispatchable: false,
+      expectedCategory: "verification",
+      expectedAlert: "Orchestrator",
+      description: "state/verify with attention/user awaits operator verification",
+    },
+
+    // 6. Dependency and upstream blockers
+    {
+      id: "R-DEP-1",
+      labels: ["dep/blocked"],
+      expectedDispatchable: false,
+      expectedCategory: "blocked",
+      expectedAlert: "Orchestrator",
+      description: "dep/blocked stops autonomous dispatch",
+    },
+    {
+      id: "R-DEP-2",
+      labels: ["upstream/blocked"],
+      expectedDispatchable: false,
+      expectedCategory: "blocked",
+      expectedAlert: "Orchestrator",
+      description: "upstream/blocked stops autonomous dispatch",
+    },
+    {
+      id: "R-DEP-1-with-approved-spec",
+      labels: ["dep/blocked", "spec/approved"],
+      expectedDispatchable: false,
+      expectedCategory: "blocked",
+      expectedAlert: "Orchestrator",
+      description: "dep/blocked blocks ticket even if spec is approved",
+    },
+
+    // 7. Scope decomposition
+    {
+      id: "R-DEC-1",
+      labels: ["size/chunk"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "size/chunk requires Orchestrator decomposition",
+    },
+    {
+      id: "R-DEC-2",
+      labels: ["linked/needs-split"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "linked/needs-split requires Orchestrator decomposition",
+    },
+
+    // 8. Pre-code shaping
+    {
+      id: "R-SHP-1",
+      labels: ["spec/needed"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "spec/needed requires Orchestrator technical shaping",
+    },
+
+    // 9. Front Desk routing
+    {
+      id: "R-FD-1",
+      labels: ["attention/frontdesk"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Front Desk",
+      description: "attention/frontdesk routes to Front Desk",
+    },
+    {
+      id: "R-FD-1-with-bug",
+      labels: ["attention/frontdesk", "kind/bug"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Front Desk",
+      description: "attention/frontdesk routes to Front Desk even on bugs",
+    },
+
+    // 10. Orchestrator explicit triage
+    {
+      id: "R-ORCH-1",
+      labels: ["attention/orchestrator"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "attention/orchestrator routes to Orchestrator triage",
+    },
+    {
+      id: "R-ORCH-1-with-spec",
+      labels: ["attention/orchestrator", "spec/approved"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "attention/orchestrator routes to Orchestrator even if spec is approved",
+    },
+
+    // 11. Non-actionable kinds
+    {
+      id: "R-KIND-1",
+      labels: ["kind/discussion"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "kind/discussion requires discussion/triage, not code dispatch",
+    },
+    {
+      id: "R-KIND-2",
+      labels: ["kind/idea"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "kind/idea requires shaping, not code dispatch",
+    },
+
+    // 12. Unshaped vs shaped triage
+    {
+      id: "R-TRI-1",
+      labels: ["state/triage"],
+      expectedDispatchable: false,
+      expectedCategory: "orchestrator_triage",
+      expectedAlert: "Orchestrator",
+      description: "state/triage without spec is unshaped",
+    },
+    {
+      id: "R-TRI-2",
+      labels: ["state/triage", "spec/approved"],
+      expectedDispatchable: true,
+      expectedCategory: "dispatchable",
+      expectedAlert: "silent",
+      description: "state/triage with spec/approved is dispatchable",
+    },
+    {
+      id: "R-TRI-3",
+      labels: ["state/triage", "spec/checklist"],
+      expectedDispatchable: true,
+      expectedCategory: "dispatchable",
+      expectedAlert: "silent",
+      description: "state/triage with spec/checklist is dispatchable",
+    },
+
+    // 13. Dispatchable tasks
+    {
+      id: "R-DISP-1",
+      labels: ["kind/feature", "spec/approved"],
+      expectedDispatchable: true,
+      expectedCategory: "dispatchable",
+      expectedAlert: "silent",
+      description: "kind/feature with spec/approved is dispatchable",
+    },
+    {
+      id: "R-DISP-2",
+      labels: ["kind/bug"],
+      expectedDispatchable: true,
+      expectedCategory: "dispatchable",
+      expectedAlert: "silent",
+      description: "unblocked kind/bug is dispatchable",
+    },
+    {
+      id: "R-DISP-3",
+      labels: ["attention/agent", "kind/feature"],
+      expectedDispatchable: true,
+      expectedCategory: "dispatchable",
+      expectedAlert: "silent",
+      description: "attention/agent on unblocked feature is dispatchable",
+    },
+
+    // 14. SOS Emergency Priority
+    {
+      id: "R-SOS-1",
+      labels: ["priority/sos", "kind/feature", "spec/approved"],
+      expectedDispatchable: true,
+      expectedCategory: "sos",
+      expectedAlert: "Orchestrator",
+      description: "priority/sos on dispatchable feature is dispatchable with category sos",
+    },
+    {
+      id: "R-SOS-2",
+      labels: ["priority/sos", "state/review"],
+      expectedDispatchable: false,
+      expectedCategory: "sos",
+      expectedAlert: "Orchestrator",
+      description: "priority/sos on state/review requires urgent PR audit",
+    },
+    {
+      id: "R-SOS-3",
+      labels: ["priority/sos", "state/verify"],
+      expectedDispatchable: false,
+      expectedCategory: "sos",
+      expectedAlert: "Orchestrator",
+      description: "priority/sos on state/verify requires urgent operator acceptance",
+    },
+    {
+      id: "R-SOS-4",
+      labels: ["priority/sos", "attention/frontdesk"],
+      expectedDispatchable: false,
+      expectedCategory: "sos",
+      expectedAlert: "Front Desk",
+      description: "priority/sos with attention/frontdesk routes emergency alert to Front Desk",
+    },
+  ];
+
+  for (const fixture of MATRIX_FIXTURES) {
+    it(`evaluates ${fixture.id}: ${fixture.description}`, () => {
+      const labelSet = new Set(fixture.labels);
+      const testIssue = issue(1414, { labels: fixture.labels });
+
+      // 1. Dispatchability algebra
+      const isDisp = isDispatchableCandidate(labelSet);
+      assert.equal(
+        isDisp,
+        fixture.expectedDispatchable,
+        `isDispatchableCandidate failed for [${fixture.labels.join(", ")}] (${fixture.description})`,
+      );
+
+      // 2. Candidate classification
+      const classification = classifyCandidate(testIssue, labelSet);
+      assert.equal(
+        classification.is_dispatchable,
+        fixture.expectedDispatchable,
+        `classifyCandidate is_dispatchable failed for [${fixture.labels.join(", ")}]`,
+      );
+      assert.equal(
+        classification.category,
+        fixture.expectedCategory,
+        `classifyCandidate category failed for [${fixture.labels.join(", ")}]`,
+      );
+
+      // 3. Alert destination resolution
+      const alertDest = resolveAlertDestination(classification.category, labelSet);
+      assert.equal(
+        alertDest,
+        fixture.expectedAlert,
+        `resolveAlertDestination failed for [${fixture.labels.join(", ")}]`,
+      );
+    });
+  }
+});
+

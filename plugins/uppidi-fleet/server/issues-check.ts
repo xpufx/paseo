@@ -710,6 +710,14 @@ export function classifyCandidate(
 
   if (labelSet.has("priority/sos")) {
     trace?.guard("sos", "SOS priority (preempt all work)", true);
+    if (setIntersects(labelSet, ["flag/stop-work", "flag/wont-do", "attention/ignore", "state/done"])) {
+      trace?.guard("hard-stop", "Hard stop or ignore flags (overrides SOS)", true);
+      return {
+        category: "ignored",
+        is_dispatchable: false,
+        reason: "Hard stop or ignore flag (priority/sos overridden by stop-work)",
+      };
+    }
     const isDisp = isDispatchableCandidate(labelSet, trace);
     if (labelSet.has("state/review")) {
       trace?.guard("sos-state-review", "SOS deliverable in state/review", true);
@@ -739,21 +747,51 @@ export function classifyCandidate(
     };
   }
 
-  // Follow-up on verified deliverable directed to Orchestrator
-  if (labelSet.has("state/verify") && labelSet.has("attention/orchestrator")) {
-    trace?.guard("verify-orchestrator-followup", "state/verify follow-up directed to Orchestrator", true);
+  // Hard stop or ignore flags
+  const hardStopLabels = ["flag/stop-work", "flag/wont-do", "attention/ignore", "state/done"];
+  const hardStop = setIntersects(labelSet, hardStopLabels);
+  if (hardStop) {
+    const matched = hardStopLabels.filter((l) => labelSet.has(l));
+    trace?.guard("hard-stop", "Hard stop or ignore flags", true, matched);
     return {
-      category: "orchestrator_triage",
+      category: "ignored",
       is_dispatchable: false,
-      reason: "Requires Orchestrator triage / investigation (state/verify follow-up directed by operator)",
+      reason: `Hard stop or ignore flag: ${matched.join(", ")}`,
     };
   }
 
-  // Merged deliverable awaiting operator verification
-  if (labelSet.has("state/verify")) {
-    trace?.guard("operator-verify", "Merged deliverable awaiting operator verification", true);
+  // Dependency blocked
+  const depBlocked = ["dep/blocked", "upstream/blocked"].filter((l) => labelSet.has(l));
+  trace?.guard("dependency-blocked", "Blocked on dependency / upstream", depBlocked.length > 0, depBlocked);
+  if (depBlocked.length > 0) {
     return {
-      category: "operator_verify",
+      category: "blocked",
+      is_dispatchable: false,
+      reason: "Blocked on dependency / upstream: Orchestrator must evaluate unblock status",
+    };
+  }
+
+  // Deliverable verification (state/verify)
+  if (labelSet.has("state/verify")) {
+    if (labelSet.has("attention/agent") && !setIntersects(labelSet, ["dep/blocked", "upstream/blocked"])) {
+      trace?.guard("verify-agent-dispatch", "state/verify assigned to agent", true, ["state/verify", "attention/agent"]);
+      return {
+        category: "dispatchable",
+        is_dispatchable: true,
+        reason: "Deliverable verification assigned to agent (unblocked, ready for autonomous execution)",
+      };
+    }
+    if (labelSet.has("attention/orchestrator")) {
+      trace?.guard("verify-orchestrator-followup", "state/verify follow-up directed to Orchestrator", true, ["state/verify", "attention/orchestrator"]);
+      return {
+        category: "orchestrator_triage",
+        is_dispatchable: false,
+        reason: "Requires Orchestrator triage / investigation (state/verify follow-up directed by operator)",
+      };
+    }
+    trace?.guard("operator-verify", "Merged deliverable awaiting operator verification", true, ["state/verify"]);
+    return {
+      category: "verification",
       is_dispatchable: false,
       reason: "Merged deliverable: awaiting human operator acceptance / live verification",
     };
@@ -770,23 +808,23 @@ export function classifyCandidate(
     };
   }
 
-  // Deliverable PR review
-  if (labelSet.has("state/review")) {
-    trace?.guard("deliverable-review", "Deliverable PR review (state/review)", true);
+  // Active WIP
+  if (labelSet.has("state/wip")) {
+    trace?.guard("in-progress", "Active work in progress (state/wip)", true, ["state/wip"]);
     return {
-      category: "verification",
+      category: "wip",
       is_dispatchable: false,
-      reason: "Deliverable complete: worker completed implementation; Orchestrator pre-flight hygiene audit required",
+      reason: "Work in progress by worker",
     };
   }
 
-  // Active WIP
-  if (labelSet.has("state/wip")) {
-    trace?.guard("in-progress", "Active work in progress (state/wip)", true);
+  // Deliverable PR review
+  if (labelSet.has("state/review")) {
+    trace?.guard("deliverable-review", "Deliverable PR review (state/review)", true, ["state/review"]);
     return {
-      category: "in_progress",
+      category: "review",
       is_dispatchable: false,
-      reason: "Work in progress by worker",
+      reason: "Deliverable complete: worker completed implementation; Orchestrator pre-flight hygiene audit required",
     };
   }
 
@@ -795,20 +833,9 @@ export function classifyCandidate(
   trace?.guard("decomposition", "Decomposition required", decomposition.length > 0, decomposition);
   if (decomposition.length > 0) {
     return {
-      category: "decomposition",
+      category: "orchestrator_triage",
       is_dispatchable: false,
       reason: "Decomposition required: Orchestrator must chunk or split across domain boundaries",
-    };
-  }
-
-  // Dependency blocked
-  const depBlocked = ["dep/blocked", "upstream/blocked"].filter((l) => labelSet.has(l));
-  trace?.guard("dependency-blocked", "Blocked on dependency / upstream", depBlocked.length > 0, depBlocked);
-  if (depBlocked.length > 0) {
-    return {
-      category: "blocked",
-      is_dispatchable: false,
-      reason: "Blocked on dependency / upstream: Orchestrator must evaluate unblock status",
     };
   }
 
@@ -817,7 +844,7 @@ export function classifyCandidate(
   trace?.guard("pre-code-shaping", "Pre-code shaping required (spec/needed)", specNeeded, specNeeded ? ["spec/needed"] : undefined);
   if (specNeeded) {
     return {
-      category: "shaping",
+      category: "orchestrator_triage",
       is_dispatchable: false,
       reason: "Pre-code shaping required: Orchestrator must formulate specification & checklist (spec/needed)",
     };
@@ -843,6 +870,28 @@ export function classifyCandidate(
       category: "orchestrator_triage",
       is_dispatchable: false,
       reason: "Requires Front Desk routing / triage",
+    };
+  }
+
+  // Non-actionable kinds: discussion and ideas are not coding tasks
+  const nonActionableKinds = ["kind/discussion", "kind/idea"].filter((l) => labelSet.has(l));
+  trace?.guard("non-actionable-kind", "Non-actionable kinds (discussion, idea)", nonActionableKinds.length > 0, nonActionableKinds);
+  if (nonActionableKinds.length > 0) {
+    return {
+      category: "orchestrator_triage",
+      is_dispatchable: false,
+      reason: "Non-actionable kind (discussion / idea) requires triage",
+    };
+  }
+
+  // Unshaped triage tickets without a spec/approved or spec/checklist are not dispatchable
+  const unshapedTriage = labelSet.has("state/triage") && !labelSet.has("spec/approved") && !labelSet.has("spec/checklist");
+  trace?.guard("unshaped-triage", "Unshaped state/triage without spec/approved or spec/checklist", unshapedTriage, unshapedTriage ? ["state/triage"] : undefined);
+  if (unshapedTriage) {
+    return {
+      category: "orchestrator_triage",
+      is_dispatchable: false,
+      reason: "Unshaped state/triage ticket requires specification / checklist",
     };
   }
 
@@ -880,7 +929,7 @@ export function classifyCandidate(
         if (labelSet.has("state/wip")) {
           trace?.guard("active-wip", `Active WIP in ${issueStage}`, true, ["state/wip"]);
           return {
-            category: "in_progress",
+            category: "wip",
             is_dispatchable: false,
             reason: `Playbook stage ${issueStage} in progress (active WIP)`,
           };
@@ -917,6 +966,44 @@ export function classifyCandidate(
     is_dispatchable: false,
     reason: "Actionable task",
   };
+}
+
+export type DispatchCategory =
+  | "dispatchable"
+  | "orchestrator_triage"
+  | "user_attention"
+  | "blocked"
+  | "review"
+  | "wip"
+  | "verification"
+  | "ignored";
+
+export type AlertDestination = "Front Desk" | "Orchestrator" | "silent";
+
+/**
+ * Resolve alert destination from classification category and label set according to
+ * the declarative dispatchability matrix (#1414).
+ */
+export function resolveAlertDestination(category: string, labelSet: Set<string>): AlertDestination {
+  if (category === "ignored" || category === "wip" || category === "dispatchable") {
+    return "silent";
+  }
+  if (labelSet.has("attention/frontdesk")) {
+    return "Front Desk";
+  }
+  if (
+    category === "user_attention" ||
+    category === "blocked" ||
+    category === "review" ||
+    category === "verification" ||
+    category === "orchestrator_triage"
+  ) {
+    return "Orchestrator";
+  }
+  if (category === "sos") {
+    return labelSet.has("attention/frontdesk") ? "Front Desk" : "Orchestrator";
+  }
+  return "silent";
 }
 
 export function isActionable(labelSet: Set<string>, role: IssuesCheckRole = "orchestrator"): boolean {
@@ -1462,12 +1549,12 @@ export function renderIssuesCheckMarkdown(
   const inGroup = (i: number) => sosIdx.has(i) || userAttentionIdx.has(i) || dispatchableIdx.has(i);
   const byCategory = (category: string) =>
     candidates.map((c, i) => ({ c, i })).filter(({ c }) => c.category === category).map(({ i }) => i);
-  const verificationIdx = byCategory("verification");
-  const operatorVerifyIdx = byCategory("operator_verify");
+  const reviewIdx = byCategory("review");
+  const verificationIdx = [...byCategory("verification"), ...byCategory("operator_verify")];
   const shapingIdx = byCategory("shaping");
   const gatedSpecIdx = byCategory("gated_spec");
+  const reviewSet = new Set(reviewIdx);
   const verificationSet = new Set(verificationIdx);
-  const operatorVerifySet = new Set(operatorVerifyIdx);
   const shapingSet = new Set(shapingIdx);
   const gatedSpecSet = new Set(gatedSpecIdx);
   const othersIdx = candidates
@@ -1475,8 +1562,8 @@ export function renderIssuesCheckMarkdown(
     .filter(
       (i) =>
         !inGroup(i) &&
+        !reviewSet.has(i) &&
         !verificationSet.has(i) &&
-        !operatorVerifySet.has(i) &&
         !shapingSet.has(i) &&
         !gatedSpecSet.has(i),
     );
@@ -1509,8 +1596,8 @@ export function renderIssuesCheckMarkdown(
   printSection("CRITICAL SOS (PREEMPT ALL WORK)", [...sosIdx]);
   printSection("USER ATTENTION REQUIRED (AWAITING OPERATOR INPUT)", [...userAttentionIdx]);
   printSection("DISPATCHABLE TASKS - AUTONOMOUS EXECUTION (NO APPROVAL NEEDED)", [...dispatchableIdx]);
-  printSection("DELIVERABLE VERIFICATION - READY FOR PRE-FLIGHT AUDIT", verificationIdx);
-  printSection("OPERATOR ACCEPTANCE - AWAITING LIVE VERIFICATION", operatorVerifyIdx);
+  printSection("DELIVERABLE VERIFICATION - READY FOR PRE-FLIGHT AUDIT", reviewIdx);
+  printSection("OPERATOR ACCEPTANCE - AWAITING LIVE VERIFICATION", verificationIdx);
   printSection("PRE-CODE SHAPING - ORCHESTRATOR SPECIFICATION REQUIRED", shapingIdx);
   printSection("HOLDING FOR OPERATOR APPROVAL (SPEC CHECKLIST)", gatedSpecIdx);
   printSection("ORCHESTRATOR REASONING & TRIAGE", othersIdx);
