@@ -1,7 +1,85 @@
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { candidateRepoKeys, canonicalRepoKey, normalizeRepoKey } from "../client/types.js";
-import { isRepoMatching } from "../client/filter.js";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Resolves the root commit SHA of a git repository using deterministic sorting:
+ * `git rev-list --max-parents=0 HEAD | sort | head -n 1`.
+ */
+export async function resolveGitRootCommit(cwd: string): Promise<string | null> {
+  if (!cwd || typeof cwd !== "string") return null;
+  try {
+    const { stdout } = await execFileAsync("git", ["rev-list", "--max-parents=0", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+    });
+    const lines = stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
+    if (lines.length === 0) return null;
+    lines.sort();
+    return lines[0];
+  } catch {
+    return null;
+  }
+}
+
+/** Synchronous variant of resolveGitRootCommit. */
+export function resolveGitRootCommitSync(cwd: string): string | null {
+  if (!cwd || typeof cwd !== "string") return null;
+  try {
+    const stdout = execFileSync("git", ["rev-list", "--max-parents=0", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const lines = stdout.trim().split("\n").map((s) => s.trim()).filter(Boolean);
+    if (lines.length === 0) return null;
+    lines.sort();
+    return lines[0];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Derives canonical universal project identity:
+ * - Git repository: `git-root:<rootCommitSha>`
+ * - Non-git directory: explicit sentinel `non-git:<pathHash>`
+ */
+export function canonicalProjectKey(cwd: string): string {
+  if (!cwd || typeof cwd !== "string") return "";
+  const trimmed = cwd.trim();
+  if (trimmed.startsWith("git-root:") || trimmed.startsWith("non-git:")) {
+    return trimmed;
+  }
+  const rootCommit = resolveGitRootCommitSync(trimmed);
+  if (rootCommit) {
+    return `git-root:${rootCommit}`;
+  }
+  const resolvedPath = resolve(trimmed);
+  const hash = createHash("sha256").update(resolvedPath).digest("hex").slice(0, 16);
+  return `non-git:${hash}`;
+}
+
+/** Async variant of canonicalProjectKey. */
+export async function resolveCanonicalProjectKey(cwd: string): Promise<string> {
+  if (!cwd || typeof cwd !== "string") return "";
+  const trimmed = cwd.trim();
+  if (trimmed.startsWith("git-root:") || trimmed.startsWith("non-git:")) {
+    return trimmed;
+  }
+  const rootCommit = await resolveGitRootCommit(trimmed);
+  if (rootCommit) {
+    return `git-root:${rootCommit}`;
+  }
+  const resolvedPath = resolve(trimmed);
+  const hash = createHash("sha256").update(resolvedPath).digest("hex").slice(0, 16);
+  return `non-git:${hash}`;
+}
 
 export interface WorkspaceRecord {
   workspaceId: string;
@@ -143,24 +221,28 @@ function workspaceCandidateKeys(workspace: WorkspaceRecord, project?: ProjectRec
   const keys = new Set<string>();
   const add = (value?: string | null): void => {
     if (!value) return;
-    const normalized = normalizeRepoKey(value);
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    keys.add(trimmed.toLowerCase());
+    const normalized = normalizeRepoKey(trimmed);
     if (normalized) keys.add(normalized.toLowerCase());
-    const canonical = canonicalRepoKey(value);
+    const canonical = canonicalRepoKey(trimmed);
     if (canonical) keys.add(canonical.toLowerCase());
   };
 
-  const rawProjectKey = project?.projectKey?.trim();
-  if (rawProjectKey && !rawProjectKey.startsWith("prj_") && !/^prj_[a-z0-9]+$/i.test(rawProjectKey)) {
-    add(project?.projectKey);
-  }
-  if (typeof workspace.projectId === "string" && workspace.projectId.startsWith("remote:")) {
-    add(workspace.projectId);
-  }
+  add(workspace.projectId);
+  add((workspace as any).projectKey);
+  add((workspace as any).repo);
+  add(project?.projectId);
+  add(project?.projectKey);
   add(workspace.mainRepoRoot);
   add(project?.rootPath);
   add(workspace.cwd);
   add(workspace.displayName);
   add(project?.displayName);
+  if (workspace.cwd) add(basename(workspace.cwd));
+  if (workspace.mainRepoRoot) add(basename(workspace.mainRepoRoot));
+  if (project?.rootPath) add(basename(project.rootPath));
 
   return [...keys];
 }
@@ -185,26 +267,29 @@ export function resolveWorkspaceForRepo(
   }
 
   const targetKeys = new Set<string>();
-  for (const candidate of candidateRepoKeys(repo)) {
-    const normalized = normalizeRepoKey(candidate);
-    if (normalized) targetKeys.add(normalized.toLowerCase());
-    const canonical = canonicalRepoKey(candidate);
-    if (canonical) targetKeys.add(canonical.toLowerCase());
+  targetKeys.add(repo.toLowerCase());
+
+  if (repo.startsWith("git-root:") || repo.startsWith("non-git:")) {
+    // Direct canonical key match
+  } else {
+    for (const candidate of candidateRepoKeys(repo)) {
+      const normalized = normalizeRepoKey(candidate);
+      if (normalized) targetKeys.add(normalized.toLowerCase());
+      const canonical = canonicalRepoKey(candidate);
+      if (canonical) targetKeys.add(canonical.toLowerCase());
+    }
+    if (existsSync(repo)) {
+      const pKey = canonicalProjectKey(repo);
+      if (pKey) targetKeys.add(pKey.toLowerCase());
+    }
   }
-  const repoBasename = basename(repo.replace(/\.git$/, "")).toLowerCase();
 
   const matches: Array<{ workspace: WorkspaceRecord; project?: ProjectRecord }> = [];
   for (const workspace of workspaces) {
     if (!workspace?.workspaceId || !workspace.cwd) continue;
     const project = workspace.projectId ? projectsById.get(workspace.projectId) : undefined;
     const keys = workspaceCandidateKeys(workspace, project);
-    const hit = keys.some(
-      (key) =>
-        targetKeys.has(key) ||
-        key === repoBasename ||
-        key.endsWith(`/${repoBasename}`) ||
-        isRepoMatching(repo, key),
-    );
+    const hit = keys.some((key) => targetKeys.has(key));
     if (hit) matches.push({ workspace, project });
   }
 

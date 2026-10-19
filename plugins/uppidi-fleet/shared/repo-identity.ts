@@ -13,6 +13,7 @@ export const DEFAULT_FORGEJO_HOST = "forge.mrs.uppidi.com";
 export function normalizeRepoKey(raw: string | null | undefined): string | null {
   if (!raw || typeof raw !== "string") return null;
   let s = raw.trim();
+  if (s.startsWith("remote:")) s = s.slice("remote:".length);
   s = s.replace(/^git@([^:]+):/, "$1/");
   s = s.replace(/^https?:\/\//, "");
   s = s.replace(/^ssh:\/\/git@/, "");
@@ -189,3 +190,11 @@ export function compactRepoName(
 ): string | null {
   return resolveCanonicalRepo(input, options)?.compact ?? null;
 }
+
+export {
+  type ProjectIdentity,
+  type FormattedProjectDisplay,
+  formatProjectDisplay,
+  formatProjectOptionLabel,
+} from "@xpufx/backend-fleet/client";
+

@@ -29,6 +29,8 @@ import { isRepoMatching } from "../shared/sort-filter.js";
 import {
   canonicalRepoName,
   resolveCanonicalRepo,
+  formatProjectDisplay,
+  formatProjectOptionLabel,
   type CanonicalRepo,
 } from "../shared/repo-identity.js";
 
@@ -239,7 +241,7 @@ function ForgeIssuesViewInner({
     ...reposList.map((r) => ({
       label: r,
       value: r,
-      display: resolveForgeSelection(r, rawRepos)?.compact ?? r,
+      display: formatProjectOptionLabel(r),
     })),
   ], [reposList, rawRepos]);
 
@@ -407,7 +409,7 @@ function ForgeIssuesViewInner({
                   ? `No open issues match "${searchQuery}".`
                   : currentRepo === "all"
                   ? "No open issues found across enrolled repositories."
-                  : `No open issues found for ${currentRepo}.`
+                  : `No open issues found for ${formatProjectOptionLabel(currentRepo)}.`
               }
             />
           </Card>

@@ -37,12 +37,6 @@ export function parseProjectKey(key?: string | null): string | undefined {
   return segments[0];
 }
 
-function isOpaqueProjectKey(key?: string | null): boolean {
-  if (!key || typeof key !== "string") return false;
-  const trimmed = key.trim();
-  return trimmed.startsWith("prj_") || /^prj_[a-z0-9]+$/i.test(trimmed);
-}
-
 /**
  * Builds a WorkspaceProjectMap purely from in-memory workspace and project records
  * without touching the filesystem.
@@ -64,13 +58,15 @@ export function buildWorkspaceProjectMapFromRegistry(
   for (const workspace of workspaces) {
     if (!workspace?.workspaceId) continue;
     const project = workspace.projectId ? projectsById.get(workspace.projectId) : undefined;
-    const validProjectKey = !isOpaqueProjectKey(project?.projectKey) ? project?.projectKey : undefined;
+    const validProjectKey = project?.projectKey;
     const repo =
       parseProjectKey(validProjectKey) ||
       normalizeRepoKey(validProjectKey) ||
       project?.displayName?.trim() ||
       workspace.displayName?.trim() ||
-      (workspace.mainRepoRoot || project?.rootPath || workspace.worktreeRoot || workspace.cwd)?.split("/").filter(Boolean).pop();
+      (workspace.mainRepoRoot || project?.rootPath || workspace.worktreeRoot || workspace.cwd)?.split("/").filter(Boolean).pop() ||
+      project?.projectId ||
+      workspace.projectId;
     if (repo) map[workspace.workspaceId] = normalizeProjectName(repo);
   }
 
@@ -118,13 +114,15 @@ export function readWorkspaceProjectMap(options?: {
         for (const workspace of parsed as WorkspaceRecord[]) {
           if (!workspace?.workspaceId) continue;
           const project = workspace.projectId ? projectsById.get(workspace.projectId) : undefined;
-          const validProjectKey = !isOpaqueProjectKey(project?.projectKey) ? project?.projectKey : undefined;
+          const validProjectKey = project?.projectKey;
           const repo =
             parseProjectKey(validProjectKey) ||
             normalizeRepoKey(validProjectKey) ||
             project?.displayName?.trim() ||
             workspace.displayName?.trim() ||
-            (workspace.mainRepoRoot || project?.rootPath || workspace.worktreeRoot || workspace.cwd)?.split("/").filter(Boolean).pop();
+            (workspace.mainRepoRoot || project?.rootPath || workspace.worktreeRoot || workspace.cwd)?.split("/").filter(Boolean).pop() ||
+            project?.projectId ||
+            workspace.projectId;
           if (repo) map[workspace.workspaceId] = normalizeProjectName(repo);
         }
       }

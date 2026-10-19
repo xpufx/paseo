@@ -27,7 +27,11 @@
       "@xpufx/backend-tickets": ["../../packages/backend/tickets/src/index.ts"],
       "@xpufx/backend-tickets/client": ["../../packages/backend/tickets/src/client/index.ts"],
       "@xpufx/backend-tickets/shared": ["../../packages/backend/tickets/src/shared/index.ts"],
-      "@xpufx/backend-tickets/server": ["../../packages/backend/tickets/src/server/index.ts"]
+      "@xpufx/backend-tickets/server": ["../../packages/backend/tickets/src/server/index.ts"],
+      "@xpufx/backend-fleet": ["../../packages/backend/fleet/src/index.ts"],
+      "@xpufx/backend-fleet/client": ["../../packages/backend/fleet/src/client/index.ts"],
+      "@xpufx/backend-fleet/shared": ["../../packages/backend/fleet/src/shared/index.ts"],
+      "@xpufx/backend-fleet/server": ["../../packages/backend/fleet/src/server/index.ts"]
     },
     "target": "ES2020",
     "module": "ESNext",

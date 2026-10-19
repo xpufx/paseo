@@ -662,14 +662,13 @@ export const DEFAULT_PROJECT = "Default Project";
 export function normalizeRepoKey(raw: string | null | undefined): string | null {
   if (!raw || typeof raw !== "string") return null;
   let s = raw.trim();
-  if (/^prj_[a-z0-9]+$/i.test(s)) return null;
+  if (s.startsWith("remote:")) s = s.slice("remote:".length);
   s = s.replace(/^git@([^:]+):/, "$1/");
   s = s.replace(/^https?:\/\//, "");
   s = s.replace(/^ssh:\/\/git@/, "");
   s = s.replace(/:\d+\//, "/");
   s = s.replace(/\.git$/, "");
   s = s.replace(/^\/+|\/+$/g, "");
-  if (/^prj_[a-z0-9]+$/i.test(s)) return null;
   return s || null;
 }
 
@@ -825,3 +824,119 @@ export function compactRepoName(
 ): string | null {
   return resolveCanonicalRepo(input, options)?.compact ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// 9. Project Identity Display Formatting
+// ---------------------------------------------------------------------------
+
+export interface ProjectIdentity {
+  /** Canonical project key (e.g. `git-root:<sha>` or `non-git:<hash>`). */
+  projectKey?: string | null;
+  /** Primary identifier or directory path. */
+  name?: string | null;
+  displayName?: string | null;
+  repo?: string | null;
+  rootPath?: string | null;
+  cwd?: string | null;
+  worktree?: string | null;
+  branch?: string | null;
+}
+
+export interface FormattedProjectDisplay {
+  primaryName: string;
+  orgPill?: string;
+  rootShaPill: string;
+  worktreePill?: string;
+}
+
+export function formatProjectDisplay(
+  project: ProjectIdentity | string | null | undefined,
+): FormattedProjectDisplay {
+  if (!project) {
+    return { primaryName: "", rootShaPill: "" };
+  }
+
+  const p: ProjectIdentity = typeof project === "string" ? { name: project } : project;
+
+  let rootShaPill = "";
+  const key = (p.projectKey ?? (typeof project === "string" ? project : "")).trim();
+  if (key.startsWith("git-root:")) {
+    const sha = key.slice("git-root:".length).trim();
+    rootShaPill = sha ? `#${sha.slice(0, 7)}` : "";
+  } else if (key.startsWith("non-git:")) {
+    const hash = key.slice("non-git:".length).trim();
+    rootShaPill = hash ? `non-git:${hash.slice(0, 7)}` : "";
+  }
+
+  // Determine candidate raw name
+  let rawName = (
+    p.displayName ||
+    p.repo ||
+    p.name ||
+    (p.rootPath ? p.rootPath.split("/").filter(Boolean).pop() : undefined) ||
+    (p.cwd ? p.cwd.split("/").filter(Boolean).pop() : undefined) ||
+    ""
+  ).trim();
+
+  // If rawName is itself a git-root or non-git key
+  if (rawName.startsWith("git-root:")) {
+    const sha = rawName.slice("git-root:".length).trim();
+    if (!rootShaPill) rootShaPill = sha ? `#${sha.slice(0, 7)}` : "";
+    rawName = sha.slice(0, 7);
+  } else if (rawName.startsWith("non-git:")) {
+    const hash = rawName.slice("non-git:".length).trim();
+    if (!rootShaPill) rootShaPill = hash ? `non-git:${hash.slice(0, 7)}` : "";
+    rawName = hash.slice(0, 7);
+  }
+
+  let primaryName = "";
+  let orgPill: string | undefined = undefined;
+
+  const coords = repoCoordinates(rawName);
+  if (coords) {
+    primaryName = coords.repo;
+    orgPill = coords.owner;
+  } else if (rawName.includes("/")) {
+    const parts = rawName.split("/").filter(Boolean);
+    primaryName = parts[parts.length - 1];
+    orgPill = parts.slice(0, -1).join("/");
+  } else if (rawName) {
+    primaryName = rawName;
+  } else if (rootShaPill) {
+    primaryName = rootShaPill.replace(/^#/, "");
+  }
+
+  let worktreePill: string | undefined = undefined;
+  if (p.worktree) {
+    worktreePill = p.worktree;
+  } else if (p.branch) {
+    worktreePill = p.branch;
+  } else if (p.cwd && p.cwd.includes("/.paseo/worktrees/")) {
+    const match = p.cwd.match(/\/\.paseo\/worktrees\/[^/]+\/([^/]+)/);
+    if (match?.[1]) {
+      worktreePill = match[1];
+    }
+  }
+
+  return {
+    primaryName: primaryName || (rootShaPill ? rootShaPill.replace(/^#/, "") : "unknown"),
+    ...(orgPill ? { orgPill } : {}),
+    rootShaPill,
+    ...(worktreePill ? { worktreePill } : {}),
+  };
+}
+
+export function formatProjectOptionLabel(
+  project: ProjectIdentity | string | null | undefined,
+): string {
+  const display = formatProjectDisplay(project);
+  let label = display.primaryName;
+  if (display.orgPill) {
+    label += ` (${display.orgPill})`;
+  }
+  if (display.rootShaPill) {
+    label += ` [${display.rootShaPill}]`;
+  }
+  return label;
+}
+

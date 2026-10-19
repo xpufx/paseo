@@ -32,6 +32,11 @@ import {
   registerFleetHandlers,
   fleetRosterContract,
   archiveAgentContract,
+  resolveGitRootCommit,
+  resolveGitRootCommitSync,
+  canonicalProjectKey,
+  formatProjectDisplay,
+  formatProjectOptionLabel,
 } from "../index.js";
 
 describe("@xpufx/backend-fleet", () => {
@@ -225,13 +230,40 @@ describe("@xpufx/backend-fleet", () => {
       expect(isRepoMatching("other", "xpufx-org/paseo")).toBe(false);
     });
 
-    it("rejects opaque internal project IDs in normalizeRepoKey", () => {
-      expect(normalizeRepoKey("prj_0e77794a3a650cdf")).toBeNull();
-      expect(normalizeRepoKey("prj_abc123")).toBeNull();
-      expect(normalizeRepoKey("PRJ_XYZ789")).toBeNull();
-      expect(normalizeRepoKey("prj_0e77794a3a650cdf.git")).toBeNull();
-      expect(normalizeRepoKey("  prj_0e77794a3a650cdf  ")).toBeNull();
-      expect(normalizeRepoKey("xpufx-org/paseo")).toBe("xpufx-org/paseo");
+    it("derives canonical universal project identity with git-root and non-git sentinel", () => {
+      const gitRoot = resolveGitRootCommitSync(process.cwd());
+      expect(typeof gitRoot).toBe("string");
+      expect(gitRoot?.length).toBe(40);
+
+      const pKey = canonicalProjectKey(process.cwd());
+      expect(pKey).toBe(`git-root:${gitRoot}`);
+
+      const nonGitKey = canonicalProjectKey("/non-existent/directory/for/testing/1371");
+      expect(nonGitKey.startsWith("non-git:")).toBe(true);
+      expect(nonGitKey.length).toBe("non-git:".length + 16);
+
+      // Preserves already canonical keys
+      expect(canonicalProjectKey("git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581")).toBe(
+        "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581"
+      );
+      expect(canonicalProjectKey("non-git:1234567890abcdef")).toBe("non-git:1234567890abcdef");
+    });
+
+    it("formats project display with distinct repo name and pills", () => {
+      const display = formatProjectDisplay({
+        projectKey: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
+        repo: "xpufx-org/paseo",
+      });
+      expect(display.primaryName).toBe("paseo");
+      expect(display.orgPill).toBe("xpufx-org");
+      expect(display.rootShaPill).toBe("#5d9c889");
+
+      const label = formatProjectOptionLabel("forge.mrs.uppidi.com/xpufx-org/platform");
+      expect(label).toBe("platform (xpufx-org)");
+
+      const rawSha = formatProjectDisplay("git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581");
+      expect(rawSha.primaryName).toBe("5d9c889");
+      expect(rawSha.rootShaPill).toBe("#5d9c889");
     });
   });
 
@@ -300,41 +332,40 @@ describe("@xpufx/backend-fleet", () => {
       expect(map["ws-99"]).toBe("forge.mrs.uppidi.com/my-org/my-app");
     });
 
-    it("ignores opaque prj_* projectKey and resolves to human-readable repository display name", () => {
+    it("maps workspace to canonical git-root project and human-readable display name", () => {
       const map = buildWorkspaceProjectMapFromRegistry(
         [
           {
             workspaceId: "ws-1",
-            projectId: "prj_0e77794a3a650cdf",
+            projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
             cwd: "/home/user/code/paseo",
             displayName: "paseo-workspace",
           },
         ],
         [
           {
-            projectId: "prj_0e77794a3a650cdf",
+            projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
             displayName: "xpufx-org/paseo",
-            projectKey: "prj_0e77794a3a650cdf",
+            projectKey: "remote:forge.mrs.uppidi.com/xpufx-org/paseo",
           },
         ]
       );
       expect(map["ws-1"]).toBe("forge.mrs.uppidi.com/xpufx-org/paseo");
     });
 
-    it("falls through to workspace displayName or rootPath when projectKey is opaque prj_*", () => {
+    it("resolves workspace project mapping from display name or rootPath directly", () => {
       const mapFromWs = buildWorkspaceProjectMapFromRegistry(
         [
           {
             workspaceId: "ws-2",
-            projectId: "prj_abc",
+            projectId: "git-root:abc1234567890abcdef1234567890abcdef12",
             cwd: "/repos/my-repo",
             displayName: "my-custom-display",
           },
         ],
         [
           {
-            projectId: "prj_abc",
-            projectKey: "prj_abc",
+            projectId: "git-root:abc1234567890abcdef1234567890abcdef12",
           },
         ]
       );
@@ -344,14 +375,13 @@ describe("@xpufx/backend-fleet", () => {
         [
           {
             workspaceId: "ws-3",
-            projectId: "prj_def",
+            projectId: "git-root:def1234567890abcdef1234567890abcdef12",
             cwd: "/repos/my-repo",
           },
         ],
         [
           {
-            projectId: "prj_def",
-            projectKey: "prj_def",
+            projectId: "git-root:def1234567890abcdef1234567890abcdef12",
             rootPath: "/repos/my-repo",
           },
         ]
