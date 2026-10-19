@@ -458,7 +458,9 @@ export interface HookRouterOptions {
 
 export interface EnsureOrchestratorInput {
   repo: string;
+  /** @deprecated Caller-dictated provider is ignored; hook router is sole model authority (#1392). */
   provider?: string;
+  /** @deprecated Caller-dictated model is ignored; hook router is sole model authority (#1392). */
   model?: string;
   mode?: string;
   force?: boolean;
@@ -3197,11 +3199,14 @@ export function recordModelQuotaFailure(
 
 /**
  * Build the ordered, de-duplicated orchestrator model candidate list from the
- * explicit request and the configured role fallback chain (#890/#973).
+ * configured role fallback chain (#890/#973/#1392). Caller-dictated model overrides
+ * are disallowed; the Hook Router is the sole model authority.
  */
 export function orchestratorModelCandidates(
   options: {
+    /** @deprecated Caller-dictated provider is ignored; hook router is sole model authority (#1392). */
     requestedProvider?: string;
+    /** @deprecated Caller-dictated model is ignored; hook router is sole model authority (#1392). */
     requestedModel?: string;
     fallbackList?: readonly string[];
   } = {},
@@ -3214,13 +3219,8 @@ export function orchestratorModelCandidates(
     configuredFallbacks = [orchRole.primaryModel, ...(orchRole.fallbackGroup ?? [])];
   }
 
-  const rawCandidates: string[] = [];
-  if (options.requestedModel?.trim()) {
-    const reqM = options.requestedModel.trim();
-    const reqP = options.requestedProvider?.trim() || "";
-    rawCandidates.push(reqP ? modelKey(reqP, reqM) : reqM);
-  }
-  rawCandidates.push(...configuredFallbacks);
+  // Caller-dictated model overrides are strictly ignored (#1392).
+  const rawCandidates: string[] = [...configuredFallbacks];
 
   const candidates: string[] = [];
   const seen = new Set<string>();
@@ -3303,17 +3303,6 @@ export interface SpawnResult {
 }
 
 /**
- * Resolve the `role-models.json` key for a spawn role.
- * Maps `worker` → `coding-agent`, `frontdesk` → `front-desk`, `orchestrator` → `orchestrator`.
- */
-function roleKeyForSpawn(role: SpawnRole): RoleModelKey {
-  if (role === "frontdesk") return "front-desk";
-  if (role === "orchestrator") return "orchestrator";
-  // worker → coding-agent
-  return "coding-agent";
-}
-
-/**
  * Verify that a requested model is whitelisted for the given role.
  * Returns `{ allowed: true }` when the model is in the role's primaryModel + fallbackGroup,
  * or `{ allowed: false, error }` when it is not.
@@ -3322,9 +3311,9 @@ export function verifyModelWhitelist(
   role: SpawnRole,
   requestedModel: string,
 ): { allowed: true } | { allowed: false; error: string } {
-  const roleKey = roleKeyForSpawn(role);
+  const roleKey = resolveRoleModelKey(role);
   const savedRoles = loadSavedRoleModels();
-  const config = savedRoles[roleKey];
+  const config = savedRoles[roleKey] ?? DEFAULT_ROLE_MODELS[roleKey];
   if (!config) {
     return { allowed: false, error: `No role-model configuration found for role '${role}' (${roleKey})` };
   }
@@ -3350,7 +3339,7 @@ export function resolveSpawnModel(
   role: SpawnRole,
   requestedModel: string | undefined,
 ): { model: string; resolvedFrom: "explicit" | "default" } {
-  const roleKey = roleKeyForSpawn(role);
+  const roleKey = resolveRoleModelKey(role);
   const savedRoles = loadSavedRoleModels();
   const config = savedRoles[roleKey] ?? DEFAULT_ROLE_MODELS[roleKey];
   const defaultModel = config?.primaryModel ?? "antigravity-acp/gemini-3.8-flash-low";
@@ -3694,7 +3683,9 @@ export async function handleSpawnAgent(
 
 export function resolveOrchestratorModel(
   options: {
+    /** @deprecated Caller-dictated provider is ignored; hook router is sole model authority (#1392). */
     requestedProvider?: string;
+    /** @deprecated Caller-dictated model is ignored; hook router is sole model authority (#1392). */
     requestedModel?: string;
     fallbackList?: readonly string[];
     circuitBreakerPath?: string;
@@ -8130,8 +8121,6 @@ export class HookRouter {
     const fallbackList = this.options?.orchestratorModelFallback ?? this.options?.modelFallbackList;
     const availableProviders = await this.getAvailableProviderSet();
     const resolvedModel = resolveOrchestratorModel({
-      requestedProvider: input.provider,
-      requestedModel: input.model,
       fallbackList,
       circuitBreakerPath,
       availableProviders,
@@ -13024,8 +13013,6 @@ export class HookRouter {
         try {
           const result = await this.ensureOrchestrator({
             repo,
-            provider: typeof body?.provider === "string" ? body.provider.trim() : undefined,
-            model: typeof body?.model === "string" ? body.model.trim() : undefined,
             mode: typeof body?.mode === "string" ? body.mode.trim() : undefined,
             force: Boolean(body?.force),
           });

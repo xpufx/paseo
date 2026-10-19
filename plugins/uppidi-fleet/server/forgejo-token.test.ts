@@ -12,6 +12,7 @@ describe("resolveForgejoToken — no ambient credential harvesting (#1332)", () 
   beforeEach(() => {
     originalEnv = { ...process.env };
     originalPaseoHome = process.env.PASEO_HOME;
+    process.env.PASEO_HOME = "/nonexistent/paseo/home/path-xyz";
     setTokenResolverForTest(null);
   });
 
