@@ -76,6 +76,7 @@ import {
   recordModelQuotaFailure,
   getCachedModelHealth,
   resolveOrchestratorModel,
+  orchestratorModelCandidates,
   readModelAlerts,
   recordModelAlert,
   clearModelAlert,
@@ -7976,6 +7977,51 @@ describe("hook-router ensure-orchestrator deterministic resolution and idempoten
     assert.ok(!router.getEnrolledRepos().includes(unenrolledRepo));
     assert.ok(!(loadRouterConfig().enrolledRepos ?? []).includes(unenrolledRepo));
   });
+
+  it("POST /orchestrators/spawn ignores caller-supplied provider/model and selects from configured role-models chain (#1392)", async () => {
+    const provRes = await fetch(`http://127.0.0.1:${router.port}/orchestrators/spawn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repo: "xpufx-org/paseo",
+        provider: "unauthorized-provider",
+        model: "unauthorized-model",
+        mode: "yolo",
+        force: true,
+      }),
+    });
+    assert.equal(provRes.status, 200);
+    const provBody = await provRes.json();
+    assert.equal(provBody.ok, true);
+    assert.equal(provBody.status, "provisioned");
+    assert.equal(provBody.resolvedModelKey, "antigravity-acp/gemini-3.8-flash-low");
+    assert.equal(spawnedCalls.length, 1);
+    assert.equal(spawnedCalls[0].provider, "antigravity-acp");
+    assert.equal(spawnedCalls[0].model, "gemini-3.8-flash-low");
+  });
+
+  it("ensureOrchestrator ignores caller-supplied provider/model in EnsureOrchestratorInput (#1392)", async () => {
+    const res = await router.ensureOrchestrator({
+      repo: "xpufx-org/paseo",
+      provider: "rogue-provider",
+      model: "rogue-model",
+      force: true,
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.resolvedModelKey, "antigravity-acp/gemini-3.8-flash-low");
+    assert.equal(spawnedCalls.length, 1);
+    assert.equal(spawnedCalls[0].provider, "antigravity-acp");
+    assert.equal(spawnedCalls[0].model, "gemini-3.8-flash-low");
+  });
+
+  it("orchestratorModelCandidates ignores requestedProvider and requestedModel (#1392)", () => {
+    const candidates = orchestratorModelCandidates({
+      requestedProvider: "rogue-provider",
+      requestedModel: "rogue-model",
+      fallbackList: ["provider-a/model-1", "provider-b/model-2"],
+    });
+    assert.deepEqual(candidates, ["provider-a/model-1", "provider-b/model-2"]);
+  });
 });
 
 describe("orchestrator provider mode resolution (#894)", () => {
@@ -8068,6 +8114,7 @@ describe("orchestrator provider mode resolution (#894)", () => {
   it("omits the spawn mode for a mode-less provider", async () => {
     const spawned: any[] = [];
     const router = makeRouter({
+      orchestratorModelFallback: ["pi/pi-model"],
       providerModeResolver: async () => ({ modes: [] }),
       spawnAgent: async (opts) => {
         spawned.push(opts);
@@ -8077,8 +8124,6 @@ describe("orchestrator provider mode resolution (#894)", () => {
 
     const res = await router.ensureOrchestrator({
       repo: "xpufx-org/paseo",
-      provider: "pi",
-      model: "pi-model",
     });
     assert.equal(res.ok, true);
     assert.equal(spawned[0].provider, "pi");
@@ -8107,13 +8152,12 @@ describe("orchestrator provider mode resolution (#894)", () => {
   it("omits --mode on the CLI fallback for a mode-less provider", async () => {
     const router = makeRouter({
       allowCliSpawn: true,
+      orchestratorModelFallback: ["pi/pi-model"],
       providerModeResolver: async () => ({ modes: [] }),
     });
 
     const res = await router.ensureOrchestrator({
       repo: "xpufx-org/paseo",
-      provider: "pi",
-      model: "pi-model",
     });
     assert.equal(res.ok, true);
     assert.equal(capturedRuns.length, 1);

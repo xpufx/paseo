@@ -505,7 +505,7 @@ Beyond ingress, the router exposes:
 | `GET /handoff` · `POST /handoff` (alias `/frontdesk-handoff`) | Front Desk rotation: seed `latest-handoff.md`, project role labels, retire the previous agent, persist `frontdesk.json`, notify orchestrators. |
 | `GET /orchestrators[/:repo]` | Read one or all orchestrator registrations. |
 | `POST /orchestrator` (alias `/orchestrate`) | Register `{repo, agentId}`. |
-| `POST /orchestrators/spawn` | Provision `{repo, provider?, model?, mode?, force?}` server-side and atomically register it as a peer orchestrator (idempotent; no Front Desk parent). |
+| `POST /orchestrators/spawn` | Provision `{repo, mode?, force?}` server-side and atomically register it as a peer orchestrator (idempotent; no Front Desk parent; model resolved via `role-models.json`). |
 | `POST /orchestrators/prune` | Delete registrations whose agent no longer exists on the daemon. |
 | `POST /orchestrator-rotate` | Rotate a long-lived role onto a fresh agent (`{role?, repo?, reason?, force?}`): spawn → verify → brief → archive; aborts cleanly on spawn failure. |
 | `GET /orchestrator-rotation` | Rotation policy + guardrail state per role (`?role=&repo=`). |
@@ -521,6 +521,9 @@ curl -s -X POST http://127.0.0.1:8099/frontdesk \
 curl -s -X POST http://127.0.0.1:8099/orchestrator \
   -H 'Content-Type: application/json' \
   -d '{"repo":"forge.example.com/your-org/your-repo","agentId":"<YOUR_ORCH_ID>"}'
+curl -s -X POST http://127.0.0.1:8099/orchestrators/spawn \
+  -H 'Content-Type: application/json' \
+  -d '{"repo":"forge.example.com/your-org/your-repo","force":true}'
 curl -s -X POST http://127.0.0.1:8099/handoff \
   -H 'Content-Type: application/json' \
   -d '{"agentId":"<NEW_FRONT_DESK_ID>","handoffText":"# Handoff\n\nOperator context."}'
