@@ -2,7 +2,12 @@
 // global-lib ordering and trips pre-existing vendor setTimeout errors.
 import { describe, expect, it, vi } from "vitest";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
-import { registerSlashCommands } from "../client/commands";
+import {
+  BACKOFF_DELAYS,
+  MAX_BACKOFF_MS,
+  getBackoffDelay,
+  registerSlashCommands,
+} from "../client/commands";
 import { SEED_COMMANDS, listCommandsRpc, runCommandRpc, slashSettingsContract } from "./resources";
 
 interface Contribution {
@@ -249,5 +254,242 @@ describe("registerSlashCommands rpc wiring", () => {
     expect(agentRef.send).not.toHaveBeenCalled();
 
     dispose();
+  });
+});
+
+describe("registerSlashCommands reconnect backoff & command cache resilience (#1387)", () => {
+  it("computes backoff delays matching the exponential schedule (1s, 2s, 5s up to 30s)", () => {
+    expect(getBackoffDelay(0)).toBe(1_000);
+    expect(getBackoffDelay(1)).toBe(2_000);
+    expect(getBackoffDelay(2)).toBe(5_000);
+    expect(getBackoffDelay(3)).toBe(10_000);
+    expect(getBackoffDelay(4)).toBe(20_000);
+    expect(getBackoffDelay(5)).toBe(30_000);
+    expect(getBackoffDelay(6)).toBe(30_000);
+    expect(getBackoffDelay(99)).toBe(30_000);
+    expect(getBackoffDelay(-1)).toBe(1_000);
+
+    // Respects custom backoff delays and custom max
+    expect(getBackoffDelay(0, [100, 200], 500)).toBe(100);
+    expect(getBackoffDelay(1, [100, 200], 500)).toBe(200);
+    expect(getBackoffDelay(2, [100, 200], 500)).toBe(500);
+  });
+
+  it("retries with exponential backoff when list-commands RPC fails on initial sync", async () => {
+    vi.useFakeTimers();
+    try {
+      let rpcCount = 0;
+      const contributions: Contribution[] = [];
+      const rpc = vi.fn(async (contract: unknown) => {
+        if (contract === listCommandsRpc) {
+          rpcCount++;
+          if (rpcCount < 4) {
+            throw new Error("Server disconnected");
+          }
+          return { commands: SEED_COMMANDS };
+        }
+        if (contract === slashSettingsContract.get) return { prefix: "slash-" };
+        throw new Error("unexpected contract");
+      });
+
+      const client = {
+        rpc,
+        addSlashCommand: vi.fn((contribution: Contribution) => {
+          contributions.push(contribution);
+          return () => {};
+        }),
+      } as unknown as PluginClientContext;
+
+      const dispose = registerSlashCommands(client);
+
+      // Initial sync ran and failed (rpcCount = 1)
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rpcCount).toBe(1);
+      expect(contributions).toHaveLength(0);
+
+      // Before 1000ms: no retry yet
+      await vi.advanceTimersByTimeAsync(900);
+      expect(rpcCount).toBe(1);
+
+      // At 1000ms: 1st retry fires (fails, rpcCount = 2)
+      await vi.advanceTimersByTimeAsync(100);
+      expect(rpcCount).toBe(2);
+      expect(contributions).toHaveLength(0);
+
+      // Before 2000ms delay: no retry yet
+      await vi.advanceTimersByTimeAsync(1900);
+      expect(rpcCount).toBe(2);
+
+      // At 2000ms: 2nd retry fires (fails, rpcCount = 3)
+      await vi.advanceTimersByTimeAsync(100);
+      expect(rpcCount).toBe(3);
+      expect(contributions).toHaveLength(0);
+
+      // Before 5000ms delay: no retry yet
+      await vi.advanceTimersByTimeAsync(4900);
+      expect(rpcCount).toBe(3);
+
+      // At 5000ms: 3rd retry fires (succeeds, rpcCount = 4)
+      await vi.advanceTimersByTimeAsync(100);
+      expect(rpcCount).toBe(4);
+      expect(contributions).toHaveLength(SEED_COMMANDS.length);
+
+      dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains registered commands and removers across transient RPC failures", async () => {
+    vi.useFakeTimers();
+    try {
+      let shouldFail = false;
+      const activeRemovers = new Set<string>();
+      const registeredCommands = new Map<string, Contribution>();
+
+      const rpc = vi.fn(async (contract: unknown) => {
+        if (contract === listCommandsRpc) {
+          if (shouldFail) {
+            throw new Error("Server disconnected");
+          }
+          return { commands: SEED_COMMANDS };
+        }
+        if (contract === slashSettingsContract.get) return { prefix: "slash-" };
+        throw new Error("unexpected contract");
+      });
+
+      const client = {
+        rpc,
+        addSlashCommand: vi.fn((contribution: Contribution) => {
+          registeredCommands.set(contribution.name, contribution);
+          activeRemovers.add(contribution.name);
+          return () => {
+            activeRemovers.delete(contribution.name);
+            registeredCommands.delete(contribution.name);
+          };
+        }),
+      } as unknown as PluginClientContext;
+
+      const dispose = registerSlashCommands(client, { intervalMs: 10_000 });
+
+      // Initial sync succeeds
+      await vi.advanceTimersByTimeAsync(0);
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+
+      // Now server disconnects
+      shouldFail = true;
+
+      // Regular interval fires, sync fails
+      await vi.advanceTimersByTimeAsync(10_000);
+      // Verify commands and removers were RETAINED, not cleared
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+
+      // First retry fires at 1s, also fails
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+
+      // Server recovers
+      shouldFail = false;
+      // Second retry fires at 2s, succeeds
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(registeredCommands.size).toBe(SEED_COMMANDS.length);
+      expect(activeRemovers.size).toBe(SEED_COMMANDS.length);
+
+      // Disposal cleans up all removers
+      dispose();
+      expect(activeRemovers.size).toBe(0);
+      expect(registeredCommands.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cleans up active retry timers on disposal to prevent leaks", async () => {
+    vi.useFakeTimers();
+    try {
+      let rpcCount = 0;
+      const rpc = vi.fn(async (contract: unknown) => {
+        if (contract === listCommandsRpc) {
+          rpcCount++;
+          throw new Error("Server disconnected");
+        }
+        return {};
+      });
+
+      const client = {
+        rpc,
+        addSlashCommand: vi.fn(() => () => {}),
+      } as unknown as PluginClientContext;
+
+      const dispose = registerSlashCommands(client);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rpcCount).toBe(1);
+
+      // Dispose while retry backoff timer is pending
+      dispose();
+
+      // Advance time by 60 seconds — no more RPC calls should occur
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(rpcCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resets backoff attempt counter after a successful sync", async () => {
+    vi.useFakeTimers();
+    try {
+      let rpcCount = 0;
+      let shouldFail = true;
+
+      const rpc = vi.fn(async (contract: unknown) => {
+        if (contract === listCommandsRpc) {
+          rpcCount++;
+          if (shouldFail) throw new Error("Server disconnected");
+          return { commands: SEED_COMMANDS };
+        }
+        if (contract === slashSettingsContract.get) return { prefix: "" };
+        return {};
+      });
+
+      const client = {
+        rpc,
+        addSlashCommand: vi.fn(() => () => {}),
+      } as unknown as PluginClientContext;
+
+      const dispose = registerSlashCommands(client);
+
+      // Initial fail (attempt 0 -> retry at 1s)
+      await vi.advanceTimersByTimeAsync(0);
+      expect(rpcCount).toBe(1);
+
+      // Retry at 1s fails (attempt 1 -> retry at 2s)
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(rpcCount).toBe(2);
+
+      // Recover for the retry at 2s
+      shouldFail = false;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(rpcCount).toBe(3); // succeeded, backoff reset to 0
+
+      // Now server fails again on next trigger
+      shouldFail = true;
+      // Interval fires at t=30,000 (we are currently at t=3,000, so advance 27,000ms)
+      await vi.advanceTimersByTimeAsync(27_000);
+      expect(rpcCount).toBe(4);
+
+      // Since backoff was reset to 0, next retry must happen at 1s (not 5s or 10s)
+      await vi.advanceTimersByTimeAsync(900);
+      expect(rpcCount).toBe(4);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(rpcCount).toBe(5);
+
+      dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
