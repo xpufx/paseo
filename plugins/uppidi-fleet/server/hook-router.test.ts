@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
+import type { NormalizedTurnTelemetry } from "paseo-plugin-helper/server";
 import {
   normalizeRepoKey,
   candidateRepoKeys,
@@ -1575,6 +1576,235 @@ describe("hook-router HTTP server endpoints", () => {
     const getBody = await getRes.json();
     assert.equal(getBody.ok, true);
     assert.equal(getBody.orchestrator.agentId, "test-orch-agent-1");
+  });
+
+  describe("GET /observatory/scorecard (#1452)", () => {
+    it("responds with default 7d window and empty models array when telemetry store is empty", async () => {
+      const res = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard`);
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get("content-type"), "application/json");
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.window, "7d");
+      assert.ok(Array.isArray(body.models));
+      assert.equal(body.models.length, 0);
+      assert.equal(body.recordsCount, 0);
+      assert.equal(typeof body.updatedAt, "string");
+    });
+
+    it("responds with aggregated model summaries and valid scorecard metrics", async () => {
+      const rec1: NormalizedTurnTelemetry = {
+        turnId: "turn-1",
+        agentId: "agent-1",
+        repo: "xpufx-org/paseo",
+        role: "worker",
+        model: "gemini-3.8-flash-low",
+        provider: "antigravity-acp",
+        timestamp: new Date(Date.now() - 3600 * 1000).toISOString(),
+        durationMs: 2500,
+        inputTokens: 100,
+        outputTokens: 200,
+        cachedTokens: 50,
+        reasoningTokens: 0,
+        totalTokens: 350,
+        tokensPerSecond: 80,
+        contextUsedTokens: 1000,
+        contextMaxTokens: 8000,
+        contextUtilizationPct: 12.5,
+        costUsd: 0.002,
+        toolCallsCount: 2,
+        toolErrorsCount: 0,
+        finishReason: "completed",
+        gitInsertions: 10,
+        gitDeletions: 2,
+        gitFilesChanged: 1,
+        isInterrupted: false,
+      };
+
+      const rec2: NormalizedTurnTelemetry = {
+        turnId: "turn-2",
+        agentId: "agent-1",
+        repo: "xpufx-org/paseo",
+        role: "worker",
+        model: "gemini-3.8-flash-low",
+        provider: "antigravity-acp",
+        timestamp: new Date(Date.now() - 1800 * 1000).toISOString(),
+        durationMs: 3500,
+        inputTokens: 150,
+        outputTokens: 250,
+        cachedTokens: 60,
+        reasoningTokens: 10,
+        totalTokens: 470,
+        tokensPerSecond: 90,
+        contextUsedTokens: 1500,
+        contextMaxTokens: 8000,
+        contextUtilizationPct: 18.75,
+        costUsd: 0.003,
+        toolCallsCount: 3,
+        toolErrorsCount: 0,
+        finishReason: "completed",
+        gitInsertions: 20,
+        gitDeletions: 5,
+        gitFilesChanged: 2,
+        isInterrupted: false,
+      };
+
+      mkdirSync(join(tempDir), { recursive: true });
+      writeFileSync(router.telemetryFilePath, `${JSON.stringify(rec1)}\n${JSON.stringify(rec2)}\n`, "utf8");
+
+      const res = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.window, "7d");
+      assert.equal(body.recordsCount, 2);
+      assert.equal(body.models.length, 1);
+
+      const m = body.models[0];
+      assert.equal(m.provider, "antigravity-acp");
+      assert.equal(m.model, "gemini-3.8-flash-low");
+      assert.equal(m.role, "worker");
+      assert.equal(m.turnsCompleted, 2);
+      assert.equal(m.turnsFailed, 0);
+      assert.equal(m.turnsInterrupted, 0);
+      assert.equal(m.totalTokens, 820);
+      assert.equal(m.inputTokens, 250);
+      assert.equal(m.outputTokens, 450);
+      assert.equal(m.costUsd, 0.005);
+      assert.ok(m.compositeIndices, "Must calculate composite indices");
+      assert.equal(typeof m.compositeIndices.fdsi, "number");
+      assert.equal(typeof m.compositeIndices.workerRoi, "number");
+      assert.equal(typeof m.compositeIndices.orchestratorVigilance, "number");
+      assert.equal(typeof m.compositeIndices.toolThrashingIndex, "number");
+      assert.equal(typeof m.compositeIndices.contextDecayRisk, "number");
+    });
+
+    it("filters by custom query parameters (window, role, provider, model)", async () => {
+      const recWorker: NormalizedTurnTelemetry = {
+        turnId: "turn-w",
+        agentId: "agent-w",
+        repo: "xpufx-org/paseo",
+        role: "worker",
+        model: "gemini-3.8-flash-low",
+        provider: "antigravity-acp",
+        timestamp: new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString(),
+        durationMs: 2000,
+        inputTokens: 100,
+        outputTokens: 200,
+        cachedTokens: 50,
+        reasoningTokens: 0,
+        totalTokens: 350,
+        tokensPerSecond: 100,
+        contextUsedTokens: 1000,
+        contextMaxTokens: 8000,
+        contextUtilizationPct: 12.5,
+        costUsd: 0.002,
+        toolCallsCount: 1,
+        toolErrorsCount: 0,
+        finishReason: "completed",
+        gitInsertions: 5,
+        gitDeletions: 1,
+        gitFilesChanged: 1,
+        isInterrupted: false,
+      };
+
+      const recOrchOld: NormalizedTurnTelemetry = {
+        turnId: "turn-o",
+        agentId: "agent-o",
+        repo: "xpufx-org/paseo",
+        role: "orchestrator",
+        model: "gpt-5.6-luna",
+        provider: "openai",
+        timestamp: new Date(Date.now() - 10 * 24 * 3600 * 1000).toISOString(),
+        durationMs: 4000,
+        inputTokens: 500,
+        outputTokens: 300,
+        cachedTokens: 100,
+        reasoningTokens: 50,
+        totalTokens: 950,
+        tokensPerSecond: 120,
+        contextUsedTokens: 4000,
+        contextMaxTokens: 32000,
+        contextUtilizationPct: 12.5,
+        costUsd: 0.01,
+        toolCallsCount: 2,
+        toolErrorsCount: 0,
+        finishReason: "completed",
+        gitInsertions: 0,
+        gitDeletions: 0,
+        gitFilesChanged: 0,
+        isInterrupted: false,
+      };
+
+      mkdirSync(join(tempDir), { recursive: true });
+      writeFileSync(router.telemetryFilePath, `${JSON.stringify(recWorker)}\n${JSON.stringify(recOrchOld)}\n`, "utf8");
+
+      // Default 7d window excludes 10-day-old record
+      const res7d = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard`);
+      assert.equal(res7d.status, 200);
+      const body7d = await res7d.json();
+      assert.equal(body7d.recordsCount, 1);
+      assert.equal(body7d.models.length, 1);
+      assert.equal(body7d.models[0].role, "worker");
+
+      // 30d window includes both records
+      const res30d = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard?window=30d`);
+      assert.equal(res30d.status, 200);
+      const body30d = await res30d.json();
+      assert.equal(body30d.recordsCount, 2);
+      assert.equal(body30d.window, "30d");
+      assert.equal(body30d.models.length, 2);
+
+      // Filter by role=worker
+      const resWorker = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard?window=30d&role=worker`);
+      assert.equal(resWorker.status, 200);
+      const bodyWorker = await resWorker.json();
+      assert.equal(bodyWorker.recordsCount, 1);
+      assert.equal(bodyWorker.models[0].role, "worker");
+
+      // Filter by role=orchestrator
+      const resOrch = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard?window=30d&role=orchestrator`);
+      assert.equal(resOrch.status, 200);
+      const bodyOrch = await resOrch.json();
+      assert.equal(bodyOrch.recordsCount, 1);
+      assert.equal(bodyOrch.models[0].role, "orchestrator");
+
+      // role=all includes all roles
+      const resAll = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard?window=30d&role=all`);
+      assert.equal(resAll.status, 200);
+      const bodyAll = await resAll.json();
+      assert.equal(bodyAll.recordsCount, 2);
+
+      // Filter by provider
+      const resProvider = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard?window=30d&provider=openai`);
+      assert.equal(resProvider.status, 200);
+      const bodyProvider = await resProvider.json();
+      assert.equal(bodyProvider.recordsCount, 1);
+      assert.equal(bodyProvider.models[0].provider, "openai");
+
+      // Filter by model
+      const resModel = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard?window=30d&model=gemini-3.8-flash-low`);
+      assert.equal(resModel.status, 200);
+      const bodyModel = await resModel.json();
+      assert.equal(bodyModel.recordsCount, 1);
+      assert.equal(bodyModel.models[0].model, "gemini-3.8-flash-low");
+    });
+
+    it("validates window parameter and rejects invalid window with 400", async () => {
+      const res = await fetch(`http://127.0.0.1:${router.port}/observatory/scorecard?window=invalid_window`);
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.ok, false);
+      assert.match(body.error, /window/i);
+    });
+
+    it("aliases GET /observatory/metrics to /observatory/scorecard", async () => {
+      const res = await fetch(`http://127.0.0.1:${router.port}/observatory/metrics`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.ok, true);
+      assert.equal(body.window, "7d");
+    });
   });
 });
 

@@ -52,6 +52,7 @@ import {
 import { getUppidiFleetSettingsStorage } from "./settings.js";
 import { forgejoApiGet, forgejoApiRequest, forgejoToken, resolveForgejoHost } from "./forgejo-api.js";
 import { appendRollupReceipt } from "./metrics.js";
+import { handleUppidiModelTelemetryQuery } from "./telemetry.js";
 import {
   createDefaultIssuesCheckIo,
   runIssuesCheck,
@@ -389,6 +390,8 @@ export interface HookRouterOptions {
   auditReconciliationsFilePath?: string;
   /** Durable append-only watchdog auto-recovery telemetry log path (#1429). */
   recoveryLogPath?: string;
+  /** Explicit model telemetry store path (telemetry.jsonl, #1452). */
+  telemetryFilePath?: string;
   /** Explicit log directory path for hook router disk logging (#1115). */
   logDir?: string;
   /** Explicit hook log file path (#1115). */
@@ -4775,6 +4778,8 @@ export class HookRouter {
   public readonly auditReconciliationsFilePath: string;
   /** Durable append-only watchdog auto-recovery telemetry log path (#1429). */
   public readonly recoveryLogPath: string;
+  /** Durable append-only model telemetry store (telemetry.jsonl, #1452). */
+  public readonly telemetryFilePath: string;
   /** Scoped rotating disk logger (#1115). */
   public readonly diskLogger: DiskLogger;
   public readonly logDir: string;
@@ -4915,6 +4920,10 @@ export class HookRouter {
       options?.recoveryLogPath ??
       process.env.UPPIDI_FLEET_WATCHDOG_RECOVERIES_FILE ??
       join(dirname(this.stateDir), "watchdog-recoveries.jsonl");
+    this.telemetryFilePath =
+      options?.telemetryFilePath ??
+      process.env.UPPIDI_FLEET_TELEMETRY_FILE ??
+      join(dirname(this.stateDir), "telemetry.jsonl");
 
     // Load persisted sweep digests on startup (#1352).
     const testBaseDir = this.isTestMode ? scopedRoot : undefined;
@@ -13333,6 +13342,49 @@ export class HookRouter {
         const profile = url.searchParams.get("profile")?.trim() || undefined;
         const report = getPlaybookMetricsReport({ stage, profile });
         this.sendJson(res, 200, report);
+        return;
+      }
+
+      // Fleet observatory scorecard HTTP API (#1452, platform#350)
+      if (req.method === "GET" && (pathname === "/observatory/scorecard" || pathname === "/observatory/metrics")) {
+        const rawWindow = url.searchParams.get("window")?.trim().toLowerCase();
+        let window: "7d" | "30d" | "all" = "7d";
+        if (rawWindow) {
+          if (rawWindow === "7d" || rawWindow === "30d" || rawWindow === "all") {
+            window = rawWindow;
+          } else {
+            this.sendJson(res, 400, {
+              ok: false,
+              error: `Invalid window '${rawWindow}'. Must be one of: 7d, 30d, all`,
+            });
+            return;
+          }
+        }
+
+        const rawRole = url.searchParams.get("role")?.trim();
+        const role = rawRole && rawRole.toLowerCase() !== "all" ? rawRole : undefined;
+        const provider = url.searchParams.get("provider")?.trim() || undefined;
+        const model = url.searchParams.get("model")?.trim() || undefined;
+
+        try {
+          const context = this.telemetryFilePath
+            ? { storage: this.telemetryFilePath }
+            : (this.server as any);
+
+          const payload = await handleUppidiModelTelemetryQuery(
+            {
+              window,
+              role,
+              provider,
+              model,
+            },
+            context,
+          );
+
+          this.sendJson(res, 200, payload);
+        } catch (err: any) {
+          this.sendJson(res, 500, { ok: false, error: err?.message ?? String(err) });
+        }
         return;
       }
 
