@@ -66,7 +66,7 @@ export function UppidiFleetToolingView({ initialTool }: UppidiFleetToolingProps)
     const props = activeTool.inputSchema?.properties ?? {};
     for (const [key, prop] of Object.entries(props)) {
       if (prop.default !== undefined) {
-        initial[key] = String(prop.default);
+        initial[key] = Array.isArray(prop.default) ? prop.default.join(", ") : String(prop.default);
       } else {
         initial[key] = "";
       }
@@ -109,6 +109,8 @@ export function UppidiFleetToolingView({ initialTool }: UppidiFleetToolingProps)
         }
       } else if (type === "boolean") {
         parsedArgs[key] = val.toLowerCase() === "true" || val === "1";
+      } else if (type === "array") {
+        parsedArgs[key] = val.split(",").map((s) => s.trim()).filter(Boolean);
       } else {
         parsedArgs[key] = val;
       }
@@ -150,7 +152,7 @@ export function UppidiFleetToolingView({ initialTool }: UppidiFleetToolingProps)
     const props = activeTool.inputSchema?.properties ?? {};
     for (const [key, prop] of Object.entries(props)) {
       if (prop.default !== undefined) {
-        initial[key] = String(prop.default);
+        initial[key] = Array.isArray(prop.default) ? prop.default.join(", ") : String(prop.default);
       } else {
         initial[key] = "";
       }
@@ -307,10 +309,14 @@ export function UppidiFleetToolingView({ initialTool }: UppidiFleetToolingProps)
                   onChangeText={(text) => setFormValues((prev) => ({ ...prev, [paramName]: text }))}
                   placeholder={
                     prop.default !== undefined
-                      ? String(prop.default)
+                      ? Array.isArray(prop.default)
+                        ? prop.default.join(", ")
+                        : String(prop.default)
                       : isRequired
                         ? "Required value..."
-                        : "Optional value..."
+                        : typeRaw === "array"
+                          ? "comma-delimited items..."
+                          : "Optional value..."
                   }
                   autoCapitalize="none"
                   autoCorrect={false}

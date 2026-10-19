@@ -76,6 +76,11 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
           description: `Hours before WIP issues are considered stale (default: ${ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS})`,
           default: ISSUES_CHECK_DEFAULT_STALE_WIP_HOURS,
         },
+        sweepStaleWip: {
+          type: "boolean",
+          description: "Sweep and recover stale WIP issues during the check (default: true)",
+          default: true,
+        },
         dryRun: {
           type: "boolean",
           description: "Dry-run mode: calculate triage without mutating board labels",
@@ -140,6 +145,14 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
           description: "Treat finished idle agents requiring attention as stalled (default: false)",
           default: false,
         },
+        repetitiveToolLoopThreshold: {
+          type: "number",
+          description: "Repetitive tool execution loop threshold before flagging anomaly",
+        },
+        childWakeups: {
+          type: "boolean",
+          description: "Audit child wakeup cascades and stall detection",
+        },
         json: {
           type: "boolean",
           description: "Output machine-readable JSON instead of markdown",
@@ -197,6 +210,11 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
           type: "boolean",
           description: "Dry-run mode: report dead orchestrators without deleting records (default: false)",
           default: false,
+        },
+        graceSweeps: {
+          type: "number",
+          description: "Consecutive closed sweeps required before pruning orchestrator record (default: 3)",
+          default: 3,
         },
         json: {
           type: "boolean",
@@ -285,6 +303,11 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
         reason: {
           type: "string",
           description: "Operator-supplied rationale recorded in the rotation brief",
+        },
+        force: {
+          type: "boolean",
+          description: "Force immediate rotation bypassing cooldowns and activity thresholds (default: true)",
+          default: true,
         },
         json: {
           type: "boolean",
@@ -424,6 +447,7 @@ export async function executeFleetCheckBoard(
       isError: true,
     };
   }
+  const sweepStaleWip = args.sweepStaleWip !== undefined ? Boolean(args.sweepStaleWip) : undefined;
   const dryRun = Boolean(args.dryRun);
   const json = Boolean(args.json);
   const trace = Boolean(args.trace);
@@ -440,6 +464,7 @@ export async function executeFleetCheckBoard(
       role,
       force,
       all,
+      sweepStaleWip,
       staleWipHours,
       dryRun,
       stage,
@@ -579,6 +604,9 @@ export async function executeFleetWatchdogAudit(args: Record<string, unknown> = 
   const runningStaleSeconds =
     typeof args.runningStaleSeconds === "number" ? args.runningStaleSeconds : undefined;
   const assumePendingWork = Boolean(args.assumePendingWork);
+  const repetitiveToolLoopThreshold =
+    typeof args.repetitiveToolLoopThreshold === "number" ? args.repetitiveToolLoopThreshold : undefined;
+  const childWakeups = args.childWakeups !== undefined ? Boolean(args.childWakeups) : undefined;
   const json = Boolean(args.json);
 
   const opts: WatchdogAuditOptions = {
@@ -588,6 +616,8 @@ export async function executeFleetWatchdogAudit(args: Record<string, unknown> = 
     cancellationRecencySeconds,
     runningStaleSeconds,
     assumePendingWork,
+    repetitiveToolLoopThreshold,
+    childWakeups,
   };
 
   try {
@@ -706,10 +736,11 @@ export async function executeFleetPruneOrchestrators(
 ): Promise<FleetToolCallResult> {
   const json = Boolean(args.json);
   const dryRun = Boolean(args.dryRun);
+  const graceSweeps = typeof args.graceSweeps === "number" ? args.graceSweeps : undefined;
 
   try {
     const router = getActiveHookRouter() ?? new HookRouter();
-    const result = await router.pruneOrchestrators({ dryRun });
+    const result = await router.pruneOrchestrators({ dryRun, graceSweeps });
 
     if (json) {
       return {
@@ -922,13 +953,14 @@ export async function executeFleetRotateRole(
   const role = typeof args.role === "string" && args.role.trim() ? args.role.trim() : "orchestrator";
   const repo = typeof args.repo === "string" && args.repo.trim() ? args.repo.trim() : undefined;
   const reason = typeof args.reason === "string" && args.reason.trim() ? args.reason.trim() : undefined;
+  const force = args.force !== false;
 
   try {
     const router = getActiveHookRouter();
     if (!router) {
       return { content: [{ type: "text", text: "fleet_rotate_role failed: hook router is not running" }], isError: true };
     }
-    const result = await router.rotateRole({ role, repo, reason, force: true });
+    const result = await router.rotateRole({ role, repo, reason, force });
     if (json) {
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], isError: !result.ok };
     }
@@ -1042,11 +1074,16 @@ export async function executeFleetPruneDeadSessions(
           reason: ds.killBlockedReasons.length > 0 ? ds.killBlockedReasons.join("; ") : ds.deadPredicates.join(", "),
         });
       } else if (ds.killAllowed && kill) {
-        // Kill the agent
+        let killed = false;
+        try {
+          killed = await router.archiveAgent(ds.agentId);
+        } catch {
+          killed = false;
+        }
         pruned.push({
           agentId: ds.agentId,
           name: ds.name,
-          action: "killed",
+          action: killed ? "killed" : "kill_failed",
           reason: ds.deadPredicates.join(", "),
         });
       } else if (ds.killAllowed) {

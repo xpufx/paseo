@@ -14,6 +14,7 @@ import {
   executeFleetQueuePurge,
   executeFleetHandoffGenerate,
   executeFleetEnsureOrchestrator,
+  executeFleetRotateRole,
   executeFleetValidateWorkspace,
   executeFleetPruneDeadSessions,
   executeFleetTool,
@@ -75,12 +76,19 @@ describe("fleet MCP tools and handlers", () => {
     assert.ok(boardTool.inputSchema.properties.dryRun);
     assert.ok(boardTool.inputSchema.properties.trace);
     assert.ok(boardTool.inputSchema.properties.diagnosticComment);
+    assert.ok(boardTool.inputSchema.properties.sweepStaleWip);
+    assert.equal(boardTool.inputSchema.properties.sweepStaleWip.type, "boolean");
+    assert.equal(boardTool.inputSchema.properties.sweepStaleWip.default, true);
 
     const watchdogTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_watchdog_audit");
     assert.ok(watchdogTool, "fleet_watchdog_audit tool must be registered");
     assert.equal(watchdogTool.inputSchema.type, "object");
     assert.ok(watchdogTool.inputSchema.properties.recover);
     assert.ok(watchdogTool.inputSchema.properties.frontDeskId);
+    assert.ok(watchdogTool.inputSchema.properties.repetitiveToolLoopThreshold);
+    assert.equal(watchdogTool.inputSchema.properties.repetitiveToolLoopThreshold.type, "number");
+    assert.ok(watchdogTool.inputSchema.properties.childWakeups);
+    assert.equal(watchdogTool.inputSchema.properties.childWakeups.type, "boolean");
 
     const sweepTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_board_sweep");
     assert.ok(sweepTool, "fleet_board_sweep tool must be registered");
@@ -95,6 +103,9 @@ describe("fleet MCP tools and handlers", () => {
     assert.equal(pruneTool.inputSchema.type, "object");
     assert.ok(pruneTool.inputSchema.properties.dryRun);
     assert.ok(pruneTool.inputSchema.properties.json);
+    assert.ok(pruneTool.inputSchema.properties.graceSweeps);
+    assert.equal(pruneTool.inputSchema.properties.graceSweeps.type, "number");
+    assert.equal(pruneTool.inputSchema.properties.graceSweeps.default, 3);
 
     const queueInspectTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_queue_inspect");
     assert.ok(queueInspectTool, "fleet_queue_inspect tool must be registered");
@@ -127,6 +138,9 @@ describe("fleet MCP tools and handlers", () => {
     assert.equal(rotateTool.inputSchema.type, "object");
     assert.ok(rotateTool.inputSchema.properties.role);
     assert.ok(rotateTool.inputSchema.properties.repo);
+    assert.ok(rotateTool.inputSchema.properties.force);
+    assert.equal(rotateTool.inputSchema.properties.force.type, "boolean");
+    assert.equal(rotateTool.inputSchema.properties.force.default, true);
   });
 
   test("executeFleetCheckBoard rejects invalid role", async () => {
@@ -481,5 +495,138 @@ describe("fleet MCP tools and handlers", () => {
     const res = await executeFleetPruneDeadSessions({ kill: true, apply: false });
     assert.equal(res.isError, true);
     assert.match(res.content[0]!.text, /kill requires apply/);
+  });
+
+  test("executeFleetPruneDeadSessions invokes archiveAgent when apply: true and kill: true", async () => {
+    const originalWatchdog = router.runWatchdogAudit;
+    const originalArchive = (router as any).archiveAgent;
+    const archivedIds: string[] = [];
+    (router as any).archiveAgent = async (agentId: string) => {
+      archivedIds.push(agentId);
+      return true;
+    };
+    (router as any).runWatchdogAudit = async () => ({
+      ok: true,
+      timestamp: Date.now(),
+      audited: { orchestrators: 1, agents: 1, queues: 0 },
+      anomalies: [],
+      deadSessions: [
+        {
+          agentId: "dead-agent-123",
+          name: "Coding Agent #1458",
+          deadPredicates: ["TERMINAL_FATAL_ERROR"],
+          deadReasons: ["Fatal process exit code 1"],
+          killAllowed: true,
+          killBlockedReasons: [],
+        },
+      ],
+    });
+
+    try {
+      const res = await executeFleetPruneDeadSessions({ apply: true, kill: true, dryRun: false, json: true });
+      assert.equal(res.isError, false);
+      assert.deepEqual(archivedIds, ["dead-agent-123"]);
+      const body = JSON.parse(res.content[0]!.text);
+      assert.equal(body.applied, true);
+      assert.equal(body.killed, true);
+      assert.equal(body.pruned.length, 1);
+      assert.equal(body.pruned[0].action, "killed");
+
+      // Verify failure path records kill_failed
+      (router as any).archiveAgent = async () => false;
+      const failRes = await executeFleetPruneDeadSessions({ apply: true, kill: true, dryRun: false, json: true });
+      assert.equal(failRes.isError, false);
+      const failBody = JSON.parse(failRes.content[0]!.text);
+      assert.equal(failBody.pruned[0].action, "kill_failed");
+    } finally {
+      router.runWatchdogAudit = originalWatchdog;
+      (router as any).archiveAgent = originalArchive;
+    }
+  });
+
+  test("executeFleetRotateRole respects force: false", async () => {
+    let capturedForce: boolean | undefined;
+    const originalRotateRole = router.rotateRole;
+    (router as any).rotateRole = async (input: any) => {
+      capturedForce = input.force;
+      return { ok: true, role: input.role, repo: input.repo, agentId: "new-agent", triggers: ["manual"] };
+    };
+
+    try {
+      const resFalse = await executeFleetRotateRole({ role: "orchestrator", repo: "test-org/repo-a", force: false, json: true });
+      assert.equal(resFalse.isError, false);
+      assert.equal(capturedForce, false);
+
+      const resDefault = await executeFleetRotateRole({ role: "orchestrator", repo: "test-org/repo-a", json: true });
+      assert.equal(resDefault.isError, false);
+      assert.equal(capturedForce, true);
+    } finally {
+      router.rotateRole = originalRotateRole;
+    }
+  });
+
+  test("executeFleetCheckBoard passes sweepStaleWip", async () => {
+    let staleWipSwept = false;
+    const now = Date.now();
+    const mockIo: IssuesCheckIo = {
+      getOpenIssues: async () => ({
+        ok: true,
+        issues: [
+          {
+            number: 100,
+            title: "Stale WIP issue",
+            state: "open",
+            labels: [{ name: "state/wip" }],
+            created_at: new Date(now - 10 * 3600 * 1000).toISOString(),
+            updated_at: new Date(now - 10 * 3600 * 1000).toISOString(),
+          },
+        ],
+      }),
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => {
+        staleWipSwept = true;
+        return true;
+      },
+    };
+
+    router.setIssuesCheckIoForTest(mockIo);
+    try {
+      // With sweepStaleWip: false, stale WIP recovery should NOT execute
+      staleWipSwept = false;
+      const resDisabled = await executeFleetCheckBoard({ sweepStaleWip: false, json: true });
+      assert.equal(resDisabled.isError, false);
+      assert.equal(staleWipSwept, false);
+      const parsedDisabled = JSON.parse(resDisabled.content[0]!.text);
+      assert.equal(parsedDisabled.stale_wip_recovery.length, 0);
+
+      // With sweepStaleWip: true (or default), stale WIP recovery executes
+      staleWipSwept = false;
+      const resEnabled = await executeFleetCheckBoard({ sweepStaleWip: true, json: true });
+      assert.equal(resEnabled.isError, false);
+      assert.equal(staleWipSwept, true);
+      const parsedEnabled = JSON.parse(resEnabled.content[0]!.text);
+      assert.equal(parsedEnabled.stale_wip_recovery.length, 1);
+    } finally {
+      router.setIssuesCheckIoForTest(null);
+    }
+  });
+
+  test("executeFleetPruneOrchestrators passes graceSweeps", async () => {
+    let capturedGraceSweeps: number | undefined;
+    const originalPrune = router.pruneOrchestrators;
+    (router as any).pruneOrchestrators = async (opts: any) => {
+      capturedGraceSweeps = opts.graceSweeps;
+      return { ok: true, prunedCount: 0, pruned: [], dryRun: opts.dryRun };
+    };
+
+    try {
+      await executeFleetPruneOrchestrators({ graceSweeps: 5, dryRun: true });
+      assert.equal(capturedGraceSweeps, 5);
+    } finally {
+      router.pruneOrchestrators = originalPrune;
+    }
   });
 });
