@@ -210,6 +210,8 @@ export interface RouterConfig {
   mode?: FleetMode;
   /** Per-class delivery overrides (#1034). */
   eventClassPolicy?: Record<string, string>;
+  /** Authorized operator identities for human gate signoffs (#1404). */
+  authorizedOperators?: string[];
 }
 
 export function getAvailableNetworkInterfaces(): string[] {
@@ -244,6 +246,7 @@ export function loadRouterConfig(): RouterConfig {
       kanbanOnlyRepos: settings.kanbanOnlyRepos,
       enrolledRepos: settings.enrolledRepos,
       mergeEventHooks: settings.mergeEventHooks,
+      authorizedOperators: settings.authorizedOperators,
     };
   } catch (err) {
     const cause = err instanceof Error ? err.message : String(err);
@@ -295,12 +298,51 @@ export function saveRouterConfig(config: RouterConfig): void {
     if (config.eventClassPolicy !== undefined) {
       updateData.eventClassPolicy = config.eventClassPolicy;
     }
+    if (config.authorizedOperators !== undefined) {
+      updateData.authorizedOperators = config.authorizedOperators;
+    }
     if (Object.keys(updateData).length > 0) {
       storage.update((prev) => ({ ...prev, ...updateData }));
     }
   } catch {
     // ignore when storage not accessible or in isolated testing
   }
+}
+
+/**
+ * Resolves the effective authorized operators for human-in-the-loop gates and transition guards (#1404).
+ * Evaluation precedence:
+ *   a) `options?.authorizedOperators` if provided and non-empty.
+ *   b) Environment variable `process.env.AUTHORIZED_OPERATORS` if set (comma-separated, trimmed).
+ *   c) Plugin settings storage `settings?.authorizedOperators` if defined and non-empty.
+ *   d) Fallback to `[...DEFAULT_AUTHORIZED_OPERATORS]`.
+ */
+export function resolveAuthorizedOperators(options?: { authorizedOperators?: string[] }): string[] {
+  if (options?.authorizedOperators && options.authorizedOperators.length > 0) {
+    const list = options.authorizedOperators.map((s) => s.trim()).filter((s) => s.length > 0);
+    if (list.length > 0) return list;
+  }
+  if (process.env.AUTHORIZED_OPERATORS !== undefined) {
+    const raw = process.env.AUTHORIZED_OPERATORS.trim();
+    if (raw.length > 0) {
+      const list = raw.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+      if (list.length > 0) return list;
+    }
+  }
+  try {
+    const settings = getUppidiFleetSettingsStorage().read();
+    if (
+      settings?.authorizedOperators &&
+      Array.isArray(settings.authorizedOperators) &&
+      settings.authorizedOperators.length > 0
+    ) {
+      const list = settings.authorizedOperators.map((s) => s.trim()).filter((s) => s.length > 0);
+      if (list.length > 0) return list;
+    }
+  } catch {
+    // ignore when settings storage is unavailable
+  }
+  return [...DEFAULT_AUTHORIZED_OPERATORS];
 }
 
 export interface HookRouterOptions {
@@ -4751,8 +4793,24 @@ export class HookRouter {
   private readonly closeGuardTargetActors: string[];
   private readonly closeGuardAcceptedLabels: string[];
   private readonly sharedAgentActor: string;
+  private _authorizedOperatorsOverride?: string[];
+
   /** Authorized operator identities for human gate signoffs (#1404). */
-  public readonly authorizedOperators: string[];
+  public get authorizedOperators(): string[] {
+    if (this._authorizedOperatorsOverride && this._authorizedOperatorsOverride.length > 0) {
+      return [...this._authorizedOperatorsOverride];
+    }
+    return resolveAuthorizedOperators(this.options);
+  }
+
+  public set authorizedOperators(operators: string[] | undefined) {
+    this._authorizedOperatorsOverride = operators && operators.length > 0 ? [...operators] : undefined;
+  }
+
+  public resolveAuthorizedOperators(): string[] {
+    return this.authorizedOperators;
+  }
+
   /** Playbook stage transition guard enabled (#1404). */
   public readonly stageGuardEnabled: boolean;
   /** Active human gates keyed by `${repo}#${issue}` (#1404). */
@@ -4823,7 +4881,6 @@ export class HookRouter {
         ? options.closeGuardAcceptedLabels.map(normalizeLabelName)
         : [...CLOSE_GUARD_ACCEPTED_LABELS];
     this.sharedAgentActor = options?.sharedActor ?? SHARED_AGENT_ACTOR;
-    this.authorizedOperators = options?.authorizedOperators ?? [...DEFAULT_AUTHORIZED_OPERATORS];
     this.stageGuardEnabled = options?.stageGuardEnabled !== undefined ? options.stageGuardEnabled : !this.isTestMode;
     this.mergeEventHooks = options?.mergeEventHooks ?? persisted.mergeEventHooks ?? {};
 

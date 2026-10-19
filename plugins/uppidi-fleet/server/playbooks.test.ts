@@ -482,9 +482,14 @@ describe("deterministic stage transition guards & artifact enforcement (#1404)",
     assert.equal(isStageLabel(123), false);
   });
 
+  it("verifies DEFAULT_AUTHORIZED_OPERATORS has only okcode", () => {
+    assert.deepEqual(DEFAULT_AUTHORIZED_OPERATORS, ["okcode"]);
+  });
+
   it("verifies authorized operator identity with isAuthorizedOperator", () => {
     assert.equal(isAuthorizedOperator("okcode"), true);
-    assert.equal(isAuthorizedOperator("oktay"), true);
+    assert.equal(isAuthorizedOperator("oktay"), false);
+    assert.equal(isAuthorizedOperator("oktay", ["oktay"]), true);
     assert.equal(isAuthorizedOperator("OKCODE"), true);
     assert.equal(isAuthorizedOperator("xpufx"), false);
     assert.equal(isAuthorizedOperator("autonomous-agent"), false);
@@ -790,7 +795,7 @@ describe("human-in-the-loop gating & sender verification (#1404)", () => {
     assert.match(decision.reason, /requires an authorized operator signature; actor 'xpufx' is unauthorized/);
   });
 
-  it("allows authorized operator (okcode / oktay) to advance out of human-gated stage in Medium profile", () => {
+  it("allows authorized operator (okcode) to advance out of human-gated stage in Medium profile", () => {
     const decision = evaluateStageTransition({
       profile: medium,
       fromStage: "stage/spec-audit",
@@ -1072,8 +1077,8 @@ describe("Light vs Medium simulated end-to-end lifecycle harness (#1404)", () =>
       profile: medium,
       fromStage: "stage/review",
       toStage: "stage/merge",
-      actor: "oktay",
-      context: { ...context, actor: "oktay" },
+      actor: "okcode",
+      context: { ...context, actor: "okcode" },
     });
     assert.equal(step5.allowed, true);
     assert.equal(step5.requiresHumanGate, false);

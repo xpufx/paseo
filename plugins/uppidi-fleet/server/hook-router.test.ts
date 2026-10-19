@@ -147,7 +147,9 @@ import {
   resetSweepDigestStorage,
   buildOrchestratorPrompt,
   resolveCodingAgentModel,
+  resolveAuthorizedOperators,
 } from "./hook-router.js";
+import { DEFAULT_AUTHORIZED_OPERATORS } from "./playbooks.js";
 import { readAdjudicationDecisions } from "./permission-adjudication.js";
 import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
 import { setMetricsFilePathForTest } from "./metrics.js";
@@ -13111,6 +13113,98 @@ describe("Hook Router Launch Contract & Prompt Embedding (#1398)", () => {
     assert.ok(prompt.includes("### Launch Contract"));
     assert.ok(prompt.includes("- Hook Router: http://10.0.0.42:8150"));
     assert.ok(prompt.includes("- Resolved Coding-Agent Model: "));
+  });
+
+  describe("HookRouter authorizedOperators configuration and dynamic precedence (#1404)", () => {
+    const originalEnv = process.env.AUTHORIZED_OPERATORS;
+
+    afterEach(() => {
+      if (originalEnv !== undefined) {
+        process.env.AUTHORIZED_OPERATORS = originalEnv;
+      } else {
+        delete process.env.AUTHORIZED_OPERATORS;
+      }
+    });
+
+    it("verifies DEFAULT_AUTHORIZED_OPERATORS is ['okcode']", () => {
+      assert.deepEqual(DEFAULT_AUTHORIZED_OPERATORS, ["okcode"]);
+    });
+
+    it("defaults router.authorizedOperators to DEFAULT_AUTHORIZED_OPERATORS when unconfigured", () => {
+      delete process.env.AUTHORIZED_OPERATORS;
+      const storage = getUppidiFleetSettingsStorage();
+      storage.update((prev) => ({ ...prev, authorizedOperators: undefined as any }));
+
+      const router = new HookRouter(null, { isTestMode: true });
+      assert.deepEqual(router.authorizedOperators, ["okcode"]);
+      assert.deepEqual(resolveAuthorizedOperators(), ["okcode"]);
+    });
+
+    it("takes options.authorizedOperators when provided and non-empty", () => {
+      delete process.env.AUTHORIZED_OPERATORS;
+      const router = new HookRouter(null, {
+        isTestMode: true,
+        authorizedOperators: ["custom-operator", "another-operator"],
+      });
+      assert.deepEqual(router.authorizedOperators, ["custom-operator", "another-operator"]);
+      assert.deepEqual(
+        resolveAuthorizedOperators({ authorizedOperators: ["custom-operator", "another-operator"] }),
+        ["custom-operator", "another-operator"],
+      );
+    });
+
+    it("falls back when options.authorizedOperators is empty array", () => {
+      delete process.env.AUTHORIZED_OPERATORS;
+      const router = new HookRouter(null, {
+        isTestMode: true,
+        authorizedOperators: [],
+      });
+      // Should fall back past empty options to settings or default
+      assert.deepEqual(router.authorizedOperators, ["okcode"]);
+    });
+
+    it("uses process.env.AUTHORIZED_OPERATORS when set (comma-separated, trimmed)", () => {
+      process.env.AUTHORIZED_OPERATORS = " env-operator1 , env-operator2 ";
+      const router = new HookRouter(null, { isTestMode: true });
+      assert.deepEqual(router.authorizedOperators, ["env-operator1", "env-operator2"]);
+      assert.deepEqual(resolveAuthorizedOperators(), ["env-operator1", "env-operator2"]);
+    });
+
+    it("prioritizes options.authorizedOperators over process.env.AUTHORIZED_OPERATORS", () => {
+      process.env.AUTHORIZED_OPERATORS = "env-operator";
+      const router = new HookRouter(null, {
+        isTestMode: true,
+        authorizedOperators: ["option-operator"],
+      });
+      assert.deepEqual(router.authorizedOperators, ["option-operator"]);
+      assert.deepEqual(
+        resolveAuthorizedOperators({ authorizedOperators: ["option-operator"] }),
+        ["option-operator"],
+      );
+    });
+
+    it("uses settings storage authorizedOperators and updates dynamically", () => {
+      delete process.env.AUTHORIZED_OPERATORS;
+      const storage = getUppidiFleetSettingsStorage();
+      storage.update((prev) => ({ ...prev, authorizedOperators: ["settings-op-1", "settings-op-2"] }));
+
+      const router = new HookRouter(null, { isTestMode: true });
+      assert.deepEqual(router.authorizedOperators, ["settings-op-1", "settings-op-2"]);
+
+      // Dynamic update test: updating settings storage immediately reflects on router instance
+      storage.update((prev) => ({ ...prev, authorizedOperators: ["dynamically-updated-op"] }));
+      assert.deepEqual(router.authorizedOperators, ["dynamically-updated-op"]);
+    });
+
+    it("prioritizes process.env.AUTHORIZED_OPERATORS over settings storage", () => {
+      const storage = getUppidiFleetSettingsStorage();
+      storage.update((prev) => ({ ...prev, authorizedOperators: ["settings-op"] }));
+      process.env.AUTHORIZED_OPERATORS = "env-priority-op";
+
+      const router = new HookRouter(null, { isTestMode: true });
+      assert.deepEqual(router.authorizedOperators, ["env-priority-op"]);
+      assert.deepEqual(resolveAuthorizedOperators(), ["env-priority-op"]);
+    });
   });
 });
 
