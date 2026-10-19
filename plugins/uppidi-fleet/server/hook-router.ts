@@ -4338,6 +4338,8 @@ export interface BoardSweepResult {
   queuedCandidates?: Array<{ repo: string; number: number; stage?: string; reason?: string }>;
   /** Stages automatically advanced during the sweep upon receipt of exit artifacts (#1405). */
   stageTransitions?: Array<{ repo: string; issue: number; fromStage: string; toStage: string }>;
+  /** Structured per-issue decision traces from the board sweep (#1415). */
+  decisionTraces?: DecisionTrace[];
   error?: string;
 }
 
@@ -10803,17 +10805,18 @@ export class HookRouter {
     repo: string,
     hostname = "forge.mrs.uppidi.com",
     io?: IssuesCheckIo,
-    opts?: { stage?: PlaybookStageName; profile?: string },
+    opts?: { stage?: PlaybookStageName; profile?: string; trace?: boolean; diagnosticComment?: boolean },
   ): Promise<BoardCheckResult> {
     // Enrolled keys may be `owner/repo` or the forge-qualified `host/owner/repo`;
     // the checker's `-R` argument always wants the trailing `owner/repo`.
     const parts = String(repo ?? "").split("/").filter(Boolean);
     const ownerRepo = parts.length > 2 ? parts.slice(-2).join("/") : parts.join("/");
+    const checkHost = hostname !== "forge.mrs.uppidi.com" ? hostname : (parts.length > 2 ? parts[0] : hostname);
     const debugScript = process.env.FORGEJO_ISSUES_CHECK;
     if (debugScript) {
       this.log(`[warn] FORGEJO_ISSUES_CHECK debug override active: exec ${debugScript}`);
       try {
-        const { stdout } = await execFileAsync(debugScript, ["--hostname", hostname, "-R", ownerRepo, "--json"], {
+        const { stdout } = await execFileAsync(debugScript, ["--hostname", checkHost, "-R", ownerRepo, "--json"], {
           timeout: 30000,
           maxBuffer: 5 * 1024 * 1024,
         });
@@ -10829,7 +10832,7 @@ export class HookRouter {
       }
     }
     const outcome = await runIssuesCheck({
-      hostname,
+      hostname: checkHost,
       repo: ownerRepo,
       all: true,
       sweepStaleWip: this.staleWipSweepEnabled,
@@ -10838,12 +10841,34 @@ export class HookRouter {
       stage: opts?.stage,
       profile: opts?.profile,
     });
+
+    if (opts?.diagnosticComment && outcome.decisionTraces && outcome.decisionTraces.length > 0) {
+      const token = await this.resolveApiToken(checkHost);
+      for (const trace of outcome.decisionTraces) {
+        try {
+          const comment = await forgejoApiRequest<any>(
+            "POST",
+            `/api/v1/repos/${ownerRepo}/issues/${trace.number}/comments`,
+            { body: renderDecisionTraceComment(trace) },
+            { host: checkHost, token },
+          );
+          if (comment.outcome !== "ok") {
+            this.log(`[warn] diagnostic comment failed for ${ownerRepo}#${trace.number}: ${comment.error}`);
+          }
+        } catch (err) {
+          this.log(
+            `[warn] diagnostic comment failed for ${ownerRepo}#${trace.number}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+
     return {
       repo,
       ok: true,
       candidates: this.applyRepoAutomationTier(repo, outcome.rankedCandidates),
       staleWipRecovery: outcome.staleWipRecovery,
-      decisionTraces: outcome.decisionTraces,
+      ...(opts?.trace ? { decisionTraces: outcome.decisionTraces ?? [] } : {}),
     };
   }
 
@@ -10869,7 +10894,7 @@ export class HookRouter {
   public async sweepBoard(
     repos?: string[],
     io?: IssuesCheckIo,
-    opts: { explicit?: boolean; now?: number; stage?: PlaybookStageName; profile?: string } = {},
+    opts: { explicit?: boolean; now?: number; stage?: PlaybookStageName; profile?: string; trace?: boolean; diagnosticComment?: boolean } = {},
   ): Promise<BoardSweepResult> {
     return this.runBoardSweep(repos, io, opts);
   }
@@ -10877,7 +10902,7 @@ export class HookRouter {
   public async runBoardSweep(
     repos?: string[],
     io?: IssuesCheckIo,
-    opts: { explicit?: boolean; now?: number; stage?: PlaybookStageName; profile?: string } = {},
+    opts: { explicit?: boolean; now?: number; stage?: PlaybookStageName; profile?: string; trace?: boolean; diagnosticComment?: boolean } = {},
   ): Promise<BoardSweepResult> {
     if (this.isHalted()) {
       return { ok: true, swept: 0, actionable: [], staleWipRecovered: [], errors: [], prunedCount: 0, autoEnsured: [], notified: 0 };
@@ -10890,7 +10915,7 @@ export class HookRouter {
       return parts.length >= 2;
     });
     const targets = Array.from(new Set(rawTargets.map((k) => canonicalRepoKey(k) ?? k)));
-    const sweepKey = targets.slice().sort().join(",");
+    const sweepKey = `${targets.slice().sort().join(",")}:${opts.trace ? 1 : 0}:${opts.diagnosticComment ? 1 : 0}:${opts.stage ?? ""}:${opts.profile ?? ""}`;
     const inFlight = this.inFlightBoardSweep.get(sweepKey);
     if (inFlight) {
       return await inFlight;
@@ -10917,6 +10942,7 @@ export class HookRouter {
       const errors: Array<{ repo: string; error: string }> = [];
       const queuedCandidates: Array<{ repo: string; number: number; stage?: string; reason?: string }> = [];
       const stageTransitions: Array<{ repo: string; issue: number; fromStage: string; toStage: string }> = [];
+      const allDecisionTraces: DecisionTrace[] = [];
       // Per-repo actionable-set digest for the delta gate (#1181).
       const sweepDigests = new Map<string, string>();
       const pruneResult = await this.pruneOrchestrators();
@@ -10927,7 +10953,12 @@ export class HookRouter {
       for (const repo of targets) {
         let res: BoardCheckResult;
         try {
-          res = await this.runBoardCheck(repo, undefined, io, { stage: opts.stage, profile: opts.profile });
+          res = await this.runBoardCheck(repo, undefined, io, {
+            stage: opts.stage,
+            profile: opts.profile,
+            trace: opts.trace,
+            diagnosticComment: opts.diagnosticComment,
+          });
         } catch (err) {
           // A failed check is loud: logged, returned, and reported to Front
           // Desk, because an unreported failure looks exactly like a clean board.
@@ -10939,6 +10970,9 @@ export class HookRouter {
         }
         if (res.staleWipRecovery && res.staleWipRecovery.length > 0) {
           staleWipRecovered.push(...res.staleWipRecovery);
+        }
+        if (opts.trace && res.decisionTraces && res.decisionTraces.length > 0) {
+          allDecisionTraces.push(...res.decisionTraces);
         }
         sweepDigests.set(repo, res.ok ? this.actionableDigest(res.candidates) : "#board-check-error");
         if (!res.ok || res.candidates.length === 0) continue;
@@ -11114,6 +11148,7 @@ export class HookRouter {
         ...(autoEnsured.length > 0 ? { autoEnsured } : {}),
         ...(queuedCandidates.length > 0 ? { queuedCandidates } : {}),
         ...(stageTransitions.length > 0 ? { stageTransitions } : {}),
+        ...(opts.trace ? { decisionTraces: allDecisionTraces } : {}),
       };
     })();
 

@@ -1170,6 +1170,82 @@ describe("hook-router HTTP server endpoints", () => {
         setFetchForTest(null);
       }
     });
+
+    it("runBoardCheck includes decisionTraces when trace=true and omits by default (#1415)", async () => {
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1415,
+              title: "Decision tree logging",
+              state: "open",
+              labels: [{ name: "kind/feature" }, { name: "priority/normal" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      const checkWithTrace = await router.runBoardCheck("xpufx-org/paseo", undefined, mockIo, { trace: true });
+      assert.equal(checkWithTrace.ok, true);
+      assert.ok(Array.isArray(checkWithTrace.decisionTraces));
+      assert.equal(checkWithTrace.decisionTraces.length, 1);
+      assert.equal(checkWithTrace.decisionTraces[0].number, 1415);
+
+      const checkWithoutTrace = await router.runBoardCheck("xpufx-org/paseo", undefined, mockIo);
+      assert.equal(checkWithoutTrace.ok, true);
+      assert.equal(checkWithoutTrace.decisionTraces, undefined);
+    });
+
+    it("runBoardCheck and runBoardSweep post diagnostic comments when diagnosticComment=true (#1415)", async () => {
+      const posted: Array<{ url: string; method: string; body: any }> = [];
+      setFetchForTest(async (input: string, init?: any) => {
+        const method = String(init?.method ?? "GET").toUpperCase();
+        const body = init?.body ? JSON.parse(init.body) : undefined;
+        posted.push({ url: input, method, body });
+        return { ok: true, status: 200, statusText: "", json: async () => ({ id: 1 }) };
+      });
+      const mockIo: IssuesCheckIo = {
+        getOpenIssues: async () => ({
+          ok: true,
+          issues: [
+            {
+              number: 1415,
+              title: "Decision tree logging",
+              state: "open",
+              labels: [{ name: "kind/feature" }],
+              created_at: "2026-10-16T16:00:00Z",
+              updated_at: "2026-10-16T16:00:00Z",
+            },
+          ],
+        }),
+        loadCache: async () => ({}),
+        saveCache: async () => {},
+        getLatestComments: async () => [],
+        getIssueComments: async () => [],
+        runStaleWipCommand: async () => true,
+      };
+      try {
+        const sweepRes = await router.runBoardSweep(["xpufx-org/paseo"], mockIo, {
+          trace: true,
+          diagnosticComment: true,
+        });
+        assert.equal(sweepRes.ok, true);
+        assert.ok(Array.isArray(sweepRes.decisionTraces));
+        assert.equal(sweepRes.decisionTraces.length, 1);
+        assert.equal(posted.length, 1);
+        assert.ok(posted[0].url.includes("/issues/1415/comments"));
+        assert.ok(posted[0].body.body.includes("Board Sweep Decision Trace"));
+      } finally {
+        setFetchForTest(null);
+      }
+    });
   });
 
   it("records, checks and summarizes audits over the HTTP gateway (#1172)", async () => {

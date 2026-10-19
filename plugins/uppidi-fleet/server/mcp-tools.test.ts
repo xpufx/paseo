@@ -22,6 +22,7 @@ import {
   renderWatchdogAuditMarkdown,
 } from "./mcp-tools.js";
 import { HookRouter, setActiveHookRouter, type WatchdogAuditResult } from "./hook-router.js";
+import type { IssuesCheckIo } from "./issues-check.js";
 
 describe("fleet MCP tools and handlers", () => {
   let tmpDir: string;
@@ -72,6 +73,8 @@ describe("fleet MCP tools and handlers", () => {
     assert.ok(boardTool.inputSchema.properties.role);
     assert.ok(boardTool.inputSchema.properties.force);
     assert.ok(boardTool.inputSchema.properties.dryRun);
+    assert.ok(boardTool.inputSchema.properties.trace);
+    assert.ok(boardTool.inputSchema.properties.diagnosticComment);
 
     const watchdogTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_watchdog_audit");
     assert.ok(watchdogTool, "fleet_watchdog_audit tool must be registered");
@@ -84,6 +87,8 @@ describe("fleet MCP tools and handlers", () => {
     assert.equal(sweepTool.inputSchema.type, "object");
     assert.ok(sweepTool.inputSchema.properties.repos);
     assert.ok(sweepTool.inputSchema.properties.json);
+    assert.ok(sweepTool.inputSchema.properties.trace);
+    assert.ok(sweepTool.inputSchema.properties.diagnosticComment);
 
     const pruneTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_prune_orchestrators");
     assert.ok(pruneTool, "fleet_prune_orchestrators tool must be registered");
@@ -134,6 +139,86 @@ describe("fleet MCP tools and handlers", () => {
     const res = await executeFleetCheckBoard({ staleWipHours: -1 });
     assert.equal(res.isError, true);
     assert.match(res.content[0]!.text, /staleWipHours must be a non-negative number/);
+  });
+
+  test("executeFleetCheckBoard supports trace: true for JSON and markdown output", async () => {
+    const mockIo: IssuesCheckIo = {
+      getOpenIssues: async () => ({
+        ok: true,
+        issues: [
+          {
+            number: 1415,
+            title: "Decision tree logging",
+            state: "open",
+            labels: [{ name: "kind/feature" }, { name: "priority/normal" }],
+            created_at: "2026-10-16T16:00:00Z",
+            updated_at: "2026-10-16T16:00:00Z",
+          },
+        ],
+      }),
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+    };
+    router.setIssuesCheckIoForTest(mockIo);
+    try {
+      const jsonRes = await executeFleetCheckBoard({ trace: true, json: true });
+      assert.equal(jsonRes.isError, false);
+      const data = JSON.parse(jsonRes.content[0]!.text);
+      assert.ok(Array.isArray(data.decision_traces));
+      assert.equal(data.decision_traces.length, 1);
+      assert.equal(data.decision_traces[0].number, 1415);
+      assert.equal(data.decision_traces[0].path, "new");
+
+      const mdRes = await executeFleetCheckBoard({ trace: true, json: false });
+      assert.equal(mdRes.isError, false);
+      assert.match(mdRes.content[0]!.text, /Decision Traces/);
+      assert.match(mdRes.content[0]!.text, /#1415/);
+    } finally {
+      router.setIssuesCheckIoForTest(null);
+    }
+  });
+
+  test("executeFleetBoardSweep supports trace: true for JSON and markdown output", async () => {
+    const mockIo: IssuesCheckIo = {
+      getOpenIssues: async () => ({
+        ok: true,
+        issues: [
+          {
+            number: 1415,
+            title: "Decision tree logging",
+            state: "open",
+            labels: [{ name: "kind/feature" }, { name: "priority/normal" }],
+            created_at: "2026-10-16T16:00:00Z",
+            updated_at: "2026-10-16T16:00:00Z",
+          },
+        ],
+      }),
+      loadCache: async () => ({}),
+      saveCache: async () => {},
+      getLatestComments: async () => [],
+      getIssueComments: async () => [],
+      runStaleWipCommand: async () => true,
+    };
+    router.setIssuesCheckIoForTest(mockIo);
+    try {
+      const jsonRes = await executeFleetBoardSweep({ repos: ["test-org/repo-a"], trace: true, json: true });
+      assert.equal(jsonRes.isError, false);
+      const parsed = JSON.parse(jsonRes.content[0]!.text);
+      assert.equal(parsed.ok, true);
+      assert.ok(Array.isArray(parsed.decisionTraces));
+      assert.equal(parsed.decisionTraces.length, 1);
+      assert.equal(parsed.decisionTraces[0].number, 1415);
+
+      const mdRes = await executeFleetBoardSweep({ repos: ["test-org/repo-a"], trace: true, json: false });
+      assert.equal(mdRes.isError, false);
+      assert.match(mdRes.content[0]!.text, /### Decision Traces/);
+      assert.match(mdRes.content[0]!.text, /#1415/);
+    } finally {
+      router.setIssuesCheckIoForTest(null);
+    }
   });
 
   test("renderWatchdogAuditMarkdown renders clean state", () => {
