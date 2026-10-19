@@ -30,6 +30,17 @@ function tryFile(url) {
 // fails, so probing is deferred to the catch below: this hook is pure fallback
 // and never shadows a specifier node can already resolve.
 export async function resolve(specifier, context, next) {
+  if (specifier === "@xpufx/backend-fleet" || specifier.startsWith("@xpufx/backend-fleet/")) {
+    const sub =
+      specifier === "@xpufx/backend-fleet"
+        ? "index.js"
+        : specifier.slice("@xpufx/backend-fleet/".length) + (specifier.endsWith(".js") ? "" : "/index.js");
+    const localDist = new URL(`../../../packages/backend/fleet/dist/${sub}`, import.meta.url);
+    if (fs.existsSync(localDist)) {
+      return { url: localDist.href, shortCircuit: true };
+    }
+  }
+
   try {
     return await next(specifier, context);
   } catch (err) {

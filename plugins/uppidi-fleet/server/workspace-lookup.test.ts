@@ -9,13 +9,13 @@ import { resolveHostHome } from "./role-models.js";
 describe("workspace-lookup deterministic resolution (#793)", () => {
   const sampleProjects: ProjectRecord[] = [
     {
-      projectId: "prj_paseo",
+      projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
       displayName: "paseo",
       projectKey: "remote:forge.mrs.uppidi.com:222/xpufx-org/paseo",
       rootPath: "/home/user/code/paseo",
     },
     {
-      projectId: "prj_uppidi",
+      projectId: "git-root:2f4167e4e1a0676a03d01ad28b8cf92ef5312345",
       displayName: "uppidi",
       projectKey: "remote:forge.example.com:222/xpufx/uppidi",
       rootPath: "/home/user/code/uppidi",
@@ -25,7 +25,7 @@ describe("workspace-lookup deterministic resolution (#793)", () => {
   const sampleWorkspaces: WorkspaceRecord[] = [
     {
       workspaceId: "wks_paseo_main",
-      projectId: "prj_paseo",
+      projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
       cwd: "/home/user/code/paseo",
       displayName: "main",
       mainRepoRoot: null,
@@ -34,7 +34,7 @@ describe("workspace-lookup deterministic resolution (#793)", () => {
     },
     {
       workspaceId: "wks_paseo_worktree",
-      projectId: "prj_paseo",
+      projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
       cwd: "/home/user/.paseo/worktrees/123/feat-793",
       displayName: "feat-793",
       mainRepoRoot: "/home/user/code/paseo",
@@ -44,14 +44,14 @@ describe("workspace-lookup deterministic resolution (#793)", () => {
     },
     {
       workspaceId: "wks_paseo_archived",
-      projectId: "prj_paseo",
+      projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
       cwd: "/home/user/code/old-paseo",
       displayName: "old",
       archivedAt: "2026-01-01T00:00:00Z",
     },
     {
       workspaceId: "wks_uppidi_main",
-      projectId: "prj_uppidi",
+      projectId: "git-root:2f4167e4e1a0676a03d01ad28b8cf92ef5312345",
       cwd: "/home/user/code/uppidi",
       displayName: "main",
       mainRepoRoot: null,
@@ -94,7 +94,7 @@ describe("workspace-lookup deterministic resolution (#793)", () => {
     const archived: WorkspaceRecord[] = [
       {
         workspaceId: "wks_archived",
-        projectId: "prj_paseo",
+        projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
         cwd: "/home/user/code/paseo-old",
         displayName: "paseo",
         archivedAt: "2026-01-01T00:00:00Z",
@@ -113,6 +113,15 @@ describe("workspace-lookup deterministic resolution (#793)", () => {
     });
     assert.ok(withLive);
     assert.equal(withLive.workspaceId, "wks_paseo_main");
+  });
+
+  it("matches git-root:<sha> canonical key directly", () => {
+    const res = resolveWorkspaceForRepo("git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581", {
+      workspacesData: sampleWorkspaces,
+      projectsData: sampleProjects,
+    });
+    assert.ok(res);
+    assert.equal(res.workspaceId, "wks_paseo_main");
   });
 
   it("matches repo basename to project displayName", () => {
@@ -206,7 +215,7 @@ describe("canonical daemon workspace resolution (#1159)", () => {
       paseoWith([
         {
           id: "wks_worktree",
-          projectId: "prj_paseo",
+          projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
           projectRootPath: "/home/user/code/paseo",
           workspaceDirectory: "/home/user/.paseo/worktrees/abc/feat-1",
           workspaceKind: "worktree",
@@ -216,7 +225,7 @@ describe("canonical daemon workspace resolution (#1159)", () => {
         },
         {
           id: "wks_main",
-          projectId: "prj_paseo",
+          projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581",
           projectRootPath: "/home/user/code/paseo",
           workspaceDirectory: "/home/user/code/paseo",
           workspaceKind: "checkout",
@@ -240,7 +249,7 @@ describe("canonical daemon workspace resolution (#1159)", () => {
         "xpufx-org/paseo",
         paseoWith([], async ({ cwd }: { cwd: string }) => {
           openedCwd = cwd;
-          return { id: "wks_ambient", directory: cwd, projectId: "prj_ambient" };
+          return { id: "wks_ambient", directory: cwd, projectId: "git-root:5d9c889a1c69e5bcb33cf338269ddf6fc24c6581" };
         }),
         { candidateDir: () => repoDir },
       );

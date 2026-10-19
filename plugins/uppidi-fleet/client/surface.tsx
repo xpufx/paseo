@@ -123,7 +123,12 @@ import { ForgeIssuesView } from "./forges-tab.js";
 import { canonicalForgeUrl, resolveForgeSelection } from "./forges-tab.js";
 import { ActionsTabView } from "./actions-tab.js";
 import { RunnersTab } from "./runners-tab.js";
-import { canonicalRepoName, resolveCanonicalRepo } from "../shared/repo-identity.js";
+import {
+  canonicalRepoName,
+  resolveCanonicalRepo,
+  formatProjectDisplay,
+  formatProjectOptionLabel,
+} from "../shared/repo-identity.js";
 import { defaultAgentLink } from "../shared/agent-links.js";
 
 export type SurfaceTab = "tree" | "dashboard" | "tooling" | "settings" | "board" | "forges" | "actions" | "runners";
@@ -1454,7 +1459,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     ...availableRepos.map((r) => ({
       label: r,
       value: r,
-      display: resolveForgeSelection(r, availableRepos)?.compact ?? r,
+      display: formatProjectOptionLabel(r),
     })),
   ], [availableRepos]);
 
@@ -2143,17 +2148,21 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                           ) : (
                             enrolledList.map((r) => {
                               const isUnenrolling = unenrollingRepoKey === r.key;
+                              const display = formatProjectDisplay(r.key);
                               return (
                                 <Card key={r.key} variant="elevated">
                                   <Row justify="space-between" align="center" wrap gap="xs">
                                     <Stack gap="xxs" style={{ flex: 1, minWidth: 160 }}>
                                       <Row align="center" gap="xs" wrap>
                                         <Text
-                                          style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}
+                                          style={{ color: colors.foreground, ...typography.body, fontWeight: "700" }}
                                           numberOfLines={1}
                                         >
-                                          {r.key}
+                                          {display.primaryName}
                                         </Text>
+                                        {display.orgPill && <Badge label={display.orgPill} variant="neutral" size="sm" />}
+                                        {display.rootShaPill && <Badge label={display.rootShaPill} variant="neutral" size="sm" />}
+                                        {display.worktreePill && <Badge label={display.worktreePill} variant="neutral" size="sm" />}
                                         {r.private && <Badge label="Private" variant="neutral" size="sm" />}
                                         {r.paused && <Badge label="Paused" variant="warning" size="sm" />}
                                         {r.hasOrchestrator && <Badge label="Orchestrator" variant="info" size="sm" />}
@@ -2161,7 +2170,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                                           <Badge label={`${r.queueDepth} queued`} variant="info" size="sm" />
                                         )}
                                       </Row>
-                                      {r.owner && (
+                                      <Text
+                                        style={{ color: colors.foregroundMuted, ...typography.caption }}
+                                        numberOfLines={1}
+                                      >
+                                        {r.key}
+                                      </Text>
+                                      {r.owner && r.owner !== display.orgPill && (
                                         <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                                           Owner: {r.owner}
                                         </Text>
@@ -2198,20 +2213,29 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                           ) : (
                             availableList.map((r) => {
                               const isEnrolling = enrollingRepoKey === r.key;
+                              const display = formatProjectDisplay(r.key);
                               return (
                                 <Card key={r.key} variant="elevated">
                                   <Row justify="space-between" align="center" wrap gap="xs">
                                     <Stack gap="xxs" style={{ flex: 1, minWidth: 160 }}>
                                       <Row align="center" gap="xs" wrap>
                                         <Text
-                                          style={{ color: colors.foreground, ...typography.body, fontWeight: "600" }}
+                                          style={{ color: colors.foreground, ...typography.body, fontWeight: "700" }}
                                           numberOfLines={1}
                                         >
-                                          {r.key}
+                                          {display.primaryName}
                                         </Text>
+                                        {display.orgPill && <Badge label={display.orgPill} variant="neutral" size="sm" />}
+                                        {display.rootShaPill && <Badge label={display.rootShaPill} variant="neutral" size="sm" />}
                                         {r.private && <Badge label="Private" variant="neutral" size="sm" />}
                                       </Row>
-                                      {r.owner && (
+                                      <Text
+                                        style={{ color: colors.foregroundMuted, ...typography.caption }}
+                                        numberOfLines={1}
+                                      >
+                                        {r.key}
+                                      </Text>
+                                      {r.owner && r.owner !== display.orgPill && (
                                         <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
                                           Owner: {r.owner}
                                         </Text>

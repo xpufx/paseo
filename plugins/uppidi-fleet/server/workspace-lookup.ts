@@ -2,8 +2,19 @@ import { existsSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { candidateRepoKeys, canonicalRepoKey, normalizeRepoKey } from "../shared/repo-identity.js";
-import { isRepoMatching } from "../shared/sort-filter.js";
 import { resolveHostHome } from "./role-models.js";
+import {
+  resolveGitRootCommit,
+  resolveGitRootCommitSync,
+  canonicalProjectKey,
+  resolveCanonicalProjectKey,
+} from "@xpufx/backend-fleet";
+export {
+  resolveGitRootCommit,
+  resolveGitRootCommitSync,
+  canonicalProjectKey,
+  resolveCanonicalProjectKey,
+};
 
 type PaseoApi = PluginHandlerContext["paseo"];
 
@@ -160,21 +171,28 @@ function workspaceCandidateKeys(workspace: WorkspaceRecord, project?: ProjectRec
   const keys = new Set<string>();
   const add = (value?: string | null): void => {
     if (!value) return;
-    const normalized = normalizeRepoKey(value);
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    keys.add(trimmed.toLowerCase());
+    const normalized = normalizeRepoKey(trimmed);
     if (normalized) keys.add(normalized.toLowerCase());
-    const canonical = canonicalRepoKey(value);
+    const canonical = canonicalRepoKey(trimmed);
     if (canonical) keys.add(canonical.toLowerCase());
   };
 
-  add(project?.projectKey ?? undefined);
-  if (typeof workspace.projectId === "string" && workspace.projectId.startsWith("remote:")) {
-    add(workspace.projectId);
-  }
+  add(workspace.projectId);
+  add((workspace as any).projectKey);
+  add((workspace as any).repo);
+  add(project?.projectId);
+  add(project?.projectKey);
   add(workspace.mainRepoRoot);
   add(project?.rootPath);
   add(workspace.cwd);
   add(workspace.displayName);
   add(project?.displayName);
+  if (workspace.cwd) add(basename(workspace.cwd));
+  if (workspace.mainRepoRoot) add(basename(workspace.mainRepoRoot));
+  if (project?.rootPath) add(basename(project.rootPath));
 
   return [...keys];
 }
@@ -205,26 +223,29 @@ export function resolveWorkspaceForRepo(
   }
 
   const targetKeys = new Set<string>();
-  for (const candidate of candidateRepoKeys(repo)) {
-    const normalized = normalizeRepoKey(candidate);
-    if (normalized) targetKeys.add(normalized.toLowerCase());
-    const canonical = canonicalRepoKey(candidate);
-    if (canonical) targetKeys.add(canonical.toLowerCase());
+  targetKeys.add(repo.toLowerCase());
+
+  if (repo.startsWith("git-root:") || repo.startsWith("non-git:")) {
+    // Direct canonical key match
+  } else {
+    for (const candidate of candidateRepoKeys(repo)) {
+      const normalized = normalizeRepoKey(candidate);
+      if (normalized) targetKeys.add(normalized.toLowerCase());
+      const canonical = canonicalRepoKey(candidate);
+      if (canonical) targetKeys.add(canonical.toLowerCase());
+    }
+    if (existsSync(repo)) {
+      const pKey = canonicalProjectKey(repo);
+      if (pKey) targetKeys.add(pKey.toLowerCase());
+    }
   }
-  const repoBasename = basename(repo.replace(/\.git$/, "")).toLowerCase();
 
   const matches: Array<{ workspace: WorkspaceRecord; project?: ProjectRecord }> = [];
   for (const workspace of workspaces) {
     if (!workspace?.workspaceId || !workspace.cwd) continue;
     const project = workspace.projectId ? projectsById.get(workspace.projectId) : undefined;
     const keys = workspaceCandidateKeys(workspace, project);
-    const hit = keys.some(
-      (key) =>
-        targetKeys.has(key) ||
-        key === repoBasename ||
-        key.endsWith(`/${repoBasename}`) ||
-        isRepoMatching(repo, key),
-    );
+    const hit = keys.some((key) => targetKeys.has(key));
     if (hit) matches.push({ workspace, project });
   }
 

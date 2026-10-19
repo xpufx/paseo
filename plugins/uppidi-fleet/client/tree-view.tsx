@@ -66,6 +66,7 @@ import {
   type SortDirection,
 } from "../shared/sort-filter.js";
 import { defaultAgentLink } from "../shared/agent-links.js";
+import { formatProjectDisplay } from "../shared/repo-identity.js";
 
 export {
   type DeterministicStateConfig,
@@ -2418,20 +2419,36 @@ export function ProjectGroupCard({
                   color={colors.foregroundMuted}
                 />
               )}
-              <Icon name="FolderGit2" size={16} color={colors.accent} />
-              <Text
-                numberOfLines={1}
-                style={{
-                  color: colors.foreground,
-                  ...typography.heading,
-                  fontWeight: "700",
-                  fontSize: 14,
-                  flexShrink: 1,
-                  minWidth: 0,
-                }}
-              >
-                {group.projectName}
-              </Text>
+              {(() => {
+                const display = formatProjectDisplay(group.projectName);
+                return (
+                  <>
+                    <Icon name="FolderGit2" size={16} color={colors.accent} />
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        color: colors.foreground,
+                        ...typography.heading,
+                        fontWeight: "700",
+                        fontSize: 14,
+                        flexShrink: 1,
+                        minWidth: 0,
+                      }}
+                    >
+                      {display.primaryName}
+                    </Text>
+                    {display.orgPill && (
+                      <Badge label={display.orgPill} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+                    )}
+                    {display.rootShaPill && (
+                      <Badge label={display.rootShaPill} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+                    )}
+                    {display.worktreePill && (
+                      <Badge label={display.worktreePill} variant="neutral" size="sm" textStyle={{ fontSize: 10 }} />
+                    )}
+                  </>
+                );
+              })()}
               <Badge
                 label={`${group.orchestrators.length} Orchestrator${
                   group.orchestrators.length === 1 ? "" : "s"
