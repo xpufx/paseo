@@ -246,7 +246,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `server/fleet-reset.test.ts` | server/fleet-reset | `test:node` | 168 | `deterministic` |
 | `server/fleet.test.ts` | Cross-surface fleet behaviour | `test:node` | 1595 | `deterministic` |
 | `server/forgejo-api.test.ts` | server/forgejo-api | `test:node` | 300 | `deterministic` |
-| `server/forgejo-token.test.ts` | server/forgejo-token | `test:node` | 109 | `deterministic` |
+| `server/forgejo-token.test.ts` | server/forgejo-token | `test:node` | 110 | `deterministic` |
 | `server/hook-router.test.ts` | Webhook classification, coalescing, queueing, watchdog taxonomy, handoff | `test:node` | 13117 | `deterministic` |
 | `server/hook.test.ts` | Hook-service handlers, endpoint resolution, unreachable-path shapes | `test:node` | 460 | `deterministic` |
 | `server/issues-check.test.ts` | Ported stale-WIP sweep fixtures, checker retirement guard (#733) | `test:node` | 1243 | `deterministic` |
@@ -359,7 +359,7 @@ matrix above is the judgement half.
 | `server/fleet.test.ts` | server | 1595 | 0 | — |
 | `server/forgejo-api.test.ts` | server | 300 | 0 | — |
 | `server/forgejo-api.ts` | server | 315 | 17 | `DEFAULT_FORGEJO_HOST`, `FORGEJO_API_TIMEOUT_MS`, `FetchLike`, `ForgejoApiResult`, `ForgejoIdentity`, `ResolveForgejoIdentityOptions`, `TokenResolverFn`, `forgejoApiGet`, `forgejoApiRequest`, `forgejoToken`, `resolveForgejoHost`, `resolveForgejoIdentity` …+5 more |
-| `server/forgejo-token.test.ts` | server | 109 | 0 | — |
+| `server/forgejo-token.test.ts` | server | 110 | 0 | — |
 | `server/hook-router.test.ts` | server | 13117 | 0 | — |
 | `server/hook-router.ts` | server | 13812 | 271 | `BACKWARD_TRANSITION_STEERING_COMMENT`, `BACKWARD_TRANSITION_STEERING_MARKER`, `BoardCandidate`, `BoardCheckResult`, `BoardSweepResult`, `CANCELLATION_TIMEOUT_MARKER`, `CHILD_WAKEUP_EVENTS`, `CI_FAILURE_LABELS`, `CLOSE_GUARD_ACCEPTED_LABELS`, `CLOSE_GUARD_POLICY_COMMENT`, `ChildWakeupAssessment`, `ChildWakeupContext` …+259 more |
 | `server/hook.test.ts` | server | 460 | 0 | — |
