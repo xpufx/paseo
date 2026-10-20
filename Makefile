@@ -7,7 +7,7 @@ all: doctor
 doctor:
 	@node scripts/doctor-live.mjs
 
-## reload: Auto-rebuild and vendor helper, stamp version, and reload affected daemons
+## reload: Auto-rebuild helper, stamp version, and reload affected daemons
 reload:
 	@node scripts/doctor-live.mjs --reload
 
@@ -40,21 +40,9 @@ migrate-numberless-labels:
 build:
 	@npm run build --workspaces --if-present
 
-## vendor-sync: Refresh the committed helper copies plugins publish from (Track B, #71)
-vendor-sync:
-	@node scripts/vendor-sync.mjs
-
 ## stamp: Refresh plugin version stamps explicitly (typecheck/test no longer stamp)
 stamp:
 	@for p in demo top mcp-tools; do npm run stamp --prefix plugins/$$p; done
-
-## vendor-link: Verify the live dev link (workspace link + tsconfig alias); creates no symlinks
-vendor-link:
-	@node scripts/vendor-sync.mjs --link
-
-## vendor-check: Fail if committed helper copies drifted from helper src or a legacy dev symlink remains
-vendor-check:
-	@node scripts/vendor-sync.mjs --check
 
 ## npm-stage: Stage all plugin tarballs (agent/CI uploads the artifact; no 2FA)
 npm-stage:

@@ -12,8 +12,8 @@ import {
   // these are provided as no-op stubs to prevent build failures (see #510).
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
 } from "@getpaseo/plugin/client/react-native";
-import { initClientHelpers, registerCommandCenterItem } from "./client/vendor/paseo-plugin-helper/core";
-import { registerSidebarSurface } from "./client/vendor/paseo-plugin-helper/lifecycle";
+import { initClientHelpers, registerCommandCenterItem } from "paseo-plugin-helper/core";
+import { registerSidebarSurface } from "paseo-plugin-helper/lifecycle";
 import { registerSlashCommands } from "./client/commands";
 import { registerSlashTimeline } from "./client/timeline";
 import { SlashConsole } from "./client/console";

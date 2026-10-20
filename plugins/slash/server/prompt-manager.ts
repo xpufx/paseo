@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import { COMMAND_NAME_PATTERN, type SlashCommand } from "../shared/resources";
-import { isPluginRunning } from "./vendor/paseo-plugin-helper";
+import { isPluginRunning } from "paseo-plugin-helper/server";
 
 export const PROMPT_MANAGER_PLUGIN_ID = "paseo-prompt-manager";
 

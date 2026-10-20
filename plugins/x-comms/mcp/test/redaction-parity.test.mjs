@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 
 import { redactSecrets as mirrorRedact } from "../redact.mjs";
-import { redactSecrets as canonicalRedact } from "../../server/vendor/paseo-plugin-helper/redact.ts";
+import { redactSecrets as canonicalRedact } from "../../../../packages/paseo-plugin-helper/src/server/redact.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -108,7 +108,7 @@ test("the mirror masks the offer, so this test cannot pass by comparing two leak
 test("the mirror still carries the helper's offer and auth patterns", () => {
   const source = readFileSync(join(HERE, "..", "redact.mjs"), "utf-8");
   const canonical = readFileSync(
-    join(HERE, "..", "..", "server", "vendor", "paseo-plugin-helper", "redact.ts"),
+    join(HERE, "..", "..", "..", "..", "packages", "paseo-plugin-helper", "src", "server", "redact.ts"),
     "utf-8",
   );
   for (const pattern of [

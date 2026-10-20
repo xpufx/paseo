@@ -8,7 +8,7 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URL } from "node:url";
 import {
   createPluginLogger,
   registerMcpInjection,

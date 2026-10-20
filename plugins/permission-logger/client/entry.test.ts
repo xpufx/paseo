@@ -49,13 +49,6 @@ describe("permission-logger client/ migration (paseo#847 Phase 3)", () => {
     expect(entry).toContain("registerSidebarSurface");
     expect(surface).toContain("PluginSurfaceProps");
   });
-
-  it("carries a vendored paseo-plugin-helper/ui publish tree", () => {
-    const manifest = JSON.parse(readSource("paseo-plugin.json"));
-    expect(manifest.id).toBe("permission-logger");
-    const uiIndex = readSource("client/vendor/paseo-plugin-helper/ui/index.ts");
-    expect(uiIndex).toContain("HostScroll");
-  });
 });
 
 describe("permission-logger server entry", () => {

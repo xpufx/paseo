@@ -21,9 +21,9 @@ import {
 } from "./resources";
 import { getSlashSettingsStorage, resetSlashSettingsStorageInstance } from "./settings";
 
-// Mock isPluginRunning from vendor helper
-vi.mock("./vendor/paseo-plugin-helper", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./vendor/paseo-plugin-helper")>();
+// Mock isPluginRunning from helper
+vi.mock("paseo-plugin-helper/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("paseo-plugin-helper/server")>();
   return {
     ...actual,
     isPluginRunning: vi.fn().mockResolvedValue(false),
@@ -96,7 +96,7 @@ describe("isPromptManagerRunning (presence detection)", () => {
   });
 
   it("delegates to isPluginRunning when context.paseo.plugins.list is not available", async () => {
-    const { isPluginRunning: mockIsPluginRunning } = await import("./vendor/paseo-plugin-helper");
+    const { isPluginRunning: mockIsPluginRunning } = await import("paseo-plugin-helper/server");
     vi.mocked(mockIsPluginRunning).mockResolvedValueOnce(true);
 
     const result = await isPromptManagerRunning();

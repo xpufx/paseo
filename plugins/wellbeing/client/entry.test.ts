@@ -82,23 +82,6 @@ describe("wellbeing client entry contract", () => {
       /import\s*\{[^}]*registerSidebarSurface[^}]*\}\s*from\s*["']paseo-plugin-helper\/lifecycle["']/,
       "index.client.tsx must register the surface from paseo-plugin-helper/lifecycle",
     );
-
-    // The referenced lifecycle/shared exports must be real in the vendored
-    // copies the published plugin tree ships.
-    const vendored = path.resolve(pluginDir, "client/vendor/paseo-plugin-helper");
-    assert.match(
-      fs.readFileSync(path.join(vendored, "lifecycle/host-theme.tsx"), "utf8"),
-      /export\s+function\s+useHostTheme/,
-      "vendored lifecycle must export useHostTheme",
-    );
-    assert.match(
-      fs.readFileSync(
-        path.resolve(pluginDir, "shared/vendor/paseo-plugin-helper/formatters.ts"),
-        "utf8",
-      ),
-      /export\s+function\s+resolveMetricStatus/,
-      "vendored shared must export resolveMetricStatus",
-    );
   });
 
   it("never touches DOM event APIs without a runtime function check", () => {

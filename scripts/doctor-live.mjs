@@ -407,33 +407,7 @@ async function diagnose() {
         .map((d) => d.name)
     : [];
 
-  // Vendor drift (once): which plugins' vendored helper copies differ
-  // from a fresh sync. Paths look like "drift: plugins/<name>/...".
-  // A deliberate dev link ("linked: plugins/<name>/...") is NOT drift and must
-  // never be auto-materialized here (#146) — it is reported as a warning, since
-  // a linked tree is not installable. It is also excluded from reload: the
-  // Paseo compiler rejects the relative vendored symlink.
-  try {
-    execSync("node scripts/vendor-sync.mjs --check", {
-      cwd: ROOT_DIR,
-      encoding: "utf-8",
-      stdio: ["pipe", "pipe", "ignore"],
-    });
-  } catch (err) {
-    // A non-zero exit is expected when drift/linked output was produced; a
-    // genuine failure is one that yields neither.
-    const out = (err.stdout || "") + "\n" + (err.stderr || "");
-    for (const m of out.matchAll(/drift:\s*plugins\/([^/\s]+)/g)) {
-      state.vendorDrifted.add(m[1]);
-    }
-    for (const m of out.matchAll(/linked:\s*plugins\/([^/\s]+)/g)) {
-      state.vendorLinked.add(m[1]);
-    }
-    if (state.vendorDrifted.size === 0 && state.vendorLinked.size === 0) {
-      recordDiagnostic("node scripts/vendor-sync.mjs --check", err);
-    }
-  }
-  if (state.vendorLinked.size > 0) result.ready = false;
+
 
   for (const name of pluginDirs) {
     const fullPath = path.join(pluginsDir, name);
@@ -676,11 +650,7 @@ async function remediate(result, state) {
     }
   }
 
-  // Vendored copies are publish artifacts, not a dev dependency: never copy
-  // them during a reload. The publish gate runs `vendor-sync` itself.
-  if (state.vendorDrifted.size > 0) {
-    console.log(`${colors.yellow}ℹ Vendored helper copies are stale (publish artifact) — run: node scripts/vendor-sync.mjs before publishing${colors.reset}`);
-  }
+
 
   for (const ps of state.pluginStates) {
     if (ps.nestedShadow) {
@@ -857,25 +827,7 @@ function output(result) {
     console.log("");
   }
 
-  const linkedPlugins = result.plugins.filter((p) => p.vendorLinked);
-  if (linkedPlugins.length > 0) {
-    console.log(`${colors.yellow}⚠️  Vendored helper trees are legacy dev symlinks — NOT installable, do not ship/publish:${colors.reset}`);
-    for (const p of linkedPlugins) {
-      console.log(`      plugins/${p.name} — materialize with ${colors.cyan}node scripts/vendor-sync.mjs${colors.reset}`);
-    }
-    console.log("");
-  }
 
-  // Publish-only signal: dev is unaffected because it resolves the bare helper
-  // specifier straight to the helper src.
-  const driftedPublish = result.plugins.filter((p) => p.vendorDrift);
-  if (driftedPublish.length > 0) {
-    console.log(`${colors.yellow}ℹ Vendored helper copies stale (publish artifact only — dev resolves helper src directly):${colors.reset}`);
-    for (const p of driftedPublish) {
-      console.log(`      plugins/${p.name}: pinned ${p.vendorPin} — run ${colors.cyan}node scripts/vendor-sync.mjs${colors.reset} before publishing`);
-    }
-    console.log("");
-  }
 
   if (!result.ready && !shouldReload) {
     console.log(`${colors.yellow}⚠️  Action Required to Test Fresh Code:${colors.reset}`);
@@ -922,11 +874,6 @@ function output(result) {
     console.log(`  💡 Tip: run with ${colors.cyan}--reload${colors.reset} to auto-fix and reload: ${colors.cyan}npm run doctor:live -- --reload${colors.reset}`);
     console.log("");
     console.log(`${colors.gray}🖥️  Client UI Note: If you have Paseo open, press Ctrl+R (Cmd+R) or re-open the plugin modal/surface to pick up fresh evaluated client code.${colors.reset}`);
-    console.log("");
-    return 1;
-  } else if (linkedPlugins.length > 0) {
-    console.log(`${colors.red}✖ Linked vendored helper trees cannot load or install — refusing to report healthy.${colors.reset}`);
-    console.log(`${colors.gray}Run: node scripts/vendor-sync.mjs${colors.reset}`);
     console.log("");
     return 1;
   } else {

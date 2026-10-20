@@ -5,7 +5,7 @@ import path from "node:path";
 import {
   installStorageGuard,
   ScopedStorageViolationError,
-} from "./vendor/paseo-plugin-helper";
+} from "paseo-plugin-helper/server";
 import contribute from "../index.server";
 
 describe("slash scoped storage guard (#1412)", () => {

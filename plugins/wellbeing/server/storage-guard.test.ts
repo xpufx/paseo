@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { installStorageGuard, ScopedStorageViolationError } from "../server/vendor/paseo-plugin-helper/storage-guard.js";
+import { installStorageGuard, ScopedStorageViolationError } from "paseo-plugin-helper/server";
 
 describe("wellbeing scoped storage guard (#1187)", () => {
   it("allows writes within scoped plugin storage directory", () => {

@@ -589,7 +589,6 @@ const RUNNER_SHAPES = [
   ["plugins/x-comms/mcp/test/redaction-parity.test.mjs", /x-comms\/package\.json scripts\.test$/],
   ["scripts/declared-tooling.test.mjs", /package\.json scripts\.check:declared-tooling$/],
   ["scripts/board-hygiene.test.mjs", /^Makefile:\d+$/],
-  ["scripts/vendor-sync.test.mjs", /test-suites\.yml run step/],
   ["scripts/npm-stage-native.test.mjs", /npm-stage\.yml run step/],
 ];
 

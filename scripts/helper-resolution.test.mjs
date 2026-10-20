@@ -242,35 +242,6 @@ test("a plugin that resolves no helper is not asked to declare one", () => {
   );
 });
 
-test("a committed vendored tree is the publish artifact, not the runtime resolution", () => {
-  // The fact that makes "just vendor the helper" the wrong fix for #633: these
-  // plugins carry a committed copy *and* still run this checkout's helper, so
-  // the copy would not have changed one byte of what the daemon served.
-  for (const name of [
-    "demo",
-    "forges",
-    "mcp-tools",
-    "plugin-updates",
-    "top",
-    "twofado",
-    "wellbeing",
-    "x-comms",
-  ]) {
-    const observed = resolveServedFrom(path.join(REPO_ROOT, "plugins", name));
-    assert.equal(observed.servedFrom, "checkout", `plugins/${name} is expected to be checkout-served`);
-    assert.ok(
-      observed.vendoredTrees.length > 0,
-      `plugins/${name} is expected to also carry a publish-only vendored tree`,
-    );
-  }
-
-  // slash serves its vendored helper copies directly (xpufx-org/paseo#1100).
-  const slash = resolveServedFrom(path.join(REPO_ROOT, "plugins", "slash"));
-  assert.equal(slash.servedFrom, "vendored");
-  assert.deepEqual(slash.bareSources, []);
-  assert.ok(slash.vendoredSources.length > 1);
-});
-
 test("the gate reports drift instead of passing vacuously", () => {
   // A plugin that bundles this checkout's helper, declares nothing and carries no
   // stamp is precisely the pre-fix uppidi-fleet. It must come back stale with

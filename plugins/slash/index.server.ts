@@ -1,5 +1,5 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { installStorageGuard } from "./server/vendor/paseo-plugin-helper";
+import { installStorageGuard } from "paseo-plugin-helper/server";
 import {
   catalogRpc,
   exportBundleRpc,

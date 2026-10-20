@@ -20,7 +20,6 @@ import ts from "typescript";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(here, "..");
-const vendorRoot = path.join(here, "vendor", "paseo-plugin-helper");
 const helperSrcRoot = path.resolve(pluginRoot, "../../packages/paseo-plugin-helper/src");
 
 // Helper entries this plugin's surfaces resolve (paseo-plugin-helper/client was
@@ -293,17 +292,17 @@ describe("2fado client JSX element types resolve statically (#555)", () => {
     }
   });
 
-  it("imports only names the vendored helper barrels export", () => {
-    const vendored = new Map(
-      HELPER_TREES.map((tree) => [tree, collectBarrelExports(path.join(vendorRoot, tree, "index.ts"))]),
+  it("imports only names the helper barrels export", () => {
+    const helperBarrels = new Map(
+      HELPER_TREES.map((tree) => [tree, collectBarrelExports(path.join(helperSrcRoot, tree, "index.ts"))]),
     );
-    expect([...vendored.values()].some((names) => names.size > 0)).toBe(true);
+    expect([...helperBarrels.values()].some((names) => names.size > 0)).toBe(true);
     for (const { rel, source } of parsedSurfaces) {
       for (const { tree, name, typeOnly } of helperImports(source)) {
         if (typeOnly) continue;
         expect(
-          vendored.get(tree)!.has(name),
-          `${rel} imports '${name}' from paseo-plugin-helper/${tree} but the vendored barrel does not export it`,
+          helperBarrels.get(tree)!.has(name),
+          `${rel} imports '${name}' from paseo-plugin-helper/${tree} but the helper barrel does not export it`,
         ).toBe(true);
       }
     }
@@ -321,16 +320,6 @@ describe("2fado client JSX element types resolve statically (#555)", () => {
           `${rel} imports ${undeclared.map((name) => `'${name}'`).join(", ")} from ${specifier}, which is not part of the installed SDK's runtime surface — the binding is undefined on every host`,
         ).toEqual([]);
       }
-    }
-  });
-
-  it("keeps the vendored helper barrels in sync with the helper source barrels", () => {
-    // Equivalent to `node scripts/vendor-sync.mjs --check`, scoped to the
-    // entries this plugin actually resolves at build time.
-    for (const tree of HELPER_TREES) {
-      const vendored = [...collectBarrelExports(path.join(vendorRoot, tree, "index.ts"))].sort();
-      const source = [...collectBarrelExports(path.join(helperSrcRoot, tree, "index.ts"))].sort();
-      expect(vendored, tree).toEqual(source);
     }
   });
 });
