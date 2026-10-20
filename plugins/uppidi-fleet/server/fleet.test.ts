@@ -62,6 +62,7 @@ import {
 } from "./agents.js";
 
 import { DEFAULT_ROLE_MODELS, handleUppidiRoleModels, handleUppidiSetRoleModel, setExecFileAsyncForTest as setRoleModelsExecFileAsyncForTest } from "./role-models.js";
+import { DiskLogger, setOperationsLogger } from "./disk-logger.js";
 import { getBundledSkillPath } from "./skills.js";
 // The runners module owns its own exec seam, distinct from the agents one
 // above; stubbing only the agents seam would leave the runner path shelling
@@ -535,16 +536,36 @@ describe("archive agent actions (#402)", () => {
       },
     };
 
-    const res = await handleUppidiArchiveAgent({ agentId: "worker-1" }, mockContext);
+    const res = await handleUppidiArchiveAgent({ agentId: "worker-1", reason: "cleanup test" }, mockContext);
     assert.equal(res.ok, true);
     assert.equal(res.agentId, "worker-1");
     assert.equal(archivedId, "worker-1");
   });
 
+  it("rejects handleUppidiArchiveAgent without reason (#1115)", async () => {
+    const resNoReason = await handleUppidiArchiveAgent({ agentId: "worker-1" } as any, {} as any);
+    assert.equal(resNoReason.ok, false);
+    assert.ok(resNoReason.error?.includes("reason is required"));
+
+    const resEmptyReason = await handleUppidiArchiveAgent({ agentId: "worker-1", reason: "" }, {} as any);
+    assert.equal(resEmptyReason.ok, false);
+    assert.ok(resEmptyReason.error?.includes("reason is required"));
+  });
+
   it("handles missing agentId gracefully", async () => {
-    const res = await handleUppidiArchiveAgent({ agentId: "" }, {} as any);
+    const res = await handleUppidiArchiveAgent({ agentId: "", reason: "cleanup test" }, {} as any);
     assert.equal(res.ok, false);
     assert.ok(res.error?.includes("agentId is required"));
+  });
+
+  it("rejects handleUppidiArchiveInactiveAgents without reason (#1115)", async () => {
+    const resNoReason = await handleUppidiArchiveInactiveAgents({} as any, {} as any);
+    assert.equal(resNoReason.ok, false);
+    assert.ok(resNoReason.error?.includes("reason is required"));
+
+    const resEmptyReason = await handleUppidiArchiveInactiveAgents({ reason: "" }, {} as any);
+    assert.equal(resEmptyReason.ok, false);
+    assert.ok(resEmptyReason.error?.includes("reason is required"));
   });
 
   it("bulk archives inactive and failed agents while protecting running agents, orchestrators, and idle waiting agents (#409)", async () => {
@@ -583,6 +604,7 @@ describe("archive agent actions (#402)", () => {
           "worker-idle",
           "worker-closed",
         ],
+        reason: "cleanup explicit list",
       },
       mockContext
     );
@@ -594,7 +616,7 @@ describe("archive agent actions (#402)", () => {
 
     // Case 2: No IDs passed, archives all eligible agents (worker-idle MUST NOT be archived)
     archivedIds.length = 0;
-    const resBulkAll = await handleUppidiArchiveInactiveAgents({}, mockContext);
+    const resBulkAll = await handleUppidiArchiveInactiveAgents({ reason: "cleanup all" }, mockContext);
     assert.equal(resBulkAll.ok, true);
     assert.equal(resBulkAll.archivedCount, 2);
     assert.deepEqual(resBulkAll.archivedIds, ["worker-failed", "worker-closed"]);
@@ -615,11 +637,54 @@ describe("archive agent actions (#402)", () => {
       },
     };
 
-    const res = await handleUppidiArchiveInactiveAgents({}, mockContext);
+    const res = await handleUppidiArchiveInactiveAgents({ reason: "cleanup candidate list" }, mockContext);
     assert.equal(res.ok, true);
     assert.equal(res.archivedCount, 0);
     assert.deepEqual(res.archivedIds, []);
     assert.ok(res.message?.includes("No eligible"));
+  });
+
+  it("logs archiveAgent and archiveInactiveAgents to operationsLogger (#1115)", async () => {
+    const opsDir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-ops-test-"));
+    const opsLogger = new DiskLogger({ logDir: opsDir, fileName: "operations.log" });
+    setOperationsLogger(opsLogger);
+
+    try {
+      const mockContext: any = {
+        actor: "operator-alice",
+        paseo: {
+          agents: {
+            list: async () => ({
+              entries: [
+                { agent: { id: "worker-closed", name: "Worker closed", status: "closed" } },
+              ],
+            }),
+            ref: (id: string) => ({
+              archive: async () => ({ archivedAt: new Date().toISOString() }),
+            }),
+          },
+        },
+      };
+
+      const resArchive = await handleUppidiArchiveAgent(
+        { agentId: "worker-single", reason: "stale agent pruning" },
+        mockContext
+      );
+      assert.equal(resArchive.ok, true);
+
+      const resBulk = await handleUppidiArchiveInactiveAgents(
+        { agentIds: ["worker-closed"], reason: "bulk prune batch" },
+        mockContext
+      );
+      assert.equal(resBulk.ok, true);
+
+      const logContent = fs.readFileSync(path.join(opsDir, "operations.log"), "utf8");
+      assert.ok(logContent.includes('[OP] archiveAgent target=worker-single actor=operator-alice reason="stale agent pruning"'));
+      assert.ok(logContent.includes('[OP] archiveInactiveAgents target=worker-closed actor=operator-alice reason="bulk prune batch"'));
+    } finally {
+      setOperationsLogger(null);
+      fs.rmSync(opsDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -1842,7 +1842,7 @@ export async function executeFleetPruneDeadSessions(
       } else if (ds.killAllowed && kill) {
         let killed = false;
         try {
-          killed = await router.archiveAgent(ds.agentId);
+          killed = await router.archiveAgent(ds.agentId, "dead-session-prune");
         } catch {
           killed = false;
         }

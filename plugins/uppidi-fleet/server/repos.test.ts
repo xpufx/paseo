@@ -1,8 +1,9 @@
 import { describe, it, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { DiskLogger, setOperationsLogger } from "./disk-logger.js";
 import {
   handleUppidiRepos,
   handleUppidiEnrollRepo,
@@ -213,7 +214,10 @@ describe("uppidi-fleet repos handler (#867)", () => {
     assert.ok(router.getEnrolledRepos().includes("forge.mrs.uppidi.com/xpufx-org/paseo"));
 
     // Unenroll
-    const unenrollRes = await handleUppidiUnenrollRepo({ repo: "forge.mrs.uppidi.com/xpufx-org/paseo" });
+    const unenrollRes = await handleUppidiUnenrollRepo({
+      repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
+      reason: "test unenroll",
+    });
     assert.equal(unenrollRes.ok, true);
     assert.equal(unenrollRes.repo, "forge.mrs.uppidi.com/xpufx-org/paseo");
     assert.ok(!unenrollRes.enrolledRepos.includes("forge.mrs.uppidi.com/xpufx-org/paseo"));
@@ -284,7 +288,10 @@ describe("uppidi-fleet repos handler (#867)", () => {
       }),
     );
 
-    const unenrollRes = await handleUppidiUnenrollRepo({ repo: "forge.mrs.uppidi.com/xpufx-org/durable" });
+    const unenrollRes = await handleUppidiUnenrollRepo({
+      repo: "forge.mrs.uppidi.com/xpufx-org/durable",
+      reason: "test unenroll",
+    });
     assert.equal(unenrollRes.ok, true);
     assert.ok(!unenrollRes.enrolledRepos.includes("forge.mrs.uppidi.com/xpufx-org/durable"));
 
@@ -300,7 +307,10 @@ describe("uppidi-fleet repos handler (#867)", () => {
     assert.equal(enrollRes.repo, "forge.mrs.uppidi.com/xpufx-org/standalone-repo");
     assert.ok(enrollRes.enrolledRepos.includes("forge.mrs.uppidi.com/xpufx-org/standalone-repo"));
 
-    const unenrollRes = await handleUppidiUnenrollRepo({ repo: "xpufx-org/standalone-repo" });
+    const unenrollRes = await handleUppidiUnenrollRepo({
+      repo: "xpufx-org/standalone-repo",
+      reason: "test unenroll fallback",
+    });
     assert.equal(unenrollRes.ok, true);
     assert.ok(!unenrollRes.enrolledRepos.includes("forge.mrs.uppidi.com/xpufx-org/standalone-repo"));
   });
@@ -382,7 +392,10 @@ describe("uppidi-fleet repos handler (#867)", () => {
     assert.equal(router.getQueue(repoKey).length, 2);
     assert.equal(existsSync(router.queueFilePath(repoKey)), true);
 
-    const unenrollRes = await handleUppidiUnenrollRepo({ repo: repoKey });
+    const unenrollRes = await handleUppidiUnenrollRepo({
+      repo: repoKey,
+      reason: "test queue cleanup",
+    });
     assert.equal(unenrollRes.ok, true);
     assert.ok(!unenrollRes.enrolledRepos.includes(repoKey));
 
@@ -390,5 +403,37 @@ describe("uppidi-fleet repos handler (#867)", () => {
     assert.equal(router.getQueue(repoKey).length, 0);
     // On-disk queue file is unlinked
     assert.equal(existsSync(router.queueFilePath(repoKey)), false);
+  });
+
+  it("handleUppidiUnenrollRepo rejects missing or empty reason (#1115)", async () => {
+    const noReason = await handleUppidiUnenrollRepo({ repo: "test/repo" } as any);
+    assert.equal(noReason.ok, false);
+    assert.match(noReason.error!, /reason is required/);
+
+    const emptyReason = await handleUppidiUnenrollRepo({ repo: "test/repo", reason: "   " });
+    assert.equal(emptyReason.ok, false);
+    assert.match(emptyReason.error!, /reason is required/);
+  });
+
+  it("handleUppidiUnenrollRepo logs structured operation to operations.log (#1115)", async () => {
+    const testLogDir = mkdtempSync(join(tmpdir(), "paseo-test-oplog-"));
+    const opLogger = new DiskLogger({ logDir: testLogDir, fileName: "operations.log" });
+    setOperationsLogger(opLogger);
+
+    try {
+      const res = await handleUppidiUnenrollRepo(
+        { repo: "test-org/unenroll-test", reason: "decommissioning repo" },
+        { callerAgentId: "test-actor" } as any,
+      );
+      assert.equal(res.ok, true);
+
+      const logPath = join(testLogDir, "operations.log");
+      assert.ok(existsSync(logPath));
+      const logContent = readFileSync(logPath, "utf8");
+      assert.match(logContent, /\[OP\] unenrollRepo target=forge\.mrs\.uppidi\.com\/test-org\/unenroll-test actor=test-actor reason="decommissioning repo"/);
+    } finally {
+      setOperationsLogger(null);
+      rmSync(testLogDir, { recursive: true, force: true });
+    }
   });
 });

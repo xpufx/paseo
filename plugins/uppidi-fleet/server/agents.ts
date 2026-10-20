@@ -67,6 +67,7 @@ import {
 import type { WorkspaceProjectMap } from "../shared/contracts.js";
 import { isAgentEligibleForBulkArchive, isRepoMatching } from "../shared/sort-filter.js";
 import { buildAgentLink, resolveAgentLinkConfig } from "../shared/agent-links.js";
+import { operationsLogger } from "./disk-logger.js";
 import {
   appendHookLog,
   formatFleetTeardownNotice,
@@ -1197,6 +1198,12 @@ export async function handleUppidiArchiveAgent(
   if (!agentId) {
     return { ok: false, error: "agentId is required" };
   }
+  const reason = input.reason?.trim();
+  if (!reason) {
+    return { ok: false, agentId, error: "reason is required" };
+  }
+
+  const actor = (context as any)?.callerAgentId || (context as any)?.actor || (input as any)?.actor || "operator";
 
   // 1. Try SDK context.paseo.agents.ref(agentId).archive()
   if (context?.paseo?.agents?.ref) {
@@ -1204,6 +1211,7 @@ export async function handleUppidiArchiveAgent(
       const ref = context.paseo.agents.ref(agentId);
       if (typeof ref?.archive === "function") {
         await ref.archive();
+        operationsLogger.log(`[OP] archiveAgent target=${agentId} actor=${actor} reason="${reason}"`);
         return { ok: true, agentId, message: `Archived agent ${agentId}` };
       }
     } catch (err: any) {
@@ -1221,6 +1229,7 @@ export async function handleUppidiArchiveAgent(
       timeout: 5000,
       encoding: "utf-8",
     });
+    operationsLogger.log(`[OP] archiveAgent target=${agentId} actor=${actor} reason="${reason}"`);
     return { ok: true, agentId, message: `Archived agent ${agentId}` };
   } catch (err: any) {
     return {
@@ -1235,6 +1244,18 @@ export async function handleUppidiArchiveInactiveAgents(
   input: UppidiArchiveInactiveAgentsInput,
   context: PluginHandlerContext
 ): Promise<UppidiArchiveInactiveAgentsOutput> {
+  const reason = input.reason?.trim();
+  if (!reason) {
+    return {
+      ok: false,
+      archivedCount: 0,
+      archivedIds: [],
+      error: "reason is required",
+    };
+  }
+
+  const actor = (context as any)?.callerAgentId || (context as any)?.actor || (input as any)?.actor || "operator";
+
   try {
     const agents = await fetchPaseoAgents(context);
     const agentMap = new Map(agents.map((a) => [a.id, a]));
@@ -1294,6 +1315,9 @@ export async function handleUppidiArchiveInactiveAgents(
         archivedIds.push(id);
       }
     }
+
+    const targetDesc = targetIds.join(",") || "none";
+    operationsLogger.log(`[OP] archiveInactiveAgents target=${targetDesc} actor=${actor} reason="${reason}"`);
 
     return {
       ok: errors.length === 0 || archivedIds.length > 0,
@@ -1492,6 +1516,18 @@ export async function handleFleetTeardown(
   input: FleetTeardownInput,
   context: PluginHandlerContext
 ): Promise<FleetTeardownOutput> {
+  const reason = input.reason?.trim();
+  if (!reason) {
+    return {
+      ok: false,
+      tornDown: { workers: 0, orchestrators: 0, frontdesk: 0 },
+      errors: ["reason is required"],
+      error: "reason is required",
+    };
+  }
+  const actor = (context as any)?.callerAgentId || (context as any)?.actor || (input as any)?.actor || "operator";
+  operationsLogger.log(`[OP] fleetTeardown target=${(input.targets ?? []).join(",")} actor=${actor} reason="${reason}"`);
+
   // #1013: hold the teardown window for the whole handler so a dashboard RESUME
   // cannot clear the canonical halt while agents/state are still being archived.
   const router = getActiveHookRouter();
@@ -1829,9 +1865,21 @@ export async function handleFleetTeardown(
  * no-op that reports `alreadyHalted` so the dashboard can disable the control.
  */
 export async function handleFleetHalt(
-  _input: FleetHaltInput,
-  _context?: PluginHandlerContext
+  input: FleetHaltInput,
+  context?: PluginHandlerContext
 ): Promise<FleetHaltOutput> {
+  const reason = input.reason?.trim();
+  if (!reason) {
+    return {
+      ok: false,
+      halted: false,
+      alreadyHalted: false,
+      teardownInProgress: false,
+      error: "reason is required",
+    };
+  }
+  const actor = (context as any)?.callerAgentId || (context as any)?.actor || (input as any)?.actor || "operator";
+
   const router = getActiveHookRouter();
   if (!router) {
     return {
@@ -1844,6 +1892,7 @@ export async function handleFleetHalt(
   }
 
   if (router.isHalted()) {
+    operationsLogger.log(`[OP] fleetHalt target=fleet actor=${actor} reason="${reason}"`);
     return {
       ok: true,
       halted: true,
@@ -1855,6 +1904,7 @@ export async function handleFleetHalt(
 
   try {
     router.halt();
+    operationsLogger.log(`[OP] fleetHalt target=fleet actor=${actor} reason="${reason}"`);
     return {
       ok: true,
       halted: true,
@@ -1878,9 +1928,20 @@ export async function handleFleetHalt(
  * while a fleet teardown is mid-flight so resume cannot race archiving.
  */
 export async function handleFleetResume(
-  _input: FleetResumeInput,
-  _context?: PluginHandlerContext
+  input: FleetResumeInput,
+  context?: PluginHandlerContext
 ): Promise<FleetResumeOutput> {
+  const reason = input.reason?.trim();
+  if (!reason) {
+    return {
+      ok: false,
+      halted: false,
+      teardownInProgress: false,
+      error: "reason is required",
+    };
+  }
+  const actor = (context as any)?.callerAgentId || (context as any)?.actor || (input as any)?.actor || "operator";
+
   const router = getActiveHookRouter();
   if (!router) {
     return {
@@ -1901,6 +1962,7 @@ export async function handleFleetResume(
   }
 
   if (!router.isHalted()) {
+    operationsLogger.log(`[OP] fleetResume target=fleet actor=${actor} reason="${reason}"`);
     return {
       ok: true,
       halted: false,
@@ -1910,6 +1972,9 @@ export async function handleFleetResume(
   }
 
   const result = router.resumeAll();
+  if (result.ok) {
+    operationsLogger.log(`[OP] fleetResume target=fleet actor=${actor} reason="${reason}"`);
+  }
   return {
     ok: result.ok,
     halted: router.isHalted(),
@@ -1965,6 +2030,19 @@ export async function handleFleetResetState(
   input: FleetResetStateInput,
   context: PluginHandlerContext
 ): Promise<FleetResetStateOutput> {
+  const reason = input.reason?.trim();
+  if (!reason) {
+    return {
+      ok: false,
+      cleared: { boardStateFiles: 0, queueFiles: 0, cacheFiles: 0 },
+      notifiedOrchestrators: 0,
+      errors: ["reason is required"],
+      error: "reason is required",
+    };
+  }
+  const actor = (context as any)?.callerAgentId || (context as any)?.actor || (input as any)?.actor || "operator";
+  operationsLogger.log(`[OP] fleetResetState target=fleet actor=${actor} reason="${reason}"`);
+
   const errors: string[] = [];
   let cacheFiles = 0;
   let boardStateFiles = 0;
@@ -2990,7 +3068,7 @@ export async function handleUppidiReplaceFrontDesk(
     }
 
     if (oldAgentId) {
-      await handleUppidiArchiveAgent({ agentId: oldAgentId }, context).catch(() => {});
+      await handleUppidiArchiveAgent({ agentId: oldAgentId, reason: "frontdesk-replacement" }, context).catch(() => {});
     }
 
     const createRes = await handleUppidiCreateFrontDesk(
@@ -3196,7 +3274,7 @@ export async function handleUppidiReplaceOrchestrator(
     }
 
     if (oldAgentId) {
-      await handleUppidiArchiveAgent({ agentId: oldAgentId }, context).catch(() => {});
+      await handleUppidiArchiveAgent({ agentId: oldAgentId, reason: "orchestrator-replacement" }, context).catch(() => {});
     }
 
     const addRes = await handleUppidiAddOrchestrator(

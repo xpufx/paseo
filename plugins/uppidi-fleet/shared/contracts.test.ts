@@ -75,6 +75,9 @@ import {
   FleetHaltInputSchema,
   FleetHaltOutputSchema,
   uppidiFleetHaltContract,
+  FleetTeardownInputSchema,
+  FleetTeardownOutputSchema,
+  uppidiFleetTeardownContract,
   FleetResumeInputSchema,
   FleetResumeOutputSchema,
   uppidiFleetResumeContract,
@@ -429,8 +432,9 @@ describe("uppidi-fleet shared contracts", () => {
     assert.equal(uppidiArchiveAgentContract.name, "uppidi-fleet.archive-agent");
     assert.equal(uppidiArchiveInactiveAgentsContract.name, "uppidi-fleet.archive-inactive-agents");
 
-    const inputOne = UppidiArchiveAgentInputSchema.parse({ agentId: "agent-123" });
+    const inputOne = UppidiArchiveAgentInputSchema.parse({ agentId: "agent-123", reason: "manual archive" });
     assert.equal(inputOne.agentId, "agent-123");
+    assert.equal(inputOne.reason, "manual archive");
 
     const outputOne = UppidiArchiveAgentOutputSchema.parse({
       ok: true,
@@ -442,11 +446,14 @@ describe("uppidi-fleet shared contracts", () => {
 
     const inputBulk = UppidiArchiveInactiveAgentsInputSchema.parse({
       agentIds: ["agent-1", "agent-2"],
+      reason: "bulk sweep",
     });
     assert.deepEqual(inputBulk.agentIds, ["agent-1", "agent-2"]);
+    assert.equal(inputBulk.reason, "bulk sweep");
 
-    const inputBulkEmpty = UppidiArchiveInactiveAgentsInputSchema.parse({});
+    const inputBulkEmpty = UppidiArchiveInactiveAgentsInputSchema.parse({ reason: "bulk sweep" });
     assert.equal(inputBulkEmpty.agentIds, undefined);
+    assert.equal(inputBulkEmpty.reason, "bulk sweep");
 
     const outputBulk = UppidiArchiveInactiveAgentsOutputSchema.parse({
       ok: true,
@@ -735,8 +742,12 @@ describe("uppidi-fleet shared contracts", () => {
     assert.deepEqual(enrollOutput.enrolledRepos, ["forge.mrs.uppidi.com/xpufx-org/paseo"]);
 
     assert.equal(uppidiUnenrollRepoContract.name, "uppidi-fleet.unenroll-repo");
-    const unenrollInput = UppidiUnenrollRepoInputSchema.parse({ repo: "forge.mrs.uppidi.com/xpufx-org/paseo" });
+    const unenrollInput = UppidiUnenrollRepoInputSchema.parse({
+      repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
+      reason: "repo decommissioned",
+    });
     assert.equal(unenrollInput.repo, "forge.mrs.uppidi.com/xpufx-org/paseo");
+    assert.equal(unenrollInput.reason, "repo decommissioned");
     const unenrollOutput = UppidiUnenrollRepoOutputSchema.parse({
       ok: true,
       repo: "forge.mrs.uppidi.com/xpufx-org/paseo",
@@ -988,18 +999,20 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
   it("validates uppidiFleetResetStateContract and schemas (#764)", () => {
     assert.equal(uppidiFleetResetStateContract.name, "uppidi-fleet.reset-state");
 
-    const input = FleetResetStateInputSchema.parse({ confirm: true });
+    const input = FleetResetStateInputSchema.parse({ confirm: true, reason: "cache corruption" });
     assert.equal(input.confirm, true);
     assert.equal(input.notifyOrchestrators, true);
+    assert.equal(input.reason, "cache corruption");
 
     const inputWithoutNotify = FleetResetStateInputSchema.parse({
       confirm: true,
       notifyOrchestrators: false,
+      reason: "cache corruption",
     });
     assert.equal(inputWithoutNotify.notifyOrchestrators, false);
 
     assert.throws(() => {
-      FleetResetStateInputSchema.parse({ confirm: false });
+      FleetResetStateInputSchema.parse({ confirm: false, reason: "cache corruption" });
     });
 
     const output = FleetResetStateOutputSchema.parse({
@@ -1024,9 +1037,9 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
     assert.equal(uppidiFleetHaltContract.name, "uppidi-fleet.fleet-halt");
     assert.equal(uppidiFleetResumeContract.name, "uppidi-fleet.fleet-resume");
 
-    assert.equal(FleetHaltInputSchema.parse({ confirm: true }).confirm, true);
+    assert.equal(FleetHaltInputSchema.parse({ confirm: true, reason: "emergency pause" }).confirm, true);
     assert.throws(() => FleetHaltInputSchema.parse({}));
-    assert.equal(FleetResumeInputSchema.parse({ confirm: true }).confirm, true);
+    assert.equal(FleetResumeInputSchema.parse({ confirm: true, reason: "resuming operations" }).confirm, true);
 
     const halt = FleetHaltOutputSchema.parse({ ok: true });
     assert.equal(halt.halted, false);
@@ -1036,6 +1049,68 @@ describe("subagent lifecycle contract & structured block detail (#537)", () => {
     const resume = FleetResumeOutputSchema.parse({ ok: true });
     assert.equal(resume.halted, false);
     assert.equal(resume.teardownInProgress, false);
+  });
+
+  it("validates uppidiFleetTeardownContract and schema (#1115)", () => {
+    assert.equal(uppidiFleetTeardownContract.name, "uppidi-fleet.fleet-teardown");
+    const input = FleetTeardownInputSchema.parse({
+      targets: ["workers"],
+      confirm: true,
+      reason: "clean sprint state",
+    });
+    assert.deepEqual(input.targets, ["workers"]);
+    assert.equal(input.confirm, true);
+    assert.equal(input.reason, "clean sprint state");
+
+    const output = FleetTeardownOutputSchema.parse({
+      ok: true,
+      targets: ["workers"],
+      tornDown: { frontdesk: 0, orchestrators: 0, workers: 2 },
+      cleared: { stateFiles: 0, queueFiles: 1 },
+      errors: [],
+      message: "Teardown complete",
+    });
+    assert.equal(output.ok, true);
+    assert.equal(output.tornDown.workers, 2);
+  });
+
+  it("enforces mandatory reason: z.string().min(1) on all destructive operation schemas (#1115)", () => {
+    // 1. UppidiArchiveAgentInputSchema
+    assert.throws(() => UppidiArchiveAgentInputSchema.parse({ agentId: "a1" }));
+    assert.throws(() => UppidiArchiveAgentInputSchema.parse({ agentId: "a1", reason: "" }));
+    assert.doesNotThrow(() => UppidiArchiveAgentInputSchema.parse({ agentId: "a1", reason: "cleanup" }));
+
+    // 2. UppidiArchiveInactiveAgentsInputSchema
+    assert.throws(() => UppidiArchiveInactiveAgentsInputSchema.parse({}));
+    assert.throws(() => UppidiArchiveInactiveAgentsInputSchema.parse({ reason: "" }));
+    assert.doesNotThrow(() => UppidiArchiveInactiveAgentsInputSchema.parse({ reason: "prune" }));
+
+    // 3. UppidiUnenrollRepoInputSchema
+    assert.throws(() => UppidiUnenrollRepoInputSchema.parse({ repo: "org/repo" }));
+    assert.throws(() => UppidiUnenrollRepoInputSchema.parse({ repo: "org/repo", reason: "" }));
+    assert.doesNotThrow(() => UppidiUnenrollRepoInputSchema.parse({ repo: "org/repo", reason: "deprecated" }));
+
+    // 4. FleetTeardownInputSchema
+    assert.throws(() => FleetTeardownInputSchema.parse({ targets: ["workers"], confirm: true }));
+    assert.throws(() => FleetTeardownInputSchema.parse({ targets: ["workers"], confirm: true, reason: "" }));
+    assert.doesNotThrow(() =>
+      FleetTeardownInputSchema.parse({ targets: ["workers"], confirm: true, reason: "reset" })
+    );
+
+    // 5. FleetResetStateInputSchema
+    assert.throws(() => FleetResetStateInputSchema.parse({ confirm: true }));
+    assert.throws(() => FleetResetStateInputSchema.parse({ confirm: true, reason: "" }));
+    assert.doesNotThrow(() => FleetResetStateInputSchema.parse({ confirm: true, reason: "clear cache" }));
+
+    // 6. FleetHaltInputSchema
+    assert.throws(() => FleetHaltInputSchema.parse({ confirm: true }));
+    assert.throws(() => FleetHaltInputSchema.parse({ confirm: true, reason: "" }));
+    assert.doesNotThrow(() => FleetHaltInputSchema.parse({ confirm: true, reason: "pause" }));
+
+    // 7. FleetResumeInputSchema
+    assert.throws(() => FleetResumeInputSchema.parse({ confirm: true }));
+    assert.throws(() => FleetResumeInputSchema.parse({ confirm: true, reason: "" }));
+    assert.doesNotThrow(() => FleetResumeInputSchema.parse({ confirm: true, reason: "resume" }));
   });
 
   it("validates the unified fleet set-mode contract and schemas (#1373)", () => {

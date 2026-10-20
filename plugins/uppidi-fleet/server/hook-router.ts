@@ -114,7 +114,7 @@ import {
   type RotationObservation,
   type RotationTriggerReason,
 } from "./rotation.js";
-import { DiskLogger } from "./disk-logger.js";
+import { DiskLogger, operationsLogger } from "./disk-logger.js";
 import {
   appendAuditReceipt,
   appendAuditReconciliation,
@@ -7801,14 +7801,19 @@ export class HookRouter {
     }
   }
 
-  /** Archive a dead session so it stops accumulating in `paseo ls` (#973). */
-  public async archiveAgent(agentId: string): Promise<boolean> {
+  /** Archive a dead session so it stops accumulating in `paseo ls` (#973, #1115). */
+  public async archiveAgent(agentId: string, reason?: string): Promise<boolean> {
     const id = String(agentId ?? "").trim();
     if (!id) return false;
+    const effectiveReason = reason ?? "automated-cleanup";
 
     if (typeof this.options?.archiveAgent === "function") {
       try {
-        return await this.options.archiveAgent(id);
+        const ok = await this.options.archiveAgent(id);
+        if (ok) {
+          operationsLogger.log(`[OP] archiveAgent target=${id} actor=hook-router reason="${effectiveReason}"`);
+        }
+        return ok;
       } catch (err) {
         this.log(
           `[warn] Custom archiveAgent failed for ${id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -7823,9 +7828,11 @@ export class HookRouter {
         const ref = typeof paseo.agents.ref === "function" ? paseo.agents.ref(id) : null;
         if (typeof (ref as any)?.archive === "function") {
           await (ref as any).archive();
+          operationsLogger.log(`[OP] archiveAgent target=${id} actor=hook-router reason="${effectiveReason}"`);
           return true;
         } else if (typeof (paseo.agents as any)?.archive === "function") {
           await (paseo.agents as any).archive(id);
+          operationsLogger.log(`[OP] archiveAgent target=${id} actor=hook-router reason="${effectiveReason}"`);
           return true;
         }
       } catch (err) {
@@ -7841,6 +7848,7 @@ export class HookRouter {
 
     try {
       await execFileAsync("paseo", ["archive", id], { timeout: 10000 });
+      operationsLogger.log(`[OP] archiveAgent target=${id} actor=hook-router reason="${effectiveReason}"`);
       return true;
     } catch (err) {
       this.log(
@@ -7873,7 +7881,7 @@ export class HookRouter {
       const extras = matches.slice(1);
       for (const extra of extras) {
         try {
-          await this.archiveAgent(extra.id);
+          await this.archiveAgent(extra.id, "orchestrator-dedup");
           this.log(`[info] Deduplication: archived extra orchestrator ${extra.id} for ${repo}`);
         } catch (err) {
           this.log(
@@ -8340,7 +8348,7 @@ export class HookRouter {
           const extras = allMatching.filter((a) => a.id !== authoritative.id);
           for (const extra of extras) {
             try {
-              await this.archiveAgent(extra.id);
+              await this.archiveAgent(extra.id, "pre-spawn-dedup");
               this.log(`[info] Pre-spawn deduplication: archived extra orchestrator ${extra.id} for ${repo}`);
             } catch (err) {
               this.log(`[warn] Failed to archive duplicate orchestrator ${extra.id}: ${err instanceof Error ? err.message : String(err)}`);
@@ -8359,7 +8367,7 @@ export class HookRouter {
           // are superseded and must be archived before spawning replacement (#1390).
           for (const superseded of allMatching) {
             try {
-              await this.archiveAgent(superseded.id);
+              await this.archiveAgent(superseded.id, "pre-spawn-cleanup");
               this.log(`[info] Pre-spawn cleanup: archived superseded orchestrator ${superseded.id} for ${repo}`);
             } catch (err) {
               this.log(`[warn] Failed to archive superseded orchestrator ${superseded.id}: ${err instanceof Error ? err.message : String(err)}`);
@@ -8370,7 +8378,7 @@ export class HookRouter {
         // If force is set, archive all existing matching orchestrators regardless of runtime status before spawning (#1390)
         for (const existingAgent of allMatching) {
           try {
-            await this.archiveAgent(existingAgent.id);
+            await this.archiveAgent(existingAgent.id, "force-provision-cleanup");
             this.log(`[info] Force provision: archived existing orchestrator ${existingAgent.id} for ${repo}`);
           } catch (err) {
             this.log(`[warn] Failed to archive existing orchestrator ${existingAgent.id}: ${err instanceof Error ? err.message : String(err)}`);
@@ -8380,7 +8388,7 @@ export class HookRouter {
 
       if (input.force && existing?.agentId && !allMatching.some((a) => a.id === existing.agentId)) {
         try {
-          await this.archiveAgent(existing.agentId);
+          await this.archiveAgent(existing.agentId, "force-provision-cleanup");
           this.log(`[info] Force provision: archived registered orchestrator ${existing.agentId} for ${repo}`);
         } catch (err) {
           this.log(`[warn] Failed to archive registered orchestrator ${existing.agentId}: ${err instanceof Error ? err.message : String(err)}`);
@@ -10058,7 +10066,7 @@ export class HookRouter {
           }
 
           let didArchive = false;
-          const archive = opts.archiveAgent ?? ((id: string) => this.archiveAgent(id));
+          const archive = opts.archiveAgent ?? ((id: string) => this.archiveAgent(id, "prune-closed-session"));
           try {
             didArchive = await archive(agentId);
           } catch (err) {
@@ -10236,7 +10244,7 @@ export class HookRouter {
               }
 
               let didArchive = false;
-              const archive = opts.archiveAgent ?? ((agentId: string) => this.archiveAgent(agentId));
+              const archive = opts.archiveAgent ?? ((agentId: string) => this.archiveAgent(agentId, "prune-unregistered"));
               try {
                 didArchive = await archive(id);
               } catch (err) {
@@ -10864,7 +10872,7 @@ export class HookRouter {
 
       const verify = await this.verifyRotationReplacement(role, repo, spawn.agentId);
       if (!verify.ok) {
-        await this.archiveAgent(spawn.agentId).catch(() => {});
+        await this.archiveAgent(spawn.agentId, "health-check-failure").catch(() => {});
         if (oldAgentId) {
           if (role === "orchestrator") this.writeOrchestrator(repo!, oldAgentId, "rotation-abort");
           else this.writeFrontDesk(oldAgentId, "rotation-abort");
@@ -10877,7 +10885,7 @@ export class HookRouter {
       await this.deliverMessage(spawn.agentId, envelope, { noWait: true, steer: true }).catch(() => {});
 
       if (oldAgentId && oldAgentId !== spawn.agentId) {
-        await this.archiveAgent(oldAgentId).catch(() => {});
+        await this.archiveAgent(oldAgentId, "rotation-expiry").catch(() => {});
       }
       this.lastRotationAt.set(lockKey, Date.now());
       this.log(`[info] rotated ${role}${repo ? ` for ${repo}` : ""}: ${oldAgentId?.slice(0, 7) ?? "none"} -> ${spawn.agentId.slice(0, 7)} (${reasons.join(", ") || "manual"})`);

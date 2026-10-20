@@ -1465,9 +1465,10 @@ export const uppidiModelTelemetryQueryContract = defineContract({
   output: UppidiModelTelemetryQueryOutputSchema,
 });
 
-// Agent Archive Contracts (Issue #402)
+// Agent Archive Contracts (Issue #402, #1115)
 export const UppidiArchiveAgentInputSchema = z.object({
   agentId: z.string(),
+  reason: z.string().min(1),
 });
 export type UppidiArchiveAgentInput = z.infer<typeof UppidiArchiveAgentInputSchema>;
 
@@ -1488,6 +1489,7 @@ export const uppidiArchiveAgentContract = defineContract({
 
 export const UppidiArchiveInactiveAgentsInputSchema = z.object({
   agentIds: z.array(z.string()).optional(),
+  reason: z.string().min(1),
 });
 export type UppidiArchiveInactiveAgentsInput = z.infer<typeof UppidiArchiveInactiveAgentsInputSchema>;
 
@@ -1727,6 +1729,7 @@ export const uppidiEnrollRepoContract = defineContract({
 
 export const UppidiUnenrollRepoInputSchema = z.object({
   repo: z.string(),
+  reason: z.string().min(1),
 });
 export type UppidiUnenrollRepoInput = z.infer<typeof UppidiUnenrollRepoInputSchema>;
 
@@ -1747,13 +1750,14 @@ export const uppidiUnenrollRepoContract = defineContract({
 });
 
 
-// Fleet Teardown (Issue #742)
+// Fleet Teardown (Issue #742, #1115)
 export const FleetTeardownTargetSchema = z.enum(["workers", "orchestrators", "frontdesk"]);
 export type FleetTeardownTarget = z.infer<typeof FleetTeardownTargetSchema>;
 
 export const FleetTeardownInputSchema = z.object({
   targets: z.array(FleetTeardownTargetSchema).min(1),
   confirm: z.literal(true),
+  reason: z.string().min(1),
   drain: z.boolean().optional(),
   drainTimeoutMs: z.number().int().positive().default(30000).optional(),
 });
@@ -1779,9 +1783,10 @@ export const uppidiFleetTeardownContract = defineContract({
   output: FleetTeardownOutputSchema,
 });
 
-// Fleet Reset State (Issue #764)
+// Fleet Reset State (Issue #764, #1115)
 export const FleetResetStateInputSchema = z.object({
   confirm: z.literal(true),
+  reason: z.string().min(1),
   notifyOrchestrators: z.boolean().default(true).optional(),
 });
 export type FleetResetStateInput = z.infer<typeof FleetResetStateInputSchema>;
@@ -1807,11 +1812,12 @@ export const uppidiFleetResetStateContract = defineContract({
   output: FleetResetStateOutputSchema,
 });
 
-// Fleet HALT / RESUME (Issue #1013) — operator controls over the canonical ALL
+// Fleet HALT / RESUME (Issue #1013, #1115) — operator controls over the canonical ALL
 // HALT from #994. The input confirm literal mirrors teardown/reset so the
 // dashboard must arm an explicit confirmation before freezing the fleet.
 export const FleetHaltInputSchema = z.object({
   confirm: z.literal(true),
+  reason: z.string().min(1),
 });
 export type FleetHaltInput = z.infer<typeof FleetHaltInputSchema>;
 
@@ -1835,6 +1841,7 @@ export const uppidiFleetHaltContract = defineContract({
 
 export const FleetResumeInputSchema = z.object({
   confirm: z.literal(true),
+  reason: z.string().min(1),
 });
 export type FleetResumeInput = z.infer<typeof FleetResumeInputSchema>;
 

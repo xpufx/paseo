@@ -16,6 +16,7 @@ import {
   startHookRouter,
   getActiveHookRouter,
 } from "./hook-router.js";
+import { DiskLogger, setOperationsLogger } from "./disk-logger.js";
 
 describe("fleet reset state handler (#764)", { concurrency: false }, () => {
   let tmpHome: string;
@@ -82,7 +83,7 @@ describe("fleet reset state handler (#764)", { concurrency: false }, () => {
     };
 
     const res = await handleFleetResetState(
-      { confirm: true, notifyOrchestrators: true },
+      { confirm: true, notifyOrchestrators: true, reason: "test reset" },
       mockContext
     );
 
@@ -134,7 +135,7 @@ describe("fleet reset state handler (#764)", { concurrency: false }, () => {
     };
 
     const res = await handleFleetResetState(
-      { confirm: true, notifyOrchestrators: false },
+      { confirm: true, notifyOrchestrators: false, reason: "test reset no notify" },
       mockContext
     );
 
@@ -154,7 +155,7 @@ describe("fleet reset state handler (#764)", { concurrency: false }, () => {
     };
 
     const res = await handleFleetResetState(
-      { confirm: true, notifyOrchestrators: true },
+      { confirm: true, notifyOrchestrators: true, reason: "test reset missing dirs" },
       mockContext
     );
 
@@ -164,5 +165,46 @@ describe("fleet reset state handler (#764)", { concurrency: false }, () => {
     assert.equal(res.cleared.queueFiles, 0);
     assert.equal(res.notifiedOrchestrators, 0);
     assert.equal(res.errors.length, 0);
+  });
+
+  it("rejects missing or empty reason (#1115)", async () => {
+    const mockContext: any = {
+      paseo: { agents: { list: async () => [] } },
+    };
+
+    const noReason = await handleFleetResetState({ confirm: true } as any, mockContext);
+    assert.equal(noReason.ok, false);
+    assert.match(noReason.error!, /reason is required/);
+
+    const emptyReason = await handleFleetResetState({ confirm: true, reason: "   " }, mockContext);
+    assert.equal(emptyReason.ok, false);
+    assert.match(emptyReason.error!, /reason is required/);
+  });
+
+  it("logs structured operation to operations.log (#1115)", async () => {
+    const testLogDir = fs.mkdtempSync(path.join(os.tmpdir(), "paseo-test-oplog-reset-"));
+    const opLogger = new DiskLogger({ logDir: testLogDir, fileName: "operations.log" });
+    setOperationsLogger(opLogger);
+
+    const mockContext: any = {
+      paseo: { agents: { list: async () => [] } },
+      callerAgentId: "test-reset-actor",
+    };
+
+    try {
+      const res = await handleFleetResetState(
+        { confirm: true, notifyOrchestrators: false, reason: "purge corrupted cache" },
+        mockContext
+      );
+      assert.equal(res.ok, true);
+
+      const logPath = path.join(testLogDir, "operations.log");
+      assert.ok(fs.existsSync(logPath));
+      const logContent = fs.readFileSync(logPath, "utf8");
+      assert.match(logContent, /\[OP\] fleetResetState target=fleet actor=test-reset-actor reason="purge corrupted cache"/);
+    } finally {
+      setOperationsLogger(null);
+      fs.rmSync(testLogDir, { recursive: true, force: true });
+    }
   });
 });

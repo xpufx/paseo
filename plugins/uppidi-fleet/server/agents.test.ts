@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DiskLogger, setOperationsLogger } from "./disk-logger.js";
 
 if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = "test";
@@ -999,7 +1000,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
       } as any;
 
       const res = await handleFleetTeardown(
-        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true },
+        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true, reason: "test teardown" },
         mockContext,
       );
 
@@ -1061,7 +1062,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
       } as any;
 
       const res = await handleFleetTeardown(
-        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true },
+        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true, reason: "test teardown" },
         mockContext,
       );
 
@@ -1107,7 +1108,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
     } as any;
 
     const res = await handleFleetTeardown(
-      { targets: ["frontdesk"], confirm: true },
+      { targets: ["frontdesk"], confirm: true, reason: "test teardown" },
       mockContext
     );
 
@@ -1151,7 +1152,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
     } as any;
 
     const res = await handleFleetTeardown(
-      { targets: ["orchestrators"], confirm: true },
+      { targets: ["orchestrators"], confirm: true, reason: "test teardown" },
       mockContext
     );
 
@@ -1186,7 +1187,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
     } as any;
 
     const res = await handleFleetTeardown(
-      { targets: ["workers"], confirm: true },
+      { targets: ["workers"], confirm: true, reason: "test teardown" },
       mockContext
     );
 
@@ -1226,7 +1227,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
     } as any;
 
     const res = await handleFleetTeardown(
-      { targets: ["frontdesk", "orchestrators", "workers"], confirm: true },
+      { targets: ["frontdesk", "orchestrators", "workers"], confirm: true, reason: "test teardown" },
       mockContext
     );
 
@@ -1275,7 +1276,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
 
     try {
       const res = await handleFleetTeardown(
-        { targets: ["workers"], confirm: true },
+        { targets: ["workers"], confirm: true, reason: "test teardown" },
         mockContext
       );
 
@@ -1292,7 +1293,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
 
       // Also verify general teardown leaves no phantom frontdesk notice
       const generalRes = await handleFleetTeardown(
-        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true },
+        { targets: ["frontdesk", "orchestrators", "workers"], confirm: true, reason: "test teardown" },
         mockContext
       );
       assert.equal(generalRes.ok, true);
@@ -1337,7 +1338,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
     assert.equal(router.isHalted(), false);
 
     const res = await handleFleetTeardown(
-      { targets: ["workers"], confirm: true },
+      { targets: ["workers"], confirm: true, reason: "test teardown" },
       mockContext
     );
 
@@ -1397,7 +1398,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
     } as any;
 
     const res = await handleFleetTeardown(
-      { targets: ["workers"], confirm: true, drain: true, drainTimeoutMs: 2000 },
+      { targets: ["workers"], confirm: true, drain: true, drainTimeoutMs: 2000, reason: "test teardown" },
       mockContext
     );
 
@@ -1435,7 +1436,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
 
     const start = Date.now();
     const res = await handleFleetTeardown(
-      { targets: ["workers"], confirm: true, drain: true, drainTimeoutMs: 300 },
+      { targets: ["workers"], confirm: true, drain: true, drainTimeoutMs: 300, reason: "test teardown" },
       mockContext
     );
     const elapsed = Date.now() - start;
@@ -1514,7 +1515,7 @@ describe("Fleet teardown state cleanup (#774)", () => {
 
     // Teardown targeting ONLY workers
     const resWorkersOnly = await handleFleetTeardown(
-      { targets: ["workers"], confirm: true },
+      { targets: ["workers"], confirm: true, reason: "test teardown" },
       mockContext
     );
 
@@ -1782,14 +1783,14 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
     const router = makeRouter();
     assert.equal(router.isHalted(), false);
 
-    const first = await handleFleetHalt({ confirm: true });
+    const first = await handleFleetHalt({ confirm: true, reason: "test halt" });
     assert.equal(first.ok, true);
     assert.equal(first.halted, true);
     assert.equal(first.alreadyHalted, false);
     assert.equal(router.isHalted(), true);
     assert.equal(router.isAllPaused(), true);
 
-    const second = await handleFleetHalt({ confirm: true });
+    const second = await handleFleetHalt({ confirm: true, reason: "test halt" });
     assert.equal(second.ok, true);
     assert.equal(second.halted, true);
     assert.equal(second.alreadyHalted, true, "double-engage must be guarded");
@@ -1797,10 +1798,10 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
 
   it("clears the halt through resume('all')", async () => {
     const router = makeRouter();
-    await handleFleetHalt({ confirm: true });
+    await handleFleetHalt({ confirm: true, reason: "test halt" });
     assert.equal(router.isHalted(), true);
 
-    const res = await handleFleetResume({ confirm: true });
+    const res = await handleFleetResume({ confirm: true, reason: "test resume" });
     assert.equal(res.ok, true);
     assert.equal(res.halted, false);
     assert.equal(router.isHalted(), false);
@@ -1809,27 +1810,27 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
 
   it("refuses resume while a teardown is mid-flight", async () => {
     const router = makeRouter();
-    await handleFleetHalt({ confirm: true });
+    await handleFleetHalt({ confirm: true, reason: "test halt" });
     router.markTeardownStart();
 
-    const res = await handleFleetResume({ confirm: true });
+    const res = await handleFleetResume({ confirm: true, reason: "test resume" });
     assert.equal(res.ok, false);
     assert.equal(res.teardownInProgress, true);
     assert.match(res.error || "", /teardown in progress/i);
     assert.equal(router.isHalted(), true, "halt must remain engaged during teardown");
 
     router.markTeardownEnd();
-    const after = await handleFleetResume({ confirm: true });
+    const after = await handleFleetResume({ confirm: true, reason: "test resume" });
     assert.equal(after.ok, true);
     assert.equal(router.isHalted(), false);
   });
 
   it("treats a missing active router as an error", async () => {
     setActiveHookRouter(null);
-    const halt = await handleFleetHalt({ confirm: true });
+    const halt = await handleFleetHalt({ confirm: true, reason: "test halt" });
     assert.equal(halt.ok, false);
     assert.match(halt.error || "", /not running/i);
-    const resume = await handleFleetResume({ confirm: true });
+    const resume = await handleFleetResume({ confirm: true, reason: "test resume" });
     assert.equal(resume.ok, false);
     assert.match(resume.error || "", /not running/i);
   });
@@ -1858,7 +1859,7 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
       },
     } as any;
 
-    await handleFleetTeardown({ targets: ["workers"], confirm: true }, mockContext);
+    await handleFleetTeardown({ targets: ["workers"], confirm: true, reason: "test teardown" }, mockContext);
 
     assert.equal(sawListDuringTeardown, true, "teardown window must be open before archiving runs");
     assert.equal(sawTeardownWindow, true, "teardown window must be open while archiving runs");
@@ -1866,9 +1867,74 @@ describe("Fleet HALT / RESUME handlers (#1013)", () => {
     assert.equal(router.isTeardownInProgress(), false, "teardown window must close when the handler returns");
     assert.equal(router.isHalted(), true, "the halt remains engaged after teardown until RESUME");
 
-    const resume = await handleFleetResume({ confirm: true });
+    const resume = await handleFleetResume({ confirm: true, reason: "test resume" });
     assert.equal(resume.ok, true);
     assert.equal(router.isHalted(), false);
+  });
+
+  it("rejects halt, resume, and teardown when reason is missing or empty (#1115)", async () => {
+    const haltNoReason = await handleFleetHalt({ confirm: true } as any);
+    assert.equal(haltNoReason.ok, false);
+    assert.match(haltNoReason.error || "", /reason is required/i);
+
+    const haltEmptyReason = await handleFleetHalt({ confirm: true, reason: "   " } as any);
+    assert.equal(haltEmptyReason.ok, false);
+    assert.match(haltEmptyReason.error || "", /reason is required/i);
+
+    const resumeNoReason = await handleFleetResume({ confirm: true } as any);
+    assert.equal(resumeNoReason.ok, false);
+    assert.match(resumeNoReason.error || "", /reason is required/i);
+
+    const resumeEmptyReason = await handleFleetResume({ confirm: true, reason: "" } as any);
+    assert.equal(resumeEmptyReason.ok, false);
+    assert.match(resumeEmptyReason.error || "", /reason is required/i);
+
+    const teardownNoReason = await handleFleetTeardown({ targets: ["workers"], confirm: true } as any, {} as any);
+    assert.equal(teardownNoReason.ok, false);
+    assert.match(teardownNoReason.error || "", /reason is required/i);
+
+    const teardownEmptyReason = await handleFleetTeardown({ targets: ["workers"], confirm: true, reason: "" } as any, {} as any);
+    assert.equal(teardownEmptyReason.ok, false);
+    assert.match(teardownEmptyReason.error || "", /reason is required/i);
+  });
+
+  it("logs fleetHalt, fleetResume, and fleetTeardown to operationsLogger (#1115)", async () => {
+    const opsDir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-ops-halt-resume-"));
+    const opsLogger = new DiskLogger({ logDir: opsDir, fileName: "operations.log" });
+    setOperationsLogger(opsLogger);
+
+    try {
+      const router = makeRouter();
+      const mockContext = {
+        actor: "ops-operator",
+        paseo: {
+          agents: {
+            list: async () => ({ entries: [] }),
+            ref: () => ({ archive: async () => ({ ok: true }) }),
+          },
+        },
+      } as any;
+
+      const haltRes = await handleFleetHalt({ confirm: true, reason: "emergency security stop" }, mockContext);
+      assert.equal(haltRes.ok, true);
+
+      const resumeRes = await handleFleetResume({ confirm: true, reason: "investigation complete" }, mockContext);
+      assert.equal(resumeRes.ok, true);
+
+      const teardownRes = await handleFleetTeardown(
+        { targets: ["workers"], confirm: true, reason: "end of sprint cleanup" },
+        mockContext
+      );
+      assert.equal(teardownRes.ok, true);
+
+      const logContent = fs.readFileSync(path.join(opsDir, "operations.log"), "utf8");
+      assert.ok(logContent.includes('[OP] fleetHalt target=fleet actor=ops-operator reason="emergency security stop"'));
+      assert.ok(logContent.includes('[OP] fleetResume target=fleet actor=ops-operator reason="investigation complete"'));
+      assert.ok(logContent.includes('[OP] fleetTeardown target=workers actor=ops-operator reason="end of sprint cleanup"'));
+    } finally {
+      setOperationsLogger(null);
+      fs.rmSync(opsDir, { recursive: true, force: true });
+    }
   });
 });
 

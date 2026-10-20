@@ -2932,7 +2932,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
       if (onArchiveAgent) {
         await onArchiveAgent(agentId);
       } else {
-        await archiveAgentMutation.mutate({ agentId });
+        await archiveAgentMutation.mutate({ agentId, reason: "manual operator action" });
         onRefresh?.();
       }
     } catch {
@@ -2950,7 +2950,7 @@ export const UppidiFleetTreeView: React.FC<UppidiFleetTreeViewProps> = ({
         await onArchiveBulk();
       } else {
         const agentIds = eligibleBulkAgents.map((a) => a.id);
-        await archiveBulkMutation.mutate({ agentIds });
+        await archiveBulkMutation.mutate({ agentIds, reason: "manual operator action" });
         onRefresh?.();
       }
     } catch {

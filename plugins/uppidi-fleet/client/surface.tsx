@@ -584,7 +584,7 @@ export function AttentionAgentCard({ agent, onOpen }: AttentionAgentCardProps) {
 interface TeardownModalProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: (targets: Array<"workers" | "orchestrators" | "frontdesk">) => void;
+  onConfirm: (targets: Array<"workers" | "orchestrators" | "frontdesk">, reason?: string) => void;
   isProcessing: boolean;
 }
 
@@ -599,16 +599,18 @@ const TEARDOWN_TARGETS: Array<{
 ];
 
 /**
- * Multi-level approval modal for fleet teardown (#742). Requires explicit
- * checkbox selection of target categories and typing "TEARDOWN" to arm the
- * final confirmation button.
+ * Multi-level approval modal for fleet teardown (#742, #1115). Requires explicit
+ * checkbox selection of target categories, entering an operational reason, and
+ * typing "TEARDOWN" to arm the final confirmation button.
  */
 export function TeardownModal({ visible, onClose, onConfirm, isProcessing }: TeardownModalProps) {
   const { colors, typography } = useFleetTheme();
   const [selectedTargets, setSelectedTargets] = useState<Set<"workers" | "orchestrators" | "frontdesk">>(new Set());
   const [confirmText, setConfirmText] = useState("");
+  const [reason, setReason] = useState("manual operator action");
 
-  const isArmed = confirmText.trim().toUpperCase() === "TEARDOWN" && selectedTargets.size > 0;
+  const isArmed =
+    confirmText.trim().toUpperCase() === "TEARDOWN" && selectedTargets.size > 0 && reason.trim().length > 0;
   const dangerColor = colors.statusDanger;
 
   const toggleTarget = (id: "workers" | "orchestrators" | "frontdesk") => {
@@ -622,14 +624,16 @@ export function TeardownModal({ visible, onClose, onConfirm, isProcessing }: Tea
 
   const handleConfirm = () => {
     if (!isArmed || isProcessing) return;
-    onConfirm(Array.from(selectedTargets));
+    onConfirm(Array.from(selectedTargets), reason.trim() || "manual operator action");
     setSelectedTargets(new Set());
     setConfirmText("");
+    setReason("manual operator action");
   };
 
   const handleClose = () => {
     setSelectedTargets(new Set());
     setConfirmText("");
+    setReason("manual operator action");
     onClose();
   };
 
@@ -691,6 +695,15 @@ export function TeardownModal({ visible, onClose, onConfirm, isProcessing }: Tea
           ))}
 
           <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
+            Reason for teardown:
+          </Text>
+          <TextInput
+            value={reason}
+            onChangeText={setReason}
+            placeholder="Reason for teardown"
+          />
+
+          <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
             Type TEARDOWN to confirm:
           </Text>
           <TextInput
@@ -725,23 +738,35 @@ export function TeardownModal({ visible, onClose, onConfirm, isProcessing }: Tea
 export interface ResetStateModalProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (reason?: string) => void;
   isProcessing?: boolean;
 }
 
 /**
- * Confirmation modal for resetting fleet state (#764).
+ * Confirmation modal for resetting fleet state (#764, #1115).
  * Purges stale board state, issue cache, and queue files, and notifies orchestrators.
  */
 export function ResetStateModal({ visible, onClose, onConfirm, isProcessing = false }: ResetStateModalProps) {
   const { colors, typography } = useFleetTheme();
+  const [reason, setReason] = useState("manual operator action");
   const warningColor = colors.statusWarning;
+
+  const handleClose = () => {
+    setReason("manual operator action");
+    onClose();
+  };
+
+  const handleConfirm = () => {
+    if (isProcessing || !reason.trim()) return;
+    onConfirm(reason.trim() || "manual operator action");
+    setReason("manual operator action");
+  };
 
   return (
     <Modal
       open={visible}
       onOpenChange={(open) => {
-        if (!open && !isProcessing) onClose();
+        if (!open && !isProcessing) handleClose();
       }}
       title="Reset Fleet State"
     >
@@ -761,12 +786,21 @@ export function ResetStateModal({ visible, onClose, onConfirm, isProcessing = fa
             </Stack>
           </Card>
 
+          <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
+            Reason for reset:
+          </Text>
+          <TextInput
+            value={reason}
+            onChangeText={setReason}
+            placeholder="Reason for reset"
+          />
+
           <Row justify="flex-end" gap="xs">
             <Button
               label="Cancel"
               size="sm"
               variant="secondary"
-              onPress={onClose}
+              onPress={handleClose}
               disabled={isProcessing}
             />
             <Button
@@ -774,9 +808,9 @@ export function ResetStateModal({ visible, onClose, onConfirm, isProcessing = fa
               icon="RotateCcw"
               size="sm"
               variant="secondary"
-              disabled={isProcessing}
+              disabled={isProcessing || !reason.trim()}
               loading={isProcessing}
-              onPress={onConfirm}
+              onPress={handleConfirm}
             />
           </Row>
         </Stack>
@@ -855,13 +889,13 @@ const FLEET_MODE_OPTIONS: Array<{
 export interface ModeTransitionModalProps {
   visible: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  onConfirm: (reason?: string) => void;
   isProcessing?: boolean;
   mode: FleetMode;
 }
 
 /**
- * Confirmation modal for transitioning to a restricted fleet mode (HALT / STOP).
+ * Confirmation modal for transitioning to a restricted fleet mode (HALT / STOP) (#1115, #1373).
  * RUN and DRAIN transition directly without this modal.
  */
 export function ModeTransitionModal({
@@ -872,14 +906,26 @@ export function ModeTransitionModal({
   mode,
 }: ModeTransitionModalProps) {
   const { colors, typography } = useFleetTheme();
+  const [reason, setReason] = useState("manual operator action");
   const dangerColor = colors.statusDanger;
   const option = FLEET_MODE_OPTIONS.find((o) => o.value === mode)!;
+
+  const handleClose = () => {
+    setReason("manual operator action");
+    onClose();
+  };
+
+  const handleConfirm = () => {
+    if (isProcessing || !reason.trim()) return;
+    onConfirm(reason.trim() || "manual operator action");
+    setReason("manual operator action");
+  };
 
   return (
     <Modal
       open={visible}
       onOpenChange={(open) => {
-        if (!open && !isProcessing) onClose();
+        if (!open && !isProcessing) handleClose();
       }}
       title={`Transition to ${mode}`}
     >
@@ -899,12 +945,21 @@ export function ModeTransitionModal({
             </Stack>
           </Card>
 
+          <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
+            Reason for {mode} transition:
+          </Text>
+          <TextInput
+            value={reason}
+            onChangeText={setReason}
+            placeholder={`Reason for ${mode} transition`}
+          />
+
           <Row justify="flex-end" gap="xs">
             <Button
               label="Cancel"
               size="sm"
               variant="secondary"
-              onPress={onClose}
+              onPress={handleClose}
               disabled={isProcessing}
             />
             <Button
@@ -912,10 +967,99 @@ export function ModeTransitionModal({
               icon={option.icon}
               size="sm"
               variant="danger"
-              disabled={isProcessing}
+              disabled={isProcessing || !reason.trim()}
               loading={isProcessing}
               accessibilityLabel={`Confirm ${mode}`}
-              onPress={onConfirm}
+              onPress={handleConfirm}
+            />
+          </Row>
+        </Stack>
+      </ModalContent>
+    </Modal>
+  );
+}
+
+export interface UnenrollRepoModalProps {
+  visible: boolean;
+  repo: string;
+  onClose: () => void;
+  onConfirm: (repo: string, reason?: string) => void;
+  isProcessing?: boolean;
+}
+
+/**
+ * Confirmation modal for unenrolling a repository from the fleet roster (#1115).
+ */
+export function UnenrollRepoModal({
+  visible,
+  repo,
+  onClose,
+  onConfirm,
+  isProcessing = false,
+}: UnenrollRepoModalProps) {
+  const { colors, typography } = useFleetTheme();
+  const [reason, setReason] = useState("manual operator action");
+  const dangerColor = colors.statusDanger;
+
+  const handleClose = () => {
+    setReason("manual operator action");
+    onClose();
+  };
+
+  const handleConfirm = () => {
+    if (isProcessing || !reason.trim()) return;
+    onConfirm(repo, reason.trim() || "manual operator action");
+    setReason("manual operator action");
+  };
+
+  return (
+    <Modal
+      open={visible}
+      onOpenChange={(open) => {
+        if (!open && !isProcessing) handleClose();
+      }}
+      title="Unenroll Repository"
+    >
+      <ModalContent>
+        <Stack gap="sm">
+          <Card variant="flat" style={{ borderColor: dangerColor, borderWidth: 1 }}>
+            <Stack gap="xs">
+              <Row align="center" gap="xs">
+                <Icon name="AlertTriangle" size={16} color={dangerColor} />
+                <Text style={{ color: dangerColor, ...typography.heading }}>
+                  Unenroll {repo}
+                </Text>
+              </Row>
+              <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+                This will unenroll the repository from the fleet roster. This operation requires an audit reason.
+              </Text>
+            </Stack>
+          </Card>
+
+          <Text style={{ color: colors.foreground, ...typography.caption, fontWeight: "600" }}>
+            Reason for unenroll:
+          </Text>
+          <TextInput
+            value={reason}
+            onChangeText={setReason}
+            placeholder="Reason for unenroll"
+          />
+
+          <Row justify="flex-end" gap="xs">
+            <Button
+              label="Cancel"
+              size="sm"
+              variant="secondary"
+              onPress={handleClose}
+              disabled={isProcessing}
+            />
+            <Button
+              label={isProcessing ? "Unenrolling..." : "Confirm Unenroll"}
+              size="sm"
+              variant="danger"
+              disabled={isProcessing || !reason.trim()}
+              loading={isProcessing}
+              onPress={handleConfirm}
             />
           </Row>
         </Stack>
@@ -1113,6 +1257,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const unenrollRepoMutation = useRpcMutation(uppidiUnenrollRepoContract);
   const [enrollingRepoKey, setEnrollingRepoKey] = useState<string | null>(null);
   const [unenrollingRepoKey, setUnenrollingRepoKey] = useState<string | null>(null);
+  const [pendingUnenrollRepoKey, setPendingUnenrollRepoKey] = useState<string | null>(null);
 
   const pauseMutation = useRpcMutation(uppidiHookPauseContract);
   const resumeMutation = useRpcMutation(uppidiHookResumeContract);
@@ -1314,10 +1459,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     }
   };
 
-  const handleUnenrollRepo = async (repoKey: string) => {
+  const handleUnenrollRepo = async (repoKey: string, reason = "manual operator action") => {
     try {
       setUnenrollingRepoKey(repoKey);
-      const res = await unenrollRepoMutation.mutateAsync({ repo: repoKey });
+      const res = await unenrollRepoMutation.mutateAsync({
+        repo: repoKey,
+        reason: reason.trim() || "manual operator action",
+      });
       if (res.ok) {
         toast.show(res.message || `Unenrolled ${repoKey}`);
         void refetchRepos();
@@ -1329,6 +1477,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
       setUnenrollingRepoKey(null);
+      setPendingUnenrollRepoKey(null);
     }
   };
 
@@ -1624,10 +1773,13 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     Linking.openURL(defaultAgentLink(agentId)).catch(() => {});
   };
 
-  const handleArchiveAgent = async (agentId: string) => {
+  const handleArchiveAgent = async (agentId: string, reason = "manual operator action") => {
     try {
       setArchivingAgentId(agentId);
-      const res = await archiveAgentMutation.mutateAsync({ agentId });
+      const res = await archiveAgentMutation.mutateAsync({
+        agentId,
+        reason: reason.trim() || "manual operator action",
+      });
       if (res.ok) {
         toast.show(res.message || "Agent archived");
       } else {
@@ -1641,12 +1793,15 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     }
   };
 
-  const handleArchiveBulk = async () => {
+  const handleArchiveBulk = async (reason = "manual operator action") => {
     if (eligibleBulkAgents.length === 0 || isBulkArchiving) return;
     try {
       setIsBulkArchiving(true);
       const agentIds = eligibleBulkAgents.map((a) => a.id);
-      const res = await archiveBulkMutation.mutateAsync({ agentIds });
+      const res = await archiveBulkMutation.mutateAsync({
+        agentIds,
+        reason: reason.trim() || "manual operator action",
+      });
       if (res.ok) {
         toast.show(res.message || `Archived ${res.archivedCount ?? agentIds.length} inactive agent(s)`);
       } else {
@@ -1660,12 +1815,22 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     }
   };
 
-  const handleTeardown = async (targets: Array<"workers" | "orchestrators" | "frontdesk">) => {
+  const handleTeardown = async (
+    targets: Array<"workers" | "orchestrators" | "frontdesk">,
+    reason = "manual operator action"
+  ) => {
     try {
       setIsTearingDown(true);
-      const res = await teardownMutation.mutateAsync({ targets, confirm: true });
+      const res = await teardownMutation.mutateAsync({
+        targets,
+        confirm: true,
+        reason: reason.trim() || "manual operator action",
+      });
       if (res.ok) {
-        toast.show(res.message || `Torn down ${res.tornDown.workers + res.tornDown.orchestrators + res.tornDown.frontdesk} agent(s)`);
+        toast.show(
+          res.message ||
+            `Torn down ${res.tornDown.workers + res.tornDown.orchestrators + res.tornDown.frontdesk} agent(s)`
+        );
         setIsTeardownModalOpen(false);
       } else {
         toast.error(res.error || "Failed to teardown fleet");
@@ -1690,10 +1855,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     await executeModeSet(mode);
   };
 
-  const executeModeSet = async (mode: FleetMode) => {
+  const executeModeSet = async (mode: FleetMode, reason = "manual operator action") => {
     try {
       setPendingModeTransition(mode);
-      const res = await setModeMutation.mutateAsync({ mode, confirm: true });
+      const res = await setModeMutation.mutateAsync({
+        mode,
+        confirm: true,
+        reason: reason.trim() || "manual operator action",
+      });
       if (res.ok) {
         toast.show(res.message || `Fleet mode set to ${mode}`);
         void refetchHookStatus();
@@ -1711,10 +1880,14 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
     await executeModeSet("RUN");
   };
 
-  const handleResetState = async () => {
+  const handleResetState = async (reason = "manual operator action") => {
     try {
       setIsResettingState(true);
-      const res = await resetStateMutation.mutateAsync({ confirm: true, notifyOrchestrators: true });
+      const res = await resetStateMutation.mutateAsync({
+        confirm: true,
+        notifyOrchestrators: true,
+        reason: reason.trim() || "manual operator action",
+      });
       if (res.ok) {
         toast.show(res.message || "Fleet state reset successfully");
         setIsResetStateModalOpen(false);
@@ -2204,7 +2377,7 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
                                       variant="danger"
                                       disabled={isUnenrolling}
                                       loading={isUnenrolling}
-                                      onPress={() => void handleUnenrollRepo(r.key)}
+                                      onPress={() => setPendingUnenrollRepoKey(r.key)}
                                     />
                                   </Row>
                                 </Card>
@@ -3540,13 +3713,20 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
         <ModeTransitionModal
           visible={true}
           onClose={() => setPendingModeTransition(null)}
-          onConfirm={() => {
-            if (pendingModeTransition) executeModeSet(pendingModeTransition);
+          onConfirm={(reason) => {
+            if (pendingModeTransition) executeModeSet(pendingModeTransition, reason);
           }}
           isProcessing={isSettingMode}
           mode={pendingModeTransition}
         />
       )}
+      <UnenrollRepoModal
+        visible={Boolean(pendingUnenrollRepoKey)}
+        repo={pendingUnenrollRepoKey || ""}
+        onClose={() => setPendingUnenrollRepoKey(null)}
+        onConfirm={(repo, reason) => handleUnenrollRepo(repo, reason)}
+        isProcessing={unenrollingRepoKey === pendingUnenrollRepoKey}
+      />
     </ModalBody>
   );
 }

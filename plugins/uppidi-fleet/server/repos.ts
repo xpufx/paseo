@@ -17,6 +17,7 @@ import {
   saveRouterConfig,
 } from "./hook-router.js";
 import { isRepoMatching } from "../shared/sort-filter.js";
+import { operationsLogger } from "./disk-logger.js";
 
 interface RawForgejoRepo {
   name: string;
@@ -175,13 +176,19 @@ export async function handleUppidiUnenrollRepo(
   if (!rawRepo) {
     return { ok: false, repo: "", enrolledRepos: [], error: "repo is required" };
   }
+  const reason = input.reason?.trim();
+  if (!reason) {
+    return { ok: false, repo: rawRepo, enrolledRepos: [], error: "reason is required" };
+  }
 
   const canonicalKey = canonicalRepoKey(rawRepo) ?? rawRepo;
+  const actor = (_context as any)?.callerAgentId || (_context as any)?.actor || (input as any)?.actor || "operator";
 
   try {
     const router = getActiveHookRouter();
     if (router) {
       const enrolledRepos = router.unenrollRepo(canonicalKey);
+      operationsLogger.log(`[OP] unenrollRepo target=${canonicalKey} actor=${actor} reason="${reason}"`);
       return {
         ok: true,
         repo: canonicalKey,
@@ -195,6 +202,7 @@ export async function handleUppidiUnenrollRepo(
     const updatedEnrolled = currentEnrolled.filter((r) => !isRepoMatching(r, canonicalKey));
 
     saveRouterConfig({ enrolledRepos: updatedEnrolled });
+    operationsLogger.log(`[OP] unenrollRepo target=${canonicalKey} actor=${actor} reason="${reason}"`);
 
     return {
       ok: true,

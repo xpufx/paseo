@@ -26,6 +26,7 @@ export interface DiskLoggerOptions {
 export const DEFAULT_MAX_LOG_BYTES = 5 * 1024 * 1024; // 5 MB
 export const DEFAULT_MAX_LOG_FILES = 3;
 export const DEFAULT_LOG_FILE_NAME = "hook.log";
+export const DEFAULT_OPERATIONS_LOG_FILE_NAME = "operations.log";
 
 /**
  * Resolves the log directory through PluginStorage so it remains inside the
@@ -181,4 +182,27 @@ export class DiskLogger {
       // Non-fatal if disk is full or read-only
     }
   }
+}
+
+let activeOperationsLogger: DiskLogger = new DiskLogger({ fileName: DEFAULT_OPERATIONS_LOG_FILE_NAME });
+
+export const operationsLogger = new Proxy({} as DiskLogger, {
+  get(_target, prop, receiver) {
+    const val = Reflect.get(activeOperationsLogger, prop, activeOperationsLogger);
+    if (typeof val === "function") {
+      return val.bind(activeOperationsLogger);
+    }
+    return val;
+  },
+  set(_target, prop, value) {
+    return Reflect.set(activeOperationsLogger, prop, value);
+  },
+});
+
+export function getOperationsLogger(): DiskLogger {
+  return activeOperationsLogger;
+}
+
+export function setOperationsLogger(logger: DiskLogger | null): void {
+  activeOperationsLogger = logger ?? new DiskLogger({ fileName: DEFAULT_OPERATIONS_LOG_FILE_NAME });
 }

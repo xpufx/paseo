@@ -716,7 +716,7 @@ describe("uppidi-fleet client entry contract", () => {
       );
       assert.match(
         surfaceSource,
-        /label=\{isProcessing\s*\?\s*["']Resetting\.\.\.["']\s*:\s*["']Confirm Reset["']\}[\s\S]*?onPress=\{onConfirm\}/,
+        /label=\{isProcessing\s*\?\s*["']Resetting\.\.\.["']\s*:\s*["']Confirm Reset["']\}[\s\S]*?onPress=\{(?:onConfirm|handleConfirm)\}/,
         "ResetStateModal must render Confirm Reset button with loading feedback",
       );
 
