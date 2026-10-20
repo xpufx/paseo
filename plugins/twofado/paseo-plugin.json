@@ -1,5 +1,7 @@
 {
   "id": "twofado",
+  "name": "2fado",
+  "description": "Approval-gate UI and notifications for the 2fado privileged-command daemon",
   "requirements": {
     "paseo": ">=0.8.0"
   },

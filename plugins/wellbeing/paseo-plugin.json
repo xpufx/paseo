@@ -1,4 +1,6 @@
 {
   "id": "wellbeing",
+  "name": "Wellbeing",
+  "description": "Operator presence tracking, circadian schedule management, and fatigue alerting",
   "requirements": { "paseo": ">=0.8.0" }
 }

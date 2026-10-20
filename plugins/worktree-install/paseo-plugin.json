@@ -1,5 +1,7 @@
 {
   "id": "worktree-install",
+  "name": "Worktree Install",
+  "description": "Alternative fleet, queue, and ticket surface designed independently of the plugin helper UI kit",
   "requirements": {
     "paseo": ">=0.9.0"
   }

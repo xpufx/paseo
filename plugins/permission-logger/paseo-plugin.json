@@ -1,5 +1,7 @@
 {
   "id": "permission-logger",
+  "name": "Permission Logger",
+  "description": "Audit log and query Paseo permission requests, tool executions, and decisions with agent attribution",
   "requirements": {
     "paseo": ">=0.9.0"
   },

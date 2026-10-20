@@ -1,5 +1,7 @@
 {
   "id": "antigravity-claude",
+  "name": "Antigravity Claude",
+  "description": "Claude and GPT model provider for Google Antigravity with quota-aware account routing",
   "requirements": { "paseo": ">=0.9.0" },
   "build": [
     ["npm", "install", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", "--no-workspaces"]

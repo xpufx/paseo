@@ -1,4 +1,6 @@
 {
   "id": "forges",
+  "name": "Forges",
+  "description": "Forgejo and Gitea issue tracking, label management, and agent envelope comments within Paseo",
   "requirements": { "paseo": ">=0.8.0" }
 }

@@ -1,4 +1,6 @@
 {
   "id": "slash",
+  "name": "Slash",
+  "description": "Custom slash commands for the composer with prompt interpolation, surface navigation, and backend operations",
   "requirements": { "paseo": ">=0.8.0" }
 }

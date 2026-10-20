@@ -1,5 +1,7 @@
 {
   "id": "paseo-helper-demo",
+  "name": "Helper Demo",
+  "description": "Reference showcase demonstrating paseo-plugin-helper lifecycle primitives, UI components, and daemon utilities",
   "requirements": {
     "paseo": ">=0.8.0"
   }
