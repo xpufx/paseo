@@ -56,7 +56,7 @@ flowchart TD
 
 ### 1.2 Baseline Architecture vs. Planned Overhaul
 The codebase currently reflects an evolutionary state bridging pre-0.8 patterns with modern Paseo >=0.9 capabilities:
-* **Current Implementation:** Features file-backed registry (`registry.json`), filesystem-based atomicity for queues (`pending/*.json` rename claims), periodic interval sweeps, and dual-layer sending (direct SDK + MCP stdio bridge). Host discovery belongs strictly to the client runtime via Paseo's live client host primitives (`useHosts()` / `useOptionalHosts()`).
+* **Current Implementation:** Features file-backed registry (`registry.json`), filesystem-based atomicity for queues (`pending/*.json` rename claims), periodic interval sweeps, and dual-layer sending (direct SDK + MCP stdio bridge). `registry.json` is the single authoritative local registry for registered daemons. Connected live daemons are discovered strictly at runtime in the client via Paseo client host primitives (`useOptionalHosts()`) and presented as registration/pairing candidates into `registry.json`.
 * **Target Overhaul (Zero-Registry Mandate):** As outlined in issue #706, the upcoming overhaul will eliminate static on-disk registry files in favor of self-contained pairing URLs (`https://app.paseo.sh/#offer=...`), in-memory authenticated peer session pools, native WebSocket lifecycle event streaming, and native daemon-level schedule engines.
 
 ---
@@ -100,8 +100,9 @@ Rendered under three primary tabs: **Current**, **Prototype**, and **Peers**.
 | Discovered Hosts (1)                                                   |
 | +--------------------------------------------------------------------+ |
 | | lab-box @ srv_3f90   [discovered (not paired)]                     | |
-| | Host: 192.168.1.120:6767                                           | |
-| | [ Pair this host ]   [ Remove ]                                    | |
+| | Server ID: srv_3f90                                                 | |
+| | Status: online                                                      | |
+| | [ Pair this host ]                                                  | |
 | +--------------------------------------------------------------------+ |
 |                                                                        |
 | Add Daemon                                                             |
@@ -112,8 +113,8 @@ Rendered under three primary tabs: **Current**, **Prototype**, and **Peers**.
 ```
 
 #### 2.2.1 Registered Daemons List
-* Reads daemon records via `registry.read` RPC from `registry.json`.
-* Distinguishes registered daemons from discovered client host candidates.
+* Reads daemon records via `registry.read` RPC strictly from `registry.json` (the single authoritative local registry).
+* Distinguishes registered daemons from discovered client host candidates (which are discovered strictly at runtime via `useOptionalHosts()`).
 * **Live Health Badge (`HealthBadge`):**
   * `reachable (N agents)` (variant: `success`, green dot).
   * `unreachable` (variant: `danger`, red dot) with expandable error details.
@@ -122,7 +123,7 @@ Rendered under three primary tabs: **Current**, **Prototype**, and **Peers**.
   * **Probe:** Triggers `daemon.probe` to test reachability on demand.
   * **Edit:** Inlines an edit form with live pre-save reachability testing.
   * **Debug:** Opens a slide-out/modal with a detailed daemon snapshot (`daemon.dump`).
-  * **Remove:** Opens a confirmation modal invoking `daemon.remove`.
+  * **Remove:** Opens a confirmation modal invoking `daemon.remove` on `registry.json`.
 
 #### 2.2.2 "Add Anyway" and "Save Anyway" Flow (#1367 / #1479)
 To prevent blocking operators when adding remote or temporarily offline daemons:
@@ -135,10 +136,10 @@ To prevent blocking operators when adding remote or temporarily offline daemons:
   * Editing a host address triggers a pre-save probe. If unreachable, a **Save anyway** button (`variant="danger"`) is displayed.
 
 #### 2.2.3 Candidate Pairing Modal (`Pair Candidate Modal`)
-* Hosts discovered via Paseo's live client host primitives (`useHosts()` / `useOptionalHosts()`) that are not yet paired are rendered under **Discovered hosts** with badge `discovered (not paired)` (`isPaired: false`).
+* Hosts discovered via Paseo's live client host primitives (`useOptionalHosts()`) that are not yet paired are rendered under **Discovered hosts** with badge `discovered (not paired)` (`isPaired: false`).
 * Clicking **Pair this host** opens the candidate pairing modal:
   * Prompts for the pairing offer URL (`https://app.paseo.sh/#offer=...`) or raw token.
-  * **Validate & Pair:** Executes `daemon.probe` to verify the token/offer format and reachability. Upon validation, persists the peer via `daemon.add` with `isPaired: true`, moving it into the primary Registered Daemons list.
+  * **Validate & Pair:** Executes `daemon.probe` to verify the token/offer format and reachability. Upon validation, persists the peer into `registry.json` via `daemon.add` with `isPaired: true`, moving it into the primary Registered Daemons list.
 
 #### 2.2.4 Introduce Agents Picker
 * Multi-agent introduction modal allowing the operator to select Agent 1 and Agent 2 across any reachable daemons.
@@ -185,7 +186,7 @@ Registered into Paseo's agent composer bar via `registerComposerPill`:
 ### 2.5 Agent Conversation Drawer / Panel (`client/x-comms-conversation.tsx`)
 The primary conversation interface mounted in the agent workspace panel (`client/x-comms-panel.tsx`) and composer pill modal:
 * **Thread Organization:** Derives bidirectional conversation threads (`deriveConversationThreads`) from local agent timeline messages and sent-message caches.
-* **Target Selection:** Dropdown picker populated by `agents.introspect` and configured host agents (`listConfiguredHostAgents`).
+* **Target Selection:** Picker modal populated by `agents.introspect` (for registered daemons and their project/workspace/agent hierarchy, gated by `isSurfaceTargetResolvable`) and discovered candidates (rendered from `useDiscoveredHostCandidates()` with guidance that registration in `registry.json` is required to message them).
 * **Unverified Sender Warning:** Unauthenticated or unsigned incoming envelopes display prominent notice banners: `[INCOMING · UNVERIFIED SENDER]`.
 * **Sticky Bottom ScrollView (`StickBottomScrollView`):** Automatically tracks scroll height and maintains pin-to-bottom behavior during message stream updates, re-arming on thread switch.
 * **Delivery Feedback & Lifecycle Badges:**
@@ -225,14 +226,14 @@ Defined via Zod schemas in `shared/registry.ts`:
 
 | # | RPC Name | Method Identifier | Input Contract (Zod) | Output Contract (Zod) | Execution Mode & Dependencies |
 |---|---|---|---|---|---|
-| **1** | `registry.read` | `registryReadRpc` | `{}` | `{ registryPath: string, exists: boolean, validJson: boolean, parseError: string \| null, daemons: Array<{ name, value, valid, error, source?, serverId, hostname, isPaired?, xCommsInstalled? }> }` | Local FS. Reads manual `registry.json`. Never throws. |
-| **2** | `daemon.add` | `daemonAddRpc` | `{ name: string (1-64), value: string (1-512) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[], pairingToken?: string \| null }` | Local FS (`0600`). Validates charset `^[A-Za-z0-9._-]+$`, rejects duplicates and duplicate host values. |
-| **3** | `daemon.update` | `daemonUpdateRpc` | `{ name: string (1-64), rename?: string (1-64), value?: string (1-512) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[] }` | Local FS (`0600`). Atomic rename or re-addressing. Validates new host format. |
-| **4** | `daemon.remove` | `daemonRemoveRpc` | `{ name: string (1-64) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[] }` | Local FS. Removes manual entry. Refuses removal of configured hosts. |
+| **1** | `registry.read` | `registryReadRpc` | `{}` | `{ registryPath: string, exists: boolean, validJson: boolean, parseError: string \| null, daemons: Array<{ name, value, valid, error, source?, serverId, hostname, isPaired?, xCommsInstalled? }> }` | Local FS. Reads `registry.json` (single authoritative local registry). Validates every host form, derives `serverId` and hostname mappings, and tags daemons with `source: "registry"` and `isPaired: true`. Never throws. |
+| **2** | `daemon.add` | `daemonAddRpc` | `{ name: string (1-64), value: string (1-512) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[], pairingToken?: string \| null }` | Local FS (`0600`). Operates strictly on `registry.json`. Validates charset `^[A-Za-z0-9._-]+$`, rejects duplicates and duplicate host values. |
+| **3** | `daemon.update` | `daemonUpdateRpc` | `{ name: string (1-64), rename?: string (1-64), value?: string (1-512) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[] }` | Local FS (`0600`). Operates strictly on `registry.json`. Atomic rename or re-addressing. Validates new host format. |
+| **4** | `daemon.remove` | `daemonRemoveRpc` | `{ name: string (1-64) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[] }` | Local FS. Operates strictly on `registry.json`. Deletes entry; returns `saved: false` and error if daemon does not exist. |
 | **5** | `daemon.health` | `daemonHealthRpc` | `{}` | `{ results: Array<{ name: string, reachable: boolean, error: string \| null, agentCount: number \| null }> }` | Peer probe. Returns 60s cached reachability verdicts; kicks immediate outbox retry on reconnect. |
 | **6** | `peer.status` | `peerStatusRpc` | `{}` | `{ results: Array<{ name, value, valid, reachable, error, transport, serverId, hostname, version, pid, listen, relayEnabled, relayEndpoint, providerCount, providersAvailable, hubState, hubDaemonId, hubOrigin, hubLastError, xCommsInstalled? }> }` | Live peer probe. Dials every peer concurrently via `DaemonClient` (`daemon.get_status`, `getHubStatus`). |
 | **7** | `server.status` | `serverStatusRpc` | `{}` | `{ installPath: string, installed: boolean, configured: boolean, version: string \| null, syntaxOk: boolean, error: string \| null }` | Local FS. Locates bundled MCP server script and parses version metadata. |
-| **8** | `agents.introspect` | `introspectAgentsRpc` | `{}` | `{ daemons: Array<{ name: string, reachable: boolean, error: string \| null, projects: Array<{ project: string, workspaces: Array<{ name: string, agents: Array<{ agentId, shortId, name, status }> }> }> }> }` | Peer queries. Iterates all daemons and builds project/workspace/agent hierarchy tree. |
+| **8** | `agents.introspect` | `introspectAgentsRpc` | `{}` | `{ daemons: Array<{ name: string, reachable: boolean, error: string \| null, projects: Array<{ project: string, workspaces: Array<{ name: string, agents: Array<{ agentId, shortId, name, status }> }> }> }> }` | Peer queries. Iterates all registered daemons in `registry.json` and builds project/workspace/agent hierarchy tree. |
 | **9** | `agents.introduce` | `introduceAgentsRpc` | `{ first: { daemon, agentId, shortId, name }, second: { daemon, agentId, shortId, name }, message: string (1-4000) }` | `{ sends: Array<{ daemon: string, agentId: string, ok: boolean, error: string \| null }>, refused?: boolean, refusalReason?: string \| null }` | Peer send. Formulates mutual introduction prompts with return addresses; gates against unpaired/unresolvable daemons. |
 | **10** | `daemon.probe` | `daemonProbeRpc` | `{ value: string (1-512) }` | `{ valid: boolean, formatError: string \| null, reachable: boolean, error: string \| null }` | Peer network probe. Validates host format and executes live connect with 8s dial timeout. |
 | **11** | `ui.prefs.get` | `uiPrefsGetRpc` | `{}` | `{ prereqsCollapsed: boolean, presenceEnabled: boolean, injectionEnabled: boolean, outboxExpirySeconds?: number, daemonEnabled?: Record<string, boolean> }` | Local FS (`plugin.json`). Loads user UI preferences with fallback defaults. |
@@ -286,9 +287,9 @@ The MCP server is implemented in `mcp/paseo-x-comms.mjs` and built via esbuild t
 
 | Tool Name | Parameters | Returns | Operational Behavior |
 |---|---|---|---|
-| `x_comms_list_daemons` | `{ detailed?: boolean }` | `string[]` or `Array<{ name, target, status: "online", serverId, source }>` | Lists registered manual and configured hosts. Targets are redacted (`#offer=[REDACTED]`). Does not ping. |
-| `x_comms_add_daemon` | `{ name: string, offer: string }` | `{ ok: true, daemons: string[] }` | Appends entry to `registry.json`. Silently overwrites existing keys. |
-| `x_comms_remove_daemon` | `{ name: string }` | `{ ok: true, daemons: string[] }` | Removes entry from `registry.json`. Refuses to remove read-only configured hosts. |
+| `x_comms_list_daemons` | `{ detailed?: boolean }` | `string[]` or `Array<{ name, target, status: "online", serverId, source: "registry" }>` | Lists registered daemons from `registry.json`. Returns names only by default, or detailed objects with `source: "registry"` when `detailed: true`. Targets are redacted (`#offer=[REDACTED]`). Does not ping. |
+| `x_comms_add_daemon` | `{ name: string, offer: string }` | `{ ok: true, daemons: string[] }` | Operates strictly on `registry.json`. Appends entry and silently overwrites existing keys. |
+| `x_comms_remove_daemon` | `{ name: string }` | `{ ok: true, daemons: string[] }` | Operates strictly on `registry.json`. Removes entry; throws error if daemon does not exist. |
 | `x_comms_list_agents` | `{ daemon: string }` | Structured agent list JSON | Queries daemon via `DaemonClient.fetchAgents()` or `paseo ls --host`. |
 | `x_comms_inspect` | `{ daemon: string, agentId: string }` | Agent metadata JSON | Reads agent status and configuration via `DaemonClient.inspectAgent()` or CLI. |
 | `x_comms_send` | `{ daemon: string, agentId: string, prompt: string, fromAgentId?: string, fromAgentName?: string, messageId?: string, notifyOnFinish?: boolean }` | Daemon send response or `{ delivery: "queued", queueDepth, expiresAt }` | Stamps v6 envelope, probes target busy state, queues if mid-turn, dispatches if idle. Queues finish notice. |
@@ -308,8 +309,8 @@ Beyond the 11 tools, the MCP runtime incorporates 14 critical capabilities:
 * **C4 · Busy Gate:** Evaluates target run state before dispatching. Mid-turn agents cause messages to be held in the defer queue.
 * **C5 · Defer Queue Integration:** Shares the filesystem queue in `<registry_dir>/pending/` with the plugin server.
 * **C6 · Delivery Notices:** Enqueues completion notices back to the sender (`notifyOnFinish: true`) through the defer queue without preempting the sender's turn.
-* **C7 · Registry I/O:** Reads/writes `registry.json`.
-* **C8 · Unified Client Host Discovery:** Client surfaces discover live connected hosts via Paseo client primitives as registration candidates.
+* **C7 · Registry I/O:** Reads/writes `registry.json` as the single authoritative local registry for registered daemons.
+* **C8 · Unified Client Host Discovery (Client Surfaces):** Connected live daemons are discovered strictly at runtime in the client via Paseo client host primitives (`useOptionalHosts()`) and presented as registration/pairing candidates into `registry.json`.
 * **C9 · Unknown-Daemon Diagnostic:** Provides descriptive guidance for missing registry keys, advertising both direct host and relay routes.
 * **C10 · Offer & Secret Redaction:** Redacts `#offer=...` tokens in tool returns and scrubs Bearer tokens and passwords from logs/errors (`redactSecrets`).
 * **C11 · Extension Host:** Dynamically loads trusted JavaScript extension plugins from `~/.paseo/plugin-data/xpufx/paseo-x-comms/extensions/*.mjs`.
@@ -404,7 +405,7 @@ All persistent plugin state is isolated under the scoped directory:
 
 ```
 ~/.paseo/plugin-data/xpufx/paseo-x-comms/
-├── registry.json                 # Manual daemon registry (JSON, mode 0600)
+├── registry.json                 # Authoritative daemon registry (JSON, mode 0600)
 ├── plugin.json                   # UI preferences and toggles
 ├── outbox.json                   # Outbox entries awaiting transport retry
 ├── presence.json                 # Fleet presence entries, tombstones, and LRU
@@ -421,7 +422,7 @@ All persistent plugin state is isolated under the scoped directory:
 ### Storage Files Inventory
 | File Path | Schema & Purpose | Permissions & Access Policy |
 |---|---|---|
-| `registry.json` | `{ [daemonName: string]: string }` — Maps daemon aliases to opaque `--host` URLs or pairing offers. | Mode `0600`. Treated as sensitive credentials. |
+| `registry.json` | `{ [daemonName: string]: string }` — Maps daemon aliases to opaque `--host` URLs or pairing offers. | Mode `0600`. Treated as sensitive credentials. Single authoritative local registry for registered daemons. |
 | `plugin.json` | Preferences object: `prereqsCollapsed`, `presenceEnabled`, `injectionEnabled`, `outboxExpirySeconds`, `daemonEnabled`. | Managed via `PluginStorage`. Tolerates corrupt JSON by falling back to defaults. |
 | `outbox.json` | Array of `OutboxEntry` records tracking undelivered messages, retry counts, and next attempt timestamps. | Read-modify-write serialised via `withOutboxLock`. |
 | `presence.json` | Stores live agent announcements, tombstones (kept 14 days), seen message IDs (LRU cap 1000), and queued retracts. | Managed via `PluginStorage`. |
