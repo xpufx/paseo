@@ -1,11 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { SERENA_MCP_PROFILE } from "../shared/contracts.js";
 import {
   FLEET_ROLE_ENV_KEY,
   registerFleetMcpInjection,
   registerHookRouterEnvInjection,
   resolveActiveProfiles,
+  resolveFleetMcpServerConfig,
+  resolveFleetMcpServerPath,
+  stableFleetServerPath,
 } from "./mcp-injection.js";
 
 describe("Serena MCP profile shape (#1020)", () => {
@@ -290,4 +296,125 @@ describe("registerHookRouterEnvInjection (#1398)", () => {
     assert.equal(finalRequest.env?.HOOK_ROUTER_BASE_URL, undefined);
   });
 });
+
+describe("resolveFleetMcpServerPath and resolveFleetMcpServerConfig (#1475)", () => {
+  it("resolves default fleet MCP server config safely in unbundled environment", () => {
+    const config = resolveFleetMcpServerConfig();
+    assert.equal(config.type, "stdio");
+    assert.ok(config.command);
+    assert.equal(config.args.length, 1);
+    assert.match(config.args[0], /fleet-mcp-server\.mjs$/);
+  });
+
+  it("does not throw when moduleUrl is empty string (simulated bundled daemon)", () => {
+    // In Paseo daemon's bundled/inlined plugin process, import.meta.url is empty string
+    assert.doesNotThrow(() => {
+      const config = resolveFleetMcpServerConfig({ moduleUrl: "" });
+      assert.equal(config.type, "stdio");
+      assert.ok(config.command);
+      assert.equal(typeof config.args[0], "string");
+      assert.ok(config.args[0].length > 0);
+    });
+  });
+
+  it("does not throw when moduleUrl is undefined, null, or invalid non-file URL", () => {
+    for (const badUrl of [undefined, null, "webpack:///bundle.js", "http://localhost/server.js", "not-a-valid-url"]) {
+      assert.doesNotThrow(() => {
+        const config = resolveFleetMcpServerConfig({ moduleUrl: badUrl });
+        assert.equal(config.type, "stdio");
+        assert.ok(config.command);
+        assert.equal(typeof config.args[0], "string");
+      });
+    }
+  });
+
+  it("respects PASEO_FLEET_MCP_SERVER environment variable override", () => {
+    const customPath = "/opt/custom/bin/fleet-mcp-server.mjs";
+    const pathFromEnv = resolveFleetMcpServerPath({
+      env: { PASEO_FLEET_MCP_SERVER: customPath },
+    });
+    assert.equal(pathFromEnv, customPath);
+
+    // Relative path override resolved against cwd
+    const relPath = resolveFleetMcpServerPath({
+      env: { PASEO_FLEET_MCP_SERVER: "custom-rel/bin/fleet-mcp-server.mjs" },
+      cwd: "/workspace/test-repo",
+    });
+    assert.equal(relPath, "/workspace/test-repo/custom-rel/bin/fleet-mcp-server.mjs");
+  });
+
+  it("resolves from ~/.paseo/config.json when moduleUrl is empty and recorded plugin path exists", () => {
+    const tmpHome = mkdtempSync(path.join(os.tmpdir(), "mcp-test-home-"));
+    try {
+      const fakePluginDir = path.join(tmpHome, "installed-plugins", "uppidi-fleet");
+      const fakeBinDir = path.join(fakePluginDir, "bin");
+      mkdirSync(fakeBinDir, { recursive: true });
+      const fakeServerFile = path.join(fakeBinDir, "fleet-mcp-server.mjs");
+      writeFileSync(fakeServerFile, "// fake server");
+
+      const paseoDir = path.join(tmpHome, ".paseo");
+      mkdirSync(paseoDir, { recursive: true });
+      writeFileSync(
+        path.join(paseoDir, "config.json"),
+        JSON.stringify({
+          plugins: {
+            "uppidi-fleet": {
+              path: fakePluginDir,
+            },
+          },
+        }),
+      );
+
+      const resolved = resolveFleetMcpServerPath({
+        moduleUrl: "",
+        home: tmpHome,
+        cwd: tmpHome,
+      });
+      assert.equal(resolved, fakeServerFile);
+
+      const config = resolveFleetMcpServerConfig({
+        moduleUrl: "",
+        home: tmpHome,
+        cwd: tmpHome,
+      });
+      assert.equal(config.args[0], fakeServerFile);
+    } finally {
+      rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves from stableFleetServerPath when bundled binary exists", () => {
+    const tmpState = mkdtempSync(path.join(os.tmpdir(), "mcp-test-state-"));
+    try {
+      const binDir = path.join(tmpState, "bin");
+      mkdirSync(binDir, { recursive: true });
+      const bundledFile = path.join(binDir, "fleet-mcp-server.bundled.mjs");
+      writeFileSync(bundledFile, "// bundled server");
+
+      const resolved = resolveFleetMcpServerPath({
+        moduleUrl: "",
+        stateDirPath: tmpState,
+        home: tmpState,
+        cwd: tmpState,
+      });
+      assert.equal(resolved, bundledFile);
+    } finally {
+      rmSync(tmpState, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back safely without throwing when no candidates exist on disk", () => {
+    assert.doesNotThrow(() => {
+      const resolved = resolveFleetMcpServerPath({
+        moduleUrl: null,
+        env: {},
+        home: "/nonexistent/home",
+        cwd: "/nonexistent/cwd",
+      });
+      assert.equal(typeof resolved, "string");
+      assert.match(resolved, /fleet-mcp-server/);
+    });
+  });
+});
+
 

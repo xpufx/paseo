@@ -6,9 +6,10 @@
  * disable specific MCP injection profiles (Serena, etc.) without redeploying.
  */
 
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { fileURLToPath, URL } from "node:url";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createPluginLogger,
   registerMcpInjection,
@@ -211,15 +212,139 @@ export function stableFleetServerPath(stateDirPath?: string): string {
   return join(base, STABLE_FLEET_BIN_DIRNAME, STABLE_FLEET_SERVER_FILENAME);
 }
 
+export interface ResolveFleetMcpServerOptions {
+  env?: NodeJS.ProcessEnv;
+  home?: string;
+  cwd?: string;
+  moduleUrl?: string | null;
+  stateDirPath?: string;
+}
+
+/**
+ * Resolves the absolute path to the fleet MCP server binary.
+ *
+ * Safe against empty, undefined, or bundled `import.meta.url` environments
+ * (such as Paseo daemon's inlined plugin-process execution, #1475).
+ *
+ * Resolution order:
+ * 1. Process environment override `PASEO_FLEET_MCP_SERVER`
+ * 2. Unbundled `import.meta.url` (guarded against non-file / invalid URLs)
+ * 3. `~/.paseo/config.json` recorded plugin install path
+ * 4. Stable fleet server path (`~/.paseo/plugin-data/xpufx/uppidi-fleet/bin/...`)
+ * 5. Relative paths from cwd or Paseo home
+ */
+export function resolveFleetMcpServerPath(options: ResolveFleetMcpServerOptions = {}): string {
+  const env = options.env ?? process.env;
+  const cwd = options.cwd ?? process.cwd();
+  const home = options.home ?? env.HOME ?? homedir();
+
+  // 1. Process environment override
+  const rawOverride = env.PASEO_FLEET_MCP_SERVER?.trim();
+  if (rawOverride) {
+    return isAbsolute(rawOverride) ? rawOverride : resolve(cwd, rawOverride);
+  }
+
+  // 2. Unbundled import.meta.url
+  let moduleUrl = options.moduleUrl;
+  if (moduleUrl === undefined) {
+    try {
+      moduleUrl = (import.meta as unknown as { url?: string })?.url ?? null;
+    } catch {
+      moduleUrl = null;
+    }
+  }
+
+  if (typeof moduleUrl === "string" && moduleUrl.startsWith("file://")) {
+    try {
+      const candidate = fileURLToPath(new URL("../bin/fleet-mcp-server.mjs", moduleUrl).href);
+      if (existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // Ignore invalid URL or conversion errors and fall through
+    }
+  }
+
+  // 3. ~/.paseo/config.json recorded plugin path
+  const configPaths = options.home
+    ? [join(options.home, ".paseo", "config.json")]
+    : [
+        ...(env.PASEO_HOME ? [join(env.PASEO_HOME, "config.json")] : []),
+        join(home, ".paseo", "config.json"),
+      ];
+
+  let configPluginBin: string | null = null;
+  for (const configPath of configPaths) {
+    try {
+      if (existsSync(configPath)) {
+        const parsed = JSON.parse(readFileSync(configPath, "utf8"));
+        const plugins = (parsed as { plugins?: Record<string, { path?: string }> })?.plugins;
+        if (plugins && typeof plugins === "object") {
+          const entry =
+            plugins["uppidi-fleet"] ??
+            plugins["@xpufx/paseo-uppidi-fleet"] ??
+            plugins["paseo-uppidi-fleet"];
+          let pluginDir = entry?.path;
+          if (typeof pluginDir === "string" && pluginDir.trim()) {
+            pluginDir = pluginDir.trim();
+            if (pluginDir.startsWith("~/")) {
+              pluginDir = join(home, pluginDir.slice(2));
+            }
+            const candidate = join(pluginDir, "bin", "fleet-mcp-server.mjs");
+            if (existsSync(candidate)) {
+              return candidate;
+            }
+            if (!configPluginBin) {
+              configPluginBin = candidate;
+            }
+          }
+        }
+      }
+    } catch {
+      // Ignore parsing or read error
+    }
+  }
+
+  // 4. Stable fleet server path
+  const stable = stableFleetServerPath(options.stateDirPath);
+  if (existsSync(stable)) {
+    return stable;
+  }
+  const stablePlain = join(dirname(stable), "fleet-mcp-server.mjs");
+  if (existsSync(stablePlain)) {
+    return stablePlain;
+  }
+
+  // 5. Relative paths from cwd or Paseo home
+  const paseoHome = options.home ? join(options.home, ".paseo") : (env.PASEO_HOME ?? join(home, ".paseo"));
+  const candidateRelativePaths = [
+    resolve(cwd, "bin", "fleet-mcp-server.mjs"),
+    resolve(cwd, "plugins", "uppidi-fleet", "bin", "fleet-mcp-server.mjs"),
+    resolve(cwd, "..", "plugins", "uppidi-fleet", "bin", "fleet-mcp-server.mjs"),
+    join(paseoHome, "plugins", "uppidi-fleet", "bin", "fleet-mcp-server.mjs"),
+    join(home, ".paseo", "plugins", "uppidi-fleet", "bin", "fleet-mcp-server.mjs"),
+  ];
+
+  for (const candidate of candidateRelativePaths) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  // 6. Safe fallback: never throws Invalid URL
+  return configPluginBin ?? candidateRelativePaths[0];
+}
+
 /**
  * Resolves the MCP server configuration for the fleet MCP stdio server.
+ * Never throws Invalid URL when import.meta.url is empty or bundled (#1475).
  */
-export function resolveFleetMcpServerConfig(): {
+export function resolveFleetMcpServerConfig(options?: ResolveFleetMcpServerOptions): {
   type: "stdio";
   command: string;
   args: string[];
 } {
-  const serverPath = fileURLToPath(new URL("../bin/fleet-mcp-server.mjs", import.meta.url).href);
+  const serverPath = resolveFleetMcpServerPath(options);
   const command = process.env.ELECTRON_RUN_AS_NODE || /electron/i.test(process.execPath) ? "node" : (process.execPath || "node");
   return {
     type: "stdio",
