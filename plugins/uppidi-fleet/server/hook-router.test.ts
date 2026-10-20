@@ -94,6 +94,7 @@ import {
   isOrchestratorAgent,
   isFrontDeskAgent,
   isOrchestratorMatchingRepo,
+  findOrchestratorAgents,
   findLiveOrchestratorAgents,
   findLiveFrontDeskAgents,
   isProbeAgent,
@@ -4744,6 +4745,66 @@ describe("hook-router orchestrator pruning (#458)", () => {
     assert.equal(router.readOrchestrator("repo-enrolled")?.agentId, "agent-enrolled");
   });
 
+  it("sweeps un-registered orchestrators from the daemon roster (#1390)", async () => {
+    const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
+    router.enrollRepo("repo-enrolled");
+    router.writeOrchestrator("repo-enrolled", "agent-authoritative");
+
+    const archivedIds: string[] = [];
+    const agentMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-authoritative",
+        {
+          id: "agent-authoritative",
+          status: "running",
+          role: "orchestrator",
+          title: "Orchestrator · repo-enrolled",
+        },
+      ],
+      [
+        "agent-superseded-closed",
+        {
+          id: "agent-superseded-closed",
+          status: "closed",
+          role: "orchestrator",
+          title: "Orchestrator · repo-enrolled",
+        },
+      ],
+      [
+        "agent-superseded-error",
+        {
+          id: "agent-superseded-error",
+          status: "error",
+          labels: { role: "orchestrator", repo: "repo-enrolled" },
+        },
+      ],
+      [
+        "agent-worker",
+        {
+          id: "agent-worker",
+          status: "running",
+          role: "coding-agent",
+          title: "Worker #100",
+        },
+      ],
+    ]);
+
+    const result = await router.pruneOrchestrators({
+      agentMap,
+      archiveAgent: async (id) => {
+        archivedIds.push(id);
+        return true;
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.ok(archivedIds.includes("agent-superseded-closed"), "superseded closed orchestrator must be archived");
+    assert.ok(archivedIds.includes("agent-superseded-error"), "superseded error orchestrator must be archived");
+    assert.ok(!archivedIds.includes("agent-authoritative"), "authoritative registered orchestrator must NOT be archived");
+    assert.ok(!archivedIds.includes("agent-worker"), "worker must NOT be archived");
+    assert.equal(router.readOrchestrator("repo-enrolled")?.agentId, "agent-authoritative");
+  });
+
   it("appends durable actor records for every deleteOrchestrator and front-desk clear (#1077)", () => {
     const router = new HookRouter(null, { queueDir, stateDir, port: 0 });
     router.writeOrchestrator("repo-audit", "agent-audit");
@@ -8576,6 +8637,69 @@ describe("board sweep auto-reconciliation (#794)", () => {
     assert.equal(spawnedCalls.length, 0, "pre-spawn check prevented duplicate agent spawn");
   });
 
+  it("archives superseded orchestrators in closed or error status when force-spawning (#1390)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    const archivedIds: string[] = [];
+    (router as any).archiveAgent = async (id: string) => {
+      archivedIds.push(id);
+      return true;
+    };
+
+    const rosterMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-closed-past",
+        {
+          id: "agent-closed-past",
+          status: "closed",
+          title: "Orchestrator · xpufx-org/paseo",
+        },
+      ],
+      [
+        "agent-error-past",
+        {
+          id: "agent-error-past",
+          status: "error",
+          name: "Orchestrator · forge.mrs.uppidi.com/xpufx-org/paseo",
+        },
+      ],
+    ]);
+    (router as any).fetchAgentMap = async () => rosterMap;
+
+    const result = await router.ensureOrchestrator({ repo: "xpufx-org/paseo", force: true });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "provisioned");
+    assert.ok(archivedIds.includes("agent-closed-past"), "closed orchestrator must be archived");
+    assert.ok(archivedIds.includes("agent-error-past"), "error orchestrator must be archived");
+    assert.equal(spawnedCalls.length, 1, "replacement orchestrator spawned");
+  });
+
+  it("archives superseded orchestrator in closed status when superseding without force (#1390)", async () => {
+    router.enrollRepo("xpufx-org/paseo");
+    const archivedIds: string[] = [];
+    (router as any).archiveAgent = async (id: string) => {
+      archivedIds.push(id);
+      return true;
+    };
+
+    const rosterMap = new Map<string, WatchdogAgent>([
+      [
+        "agent-closed-past",
+        {
+          id: "agent-closed-past",
+          status: "closed",
+          title: "Orchestrator · xpufx-org/paseo",
+        },
+      ],
+    ]);
+    (router as any).fetchAgentMap = async () => rosterMap;
+
+    const result = await router.ensureOrchestrator({ repo: "xpufx-org/paseo" });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, "provisioned");
+    assert.ok(archivedIds.includes("agent-closed-past"), "superseded closed orchestrator must be archived");
+    assert.equal(spawnedCalls.length, 1, "replacement orchestrator spawned");
+  });
+
   it("enforces singleton invariant by archiving duplicate extras and keeping the newest authoritative agent (#993)", async () => {
     const archivedIds: string[] = [];
     (router as any).archiveAgent = async (id: string) => {
@@ -8719,6 +8843,18 @@ describe("board sweep auto-reconciliation (#794)", () => {
     );
     assert.equal(matches.length, 1);
     assert.equal(matches[0].id, "orch-cwd-match");
+
+    // 5b. findOrchestratorAgents includes closed and error orchestrators, while findLiveOrchestratorAgents excludes them (#1390)
+    const mixedMap = new Map<string, WatchdogAgent>([
+      ["orch-live", { id: "orch-live", title: "Orchestrator · xpufx-org/platform", status: "running" }],
+      ["orch-closed", { id: "orch-closed", title: "Orchestrator · xpufx-org/platform", status: "closed" }],
+      ["orch-error", { id: "orch-error", title: "Orchestrator · xpufx-org/platform", status: "error" }],
+      ["orch-archived", { id: "orch-archived", title: "Orchestrator · xpufx-org/platform", status: "archived" }],
+    ]);
+    const liveOnly = findLiveOrchestratorAgents("xpufx-org/platform", mixedMap);
+    assert.deepEqual(liveOnly.map((a) => a.id), ["orch-live"]);
+    const all = findOrchestratorAgents("xpufx-org/platform", mixedMap);
+    assert.deepEqual(all.map((a) => a.id).sort(), ["orch-closed", "orch-error", "orch-live"].sort());
 
     // 6. getActiveOrchestrator adopts live orchestrator discovered via cwd matching without labels
     router.enrollRepo("xpufx-org/platform");

@@ -2624,6 +2624,7 @@ export function isOrchestratorMatchingRepo(
   workspaceCwd?: string | null,
 ): boolean {
   if (!agent) return false;
+  if (!isOrchestratorAgent(agent)) return false;
   const target = String(repo ?? "").trim();
   if (!target) return false;
   const canonical = canonicalRepoKey(target) ?? target;
@@ -2692,15 +2693,16 @@ export function isOrchestratorMatchingRepo(
 }
 
 /**
- * Find all live orchestrator agents running for `repo` (#987/#993/#999).
+ * Find all orchestrator agents for `repo`, optionally filtering by liveness (#987/#993/#1390).
  * Matches by title/name matching 'Orchestrator · <repo>' or agent cwd matching the repo checkout.
  * Enforces singleton invariant by sorting the newest/authoritative agent first.
  */
-export function findLiveOrchestratorAgents(
+export function findOrchestratorAgents(
   repo: string,
   agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
   registeredAgentId?: string | null,
   workspaceCwd?: string | null,
+  options?: { liveOnly?: boolean },
 ): WatchdogAgent[] {
   if (!agentMap || agentMap.size === 0) return [];
   const target = String(repo ?? "").trim();
@@ -2719,19 +2721,22 @@ export function findLiveOrchestratorAgents(
   const matched: WatchdogAgent[] = [];
   const matchedIds = new Set<string>();
 
-  const isLive = (agent: WatchdogAgent | undefined): agent is WatchdogAgent => {
+  const isEligible = (agent: WatchdogAgent | undefined): agent is WatchdogAgent => {
     if (!agent || Boolean(agent.archivedAt)) return false;
     const status = String(agent.status ?? "").toLowerCase();
-    return (
-      status !== "closed" &&
-      status !== "archived" &&
-      status !== "terminated" &&
-      status !== "error"
-    );
+    if (status === "archived") return false;
+    if (options?.liveOnly) {
+      return (
+        status !== "closed" &&
+        status !== "terminated" &&
+        status !== "error"
+      );
+    }
+    return true;
   };
 
   for (const [id, agent] of agentMap) {
-    if (!isLive(agent)) continue;
+    if (!isEligible(agent)) continue;
 
     if (isOrchestratorMatchingRepo(agent, target, targetCwd)) {
       matched.push(agent);
@@ -2739,10 +2744,10 @@ export function findLiveOrchestratorAgents(
     }
   }
 
-  // If a registered agent id is provided and live, include it if not already matched
+  // If a registered agent id is provided, include it if eligible and not already matched
   if (registeredAgentId && !matchedIds.has(registeredAgentId)) {
     const regAgent = agentMap.get(registeredAgentId);
-    if (isLive(regAgent)) {
+    if (isEligible(regAgent)) {
       matched.push(regAgent);
       matchedIds.add(registeredAgentId);
     }
@@ -2771,6 +2776,20 @@ export function findLiveOrchestratorAgents(
   });
 
   return matched;
+}
+
+/**
+ * Find all live orchestrator agents running for `repo` (#987/#993/#999).
+ * Matches by title/name matching 'Orchestrator · <repo>' or agent cwd matching the repo checkout.
+ * Enforces singleton invariant by sorting the newest/authoritative agent first.
+ */
+export function findLiveOrchestratorAgents(
+  repo: string,
+  agentMap: ReadonlyMap<string, WatchdogAgent> | null | undefined,
+  registeredAgentId?: string | null,
+  workspaceCwd?: string | null,
+): WatchdogAgent[] {
+  return findOrchestratorAgents(repo, agentMap, registeredAgentId, workspaceCwd, { liveOnly: true });
 }
 
 /**
@@ -8300,16 +8319,25 @@ export class HookRouter {
 
     if (preSpawnAgentMap && !input.rotation) {
       const existing = this.readOrchestrator(repo);
-      const matchingLive = findLiveOrchestratorAgents(
+      const allMatching = findOrchestratorAgents(
         repo,
         preSpawnAgentMap,
         existing?.agentId,
         resolved?.cwd ?? null,
       );
+      const matchingLive = allMatching.filter((a) => {
+        const status = String(a.status ?? "").toLowerCase();
+        return (
+          status !== "closed" &&
+          status !== "archived" &&
+          status !== "terminated" &&
+          status !== "error"
+        );
+      });
       if (!input.force) {
         if (matchingLive.length > 0) {
           const authoritative = matchingLive[0];
-          const extras = matchingLive.slice(1);
+          const extras = allMatching.filter((a) => a.id !== authoritative.id);
           for (const extra of extras) {
             try {
               await this.archiveAgent(extra.id);
@@ -8326,16 +8354,36 @@ export class HookRouter {
             status: "existing",
             repo: canonicalKey,
           };
+        } else {
+          // No live orchestrator found: any existing matching orchestrators (e.g. closed/error)
+          // are superseded and must be archived before spawning replacement (#1390).
+          for (const superseded of allMatching) {
+            try {
+              await this.archiveAgent(superseded.id);
+              this.log(`[info] Pre-spawn cleanup: archived superseded orchestrator ${superseded.id} for ${repo}`);
+            } catch (err) {
+              this.log(`[warn] Failed to archive superseded orchestrator ${superseded.id}: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          }
         }
       } else {
-        // If force is set, archive all existing matching live orchestrators before spawning
-        for (const existingAgent of matchingLive) {
+        // If force is set, archive all existing matching orchestrators regardless of runtime status before spawning (#1390)
+        for (const existingAgent of allMatching) {
           try {
             await this.archiveAgent(existingAgent.id);
             this.log(`[info] Force provision: archived existing orchestrator ${existingAgent.id} for ${repo}`);
           } catch (err) {
             this.log(`[warn] Failed to archive existing orchestrator ${existingAgent.id}: ${err instanceof Error ? err.message : String(err)}`);
           }
+        }
+      }
+
+      if (input.force && existing?.agentId && !allMatching.some((a) => a.id === existing.agentId)) {
+        try {
+          await this.archiveAgent(existing.agentId);
+          this.log(`[info] Force provision: archived registered orchestrator ${existing.agentId} for ${repo}`);
+        } catch (err) {
+          this.log(`[warn] Failed to archive registered orchestrator ${existing.agentId}: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
     }
@@ -10135,6 +10183,77 @@ export class HookRouter {
         };
         this.persistOrchestratorRecord(updated);
         markedStale.push({ key, agentId, missCount: graceSweeps, reason: updated.staleReason! });
+      }
+    }
+
+    // Roster-wide sweep: archive un-registered orchestrators for enrolled repos (#1390)
+    if (!agentMapPartial) {
+      const unlinkedAgentIds = new Set(pruned.map((p) => p.agentId));
+      const alreadyArchivedIds = new Set(archived.map((a) => a.agentId));
+
+      const authoritativeByRepo = new Map<string, string>();
+      for (const record of orchRecords) {
+        if (record.key && record.agentId && !unlinkedAgentIds.has(record.agentId)) {
+          const canonical = canonicalRepoKey(record.key) ?? record.key;
+          authoritativeByRepo.set(canonical, record.agentId);
+          authoritativeByRepo.set(record.key, record.agentId);
+        }
+      }
+      for (const enrolled of this.getEnrolledRepos()) {
+        const rec = this.readOrchestrator(enrolled);
+        if (rec?.agentId && !unlinkedAgentIds.has(rec.agentId)) {
+          const canonical = canonicalRepoKey(enrolled) ?? enrolled;
+          if (!authoritativeByRepo.has(canonical)) {
+            authoritativeByRepo.set(canonical, rec.agentId);
+          }
+          if (!authoritativeByRepo.has(enrolled)) {
+            authoritativeByRepo.set(enrolled, rec.agentId);
+          }
+        }
+      }
+
+      const enrolledCandidates = this.enrolledRepos.size > 0
+        ? this.getEnrolledRepos()
+        : orchRecords.map((r) => r.key).filter(Boolean);
+
+      for (const [id, agent] of agentMap) {
+        if (!agent || !id) continue;
+        if (alreadyArchivedIds.has(id)) continue;
+        if (agent.archivedAt || String(agent.status ?? "").toLowerCase() === "archived") continue;
+        if (!isOrchestratorAgent(agent)) continue;
+
+        for (const enrolled of enrolledCandidates) {
+          if (!enrolled) continue;
+          if (isOrchestratorMatchingRepo(agent, enrolled)) {
+            const canonical = canonicalRepoKey(enrolled) ?? enrolled;
+            const authoritativeId = authoritativeByRepo.get(canonical) ?? authoritativeByRepo.get(enrolled);
+
+            // If this agent is NOT the authoritative registered orchestrator for this repo, archive it (#1390)
+            if (!authoritativeId || id !== authoritativeId) {
+              if (opts.dryRun) {
+                pruned.push({ key: enrolled, agentId: id, reason: "unregistered orchestrator (dry-run)" });
+                break;
+              }
+
+              let didArchive = false;
+              const archive = opts.archiveAgent ?? ((agentId: string) => this.archiveAgent(agentId));
+              try {
+                didArchive = await archive(id);
+              } catch (err) {
+                this.log(`[warn] prune archive failed for unregistered orchestrator ${id}: ${err instanceof Error ? err.message : String(err)}`);
+                didArchive = false;
+              }
+
+              if (didArchive) {
+                const reason = "unregistered orchestrator archived";
+                archived.push({ key: enrolled, agentId: id, reason });
+                pruned.push({ key: enrolled, agentId: id, reason });
+                alreadyArchivedIds.add(id);
+              }
+              break;
+            }
+          }
+        }
       }
     }
 
