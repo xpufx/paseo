@@ -67,7 +67,7 @@ Everything marked `peer` is a sample of a remote daemon's state at one instant.
 
 Capability list: C1 envelope stamping · C2 sender identity
 resolution · C3 self-message guard · C4 busy gate · C5 defer queue · C6
-delivery notices · C7 registry I/O · C8 configured-hosts merge · C9 target
+delivery notices · C7 registry I/O · C9 target
 preflight and unknown-daemon diagnostic · C10 offer redaction · C11 extension
 host · C12 paseo shell-out with cancellation · C13 result envelope · C14
 `instructions` handshake.
@@ -87,12 +87,11 @@ record** — arrays are not wrapped into one, matching Paseo's own
 
 ### 1.1 `x_comms_list_daemons`
 
-* **Does** — lists the merged daemon set. Names only by default; with
+* **Does** — lists the registered daemon set. Names only by default; with
   `detailed: true`, one object per daemon: `{ name, target, status, serverId, source }`.
 * **I/O** — in `{ detailed?: boolean }` → `string[]` or `Record[]`.
 * **Fails** — a corrupt `registry.json` throws
-  `cannot read daemons registry at <path> (corrupt JSON?)`. A corrupt
-  `hosts.json` is swallowed and treated as no configured hosts.
+  `cannot read daemons registry at <path> (corrupt JSON?)`.
 * **Depends on** — fs.
 
 Three things a caller must know:
@@ -102,9 +101,7 @@ Three things a caller must know:
   or the plugin's `peer.status` for that.
 * **`serverId` is derived from the raw target value even though `target` is
   redacted**, so identity resolution is unaffected by the redaction.
-* **`source` is `"registry"` or `"configured-host"`**, and configured hosts
-  override nothing: the merge is `{ ...configured, ...manual }`, so a manual entry
-  with the same name wins.
+* **`source` is `"registry"`**.
 * **Zero-Registry Respec (Post-0.8 / 0.10)**: Under the zero-registry mandate (#706),
   this tool transitions from listing static disk entries to listing active authenticated
   peer sessions established via direct pairing offers (`#offer=...`).
@@ -133,9 +130,7 @@ entry is invalid. The MCP write path does none of that.
 
 * **Does** — deletes a manual entry.
 * **I/O** — in `{ name }` → `{ ok: true, daemons: string[] }`.
-* **Fails** — throws `unknown daemon '<name>'`, or, for a name that exists only in
-  `~/.paseo/hosts.json`, a distinct error saying so explicitly: the daemon is
-  managed via configured hosts and cannot be removed from here.
+* **Fails** — throws `unknown daemon '<name>'`.
 * **Depends on** — fs.
 * **Zero-Registry Respec (Post-0.8 / 0.10)**: Deprecated file mutation shim. Under
   zero-registry architecture, evicts the peer session from the active in-memory connection pool.
@@ -367,19 +362,6 @@ object, overridable with `PASEO_X_COMMS_REMOTES`.
 
 * **Depends on** — fs.
 
-### C8 · Configured-hosts merge
-
-`~/.paseo/hosts.json` (overridable with `PASEO_HOSTS_FILE`) is read and merged
-under the manual registry. Accepted shapes: an array, an object with a `hosts`
-array, or a flat name→endpoint object. Endpoint keys tried in order:
-`endpoint`, `target`, `url`, `offer`, or the string itself. Name keys tried in
-order: `label`, `name`, `serverId`, or the id decoded from an embedded offer.
-
-Configured hosts are **read-only** from this server's point of view; see
-`x_comms_remove_daemon`.
-
-* **Depends on** — fs.
-
 ### C9 · Target preflight and the unknown-daemon diagnostic
 
 `hostTargetFor()` resolves the alias **before** any Paseo attempt, so a miss
@@ -596,7 +578,6 @@ an `isError`, and the plugin server's outbox is what holds it on the other route
 | `PASEO_X_COMMS_PASEO` | `paseo` | the `paseo` binary |
 | `PASEO_X_COMMS_TIMEOUT_MS` | `120000` | per-`paseo`-call timeout |
 | `PASEO_X_COMMS_EXTENSIONS` | `~/.paseo/plugin-data/xpufx/paseo-x-comms/extensions` | extension dir (trusted, unsandboxed) |
-| `PASEO_HOSTS_FILE` | `~/.paseo/hosts.json` | configured-hosts file, read-only |
 
 `PASEO_X_COMMS_MCP_SERVER` is **not** read here — it is a plugin-side override for
 locating this server's bundle.

@@ -6,7 +6,7 @@ const DaemonEntrySchema = z.object({
   value: z.string(),
   valid: z.boolean(),
   error: z.string().nullable(),
-  source: z.enum(["registry", "configured-host"]).optional(),
+  source: z.enum(["registry"]).optional(),
   status: z.string().nullable().optional(),
   isPaired: z.boolean().optional(),
 });

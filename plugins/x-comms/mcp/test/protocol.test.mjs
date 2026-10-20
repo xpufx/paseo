@@ -57,13 +57,6 @@ function tempRemotes(entries = {}) {
   return file;
 }
 
-function tempHosts(entries = []) {
-  const dir = mkdtempSync(join(tmpdir(), "paseo-hosts-test-"));
-  const file = join(dir, "hosts.json");
-  writeFileSync(file, JSON.stringify(entries, null, 2) + "\n");
-  return file;
-}
-
 async function startClient(extraEnv = {}, remotesFile = tempRemotes()) {
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -171,11 +164,11 @@ test("list_daemons on empty registry returns []", async () => {
   }
 });
 
-test("list_daemons returns configured hosts and supports detailed: true", async () => {
-  const hostsFile = tempHosts([
-    { label: "desktop-node", endpoint: "tcp://192.168.1.55:6767" },
-  ]);
-  const { client } = await startClient({ PASEO_HOSTS_FILE: hostsFile });
+test("list_daemons returns registered daemons and supports detailed: true", async () => {
+  const remotesFile = tempRemotes({
+    "desktop-node": "tcp://192.168.1.55:6767",
+  });
+  const { client } = await startClient({}, remotesFile);
   try {
     const res = await client.callTool({ name: `${PREFIX}list_daemons`, arguments: {} });
     assert.deepEqual(JSON.parse(textOf(res)), ["desktop-node"]);
@@ -189,24 +182,21 @@ test("list_daemons returns configured hosts and supports detailed: true", async 
     assert.equal(parsed[0].name, "desktop-node");
     assert.equal(parsed[0].target, "tcp://192.168.1.55:6767");
     assert.equal(parsed[0].status, "online");
-    assert.equal(parsed[0].source, "configured-host");
+    assert.equal(parsed[0].source, "registry");
   } finally {
     await client.close();
   }
 });
 
-test("remove_daemon rejects removal of configured hosts", async () => {
-  const hostsFile = tempHosts([
-    { label: "desktop-node", endpoint: "tcp://192.168.1.55:6767" },
-  ]);
-  const { client } = await startClient({ PASEO_HOSTS_FILE: hostsFile });
+test("remove_daemon rejects removal of unknown daemons", async () => {
+  const { client } = await startClient();
   try {
     const res = await client.callTool({
       name: `${PREFIX}remove_daemon`,
       arguments: { name: "desktop-node" },
     });
     assert.equal(res.isError, true);
-    assert.match(textOf(res), /daemon is managed via configured hosts/);
+    assert.match(textOf(res), /unknown daemon 'desktop-node'/);
   } finally {
     await client.close();
   }

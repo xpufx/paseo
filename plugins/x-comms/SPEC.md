@@ -56,7 +56,7 @@ flowchart TD
 
 ### 1.2 Baseline Architecture vs. Planned Overhaul
 The codebase currently reflects an evolutionary state bridging pre-0.8 patterns with modern Paseo >=0.9 capabilities:
-* **Current Implementation:** Features file-backed registries (`registry.json`, `hosts.json`), filesystem-based atomicity for queues (`pending/*.json` rename claims), periodic interval sweeps, and dual-layer sending (direct SDK + MCP stdio bridge).
+* **Current Implementation:** Features file-backed registry (`registry.json`), filesystem-based atomicity for queues (`pending/*.json` rename claims), periodic interval sweeps, and dual-layer sending (direct SDK + MCP stdio bridge). Host discovery belongs strictly to the client runtime via Paseo's live client host primitives (`useHosts()` / `useOptionalHosts()`).
 * **Target Overhaul (Zero-Registry Mandate):** As outlined in issue #706, the upcoming overhaul will eliminate static on-disk registry files in favor of self-contained pairing URLs (`https://app.paseo.sh/#offer=...`), in-memory authenticated peer session pools, native WebSocket lifecycle event streaming, and native daemon-level schedule engines.
 
 ---
@@ -112,8 +112,8 @@ Rendered under three primary tabs: **Current**, **Prototype**, and **Peers**.
 ```
 
 #### 2.2.1 Registered Daemons List
-* Reads daemon records via `registry.read` RPC merged with Paseo's configured hosts (`hosts.json`).
-* Distinguishes manual registry entries from configured hosts (`source === "configured-host"`).
+* Reads daemon records via `registry.read` RPC from `registry.json`.
+* Distinguishes registered daemons from discovered client host candidates.
 * **Live Health Badge (`HealthBadge`):**
   * `reachable (N agents)` (variant: `success`, green dot).
   * `unreachable` (variant: `danger`, red dot) with expandable error details.
@@ -135,7 +135,7 @@ To prevent blocking operators when adding remote or temporarily offline daemons:
   * Editing a host address triggers a pre-save probe. If unreachable, a **Save anyway** button (`variant="danger"`) is displayed.
 
 #### 2.2.3 Candidate Pairing Modal (`Pair Candidate Modal`)
-* Hosts discovered via Paseo's configured host subsystem (`~/.paseo/hosts.json`) that are not yet paired are rendered under **Discovered hosts** with badge `discovered (not paired)` (`isPaired: false`).
+* Hosts discovered via Paseo's live client host primitives (`useHosts()` / `useOptionalHosts()`) that are not yet paired are rendered under **Discovered hosts** with badge `discovered (not paired)` (`isPaired: false`).
 * Clicking **Pair this host** opens the candidate pairing modal:
   * Prompts for the pairing offer URL (`https://app.paseo.sh/#offer=...`) or raw token.
   * **Validate & Pair:** Executes `daemon.probe` to verify the token/offer format and reachability. Upon validation, persists the peer via `daemon.add` with `isPaired: true`, moving it into the primary Registered Daemons list.
@@ -225,7 +225,7 @@ Defined via Zod schemas in `shared/registry.ts`:
 
 | # | RPC Name | Method Identifier | Input Contract (Zod) | Output Contract (Zod) | Execution Mode & Dependencies |
 |---|---|---|---|---|---|
-| **1** | `registry.read` | `registryReadRpc` | `{}` | `{ registryPath: string, exists: boolean, validJson: boolean, parseError: string \| null, daemons: Array<{ name, value, valid, error, source?, serverId, hostname, isPaired?, xCommsInstalled? }> }` | Local FS. Merges manual `registry.json` with `~/.paseo/hosts.json`. Never throws. |
+| **1** | `registry.read` | `registryReadRpc` | `{}` | `{ registryPath: string, exists: boolean, validJson: boolean, parseError: string \| null, daemons: Array<{ name, value, valid, error, source?, serverId, hostname, isPaired?, xCommsInstalled? }> }` | Local FS. Reads manual `registry.json`. Never throws. |
 | **2** | `daemon.add` | `daemonAddRpc` | `{ name: string (1-64), value: string (1-512) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[], pairingToken?: string \| null }` | Local FS (`0600`). Validates charset `^[A-Za-z0-9._-]+$`, rejects duplicates and duplicate host values. |
 | **3** | `daemon.update` | `daemonUpdateRpc` | `{ name: string (1-64), rename?: string (1-64), value?: string (1-512) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[] }` | Local FS (`0600`). Atomic rename or re-addressing. Validates new host format. |
 | **4** | `daemon.remove` | `daemonRemoveRpc` | `{ name: string (1-64) }` | `{ saved: boolean, error: string \| null, registryPath: string, daemons: DaemonEntry[] }` | Local FS. Removes manual entry. Refuses removal of configured hosts. |
@@ -309,7 +309,7 @@ Beyond the 11 tools, the MCP runtime incorporates 14 critical capabilities:
 * **C5 · Defer Queue Integration:** Shares the filesystem queue in `<registry_dir>/pending/` with the plugin server.
 * **C6 · Delivery Notices:** Enqueues completion notices back to the sender (`notifyOnFinish: true`) through the defer queue without preempting the sender's turn.
 * **C7 · Registry I/O:** Reads/writes `registry.json`.
-* **C8 · Configured-Hosts Merge:** Merges `~/.paseo/hosts.json` entries under manual registry entries.
+* **C8 · Unified Client Host Discovery:** Client surfaces discover live connected hosts via Paseo client primitives as registration candidates.
 * **C9 · Unknown-Daemon Diagnostic:** Provides descriptive guidance for missing registry keys, advertising both direct host and relay routes.
 * **C10 · Offer & Secret Redaction:** Redacts `#offer=...` tokens in tool returns and scrubs Bearer tokens and passwords from logs/errors (`redactSecrets`).
 * **C11 · Extension Host:** Dynamically loads trusted JavaScript extension plugins from `~/.paseo/plugin-data/xpufx/paseo-x-comms/extensions/*.mjs`.
@@ -428,7 +428,6 @@ All persistent plugin state is isolated under the scoped directory:
 | `conversations.json` | Serialized summary of top 200 cross-daemon conversation threads with unread counts. | Capped at 200 items; updated during `snapshot.refresh`. |
 | `pending/` | Directory holding individual defer queue JSON files. | One file per queue item to avoid cross-process locking overhead. |
 | `bin/paseo-x-comms.bundled.mjs` | Bundled standalone MCP server runtime. | Synchronized on plugin startup to provide stable executable path. |
-| `~/.paseo/hosts.json` | Global Paseo configured hosts file. | **Read-only fallback.** Merged with manual registry; never written by plugin. |
 
 ---
 

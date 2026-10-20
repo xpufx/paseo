@@ -16,7 +16,7 @@ The companion contract for the embedded MCP server is
 
 Under operator directive for #706 (*"no registry dependency. QUICK!"*), x-comms is
 respecified to operate with **zero dependency on static registry files**
-(`registry.json` / `hosts.json`). Modern capabilities unlocked in Paseo >= 0.9:
+(`registry.json`). Modern capabilities unlocked in Paseo >= 0.9:
 * **Direct E2EE Pairing**: Daemons pair directly via self-contained pairing URLs
   (`https://app.paseo.sh/#offer=...`) or direct host addresses, communicating
   via `@getpaseo/client` and `DaemonClientRelayE2eeTransport` (`@getpaseo/relay/e2ee`).
@@ -71,7 +71,7 @@ Contracts and zod schemas: `shared/registry.ts`. Handlers:
 
 | RPC | Does | I/O | Fails | Depends on |
 |---|---|---|---|---|
-| `registry.read` | Reads the registry file **merged with Paseo's configured hosts**, validates every host form, and attaches `serverId` + `hostname` per entry. | in `{}` → `{ registryPath, exists, validJson, parseError, daemons[] }`, each daemon `{ name, value, valid, error, source?, serverId, hostname }` | Never throws. A missing file is `exists: false` with configured hosts still listed; corrupt JSON is `validJson: false` + `parseError` and an empty `daemons`. | fs |
+| `registry.read` | Reads the registry file, validates every host form, and attaches `serverId` + `hostname` per entry. | in `{}` → `{ registryPath, exists, validJson, parseError, daemons[] }`, each daemon `{ name, value, valid, error, source?, serverId, hostname }` | Never throws. A missing file is `exists: false`; corrupt JSON is `validJson: false` + `parseError` and an empty `daemons`. | fs |
 | `daemon.add` | Validates the name, refuses a duplicate, validates every entry, then writes. | in `{ name, value }` → `{ saved, error, registryPath, daemons }` | Returns `saved: false` + `error` (never a thrown RPC) for: bad name charset, duplicate name, any entry failing `validateDaemonHost`, two names sharing one host value, unparseable existing registry, write failure. On any of these the file is untouched. | fs |
 | `daemon.update` | Renames and/or re-values an entry atomically. | in `{ name, rename?, value? }` → same shape as add | `saved: false` + `error` for unknown name, rename collision, or a value that fails host validation. An update with neither `rename` nor `value` is a no-op that still reports `saved: true`. | fs |
 | `daemon.remove` | Deletes an entry. | in `{ name }` → same shape | `saved: false` + `error` for an unknown name. | fs |
@@ -83,9 +83,8 @@ Notes that matter and are not in the shipped README:
 * **Name charset** is `^[A-Za-z0-9._-]+$` and is enforced on add, update and
   remove alike (`server/registry.ts:260-267`).
 * The file is written `0600` (`server/registry.ts:387`).
-* A registry write **never** touches a configured host. Configured hosts appear
-  in `registry.read` output with `source: "configured-host"` and are not
-  addable/removable through these RPCs.
+* Discovered connected daemons are discovered via live client host primitives
+  and presented in client surfaces as candidates for registration.
 * **Zero-Registry Evolution (Post-0.8 / 0.10)**: Under the zero-registry architecture
   (issue #706), file-backed registry mutation is deprecated. These 4 RPCs operate as
   backward-compatible shims for legacy local files. The primary addressing mechanism
@@ -360,13 +359,9 @@ ref (name or srv_… id)
   └─ chatEnabledDaemon(entry)            resolveDaemonEnabled() === false ─▶ null
 ```
 
-* `readRegistry` merges the manual registry with Paseo's configured hosts
-  (`~/.paseo/hosts.json`), so a configured host is reachable here without ever
-  being added to the registry file.
+* `readRegistry` reads the manual registry (`registry.json`).
 * `findDaemonByRef` matches by name **or** `serverId`. This is what makes a
-  configured host addressable: Desktop addresses a host by the `serverId` the
-  Paseo host runtime hands it, and a host is free to carry a label, so its
-  registry name is not its id.
+  peer addressable by its registry name or derived serverId.
 * **`daemonEnabled` is enforced here.** `resolveDaemonEnabled` existed from the
   start and nothing called it, so the per-daemon toggle in the settings surface
   persisted, round-tripped through its RPC, and changed nothing — the control was
@@ -530,7 +525,6 @@ forward-only one-time migration from the old `~/.paseo` root location.
 | `bin/paseo-x-comms.bundled.mjs` | the stable copy the injector points agents at |
 | `extensions/` | MCP extension `.mjs` files (the MCP server's, read from the same dir) |
 
-`~/.paseo/hosts.json` is **read** for configured hosts and is never written.
 Every state reader degrades to an empty document on corruption and logs, so a bad
 file cannot take the plugin down; writers rebuild.
 
@@ -539,7 +533,6 @@ file cannot take the plugin down; writers rebuild.
 | Variable | Read by | Purpose |
 |---|---|---|
 | `PASEO_X_COMMS_REMOTES` | plugin registry + MCP server | registry file path |
-| `PASEO_HOSTS_FILE` | plugin registry + MCP server | configured-hosts file path |
 | `PASEO_X_COMMS_MCP_SERVER` | plugin only | explicit bundled-server path override |
 
 ---

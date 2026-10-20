@@ -1,6 +1,95 @@
+import { useMemo } from "react";
+import * as pluginClient from "@getpaseo/plugin/client";
 import type { PluginHostSummary, usePaseo } from "@getpaseo/plugin/client";
 
 type PaseoApi = ReturnType<typeof usePaseo>;
+
+function readFunction<T>(source: unknown, key: string): T | undefined {
+  if (source === null || typeof source !== "object") return undefined;
+  if (!Object.keys(source).includes(key)) return undefined;
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "function" ? (value as T) : undefined;
+}
+
+const EMPTY_HOSTS: readonly PluginHostSummary[] = [];
+const noHosts = () => EMPTY_HOSTS;
+const useHostsPrimitive =
+  readFunction<() => readonly PluginHostSummary[]>(pluginClient, "useHosts") ?? noHosts;
+
+/** Safe hook for retrieving connected hosts without crashing on platforms lacking multi-host. */
+export function useOptionalHosts(): readonly PluginHostSummary[] {
+  return useHostsPrimitive();
+}
+
+export interface DiscoveredHostCandidate {
+  serverId: string;
+  label: string;
+  name: string;
+  status: string;
+  isRegistered: boolean;
+  registeredName?: string | null;
+}
+
+/**
+ * Derives discovered host candidates from live connected client hosts and registered daemons.
+ * Connected hosts that do not match any registered daemon are candidates for registration.
+ */
+export function deriveHostCandidates(
+  hosts: readonly PluginHostSummary[],
+  registeredDaemons: readonly { name: string; serverId?: string | null }[],
+): DiscoveredHostCandidate[] {
+  const registeredServerIds = new Set<string>();
+  const registeredNames = new Set<string>();
+  for (const d of registeredDaemons) {
+    registeredNames.add(d.name.toLowerCase());
+    if (d.serverId) {
+      registeredServerIds.add(d.serverId);
+    }
+  }
+
+  return hosts.map((host) => {
+    const matchedDaemon = registeredDaemons.find(
+      (d) =>
+        (d.serverId && d.serverId === host.serverId) ||
+        d.name.toLowerCase() === host.label.toLowerCase() ||
+        d.name.toLowerCase() === host.serverId.toLowerCase(),
+    );
+
+    return {
+      serverId: host.serverId,
+      label: host.label,
+      name: host.label || host.serverId,
+      status: host.status,
+      isRegistered: matchedDaemon !== undefined,
+      registeredName: matchedDaemon?.name ?? null,
+    };
+  });
+}
+
+/**
+ * Shared client hook for live host discovery and candidate identification.
+ * Uses Paseo's live client host primitives (useOptionalHosts()).
+ * Only functions when an interactive client/app is active.
+ */
+export function useDiscoveredHostCandidates(
+  registeredDaemons: readonly { name: string; serverId?: string | null }[] = [],
+): {
+  allCandidates: DiscoveredHostCandidate[];
+  unregisteredCandidates: DiscoveredHostCandidate[];
+  hosts: readonly PluginHostSummary[];
+} {
+  const hosts = useOptionalHosts();
+  const allCandidates = useMemo(
+    () => deriveHostCandidates(hosts, registeredDaemons),
+    [hosts, registeredDaemons],
+  );
+  const unregisteredCandidates = useMemo(
+    () => allCandidates.filter((c) => !c.isRegistered),
+    [allCandidates],
+  );
+
+  return { allCandidates, unregisteredCandidates, hosts };
+}
 
 export interface ConfiguredHostAgent {
   serverId: string;

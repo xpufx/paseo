@@ -342,7 +342,7 @@ through one gated entry point and gets one of the four results below:
 
 - an agent's `x_comms_send` (MCP/relay, direct peer, or `paseo send --host`)
 - the plugin server's `conversation.send` — the registry/relay path **and** the
-  Desktop configured-host path, which address a target by `serverId` rather than
+  Desktop send path, which can address a target by `serverId` rather than
   by registry name but are gated identically
 
 The Desktop surface is not an exception. It used to be one: it borrowed a
@@ -391,7 +391,7 @@ to a preempting send:
   It does **not** fall back to a direct preempting send — that is the exact
   behaviour this contract exists to prevent, and reintroducing it as a fallback
   would make the guarantee conditional on the server being up, which is worse than
-  a visible failure. The trade is deliberate: a configured-host send needs the
+  a visible failure. The trade is deliberate: a desktop send needs the
   plugin server, the same as every other gated send.
 
 ### Why best-effort, not guaranteed

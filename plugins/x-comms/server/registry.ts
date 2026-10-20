@@ -7,8 +7,6 @@ import {
   mkdirSync,
   rmSync,
   readdirSync,
-  watch,
-  type FSWatcher,
 } from "node:fs";
 export { directHostMismatch } from "../shared/registry.ts";
 import { homedir } from "node:os";
@@ -111,169 +109,21 @@ export interface RegistryDaemon {
   value: string;
   valid: boolean;
   error: string | null;
-  source?: "registry" | "configured-host";
+  source?: "registry";
   serverId?: string | null;
   status?: string | null;
   isPaired?: boolean;
-}
-
-export function currentHostsPath(): string {
-  const env = process.env.PASEO_HOSTS_FILE;
-  if (env && env.length > 0) return env;
-  return join(homedir(), ".paseo", "hosts.json");
 }
 
 /**
  * Find the daemon a send target refers to, by registry name or by serverId.
  *
  * Name first, so every caller that already resolved by name behaves exactly as
- * before. The serverId pass is what makes a *configured host* addressable: the
- * Desktop surface addresses a host by the `serverId` Paseo's host runtime hands
- * it, and a host is free to carry a label, so its registry name is not its
- * serverId. Resolving those by name alone misses, and every miss downstream
- * degrades to "cannot tell" — which the busy gate reads as "not busy" and
- * dispatches, re-opening the preemption this lookup exists to prevent.
+ * before. The serverId pass resolves any registered peer whose relay offer embeds
+ * a serverId matching the ref.
  */
 export function findDaemonByRef(daemons: readonly RegistryDaemon[], ref: string): RegistryDaemon | undefined {
   return daemons.find((d) => d.name === ref) ?? daemons.find((d) => !!d.serverId && d.serverId === ref);
-}
-
-export function parseConfiguredHosts(content: string): {
-  ok: boolean;
-  hosts: RegistryDaemon[];
-  parseError: string | null;
-} {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch (cause) {
-    return {
-      ok: false,
-      hosts: [],
-      parseError: cause instanceof Error ? cause.message : String(cause),
-    };
-  }
-
-  const items: Array<Record<string, unknown>> = [];
-  if (Array.isArray(parsed)) {
-    for (const item of parsed) {
-      if (typeof item === "string") {
-        items.push({ endpoint: item });
-      } else if (item && typeof item === "object") {
-        items.push(item as Record<string, unknown>);
-      }
-    }
-  } else if (parsed && typeof parsed === "object") {
-    const rawObj = parsed as Record<string, unknown>;
-    if (Array.isArray(rawObj.hosts)) {
-      for (const item of rawObj.hosts) {
-        if (item && typeof item === "object") {
-          items.push(item as Record<string, unknown>);
-        }
-      }
-    } else {
-      for (const [key, val] of Object.entries(rawObj)) {
-        if (typeof val === "string") {
-          items.push({ name: key, endpoint: val });
-        } else if (val && typeof val === "object") {
-          items.push({ name: key, ...(val as Record<string, unknown>) });
-        }
-      }
-    }
-  } else {
-    return { ok: false, hosts: [], parseError: "configured hosts must be a JSON array or object" };
-  }
-
-  const hosts: RegistryDaemon[] = [];
-  for (const item of items) {
-    const endpointRaw = item.endpoint ?? item.target ?? item.url ?? item.offer;
-    const value = typeof endpointRaw === "string" ? endpointRaw.trim() : "";
-    const serverId = typeof item.serverId === "string" ? item.serverId.trim() : (deriveHostFromValue(value) ?? null);
-    const status = typeof item.status === "string" ? item.status.trim() : "online";
-    const rawName = item.label ?? item.name ?? serverId;
-    const name =
-      typeof rawName === "string" && rawName.trim().length > 0
-        ? rawName.trim()
-        : (serverId ?? "unnamed-host");
-
-    if (!value) {
-      hosts.push({
-        name,
-        value: "",
-        valid: false,
-        error: "missing endpoint / host value",
-        source: "configured-host",
-        serverId,
-        status,
-        isPaired: false,
-      });
-      continue;
-    }
-
-    const checked = validateDaemonHost(value);
-    hosts.push({
-      name,
-      value,
-      valid: checked.valid,
-      error: checked.error,
-      source: "configured-host",
-      serverId,
-      status,
-      isPaired: false,
-    });
-  }
-
-  return { ok: true, hosts, parseError: null };
-}
-
-export function loadConfiguredHosts(hostsPath: string = currentHostsPath()): RegistryDaemon[] {
-  if (!existsSync(hostsPath)) return [];
-  try {
-    const content = readFileSync(hostsPath, "utf8");
-    const parsed = parseConfiguredHosts(content);
-    return parsed.ok ? parsed.hosts : [];
-  } catch {
-    return [];
-  }
-}
-
-let activeWatcher: FSWatcher | null = null;
-
-export function startConfiguredHostsWatcher(
-  hostsPath: string = currentHostsPath(),
-  onChange?: (hosts: RegistryDaemon[]) => void,
-): () => void {
-  stopConfiguredHostsWatcher();
-  const dir = dirname(hostsPath);
-  if (!existsSync(dir)) {
-    try {
-      mkdirSync(dir, { recursive: true });
-    } catch {}
-  }
-
-  const reload = () => {
-    const hosts = loadConfiguredHosts(hostsPath);
-    onChange?.(hosts);
-  };
-
-  try {
-    activeWatcher = watch(dir, (eventType, filename) => {
-      if (!filename || filename === basename(hostsPath)) {
-        reload();
-      }
-    });
-  } catch {}
-
-  return () => stopConfiguredHostsWatcher();
-}
-
-export function stopConfiguredHostsWatcher(): void {
-  if (activeWatcher) {
-    try {
-      activeWatcher.close();
-    } catch {}
-    activeWatcher = null;
-  }
 }
 
 /** The plausible canonical forms paseo classifies as --host targets. */
@@ -360,12 +210,11 @@ export interface ReadRegistryOptions {
   hostsPath?: string;
 }
 
-/** Reads + validates the registry file, merging configured hosts unless excluded. */
+/** Reads + validates the registry file. */
 export function readRegistry(
   path: string,
-  options?: ReadRegistryOptions,
+  _options?: ReadRegistryOptions,
 ): { ok: boolean; exists: boolean; parseError: string | null; daemons: RegistryDaemon[] } {
-  const includeHosts = options?.includeConfiguredHosts !== false;
   let targetPath = path;
   if (!existsSync(targetPath)) {
     const defaultRegistry = defaultRegistryPath();
@@ -373,8 +222,7 @@ export function readRegistry(
     if ((path === defaultRegistry || path === REGISTRY_DEFAULT) && existsSync(legacyRegistry)) {
       targetPath = legacyRegistry;
     } else {
-      const configuredHosts = includeHosts ? loadConfiguredHosts(options?.hostsPath) : [];
-      return { ok: true, exists: false, parseError: null, daemons: configuredHosts };
+      return { ok: true, exists: false, parseError: null, daemons: [] };
     }
   }
   const content = readFileSync(targetPath, "utf8");
@@ -389,21 +237,7 @@ export function readRegistry(
     isPaired: true,
   }));
 
-  if (!includeHosts) {
-    return { ok: true, exists: true, parseError: null, daemons: manualDaemons };
-  }
-
-  const configuredHosts = loadConfiguredHosts(options?.hostsPath);
-  const manualNames = new Set(manualDaemons.map((d) => d.name));
-  const merged: RegistryDaemon[] = [...manualDaemons];
-
-  for (const host of configuredHosts) {
-    if (!manualNames.has(host.name)) {
-      merged.push(host);
-    }
-  }
-
-  return { ok: true, exists: true, parseError: null, daemons: merged };
+  return { ok: true, exists: true, parseError: null, daemons: manualDaemons };
 }
 
 /**
@@ -420,7 +254,7 @@ export function mutateRegistry(
   registryPath: string;
   daemons: RegistryDaemon[];
 } {
-  const current = readRegistry(path, { includeConfiguredHosts: false });
+  const current = readRegistry(path);
   if (!current.ok) {
     return {
       saved: false,

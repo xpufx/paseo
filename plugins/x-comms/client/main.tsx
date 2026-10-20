@@ -22,6 +22,7 @@ import {
   usePluginTheme,
 } from "./host-ui";
 import { formatPeerDisplay } from "./peer-label";
+import { useDiscoveredHostCandidates } from "./configured-hosts";
 import { PeerStatusSurface } from "./peer-status";
 import { SettingsPrototype } from "./settings-prototype";
 import { ViaXComms } from "./via-x-comms";
@@ -175,6 +176,8 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
   );
 
   const read = useQuery({ queryKey: ["registry-read"], queryFn: () => callRead({}) });
+  const registeredDaemons = useMemo(() => read.data?.daemons ?? [], [read.data]);
+  const { unregisteredCandidates } = useDiscoveredHostCandidates(registeredDaemons);
   const health = useQuery({
     queryKey: ["daemon-health"],
     queryFn: () => callHealth({}),
@@ -629,9 +632,8 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
         {health.isPending ? <Notice tone="muted">Checking health…</Notice> : null}
 
         {(() => {
-          const allDaemons = read.data?.daemons ?? [];
-          const registered = allDaemons.filter((d) => d.source !== "configured-host");
-          const discovered = allDaemons.filter((d) => d.source === "configured-host");
+          const registered = registeredDaemons;
+          const discovered = unregisteredCandidates;
 
           const renderDaemonCard = (daemon: { name: string; value: string; valid: boolean; error: string | null; source?: string; serverId?: string | null; hostname?: string | null; isPaired?: boolean }) => {
             const draft = edits[daemon.name] ?? { name: daemon.name, value: daemon.value };
@@ -766,16 +768,17 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
               {discovered.length > 0 && (
                 <>
                   <SectionHeader title="Discovered hosts" count={discovered.length} />
-                  {discovered.map((daemon) => {
-                    const h = healthByName[daemon.name];
+                  {discovered.map((candidate) => {
+                    const h = healthByName[candidate.name];
                     return (
-                      <Card key={daemon.name} variant="elevated">
+                      <Card key={candidate.serverId} variant="elevated">
                         <Card.Header
-                          title={peerLabelForName(daemon.name)}
-                          subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
+                          title={candidate.name}
+                          subtitle={candidate.serverId !== candidate.name ? candidate.serverId : undefined}
                           badge={<Badge label="discovered (not paired)" variant="warning" dot />}
                         />
-                        <KeyValue label="Host value" value={daemon.value} mono copyable truncate="end" truncateMaxLength={36} />
+                        <KeyValue label="Server ID" value={candidate.serverId} mono copyable />
+                        <KeyValue label="Status" value={candidate.status} />
                         {h && !h.reachable ? (
                           <Text selectable style={{ color: colors.statusDanger, fontSize: 12 }}>
                             {h.error ?? "unreachable"}
@@ -786,13 +789,7 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
                             label="Pair this host"
                             size="sm"
                             variant="primary"
-                            onPress={() => setPairTarget(daemon.name)}
-                          />
-                          <Button
-                            label="Remove"
-                            size="sm"
-                            variant="danger"
-                            onPress={() => handleRemove(daemon.name)}
+                            onPress={() => setPairTarget(candidate.name)}
                           />
                         </ActionBar>
                       </Card>

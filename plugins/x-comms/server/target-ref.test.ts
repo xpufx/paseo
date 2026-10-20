@@ -1,24 +1,22 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { findDaemonByRef, parseConfiguredHosts, type RegistryDaemon } from "./registry.ts";
+import { findDaemonByRef, type RegistryDaemon } from "./registry.ts";
 
 /**
  * Target resolution for the busy gate (#611).
  *
- * A configured host is addressed by the `serverId` Paseo's host runtime hands
- * the Desktop client, and a host is free to carry a label, so its registry name
- * is not its serverId. Resolving those by name alone misses, and every miss
- * downstream reads as "cannot tell" — which the gate treats as "not busy" and
- * dispatches. That is the preemption this lookup has to prevent, so the miss
- * case is the one worth pinning.
+ * A registered peer can be addressed by its configured registry name or by its
+ * derived `serverId` (e.g. from relay pairing offers). Resolving those by name
+ * alone misses, and every miss downstream reads as "cannot tell" — which the gate
+ * treats as "not busy" and dispatches. That is the preemption this lookup prevents.
  */
 
 function host(over: Partial<RegistryDaemon> = {}): RegistryDaemon {
-  return { name: "lab", value: "10.0.0.5:6767", valid: true, error: null, source: "configured-host", ...over };
+  return { name: "lab", value: "10.0.0.5:6767", valid: true, error: null, source: "registry", ...over };
 }
 
 describe("findDaemonByRef", () => {
-  it("matches a configured host by serverId when its name differs", () => {
+  it("matches a registered host by serverId when its name differs", () => {
     const daemons = [host({ name: "lab", serverId: "srv_two" })];
     assert.equal(findDaemonByRef(daemons, "srv_two")?.name, "lab");
   });
@@ -46,22 +44,23 @@ describe("findDaemonByRef", () => {
     assert.equal(findDaemonByRef([], "srv_missing"), undefined);
   });
 
-  it("resolves a labelled configured host parsed from hosts.json", () => {
-    const parsed = parseConfiguredHosts(
-      JSON.stringify([{ label: "lab box", serverId: "srv_two", endpoint: "10.0.0.5:6767" }]),
-    );
-    assert.equal(parsed.ok, true);
-    const entry = findDaemonByRef(parsed.hosts, "srv_two");
+  it("resolves a labelled registered host by serverId", () => {
+    const daemons: RegistryDaemon[] = [
+      { name: "lab box", value: "10.0.0.5:6767", valid: true, error: null, serverId: "srv_two", source: "registry" },
+    ];
+    const entry = findDaemonByRef(daemons, "srv_two");
     assert.equal(entry?.name, "lab box");
     assert.equal(entry?.value, "10.0.0.5:6767", "the --host value the probe needs");
   });
 
-  it("resolves a relay-paired configured host by the id embedded in its offer", () => {
+  it("resolves a relay-paired host by the id embedded in its offer", () => {
     const offer = `https://app.paseo.sh/#offer=${Buffer.from(
       JSON.stringify({ v: 1, serverId: "srv_relay", relayPublicKeyB64: "k" }),
     ).toString("base64")}`;
-    const parsed = parseConfiguredHosts(JSON.stringify([{ name: "relay", endpoint: offer }]));
-    const entry = findDaemonByRef(parsed.hosts, "srv_relay");
+    const daemons: RegistryDaemon[] = [
+      { name: "relay", value: offer, valid: true, error: null, serverId: "srv_relay", source: "registry" },
+    ];
+    const entry = findDaemonByRef(daemons, "srv_relay");
     assert.equal(entry?.name, "relay");
     assert.equal(entry?.value, offer);
   });

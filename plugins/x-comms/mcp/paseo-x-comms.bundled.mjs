@@ -36564,7 +36564,6 @@ function redactDaemonTarget(value) {
 var VERSION = "0.3.0";
 var REMOTES_DIR = join(homedir(), ".paseo", "plugin-data", "xpufx", "paseo-x-comms");
 var REMOTES_FILE = process.env.PASEO_X_COMMS_REMOTES || join(REMOTES_DIR, "registry.json");
-var HOSTS_FILE = process.env.PASEO_HOSTS_FILE || join(homedir(), ".paseo", "hosts.json");
 var PASEO = process.env.PASEO_X_COMMS_PASEO || "paseo";
 var DEFAULT_TIMEOUT_MS = Number(process.env.PASEO_X_COMMS_TIMEOUT_MS || 12e4);
 var EXTENSIONS_DIR = process.env.PASEO_X_COMMS_EXTENSIONS || join(REMOTES_DIR, "extensions");
@@ -36578,28 +36577,6 @@ function deriveHostFromOffer(value) {
     return null;
   }
 }
-function loadConfiguredHosts() {
-  if (!existsSync(HOSTS_FILE)) return {};
-  try {
-    const raw = JSON.parse(readFileSync(HOSTS_FILE, "utf8"));
-    const map2 = {};
-    const items = Array.isArray(raw) ? raw : raw && typeof raw === "object" ? Array.isArray(raw.hosts) ? raw.hosts : Object.entries(raw).map(
-      ([key, val]) => typeof val === "string" ? { name: key, endpoint: val } : { name: key, ...val && typeof val === "object" ? val : {} }
-    ) : [];
-    for (const h of items) {
-      if (!h) continue;
-      const endpoint = h.endpoint ?? h.target ?? h.url ?? h.offer ?? (typeof h === "string" ? h : null);
-      if (!endpoint || typeof endpoint !== "string") continue;
-      const name = h.label ?? h.name ?? h.serverId ?? deriveHostFromOffer(endpoint);
-      if (name && typeof name === "string") {
-        map2[name.trim()] = endpoint.trim();
-      }
-    }
-    return map2;
-  } catch {
-    return {};
-  }
-}
 function loadManualDaemons() {
   if (!existsSync(REMOTES_FILE)) return {};
   try {
@@ -36609,9 +36586,7 @@ function loadManualDaemons() {
   }
 }
 function loadDaemons() {
-  const manual = loadManualDaemons();
-  const configured = loadConfiguredHosts();
-  return { ...configured, ...manual };
+  return loadManualDaemons();
 }
 function saveManualDaemons(daemons) {
   mkdirSync(dirname(REMOTES_FILE), { recursive: true });
@@ -37195,7 +37170,6 @@ function registerTools(server2) {
       }
       const manual = loadManualDaemons();
       const details = Object.entries(daemons).map(([name, target]) => {
-        const isManual = manual[name] !== void 0;
         return {
           name,
           // Redacted; serverId is still derived from the raw value so identity
@@ -37203,7 +37177,7 @@ function registerTools(server2) {
           target: redactDaemonTarget(target),
           status: "online",
           serverId: deriveHostFromOffer(target),
-          source: isManual ? "registry" : "configured-host"
+          source: "registry"
         };
       });
       return result(details);
@@ -37233,12 +37207,6 @@ function registerTools(server2) {
     (input2) => {
       const manual = loadManualDaemons();
       if (manual[input2.name] === void 0) {
-        const configured = loadConfiguredHosts();
-        if (configured[input2.name] !== void 0) {
-          throw new Error(
-            `cannot remove '${input2.name}': daemon is managed via configured hosts (~/.paseo/hosts.json)`
-          );
-        }
         throw new Error(`unknown daemon '${input2.name}'`);
       }
       delete manual[input2.name];

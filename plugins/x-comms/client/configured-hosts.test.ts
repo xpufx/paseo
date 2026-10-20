@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   configuredHostAgentKey,
   listConfiguredHostAgents,
+  deriveHostCandidates,
 } from "./configured-hosts.ts";
 
 function client(entries: Array<{ id: string; title: string; status?: string }>) {
@@ -66,5 +67,28 @@ describe("configured-host picker", () => {
     assert.equal(results[0].agents.length, 0);
     assert.equal(results[1].error, null);
     assert.equal(results[1].agents.length, 1);
+  });
+
+  it("derives registration candidates from live connected hosts", () => {
+    const liveHosts = [
+      { serverId: "srv_local", label: "my-node", status: "online" as const },
+      { serverId: "srv_remote", label: "remote-peer", status: "online" as const },
+    ];
+    const registered = [
+      { name: "my-node", serverId: "srv_local" },
+    ];
+
+    const candidates = deriveHostCandidates(liveHosts, registered);
+    assert.equal(candidates.length, 2);
+
+    const paired = candidates.find((c) => c.serverId === "srv_local");
+    assert.ok(paired);
+    assert.equal(paired.isRegistered, true);
+    assert.equal(paired.registeredName, "my-node");
+
+    const unpaired = candidates.find((c) => c.serverId === "srv_remote");
+    assert.ok(unpaired);
+    assert.equal(unpaired.isRegistered, false);
+    assert.equal(unpaired.name, "remote-peer");
   });
 });

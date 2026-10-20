@@ -5,19 +5,18 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Clipboard, Text, View } from "react-native";
 import type { NativeScrollEvent, NativeSyntheticEvent, ScrollView as NativeScrollView, StyleProp, ViewStyle } from "react-native";
-import { getOptionalPaseoClient, useOptionalHosts } from "paseo-plugin-helper/lifecycle";
 import { Button, InlineButton, ModalContent, TextInput } from "./host-ui";
 import { HOST_SHADOW_COLOR } from "paseo-plugin-helper/lifecycle";
 import { conversationSendRpc, introspectAgentsRpc, registryReadRpc, uiPrefsGetRpc } from "../shared/registry";
 import { deriveConversationThreads, deriveConversations, isCounterpartyMatch, mergeMessages, threadKeyForCounterparty, type ConversationMessage, type ConversationPartner, type ConversationThread } from "./conversations";
-import { listConfiguredHostAgents } from "./configured-hosts";
-import { describeDelivery, sendConfiguredHostViaGate } from "./conversation-send";
+import { useDiscoveredHostCandidates } from "./configured-hosts";
+import { describeDelivery } from "./conversation-send";
 import { assertSurfaceTargetResolvable, isSurfaceTargetResolvable, surfaceUnconfiguredMessage } from "./surface-target";
 import { formatCounterparty, formatPeerDisplay, splitCounterparty, useCounterpartyLabel, usePeerDisplay, type CounterpartyRef } from "./peer-label";
 import { ViaXComms } from "./via-x-comms";
 
 const draftCache = new Map<string, string>();
-type SelectedTarget = ConversationPartner & { configuredHostServerId?: string };
+type SelectedTarget = ConversationPartner;
 
 const targetCache = new Map<string, SelectedTarget | null>();
 const sentCache = new Map<string, Map<string, ConversationMessage[]>>();
@@ -103,9 +102,6 @@ export function CrossDaemonConversation({
   onSent?: () => void;
 }) {
   const paseo = usePaseo();
-  // This hook is deliberately confined to the mounted client surface. Server,
-  // MCP, outbox, and peer-channel code retain their existing routes.
-  const hosts = useOptionalHosts();
   const callSend = useRpc(conversationSendRpc);
   const callIntrospect = useRpc(introspectAgentsRpc);
   const callRegistryRead = useRpc(registryReadRpc);
@@ -122,6 +118,7 @@ export function CrossDaemonConversation({
     staleTime: 300_000,
     refetchOnWindowFocus: false,
   });
+  const { unregisteredCandidates } = useDiscoveredHostCandidates(registry.data?.daemons ?? []);
   const serverIdByName = useMemo(() => {
     const map = new Map<string, string>();
     for (const daemon of registry.data?.daemons ?? []) {
@@ -170,19 +167,6 @@ export function CrossDaemonConversation({
     queryFn: () => callIntrospect({}),
     staleTime: 30000,
   });
-  const hostStatusKey = useMemo(
-    () => hosts.map((host) => [host.serverId, host.status] as const),
-    [hosts],
-  );
-  const configuredHosts = useQuery({
-    queryKey: ["x-comms-configured-hosts", hostStatusKey],
-    // getOptionalPaseoClient is called only in this query, when the host is
-    // online and supplies the seam; a status transition changes the query key
-    // and drops the old borrowed API.
-    queryFn: () => listConfiguredHostAgents(hosts, getOptionalPaseoClient),
-    refetchOnWindowFocus: false,
-  });
-
   const [lastSent, setLastSent] = useState<{ at: string; to: string } | null>(null);
   const [sentTick, setSentTick] = useState(0);
   const send = useMutation({
@@ -193,28 +177,12 @@ export function CrossDaemonConversation({
       // unresolvable entry is a configuration error, not a sendable target —
       // refuse here with the #851 diagnostic instead of dispatching and only
       // erroring after send.
-      if (!target.configuredHostServerId) {
-        assertSurfaceTargetResolvable({
-          daemon: target.counterparty.daemonServerId ?? target.counterparty.daemon ?? "",
-          daemons: registry.data?.daemons ?? [],
-          daemonEnabled: prefs.data?.daemonEnabled,
-        });
-      }
-      if (target.configuredHostServerId) {
-        // Same gated entry point as the registry/relay route, so a configured host
-        // that is mid-turn gets this message queued rather than preempted (#611).
-        // It reports queued | dispatched | outbox | dropped like every other route.
-        return sendConfiguredHostViaGate({
-          serverId: target.configuredHostServerId,
-          agentId: target.counterparty.agentId ?? "",
-          body: draft,
-          fromAgentId: agentId,
-          fromAgentName: "User",
-          messageId,
-          sentAt: new Date().toISOString(),
-          callSend,
-        });
-      }
+      assertSurfaceTargetResolvable({
+        daemon: target.counterparty.daemonServerId ?? target.counterparty.daemon ?? "",
+        daemons: registry.data?.daemons ?? [],
+        daemonEnabled: prefs.data?.daemonEnabled,
+      });
+
       // Existing registry/MCP relay and direct-peer route stays exactly here.
       return callSend({
         daemon: target.counterparty.daemonServerId ?? target.counterparty.daemon ?? "",
@@ -276,22 +244,6 @@ export function CrossDaemonConversation({
     });
     setPickerOpen(false);
   }, [setTargetCached, serverIdByName]);
-  const pickConfiguredHostAgent = useCallback((host: { serverId: string }, selectedAgent: { agentId: string; name: string }) => {
-    const counterparty = {
-      daemon: host.serverId,
-      daemonServerId: host.serverId,
-      agentId: selectedAgent.agentId,
-      agentName: selectedAgent.name,
-    };
-    setTargetCached({
-      conversationId: threadKeyForCounterparty(counterparty),
-      counterparty,
-      lastActivity: new Date().toISOString(),
-      messageCount: 0,
-      configuredHostServerId: host.serverId,
-    });
-    setPickerOpen(false);
-  }, [setTargetCached]);
 
   return (
     <View style={{ padding: 12, flex: 1 }}>
@@ -523,39 +475,23 @@ export function CrossDaemonConversation({
       ) : null}
       <Modal title="New conversation" open={pickerOpen} onOpenChange={setPickerOpen}>
         <ModalContent>
-          <View>
-            <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 4, textTransform: "uppercase" as const }}>
-              Configured hosts
-            </Text>
-            {hosts.map((host) => {
-              const hostAgents = configuredHosts.data?.find((entry) => entry.host.serverId === host.serverId);
-              const unavailable = host.status !== "online";
-              return (
-                <View key={host.serverId}>
-                  <Text style={{ color: unavailable ? theme.colors.foregroundMuted : theme.colors.accent, fontSize: 12, fontWeight: "700" as const, marginTop: 10 }}>
-                    {host.label} ({host.serverId}) · {host.status}{unavailable ? " (unavailable)" : ""}
+          {unregisteredCandidates.length > 0 ? (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const, marginTop: 4, textTransform: "uppercase" as const }}>
+                Discovered hosts
+              </Text>
+              {unregisteredCandidates.map((candidate) => (
+                <View key={candidate.serverId} style={{ marginTop: 6, paddingLeft: 6 }}>
+                  <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, fontWeight: "700" as const }}>
+                    {candidate.name} ({candidate.serverId}) · {candidate.status}
                   </Text>
-                  {host.status === "online" && configuredHosts.isPending ? (
-                    <Text style={{ color: theme.colors.foregroundMuted, fontSize: 12, paddingLeft: 10 }}>Loading agents…</Text>
-                  ) : null}
-                  {hostAgents?.error ? (
-                    <Text style={{ color: theme.colors.statusDanger, fontSize: 12, paddingLeft: 10 }}>Unavailable: {hostAgents.error}</Text>
-                  ) : null}
-                  {hostAgents?.agents.map((configuredAgent) => (
-                    <InlineButton
-                      key={`${configuredAgent.serverId}/${configuredAgent.agentId}`}
-                      accessibilityRole="button"
-                      label={`${configuredAgent.name} (${configuredAgent.agentId})${configuredAgent.status ? ` · ${configuredAgent.status}` : ""}`}
-                      accessibilityLabel={`Start a conversation with ${configuredAgent.name} on ${host.label}`}
-                      onPress={() => pickConfiguredHostAgent(host, configuredAgent)}
-                      style={{ paddingVertical: 6, paddingLeft: 10 }}
-                      textStyle={{ color: theme.colors.foreground, fontSize: 13 }}
-                    />
-                  ))}
+                  <Text style={{ color: theme.colors.statusWarning, fontSize: 12, paddingLeft: 6, marginTop: 2 }}>
+                    Registration in registry.json required to message this daemon.
+                  </Text>
                 </View>
-              );
-            })}
-          </View>
+              ))}
+            </View>
+          ) : null}
           {introspect.isPending ? <Text style={{ color: theme.colors.foregroundMuted, fontSize: 13 }}>Loading agents…</Text> : null}
           {introspect.error ? <Text style={{ color: theme.colors.statusDanger, fontSize: 12 }}>{String(introspect.error)}</Text> : null}
           <View>

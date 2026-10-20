@@ -98,7 +98,7 @@ Every `x_comms_send` prepends an envelope block:
 <x-comms-message>{"xComms":{"version":6,"type":"x-comms.message","sender":{…},"target":{…},"messageId":"…","sentAt":"…","direction":"outgoing"}}</x-comms-message>
 ```
 
-`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt`. The `sender` fields are plain, unverified claims — a return address for replies, not an authenticated identity. All Paseo daemons belong to one user, so there is no cross-user boundary for a signature to protect (#840). Desktop discovers configured hosts only from Paseo's mounted host runtime and sends to the selected `(serverId, agentId)` with a fresh client; it never pairs hosts or creates agents. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
+`sender` (agentId, agentName, host, daemonServerId, cwd) + `target` (daemon, agentId) + `messageId` + `sentAt`. The `sender` fields are plain, unverified claims — a return address for replies, not an authenticated identity. All Paseo daemons belong to one user, so there is no cross-user boundary for a signature to protect (#840). Connected daemons are discovered from Paseo's live client runtime (`useHosts()` / `useOptionalHosts()`) as registration candidates; cross-daemon messaging requires registration in `registry.json`. Headless agents continue to use the native `paseo send --host` path without Desktop running. Prompt text stays prose after the envelope. Recipients parse the envelope and reply via `x_comms_send` to `sender.agentId` on the sender's daemon. Full envelope + permission loop documented in [mcp/README.md#message-envelope](mcp/README.md#message-envelope) and [mcp/README.md#behavior-notes](mcp/README.md#behavior-notes).
 
 #### Recipient skill (envelope handling)
 
@@ -131,8 +131,8 @@ message **queued** instead:
 * **Remote targets** — no cross-daemon turn subscription exists, so a peer's
   status comes from `paseo inspect --host`. It is a sample, and a probe that
   fails **dispatches** rather than silently swallowing the message.
-* **Configured hosts** — reached by `serverId` rather than by registry name, and
-  resolved against Paseo's configured hosts, so a labelled host is probed rather
+* **Registered peers** — reached by `serverId` or by registry name, and
+  resolved against the registered daemons, so a labelled peer is probed rather
   than silently treated as unknown. Same gate, same bounds.
 * After a successful send the target is recorded busy, so a second send in the
   same burst is queued instead of replacing the turn the first send just started.
