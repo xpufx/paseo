@@ -149,3 +149,27 @@ test("copy text includes throughput when output tokens and duration are present"
   });
   assert.doesNotMatch(textNoThroughput, /Throughput/);
 });
+
+test("copy text uses data.tokensPerSecond directly and does not recalculate inflated throughput (#1480)", () => {
+  const text = buildTelemetryCopyText({
+    data: {
+      ...base,
+      durationMs: 10000,
+      outputTokens: 1990, // Naive recalculation would yield 199 tok/s
+      tokensPerSecond: 79.4, // Server-computed delta rate
+    },
+  });
+  assert.match(text, /Duration 10\.0s/);
+  assert.match(text, /Throughput 79 tok\/s/);
+  assert.doesNotMatch(text, /Throughput 199 tok\/s/);
+});
+
+test("copy text rounds tokensPerSecond to nearest integer (#1480)", () => {
+  const text = buildTelemetryCopyText({
+    data: {
+      ...base,
+      tokensPerSecond: 42.6,
+    },
+  });
+  assert.match(text, /Throughput 43 tok\/s/);
+});

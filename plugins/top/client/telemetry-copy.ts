@@ -105,8 +105,13 @@ export function buildTelemetryCopyText({ data, liveUsage, timeLabel }: Telemetry
   }
 
   if (data.durationMs != null) lines.push(`Duration ${(data.durationMs / 1000).toFixed(1)}s`);
-  const throughput = formatTurnTokensPerSecond(outputTokens, data.durationMs);
-  if (throughput) lines.push(`Throughput ${throughput}`);
+  if (data.tokensPerSecond != null && Number.isFinite(data.tokensPerSecond) && data.tokensPerSecond > 0) {
+    const rate = Math.round(data.tokensPerSecond);
+    lines.push(`Throughput ${rate} tok/s`);
+  } else if (data.tokensPerSecond == null) {
+    const throughput = formatTurnTokensPerSecond(outputTokens, data.durationMs);
+    if (throughput) lines.push(`Throughput ${throughput}`);
+  }
   if (data.toolCalls != null) {
     lines.push(`Tools ${data.toolCalls}${data.toolErrors ? ` (${data.toolErrors} err)` : ""}`);
   }

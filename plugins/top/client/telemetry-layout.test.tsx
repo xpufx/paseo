@@ -5,8 +5,13 @@ import { Pressable } from "react-native";
 import { TopTimelineTelemetryCard } from "./telemetry";
 import type { TopTimelineTelemetryData } from "../shared/resources";
 
+let mockAgentUsage: Record<string, unknown> | undefined = undefined;
+
 vi.mock("@getpaseo/plugin/client", () => ({
-  useAgent: () => undefined,
+  useAgent: (_id?: string, selector?: (a: { lastUsage?: unknown }) => unknown) => {
+    const snap = { lastUsage: mockAgentUsage };
+    return selector ? selector(snap) : snap;
+  },
 }));
 
 // The host SDK's react-native entry is `export {}` at runtime (the host
@@ -444,5 +449,124 @@ describe("TopTimelineTelemetryCard velocity badge (#1308)", () => {
         (textOf(node.children).includes("30.0s") || textOf(node.children).includes("⚡ 38 tok/s")),
     );
     expect(nonShrinkingBadges.length).toBe(2);
+  });
+});
+
+describe("TopTimelineTelemetryCard historical isolation from liveUsage (#1480)", () => {
+  it("does not reflect liveUsage when data.inputTokens, data.outputTokens, and data.contextUsedTokens are absent", () => {
+    mockAgentUsage = {
+      inputTokens: 99_999,
+      outputTokens: 11_111,
+      cachedInputTokens: 50_000,
+      contextWindowUsedTokens: 88_888,
+      contextWindowMaxTokens: 200_000,
+      totalCostUsd: 12.34,
+    };
+
+    try {
+      const renderer = renderCard(undefined, {
+        inputTokens: undefined,
+        outputTokens: undefined,
+        cachedTokens: undefined,
+        cachedInputTokens: undefined,
+        contextUsedTokens: undefined,
+        contextMaxTokens: undefined,
+        costUsd: undefined,
+      });
+
+      const textCollapsed = textOf(renderer.toJSON());
+      // Summary vitals must display placeholder '--' instead of bleeding active liveUsage backwards
+      expect(textCollapsed).toContain("tok --");
+      expect(textCollapsed).not.toContain("99,999");
+      expect(textCollapsed).not.toContain("11,111");
+      expect(textCollapsed).not.toContain("88k");
+      expect(textCollapsed).not.toContain("12.34");
+
+      // Expand card to check detail section
+      toggle(renderer);
+      const textExpanded = textOf(renderer.toJSON());
+      expect(textExpanded).toContain("Tokens & Context");
+      expect(textExpanded).toContain("Not reported by provider");
+      expect(textExpanded).not.toContain("99,999");
+      expect(textExpanded).not.toContain("11,111");
+      expect(textExpanded).not.toContain("12.34");
+
+      // Verify explicit Copy handler also isolates from liveUsage
+      const copyButton = renderer.root.find(
+        (node) => node.props.accessibilityLabel === "Copy timeline card",
+      );
+      const copyText = copyButton.props.getText();
+      expect(copyText).not.toContain("99999");
+      expect(copyText).not.toContain("11111");
+      expect(copyText).not.toContain("12.34");
+    } finally {
+      mockAgentUsage = undefined;
+    }
+  });
+
+  it("does not dynamically update historical cards when liveUsage changes across turns", () => {
+    mockAgentUsage = {
+      inputTokens: 12_000,
+      outputTokens: 3_000,
+    };
+
+    try {
+      const renderer = renderCard(undefined, {
+        inputTokens: undefined,
+        outputTokens: undefined,
+        contextUsedTokens: undefined,
+        contextMaxTokens: undefined,
+      });
+
+      const textBefore = textOf(renderer.toJSON());
+      expect(textBefore).toContain("tok --");
+      expect(textBefore).not.toContain("12,000");
+
+      // Simulate live agent executing new turns and updating liveUsage in memory
+      mockAgentUsage = {
+        inputTokens: 850_000,
+        outputTokens: 42_000,
+      };
+
+      const textAfter = textOf(renderer.toJSON());
+      expect(textAfter).toContain("tok --");
+      expect(textAfter).not.toContain("850,000");
+      expect(textAfter).not.toContain("42,000");
+    } finally {
+      mockAgentUsage = undefined;
+    }
+  });
+
+  it("renders turn-specific telemetry data faithfully without interference from liveUsage", () => {
+    mockAgentUsage = {
+      inputTokens: 99_999,
+      outputTokens: 11_111,
+      contextWindowUsedTokens: 88_888,
+      totalCostUsd: 99.99,
+    };
+
+    try {
+      const renderer = renderCard(undefined, {
+        inputTokens: 500,
+        outputTokens: 200,
+        contextUsedTokens: 1200,
+        contextMaxTokens: 4000,
+        costUsd: 0.05,
+      });
+
+      const textCollapsed = textOf(renderer.toJSON());
+      expect(textCollapsed).toContain("1.2k/4k (30% ctx)");
+      expect(textCollapsed).not.toContain("88k");
+
+      toggle(renderer);
+      const textExpanded = textOf(renderer.toJSON());
+      expect(textExpanded).toContain("In: 500");
+      expect(textExpanded).toContain("Out: 200");
+      expect(textExpanded).toContain("$0.05");
+      expect(textExpanded).not.toContain("99,999");
+      expect(textExpanded).not.toContain("99.99");
+    } finally {
+      mockAgentUsage = undefined;
+    }
   });
 });

@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { Text, View } from "react-native";
-import { useAgent, type PluginTimelineItemProps } from "@getpaseo/plugin/client";
+import type { PluginTimelineItemProps } from "@getpaseo/plugin/client";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import {
   HostBadge,
@@ -34,7 +34,6 @@ import {
 } from "../shared/resources";
 import {
   formatCompactTokens,
-  type TopAgentSnapshot,
 } from "./pill-labels";
 
 export { TIMELINE_RENDERED_METRICS };
@@ -48,24 +47,12 @@ export function TopTimelineTelemetryCard({
   const data = item.data;
   const compact = layout?.compact ?? false;
   const [isExpanded, setIsExpanded] = useState(false);
-  const liveUsage = useAgent(data.agentId, (a: TopAgentSnapshot) => a.lastUsage);
-  const inputTokens = data.inputTokens ?? liveUsage?.inputTokens;
-  const outputTokens = data.outputTokens ?? liveUsage?.outputTokens;
-  const cachedTokens =
-    data.cachedTokens ??
-    data.cachedInputTokens ??
-    liveUsage?.cachedInputTokens ??
-    liveUsage?.cachedTokens;
-  const contextUsedTokens =
-    data.contextUsedTokens ??
-    liveUsage?.contextWindowUsedTokens ??
-    liveUsage?.contextUsedTokens;
-  const contextMaxTokens =
-    data.contextMaxTokens ??
-    liveUsage?.contextWindowMaxTokens ??
-    liveUsage?.contextMaxTokens;
-  const costUsd =
-    data.costUsd ?? liveUsage?.totalCostUsd ?? liveUsage?.costUsd;
+  const inputTokens = data.inputTokens;
+  const outputTokens = data.outputTokens;
+  const cachedTokens = data.cachedTokens ?? data.cachedInputTokens;
+  const contextUsedTokens = data.contextUsedTokens;
+  const contextMaxTokens = data.contextMaxTokens;
+  const costUsd = data.costUsd;
   const { settings } = usePluginSettings(topSettingsContract);
   const surfaces = settings.metricSurfaces;
   const show = (id: MetricId) => !surfaces || isTimelineEnabled(surfaces[id]);
@@ -138,8 +125,8 @@ export function TopTimelineTelemetryCard({
   }, [contextUsedTokens, contextMaxTokens]);
 
   const getCopyText = useCallback(
-    () => buildTelemetryCopyText({ data, liveUsage, timeLabel }),
-    [data, liveUsage, timeLabel],
+    () => buildTelemetryCopyText({ data, timeLabel }),
+    [data, timeLabel],
   );
 
   const hasTokenDetails =
