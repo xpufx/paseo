@@ -16,6 +16,7 @@ import {
   forgejoToken,
   resolveForgejoHost,
 } from "./forgejo-api.js";
+import { normalizeRepoSlug } from "./actions.js";
 
 const DEFAULT_REPO = "xpufx-org/paseo";
 const PODMAN_TIMEOUT_MS = 3000;
@@ -58,7 +59,8 @@ function nonEmptyString(value: unknown): string | undefined {
 export function runnerScopeEndpoints(
   repo: string
 ): Array<{ scope: UppidiRunnerScope; path: string }> {
-  const [owner, name] = repo.split("/");
+  const normalized = normalizeRepoSlug(repo) || repo;
+  const [owner, name] = normalized.split("/");
   const scopes: Array<{ scope: UppidiRunnerScope; path: string }> = [];
   if (owner && name) {
     scopes.push({ scope: "repo", path: `/api/v1/repos/${owner}/${name}/actions/runners` });
@@ -174,11 +176,12 @@ export async function fetchLocalContainers(): Promise<{
 }
 
 export async function handleUppidiRunners(
-  _input: Record<string, never>,
-  _context: PluginHandlerContext
+  input: { repo?: string } = {},
+  _context?: PluginHandlerContext
 ): Promise<UppidiRunnersOutput> {
   const host = resolveForgejoHost();
-  const repo = DEFAULT_REPO;
+  const rawRepo = input?.repo && input.repo !== "all" ? input.repo : DEFAULT_REPO;
+  const repo = normalizeRepoSlug(rawRepo) || DEFAULT_REPO;
   const token = await forgejoToken(host);
 
   const scopes = runnerScopeEndpoints(repo);
@@ -218,6 +221,18 @@ export async function handleUppidiRunners(
       });
       continue;
     }
+
+    let errorDetail = response.error;
+    if (response.outcome === "http-error" && response.httpStatus === 403) {
+      if (response.error?.includes("owner of the repo")) {
+        errorDetail = `${response.error} (user is not repo owner; repo-level runners require owner permissions)`;
+      } else if (response.error?.includes("required scope")) {
+        errorDetail = `${response.error} (token lacks read:organization / read:admin scope)`;
+      } else {
+        errorDetail = `${response.error} (token lacks read:organization or read:admin permissions or user is not repo owner)`;
+      }
+    }
+
     sources.push({
       key: scope,
       kind: "forgejo-runners",
@@ -225,20 +240,25 @@ export async function handleUppidiRunners(
       ok: false,
       failure: response.outcome === "http-error" ? "http" : "unreachable",
       httpStatus: response.outcome === "http-error" ? response.httpStatus : undefined,
-      error: response.error,
+      error: errorDetail,
     });
   }
 
   const fleetSources = sources.filter((s) => s.kind === "forgejo-runners");
   const answered = fleetSources.filter((s) => s.ok);
+  const hasForbidden = fleetSources.some((s) => s.httpStatus === 403 || s.error?.includes("403"));
+  const hasUnreachable = fleetSources.some((s) => s.failure === "unreachable");
+
   const fleetStatus: UppidiFleetStatus =
-    answered.length === 0
-      ? fleetSources.some((s) => s.failure === "unreachable")
-        ? "unreachable"
-        : "forbidden"
-      : runners.length === 0
-        ? "empty"
-        : "ok";
+    runners.length > 0
+      ? "ok"
+      : answered.length === 0
+        ? hasUnreachable
+          ? "unreachable"
+          : "forbidden"
+        : hasForbidden
+          ? "forbidden"
+          : "empty";
 
   const local = await fetchLocalContainers();
   sources.push({
@@ -268,8 +288,15 @@ function firstFailure(fleetSources: UppidiRunnerSource[]): string | undefined {
   const failed = fleetSources.filter((s) => !s.ok);
   if (failed.length === 0) return undefined;
   const unreachable = failed.find((s) => s.failure === "unreachable");
-  const first = unreachable ?? failed[0]!;
-  return `Forgejo runner API ${first.failure === "unreachable" ? "unreachable" : "rejected the request"}: ${first.error ?? "no reason reported"}`;
+  if (unreachable) {
+    return `Forgejo runner API unreachable: ${unreachable.error ?? "no reason reported"}`;
+  }
+  const forbidden = failed.find((s) => s.httpStatus === 403 || s.error?.includes("403"));
+  if (forbidden) {
+    return `Forgejo runner API rejected access (HTTP 403 Forbidden): token lacks read:organization or read:admin permissions, or user is not repo owner. ${forbidden.error ?? ""}`.trim();
+  }
+  const first = failed[0]!;
+  return `Forgejo runner API rejected the request: ${first.error ?? "no reason reported"}`;
 }
 
 export async function handleUppidiFleetScaleHost(

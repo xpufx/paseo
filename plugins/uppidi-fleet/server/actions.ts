@@ -11,13 +11,33 @@ import { forgejoApiGet, forgejoToken, resolveForgejoHost } from "./forgejo-api.j
 import { getActiveHookRouter, getFleetRosterInfo } from "./hook-router.js";
 
 /**
+ * Normalise a repository key or URL to a clean "owner/repo" slug.
+ * Strips URL schemes, ports, scp-style git remotes, and hostnames.
+ */
+export function normalizeRepoSlug(repoKey: string): string {
+  if (!repoKey || typeof repoKey !== "string") return "";
+  let s = repoKey.trim();
+  s = s.replace(/^https?:\/\//, "");
+  s = s.replace(/^git@([^:]+):/, "$1/");
+  s = s.replace(/^ssh:\/\/git@/, "");
+  s = s.replace(/:\d+\//, "/");
+  s = s.replace(/\.git$/, "");
+  s = s.replace(/^\/+|\/+$/g, "");
+  const parts = s.split("/").filter(Boolean);
+  if (parts.length > 1 && (parts[0].includes(".") || parts[0].includes(":"))) {
+    return parts.slice(1).join("/");
+  }
+  return parts.join("/");
+}
+
+/**
  * Map a Forgejo terminal-status value to our canonical status/conclusion pair.
  *
  * Forgejo encodes conclusion into `rawStatus` — e.g. `"success"` means the run
  * is completed and succeeded. We translate those into the contract's dual
  * fields.
  */
-function mapForgejoStatus(
+export function mapForgejoStatus(
   rawStatus: string | undefined,
 ): { status: ForgeActionRun["status"]; conclusion: ForgeActionRun["conclusion"] } {
   switch (rawStatus) {
@@ -27,15 +47,21 @@ function mapForgejoStatus(
       return { status: "completed", conclusion: "failure" };
     case "cancelled":
       return { status: "completed", conclusion: "cancelled" };
+    case "running":
     case "in_progress":
       return { status: "in_progress", conclusion: null };
+    case "blocked":
     case "waiting":
       return { status: "waiting", conclusion: null };
-    default:
+    case "skipped":
+      return { status: "completed", conclusion: "skipped" };
+    default: {
+      const parsed = ForgeActionRunStatusSchema.safeParse(rawStatus);
       return {
-        status: ForgeActionRunStatusSchema.parse(String(rawStatus ?? "completed")),
+        status: parsed.success ? parsed.data : "completed",
         conclusion: null,
       };
+    }
   }
 }
 
@@ -43,50 +69,79 @@ function mapForgejoStatus(
  * Parse a raw Forgejo action-run JSON object into our typed shape strictly adhering
  * to Forgejo's OpenAPI schema (#1176).
  */
-function parseForgejoRun(raw: Record<string, unknown>, repoKey: string): ForgeActionRun {
-  const rawUser = (raw.trigger_user ?? {}) as Record<string, unknown>;
-  const commitSha = String(raw.commit_sha ?? "");
-  const commitMessage = String(raw.title ?? "");
+export function parseForgejoRun(raw: Record<string, unknown>, repoKey: string): ForgeActionRun {
+  const cleanRepo = normalizeRepoSlug(repoKey) || repoKey;
+  const host = resolveForgejoHost();
+  try {
+    const rawUser = (raw && typeof raw === "object" && raw.trigger_user && typeof raw.trigger_user === "object"
+      ? raw.trigger_user
+      : {}) as Record<string, unknown>;
+    const commitSha = String(raw?.commit_sha ?? "");
+    const commitMessage = String(raw?.title ?? "");
 
-  const createdAt = String(raw.created ?? "");
-  const updatedAt = String(raw.updated ?? "");
-  const startedAt = raw.started ?? null;
-  const stoppedAt = raw.stopped ?? null;
+    const createdAt = String(raw?.created ?? "");
+    const updatedAt = String(raw?.updated ?? "");
+    const startedAt = raw?.started ?? null;
+    const stoppedAt = raw?.stopped ?? null;
 
-  const mapped = mapForgejoStatus(raw.status as string | undefined);
+    const mapped = mapForgejoStatus(raw?.status as string | undefined);
 
-  // Resolve branch from prettyref, falling back to stripping "refs/heads/" from ref.
-  const ref = String(raw.ref ?? "");
-  const branch = raw.prettyref
-    ? String(raw.prettyref)
-    : ref.startsWith("refs/heads/")
-      ? ref.slice(11)
-      : ref || null;
+    // Resolve branch from prettyref, falling back to stripping "refs/heads/" from ref.
+    const ref = String(raw?.ref ?? "");
+    const branch = raw?.prettyref
+      ? String(raw?.prettyref)
+      : ref.startsWith("refs/heads/")
+        ? ref.slice(11)
+        : ref || null;
 
-  return {
-    id: Number(raw.id ?? 0),
-    name: String(raw.name ?? ""),
-    html_url: String(raw.html_url ?? ""),
-    ...mapped,
-    workflow_id: String(raw.workflow_id ?? ""),
-    ref,
-    branch,
-    event: ForgeActionRunEventSchema.parse(String(raw.event ?? "push")),
-    head_commit: {
-      message: commitMessage,
-      sha: commitSha,
-    },
-    created_at: createdAt,
-    updated_at: updatedAt,
-    run_started_at: startedAt ? String(startedAt) : null,
-    completed_at: stoppedAt ? String(stoppedAt) : null,
-    user: {
-      login: String(rawUser.login ?? ""),
-      avatar_url: rawUser.avatar_url ? String(rawUser.avatar_url) : null,
-    },
-    repo: repoKey,
-    repo_url: `https://${resolveForgejoHost()}/${repoKey}`,
-  };
+    const parsedEvent = ForgeActionRunEventSchema.safeParse(String(raw?.event ?? "push"));
+    const event = parsedEvent.success ? parsedEvent.data : "push";
+
+    return {
+      id: Number(raw?.id ?? 0),
+      name: String(raw?.name ?? ""),
+      html_url: String(raw?.html_url ?? ""),
+      ...mapped,
+      workflow_id: String(raw?.workflow_id ?? ""),
+      ref,
+      branch,
+      event,
+      head_commit: {
+        message: commitMessage,
+        sha: commitSha,
+      },
+      created_at: createdAt,
+      updated_at: updatedAt,
+      run_started_at: startedAt ? String(startedAt) : null,
+      completed_at: stoppedAt ? String(stoppedAt) : null,
+      user: {
+        login: String(rawUser.login ?? ""),
+        avatar_url: rawUser.avatar_url ? String(rawUser.avatar_url) : null,
+      },
+      repo: cleanRepo,
+      repo_url: `https://${host}/${cleanRepo}`,
+    };
+  } catch {
+    return {
+      id: Number(raw?.id ?? 0),
+      name: String(raw?.name ?? ""),
+      html_url: String(raw?.html_url ?? ""),
+      status: "completed",
+      conclusion: null,
+      workflow_id: "",
+      ref: "",
+      branch: null,
+      event: "push",
+      head_commit: { message: "", sha: "" },
+      created_at: "",
+      updated_at: "",
+      run_started_at: null,
+      completed_at: null,
+      user: { login: "", avatar_url: null },
+      repo: cleanRepo,
+      repo_url: `https://${host}/${cleanRepo}`,
+    };
+  }
 }
 
 /**
@@ -102,8 +157,13 @@ async function fetchRepoActionRuns(
     return { runs: [], error: "Forgejo token missing or invalid" };
   }
 
+  const slug = normalizeRepoSlug(repoKey);
+  if (!slug) {
+    return { runs: [], error: `Invalid repository key: ${repoKey}` };
+  }
+
   const res = await forgejoApiGet<Record<string, unknown>>(
-    `/api/v1/repos/${repoKey}/actions/runs?limit=${limit}`,
+    `/api/v1/repos/${slug}/actions/runs?limit=${limit}`,
     { host, token },
   );
 
@@ -114,7 +174,16 @@ async function fetchRepoActionRuns(
   // Forgejo returns { total_count: number, workflow_runs: [...] } envelope.
   const rawData = res.data as { total_count?: number; workflow_runs?: unknown[] } | undefined;
   const rawList = Array.isArray(rawData?.workflow_runs) ? rawData.workflow_runs : [];
-  const runs = rawList.map((r: any) => parseForgejoRun(r as Record<string, unknown>, repoKey));
+  const runs: ForgeActionRun[] = [];
+  for (const r of rawList) {
+    try {
+      if (r && typeof r === "object") {
+        runs.push(parseForgejoRun(r as Record<string, unknown>, slug));
+      }
+    } catch {
+      // Unhandled error in an entry must never drop the entire list of runs
+    }
+  }
   return { runs };
 }
 

@@ -225,6 +225,81 @@ function ActiveJobInspector({
   );
 }
 
+function RunnerPermissionBanner({
+  fleetStatus,
+  error,
+  sources,
+}: {
+  fleetStatus?: UppidiFleetStatus;
+  error?: string;
+  sources?: UppidiRunnerSource[];
+}) {
+  const { colors, typography } = useFleetTheme();
+
+  const isForbidden =
+    fleetStatus === "forbidden" ||
+    sources?.some((s) => s.httpStatus === 403 || s.error?.includes("403"));
+  const isUnreachable =
+    fleetStatus === "unreachable" ||
+    sources?.some((s) => s.failure === "unreachable");
+
+  if (!isForbidden && !isUnreachable && !error) {
+    return null;
+  }
+
+  const title = isForbidden
+    ? "Permission Restricted (403 Forbidden)"
+    : isUnreachable
+      ? "Runner Fleet Unreachable"
+      : "Fleet Warning";
+
+  const defaultExplanation = isForbidden
+    ? "The current API token lacks read:organization or read:admin permissions, or the user is not the repository owner. Runner fleet capacity cannot be queried."
+    : "Unable to contact the runner endpoints. Check network connectivity or Forgejo runner daemon status.";
+
+  const failedSources = sources?.filter((s) => !s.ok && s.kind === "forgejo-runners");
+
+  return (
+    <Card
+      variant="tinted"
+      style={{
+        borderColor: isForbidden ? colors.statusWarning : colors.statusDanger,
+        borderWidth: 1,
+        marginBottom: 8,
+      }}
+    >
+      <Stack gap="xs">
+        <Row align="center" gap="xs">
+          <StatusDot variant={isForbidden ? "warning" : "danger"} />
+          <Text style={{ color: colors.foreground, ...typography.heading, fontSize: 13, flex: 1 }}>
+            {title}
+          </Text>
+          <Badge
+            label={isForbidden ? "403 Forbidden" : "Unreachable"}
+            variant={isForbidden ? "warning" : "danger"}
+            size="sm"
+          />
+        </Row>
+        <Text style={{ color: colors.foregroundMuted, ...typography.body, fontSize: 12 }}>
+          {error || defaultExplanation}
+        </Text>
+        {failedSources && failedSources.length > 0 && (
+          <Stack gap="xxs" style={{ marginTop: 4 }}>
+            {failedSources.map((source) => (
+              <Row key={`${source.kind}:${source.key}`} align="center" gap="xs">
+                <Badge label={source.key} variant="neutral" size="sm" />
+                <Text style={{ color: colors.foregroundMuted, ...typography.caption, fontSize: 11, flex: 1 }}>
+                  {source.endpoint ? `${source.endpoint} — ` : ""}{source.error ?? "Access denied"}
+                </Text>
+              </Row>
+            ))}
+          </Stack>
+        )}
+      </Stack>
+    </Card>
+  );
+}
+
 export function RunnersTab({
   runnersData,
   scaleHostData,
@@ -240,6 +315,7 @@ export function RunnersTab({
     error?: string;
     totalCount?: number;
     onlineCount?: number;
+    sources?: UppidiRunnerSource[];
   };
   scaleHostData: UppidiFleetScaleHost;
   drainHostData: UppidiFleetDrainHost;
@@ -267,6 +343,11 @@ export function RunnersTab({
   return (
     <Stack gap={6}>
       <Tabs tabs={runnerTabs} activeTab={activeTab} onTabChange={setActiveTabHandler} />
+      <RunnerPermissionBanner
+        fleetStatus={runnersData.fleetStatus}
+        error={runnersData.error}
+        sources={runnersData.sources}
+      />
       <Collapsible
         title="Host Runner Cards"
         icon="Server"
@@ -276,6 +357,17 @@ export function RunnersTab({
         {visibleRunners.map((r) => (
           <RunnerHostCard runner={r} repoFilter={repoFilter} key={r.id} />
         ))}
+        {visibleRunners.length === 0 && (
+          <Card variant="flat" style={{ marginBottom: 4 }}>
+            <Text style={{ color: colors.foregroundMuted, ...typography.caption }}>
+              {runnersData.fleetStatus === "forbidden"
+                ? "No runners accessible: token permissions restricted (read:organization or read:admin permissions or repo owner required)."
+                : runnersData.fleetStatus === "unreachable"
+                  ? "No runners available: Forgejo runner API is unreachable."
+                  : "No runners registered or matching the selected scope."}
+            </Text>
+          </Card>
+        )}
       </Collapsible>
 
       <Collapsible

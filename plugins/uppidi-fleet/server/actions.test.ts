@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   handleForgeActionRuns,
   filterByStatus,
+  normalizeRepoSlug,
+  mapForgejoStatus,
 } from "./actions.js";
 import type { ForgeActionRun } from "../shared/contracts.js";
 import { setFetchForTest, setTokenResolverForTest } from "./forgejo-api.js";
@@ -513,6 +515,83 @@ describe("server/actions.ts", () => {
       const result = await handleForgeActionRuns({ repo: "xpufx-org/paseo", status: "running", limit: 50 });
       assert.equal(result.runs.length, 1);
       assert.equal(result.runs[0].status, "in_progress");
+    });
+  });
+
+  describe("normalizeRepoSlug helper (#1177)", () => {
+    test("normalizes various repo URL and key formats", () => {
+      assert.equal(normalizeRepoSlug("https://forge.mrs.uppidi.com/xpufx-org/paseo"), "xpufx-org/paseo");
+      assert.equal(normalizeRepoSlug("http://forge.mrs.uppidi.com/xpufx-org/paseo"), "xpufx-org/paseo");
+      assert.equal(normalizeRepoSlug("forge.mrs.uppidi.com/xpufx-org/paseo"), "xpufx-org/paseo");
+      assert.equal(normalizeRepoSlug("xpufx-org/paseo"), "xpufx-org/paseo");
+      assert.equal(normalizeRepoSlug("https://forge.mrs.uppidi.com/xpufx-org/paseo.git"), "xpufx-org/paseo");
+      assert.equal(normalizeRepoSlug("git@forge.mrs.uppidi.com:xpufx-org/paseo.git"), "xpufx-org/paseo");
+      assert.equal(normalizeRepoSlug("ssh://git@forge.mrs.uppidi.com:222/xpufx-org/paseo.git"), "xpufx-org/paseo");
+      assert.equal(normalizeRepoSlug(""), "");
+    });
+
+    test("normalizes repo in handleForgeActionRuns query path", async () => {
+      let queriedPath = "";
+      setFetchForTest(async (input: string, _init?: any) => {
+        queriedPath = String(input);
+        return {
+          ok: true,
+          json: async () => ({ total_count: 1, workflow_runs: [FORGEJO_RUN_1] }),
+        };
+      });
+
+      const result = await handleForgeActionRuns({
+        repo: "https://forge.mrs.uppidi.com/xpufx-org/paseo",
+        status: "all",
+        limit: 50,
+      });
+
+      assert.equal(result.ok, true);
+      assert.ok(queriedPath.includes("/api/v1/repos/xpufx-org/paseo/actions/runs"));
+      assert.ok(!queriedPath.includes("forge.mrs.uppidi.com/xpufx-org/paseo/actions/runs"));
+    });
+  });
+
+  describe("mapForgejoStatus status/conclusion mapping (#1177)", () => {
+    test("maps running -> in_progress, conclusion null", () => {
+      assert.deepEqual(mapForgejoStatus("running"), { status: "in_progress", conclusion: null });
+    });
+
+    test("maps blocked -> waiting, conclusion null", () => {
+      assert.deepEqual(mapForgejoStatus("blocked"), { status: "waiting", conclusion: null });
+    });
+
+    test("maps skipped -> completed, conclusion skipped", () => {
+      assert.deepEqual(mapForgejoStatus("skipped"), { status: "completed", conclusion: "skipped" });
+    });
+
+    test("handles unmapped or unexpected status strings without throwing", () => {
+      // Valid enum status
+      assert.deepEqual(mapForgejoStatus("queued"), { status: "queued", conclusion: null });
+      // Completely unrecognized string falls back to completed/null without throwing ZodError
+      assert.deepEqual(mapForgejoStatus("completely_unknown_state"), { status: "completed", conclusion: null });
+      assert.deepEqual(mapForgejoStatus(undefined), { status: "completed", conclusion: null });
+    });
+  });
+
+  describe("parseForgejoRun resilience (#1177)", () => {
+    test("recovers gracefully from malformed run items without throwing", async () => {
+      const envelope = {
+        total_count: 2,
+        workflow_runs: [
+          { invalid: "data", id: "not-a-number" },
+          FORGEJO_RUN_1,
+        ],
+      };
+      setFetchForTest(async (_input: string, _init?: any) => ({
+        ok: true,
+        json: async () => envelope,
+      }));
+
+      const result = await handleForgeActionRuns({ repo: "xpufx-org/paseo", status: "all", limit: 50 });
+      assert.equal(result.ok, true);
+      assert.equal(result.runs.length, 2);
+      assert.ok(result.runs.some((r) => r.id === 5001));
     });
   });
 });

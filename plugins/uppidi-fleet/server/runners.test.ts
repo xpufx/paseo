@@ -126,10 +126,8 @@ describe("runner fleet from the Forgejo API (#632)", () => {
 
   it("reports an authoritative empty fleet when the API returns no runners", async () => {
     fetchByPath({
-      "/api/v1/repos/xpufx-org/paseo/actions/runners": () =>
-        jsonResponse({ message: "user should be the owner of the repo" }, 403),
-      "/api/v1/orgs/xpufx-org/actions/runners": () =>
-        jsonResponse({ message: "token does not have at least one of required scope(s)" }, 403),
+      "/api/v1/repos/xpufx-org/paseo/actions/runners": () => jsonResponse([]),
+      "/api/v1/orgs/xpufx-org/actions/runners": () => jsonResponse([]),
       "/api/v1/user/actions/runners": () => jsonResponse([]),
     });
 
@@ -141,6 +139,32 @@ describe("runner fleet from the Forgejo API (#632)", () => {
     assert.equal(res.totalCount, 0);
     assert.equal(res.onlineCount, 0, "an empty fleet has zero capacity, never a placeholder");
     assert.equal(res.error, undefined);
+  });
+
+  it("reports forbidden when runner scopes return 403 Forbidden with diagnostic error (#1177)", async () => {
+    fetchByPath({
+      "/api/v1/repos/xpufx-org/paseo/actions/runners": () =>
+        jsonResponse({ message: "user should be the owner of the repo" }, 403),
+      "/api/v1/orgs/xpufx-org/actions/runners": () =>
+        jsonResponse({ message: "token does not have required scope [read:organization]" }, 403),
+      "/api/v1/user/actions/runners": () => jsonResponse([]),
+    });
+
+    const res = await handleUppidiRunners({}, {} as any);
+
+    assert.equal(res.ok, false);
+    assert.equal(res.fleetStatus, "forbidden");
+    assert.match(res.error ?? "", /403/);
+    assert.match(res.error ?? "", /read:organization/);
+    assert.match(res.error ?? "", /repo owner/);
+
+    const repoSource = res.sources.find((s) => s.key === "repo");
+    assert.equal(repoSource?.ok, false);
+    assert.match(repoSource?.error ?? "", /repo owner/);
+
+    const orgSource = res.sources.find((s) => s.key === "org");
+    assert.equal(orgSource?.ok, false);
+    assert.match(orgSource?.error ?? "", /read:organization/);
   });
 
   it("reports unreachable when the API cannot be reached at all", async () => {
@@ -268,6 +292,41 @@ describe("runner fleet from the Forgejo API (#632)", () => {
       { scope: "org", path: "/api/v1/orgs/xpufx-org/actions/runners" },
       { scope: "user", path: "/api/v1/user/actions/runners" },
     ]);
+  });
+
+  it("normalizes repo slug before splitting in runnerScopeEndpoints (#1177)", () => {
+    assert.deepEqual(
+      runnerScopeEndpoints("forge.mrs.uppidi.com/xpufx-org/paseo"),
+      [
+        { scope: "repo", path: "/api/v1/repos/xpufx-org/paseo/actions/runners" },
+        { scope: "org", path: "/api/v1/orgs/xpufx-org/actions/runners" },
+        { scope: "user", path: "/api/v1/user/actions/runners" },
+      ]
+    );
+    assert.deepEqual(
+      runnerScopeEndpoints("https://forge.mrs.uppidi.com/xpufx-org/paseo.git"),
+      [
+        { scope: "repo", path: "/api/v1/repos/xpufx-org/paseo/actions/runners" },
+        { scope: "org", path: "/api/v1/orgs/xpufx-org/actions/runners" },
+        { scope: "user", path: "/api/v1/user/actions/runners" },
+      ]
+    );
+  });
+
+  it("respects input.repo when provided, normalizing it (#1177)", async () => {
+    const calls = fetchByPath({
+      "/api/v1/repos/custom-org/custom-repo/actions/runners": () => jsonResponse([ACTIVE_RUNNER]),
+      "/api/v1/orgs/custom-org/actions/runners": () => jsonResponse([]),
+      "/api/v1/user/actions/runners": () => jsonResponse([]),
+    });
+
+    const res = await handleUppidiRunners(
+      { repo: "https://forge.mrs.uppidi.com/custom-org/custom-repo" },
+      {} as any
+    );
+
+    assert.equal(res.ok, true);
+    assert.ok(calls.includes("/api/v1/repos/custom-org/custom-repo/actions/runners"));
   });
 
   it("drops duplicate runners reported by more than one scope", async () => {

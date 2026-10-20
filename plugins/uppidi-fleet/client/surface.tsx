@@ -58,6 +58,8 @@ import {
   uppidiSkillsContract,
   uppidiSetSkillContract,
   uppidiRunnersContract,
+  uppidiFleetScaleHostContract,
+  uppidiFleetDrainHostContract,
   uppidiFleetMetricsContract,
   uppidiArchiveAgentContract,
   uppidiArchiveInactiveAgentsContract,
@@ -1078,7 +1080,21 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
   const {
     data: runnersData,
     refetch: refetchRunners,
-  } = useRpcQuery(uppidiRunnersContract, {}, { refetchInterval: 15000 });
+  } = useRpcQuery(
+    uppidiRunnersContract,
+    { repo: selectedRepo === "all" ? undefined : selectedRepo },
+    { refetchInterval: 15000 },
+  );
+
+  const {
+    data: scaleHostData,
+    refetch: refetchScaleHost,
+  } = useRpcQuery(uppidiFleetScaleHostContract, {}, { refetchInterval: 15000 });
+
+  const {
+    data: drainHostData,
+    refetch: refetchDrainHost,
+  } = useRpcQuery(uppidiFleetDrainHostContract, {}, { refetchInterval: 15000 });
 
   const {
     data: metricsData,
@@ -3124,9 +3140,25 @@ export function UppidiFleetSurface(props: PluginSurfaceProps) {
               error: runnersData?.error,
               totalCount: runnersData?.totalCount,
               onlineCount: runnersData?.onlineCount,
+              sources: runnersData?.sources,
             }}
-            scaleHostData={{ ok: false, cpuPct: 0, memoryPct: 0, runnerCount: 0, onlineCount: 0 }}
-            drainHostData={{ ok: false, dinDRunning: false, dinDHealthy: false, error: "not-loaded" }}
+            scaleHostData={
+              scaleHostData ?? {
+                ok: false,
+                cpuPct: 0,
+                memoryPct: 0,
+                runnerCount: 0,
+                onlineCount: 0,
+              }
+            }
+            drainHostData={
+              drainHostData ?? {
+                ok: false,
+                dinDRunning: false,
+                dinDHealthy: false,
+                error: "not-loaded",
+              }
+            }
             repoOptions={repoOptions}
             selectedRepo={selectedRepo}
             onRepoChange={setSelectedRepo}

@@ -1262,10 +1262,15 @@ export const UppidiRunnersOutputSchema = z.object({
 });
 export type UppidiRunnersOutput = z.infer<typeof UppidiRunnersOutputSchema>;
 
+export const UppidiRunnersInputSchema = z.object({
+  repo: z.string().optional(),
+});
+export type UppidiRunnersInput = z.infer<typeof UppidiRunnersInputSchema>;
+
 export const uppidiRunnersContract = defineContract({
   name: "uppidi-fleet.runners",
   description: "Get CI runner fleet status and labels for repository actions",
-  input: z.object({}),
+  input: UppidiRunnersInputSchema,
   output: UppidiRunnersOutputSchema,
 });
 
