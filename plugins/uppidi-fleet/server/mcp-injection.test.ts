@@ -85,7 +85,7 @@ describe("registerFleetMcpInjection fleet scoping (#1313)", () => {
     };
   }
 
-  it("does not inject Serena for standard interactive agents", () => {
+  it("does not inject Serena or fleet MCP for standard interactive agents", () => {
     const { server, dispatch } = createStubServer();
     const cleanup = registerFleetMcpInjection(server as any, {
       enabled: true,
@@ -99,12 +99,13 @@ describe("registerFleetMcpInjection fleet scoping (#1313)", () => {
 
     const finalRequest = dispatch(standardAgentRequest);
     assert.equal(finalRequest.config.mcpServers?.["uppidi-mcp-serena"], undefined);
+    assert.equal(finalRequest.config.mcpServers?.["uppidi-fleet"], undefined);
     assert.equal(finalRequest.env?.USER, "xpufx");
 
     cleanup();
   });
 
-  it("injects Serena for fleet-managed agents via request.env and strips the marker", () => {
+  it("injects Serena and fleet MCP for fleet-managed agents via request.env and strips the marker", () => {
     const { server, dispatch } = createStubServer();
     const cleanup = registerFleetMcpInjection(server as any, {
       enabled: true,
@@ -121,6 +122,12 @@ describe("registerFleetMcpInjection fleet scoping (#1313)", () => {
     assert.ok(serenaServer, "Serena server should be injected");
     assert.equal(serenaServer.type, "stdio");
     assert.equal(serenaServer.command, SERENA_MCP_PROFILE.mcpCommand);
+
+    const fleetServer = finalRequest.config.mcpServers?.["uppidi-fleet"];
+    assert.ok(fleetServer, "fleet MCP server should be injected");
+    assert.equal(fleetServer.type, "stdio");
+    assert.match(fleetServer.args[0], /fleet-mcp-server\.mjs$/);
+
     // Role marker stripped from child env
     assert.equal(finalRequest.env?.[FLEET_ROLE_ENV_KEY], undefined);
     assert.equal(finalRequest.env?.USER, "xpufx");
@@ -128,7 +135,7 @@ describe("registerFleetMcpInjection fleet scoping (#1313)", () => {
     cleanup();
   });
 
-  it("injects Serena for fleet-managed agents via config.env and strips the marker", () => {
+  it("injects Serena and fleet MCP for fleet-managed agents via config.env and strips the marker", () => {
     const { server, dispatch } = createStubServer();
     const cleanup = registerFleetMcpInjection(server as any, {
       enabled: true,
@@ -147,6 +154,10 @@ describe("registerFleetMcpInjection fleet scoping (#1313)", () => {
     const finalRequest = dispatch(fleetAgentRequest);
     const serenaServer = finalRequest.config.mcpServers?.["uppidi-mcp-serena"];
     assert.ok(serenaServer, "Serena server should be injected");
+    const fleetServer = finalRequest.config.mcpServers?.["uppidi-fleet"];
+    assert.ok(fleetServer, "fleet MCP server should be injected");
+    assert.equal(fleetServer.type, "stdio");
+    assert.match(fleetServer.args[0], /fleet-mcp-server\.mjs$/);
     assert.equal(finalRequest.config.env?.[FLEET_ROLE_ENV_KEY], undefined);
 
     cleanup();

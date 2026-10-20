@@ -6,7 +6,7 @@ import readline from "node:readline";
 const hookUrl = new URL("../test/resolve-ts-hooks.mjs", import.meta.url);
 register(hookUrl, import.meta.url);
 
-const { FLEET_MCP_TOOLS, executeFleetTool } = await import("../server/mcp-tools.ts");
+const { FLEET_MCP_TOOLS, executeFleetTool } = await import("../server/mcp.ts");
 
 const SERVER_NAME = "uppidi-fleet";
 const SERVER_VERSION = "0.1.0";

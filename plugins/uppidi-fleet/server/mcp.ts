@@ -32,12 +32,16 @@ import {
   evaluateWorkerSpawnWorkspace,
   WORKER_PRIMARY_CHECKOUT_ERROR,
 } from "./workspace-guard.js";
+import {
+  createTicketHandlers,
+  type TicketHandlers,
+} from "@xpufx/backend-tickets/server";
 
 /**
- * Declared MCP tools for Uppidi Fleet.
+ * Declared fleet management MCP tools for Uppidi Fleet.
  * Exposes deterministic board triage and fleet watchdog health auditing.
  */
-export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
+export const FLEET_MANAGEMENT_TOOLS: UppidiToolDefinition[] = [
   {
     name: "fleet_check_board",
     description:
@@ -408,6 +412,369 @@ export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
       },
     },
   },
+];
+
+/**
+ * Declared ticket management MCP tools backed by @xpufx/backend-tickets.
+ */
+export const TICKET_MCP_TOOLS: UppidiToolDefinition[] = [
+  {
+    name: "ticket_list",
+    description: "List open forge issues for the configured repository with pagination and metadata.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path to derive forge context from",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL (e.g. 'https://forge.mrs.uppidi.com/owner/repo.git')",
+        },
+        page: {
+          type: "number",
+          description: "Page number for pagination (default: 1)",
+          default: 1,
+        },
+      },
+    },
+  },
+  {
+    name: "ticket_view",
+    description: "Fetch full details including body, comments, and parsed agent envelopes for a single issue.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        issueNumber: {
+          type: "number",
+          description: "Target issue number to retrieve",
+        },
+        number: {
+          type: "number",
+          description: "Alias for issueNumber",
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+    },
+  },
+  {
+    name: "ticket_create",
+    description: "Create a new issue on the configured forge repository.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Title of the new issue (1-200 characters)",
+        },
+        body: {
+          type: "string",
+          description: "Markdown body content of the issue",
+          default: "",
+        },
+        labels: {
+          type: "array",
+          items: { type: "string" },
+          description: "Initial labels to attach to the issue",
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+      required: ["title"],
+    },
+  },
+  {
+    name: "ticket_comment",
+    description: "Post a comment or steering note to an existing issue thread.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        issueNumber: {
+          type: "number",
+          description: "Target issue number",
+        },
+        number: {
+          type: "number",
+          description: "Alias for issueNumber",
+        },
+        body: {
+          type: "string",
+          description: "Markdown comment text to post",
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+      required: ["body"],
+    },
+  },
+  {
+    name: "ticket_edit",
+    description: "Update an issue's labels (applies one scoped label, evicting peers in the same exclusive scope).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        issueNumber: {
+          type: "number",
+          description: "Target issue number",
+        },
+        number: {
+          type: "number",
+          description: "Alias for issueNumber",
+        },
+        label: {
+          type: "string",
+          description: "Scoped label to attach (e.g. 'state/wip', 'review/needed')",
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+      required: ["label"],
+    },
+  },
+];
+
+/**
+ * Declared pull request MCP tools backed by @xpufx/backend-tickets.
+ */
+export const PR_MCP_TOOLS: UppidiToolDefinition[] = [
+  {
+    name: "pr_list",
+    description: "Query open, closed, or merged pull requests with filtering by author, branch, and status.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        state: {
+          type: "string",
+          enum: ["open", "closed", "merged"],
+          description: "Filter by PR state (default: open)",
+          default: "open",
+        },
+        author: {
+          type: "string",
+          description: "Filter by PR author username",
+        },
+        branch: {
+          type: "string",
+          description: "Filter by head branch name",
+        },
+        page: {
+          type: "number",
+          description: "Page number (default: 1)",
+          default: 1,
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+    },
+  },
+  {
+    name: "pr_view",
+    description: "Retrieve pull request metadata, review comments, mergeability status, and head/base branches.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pullRequestNumber: {
+          type: "number",
+          description: "Target pull request number",
+        },
+        number: {
+          type: "number",
+          description: "Alias for pullRequestNumber",
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+    },
+  },
+  {
+    name: "pr_create",
+    description: "Open a new pull request specifying title, body, head branch, and base branch.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Pull request title",
+        },
+        headBranch: {
+          type: "string",
+          description: "Head branch containing feature changes",
+        },
+        baseBranch: {
+          type: "string",
+          description: "Target base branch (default: main)",
+        },
+        body: {
+          type: "string",
+          description: "Markdown PR description / checklist",
+          default: "",
+        },
+        draft: {
+          type: "boolean",
+          description: "Whether to create PR as draft (default: false)",
+          default: false,
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+      required: ["title", "headBranch", "baseBranch"],
+    },
+  },
+  {
+    name: "pr_diff",
+    description: "Fetch raw patch/diff of a pull request for pre-flight diff auditing.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pullRequestNumber: {
+          type: "number",
+          description: "Target pull request number",
+        },
+        number: {
+          type: "number",
+          description: "Alias for pullRequestNumber",
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+    },
+  },
+  {
+    name: "pr_merge",
+    description: "Execute squash merge on approved pull requests with title and commit message formatting.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pullRequestNumber: {
+          type: "number",
+          description: "Target pull request number to merge",
+        },
+        number: {
+          type: "number",
+          description: "Alias for pullRequestNumber",
+        },
+        title: {
+          type: "string",
+          description: "Squash commit title (optional)",
+        },
+        commitMsg: {
+          type: "string",
+          description: "Squash commit message body (optional)",
+        },
+        squash: {
+          type: "boolean",
+          description: "Squash merge flag (default: true)",
+          default: true,
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+    },
+  },
+];
+
+/**
+ * Declared CI and Action Run MCP tools backed by @xpufx/backend-tickets.
+ */
+export const CI_MCP_TOOLS: UppidiToolDefinition[] = [
+  {
+    name: "ci_logs",
+    description: "Retrieve and unpack Forgejo action run status and step logs for automated debugging.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        runId: {
+          type: "number",
+          description: "Forgejo action run ID",
+        },
+        stepId: {
+          type: "number",
+          description: "Optional step ID within the run",
+        },
+        page: {
+          type: "number",
+          description: "Log page number (default: 1)",
+          default: 1,
+        },
+        directory: {
+          type: "string",
+          description: "Local workspace or repository directory path",
+        },
+        remoteUrl: {
+          type: "string",
+          description: "Explicit git remote URL",
+        },
+      },
+      required: ["runId"],
+    },
+  },
+];
+
+/**
+ * Consolidated MCP tools exposed by the Uppidi Fleet service.
+ * Contains fleet control plane tools, Forgejo ticket tools, PR tools, and CI log tools.
+ */
+export const FLEET_MCP_TOOLS: UppidiToolDefinition[] = [
+  ...FLEET_MANAGEMENT_TOOLS,
+  ...TICKET_MCP_TOOLS,
+  ...PR_MCP_TOOLS,
+  ...CI_MCP_TOOLS,
 ];
 
 export interface FleetToolCallResult {
@@ -1194,12 +1561,408 @@ export async function executeFleetValidateWorkspace(
   };
 }
 
+let cachedTicketHandlers: TicketHandlers | undefined;
+
+export function getTicketHandlers(): TicketHandlers {
+  if (!cachedTicketHandlers) {
+    cachedTicketHandlers = createTicketHandlers();
+  }
+  return cachedTicketHandlers;
+}
+
+export function setTicketHandlersForTest(handlers: TicketHandlers | undefined): void {
+  cachedTicketHandlers = handlers;
+}
+
+export async function executeTicketList(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  try {
+    const pageNum = typeof args.page === "number" ? args.page : (typeof args.page === "string" ? parseInt(args.page, 10) : 1);
+    const output = await handlers.handleOpenIssues({
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+      page: isNaN(pageNum) || pageNum <= 0 ? 1 : pageNum,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executeTicketView(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const rawIssue = args.issueNumber ?? args.number;
+  const issueNumber = typeof rawIssue === "number" ? rawIssue : (typeof rawIssue === "string" ? parseInt(rawIssue, 10) : undefined);
+  if (!issueNumber || isNaN(issueNumber) || issueNumber <= 0) {
+    return {
+      content: [{ type: "text", text: "issueNumber is required and must be a positive integer" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const output = await handlers.handleIssueDetail({
+      issueNumber,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executeTicketCreate(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const title = typeof args.title === "string" ? args.title.trim() : "";
+  if (!title) {
+    return {
+      content: [{ type: "text", text: "title is required and cannot be empty" }],
+      isError: true,
+    };
+  }
+
+  const rawLabels = Array.isArray(args.labels)
+    ? args.labels.filter((l): l is string => typeof l === "string")
+    : typeof args.labels === "string"
+      ? args.labels.split(",").map((s) => s.trim()).filter(Boolean)
+      : undefined;
+
+  try {
+    const output = await handlers.handleCreateIssue({
+      title,
+      body: typeof args.body === "string" ? args.body : "",
+      labels: rawLabels,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executeTicketComment(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const rawIssue = args.issueNumber ?? args.number;
+  const issueNumber = typeof rawIssue === "number" ? rawIssue : (typeof rawIssue === "string" ? parseInt(rawIssue, 10) : undefined);
+  if (!issueNumber || isNaN(issueNumber) || issueNumber <= 0) {
+    return {
+      content: [{ type: "text", text: "issueNumber is required and must be a positive integer" }],
+      isError: true,
+    };
+  }
+
+  const body = typeof args.body === "string" ? args.body.trim() : "";
+  if (!body) {
+    return {
+      content: [{ type: "text", text: "body is required and cannot be empty" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const output = await handlers.handleAddComment({
+      issueNumber,
+      body,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executeTicketEdit(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const rawIssue = args.issueNumber ?? args.number;
+  const issueNumber = typeof rawIssue === "number" ? rawIssue : (typeof rawIssue === "string" ? parseInt(rawIssue, 10) : undefined);
+  if (!issueNumber || isNaN(issueNumber) || issueNumber <= 0) {
+    return {
+      content: [{ type: "text", text: "issueNumber is required and must be a positive integer" }],
+      isError: true,
+    };
+  }
+
+  const label = typeof args.label === "string" ? args.label.trim() : "";
+  if (!label) {
+    return {
+      content: [{ type: "text", text: "label is required and cannot be empty" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const output = await handlers.handleSetLabel({
+      issueNumber,
+      label,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executePrList(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  try {
+    const pageNum = typeof args.page === "number" ? args.page : (typeof args.page === "string" ? parseInt(args.page, 10) : 1);
+    const rawState = typeof args.state === "string" ? args.state.trim().toLowerCase() : "open";
+    const state: "open" | "closed" | "merged" = rawState === "closed" || rawState === "merged" ? rawState : "open";
+
+    const output = await handlers.handlePrList({
+      state,
+      author: typeof args.author === "string" ? args.author : undefined,
+      branch: typeof args.branch === "string" ? args.branch : undefined,
+      page: isNaN(pageNum) || pageNum <= 0 ? 1 : pageNum,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executePrView(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const rawPr = args.pullRequestNumber ?? args.number;
+  const pullRequestNumber = typeof rawPr === "number" ? rawPr : (typeof rawPr === "string" ? parseInt(rawPr, 10) : undefined);
+  if (!pullRequestNumber || isNaN(pullRequestNumber) || pullRequestNumber <= 0) {
+    return {
+      content: [{ type: "text", text: "pullRequestNumber is required and must be a positive integer" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const output = await handlers.handlePrView({
+      pullRequestNumber,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executePrCreate(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const title = typeof args.title === "string" ? args.title.trim() : "";
+  const headBranch = typeof args.headBranch === "string" ? args.headBranch.trim() : "";
+  const baseBranch = typeof args.baseBranch === "string" ? args.baseBranch.trim() : "";
+  if (!title) {
+    return {
+      content: [{ type: "text", text: "title is required and cannot be empty" }],
+      isError: true,
+    };
+  }
+  if (!headBranch) {
+    return {
+      content: [{ type: "text", text: "headBranch is required and cannot be empty" }],
+      isError: true,
+    };
+  }
+  if (!baseBranch) {
+    return {
+      content: [{ type: "text", text: "baseBranch is required and cannot be empty" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const output = await handlers.handlePrCreate({
+      title,
+      headBranch,
+      baseBranch,
+      body: typeof args.body === "string" ? args.body : "",
+      draft: Boolean(args.draft),
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executePrDiff(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const rawPr = args.pullRequestNumber ?? args.number;
+  const pullRequestNumber = typeof rawPr === "number" ? rawPr : (typeof rawPr === "string" ? parseInt(rawPr, 10) : undefined);
+  if (!pullRequestNumber || isNaN(pullRequestNumber) || pullRequestNumber <= 0) {
+    return {
+      content: [{ type: "text", text: "pullRequestNumber is required and must be a positive integer" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const output = await handlers.handlePrDiff({
+      pullRequestNumber,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executePrMerge(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const rawPr = args.pullRequestNumber ?? args.number;
+  const pullRequestNumber = typeof rawPr === "number" ? rawPr : (typeof rawPr === "string" ? parseInt(rawPr, 10) : undefined);
+  if (!pullRequestNumber || isNaN(pullRequestNumber) || pullRequestNumber <= 0) {
+    return {
+      content: [{ type: "text", text: "pullRequestNumber is required and must be a positive integer" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const output = await handlers.handlePrMerge({
+      pullRequestNumber,
+      title: typeof args.title === "string" ? args.title : "",
+      commitMsg: typeof args.commitMsg === "string" ? args.commitMsg : "",
+      squash: args.squash !== undefined ? Boolean(args.squash) : true,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
+export async function executeCiLogs(
+  args: Record<string, unknown> = {},
+  handlers: TicketHandlers = getTicketHandlers(),
+): Promise<FleetToolCallResult> {
+  const rawRun = args.runId;
+  const runId = typeof rawRun === "number" ? rawRun : (typeof rawRun === "string" ? parseInt(rawRun, 10) : undefined);
+  if (!runId || isNaN(runId) || runId <= 0) {
+    return {
+      content: [{ type: "text", text: "runId is required and must be a positive integer" }],
+      isError: true,
+    };
+  }
+
+  const rawStep = args.stepId;
+  const stepId = typeof rawStep === "number" ? rawStep : (typeof rawStep === "string" ? parseInt(rawStep, 10) : undefined);
+  const pageNum = typeof args.page === "number" ? args.page : (typeof args.page === "string" ? parseInt(args.page, 10) : 1);
+
+  try {
+    const output = await handlers.handleCiLogs({
+      runId,
+      stepId: stepId && !isNaN(stepId) ? stepId : undefined,
+      page: isNaN(pageNum) || pageNum <= 0 ? 1 : pageNum,
+      directory: typeof args.directory === "string" ? args.directory : undefined,
+      remoteUrl: typeof args.remoteUrl === "string" ? args.remoteUrl : undefined,
+    });
+    return {
+      content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+      isError: Boolean(output.error),
+    };
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+      isError: true,
+    };
+  }
+}
+
 /**
  * Dispatch an MCP tool call by name.
  */
 export async function executeFleetTool(
   toolName: string,
   args: Record<string, unknown> = {},
+  ticketHandlers: TicketHandlers = getTicketHandlers(),
 ): Promise<FleetToolCallResult> {
   switch (toolName) {
     case "fleet_check_board":
@@ -1224,6 +1987,28 @@ export async function executeFleetTool(
       return executeFleetValidateWorkspace(args);
     case "fleet_prune_dead_sessions":
       return executeFleetPruneDeadSessions(args);
+    case "ticket_list":
+      return executeTicketList(args, ticketHandlers);
+    case "ticket_view":
+      return executeTicketView(args, ticketHandlers);
+    case "ticket_create":
+      return executeTicketCreate(args, ticketHandlers);
+    case "ticket_comment":
+      return executeTicketComment(args, ticketHandlers);
+    case "ticket_edit":
+      return executeTicketEdit(args, ticketHandlers);
+    case "pr_list":
+      return executePrList(args, ticketHandlers);
+    case "pr_view":
+      return executePrView(args, ticketHandlers);
+    case "pr_create":
+      return executePrCreate(args, ticketHandlers);
+    case "pr_diff":
+      return executePrDiff(args, ticketHandlers);
+    case "pr_merge":
+      return executePrMerge(args, ticketHandlers);
+    case "ci_logs":
+      return executeCiLogs(args, ticketHandlers);
     default:
       return {
         content: [

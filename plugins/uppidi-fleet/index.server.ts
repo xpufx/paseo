@@ -112,7 +112,7 @@ import {
   handleUppidiModelTelemetryQuery,
   setupTelemetryTap,
 } from "./server/telemetry.js";
-import { handleFleetToolList, handleFleetToolExecute } from "./server/mcp-tools.js";
+import { handleFleetToolList, handleFleetToolExecute } from "./server/mcp.js";
 import { handleForgeActionRuns } from "./server/actions.js";
 import {
   HookRouter,

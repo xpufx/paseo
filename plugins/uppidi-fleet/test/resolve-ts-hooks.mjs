@@ -41,6 +41,17 @@ export async function resolve(specifier, context, next) {
     }
   }
 
+  if (specifier === "@xpufx/backend-tickets" || specifier.startsWith("@xpufx/backend-tickets/")) {
+    const sub =
+      specifier === "@xpufx/backend-tickets"
+        ? "index.js"
+        : specifier.slice("@xpufx/backend-tickets/".length) + (specifier.endsWith(".js") ? "" : "/index.js");
+    const localDist = new URL(`../../../packages/backend/tickets/dist/${sub}`, import.meta.url);
+    if (fs.existsSync(localDist)) {
+      return { url: localDist.href, shortCircuit: true };
+    }
+  }
+
   try {
     return await next(specifier, context);
   } catch (err) {

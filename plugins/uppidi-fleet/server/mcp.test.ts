@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   FLEET_MCP_TOOLS,
+  FLEET_MANAGEMENT_TOOLS,
+  TICKET_MCP_TOOLS,
+  PR_MCP_TOOLS,
+  CI_MCP_TOOLS,
   executeFleetCheckBoard,
   executeFleetWatchdogAudit,
   executeFleetBoardSweep,
@@ -17,11 +21,23 @@ import {
   executeFleetRotateRole,
   executeFleetValidateWorkspace,
   executeFleetPruneDeadSessions,
+  executeTicketList,
+  executeTicketView,
+  executeTicketCreate,
+  executeTicketComment,
+  executeTicketEdit,
+  executePrList,
+  executePrView,
+  executePrCreate,
+  executePrDiff,
+  executePrMerge,
+  executeCiLogs,
   executeFleetTool,
   handleFleetToolList,
   handleFleetToolExecute,
   renderWatchdogAuditMarkdown,
-} from "./mcp-tools.js";
+  setTicketHandlersForTest,
+} from "./mcp.js";
 import { HookRouter, setActiveHookRouter, type WatchdogAuditResult } from "./hook-router.js";
 import type { IssuesCheckIo } from "./issues-check.js";
 
@@ -50,7 +66,11 @@ describe("fleet MCP tools and handlers", () => {
   });
 
   test("FLEET_MCP_TOOLS declares typed tools with valid schemas", () => {
-    assert.equal(FLEET_MCP_TOOLS.length, 11);
+    assert.equal(FLEET_MANAGEMENT_TOOLS.length, 11);
+    assert.equal(TICKET_MCP_TOOLS.length, 5);
+    assert.equal(PR_MCP_TOOLS.length, 5);
+    assert.equal(CI_MCP_TOOLS.length, 1);
+    assert.equal(FLEET_MCP_TOOLS.length, 22);
 
     const toolNames = FLEET_MCP_TOOLS.map((t) => t.name);
     assert.deepEqual(toolNames, [
@@ -65,6 +85,17 @@ describe("fleet MCP tools and handlers", () => {
       "fleet_ensure_orchestrator",
       "fleet_validate_workspace",
       "fleet_prune_dead_sessions",
+      "ticket_list",
+      "ticket_view",
+      "ticket_create",
+      "ticket_comment",
+      "ticket_edit",
+      "pr_list",
+      "pr_view",
+      "pr_create",
+      "pr_diff",
+      "pr_merge",
+      "ci_logs",
     ]);
 
     const boardTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_check_board");
@@ -383,10 +414,10 @@ describe("fleet MCP tools and handlers", () => {
     assert.match(res.content[0]!.text, /Unknown tool/);
   });
 
-  test("handleFleetToolList returns all 11 available tools", async () => {
+  test("handleFleetToolList returns all 22 available tools", async () => {
     const res = await handleFleetToolList({});
     assert.equal(res.ok, true);
-    assert.equal(res.tools.length, 11);
+    assert.equal(res.tools.length, 22);
     assert.deepEqual(
       res.tools.map((t) => t.name),
       [
@@ -401,6 +432,17 @@ describe("fleet MCP tools and handlers", () => {
         "fleet_ensure_orchestrator",
         "fleet_validate_workspace",
         "fleet_prune_dead_sessions",
+        "ticket_list",
+        "ticket_view",
+        "ticket_create",
+        "ticket_comment",
+        "ticket_edit",
+        "pr_list",
+        "pr_view",
+        "pr_create",
+        "pr_diff",
+        "pr_merge",
+        "ci_logs",
       ],
     );
   });
@@ -628,5 +670,225 @@ describe("fleet MCP tools and handlers", () => {
     } finally {
       router.pruneOrchestrators = originalPrune;
     }
+  });
+
+  describe("consolidated ticket and PR MCP tools", () => {
+    const mockTicketHandlers: any = {
+      handleOpenIssues: async (input: any) => ({
+        repo: "test-org/repo-a",
+        host: "forge.mrs.uppidi.com",
+        issues: [{ number: 1, title: "Test issue", state: "open", labels: [] }],
+        page: input.page ?? 1,
+      }),
+      handleIssueDetail: async (input: any) => ({
+        repo: "test-org/repo-a",
+        issue: { number: input.issueNumber, title: "Test issue", state: "open", labels: [], body: "Hello", comments: [] },
+        fetchedAt: new Date().toISOString(),
+      }),
+      handleCreateIssue: async (input: any) => ({
+        repo: "test-org/repo-a",
+        host: "forge.mrs.uppidi.com",
+        number: 42,
+      }),
+      handleAddComment: async (input: any) => ({
+        number: input.issueNumber,
+        commentId: 101,
+      }),
+      handleSetLabel: async (input: any) => ({
+        number: input.issueNumber,
+        labels: [input.label],
+      }),
+      handlePrList: async (input: any) => ({
+        repo: "test-org/repo-a",
+        host: "forge.mrs.uppidi.com",
+        pullRequests: [{ number: 10, title: "Test PR", state: input.state ?? "open", labels: [], headBranch: "feat", baseBranch: "main", author: "xpufx", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+        page: input.page ?? 1,
+      }),
+      handlePrView: async (input: any) => ({
+        repo: "test-org/repo-a",
+        host: "forge.mrs.uppidi.com",
+        pr: { number: input.pullRequestNumber, title: "Test PR", state: "open", labels: [], headBranch: "feat", baseBranch: "main", author: "xpufx", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+        reviewComments: [],
+        fetchedAt: new Date().toISOString(),
+      }),
+      handlePrCreate: async (input: any) => ({
+        repo: "test-org/repo-a",
+        host: "forge.mrs.uppidi.com",
+        number: 11,
+        url: "https://forge.mrs.uppidi.com/test-org/repo-a/pulls/11",
+      }),
+      handlePrDiff: async (input: any) => ({
+        repo: "test-org/repo-a",
+        pullRequestNumber: input.pullRequestNumber,
+        diff: "diff --git a/test.txt b/test.txt\n+new line",
+      }),
+      handlePrMerge: async (input: any) => ({
+        repo: "test-org/repo-a",
+        pullRequestNumber: input.pullRequestNumber,
+        merged: true,
+        mergeCommitSha: "abc1234",
+      }),
+      handleCiLogs: async (input: any) => ({
+        repo: "test-org/repo-a",
+        host: "forge.mrs.uppidi.com",
+        run: { id: input.runId, runId: input.runId, name: "build", status: "completed", conclusion: "success", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), triggeredBy: "push", ref: "main", workflowName: "ci", steps: [], url: "https://forge.mrs.uppidi.com" },
+        stepLog: "Build step output log",
+        steps: [],
+        page: input.page ?? 1,
+      }),
+    };
+
+    before(() => {
+      setTicketHandlersForTest(mockTicketHandlers);
+    });
+
+    after(() => {
+      setTicketHandlersForTest(undefined);
+    });
+
+    test("ticket tools validate inputs and dispatch cleanly", async () => {
+      // ticket_list
+      const listRes = await executeTicketList({ page: 2 });
+      assert.equal(listRes.isError, false);
+      const listData = JSON.parse(listRes.content[0]!.text);
+      assert.equal(listData.page, 2);
+      assert.equal(listData.issues.length, 1);
+
+      // ticket_view validation
+      const viewMissing = await executeTicketView({});
+      assert.equal(viewMissing.isError, true);
+      assert.match(viewMissing.content[0]!.text, /issueNumber is required/);
+
+      // ticket_view success
+      const viewRes = await executeTicketView({ issueNumber: 1 });
+      assert.equal(viewRes.isError, false);
+      const viewData = JSON.parse(viewRes.content[0]!.text);
+      assert.equal(viewData.issue.number, 1);
+
+      // ticket_create validation
+      const createMissing = await executeTicketCreate({ title: "" });
+      assert.equal(createMissing.isError, true);
+      assert.match(createMissing.content[0]!.text, /title is required/);
+
+      // ticket_create success
+      const createRes = await executeTicketCreate({ title: "Issue #42", labels: ["kind/feature"] });
+      assert.equal(createRes.isError, false);
+      const createData = JSON.parse(createRes.content[0]!.text);
+      assert.equal(createData.number, 42);
+
+      // ticket_comment validation
+      const commentMissing = await executeTicketComment({ issueNumber: 42, body: "" });
+      assert.equal(commentMissing.isError, true);
+      assert.match(commentMissing.content[0]!.text, /body is required/);
+
+      // ticket_comment success
+      const commentRes = await executeTicketComment({ issueNumber: 42, body: "Progress comment" });
+      assert.equal(commentRes.isError, false);
+      const commentData = JSON.parse(commentRes.content[0]!.text);
+      assert.equal(commentData.commentId, 101);
+
+      // ticket_edit validation
+      const editMissing = await executeTicketEdit({ issueNumber: 42, label: "" });
+      assert.equal(editMissing.isError, true);
+      assert.match(editMissing.content[0]!.text, /label is required/);
+
+      // ticket_edit success
+      const editRes = await executeTicketEdit({ issueNumber: 42, label: "state/review" });
+      assert.equal(editRes.isError, false);
+      const editData = JSON.parse(editRes.content[0]!.text);
+      assert.deepEqual(editData.labels, ["state/review"]);
+    });
+
+    test("PR and CI tools validate inputs and dispatch cleanly", async () => {
+      // pr_list
+      const prListRes = await executePrList({ state: "open" });
+      assert.equal(prListRes.isError, false);
+      const prListData = JSON.parse(prListRes.content[0]!.text);
+      assert.equal(prListData.pullRequests.length, 1);
+
+      // pr_view validation
+      const prViewMissing = await executePrView({});
+      assert.equal(prViewMissing.isError, true);
+      assert.match(prViewMissing.content[0]!.text, /pullRequestNumber is required/);
+
+      // pr_view success
+      const prViewRes = await executePrView({ pullRequestNumber: 10 });
+      assert.equal(prViewRes.isError, false);
+      const prViewData = JSON.parse(prViewRes.content[0]!.text);
+      assert.equal(prViewData.pr.number, 10);
+
+      // pr_create validation
+      const prCreateMissing = await executePrCreate({ title: "PR", headBranch: "" });
+      assert.equal(prCreateMissing.isError, true);
+      assert.match(prCreateMissing.content[0]!.text, /headBranch is required/);
+
+      // pr_create success
+      const prCreateRes = await executePrCreate({ title: "PR", headBranch: "feat", baseBranch: "main" });
+      assert.equal(prCreateRes.isError, false);
+      const prCreateData = JSON.parse(prCreateRes.content[0]!.text);
+      assert.equal(prCreateData.number, 11);
+
+      // pr_diff validation & success
+      const prDiffMissing = await executePrDiff({});
+      assert.equal(prDiffMissing.isError, true);
+      const prDiffRes = await executePrDiff({ pullRequestNumber: 10 });
+      assert.equal(prDiffRes.isError, false);
+      const prDiffData = JSON.parse(prDiffRes.content[0]!.text);
+      assert.match(prDiffData.diff, /diff --git/);
+
+      // pr_merge validation & success
+      const prMergeMissing = await executePrMerge({});
+      assert.equal(prMergeMissing.isError, true);
+      const prMergeRes = await executePrMerge({ pullRequestNumber: 10 });
+      assert.equal(prMergeRes.isError, false);
+      const prMergeData = JSON.parse(prMergeRes.content[0]!.text);
+      assert.equal(prMergeData.merged, true);
+
+      // ci_logs validation & success
+      const ciLogsMissing = await executeCiLogs({});
+      assert.equal(ciLogsMissing.isError, true);
+      assert.match(ciLogsMissing.content[0]!.text, /runId is required/);
+      const ciLogsRes = await executeCiLogs({ runId: 55, stepId: 1 });
+      assert.equal(ciLogsRes.isError, false);
+      const ciLogsData = JSON.parse(ciLogsRes.content[0]!.text);
+      assert.equal(ciLogsData.run.id, 55);
+      assert.equal(ciLogsData.stepLog, "Build step output log");
+    });
+
+    test("executeFleetTool dispatches all 22 tools", async () => {
+      const allToolNames = FLEET_MCP_TOOLS.map((t) => t.name);
+      assert.equal(allToolNames.length, 22);
+
+      const safeArgs: Record<string, Record<string, unknown>> = {
+        fleet_check_board: { repo: "test-org/repo-a", dryRun: true, json: true },
+        fleet_watchdog_audit: { json: true },
+        fleet_board_sweep: { repos: "test-org/repo-a", json: true },
+        fleet_prune_orchestrators: { dryRun: true, json: true },
+        fleet_queue_inspect: { repo: "test-org/repo-a", json: true },
+        fleet_queue_purge: { repo: "test-org/repo-a", confirm: false, json: true },
+        fleet_handoff_generate: { json: true },
+        fleet_rotate_role: { role: "orchestrator", repo: "test-org/repo-a", json: true },
+        fleet_ensure_orchestrator: { repo: "test-org/repo-a", json: true },
+        fleet_validate_workspace: { path: tmpDir, json: true },
+        fleet_prune_dead_sessions: { dryRun: true, json: true },
+        ticket_list: { page: 1 },
+        ticket_view: { issueNumber: 1 },
+        ticket_create: { title: "New issue" },
+        ticket_comment: { issueNumber: 1, body: "Comment" },
+        ticket_edit: { issueNumber: 1, label: "state/wip" },
+        pr_list: { state: "open" },
+        pr_view: { pullRequestNumber: 1 },
+        pr_create: { title: "PR", headBranch: "feat", baseBranch: "main" },
+        pr_diff: { pullRequestNumber: 1 },
+        pr_merge: { pullRequestNumber: 1 },
+        ci_logs: { runId: 10 },
+      };
+
+      for (const name of allToolNames) {
+        const result = await executeFleetTool(name, safeArgs[name] ?? {});
+        assert.ok(result.content.length > 0, `${name} must return content`);
+        assert.doesNotMatch(result.content[0]!.text, /^Unknown tool/, `${name} must be handled`);
+      }
+    });
   });
 });

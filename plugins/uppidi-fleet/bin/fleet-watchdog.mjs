@@ -7,7 +7,7 @@ const hookUrl = new URL("../test/resolve-ts-hooks.mjs", import.meta.url);
 register(hookUrl, import.meta.url);
 
 const { HookRouter, getActiveHookRouter } = await import("../server/hook-router.ts");
-const { renderWatchdogAuditMarkdown } = await import("../server/mcp-tools.ts");
+const { renderWatchdogAuditMarkdown } = await import("../server/mcp.ts");
 
 function printHelp() {
   console.log(`Usage: fleet-watchdog [options]

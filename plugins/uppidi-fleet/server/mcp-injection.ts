@@ -8,6 +8,7 @@
 
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   createPluginLogger,
   registerMcpInjection,
@@ -136,6 +137,8 @@ export function registerFleetMcpInjection(
 
         log.debug(`injecting MCP servers for role "${role}"`, { role });
 
+        const fleetMcpServer = resolveFleetMcpServerConfig();
+
         return {
           ...request,
           ...(nextEnv ? { env: nextEnv } : {}),
@@ -143,10 +146,8 @@ export function registerFleetMcpInjection(
             ...request.config,
             ...(nextConfigEnv ? { env: nextConfigEnv } : {}),
             mcpServers: {
-              ...(request.config.mcpServers ?? {}),
-              // TODO: populate per-class servers from the matrix (§4 of research doc)
-              // For now the class-specific layer is a placeholder until the
-              // stdio transport decision (#1020 §5.1) lands.
+              "uppidi-fleet": fleetMcpServer,
+              ...(request.config?.mcpServers ?? {}),
             },
           },
         };
@@ -208,4 +209,21 @@ export function stableFleetServerPath(stateDirPath?: string): string {
   const home = process.env.HOME ?? homedir();
   const base = stateDirPath ?? join(home, ".paseo", "plugin-data", "xpufx", "uppidi-fleet");
   return join(base, STABLE_FLEET_BIN_DIRNAME, STABLE_FLEET_SERVER_FILENAME);
+}
+
+/**
+ * Resolves the MCP server configuration for the fleet MCP stdio server.
+ */
+export function resolveFleetMcpServerConfig(): {
+  type: "stdio";
+  command: string;
+  args: string[];
+} {
+  const serverPath = fileURLToPath(new URL("../bin/fleet-mcp-server.mjs", import.meta.url));
+  const command = process.env.ELECTRON_RUN_AS_NODE || /electron/i.test(process.execPath) ? "node" : (process.execPath || "node");
+  return {
+    type: "stdio",
+    command,
+    args: [serverPath],
+  };
 }

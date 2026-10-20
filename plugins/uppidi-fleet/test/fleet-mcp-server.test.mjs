@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.resolve(__dirname, "../bin/fleet-mcp-server.mjs");
 
-/** Declaration order of the 10 tools, asserted against `tools/list`. */
+/** Declaration order of the 22 tools, asserted against `tools/list`. */
 const TOOL_NAMES = [
   "fleet_check_board",
   "fleet_watchdog_audit",
@@ -23,6 +23,17 @@ const TOOL_NAMES = [
   "fleet_ensure_orchestrator",
   "fleet_validate_workspace",
   "fleet_prune_dead_sessions",
+  "ticket_list",
+  "ticket_view",
+  "ticket_create",
+  "ticket_comment",
+  "ticket_edit",
+  "pr_list",
+  "pr_view",
+  "pr_create",
+  "pr_diff",
+  "pr_merge",
+  "ci_logs",
 ];
 
 // ---------------------------------------------------------------------------
@@ -241,7 +252,7 @@ describe("fleet-mcp-server stdio E2E", () => {
       });
     });
 
-    test("tools/list advertises all 11 tools with object input schemas", async () => {
+    test("tools/list advertises all 22 tools with object input schemas", async () => {
       await withClient(async (client) => {
         const res = await client.request("tools/list", {});
         assert.ok(Array.isArray(res.result.tools));
@@ -294,7 +305,7 @@ describe("fleet-mcp-server stdio E2E", () => {
     });
   });
 
-  describe("tools/call executes all 11 tools over stdio", () => {
+  describe("tools/call executes all 22 tools over stdio", () => {
     test("dispatches every declared tool without an unknown-tool error", async () => {
       await withClient(async (client) => {
         const safeArgs = {
@@ -309,6 +320,17 @@ describe("fleet-mcp-server stdio E2E", () => {
           fleet_ensure_orchestrator: { repo: "test-org/repo-a", json: true },
           fleet_validate_workspace: { path: root, json: true },
           fleet_prune_dead_sessions: { dryRun: true, json: true },
+          ticket_list: { page: 1 },
+          ticket_view: { issueNumber: 1 },
+          ticket_create: { title: "Test issue" },
+          ticket_comment: { issueNumber: 1, body: "Test comment" },
+          ticket_edit: { issueNumber: 1, label: "state/wip" },
+          pr_list: { state: "open" },
+          pr_view: { pullRequestNumber: 1 },
+          pr_create: { title: "Test PR", headBranch: "feat", baseBranch: "main" },
+          pr_diff: { pullRequestNumber: 1 },
+          pr_merge: { pullRequestNumber: 1 },
+          ci_logs: { runId: 1 },
         };
 
         for (const name of TOOL_NAMES) {

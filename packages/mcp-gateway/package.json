@@ -50,8 +50,6 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@xpufx/backend-tickets": "*",
-    "@xpufx/backend-fleet": "*",
     "zod": "^3.24.2"
   },
   "devDependencies": {
