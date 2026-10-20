@@ -219,7 +219,7 @@ export function resolveFleetMcpServerConfig(): {
   command: string;
   args: string[];
 } {
-  const serverPath = fileURLToPath(new URL("../bin/fleet-mcp-server.mjs", import.meta.url));
+  const serverPath = fileURLToPath(new URL("../bin/fleet-mcp-server.mjs", import.meta.url).href);
   const command = process.env.ELECTRON_RUN_AS_NODE || /electron/i.test(process.execPath) ? "node" : (process.execPath || "node");
   return {
     type: "stdio",

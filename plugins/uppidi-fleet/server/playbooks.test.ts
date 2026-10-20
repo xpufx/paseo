@@ -482,15 +482,16 @@ describe("deterministic stage transition guards & artifact enforcement (#1404)",
     assert.equal(isStageLabel(123), false);
   });
 
-  it("verifies DEFAULT_AUTHORIZED_OPERATORS has only okcode", () => {
-    assert.deepEqual(DEFAULT_AUTHORIZED_OPERATORS, ["okcode"]);
+  it("verifies DEFAULT_AUTHORIZED_OPERATORS is empty array []", () => {
+    assert.deepEqual(DEFAULT_AUTHORIZED_OPERATORS, []);
   });
 
   it("verifies authorized operator identity with isAuthorizedOperator", () => {
-    assert.equal(isAuthorizedOperator("okcode"), true);
+    assert.equal(isAuthorizedOperator("okcode"), false);
+    assert.equal(isAuthorizedOperator("okcode", ["okcode"]), true);
+    assert.equal(isAuthorizedOperator("OKCODE", ["okcode"]), true);
     assert.equal(isAuthorizedOperator("oktay"), false);
     assert.equal(isAuthorizedOperator("oktay", ["oktay"]), true);
-    assert.equal(isAuthorizedOperator("OKCODE"), true);
     assert.equal(isAuthorizedOperator("xpufx"), false);
     assert.equal(isAuthorizedOperator("autonomous-agent"), false);
     assert.equal(isAuthorizedOperator("random-user"), false);
@@ -538,7 +539,7 @@ describe("deterministic stage transition guards & artifact enforcement (#1404)",
     // In Medium, spec-audit is human-gated
     assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", unapprovedCtx, medium).verified, false);
     assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", auditorCtx, medium).verified, false);
-    assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", operatorCtx, medium).verified, true);
+    assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", operatorCtx, medium, ["okcode"]).verified, true);
 
     // In Light, spec-audit is autonomous
     assert.equal(verifyStageArtifact("spec_audit_approval", "stage/spec-audit", unapprovedCtx, light).verified, false);
@@ -795,12 +796,13 @@ describe("human-in-the-loop gating & sender verification (#1404)", () => {
     assert.match(decision.reason, /requires an authorized operator signature; actor 'xpufx' is unauthorized/);
   });
 
-  it("allows authorized operator (okcode) to advance out of human-gated stage in Medium profile", () => {
+  it("allows authorized operator to advance out of human-gated stage in Medium profile", () => {
     const decision = evaluateStageTransition({
       profile: medium,
       fromStage: "stage/spec-audit",
       toStage: "stage/dispatch",
       actor: "okcode",
+      authorizedOperators: ["okcode"],
       context: {
         repo: "org/repo",
         issueNumber: 1,
@@ -817,7 +819,7 @@ describe("human-in-the-loop gating & sender verification (#1404)", () => {
 
 describe("HookRouter stage guard & human gate integration (#1404)", () => {
   it("intercepts illegal stage skip via runStageTransitionGuard and returns rejection result", async () => {
-    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true, authorizedOperators: ["okcode"] });
     const payload = {
       action: "labeled",
       repository: { full_name: "xpufx-org/paseo" },
@@ -834,7 +836,7 @@ describe("HookRouter stage guard & human gate integration (#1404)", () => {
   });
 
   it("intercepts stage/merge transition without audit receipt and rejects", async () => {
-    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true, authorizedOperators: ["okcode"] });
     const payload = {
       action: "labeled",
       repository: { full_name: "xpufx-org/paseo" },
@@ -851,7 +853,7 @@ describe("HookRouter stage guard & human gate integration (#1404)", () => {
   });
 
   it("activates human gate on human-gated stage transition and halts worker spawning", async () => {
-    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true, authorizedOperators: ["okcode"] });
     const payload = {
       action: "labeled",
       repository: { full_name: "xpufx-org/paseo" },
@@ -890,7 +892,7 @@ describe("HookRouter stage guard & human gate integration (#1404)", () => {
   });
 
   it("clears human gate when authorized operator advances the stage", async () => {
-    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true, authorizedOperators: ["okcode"] });
     router.setHumanGate("xpufx-org/paseo", 100, "stage/spec-audit", "Medium");
     assert.equal(router.isIssueHumanGated("xpufx-org/paseo", 100), true);
 
@@ -1044,6 +1046,7 @@ describe("Light vs Medium simulated end-to-end lifecycle harness (#1404)", () =>
       fromStage: "stage/spec-audit",
       toStage: "stage/dispatch",
       actor: "okcode",
+      authorizedOperators: ["okcode"],
       context: { ...context, actor: "okcode" },
     });
     assert.equal(step2Auth.allowed, true);
@@ -1078,6 +1081,7 @@ describe("Light vs Medium simulated end-to-end lifecycle harness (#1404)", () =>
       fromStage: "stage/review",
       toStage: "stage/merge",
       actor: "okcode",
+      authorizedOperators: ["okcode"],
       context: { ...context, actor: "okcode" },
     });
     assert.equal(step5.allowed, true);
@@ -1283,7 +1287,7 @@ describe("HookRouter board sweep integration & automated stage progression (Phas
     process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
     process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
 
-    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true, authorizedOperators: ["okcode"] });
     const result = await router.advanceStageOnArtifact("org/repo", 201, {
       type: "pull_request.opened",
       actor: "worker-agent-1",
@@ -1303,7 +1307,7 @@ describe("HookRouter board sweep integration & automated stage progression (Phas
     process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
     process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
 
-    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true, authorizedOperators: ["okcode"] });
     const result = await router.advanceStageOnArtifact("org/repo", 202, {
       type: "pull_request.opened",
       actor: "worker-agent-1",
@@ -1328,7 +1332,7 @@ describe("HookRouter board sweep integration & automated stage progression (Phas
     process.env.UPPIDI_FLEET_PLAYBOOKS_BASE_DIR = tempDir;
     process.env.UPPIDI_FLEET_PLAYBOOKS_METRICS_BASE_DIR = tempDir;
 
-    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true });
+    const router = new HookRouter(null, { isTestMode: true, stageGuardEnabled: true, authorizedOperators: ["okcode"] });
     const result = await router.advanceStageOnArtifact("org/repo", 203, {
       type: "pull_request.closed",
       actor: "orchestrator",

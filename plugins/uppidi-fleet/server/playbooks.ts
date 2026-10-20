@@ -445,7 +445,7 @@ export async function handleUppidiSetPlaybook(
 // Transition guards, artifact enforcement & human gate handling (#1404)
 // ──────────────────────────────────────────────────────────────────────────
 
-export const DEFAULT_AUTHORIZED_OPERATORS = ["okcode"] as const;
+export const DEFAULT_AUTHORIZED_OPERATORS = [] as const;
 
 export function isStageLabel(label: unknown): label is PlaybookStageName {
   return typeof label === "string" && (CANONICAL_PLAYBOOK_STAGES as readonly string[]).includes(label);

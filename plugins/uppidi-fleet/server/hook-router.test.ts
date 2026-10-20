@@ -13393,10 +13393,15 @@ describe("Hook Router Launch Contract & Prompt Embedding (#1398)", () => {
       } else {
         delete process.env.AUTHORIZED_OPERATORS;
       }
+      try {
+        getUppidiFleetSettingsStorage().update((prev) => ({ ...prev, authorizedOperators: undefined as any }));
+      } catch {
+        // ignore
+      }
     });
 
-    it("verifies DEFAULT_AUTHORIZED_OPERATORS is ['okcode']", () => {
-      assert.deepEqual(DEFAULT_AUTHORIZED_OPERATORS, ["okcode"]);
+    it("verifies DEFAULT_AUTHORIZED_OPERATORS is empty array []", () => {
+      assert.deepEqual(DEFAULT_AUTHORIZED_OPERATORS, []);
     });
 
     it("defaults router.authorizedOperators to DEFAULT_AUTHORIZED_OPERATORS when unconfigured", () => {
@@ -13405,8 +13410,8 @@ describe("Hook Router Launch Contract & Prompt Embedding (#1398)", () => {
       storage.update((prev) => ({ ...prev, authorizedOperators: undefined as any }));
 
       const router = new HookRouter(null, { isTestMode: true });
-      assert.deepEqual(router.authorizedOperators, ["okcode"]);
-      assert.deepEqual(resolveAuthorizedOperators(), ["okcode"]);
+      assert.deepEqual(router.authorizedOperators, []);
+      assert.deepEqual(resolveAuthorizedOperators(), []);
     });
 
     it("takes options.authorizedOperators when provided and non-empty", () => {
@@ -13424,12 +13429,14 @@ describe("Hook Router Launch Contract & Prompt Embedding (#1398)", () => {
 
     it("falls back when options.authorizedOperators is empty array", () => {
       delete process.env.AUTHORIZED_OPERATORS;
+      const storage = getUppidiFleetSettingsStorage();
+      storage.update((prev) => ({ ...prev, authorizedOperators: undefined as any }));
       const router = new HookRouter(null, {
         isTestMode: true,
         authorizedOperators: [],
       });
       // Should fall back past empty options to settings or default
-      assert.deepEqual(router.authorizedOperators, ["okcode"]);
+      assert.deepEqual(router.authorizedOperators, []);
     });
 
     it("uses process.env.AUTHORIZED_OPERATORS when set (comma-separated, trimmed)", () => {

@@ -2088,7 +2088,7 @@ export const uppidiFleetSettingsSchema = z.object({
   hookHost: z.string().default("127.0.0.1"),
   hookPort: z.number().int().min(1).max(65535).default(8099),
   /** Authorized operator identities for human-in-the-loop gates and transition guards (#1404). */
-  authorizedOperators: z.array(z.string()).default(["okcode"]),
+  authorizedOperators: z.array(z.string()).default([]),
   enrolledRepos: z.array(z.string()).default([]),
   pausedRepos: z.array(z.string()).default([]),
   /** Repos where autonomous dispatch is barred entirely (#1282). */
