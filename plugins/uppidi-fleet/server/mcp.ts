@@ -5,6 +5,9 @@ import {
   type UppidiFleetToolExecuteInput,
   type UppidiFleetToolExecuteOutput,
   type PlaybookStageName,
+  type FleetMode,
+  type UppidiAuditRecordInput,
+  type UppidiAuditVerdict,
 } from "../shared/contracts.js";
 import {
   runIssuesCheck,
@@ -36,6 +39,17 @@ import {
   createTicketHandlers,
   type TicketHandlers,
 } from "@xpufx/backend-tickets/server";
+import {
+  evaluateStageTransition,
+  loadSavedPlaybooks,
+  getPlaybookProfile,
+  isStageLabel,
+} from "./playbooks.js";
+import {
+  appendAuditReceipt,
+  auditCheck,
+  projectAuditSummary,
+} from "./audit-receipts.js";
 
 /**
  * Declared fleet management MCP tools for Uppidi Fleet.
@@ -403,6 +417,391 @@ export const FLEET_MANAGEMENT_TOOLS: UppidiToolDefinition[] = [
           type: "boolean",
           description: "Opt-in to actually killing dead agents via paseo agent delete (requires --apply for registry cleanup too)",
           default: false,
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "fleet_status_get",
+    description:
+      "Query HookRouter operational status overview (mode, frontDesk, queues, totalQueued, capabilities).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "fleet_queue_pause",
+    description:
+      "Pause webhook delivery for a specific repository queue or all queues.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: {
+          type: "string",
+          description:
+            "Target repository slug or queue key to pause (optional; defaults to 'all')",
+        },
+        repo: {
+          type: "string",
+          description: "Alias for key",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "fleet_queue_resume",
+    description:
+      "Resume webhook delivery for a specific repository queue or all queues.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: {
+          type: "string",
+          description:
+            "Target repository slug or queue key to resume (optional; defaults to 'all')",
+        },
+        repo: {
+          type: "string",
+          description: "Alias for key",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "fleet_queue_drain",
+    description:
+      "Trigger immediate webhook queue drain for a repository queue.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        key: {
+          type: "string",
+          description: "Target repository slug or queue key to drain",
+        },
+        repo: {
+          type: "string",
+          description: "Alias for key",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+      required: ["key"],
+    },
+  },
+  {
+    name: "fleet_control_mode",
+    description:
+      "Set fleet control mode (RUN, DRAIN, HALT, STOP) per unified fleet control doctrine (#1034).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          enum: ["RUN", "DRAIN", "HALT", "STOP"],
+          description: "Target fleet control mode",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+      required: ["mode"],
+    },
+  },
+  {
+    name: "fleet_repos_list",
+    description:
+      "List enrolled repositories with automation tier status (full-active, paused, kanban-only).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+    },
+  },
+  {
+    name: "fleet_stage_evaluate",
+    description:
+      "Evaluate playbook stage transition rules, preconditions, and human gates for an issue before attempting transition (#1404).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: {
+          type: "string",
+          description: "Target repository in 'owner/repo' format",
+        },
+        issue: {
+          type: "number",
+          description: "Target issue number (positive integer)",
+        },
+        targetStage: {
+          type: "string",
+          description:
+            "Canonical playbook target stage (e.g. stage/spec, stage/code, stage/review, stage/verify, stage/done)",
+        },
+        toStage: {
+          type: "string",
+          description: "Alias for targetStage",
+        },
+        fromStage: {
+          type: "string",
+          description: "Source stage if known (optional)",
+        },
+        actor: {
+          type: "string",
+          description:
+            "Actor attempting the transition (agent ID or operator username)",
+        },
+        profile: {
+          type: "string",
+          description: "Playbook profile name (e.g. Light, Medium; default: Medium)",
+        },
+        prNumber: {
+          type: "number",
+          description: "Associated pull request number",
+        },
+        headCommit: {
+          type: "string",
+          description: "Head commit SHA of the pull request",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+      required: ["repo", "issue", "targetStage", "actor"],
+    },
+  },
+  {
+    name: "fleet_stage_transition",
+    description:
+      "Execute stage transition guard and apply labels for an issue (#1404).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: {
+          type: "string",
+          description: "Target repository in 'owner/repo' format",
+        },
+        issue: {
+          type: "number",
+          description: "Target issue number (positive integer)",
+        },
+        targetStage: {
+          type: "string",
+          description:
+            "Canonical playbook target stage (e.g. stage/spec, stage/code, stage/review, stage/verify, stage/done)",
+        },
+        toStage: {
+          type: "string",
+          description: "Alias for targetStage",
+        },
+        fromStage: {
+          type: "string",
+          description: "Source stage if known (optional)",
+        },
+        actor: {
+          type: "string",
+          description:
+            "Actor executing the transition (agent ID or operator username)",
+        },
+        prNumber: {
+          type: "number",
+          description: "Associated pull request number",
+        },
+        headCommit: {
+          type: "string",
+          description: "Head commit SHA of the pull request",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+      required: ["repo", "issue", "targetStage", "actor"],
+    },
+  },
+  {
+    name: "fleet_audit_record",
+    description:
+      "Append signed audit receipt to the durable JSONL log via appendAuditReceipt (Platform #348).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: {
+          type: "string",
+          description: "Target repository in 'owner/repo' format",
+        },
+        pr: {
+          type: "number",
+          description: "Pull request number",
+        },
+        issue: {
+          type: "number",
+          description: "Associated issue number (optional)",
+        },
+        headCommit: {
+          type: "string",
+          description: "Head commit SHA audited",
+        },
+        verdict: {
+          type: "string",
+          enum: [
+            "approved",
+            "changes_requested",
+            "rejected_duplicate",
+            "rejected_spec_flaw",
+            "adhoc_bypass",
+          ],
+          description: "Audit verdict",
+        },
+        summary: {
+          type: "string",
+          description: "Auditor evaluation summary",
+        },
+        auditorAgentId: {
+          type: "string",
+          description: "Auditor agent ID",
+        },
+        auditorRole: {
+          type: "string",
+          enum: ["orchestrator", "reviewer", "operator"],
+          description: "Auditor role (default: reviewer)",
+          default: "reviewer",
+        },
+        auditorModel: {
+          type: "string",
+          description: "Auditor model name",
+        },
+        authorAgentId: {
+          type: "string",
+          description: "Author agent ID",
+        },
+        authorRole: {
+          type: "string",
+          enum: ["coding-agent", "worker", "orchestrator", "operator"],
+          description: "Author role (default: worker)",
+          default: "worker",
+        },
+        authorModel: {
+          type: "string",
+          description: "Author model name",
+        },
+        iteration: {
+          type: "number",
+          description: "Review iteration (default: 1)",
+          default: 1,
+        },
+        taxonomy: {
+          type: "array",
+          items: { type: "string" },
+          description: "Defect taxonomy tags",
+        },
+        workerClaimed: {
+          type: "string",
+          enum: ["passed", "failed", "unverified"],
+          description: "Worker claim status (default: passed)",
+          default: "passed",
+        },
+        auditorVerified: {
+          type: "string",
+          enum: ["passed", "failed", "skipped"],
+          description: "Auditor verification status (default: passed)",
+          default: "passed",
+        },
+        checksRun: {
+          type: "array",
+          items: { type: "string" },
+          description: "Verification checks executed",
+        },
+        isolatedEnv: {
+          type: "boolean",
+          description: "Whether verification ran in isolated environment (default: true)",
+          default: true,
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+      required: ["repo", "pr", "headCommit", "verdict", "summary"],
+    },
+  },
+  {
+    name: "fleet_audit_check",
+    description:
+      "Query audit receipt validity for a repository PR and commit (Platform #348).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: {
+          type: "string",
+          description: "Target repository slug (e.g. 'owner/repo')",
+        },
+        pr: {
+          type: "number",
+          description: "Pull request number (positive integer)",
+        },
+        commit: {
+          type: "string",
+          description: "Commit SHA to verify audit receipt for",
+        },
+        json: {
+          type: "boolean",
+          description: "Output machine-readable JSON instead of markdown",
+          default: false,
+        },
+      },
+      required: ["repo", "pr", "commit"],
+    },
+  },
+  {
+    name: "fleet_audit_summary",
+    description:
+      "Project audit summary metrics across repositories (compliance rate, first-pass rate, taxonomy breakdown, model scorecard) (Platform #348).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: {
+          type: "string",
+          description: "Filter summary by repository slug (optional)",
+        },
+        since: {
+          type: "string",
+          description: "ISO timestamp lower bound for audits to include (optional)",
         },
         json: {
           type: "boolean",
@@ -1561,6 +1960,828 @@ export async function executeFleetValidateWorkspace(
   };
 }
 
+/**
+ * Execute fleet_status_get with validated parameters.
+ */
+export async function executeFleetStatusGet(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const status = router.getStatusOverview();
+    const queuesOverview = router.getQueuesOverview();
+    const queues = (queuesOverview.queues as Array<Record<string, unknown>>) ?? [];
+    const capabilities = { xCommsInstalled: false };
+    const payload = {
+      ...status,
+      queues,
+      capabilities,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: false,
+      };
+    }
+
+    const frontDesk = status.frontDesk as { agentId?: string } | null;
+    const paused = Array.isArray(status.paused) ? (status.paused as string[]) : [];
+    const lines: string[] = [
+      "# Fleet Operational Status",
+      `- Mode: \`${status.mode ?? "RUN"}\``,
+      `- Halted: ${status.halted ? "Yes" : "No"}`,
+      `- Teardown in Progress: ${status.teardownInProgress ? "Yes" : "No"}`,
+      `- Front Desk: ${frontDesk?.agentId ? `\`${frontDesk.agentId}\`` : "_None_"}`,
+      `- Total Queued: ${Number(status.totalQueued ?? 0)}`,
+      `- Enrolled Repositories: ${Number(status.repoCount ?? 0)}`,
+      `- Paused Queues: ${paused.length > 0 ? paused.join(", ") : "None"}`,
+      `- Uptime: ${Number(status.uptime ?? 0)}s`,
+      `- x-comms Installed: ${capabilities.xCommsInstalled ? "Yes" : "No"}`,
+    ];
+
+    if (queues.length > 0) {
+      lines.push("", "### Active Queues");
+      for (const q of queues) {
+        lines.push(
+          `- **\`${String(q.key)}\`**: depth=${Number(q.depth ?? 0)}, status=${q.paused ? "paused" : q.isBusy ? "busy" : "idle"}`,
+        );
+      }
+    }
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_status_get failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_queue_pause with validated parameters.
+ */
+export async function executeFleetQueuePause(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const rawKey =
+    typeof args.key === "string"
+      ? args.key.trim()
+      : typeof args.repo === "string"
+        ? args.repo.trim()
+        : "";
+  const target = rawKey && rawKey !== "all" ? rawKey : undefined;
+
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const allPaused = router.pause(target);
+    const payload = {
+      ok: true,
+      paused: target ?? "all",
+      allPaused,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: false,
+      };
+    }
+
+    const lines: string[] = [
+      "# Fleet Queue Paused",
+      `- Target: \`${target ?? "all"}\``,
+      `- Paused Queues: ${allPaused.length > 0 ? allPaused.map((k) => `\`${k}\``).join(", ") : "None"}`,
+    ];
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_queue_pause failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_queue_resume with validated parameters.
+ */
+export async function executeFleetQueueResume(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const rawKey =
+    typeof args.key === "string"
+      ? args.key.trim()
+      : typeof args.repo === "string"
+        ? args.repo.trim()
+        : "";
+  const target = rawKey && rawKey !== "all" ? rawKey : undefined;
+
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const allPaused = router.resume(target);
+    const payload = {
+      ok: true,
+      resumed: target ?? "all",
+      allPaused,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: false,
+      };
+    }
+
+    const lines: string[] = [
+      "# Fleet Queue Resumed",
+      `- Target: \`${target ?? "all"}\``,
+      `- Remaining Paused Queues: ${allPaused.length > 0 ? allPaused.map((k) => `\`${k}\``).join(", ") : "None"}`,
+    ];
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_queue_resume failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_queue_drain with validated parameters.
+ */
+export async function executeFleetQueueDrain(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const rawKey =
+    typeof args.key === "string"
+      ? args.key.trim()
+      : typeof args.repo === "string"
+        ? args.repo.trim()
+        : "";
+
+  if (!rawKey) {
+    return {
+      content: [{ type: "text", text: "Error: key parameter is required for queue drain" }],
+      isError: true,
+    };
+  }
+
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const target = rawKey === "all" ? undefined : rawKey;
+    void router.drain(target);
+    const payload = {
+      ok: true,
+      draining: rawKey,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: false,
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `# Fleet Queue Drain\n- Target: \`${rawKey}\`\n- Status: Immediate drain triggered`,
+        },
+      ],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_queue_drain failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_control_mode with validated parameters.
+ */
+export async function executeFleetControlMode(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const rawMode = typeof args.mode === "string" ? args.mode.trim().toUpperCase() : "";
+  const validModes: FleetMode[] = ["RUN", "DRAIN", "HALT", "STOP"];
+
+  if (!validModes.includes(rawMode as FleetMode)) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Invalid mode "${rawMode}". Must be one of: ${validModes.join(", ")}`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const previousMode = router.mode;
+    router.setMode(rawMode);
+    const payload = {
+      ok: true,
+      mode: router.mode,
+      previousMode,
+      halted: router.isHalted(),
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: false,
+      };
+    }
+
+    const lines: string[] = [
+      "# Fleet Control Mode Updated",
+      `- Previous Mode: \`${previousMode}\``,
+      `- Current Mode: \`${router.mode}\``,
+      `- Halted: ${router.isHalted() ? "Yes" : "No"}`,
+    ];
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_control_mode failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_repos_list with validated parameters.
+ */
+export async function executeFleetReposList(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const enrolledRepos = router.getCanonicalEnrolledRepos();
+    const repos = enrolledRepos.map((repo) => {
+      const tier = router.getRepoAutomationTier(repo);
+      return {
+        repo,
+        tier,
+        isPaused: router.isRepoPaused(repo),
+        isKanbanOnly: router.isRepoKanbanOnly(repo),
+      };
+    });
+
+    const payload = {
+      ok: true,
+      count: repos.length,
+      repos,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: false,
+      };
+    }
+
+    const lines: string[] = [
+      "# Enrolled Fleet Repositories",
+      `- Total Enrolled: ${repos.length}`,
+    ];
+
+    if (repos.length === 0) {
+      lines.push("", "No repositories currently enrolled.");
+    } else {
+      lines.push("", "| Repository | Automation Tier | Paused | Kanban-Only |", "| :--- | :--- | :--- | :--- |");
+      for (const r of repos) {
+        lines.push(`| \`${r.repo}\` | \`${r.tier}\` | ${r.isPaused ? "Yes" : "No"} | ${r.isKanbanOnly ? "Yes" : "No"} |`);
+      }
+    }
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_repos_list failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_stage_evaluate with validated parameters.
+ */
+export async function executeFleetStageEvaluate(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const repo = typeof args.repo === "string" ? args.repo.trim() : "";
+  const issue = typeof args.issue === "number" ? args.issue : Number(args.issue);
+  const rawTargetStage =
+    typeof args.targetStage === "string"
+      ? args.targetStage.trim()
+      : typeof args.toStage === "string"
+        ? args.toStage.trim()
+        : "";
+  const actor = typeof args.actor === "string" ? args.actor.trim() : "";
+
+  if (!repo) {
+    return { content: [{ type: "text", text: "Error: repo parameter is required" }], isError: true };
+  }
+  if (!Number.isInteger(issue) || issue <= 0) {
+    return { content: [{ type: "text", text: "Error: issue parameter must be a positive integer" }], isError: true };
+  }
+  if (!rawTargetStage) {
+    return { content: [{ type: "text", text: "Error: targetStage parameter is required" }], isError: true };
+  }
+  if (!isStageLabel(rawTargetStage)) {
+    return { content: [{ type: "text", text: `Error: "${rawTargetStage}" is not a canonical playbook stage` }], isError: true };
+  }
+  if (!actor) {
+    return { content: [{ type: "text", text: "Error: actor parameter is required" }], isError: true };
+  }
+
+  const fromStage =
+    typeof args.fromStage === "string" && isStageLabel(args.fromStage) ? args.fromStage : null;
+  const profileName = typeof args.profile === "string" && args.profile.trim() ? args.profile.trim() : undefined;
+  const prNumber = typeof args.prNumber === "number" ? args.prNumber : undefined;
+  const headCommit = typeof args.headCommit === "string" ? args.headCommit.trim() : undefined;
+
+  try {
+    const router = getActiveHookRouter();
+    const config = loadSavedPlaybooks();
+    const profile = getPlaybookProfile(profileName, config);
+    const decision = evaluateStageTransition({
+      profile,
+      fromStage,
+      toStage: rawTargetStage,
+      actor,
+      context: {
+        repo,
+        issueNumber: issue,
+        prNumber,
+        headCommit,
+        actor,
+        auditsFilePath: router?.auditsFilePath,
+      },
+      authorizedOperators: router?.authorizedOperators,
+    });
+
+    const payload = {
+      ok: true,
+      decision,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: !decision.allowed,
+      };
+    }
+
+    const lines: string[] = [
+      `# Playbook Stage Evaluation: ${repo}#${issue}`,
+      `- Target Stage: \`${rawTargetStage}\``,
+      `- From Stage: \`${fromStage ?? "inferred"}\``,
+      `- Actor: \`${actor}\``,
+      `- Profile: \`${profile.name}\``,
+      `- Allowed: ${decision.allowed ? "✅ Yes" : "❌ No"}`,
+      `- Action Taken: \`${decision.actionTaken}\``,
+      `- Requires Human Gate: ${decision.requiresHumanGate ? "Yes" : "No"}`,
+      `- Reason: ${decision.reason}`,
+    ];
+
+    if (decision.verifiedArtifact) {
+      lines.push(`- Verified Artifact: \`${decision.verifiedArtifact}\``);
+    }
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: !decision.allowed,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_stage_evaluate failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_stage_transition with validated parameters.
+ */
+export async function executeFleetStageTransition(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const repo = typeof args.repo === "string" ? args.repo.trim() : "";
+  const issue = typeof args.issue === "number" ? args.issue : Number(args.issue);
+  const rawTargetStage =
+    typeof args.targetStage === "string"
+      ? args.targetStage.trim()
+      : typeof args.toStage === "string"
+        ? args.toStage.trim()
+        : "";
+  const actor = typeof args.actor === "string" ? args.actor.trim() : "";
+
+  if (!repo) {
+    return { content: [{ type: "text", text: "Error: repo parameter is required" }], isError: true };
+  }
+  if (!Number.isInteger(issue) || issue <= 0) {
+    return { content: [{ type: "text", text: "Error: issue parameter must be a positive integer" }], isError: true };
+  }
+  if (!rawTargetStage) {
+    return { content: [{ type: "text", text: "Error: targetStage parameter is required" }], isError: true };
+  }
+  if (!isStageLabel(rawTargetStage)) {
+    return { content: [{ type: "text", text: `Error: "${rawTargetStage}" is not a canonical playbook stage` }], isError: true };
+  }
+  if (!actor) {
+    return { content: [{ type: "text", text: "Error: actor parameter is required" }], isError: true };
+  }
+
+  const fromStage =
+    typeof args.fromStage === "string" && isStageLabel(args.fromStage) ? args.fromStage : undefined;
+  const prNumber = typeof args.prNumber === "number" ? args.prNumber : undefined;
+  const headCommit = typeof args.headCommit === "string" ? args.headCommit.trim() : undefined;
+
+  try {
+    const router = getActiveHookRouter() ?? new HookRouter();
+    const outcome = await router.runStageTransitionGuard(
+      {
+        repo,
+        issueNumber: issue,
+        toStage: rawTargetStage,
+        fromStage,
+        actor,
+        prNumber,
+        headCommit,
+      },
+      "mcp",
+    );
+
+    const payload = {
+      ok: Boolean(outcome.allowed),
+      ...outcome,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: !outcome.allowed,
+      };
+    }
+
+    const lines: string[] = [
+      `# Playbook Stage Transition: ${repo}#${issue}`,
+      `- Target Stage: \`${rawTargetStage}\``,
+      `- Allowed: ${outcome.allowed ? "✅ Yes" : "❌ No"}`,
+      `- Acted: ${outcome.acted ? "Yes" : "No"}`,
+      `- Human Gated: ${outcome.humanGated ? "Yes" : "No"}`,
+      `- Reason: ${outcome.reason ?? "N/A"}`,
+    ];
+
+    if (outcome.appliedLabel) {
+      lines.push(`- Applied Label: \`${outcome.appliedLabel}\``);
+    }
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: !outcome.allowed,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_stage_transition failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_audit_record with validated parameters.
+ */
+export async function executeFleetAuditRecord(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const repo = typeof args.repo === "string" ? args.repo.trim() : "";
+  const pr = typeof args.pr === "number" ? args.pr : Number(args.pr);
+  const headCommit = typeof args.headCommit === "string" ? args.headCommit.trim() : "";
+  const verdict = typeof args.verdict === "string" ? args.verdict.trim() : "";
+  const summary = typeof args.summary === "string" ? args.summary.trim() : "";
+
+  if (!repo) {
+    return { content: [{ type: "text", text: "Error: repo parameter is required" }], isError: true };
+  }
+  if (!Number.isInteger(pr) || pr <= 0) {
+    return { content: [{ type: "text", text: "Error: pr parameter must be a positive integer" }], isError: true };
+  }
+  if (!headCommit) {
+    return { content: [{ type: "text", text: "Error: headCommit parameter is required" }], isError: true };
+  }
+  const validVerdicts: readonly UppidiAuditVerdict[] = [
+    "approved",
+    "changes_requested",
+    "rejected_duplicate",
+    "rejected_spec_flaw",
+    "adhoc_bypass",
+  ];
+  if (!validVerdicts.includes(verdict as UppidiAuditVerdict)) {
+    return {
+      content: [{ type: "text", text: `Error: verdict must be one of: ${validVerdicts.join(", ")}` }],
+      isError: true,
+    };
+  }
+  if (!summary) {
+    return { content: [{ type: "text", text: "Error: summary parameter is required" }], isError: true };
+  }
+
+  const issue = typeof args.issue === "number" ? args.issue : undefined;
+  const iteration = typeof args.iteration === "number" && args.iteration > 0 ? args.iteration : 1;
+  const auditorRole = (typeof args.auditorRole === "string" ? args.auditorRole : "reviewer") as
+    | "orchestrator"
+    | "reviewer"
+    | "operator";
+  const authorRole = (typeof args.authorRole === "string" ? args.authorRole : "worker") as
+    | "coding-agent"
+    | "worker"
+    | "orchestrator"
+    | "operator";
+  const auditorAgentId =
+    typeof args.auditorAgentId === "string" && args.auditorAgentId.trim()
+      ? args.auditorAgentId.trim()
+      : "auditor";
+  const auditorModel =
+    typeof args.auditorModel === "string" && args.auditorModel.trim()
+      ? args.auditorModel.trim()
+      : "unknown";
+  const authorAgentId =
+    typeof args.authorAgentId === "string" && args.authorAgentId.trim()
+      ? args.authorAgentId.trim()
+      : undefined;
+  const authorModel =
+    typeof args.authorModel === "string" && args.authorModel.trim()
+      ? args.authorModel.trim()
+      : undefined;
+
+  const taxonomy = Array.isArray(args.taxonomy)
+    ? args.taxonomy.filter((t): t is string => typeof t === "string")
+    : [];
+  const workerClaimed = (typeof args.workerClaimed === "string" ? args.workerClaimed : "passed") as
+    | "passed"
+    | "failed"
+    | "unverified";
+  const auditorVerified = (typeof args.auditorVerified === "string" ? args.auditorVerified : "passed") as
+    | "passed"
+    | "failed"
+    | "skipped";
+  const checksRun = Array.isArray(args.checksRun)
+    ? args.checksRun.filter((c): c is string => typeof c === "string")
+    : [];
+  const isolatedEnv = args.isolatedEnv !== undefined ? Boolean(args.isolatedEnv) : true;
+
+  try {
+    const router = getActiveHookRouter();
+    const recordInput: UppidiAuditRecordInput = {
+      repo,
+      pr,
+      issue,
+      headCommit,
+      iteration,
+      actors: {
+        auditor: {
+          agentId: auditorAgentId,
+          role: auditorRole,
+          model: auditorModel,
+        },
+        author: {
+          agentId: authorAgentId,
+          role: authorRole,
+          model: authorModel,
+        },
+      },
+      verdict: verdict as UppidiAuditVerdict,
+      taxonomy: taxonomy as any,
+      verification: {
+        workerClaimed,
+        auditorVerified,
+        checksRun,
+        isolatedEnv,
+      },
+      summary,
+    };
+
+    const result = appendAuditReceipt(recordInput, { filePath: router?.auditsFilePath });
+
+    if (!result.ok) {
+      return {
+        content: [{ type: "text", text: `fleet_audit_record failed: ${result.error ?? "unknown error"}` }],
+        isError: true,
+      };
+    }
+
+    const payload = {
+      ok: true,
+      auditId: result.receipt.auditId,
+      recordedAt: result.receipt.timestamp,
+      receipt: result.receipt,
+    };
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        isError: false,
+      };
+    }
+
+    const lines: string[] = [
+      "# Audit Receipt Recorded",
+      `- Audit ID: \`${result.receipt.auditId}\``,
+      `- Repository: \`${repo}\``,
+      `- Pull Request: #${pr}`,
+      `- Commit: \`${headCommit}\``,
+      `- Verdict: \`${verdict}\``,
+      `- Timestamp: \`${result.receipt.timestamp}\``,
+      `- Summary: ${summary}`,
+    ];
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_audit_record failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_audit_check with validated parameters.
+ */
+export async function executeFleetAuditCheck(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const repo = typeof args.repo === "string" ? args.repo.trim() : "";
+  const pr = typeof args.pr === "number" ? args.pr : Number(args.pr);
+  const commit = typeof args.commit === "string" ? args.commit.trim() : "";
+
+  if (!repo) {
+    return { content: [{ type: "text", text: "Error: repo parameter is required" }], isError: true };
+  }
+  if (!Number.isInteger(pr) || pr <= 0) {
+    return { content: [{ type: "text", text: "Error: pr parameter must be a positive integer" }], isError: true };
+  }
+  if (!commit) {
+    return { content: [{ type: "text", text: "Error: commit parameter is required" }], isError: true };
+  }
+
+  try {
+    const router = getActiveHookRouter();
+    const result = auditCheck({ repo, pr, commit }, { filePath: router?.auditsFilePath });
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        isError: !result.audited,
+      };
+    }
+
+    const lines: string[] = [
+      `# Audit Receipt Check: ${repo}#${pr}`,
+      `- Commit: \`${commit}\``,
+      `- Audited: ${result.audited ? "✅ Valid Receipt Found" : "❌ No Audit Receipt Found"}`,
+    ];
+
+    if (result.audit) {
+      lines.push(
+        `- Audit ID: \`${result.audit.auditId}\``,
+        `- Verdict: \`${result.audit.verdict}\``,
+        `- Iteration: ${result.audit.iteration}`,
+        `- Timestamp: \`${result.audit.timestamp}\``,
+      );
+    }
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: !result.audited,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_audit_check failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
+/**
+ * Execute fleet_audit_summary with validated parameters.
+ */
+export async function executeFleetAuditSummary(
+  args: Record<string, unknown> = {},
+): Promise<FleetToolCallResult> {
+  const json = Boolean(args.json);
+  const repo = typeof args.repo === "string" && args.repo.trim() ? args.repo.trim() : undefined;
+  const since = typeof args.since === "string" && args.since.trim() ? args.since.trim() : undefined;
+
+  try {
+    const router = getActiveHookRouter();
+    const summary = projectAuditSummary(
+      { repo, since },
+      {
+        filePath: router?.auditsFilePath,
+        reconciliationsPath: router?.auditReconciliationsFilePath,
+      },
+    );
+
+    if (json) {
+      return {
+        content: [{ type: "text", text: JSON.stringify(summary, null, 2) }],
+        isError: false,
+      };
+    }
+
+    const lines: string[] = [
+      "# Fleet Audit Summary & Compliance Metrics",
+      repo ? `- Filter Repository: \`${repo}\`` : "- Scope: Fleet-wide",
+      since ? `- Since: \`${since}\`` : "",
+      `- Total Audits: ${summary.totalAudits}`,
+      `- Audited Merges: ${summary.auditedMerges}`,
+      `- Unaudited Merges: ${summary.unauditedMerges}`,
+      `- Compliance Rate: **${summary.complianceRate}%**`,
+      `- First-Pass Success Rate: **${summary.firstPassSuccessRate}%**`,
+    ].filter(Boolean);
+
+    const taxonomyEntries = Object.entries(summary.defectTaxonomyCounts);
+    if (taxonomyEntries.length > 0) {
+      lines.push("", "### Defect Taxonomy Breakdown");
+      for (const [tag, count] of taxonomyEntries) {
+        lines.push(`- \`${tag}\`: ${count}`);
+      }
+    }
+
+    if (summary.modelScorecard.length > 0) {
+      lines.push(
+        "",
+        "### Model Quality Scorecard",
+        "| Model | Reviews | First-Pass Approved | Changes Requested |",
+        "| :--- | :--- | :--- | :--- |",
+      );
+      for (const m of summary.modelScorecard) {
+        lines.push(`| \`${m.model}\` | ${m.reviewsReceived} | ${m.firstPassApproved} | ${m.changesRequested} |`);
+      }
+    }
+
+    return {
+      content: [{ type: "text", text: lines.join("\n") }],
+      isError: false,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      content: [{ type: "text", text: `fleet_audit_summary failed: ${message}` }],
+      isError: true,
+    };
+  }
+}
+
 let cachedTicketHandlers: TicketHandlers | undefined;
 
 export function getTicketHandlers(): TicketHandlers {
@@ -1987,6 +3208,28 @@ export async function executeFleetTool(
       return executeFleetValidateWorkspace(args);
     case "fleet_prune_dead_sessions":
       return executeFleetPruneDeadSessions(args);
+    case "fleet_status_get":
+      return executeFleetStatusGet(args);
+    case "fleet_queue_pause":
+      return executeFleetQueuePause(args);
+    case "fleet_queue_resume":
+      return executeFleetQueueResume(args);
+    case "fleet_queue_drain":
+      return executeFleetQueueDrain(args);
+    case "fleet_control_mode":
+      return executeFleetControlMode(args);
+    case "fleet_repos_list":
+      return executeFleetReposList(args);
+    case "fleet_stage_evaluate":
+      return executeFleetStageEvaluate(args);
+    case "fleet_stage_transition":
+      return executeFleetStageTransition(args);
+    case "fleet_audit_record":
+      return executeFleetAuditRecord(args);
+    case "fleet_audit_check":
+      return executeFleetAuditCheck(args);
+    case "fleet_audit_summary":
+      return executeFleetAuditSummary(args);
     case "ticket_list":
       return executeTicketList(args, ticketHandlers);
     case "ticket_view":

@@ -21,6 +21,17 @@ import {
   executeFleetRotateRole,
   executeFleetValidateWorkspace,
   executeFleetPruneDeadSessions,
+  executeFleetStatusGet,
+  executeFleetQueuePause,
+  executeFleetQueueResume,
+  executeFleetQueueDrain,
+  executeFleetControlMode,
+  executeFleetReposList,
+  executeFleetStageEvaluate,
+  executeFleetStageTransition,
+  executeFleetAuditRecord,
+  executeFleetAuditCheck,
+  executeFleetAuditSummary,
   executeTicketList,
   executeTicketView,
   executeTicketCreate,
@@ -66,11 +77,11 @@ describe("fleet MCP tools and handlers", () => {
   });
 
   test("FLEET_MCP_TOOLS declares typed tools with valid schemas", () => {
-    assert.equal(FLEET_MANAGEMENT_TOOLS.length, 11);
+    assert.equal(FLEET_MANAGEMENT_TOOLS.length, 22);
     assert.equal(TICKET_MCP_TOOLS.length, 5);
     assert.equal(PR_MCP_TOOLS.length, 5);
     assert.equal(CI_MCP_TOOLS.length, 1);
-    assert.equal(FLEET_MCP_TOOLS.length, 22);
+    assert.equal(FLEET_MCP_TOOLS.length, 33);
 
     const toolNames = FLEET_MCP_TOOLS.map((t) => t.name);
     assert.deepEqual(toolNames, [
@@ -85,6 +96,17 @@ describe("fleet MCP tools and handlers", () => {
       "fleet_ensure_orchestrator",
       "fleet_validate_workspace",
       "fleet_prune_dead_sessions",
+      "fleet_status_get",
+      "fleet_queue_pause",
+      "fleet_queue_resume",
+      "fleet_queue_drain",
+      "fleet_control_mode",
+      "fleet_repos_list",
+      "fleet_stage_evaluate",
+      "fleet_stage_transition",
+      "fleet_audit_record",
+      "fleet_audit_check",
+      "fleet_audit_summary",
       "ticket_list",
       "ticket_view",
       "ticket_create",
@@ -172,6 +194,54 @@ describe("fleet MCP tools and handlers", () => {
     assert.ok(rotateTool.inputSchema.properties.force);
     assert.equal(rotateTool.inputSchema.properties.force.type, "boolean");
     assert.equal(rotateTool.inputSchema.properties.force.default, true);
+
+    const statusTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_status_get");
+    assert.ok(statusTool, "fleet_status_get tool must be registered");
+    assert.equal(statusTool.inputSchema.type, "object");
+    assert.ok(statusTool.inputSchema.properties.json);
+
+    const pauseTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_queue_pause");
+    assert.ok(pauseTool, "fleet_queue_pause tool must be registered");
+    assert.equal(pauseTool.inputSchema.type, "object");
+    assert.ok(pauseTool.inputSchema.properties.key);
+
+    const resumeTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_queue_resume");
+    assert.ok(resumeTool, "fleet_queue_resume tool must be registered");
+    assert.equal(resumeTool.inputSchema.type, "object");
+    assert.ok(resumeTool.inputSchema.properties.key);
+
+    const drainTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_queue_drain");
+    assert.ok(drainTool, "fleet_queue_drain tool must be registered");
+    assert.deepEqual(drainTool.inputSchema.required, ["key"]);
+
+    const controlModeTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_control_mode");
+    assert.ok(controlModeTool, "fleet_control_mode tool must be registered");
+    assert.deepEqual(controlModeTool.inputSchema.required, ["mode"]);
+    assert.deepEqual(controlModeTool.inputSchema.properties.mode.enum, ["RUN", "DRAIN", "HALT", "STOP"]);
+
+    const reposListTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_repos_list");
+    assert.ok(reposListTool, "fleet_repos_list tool must be registered");
+    assert.equal(reposListTool.inputSchema.type, "object");
+
+    const stageEvalTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_stage_evaluate");
+    assert.ok(stageEvalTool, "fleet_stage_evaluate tool must be registered");
+    assert.deepEqual(stageEvalTool.inputSchema.required, ["repo", "issue", "targetStage", "actor"]);
+
+    const stageTransTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_stage_transition");
+    assert.ok(stageTransTool, "fleet_stage_transition tool must be registered");
+    assert.deepEqual(stageTransTool.inputSchema.required, ["repo", "issue", "targetStage", "actor"]);
+
+    const auditRecordTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_audit_record");
+    assert.ok(auditRecordTool, "fleet_audit_record tool must be registered");
+    assert.deepEqual(auditRecordTool.inputSchema.required, ["repo", "pr", "headCommit", "verdict", "summary"]);
+
+    const auditCheckTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_audit_check");
+    assert.ok(auditCheckTool, "fleet_audit_check tool must be registered");
+    assert.deepEqual(auditCheckTool.inputSchema.required, ["repo", "pr", "commit"]);
+
+    const auditSummaryTool = FLEET_MCP_TOOLS.find((t) => t.name === "fleet_audit_summary");
+    assert.ok(auditSummaryTool, "fleet_audit_summary tool must be registered");
+    assert.equal(auditSummaryTool.inputSchema.type, "object");
   });
 
   test("executeFleetCheckBoard rejects invalid role", async () => {
@@ -414,10 +484,10 @@ describe("fleet MCP tools and handlers", () => {
     assert.match(res.content[0]!.text, /Unknown tool/);
   });
 
-  test("handleFleetToolList returns all 22 available tools", async () => {
+  test("handleFleetToolList returns all 33 available tools", async () => {
     const res = await handleFleetToolList({});
     assert.equal(res.ok, true);
-    assert.equal(res.tools.length, 22);
+    assert.equal(res.tools.length, 33);
     assert.deepEqual(
       res.tools.map((t) => t.name),
       [
@@ -432,6 +502,17 @@ describe("fleet MCP tools and handlers", () => {
         "fleet_ensure_orchestrator",
         "fleet_validate_workspace",
         "fleet_prune_dead_sessions",
+        "fleet_status_get",
+        "fleet_queue_pause",
+        "fleet_queue_resume",
+        "fleet_queue_drain",
+        "fleet_control_mode",
+        "fleet_repos_list",
+        "fleet_stage_evaluate",
+        "fleet_stage_transition",
+        "fleet_audit_record",
+        "fleet_audit_check",
+        "fleet_audit_summary",
         "ticket_list",
         "ticket_view",
         "ticket_create",
@@ -672,6 +753,244 @@ describe("fleet MCP tools and handlers", () => {
     }
   });
 
+  describe("Phase 2, 3, 4 operational fleet control, playbooks, and audit tools", () => {
+    test("executeFleetStatusGet returns status overview in json and markdown", async () => {
+      const jsonRes = await executeFleetStatusGet({ json: true });
+      assert.equal(jsonRes.isError, false);
+      const data = JSON.parse(jsonRes.content[0]!.text);
+      assert.equal(data.ok, true);
+      assert.equal(data.mode, "RUN");
+      assert.equal(data.halted, false);
+      assert.ok(Array.isArray(data.queues));
+      assert.ok(data.capabilities);
+
+      const mdRes = await executeFleetStatusGet({ json: false });
+      assert.equal(mdRes.isError, false);
+      assert.match(mdRes.content[0]!.text, /# Fleet Operational Status/);
+      assert.match(mdRes.content[0]!.text, /- Mode: `RUN`/);
+    });
+
+    test("executeFleetQueuePause and executeFleetQueueResume control queues", async () => {
+      // Pause specific queue
+      const pauseSingle = await executeFleetQueuePause({ key: "test-org/repo-a", json: true });
+      assert.equal(pauseSingle.isError, false);
+      const pauseSingleData = JSON.parse(pauseSingle.content[0]!.text);
+      assert.equal(pauseSingleData.ok, true);
+      assert.equal(pauseSingleData.paused, "test-org/repo-a");
+      assert.ok(pauseSingleData.allPaused.includes("test-org/repo-a"));
+
+      // Resume specific queue
+      const resumeSingle = await executeFleetQueueResume({ key: "test-org/repo-a", json: true });
+      assert.equal(resumeSingle.isError, false);
+      const resumeSingleData = JSON.parse(resumeSingle.content[0]!.text);
+      assert.equal(resumeSingleData.ok, true);
+      assert.equal(resumeSingleData.resumed, "test-org/repo-a");
+      assert.ok(!resumeSingleData.allPaused.includes("test-org/repo-a"));
+
+      // Pause all queues
+      const pauseAll = await executeFleetQueuePause({ json: false });
+      assert.equal(pauseAll.isError, false);
+      assert.match(pauseAll.content[0]!.text, /# Fleet Queue Paused/);
+      assert.match(pauseAll.content[0]!.text, /Target: `all`/);
+
+      // Resume all queues
+      const resumeAll = await executeFleetQueueResume({ json: false });
+      assert.equal(resumeAll.isError, false);
+      assert.match(resumeAll.content[0]!.text, /# Fleet Queue Resumed/);
+    });
+
+    test("executeFleetQueueDrain validates required key and triggers drain", async () => {
+      const missingKey = await executeFleetQueueDrain({});
+      assert.equal(missingKey.isError, true);
+      assert.match(missingKey.content[0]!.text, /key parameter is required/);
+
+      const res = await executeFleetQueueDrain({ key: "test-org/repo-a", json: true });
+      assert.equal(res.isError, false);
+      const data = JSON.parse(res.content[0]!.text);
+      assert.equal(data.ok, true);
+      assert.equal(data.draining, "test-org/repo-a");
+
+      const mdRes = await executeFleetQueueDrain({ repo: "test-org/repo-b" });
+      assert.equal(mdRes.isError, false);
+      assert.match(mdRes.content[0]!.text, /# Fleet Queue Drain/);
+    });
+
+    test("executeFleetControlMode validates mode and updates router mode", async () => {
+      const invalid = await executeFleetControlMode({ mode: "INVALID_MODE" });
+      assert.equal(invalid.isError, true);
+      assert.match(invalid.content[0]!.text, /Invalid mode/);
+
+      const drainRes = await executeFleetControlMode({ mode: "DRAIN", json: true });
+      assert.equal(drainRes.isError, false);
+      const drainData = JSON.parse(drainRes.content[0]!.text);
+      assert.equal(drainData.mode, "DRAIN");
+      assert.equal(router.mode, "DRAIN");
+
+      const haltRes = await executeFleetControlMode({ mode: "HALT", json: true });
+      assert.equal(haltRes.isError, false);
+      const haltData = JSON.parse(haltRes.content[0]!.text);
+      assert.equal(haltData.mode, "HALT");
+      assert.equal(haltData.halted, true);
+      assert.equal(router.isHalted(), true);
+
+      // Return to RUN
+      const runRes = await executeFleetControlMode({ mode: "RUN", json: false });
+      assert.equal(runRes.isError, false);
+      assert.match(runRes.content[0]!.text, /Current Mode: `RUN`/);
+      assert.equal(router.mode, "RUN");
+    });
+
+    test("executeFleetReposList returns enrolled repositories and automation tiers", async () => {
+      const jsonRes = await executeFleetReposList({ json: true });
+      assert.equal(jsonRes.isError, false);
+      const data = JSON.parse(jsonRes.content[0]!.text);
+      assert.equal(data.ok, true);
+      assert.ok(data.count >= 2);
+      const repoA = data.repos.find((r: any) => r.repo.includes("test-org/repo-a"));
+      assert.ok(repoA);
+      assert.equal(repoA.tier, "full-active");
+      assert.equal(repoA.isPaused, false);
+      assert.equal(repoA.isKanbanOnly, false);
+
+      const mdRes = await executeFleetReposList({ json: false });
+      assert.equal(mdRes.isError, false);
+      assert.match(mdRes.content[0]!.text, /# Enrolled Fleet Repositories/);
+      assert.match(mdRes.content[0]!.text, /test-org\/repo-a/);
+    });
+
+    test("executeFleetStageEvaluate validates input and evaluates transitions", async () => {
+      // Validation failures
+      const noRepo = await executeFleetStageEvaluate({ issue: 1, targetStage: "stage/spec", actor: "wrk-1" });
+      assert.equal(noRepo.isError, true);
+      assert.match(noRepo.content[0]!.text, /repo parameter is required/);
+
+      const badIssue = await executeFleetStageEvaluate({ repo: "test-org/repo-a", issue: -1, targetStage: "stage/spec", actor: "wrk-1" });
+      assert.equal(badIssue.isError, true);
+      assert.match(badIssue.content[0]!.text, /positive integer/);
+
+      const badStage = await executeFleetStageEvaluate({ repo: "test-org/repo-a", issue: 1, targetStage: "invalid/stage", actor: "wrk-1" });
+      assert.equal(badStage.isError, true);
+      assert.match(badStage.content[0]!.text, /not a canonical playbook stage/);
+
+      const noActor = await executeFleetStageEvaluate({ repo: "test-org/repo-a", issue: 1, targetStage: "stage/spec" });
+      assert.equal(noActor.isError, true);
+      assert.match(noActor.content[0]!.text, /actor parameter is required/);
+
+      // Successful evaluation (to stage/spec)
+      const validRes = await executeFleetStageEvaluate({
+        repo: "test-org/repo-a",
+        issue: 1,
+        targetStage: "stage/spec",
+        actor: "wrk-1",
+        json: true,
+      });
+      assert.equal(validRes.isError, false);
+      const data = JSON.parse(validRes.content[0]!.text);
+      assert.equal(data.ok, true);
+      assert.equal(data.decision.allowed, true);
+      assert.equal(data.decision.toStage, "stage/spec");
+
+      // Markdown evaluation output
+      const mdRes = await executeFleetStageEvaluate({
+        repo: "test-org/repo-a",
+        issue: 1,
+        toStage: "stage/spec",
+        actor: "wrk-1",
+        json: false,
+      });
+      assert.equal(mdRes.isError, false);
+      assert.match(mdRes.content[0]!.text, /# Playbook Stage Evaluation/);
+    });
+
+    test("executeFleetStageTransition validates input and delegates to router guard", async () => {
+      const missing = await executeFleetStageTransition({});
+      assert.equal(missing.isError, true);
+      assert.match(missing.content[0]!.text, /repo parameter is required/);
+
+      const res = await executeFleetStageTransition({
+        repo: "test-org/repo-a",
+        issue: 1,
+        targetStage: "stage/spec",
+        actor: "wrk-1",
+        json: true,
+      });
+      const data = JSON.parse(res.content[0]!.text);
+      assert.ok("acted" in data);
+    });
+
+    test("executeFleetAuditRecord, executeFleetAuditCheck, and executeFleetAuditSummary", async () => {
+      // Audit record validation
+      const missingRepo = await executeFleetAuditRecord({});
+      assert.equal(missingRepo.isError, true);
+      assert.match(missingRepo.content[0]!.text, /repo parameter is required/);
+
+      const badVerdict = await executeFleetAuditRecord({
+        repo: "test-org/repo-a",
+        pr: 10,
+        headCommit: "commit-abc",
+        verdict: "bad_verdict",
+        summary: "test",
+      });
+      assert.equal(badVerdict.isError, true);
+      assert.match(badVerdict.content[0]!.text, /verdict must be one of/);
+
+      // Successful audit record
+      const recordRes = await executeFleetAuditRecord({
+        repo: "test-org/repo-a",
+        pr: 10,
+        headCommit: "commit-abc",
+        verdict: "approved",
+        summary: "Code and tests verified clean",
+        auditorAgentId: "auditor-1",
+        authorAgentId: "wrk-1",
+        json: true,
+      });
+      assert.equal(recordRes.isError, false);
+      const recordData = JSON.parse(recordRes.content[0]!.text);
+      assert.equal(recordData.ok, true);
+      assert.ok(recordData.auditId.startsWith("aud_"));
+      assert.ok(recordData.recordedAt);
+
+      // Audit check validation & lookup
+      const checkMissing = await executeFleetAuditCheck({});
+      assert.equal(checkMissing.isError, true);
+
+      // Positive check
+      const checkFound = await executeFleetAuditCheck({
+        repo: "test-org/repo-a",
+        pr: 10,
+        commit: "commit-abc",
+        json: true,
+      });
+      assert.equal(checkFound.isError, false);
+      const foundData = JSON.parse(checkFound.content[0]!.text);
+      assert.equal(foundData.audited, true);
+      assert.equal(foundData.audit.verdict, "approved");
+
+      // Negative check
+      const checkNotFound = await executeFleetAuditCheck({
+        repo: "test-org/repo-a",
+        pr: 10,
+        commit: "different-commit",
+        json: true,
+      });
+      assert.equal(checkNotFound.isError, true);
+      const notFoundData = JSON.parse(checkNotFound.content[0]!.text);
+      assert.equal(notFoundData.audited, false);
+
+      // Audit summary
+      const summaryJson = await executeFleetAuditSummary({ repo: "test-org/repo-a", json: true });
+      assert.equal(summaryJson.isError, false);
+      const summaryData = JSON.parse(summaryJson.content[0]!.text);
+      assert.equal(summaryData.ok, true);
+      assert.ok(summaryData.totalAudits >= 1);
+
+      const summaryMd = await executeFleetAuditSummary({ json: false });
+      assert.equal(summaryMd.isError, false);
+      assert.match(summaryMd.content[0]!.text, /# Fleet Audit Summary/);
+    });
+  });
+
   describe("consolidated ticket and PR MCP tools", () => {
     const mockTicketHandlers: any = {
       handleOpenIssues: async (input: any) => ({
@@ -855,9 +1174,9 @@ describe("fleet MCP tools and handlers", () => {
       assert.equal(ciLogsData.stepLog, "Build step output log");
     });
 
-    test("executeFleetTool dispatches all 22 tools", async () => {
+    test("executeFleetTool dispatches all 33 tools", async () => {
       const allToolNames = FLEET_MCP_TOOLS.map((t) => t.name);
-      assert.equal(allToolNames.length, 22);
+      assert.equal(allToolNames.length, 33);
 
       const safeArgs: Record<string, Record<string, unknown>> = {
         fleet_check_board: { repo: "test-org/repo-a", dryRun: true, json: true },
@@ -871,6 +1190,17 @@ describe("fleet MCP tools and handlers", () => {
         fleet_ensure_orchestrator: { repo: "test-org/repo-a", json: true },
         fleet_validate_workspace: { path: tmpDir, json: true },
         fleet_prune_dead_sessions: { dryRun: true, json: true },
+        fleet_status_get: { json: true },
+        fleet_queue_pause: { key: "test-org/repo-a", json: true },
+        fleet_queue_resume: { key: "test-org/repo-a", json: true },
+        fleet_queue_drain: { key: "test-org/repo-a", json: true },
+        fleet_control_mode: { mode: "RUN", json: true },
+        fleet_repos_list: { json: true },
+        fleet_stage_evaluate: { repo: "test-org/repo-a", issue: 1, targetStage: "stage/spec", actor: "wrk-1", json: true },
+        fleet_stage_transition: { repo: "test-org/repo-a", issue: 1, targetStage: "stage/spec", actor: "wrk-1", json: true },
+        fleet_audit_record: { repo: "test-org/repo-a", pr: 1, headCommit: "abc", verdict: "approved", summary: "ok", json: true },
+        fleet_audit_check: { repo: "test-org/repo-a", pr: 1, commit: "abc", json: true },
+        fleet_audit_summary: { json: true },
         ticket_list: { page: 1 },
         ticket_view: { issueNumber: 1 },
         ticket_create: { title: "New issue" },

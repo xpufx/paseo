@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const serverPath = path.resolve(__dirname, "../bin/fleet-mcp-server.mjs");
 
-/** Declaration order of the 22 tools, asserted against `tools/list`. */
+/** Declaration order of the 33 tools, asserted against `tools/list`. */
 const TOOL_NAMES = [
   "fleet_check_board",
   "fleet_watchdog_audit",
@@ -23,6 +23,17 @@ const TOOL_NAMES = [
   "fleet_ensure_orchestrator",
   "fleet_validate_workspace",
   "fleet_prune_dead_sessions",
+  "fleet_status_get",
+  "fleet_queue_pause",
+  "fleet_queue_resume",
+  "fleet_queue_drain",
+  "fleet_control_mode",
+  "fleet_repos_list",
+  "fleet_stage_evaluate",
+  "fleet_stage_transition",
+  "fleet_audit_record",
+  "fleet_audit_check",
+  "fleet_audit_summary",
   "ticket_list",
   "ticket_view",
   "ticket_create",
@@ -252,7 +263,7 @@ describe("fleet-mcp-server stdio E2E", () => {
       });
     });
 
-    test("tools/list advertises all 22 tools with object input schemas", async () => {
+    test("tools/list advertises all 33 tools with object input schemas", async () => {
       await withClient(async (client) => {
         const res = await client.request("tools/list", {});
         assert.ok(Array.isArray(res.result.tools));
@@ -305,7 +316,7 @@ describe("fleet-mcp-server stdio E2E", () => {
     });
   });
 
-  describe("tools/call executes all 22 tools over stdio", () => {
+  describe("tools/call executes all 33 tools over stdio", () => {
     test("dispatches every declared tool without an unknown-tool error", async () => {
       await withClient(async (client) => {
         const safeArgs = {
@@ -320,6 +331,17 @@ describe("fleet-mcp-server stdio E2E", () => {
           fleet_ensure_orchestrator: { repo: "test-org/repo-a", json: true },
           fleet_validate_workspace: { path: root, json: true },
           fleet_prune_dead_sessions: { dryRun: true, json: true },
+          fleet_status_get: { json: true },
+          fleet_queue_pause: { key: "test-org/repo-a", json: true },
+          fleet_queue_resume: { key: "test-org/repo-a", json: true },
+          fleet_queue_drain: { key: "test-org/repo-a", json: true },
+          fleet_control_mode: { mode: "RUN", json: true },
+          fleet_repos_list: { json: true },
+          fleet_stage_evaluate: { repo: "test-org/repo-a", issue: 1, targetStage: "stage/spec", actor: "wrk-1", json: true },
+          fleet_stage_transition: { repo: "test-org/repo-a", issue: 1, targetStage: "stage/spec", actor: "wrk-1", json: true },
+          fleet_audit_record: { repo: "test-org/repo-a", pr: 1, headCommit: "abc", verdict: "approved", summary: "ok", json: true },
+          fleet_audit_check: { repo: "test-org/repo-a", pr: 1, commit: "abc", json: true },
+          fleet_audit_summary: { json: true },
           ticket_list: { page: 1 },
           ticket_view: { issueNumber: 1 },
           ticket_create: { title: "Test issue" },
