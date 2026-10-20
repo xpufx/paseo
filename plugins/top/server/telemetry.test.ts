@@ -23,7 +23,7 @@ import {
   shouldAppendTimelineForTurn,
   type McpStatusSnapshot,
 } from "../shared/resources";
-import { collectTurnTelemetry, countTurns, customPillPoller, isInterruptEcho, isStaleTurnEnd, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline, computeTokensPerSecond, classifyContextPressure } from "./resources";
+import { collectTurnTelemetry, countTurns, customPillPoller, isInterruptEcho, isStaleTurnEnd, parseGitDiffShortstat, setLastLiveUsage, summarizeTurnTimeline, computeTokensPerSecond, classifyContextPressure, resetAgentCumulativeTokens, getAgentCumulativeOutputTokens } from "./resources";
 
 after(() => {
   customPillPoller.stop();
@@ -853,4 +853,191 @@ test("velocity metric appears in all required registries", () => {
   assert.ok(def.description.length > 0, "velocity definition needs a description");
   assert.ok(def.icon.length > 0, "velocity definition needs an icon");
   assert.ok(def.shortLabel, "velocity definition needs a shortLabel");
+});
+
+test("collectTurnTelemetry computes multi-turn delta tokens and tok/s from cumulative liveUsage (#1465)", async () => {
+  const agentId = "agent-cumul-delta-1";
+  resetAgentCumulativeTokens(agentId);
+
+  // Turn 1: Initial turn with 1000 cumulative tokens in 10s -> 100 tok/s
+  const turn1 = await collectTurnTelemetry(
+    "turn-cumul-1",
+    agentId,
+    { kind: "completed" },
+    10_000,
+    { liveUsage: { outputTokens: 1000 } },
+  );
+  assert.equal(turn1.outputTokens, 1000);
+  assert.equal(turn1.tokensPerSecond, 100);
+  assert.equal(getAgentCumulativeOutputTokens(agentId), 1000);
+  topTimelineTelemetrySchema.parse(turn1);
+
+  // Turn 2: Cumulative reaches 2500 in 15s -> delta is 1500 tokens in 15s -> 100 tok/s
+  // Without delta, this would be inflated to 2500 / 15 = 166.67 tok/s
+  const turn2 = await collectTurnTelemetry(
+    "turn-cumul-2",
+    agentId,
+    { kind: "completed" },
+    15_000,
+    { liveUsage: { outputTokens: 2500 } },
+  );
+  assert.equal(turn2.outputTokens, 2500);
+  assert.equal(turn2.tokensPerSecond, 100);
+  assert.equal(getAgentCumulativeOutputTokens(agentId), 2500);
+  topTimelineTelemetrySchema.parse(turn2);
+
+  // Turn 3: Cumulative reaches 3100 in 10s -> delta is 600 tokens in 10s -> 60 tok/s
+  // Without delta, this would be inflated to 3100 / 10 = 310 tok/s
+  const turn3 = await collectTurnTelemetry(
+    "turn-cumul-3",
+    agentId,
+    { kind: "completed" },
+    10_000,
+    { liveUsage: { outputTokens: 3100 } },
+  );
+  assert.equal(turn3.outputTokens, 3100);
+  assert.equal(turn3.tokensPerSecond, 60);
+  assert.equal(getAgentCumulativeOutputTokens(agentId), 3100);
+  topTimelineTelemetrySchema.parse(turn3);
+
+  resetAgentCumulativeTokens(agentId);
+});
+
+test("collectTurnTelemetry computes multi-turn delta from cumulative timeline usage (#1465)", async () => {
+  const agentId = "agent-timeline-delta";
+  resetAgentCumulativeTokens(agentId);
+
+  // Turn 1: 500 cumulative output tokens in 5s -> 100 tok/s
+  const turn1 = await collectTurnTelemetry(
+    "turn-tl-1",
+    agentId,
+    { kind: "completed" },
+    5000,
+    {
+      timeline: [
+        { type: "usage_updated", usage: { inputTokens: 100, outputTokens: 500 } },
+      ],
+    },
+  );
+  assert.equal(turn1.outputTokens, 500);
+  assert.equal(turn1.tokensPerSecond, 100);
+
+  // Turn 2: 1200 cumulative output tokens in 7s -> delta 700 tokens in 7s -> 100 tok/s
+  const turn2 = await collectTurnTelemetry(
+    "turn-tl-2",
+    agentId,
+    { kind: "completed" },
+    7000,
+    {
+      timeline: [
+        { type: "usage_updated", usage: { inputTokens: 200, outputTokens: 1200 } },
+      ],
+    },
+  );
+  assert.equal(turn2.outputTokens, 1200);
+  assert.equal(turn2.tokensPerSecond, 100);
+
+  resetAgentCumulativeTokens(agentId);
+});
+
+test("collectTurnTelemetry maintains agent scoping and avoids cross-agent contamination (#1465)", async () => {
+  const agentA = "agent-scope-A";
+  const agentB = "agent-scope-B";
+  resetAgentCumulativeTokens(agentA);
+  resetAgentCumulativeTokens(agentB);
+
+  // Agent A turn 1: 1000 tokens in 10s -> 100 tok/s
+  const turnA1 = await collectTurnTelemetry(
+    "turn-A1",
+    agentA,
+    { kind: "completed" },
+    10_000,
+    { liveUsage: { outputTokens: 1000 } },
+  );
+  assert.equal(turnA1.tokensPerSecond, 100);
+
+  // Agent B turn 1: 300 tokens in 3s -> 100 tok/s (should not subtract Agent A's 1000)
+  const turnB1 = await collectTurnTelemetry(
+    "turn-B1",
+    agentB,
+    { kind: "completed" },
+    3000,
+    { liveUsage: { outputTokens: 300 } },
+  );
+  assert.equal(turnB1.tokensPerSecond, 100);
+
+  // Agent A turn 2: 1500 tokens in 5s -> delta is 500 in 5s -> 100 tok/s (measured against A's 1000, not B's 300)
+  const turnA2 = await collectTurnTelemetry(
+    "turn-A2",
+    agentA,
+    { kind: "completed" },
+    5000,
+    { liveUsage: { outputTokens: 1500 } },
+  );
+  assert.equal(turnA2.tokensPerSecond, 100);
+
+  // Agent B turn 2: 800 tokens in 5s -> delta is 500 in 5s -> 100 tok/s (measured against B's 300, not A's 1500)
+  const turnB2 = await collectTurnTelemetry(
+    "turn-B2",
+    agentB,
+    { kind: "completed" },
+    5000,
+    { liveUsage: { outputTokens: 800 } },
+  );
+  assert.equal(turnB2.tokensPerSecond, 100);
+
+  resetAgentCumulativeTokens(agentA);
+  resetAgentCumulativeTokens(agentB);
+});
+
+test("collectTurnTelemetry handles agent reset and teardown gracefully (#1465)", async () => {
+  const agentId = "agent-teardown";
+  resetAgentCumulativeTokens(agentId);
+
+  // Turn 1: 1000 tokens in 10s -> 100 tok/s
+  const turn1 = await collectTurnTelemetry(
+    "turn-td-1",
+    agentId,
+    { kind: "completed" },
+    10_000,
+    { liveUsage: { outputTokens: 1000 } },
+  );
+  assert.equal(turn1.tokensPerSecond, 100);
+
+  // Agent reset/teardown occurs
+  resetAgentCumulativeTokens(agentId);
+  assert.equal(getAgentCumulativeOutputTokens(agentId), undefined);
+
+  // Turn 2 after reset: starts new session with 400 tokens in 4s -> 100 tok/s
+  const turn2 = await collectTurnTelemetry(
+    "turn-td-2",
+    agentId,
+    { kind: "completed" },
+    4000,
+    { liveUsage: { outputTokens: 400 } },
+  );
+  assert.equal(turn2.tokensPerSecond, 100);
+
+  // Counter decrease without explicit reset (e.g. backend reset) clamps delta at 0
+  const turn3 = await collectTurnTelemetry(
+    "turn-td-3",
+    agentId,
+    { kind: "completed" },
+    2000,
+    { liveUsage: { outputTokens: 50 } }, // 50 < 400
+  );
+  assert.equal(turn3.tokensPerSecond, 0);
+  assert.equal(getAgentCumulativeOutputTokens(agentId), 50);
+
+  // Turn 4: resumes increasing from 50 to 150 in 1s -> delta 100 -> 100 tok/s
+  const turn4 = await collectTurnTelemetry(
+    "turn-td-4",
+    agentId,
+    { kind: "completed" },
+    1000,
+    { liveUsage: { outputTokens: 150 } },
+  );
+  assert.equal(turn4.tokensPerSecond, 100);
+
+  resetAgentCumulativeTokens(agentId);
 });

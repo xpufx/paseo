@@ -753,6 +753,31 @@ let lastTurnTelemetry: TopTimelineTelemetryData | null = null;
 
 let lastLiveUsage: LiveUsage | null = null;
 
+/** Cumulative output tokens tracked per agent to compute turn-specific deltas (#1465). */
+const agentCumulativeOutputTokens = new Map<string, number>();
+
+/**
+ * Reset tracked cumulative output tokens for an agent, or all agents if no agentId is provided.
+ */
+export function resetAgentCumulativeTokens(agentId?: string): void {
+  if (agentId) {
+    agentCumulativeOutputTokens.delete(agentId);
+  } else {
+    agentCumulativeOutputTokens.clear();
+  }
+}
+
+/** Alias for resetAgentCumulativeTokens for agent reset/teardown. */
+export const clearAgentCumulativeTokens = resetAgentCumulativeTokens;
+export const resetAgentTelemetry = resetAgentCumulativeTokens;
+
+/**
+ * Retrieve the current tracked cumulative output tokens for an agent.
+ */
+export function getAgentCumulativeOutputTokens(agentId: string): number | undefined {
+  return agentCumulativeOutputTokens.get(agentId);
+}
+
 export function getLastTurnTelemetry(): TopTimelineTelemetryData | null {
   return lastTurnTelemetry;
 }
@@ -899,6 +924,17 @@ export async function collectTurnTelemetry(
     costUsd = effectiveLiveUsage.totalCostUsd;
   }
 
+  // When cumulative session tokens are provided in effectiveLiveUsage or timeline usage,
+  // compute turn-specific delta tokens scoped per agent (#1465).
+  let turnOutputTokens: number | undefined = outputTokens;
+  if (agentId && outputTokens !== undefined && Number.isFinite(outputTokens)) {
+    const previousOutput = agentCumulativeOutputTokens.get(agentId);
+    if (previousOutput !== undefined) {
+      turnOutputTokens = Math.max(0, outputTokens - previousOutput);
+    }
+    agentCumulativeOutputTokens.set(agentId, outputTokens);
+  }
+
   const data: TopTimelineTelemetryData = {
     turnId,
     agentId,
@@ -937,7 +973,7 @@ export async function collectTurnTelemetry(
     // Live generation velocity: (output + reasoning) / durationSec.
     // Guard against zero-duration, missing fields, and interrupted turns.
     tokensPerSecond: computeTokensPerSecond(
-      outputTokens,
+      turnOutputTokens,
       durationMs,
       outcome.kind,
     ),

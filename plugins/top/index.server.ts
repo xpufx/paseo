@@ -34,6 +34,7 @@ import {
   isInterruptEcho,
   isStaleTurnEnd,
   setLastLiveUsage,
+  resetAgentCumulativeTokens,
   migrateLegacyCustomPills,
   log,
 } from "./server/resources";
@@ -224,9 +225,14 @@ const timelineTelemetryModule = createTimelineTelemetryFeature<PluginServerConte
     });
 
     const unsubscribeAgentCreated = server.on("agent.created", (event) => {
+      resetAgentCumulativeTokens(event.agent.id);
       if ((event.agent as any)?.lastUsage) {
         setLastLiveUsage((event.agent as any).lastUsage);
       }
+    });
+
+    const unsubscribeAgentArchived = server.on("agent.archived", (event) => {
+      resetAgentCumulativeTokens(event.agent.id);
     });
 
     const unsubscribeTurnEnded = server.on("agent.turn_ended", (event, context) => {
@@ -292,8 +298,10 @@ const timelineTelemetryModule = createTimelineTelemetryFeature<PluginServerConte
       turnStartTimes.clear();
       turnGitBefore.clear();
       turnCounters.clear();
+      resetAgentCumulativeTokens();
       unsubscribeTurnStarted();
       unsubscribeAgentCreated();
+      unsubscribeAgentArchived();
       unsubscribeTurnEnded();
     };
   },
