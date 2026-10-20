@@ -5,6 +5,7 @@ import {
   parseEnvelope,
   type CrossDaemonEnvelope,
 } from "./envelope.ts";
+import { directHostMismatch } from "./registry.ts";
 
 const SENT_AT = "2026-09-25T12:00:00.000Z";
 
@@ -104,5 +105,13 @@ describe("envelope wire contract", () => {
   it("does not treat ordinary prose as a delivery", () => {
     assert.equal(parseEnvelope("Can you take a look at the failing test?"), null);
     assert.equal(parseEnvelope(`A user pasted ${"<x-comms-message>"} mid-sentence`), null);
+  });
+});
+
+describe("directHostMismatch custom aliases (#1367)", () => {
+  it("returns null for arbitrary custom aliases without enforcing host name matching", () => {
+    assert.equal(directHostMismatch("my-laptop", "192.168.1.100:6767"), null);
+    assert.equal(directHostMismatch("desktop", "tcp://10.0.0.5:6767"), null);
+    assert.equal(directHostMismatch("remote", "https://app.paseo.sh/#offer=xyz"), null);
   });
 });

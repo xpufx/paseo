@@ -41,7 +41,6 @@ import {
   serverStatusRpc,
   introspectAgentsRpc,
   introduceAgentsRpc,
-  directHostMismatch,
   conversationSendRpc,
 } from "../shared/registry";
 
@@ -227,6 +226,9 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
   const [addProbe, setAddProbe] = useState<{ value: string; error: string | null } | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Set<string>>(new Set());
+  const [addError, setAddError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [probingDaemon, setProbingDaemon] = useState<Set<string>>(new Set());
 
   // Pairing flow state.
   const [pairTarget, setPairTarget] = useState<string | null>(null);
@@ -234,10 +236,30 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
   const [pairing, setPairing] = useState(false);
   const [pairResult, setPairResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
-  const applyResult = useCallback(
+  const applyMutationResult = useCallback(
     (result: unknown) => {
-      const r = result as { error?: string | null };
-      if (r?.error) throw new Error(r.error);
+      const r = result as { saved?: boolean; error?: string | null };
+      if (r?.error || r?.saved === false) {
+        setActionError(r?.error ?? "Operation failed");
+        return;
+      }
+      setActionError(null);
+      void read.refetch();
+      void health.refetch();
+    },
+    [read, health],
+  );
+
+  const handleAddSuccess = useCallback(
+    (result: { saved: boolean; error: string | null }) => {
+      if (!result.saved || result.error) {
+        setAddError(result.error ?? "Failed to add daemon");
+        return;
+      }
+      setAddError(null);
+      setNewName("");
+      setNewValue("");
+      setAddProbe(null);
       void read.refetch();
       void health.refetch();
     },
@@ -265,21 +287,51 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
     [probe],
   );
 
-  const deriveHost = useCallback((value: string) => {
-    const offer = value.match(/#offer=([A-Za-z0-9_-]+)/);
-    if (offer && newName.trim().length === 0) {
-      try {
-        const payload = JSON.parse(Buffer.from(offer[1], "base64").toString("utf8"));
-        if (typeof payload.serverId === "string") setNewName(payload.serverId);
-      } catch { /* ignore */ }
-    }
-  }, [newName]);
+  const deriveHost = useCallback(
+    (value: string) => {
+      const offer = value.match(/#offer=([A-Za-z0-9_-]+)/);
+      if (offer && newName.trim().length === 0) {
+        try {
+          const payload = JSON.parse(Buffer.from(offer[1], "base64").toString("utf8"));
+          const candidate =
+            typeof payload.serverId === "string" && payload.serverId.trim().length > 0
+              ? payload.serverId.trim()
+              : typeof payload.hostname === "string" && payload.hostname.trim().length > 0
+                ? payload.hostname.trim()
+                : null;
+          if (candidate) setNewName(candidate);
+        } catch { /* ignore */ }
+      }
+    },
+    [newName],
+  );
+
+  const handleProbeDaemon = useCallback(
+    (daemon: { name: string; value: string }) => {
+      setProbingDaemon((prev) => new Set(prev).add(daemon.name));
+      probe.mutate(
+        { value: daemon.value },
+        {
+          onSettled: () => {
+            setProbingDaemon((prev) => {
+              const next = new Set(prev);
+              next.delete(daemon.name);
+              return next;
+            });
+            void health.refetch();
+          },
+        },
+      );
+    },
+    [probe, health],
+  );
 
   const handleAdd = useCallback(() => {
     const name = newName.trim();
     const value = newValue.trim();
     if (!name || !value) return;
     setAdding(true);
+    setAddError(null);
     probeValue(value).then((outcome) => {
       if (outcome === "invalid") {
         setAddProbe({ value, error: "not a valid host form" });
@@ -292,17 +344,33 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
         return;
       }
       setAddProbe(null);
-      add.mutate({ name, value }, { onSuccess: applyResult, onSettled: () => setAdding(false) });
+      add.mutate(
+        { name, value },
+        {
+          onSuccess: handleAddSuccess,
+          onError: (err) => setAddError(err instanceof Error ? err.message : String(err)),
+          onSettled: () => setAdding(false),
+        },
+      );
     });
-  }, [add, newName, newValue, applyResult, probeValue]);
+  }, [add, newName, newValue, handleAddSuccess, probeValue]);
 
   const confirmAddAnyway = useCallback(() => {
     const value = newValue.trim();
     const name = newName.trim();
     if (!name || !value) return;
     setAddProbe(null);
-    add.mutate({ name, value }, { onSuccess: applyResult });
-  }, [add, newName, newValue, applyResult]);
+    setAdding(true);
+    setAddError(null);
+    add.mutate(
+      { name, value },
+      {
+        onSuccess: handleAddSuccess,
+        onError: (err) => setAddError(err instanceof Error ? err.message : String(err)),
+        onSettled: () => setAdding(false),
+      },
+    );
+  }, [add, newName, newValue, handleAddSuccess]);
 
   const handleSave = useCallback(
     (originalName: string) => {
@@ -323,7 +391,7 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
           update.mutate(
             { name: originalName, rename, value },
             {
-              onSuccess: applyResult,
+              onSuccess: applyMutationResult,
               onSettled: () => {
                 setEdits((prev) => { const next = { ...prev }; delete next[originalName]; return next; });
                 setEditing((prev) => { const next = new Set(prev); next.delete(originalName); return next; });
@@ -339,7 +407,7 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
         setRowProbe((prev) => ({ ...prev, [originalName]: { value: targetValue, error: "not a valid host form", saved: false } }));
       });
     },
-    [update, edits, applyResult, probeValue],
+    [update, edits, applyMutationResult, probeValue],
   );
 
   const confirmEditAnyway = useCallback(
@@ -352,7 +420,7 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
       update.mutate(
         { name: originalName, rename, value },
         {
-          onSuccess: applyResult,
+          onSuccess: applyMutationResult,
           onSettled: () => {
             setEdits((prev) => { const next = { ...prev }; delete next[originalName]; return next; });
             setEditing((prev) => { const next = new Set(prev); next.delete(originalName); return next; });
@@ -360,7 +428,7 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
         },
       );
     },
-    [update, edits, applyResult],
+    [update, edits, applyMutationResult],
   );
 
   const [pendingRemove, setPendingRemove] = useState<string | null>(null);
@@ -374,9 +442,9 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
 
   const confirmRemove = useCallback(() => {
     if (!pendingRemove) return;
-    remove.mutate({ name: pendingRemove }, { onSuccess: applyResult });
+    remove.mutate({ name: pendingRemove }, { onSuccess: applyMutationResult });
     setPendingRemove(null);
-  }, [pendingRemove, remove, applyResult]);
+  }, [pendingRemove, remove, applyMutationResult]);
 
   const canAdd = newName.trim().length > 0 && newValue.trim().length > 0;
 
@@ -430,11 +498,6 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
     },
     [aliasByServerId, serverIdByName],
   );
-
-  const addMismatch =
-    newName.trim().length > 0 && newValue.trim().length > 0 && !newValue.includes("#offer=")
-      ? directHostMismatch(newName.trim(), newValue.trim())
-      : null;
 
   const daemonCount = read.data?.daemons.length ?? 0;
 
@@ -546,7 +609,6 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
           </KeyValueGroup>
         </Collapsible>
 
-        <SectionHeader title="Registered daemons" count={daemonCount} />
         {read.data?.registryPath ? (
           <KeyValue label="Registry path" value={read.data.registryPath} mono copyable truncate="path" />
         ) : null}
@@ -554,9 +616,6 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
           <Card>
             <Card.Header title="Loading…" subtitle="Reading the daemon registry." />
           </Card>
-        ) : null}
-        {!read.isPending && !read.data?.exists ? (
-          <EmptyState title="No registry file yet." description="Add your first daemon below." />
         ) : null}
         {read.data && !read.data.validJson ? (
           <Card variant="elevated">
@@ -569,11 +628,10 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
         ) : null}
         {health.isPending ? <Notice tone="muted">Checking health…</Notice> : null}
 
-        {/* Two-tier display: Paired Peers vs Discovered Hosts */}
         {(() => {
-          const paired = (read.data?.daemons ?? []).filter(isPairedFn);
-          const unpaired = (read.data?.daemons ?? []).filter(isUnpaired);
-          const other = (read.data?.daemons ?? []).filter((d) => !isPairedFn(d) && !isUnpaired(d));
+          const allDaemons = read.data?.daemons ?? [];
+          const registered = allDaemons.filter((d) => d.source !== "configured-host");
+          const discovered = allDaemons.filter((d) => d.source === "configured-host");
 
           const renderDaemonCard = (daemon: { name: string; value: string; valid: boolean; error: string | null; source?: string; serverId?: string | null; hostname?: string | null; isPaired?: boolean }) => {
             const draft = edits[daemon.name] ?? { name: daemon.name, value: daemon.value };
@@ -668,6 +726,15 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
                 ) : null}
                 <ActionBar align="flex-start">
                   <Button
+                    label="Probe"
+                    size="sm"
+                    variant="secondary"
+                    icon="RefreshCw"
+                    loading={probingDaemon.has(daemon.name)}
+                    disabled={probingDaemon.has(daemon.name)}
+                    onPress={() => handleProbeDaemon(daemon)}
+                  />
+                  <Button
                     label="Edit"
                     size="sm"
                     variant="secondary"
@@ -690,58 +757,47 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
 
           return (
             <>
-              {/* Paired Peers section */}
-              {paired.length > 0 && (
-                <>
-                  <SectionHeader title="Paired peers" count={paired.length} />
-                  {paired.map(renderDaemonCard)}
-                </>
-              )}
+              <SectionHeader title="Registered daemons" count={registered.length} />
+              {!read.isPending && registered.length === 0 ? (
+                <EmptyState title="No registered daemons yet" description="Add your first daemon below." />
+              ) : null}
+              {registered.map(renderDaemonCard)}
 
-              {/* Discovered Hosts section */}
-              {unpaired.length > 0 && (
+              {discovered.length > 0 && (
                 <>
-                  <SectionHeader title="Discovered hosts" count={unpaired.length} />
-                  {unpaired.map((daemon) => {
+                  <SectionHeader title="Discovered hosts" count={discovered.length} />
+                  {discovered.map((daemon) => {
                     const h = healthByName[daemon.name];
                     return (
-                    <Card key={daemon.name} variant="elevated">
-                      <Card.Header
-                        title={peerLabelForName(daemon.name)}
-                        subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
-                        badge={<Badge label="discovered (not paired)" variant="warning" dot />}
-                      />
-                      <KeyValue label="Host value" value={daemon.value} mono copyable truncate="end" truncateMaxLength={36} />
-                      {h && !h.reachable ? (
-                        <Text selectable style={{ color: colors.statusDanger, fontSize: 12 }}>
-                          {h.error ?? "unreachable"}
-                        </Text>
-                      ) : null}
-                      <ActionBar align="flex-start">
-                        <Button
-                          label="Pair this host"
-                          size="sm"
-                          variant="primary"
-                          onPress={() => setPairTarget(daemon.name)}
+                      <Card key={daemon.name} variant="elevated">
+                        <Card.Header
+                          title={peerLabelForName(daemon.name)}
+                          subtitle={daemon.hostname && daemon.hostname !== daemon.name ? daemon.hostname : undefined}
+                          badge={<Badge label="discovered (not paired)" variant="warning" dot />}
                         />
-                        <Button
-                          label="Remove"
-                          size="sm"
-                          variant="danger"
-                          onPress={() => handleRemove(daemon.name)}
-                        />
-                      </ActionBar>
-                    </Card>
+                        <KeyValue label="Host value" value={daemon.value} mono copyable truncate="end" truncateMaxLength={36} />
+                        {h && !h.reachable ? (
+                          <Text selectable style={{ color: colors.statusDanger, fontSize: 12 }}>
+                            {h.error ?? "unreachable"}
+                          </Text>
+                        ) : null}
+                        <ActionBar align="flex-start">
+                          <Button
+                            label="Pair this host"
+                            size="sm"
+                            variant="primary"
+                            onPress={() => setPairTarget(daemon.name)}
+                          />
+                          <Button
+                            label="Remove"
+                            size="sm"
+                            variant="danger"
+                            onPress={() => handleRemove(daemon.name)}
+                          />
+                        </ActionBar>
+                      </Card>
                     );
                   })}
-                </>
-              )}
-
-              {/* Unlabelled entries (neither paired nor unpaired) */}
-              {other.length > 0 && (
-                <>
-                  <SectionHeader title="Registered daemons" count={other.length} />
-                  {other.map(renderDaemonCard)}
                 </>
               )}
             </>
@@ -751,20 +807,26 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
         <SectionHeader title="Add daemon" />
         <Card>
           <FormRow label="Name" description="The daemon's real name; derived automatically for relay links.">
-            <TextInput value={newName} onChangeText={setNewName} autoCapitalize="none" autoCorrect={false} />
+            <TextInput
+              value={newName}
+              onChangeText={(text) => { setNewName(text); setAddError(null); }}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
           </FormRow>
           <FormRow label="Host value" description={HOST_FORM_HINT}>
             <TextInput
               mono
               value={newValue}
-              onChangeText={(text) => { setNewValue(text); deriveHost(text); }}
+              onChangeText={(text) => { setNewValue(text); deriveHost(text); setAddError(null); }}
               autoCapitalize="none"
               autoCorrect={false}
               placeholder={HOST_FORM_HINT}
-              errorText={addMismatch ?? undefined}
             />
           </FormRow>
-          {add.error ? <Notice>{add.error.message}</Notice> : null}
+          {(addError ?? add.error?.message) ? (
+            <Notice>{addError ?? add.error?.message}</Notice>
+          ) : null}
           {adding ? <Notice tone="muted">Probing host…</Notice> : null}
           {addProbe ? (
             <>
@@ -783,8 +845,18 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
               disabled={!canAdd || add.isPending || adding}
               onPress={handleAdd}
             />
+            {!addProbe && canAdd ? (
+              <Button
+                label="Add anyway"
+                variant="secondary"
+                loading={add.isPending || adding}
+                disabled={!canAdd || add.isPending || adding}
+                onPress={confirmAddAnyway}
+              />
+            ) : null}
           </ActionBar>
         </Card>
+        {actionError ? <Notice>{actionError}</Notice> : null}
         {update.error ? <Notice>{update.error.message}</Notice> : null}
         {remove.error ? <Notice>{remove.error.message}</Notice> : null}
 
@@ -1058,7 +1130,7 @@ function CurrentSurface({ theme }: PluginSurfaceProps) {
             />
           </ActionBar>
           {pairResult?.ok ? (
-            <Notice tone="muted">✓ Paired successfully. The peer now appears under Paired peers.</Notice>
+            <Notice tone="muted">✓ Paired successfully. The peer now appears under Registered daemons.</Notice>
           ) : null}
           <ViaXComms theme={theme} />
         </ModalContent>

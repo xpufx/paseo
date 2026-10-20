@@ -205,6 +205,7 @@ export function parseConfiguredHosts(content: string): {
         source: "configured-host",
         serverId,
         status,
+        isPaired: false,
       });
       continue;
     }
@@ -218,6 +219,7 @@ export function parseConfiguredHosts(content: string): {
       source: "configured-host",
       serverId,
       status,
+      isPaired: false,
     });
   }
 
@@ -384,6 +386,7 @@ export function readRegistry(
     ...d,
     source: "registry" as const,
     serverId: deriveHostFromValue(d.value) ?? null,
+    isPaired: true,
   }));
 
   if (!includeHosts) {
@@ -447,6 +450,7 @@ export function mutateRegistry(
     ...validateDaemonHost(value),
     source: "registry" as const,
     serverId: deriveHostFromValue(value) ?? null,
+    isPaired: true,
   }));
   const invalid = entries.find((entry) => !entry.valid);
   if (invalid) {
