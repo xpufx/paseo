@@ -367,25 +367,6 @@ export function TopTimelineTelemetryCard({
                 </HostVital>
               )}
 
-              {show("velocity") && (
-                <HostVital
-                  icon="Zap"
-                  color={
-                    data.tokensPerSecond != null && Number.isFinite(data.tokensPerSecond)
-                      ? data.contextPressureLevel === "high"
-                        ? theme.colors.statusDanger
-                        : data.contextPressureLevel === "warning"
-                          ? theme.colors.statusWarning
-                          : theme.colors.foreground
-                      : theme.colors.foregroundMuted
-                  }
-                >
-                  {data.tokensPerSecond != null && Number.isFinite(data.tokensPerSecond)
-                    ? `${Math.round(data.tokensPerSecond)} tok/s`
-                    : "vel --"}
-                </HostVital>
-              )}
-
               {show("tools") && (
                 <HostVital icon="Sigma" color={theme.colors.foreground}>
                   {data.toolCalls != null

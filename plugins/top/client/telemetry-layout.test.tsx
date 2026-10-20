@@ -383,6 +383,19 @@ describe("TopTimelineTelemetryCard velocity badge (#1308)", () => {
     expect(text).not.toContain("38 tok/s");
   });
 
+  it("does not render duplicate velocity in the summary row (#1465)", () => {
+    const renderer = renderCard(undefined, {
+      durationMs: 30000,
+      tokensPerSecond: 38,
+    });
+    const text = textOf(renderer.toJSON());
+    expect(text).toContain("⚡ 38 tok/s");
+    // Verify velocity appears only once across the rendered card (in header badge, not bottom summary)
+    const matches = text.match(/tok\/s/g);
+    expect(matches).toHaveLength(1);
+    expect(text).not.toContain("vel --");
+  });
+
   it("gates velocity badge behind the velocity setting", () => {
     const orig = mockPluginSettings;
     try {
