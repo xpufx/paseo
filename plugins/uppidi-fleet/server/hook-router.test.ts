@@ -11243,6 +11243,68 @@ describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
       assert.equal(isActionableWakeupEvent("issues", { action: "edited" }), false);
       assert.equal(isActionableWakeupEvent("pull_request", { action: "synchronize" }), false);
     });
+
+    it("matches human operator comments without slash commands (#1463)", () => {
+      // Human operator on issue_comment
+      assert.equal(
+        isActionableWakeupEvent("issue_comment", {
+          action: "created",
+          sender: { login: "okcode" },
+          comment: { body: "Is this ready for testing?" },
+        }),
+        true,
+      );
+      // Human operator on pull_request_review_comment
+      assert.equal(
+        isActionableWakeupEvent("pull_request_review_comment", {
+          action: "created",
+          sender: { login: "okcode" },
+          comment: { body: "Please check this edge case." },
+        }),
+        true,
+      );
+      // Shared agent actor without envelope is not an operator comment
+      assert.equal(
+        isActionableWakeupEvent("issue_comment", {
+          action: "created",
+          sender: { login: SHARED_AGENT_ACTOR },
+          comment: { body: "Routine agent output" },
+        }),
+        false,
+      );
+    });
+
+    it("matches label_updated containing action tokens (#1463)", () => {
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "label_updated",
+          issue: { labels: [{ name: "attention/orchestrator" }] },
+        }),
+        true,
+      );
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "label_updated",
+          issue: { labels: [{ name: "priority/sos" }] },
+        }),
+        true,
+      );
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "label_updated",
+          label: { name: "attention/frontdesk" },
+        }),
+        true,
+      );
+      // label_updated with only cosmetic metadata labels is passive
+      assert.equal(
+        isActionableWakeupEvent("issues", {
+          action: "label_updated",
+          issue: { labels: [{ name: "format/needed" }, { name: "size/m" }] },
+        }),
+        false,
+      );
+    });
   });
 
   describe("dormancy state tracking (isDormant, refreshDormancy, exitQuiescence)", () => {
@@ -11292,6 +11354,77 @@ describe("HookRouter fleet dormancy and hibernation (#1181)", () => {
       // explicit exitQuiescence leaves quiescent mode
       router.exitQuiescence("test wakeup");
       assert.equal(router.isQuiescent, false);
+    });
+  });
+
+  describe("dormancy webhook ingress and direct action decoupling (#1463)", () => {
+    it("human comment without slash command wakes fleet from dormancy", async () => {
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      router.enrollRepo("xpufx-org/test");
+      router.refreshDormancy(new Map());
+      assert.equal(router.isQuiescent, true);
+
+      const payload = {
+        action: "created",
+        repository: { full_name: "xpufx-org/test", html_url: "https://forge.mrs.uppidi.com/xpufx-org/test" },
+        sender: { login: "okcode" },
+        issue: { number: 42, title: "Test issue", state: "open" },
+        comment: { body: "Hey team, this bug needs fixing" },
+      };
+
+      const res = await router.ingestWebhook("issue_comment", payload);
+      assert.equal(router.isQuiescent, false);
+      assert.notEqual(res.result, "suppressed");
+    });
+
+    it("label_updated adding attention/orchestrator wakes fleet from dormancy", async () => {
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      router.enrollRepo("xpufx-org/test");
+      router.refreshDormancy(new Map());
+      assert.equal(router.isQuiescent, true);
+
+      const payload = {
+        action: "label_updated",
+        repository: { full_name: "xpufx-org/test", html_url: "https://forge.mrs.uppidi.com/xpufx-org/test" },
+        sender: { login: "okcode" },
+        issue: {
+          number: 42,
+          title: "Test issue",
+          state: "open",
+          labels: [{ name: "attention/orchestrator" }],
+        },
+      };
+
+      const res = await router.ingestWebhook("issues", payload);
+      assert.equal(router.isQuiescent, false);
+      assert.notEqual(res.result, "suppressed");
+    });
+
+    it("direct action runLabelTriage executes even during dormancy", async () => {
+      const router = new HookRouter({} as any, { queueDir, stateDir, port: 0 });
+      let triageCalls = 0;
+      (router as any).runLabelTriage = async () => {
+        triageCalls++;
+      };
+      router.refreshDormancy(new Map());
+      assert.equal(router.isQuiescent, true);
+
+      const payload = {
+        action: "created",
+        repository: { full_name: "xpufx-org/test", html_url: "https://forge.mrs.uppidi.com/xpufx-org/test" },
+        sender: { login: "xpufx" },
+        issue: { number: 42, title: "Test issue", state: "open" },
+        comment: {
+          body: "Routine progress update\n\n---\n<sub>🤖 **Worker** (`abc1234`) · `model` · `repo:branch` · _now_</sub>",
+        },
+      };
+
+      const res = await router.ingestWebhook("issue_comment", payload);
+      // Suppressed from agent queue delivery due to dormancy + passive self-stamped comment
+      assert.equal(res.result, "suppressed");
+      assert.equal(router.isQuiescent, true);
+      // Direct action runLabelTriage still executed!
+      assert.equal(triageCalls, 1);
     });
   });
 

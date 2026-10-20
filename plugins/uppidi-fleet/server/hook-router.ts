@@ -1289,6 +1289,48 @@ function wakeupEventAction(event: string, body: any): string {
   return `${event}:${String(body?.action ?? "").toLowerCase()}`;
 }
 
+function wakeupSenderLogin(body: any): string {
+  const sender = senderFromPayload(body);
+  if (typeof sender === "string") return sender.trim();
+  const login = sender?.login ?? sender?.username;
+  if (typeof login === "string") return login.trim();
+  if (typeof body?.actor === "string") return body.actor.trim();
+  return "";
+}
+
+function hasActionToken(body: any): boolean {
+  const check = (raw: unknown): boolean => {
+    const canonical = canonicalLabelName(raw);
+    if (!canonical || canonical === "attention/ignore") return false;
+    return canonical.startsWith("attention/") || WAKEUP_ACTION_LABELS.has(canonical);
+  };
+
+  const action = String(body?.action ?? "").toLowerCase();
+  if (action === "labeled") {
+    if (body?.label?.name) {
+      return check(body.label.name);
+    }
+    const issueLabels = body?.issue?.labels ?? body?.pull_request?.labels;
+    if (Array.isArray(issueLabels)) {
+      return issueLabels.some((l: any) => check(typeof l === "string" ? l : l?.name));
+    }
+    return false;
+  }
+
+  if (action === "label_updated") {
+    if (body?.label?.name && check(body.label.name)) {
+      return true;
+    }
+    const issueLabels = body?.issue?.labels ?? body?.pull_request?.labels;
+    if (Array.isArray(issueLabels)) {
+      return issueLabels.some((l: any) => check(typeof l === "string" ? l : l?.name));
+    }
+    return false;
+  }
+
+  return false;
+}
+
 /**
  * Declarative wakeup rules, first match wins. Actionable signals come first so
  * a directive still wakes the fleet even inside an envelope-decorated comment;
@@ -1303,13 +1345,27 @@ export const WAKEUP_RULES: readonly WakeupRule[] = [
     matches: (_event, body) => SLASH_COMMAND_RE.test(wakeupCommentText(body)),
   },
   {
+    id: "operator-comment",
+    description: "human operator comment (non-shared actor, no agent envelope)",
+    actionable: true,
+    matches: (event, body) => {
+      if (event !== "issue_comment" && event !== "pull_request_review_comment") return false;
+      if (envelopeAgentId(body) !== null) return false;
+      const action = String(body?.action ?? "").toLowerCase();
+      if (action === "deleted") return false;
+      const sender = wakeupSenderLogin(body);
+      return sender !== SHARED_AGENT_ACTOR;
+    },
+  },
+  {
     id: "action-token-transfer",
     description:
-      "labeled with attention/orchestrator, attention/frontdesk, priority/sos, state/review, review/needed or flag/stop-work",
+      "labeled or label_updated with attention/orchestrator, attention/frontdesk, priority/sos, state/review, review/needed or flag/stop-work",
     actionable: true,
     matches: (_event, body) => {
-      if (String(body?.action ?? "").toLowerCase() !== "labeled") return false;
-      return WAKEUP_ACTION_LABELS.has(canonicalLabelName(body?.label?.name));
+      const action = String(body?.action ?? "").toLowerCase();
+      if (action !== "labeled" && action !== "label_updated") return false;
+      return hasActionToken(body);
     },
   },
   {
@@ -1322,7 +1378,9 @@ export const WAKEUP_RULES: readonly WakeupRule[] = [
     id: "passive-self-stamped-comment",
     description: "fleet-originated (self-stamped) comment",
     actionable: false,
-    matches: (event, body) => event === "issue_comment" && envelopeAgentId(body) !== null,
+    matches: (event, body) =>
+      (event === "issue_comment" || event === "pull_request_review_comment") &&
+      envelopeAgentId(body) !== null,
   },
   {
     id: "passive-issue-closed",
@@ -1348,10 +1406,13 @@ export const WAKEUP_RULES: readonly WakeupRule[] = [
     id: "passive-cosmetic-edit",
     description: "body/description edit or other cosmetic mutation",
     actionable: false,
-    matches: (_event, body) =>
-      ["edited", "label_updated", "synchronize", "synchronized"].includes(
-        String(body?.action ?? "").toLowerCase(),
-      ),
+    matches: (_event, body) => {
+      const action = String(body?.action ?? "").toLowerCase();
+      if (action === "label_updated") {
+        return !hasActionToken(body);
+      }
+      return ["edited", "synchronize", "synchronized"].includes(action);
+    },
   },
 ];
 
@@ -5176,6 +5237,14 @@ export class HookRouter {
       return { key: targetKey, result: "suppressed", frontDesk: isFd, bypass: false };
     }
     const ev = String(event ?? "unknown");
+
+    // Direct-action guards (#847) run off the critical path: the delivery is
+    // acknowledged immediately and the guard acts asynchronously. Both are
+    // disabled by default under test so fixtures never touch the network.
+    // Repository governance invariants always execute on incoming webhooks, before
+    // dormancy/quiescence filtering (#1463).
+    void this.runDirectActions(ev, body);
+
     // Quiescence (#1181): an actionable wakeup clears dormancy immediately; a
     // passive event while quiescent must not wake the fleet at all.
     if (isActionableWakeupEvent(ev, body)) {
@@ -5195,11 +5264,6 @@ export class HookRouter {
       .map((l: any) => (typeof l === "string" ? l : l?.name))
       .filter(Boolean);
     const msg = formatWebhookMessage(ev, body);
-
-    // Direct-action guards (#847) run off the critical path: the delivery is
-    // acknowledged immediately and the guard acts asynchronously. Both are
-    // disabled by default under test so fixtures never touch the network.
-    void this.runDirectActions(ev, body);
 
     // Explicit operator board sweep (`/sweep`) always delivers, bypassing the
     // delta gate that suppresses unchanged sweeps (#1181).
