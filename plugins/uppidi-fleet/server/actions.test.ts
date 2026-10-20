@@ -289,7 +289,7 @@ describe("server/actions.ts", () => {
       const result = await handleForgeActionRuns({ repo: "xpufx-org/paseo", status: "all", limit: 10 });
 
       // The limit is passed to the Forgejo API; the server doesn't truncate client-side
-      // but the contract says limit defaults to 50 and maxes at 100.
+      // but the contract says limit defaults to 10 and maxes at 100.
       assert.equal(result.ok, true);
       // The actual count depends on what Forgejo returns; our handler passes limit through.
       assert.ok(result.runs.length > 0);
@@ -592,6 +592,141 @@ describe("server/actions.ts", () => {
       assert.equal(result.ok, true);
       assert.equal(result.runs.length, 2);
       assert.ok(result.runs.some((r) => r.id === 5001));
+    });
+  });
+
+  describe("pagination, limit default 10, totalCount, and hasMore (#1177)", () => {
+    test("defaults limit to 10 and page to 1 when omitted", async () => {
+      let requestedUrl = "";
+      setFetchForTest(async (input: string) => {
+        requestedUrl = input;
+        return {
+          ok: true,
+          json: async () => ({ total_count: 0, workflow_runs: [] }),
+        };
+      });
+
+      const result = await handleForgeActionRuns({ repo: "xpufx-org/paseo" });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.page, 1);
+      assert.equal(result.limit, 10);
+      assert.equal(result.totalCount, 0);
+      assert.equal(result.hasMore, false);
+      assert.ok(requestedUrl.includes("page=1&limit=10"));
+    });
+
+    test("passes page and limit parameters to Forgejo API endpoint", async () => {
+      let requestedUrl = "";
+      setFetchForTest(async (input: string) => {
+        requestedUrl = input;
+        return {
+          ok: true,
+          json: async () => ({
+            total_count: 35,
+            workflow_runs: [FORGEJO_RUN_1],
+          }),
+        };
+      });
+
+      const result = await handleForgeActionRuns({
+        repo: "xpufx-org/paseo",
+        page: 2,
+        limit: 10,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.page, 2);
+      assert.equal(result.limit, 10);
+      assert.equal(result.totalCount, 35);
+      assert.equal(result.hasMore, true); // page 2 * limit 10 (20) < 35
+      assert.ok(requestedUrl.includes("page=2&limit=10"));
+    });
+
+    test("computes hasMore = true when more pages exist", async () => {
+      const envelope = {
+        total_count: 25,
+        workflow_runs: Array.from({ length: 10 }, (_, i) => ({
+          ...FORGEJO_RUN_1,
+          id: 6000 + i,
+        })),
+      };
+      setFetchForTest(async (_input: string) => ({
+        ok: true,
+        json: async () => envelope,
+      }));
+
+      const result = await handleForgeActionRuns({
+        repo: "xpufx-org/paseo",
+        page: 1,
+        limit: 10,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.runs.length, 10);
+      assert.equal(result.totalCount, 25);
+      assert.equal(result.hasMore, true);
+    });
+
+    test("computes hasMore = false on the final page", async () => {
+      const envelope = {
+        total_count: 25,
+        workflow_runs: Array.from({ length: 5 }, (_, i) => ({
+          ...FORGEJO_RUN_1,
+          id: 6010 + i,
+        })),
+      };
+      setFetchForTest(async (_input: string) => ({
+        ok: true,
+        json: async () => envelope,
+      }));
+
+      const result = await handleForgeActionRuns({
+        repo: "xpufx-org/paseo",
+        page: 3,
+        limit: 10,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.runs.length, 5);
+      assert.equal(result.totalCount, 25);
+      assert.equal(result.hasMore, false); // 3 * 10 = 30 >= 25
+    });
+
+    test("caps limit at 100 and clamps minimum page to 1", async () => {
+      let requestedUrl = "";
+      setFetchForTest(async (input: string) => {
+        requestedUrl = input;
+        return {
+          ok: true,
+          json: async () => ({ total_count: 0, workflow_runs: [] }),
+        };
+      });
+
+      const result = await handleForgeActionRuns({
+        repo: "xpufx-org/paseo",
+        page: 0,
+        limit: 250,
+      });
+
+      assert.equal(result.page, 1);
+      assert.equal(result.limit, 100);
+      assert.ok(requestedUrl.includes("page=1&limit=100"));
+    });
+
+    test("all-enrolled-repos mode returns pagination envelope", async () => {
+      const result = await handleForgeActionRuns({
+        status: "all",
+        page: 2,
+        limit: 10,
+      });
+
+      assert.equal(result.ok, true);
+      assert.equal(result.page, 2);
+      assert.equal(result.limit, 10);
+      assert.equal(result.runs.length, 0);
+      assert.equal(result.totalCount, 0);
+      assert.equal(result.hasMore, false);
     });
   });
 });

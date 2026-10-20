@@ -150,7 +150,8 @@ export function parseForgejoRun(raw: Record<string, unknown>, repoKey: string): 
 async function fetchRepoActionRuns(
   repoKey: string,
   limit: number,
-): Promise<{ runs: ForgeActionRun[]; error?: string }> {
+  page: number = 1,
+): Promise<{ runs: ForgeActionRun[]; total_count?: number; error?: string }> {
   const host = resolveForgejoHost();
   const token = await forgejoToken(host);
   if (!token) {
@@ -163,7 +164,7 @@ async function fetchRepoActionRuns(
   }
 
   const res = await forgejoApiGet<Record<string, unknown>>(
-    `/api/v1/repos/${slug}/actions/runs?limit=${limit}`,
+    `/api/v1/repos/${slug}/actions/runs?page=${page}&limit=${limit}`,
     { host, token },
   );
 
@@ -174,6 +175,7 @@ async function fetchRepoActionRuns(
   // Forgejo returns { total_count: number, workflow_runs: [...] } envelope.
   const rawData = res.data as { total_count?: number; workflow_runs?: unknown[] } | undefined;
   const rawList = Array.isArray(rawData?.workflow_runs) ? rawData.workflow_runs : [];
+  const totalCount = typeof rawData?.total_count === "number" ? rawData.total_count : undefined;
   const runs: ForgeActionRun[] = [];
   for (const r of rawList) {
     try {
@@ -184,7 +186,7 @@ async function fetchRepoActionRuns(
       // Unhandled error in an entry must never drop the entire list of runs
     }
   }
-  return { runs };
+  return { runs, total_count: totalCount };
 }
 
 /**
@@ -196,57 +198,92 @@ function getEnrolledRepoKeys(): string[] {
 }
 
 export async function handleForgeActionRuns(
-  input: ForgeActionRunsInput,
+  input: Partial<ForgeActionRunsInput>,
   _context?: PluginHandlerContext,
 ): Promise<ForgeActionRunsOutput> {
-  const limit = Math.min(input.limit ?? 50, 100);
+  const page = Math.max(input.page ?? 1, 1);
+  const limit = Math.min(Math.max(input.limit ?? 10, 1), 100);
+  const status = input.status ?? "all";
 
   // Single-repository mode: direct query.
   if (input.repo) {
-    const result = await fetchRepoActionRuns(input.repo, limit);
+    const result = await fetchRepoActionRuns(input.repo, limit, page);
     let runs = result.runs;
 
     // Apply status filter client-side.
-    if (input.status !== "all") {
-      runs = filterByStatus(runs, input.status);
+    if (status !== "all") {
+      runs = filterByStatus(runs, status);
     }
 
     // Sort newest first.
     runs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    return { ok: true, runs };
+    const totalCount = result.total_count;
+    const hasMore = totalCount !== undefined ? page * limit < totalCount : runs.length >= limit;
+
+    return {
+      ok: true,
+      runs,
+      page,
+      limit,
+      totalCount,
+      hasMore,
+      error: result.error,
+    };
   }
 
   // All-enrolled-repos mode: parallel fetch with error resilience.
   const enrolledRepoKeys = getEnrolledRepoKeys();
   if (enrolledRepoKeys.length === 0) {
-    return { ok: true, runs: [] };
+    return { ok: true, runs: [], page, limit, totalCount: 0, hasMore: false };
   }
 
+  // Query up to limit * page runs from each enrolled repo (capped at 100) so we can
+  // aggregate and sort chronologically before slicing for the current page.
+  const fetchLimit = Math.min(Math.max(limit * page, 10), 100);
   const results = await Promise.allSettled(
-    enrolledRepoKeys.map((repoKey) => fetchRepoActionRuns(repoKey, limit)),
+    enrolledRepoKeys.map((repoKey) => fetchRepoActionRuns(repoKey, fetchLimit, 1)),
   );
 
   const allRuns: ForgeActionRun[] = [];
+  let totalCount = 0;
+  let hasValidTotalCount = false;
+
   for (const result of results) {
     if (result.status === "fulfilled") {
       allRuns.push(...result.value.runs);
+      if (typeof result.value.total_count === "number") {
+        totalCount += result.value.total_count;
+        hasValidTotalCount = true;
+      }
     }
     // Settled but rejected → silently skip (resilient aggregation).
   }
 
-  // Apply status filter.
-  if (input.status !== "all") {
-    const filtered = filterByStatus(allRuns, input.status);
-    // Re-sort after filtering.
-    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    return { ok: true, runs: filtered };
+  let filteredRuns = allRuns;
+  if (status !== "all") {
+    filteredRuns = filterByStatus(allRuns, status);
   }
 
   // Sort newest first across all repos.
-  allRuns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  filteredRuns.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-  return { ok: true, runs: allRuns };
+  const startIndex = (page - 1) * limit;
+  const pagedRuns = filteredRuns.slice(startIndex, startIndex + limit);
+
+  const finalTotalCount = hasValidTotalCount ? totalCount : filteredRuns.length;
+  const hasMore = hasValidTotalCount
+    ? page * limit < totalCount
+    : startIndex + limit < filteredRuns.length;
+
+  return {
+    ok: true,
+    runs: pagedRuns,
+    page,
+    limit,
+    totalCount: finalTotalCount,
+    hasMore,
+  };
 }
 
 /**

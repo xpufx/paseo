@@ -2642,13 +2642,18 @@ export type ForgeActionRun = z.infer<typeof ForgeActionRunSchema>;
 export const ForgeActionRunsInputSchema = z.object({
   repo: z.string().optional(),
   status: z.enum(["all", "running", "failed", "succeeded"]).default("all"),
-  limit: z.number().default(50),
+  page: z.number().int().min(1).default(1),
+  limit: z.number().default(10),
 });
 export type ForgeActionRunsInput = z.infer<typeof ForgeActionRunsInputSchema>;
 
 export const ForgeActionRunsOutputSchema = z.object({
   ok: z.boolean(),
   runs: z.array(ForgeActionRunSchema).default([]),
+  page: z.number().default(1),
+  limit: z.number().default(10),
+  totalCount: z.number().optional(),
+  hasMore: z.boolean().default(false),
   error: z.string().optional(),
 });
 export type ForgeActionRunsOutput = z.infer<typeof ForgeActionRunsOutputSchema>;

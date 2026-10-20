@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, Linking } from "react-native";
 import {
   Card,
   CardHeader,
   Badge,
+  Button,
   SearchInput,
   EmptyState,
   Row,
@@ -121,6 +122,27 @@ export function ActionsTabView({
   const { colors, typography } = useFleetTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  // Reset page to 1 when selected repo changes.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedRepo]);
+
+  const handleSearchChange = (text: string) => {
+    setSearchQuery(text);
+    setCurrentPage(1);
+  };
+
+  const handleSearchClear = () => {
+    setSearchQuery("");
+    setCurrentPage(1);
+  };
+
+  const handleStatusFilterChange = (newStatus: string) => {
+    setStatusFilter(newStatus);
+    setCurrentPage(1);
+  };
 
   // Resolve the repo parameter for the RPC call.
   const rpcRepo = useMemo(() => {
@@ -133,9 +155,10 @@ export function ActionsTabView({
     () => ({
       repo: rpcRepo,
       status: statusFilter as "all" | "running" | "failed" | "succeeded",
-      limit: 50,
+      page: currentPage,
+      limit: 10,
     }),
-    [rpcRepo, statusFilter],
+    [rpcRepo, statusFilter, currentPage],
   );
 
   // Fetch action runs via RPC.
@@ -145,6 +168,9 @@ export function ActionsTabView({
   });
 
   const runs = rpcData?.runs ?? [];
+  const totalCount = rpcData?.totalCount;
+  const hasMore = rpcData?.hasMore ?? false;
+  const totalPages = totalCount !== undefined ? Math.max(1, Math.ceil(totalCount / 10)) : undefined;
 
   // Client-side search filtering across all searchable fields.
   const filteredRuns = useMemo(() => {
@@ -308,32 +334,65 @@ export function ActionsTabView({
           <SearchInput
             placeholder="Search workflows, commits, branches, users…"
             value={searchQuery}
-            onChangeText={setSearchQuery}
-            onClear={() => setSearchQuery("")}
+            onChangeText={handleSearchChange}
+            onClear={handleSearchClear}
           />
           <Row align="center" gap="xs" wrap>
             {QUICK_FILTERS.map((filter) => (
-              <Badge
+              <Button
                 key={filter.id}
                 label={filter.label}
-                variant={statusFilter === filter.id ? "info" : "neutral"}
+                variant={statusFilter === filter.id ? "primary" : "ghost"}
                 size="sm"
+                onPress={() => handleStatusFilterChange(filter.id)}
               />
             ))}
           </Row>
         </Stack>
 
-        {/* Results count */}
-        <Text
-          style={{
-            color: colors.foregroundMuted,
-            ...typography.caption,
-            fontSize: 12,
-          }}
-        >
-          {filteredRuns.length} run{filteredRuns.length !== 1 ? "s" : ""}
-          {isLoading && " (loading…)"}
-        </Text>
+        {/* Results count & Pagination controls */}
+        <Row justify="space-between" align="center" wrap gap="xs">
+          <Text
+            style={{
+              color: colors.foregroundMuted,
+              ...typography.caption,
+              fontSize: 12,
+            }}
+          >
+            {totalCount !== undefined
+              ? `${totalCount} total run${totalCount !== 1 ? "s" : ""}`
+              : `${filteredRuns.length} run${filteredRuns.length !== 1 ? "s" : ""}`}
+            {isLoading && " (loading…)"}
+          </Text>
+
+          <Row align="center" gap="xs">
+            <Button
+              label="Previous"
+              size="sm"
+              variant="ghost"
+              disabled={currentPage <= 1 || isLoading}
+              onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            />
+            <Text
+              style={{
+                color: colors.foregroundMuted,
+                ...typography.caption,
+                fontSize: 12,
+              }}
+            >
+              {totalPages !== undefined
+                ? `Page ${currentPage} of ${totalPages}`
+                : `Page ${currentPage}`}
+            </Text>
+            <Button
+              label="Next"
+              size="sm"
+              variant="ghost"
+              disabled={!hasMore || (totalPages !== undefined && currentPage >= totalPages) || isLoading}
+              onPress={() => setCurrentPage((p) => p + 1)}
+            />
+          </Row>
+        </Row>
 
         {/* Action runs list */}
         {filteredRuns.length === 0 && !isLoading ? (
@@ -347,7 +406,36 @@ export function ActionsTabView({
             }
           />
         ) : (
-          <Stack gap={2}>{filteredRuns.map(renderRunCard)}</Stack>
+          <Stack gap={2}>
+            {filteredRuns.map(renderRunCard)}
+            <Row justify="space-between" align="center" style={{ paddingTop: 8, paddingBottom: 4 }}>
+              <Button
+                label="Previous Page"
+                size="sm"
+                variant="ghost"
+                disabled={currentPage <= 1 || isLoading}
+                onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              />
+              <Text
+                style={{
+                  color: colors.foregroundMuted,
+                  ...typography.caption,
+                  fontSize: 12,
+                }}
+              >
+                {totalPages !== undefined
+                  ? `Page ${currentPage} of ${totalPages}`
+                  : `Page ${currentPage}`}
+              </Text>
+              <Button
+                label="Next Page"
+                size="sm"
+                variant="ghost"
+                disabled={!hasMore || (totalPages !== undefined && currentPage >= totalPages) || isLoading}
+                onPress={() => setCurrentPage((p) => p + 1)}
+              />
+            </Row>
+          </Stack>
         )}
       </Stack>
     </ModalBodyScrollOwnerContext.Provider>
