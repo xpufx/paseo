@@ -327,14 +327,6 @@ function SlashConsoleInner() {
               onChangeText={(val) => updateSettings({ prefix: val })}
             />
           </HostFormRow>
-          {settings.hasPromptManager ? (
-            <HostFormRow label="Include Prompt Manager prompts in slash commands">
-              <HostToggle
-                value={settings.includePromptManagerPrompts ?? false}
-                onValueChange={(val) => updateSettings({ includePromptManagerPrompts: val })}
-              />
-            </HostFormRow>
-          ) : null}
           {form ? null : (
             <HostActionBar align="start" direction="row" style={{ marginTop: spacing.sm }}>
               <HostButton
@@ -469,6 +461,14 @@ function SlashConsoleInner() {
           subtitle="Hook endpoint, bundle import/export and reset"
           icon="Wrench"
         >
+          {settings.hasPromptManager ? (
+            <HostFormRow label="Include Prompt Manager prompts in slash commands">
+              <HostToggle
+                value={settings.includePromptManagerPrompts ?? false}
+                onValueChange={(val) => updateSettings({ includePromptManagerPrompts: val })}
+              />
+            </HostFormRow>
+          ) : null}
           <HostFormRow
             label="Hook URL"
             description="Base URL for rpc operations targeting the forgejo hook. Empty uses PASEO_FORGEJO_HOOK_URL, then http://127.0.0.1:8099."
