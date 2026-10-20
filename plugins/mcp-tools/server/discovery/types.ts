@@ -20,4 +20,8 @@ export interface McpProbe {
   label: string;
   matches(provider: string): boolean;
   probe(ctx: ProbeContext): Promise<ProbeResult>;
+  supportsMcpInjection?: boolean;
+  supportsNativePaseoTools?: boolean;
+  manualConfigPath?: string;
+  getManualConfigSnippet?(serverName?: string, serverConfig?: unknown): string;
 }

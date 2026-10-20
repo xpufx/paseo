@@ -9,7 +9,8 @@ import { PLUGIN_VERSION } from "../shared/version";
 // Direct source import. The helper MCP client has zero runtime deps,
 // so no bundling step is needed for the daemon to resolve it.
 import { createPluginLogger, PluginStorage, redactSecrets } from "paseo-plugin-helper/server";
-import { checkMany, checkMcpServerHealth, callMcpServerTool } from "./health/health";
+import { checkMany, checkMcpServerHealth, callMcpServerTool, checkProviderInjectionHealth } from "./health/health";
+import { inspectProviderMcpCapability } from "./providers/capability";
 
 type McpServer = z.infer<typeof McpServerSchema>;
 
@@ -170,7 +171,21 @@ export function createListMcpHandler() {
   return async (input: { agentId: string }, context: PluginHandlerContext) => {
     const agent = await loadAgent(input.agentId, context);
     const { servers, error } = await discoverLiveServers(input.agentId, context);
-    return { provider: agent.provider, cwd: agent.cwd, servers, paseoTools: PASEO_TOOLS, error };
+    const cap = inspectProviderMcpCapability(agent.provider, {
+      capabilities: (agent.snapshot as unknown as { capabilities?: string[] | Record<string, boolean> })?.capabilities,
+    });
+    return {
+      provider: agent.provider,
+      cwd: agent.cwd,
+      servers,
+      paseoTools: PASEO_TOOLS,
+      error,
+      supportsMcpInjection: cap.supportsMcpInjection,
+      supportsNativePaseoTools: cap.supportsNativePaseoTools,
+      manualConfigPath: cap.manualConfigPath,
+      manualConfigSnippet: cap.manualConfigSnippet,
+      warning: cap.warning,
+    };
   };
 }
 
@@ -332,6 +347,19 @@ export function createDiagnoseMcpHandler() {
       });
     }
 
+    // 3. Provider MCP Injection Capability Inspection
+    const cap = inspectProviderMcpCapability(agent.provider, {
+      capabilities: (agent.snapshot as unknown as { capabilities?: string[] | Record<string, boolean> })?.capabilities,
+    });
+    steps.push({
+      target: `Provider MCP Injection Capability (${agent.provider})`,
+      status: cap.supportsMcpInjection ? "found" : "missing",
+      details: cap.supportsMcpInjection
+        ? `Provider '${agent.provider}' supports runtime MCP injection.`
+        : (cap.warning ?? `Provider '${agent.provider}' lacks runtime MCP injection.`),
+      contentPreview: cap.manualConfigSnippet,
+    });
+
     return {
       report: "Paseo Provider MCP Probe Diagnostic",
       version: PLUGIN_VERSION,
@@ -342,7 +370,26 @@ export function createDiagnoseMcpHandler() {
       steps,
       discoveredServerCount,
       error: probeError,
+      supportsMcpInjection: cap.supportsMcpInjection,
+      supportsNativePaseoTools: cap.supportsNativePaseoTools,
+      manualConfigPath: cap.manualConfigPath,
+      manualConfigSnippet: cap.manualConfigSnippet,
+      warning: cap.warning,
     };
+  };
+}
+
+export function createInspectProviderMcpHandler() {
+  return async (input: {
+    provider: string;
+    capabilities?: string[];
+    supportsNativePaseoTools?: boolean;
+    agentId?: string;
+  }) => {
+    return checkProviderInjectionHealth(input.provider, {
+      capabilities: input.capabilities,
+      supportsNativePaseoTools: input.supportsNativePaseoTools,
+    });
   };
 }
 

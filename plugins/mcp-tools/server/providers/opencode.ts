@@ -42,6 +42,9 @@ export const opencodeProbe: McpProbe = {
   id: "opencode",
   label: "opencode · live",
   matches: (provider) => matchesOpencodeFamily(provider),
+  supportsMcpInjection: true,
+  supportsNativePaseoTools: true,
+  manualConfigPath: path.join(os.homedir(), ".config", "opencode", "opencode.jsonc"),
   async probe(ctx: ProbeContext) {
     const globalCfg = path.join(os.homedir(), ".config", "opencode", "opencode.jsonc");
     const localCfg = path.join(ctx.cwd, "opencode.json");

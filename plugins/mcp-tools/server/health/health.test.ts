@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkMcpServerHealth } from "./health";
+import { checkMcpServerHealth, checkProviderInjectionHealth } from "./health";
 import type { McpServer } from "../../shared/mcp";
 
 describe("generic health client — works with every MCP without being a server", () => {
@@ -82,5 +82,44 @@ describe("generic health client — works with every MCP without being a server"
       configPreview: "{}",
     };
     await expect(callMcpServerTool(s, "any_tool", {})).rejects.toThrow(/unknown transport/);
+  });
+
+  describe("provider MCP injection health checks (#1384)", () => {
+    it("reports unsupported health for antigravity with manual config guidance", () => {
+      const res = checkProviderInjectionHealth("antigravity");
+      expect(res.provider).toBe("antigravity");
+      expect(res.supportsMcpInjection).toBe(false);
+      expect(res.supportsNativePaseoTools).toBe(false);
+      expect(res.status).toBe("unsupported");
+      expect(res.manualConfigPath).toContain(".gemini/config/mcp_config.json");
+      expect(res.manualConfigSnippet).toContain('"gateway"');
+      expect(res.warning).toContain("does not implement runtime MCP injection");
+      expect(res.checkedAt).toBeTruthy();
+    });
+
+    it("reports supported health for native paseo and standard providers", () => {
+      const paseoRes = checkProviderInjectionHealth("paseo");
+      expect(paseoRes.supportsMcpInjection).toBe(true);
+      expect(paseoRes.status).toBe("supported");
+      expect(paseoRes.warning).toBeNull();
+
+      const claudeRes = checkProviderInjectionHealth("claude");
+      expect(claudeRes.supportsMcpInjection).toBe(true);
+      expect(claudeRes.status).toBe("supported");
+    });
+
+    it("evaluates custom provider capabilities correctly", () => {
+      const withSessionMcp = checkProviderInjectionHealth("custom-runner", {
+        capabilities: ["session.mcp"],
+      });
+      expect(withSessionMcp.supportsMcpInjection).toBe(true);
+      expect(withSessionMcp.status).toBe("supported");
+
+      const withoutSessionMcp = checkProviderInjectionHealth("custom-runner", {
+        capabilities: ["prompt.message"],
+      });
+      expect(withoutSessionMcp.supportsMcpInjection).toBe(false);
+      expect(withoutSessionMcp.status).toBe("unsupported");
+    });
   });
 });

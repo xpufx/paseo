@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { probes, probeForProvider } from "./index";
+import { probes, probeForProvider, inspectProviderMcpCapability } from "./index";
 import { McpServerSchema } from "../../shared/mcp";
 import type { McpProbe } from "../discovery/types";
 
@@ -86,6 +86,74 @@ describe("provider contract verification (black-box guarantee)", () => {
         expect(found?.id).toBe(probe.id);
       }
       expect(probeForProvider("unknown-provider")).toBeNull();
+    });
+  });
+
+  describe("provider MCP runtime injection capability detection (#1384)", () => {
+    it("flags antigravity and agy as lacking runtime MCP injection", () => {
+      const agProbe = probeForProvider("antigravity");
+      expect(agProbe?.supportsMcpInjection).toBe(false);
+      expect(agProbe?.supportsNativePaseoTools).toBe(false);
+      expect(agProbe?.manualConfigPath).toContain("mcp_config.json");
+      expect(typeof agProbe?.getManualConfigSnippet).toBe("function");
+
+      const inspection = inspectProviderMcpCapability("antigravity");
+      expect(inspection.supportsMcpInjection).toBe(false);
+      expect(inspection.supportsNativePaseoTools).toBe(false);
+      expect(inspection.status).toBe("unsupported");
+      expect(inspection.manualConfigPath).toContain(".gemini/config/mcp_config.json");
+      expect(inspection.manualConfigSnippet).toContain('"gateway"');
+      expect(inspection.warning).toContain("does not implement runtime MCP injection");
+
+      const acpInspection = inspectProviderMcpCapability("antigravity-acp");
+      expect(acpInspection.supportsMcpInjection).toBe(false);
+      expect(acpInspection.status).toBe("unsupported");
+
+      const agyInspection = inspectProviderMcpCapability("agy");
+      expect(agyInspection.supportsMcpInjection).toBe(false);
+      expect(agyInspection.status).toBe("unsupported");
+    });
+
+    it("verifies supported providers report supportsMcpInjection: true", () => {
+      for (const id of ["paseo", "claude", "codex", "opencode", "pi"]) {
+        const inspection = inspectProviderMcpCapability(id);
+        expect(inspection.supportsMcpInjection).toBe(true);
+        expect(inspection.supportsNativePaseoTools).toBe(true);
+        expect(inspection.status).toBe("supported");
+        expect(inspection.warning).toBeNull();
+      }
+    });
+
+    it("inspects explicit provider registration capabilities (session.mcp)", () => {
+      // With session.mcp capability
+      const withSessionMcp = inspectProviderMcpCapability("custom-agent", {
+        capabilities: ["prompt.message", "session.mcp"],
+      });
+      expect(withSessionMcp.supportsMcpInjection).toBe(true);
+      expect(withSessionMcp.status).toBe("supported");
+
+      // Without session.mcp capability
+      const withoutSessionMcp = inspectProviderMcpCapability("custom-agent", {
+        capabilities: ["prompt.message", "session.persistence"],
+      });
+      expect(withoutSessionMcp.supportsMcpInjection).toBe(false);
+      expect(withoutSessionMcp.status).toBe("unsupported");
+      expect(withoutSessionMcp.warning).toContain("lacks 'session.mcp' or 'supportsNativePaseoTools'");
+    });
+
+    it("honors supportsNativePaseoTools and supportsMcpInjection override flags", () => {
+      const nativeDisabled = inspectProviderMcpCapability("claude", {
+        supportsNativePaseoTools: false,
+      });
+      expect(nativeDisabled.supportsNativePaseoTools).toBe(false);
+      expect(nativeDisabled.supportsMcpInjection).toBe(false);
+      expect(nativeDisabled.status).toBe("unsupported");
+
+      const forcedInjection = inspectProviderMcpCapability("antigravity", {
+        supportsMcpInjection: true,
+      });
+      expect(forcedInjection.supportsMcpInjection).toBe(true);
+      expect(forcedInjection.status).toBe("supported");
     });
   });
 });

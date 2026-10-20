@@ -1,6 +1,26 @@
 import { McpClient } from "paseo-plugin-helper/mcp";
 import { withTimeout } from "paseo-plugin-helper/shared";
 import type { McpServer } from "../../shared/mcp";
+import {
+  inspectProviderMcpCapability,
+  type ProviderCapabilityOptions,
+  type ProviderCapabilityInspection,
+} from "../providers/capability";
+
+export interface ProviderInjectionHealthResult extends ProviderCapabilityInspection {
+  checkedAt: string;
+}
+
+export function checkProviderInjectionHealth(
+  provider: string,
+  opts: ProviderCapabilityOptions = {},
+): ProviderInjectionHealthResult {
+  const cap = inspectProviderMcpCapability(provider, opts);
+  return {
+    ...cap,
+    checkedAt: new Date().toISOString(),
+  };
+}
 
 // GTD: generic health check that works with *every* MCP.
 // This is a CLIENT — we are not an MCP server, we just dial MCP servers.

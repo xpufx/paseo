@@ -9,6 +9,9 @@ export const codexProbe: McpProbe = {
   id: "codex",
   label: "codex · live",
   matches: (provider) => matchesFamily(provider, "codex"),
+  supportsMcpInjection: true,
+  supportsNativePaseoTools: true,
+  manualConfigPath: path.join(os.homedir(), ".codex", "config.toml"),
   async probe(ctx: ProbeContext) {
     const home = os.homedir();
     const candidatePaths = [

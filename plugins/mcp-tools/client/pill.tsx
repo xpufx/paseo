@@ -105,6 +105,11 @@ function McpModalContent({ agentId, close, theme }: RenderModalProps) {
     }>;
     discoveredServerCount: number;
     error: string | null;
+    supportsMcpInjection?: boolean;
+    supportsNativePaseoTools?: boolean;
+    manualConfigPath?: string | null;
+    manualConfigSnippet?: string | null;
+    warning?: string | null;
   } | null>(null);
 
   const healthMap = useMemo(() => {
@@ -517,6 +522,28 @@ function McpModalContent({ agentId, close, theme }: RenderModalProps) {
             />
           </HostActionBar>
         </View>
+        {query.data?.supportsMcpInjection === false ? (
+          <HostCard>
+            <HostCard.Header
+              title="Runtime MCP Injection Unsupported"
+              badge={<HostBadge label="Manual Setup Required" variant="warning" />}
+            />
+            <Text style={{ color: colors.statusWarning, fontSize: 12, marginTop: 4 }}>
+              {query.data.warning || `Provider '${query.data.provider}' does not support runtime MCP injection.`}
+            </Text>
+            {query.data.manualConfigPath ? (
+              <Text style={{ color: colors.foregroundMuted, fontSize: 11, marginTop: 4 }}>
+                Configuration path: <Text style={{ fontFamily: "monospace", color: colors.foreground }}>{query.data.manualConfigPath}</Text>
+              </Text>
+            ) : null}
+            {query.data.manualConfigSnippet ? (
+              <View style={{ marginTop: 8 }}>
+                <Text style={{ color: colors.foregroundMuted, fontSize: 11, marginBottom: 4 }}>Add to config:</Text>
+                <HostCodeBlock language="json" code={query.data.manualConfigSnippet} maxHeight={160} copyable />
+              </View>
+            ) : null}
+          </HostCard>
+        ) : null}
         <HostSearchInput
           value={search}
           onChangeText={setSearch}
@@ -633,6 +660,26 @@ function McpModalContent({ agentId, close, theme }: RenderModalProps) {
               <Text style={{ color: colors.statusDanger, fontSize: 12, marginTop: 4 }}>
                 Probe Error: {diagnosticData.error}
               </Text>
+            ) : null}
+            {diagnosticData.supportsMcpInjection === false ? (
+              <View style={{ marginTop: 8, padding: 8, borderRadius: 6, backgroundColor: colors.statusWarning + "15", borderWidth: 1, borderColor: colors.statusWarning + "30" }}>
+                <Text style={{ color: colors.statusWarning, fontSize: 12, fontWeight: "600" }}>
+                  Runtime MCP Injection Unsupported
+                </Text>
+                <Text style={{ color: colors.foregroundMuted, fontSize: 11, marginTop: 2 }}>
+                  {diagnosticData.warning || `Provider '${diagnosticData.provider}' does not support runtime MCP injection.`}
+                </Text>
+                {diagnosticData.manualConfigPath ? (
+                  <Text style={{ color: colors.foregroundMuted, fontSize: 11, marginTop: 4 }}>
+                    Manual config path: <Text style={{ fontFamily: "monospace", color: colors.foreground }}>{diagnosticData.manualConfigPath}</Text>
+                  </Text>
+                ) : null}
+                {diagnosticData.manualConfigSnippet ? (
+                  <View style={{ marginTop: 6 }}>
+                    <HostCodeBlock language="json" code={diagnosticData.manualConfigSnippet} maxHeight={140} copyable />
+                  </View>
+                ) : null}
+              </View>
             ) : null}
             <HostCodeBlock language="json" code={JSON.stringify(diagnosticData, null, 2)} maxHeight={200} copyable />
           </HostCard>

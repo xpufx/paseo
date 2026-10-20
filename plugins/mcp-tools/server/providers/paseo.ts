@@ -34,6 +34,8 @@ export const paseoProbe: McpProbe = {
   id: "paseo",
   label: "Paseo · Built-in",
   matches: (provider) => matchesFamily(provider, "paseo"),
+  supportsMcpInjection: true,
+  supportsNativePaseoTools: true,
   async probe(ctx: ProbeContext): Promise<ProbeResult> {
     const steps: DiagnosticStep[] = [];
     const record = await findStoredAgentRecord(ctx.agentId);

@@ -8,6 +8,9 @@ export const piProbe: McpProbe = {
   id: "pi",
   label: "pi · live",
   matches: (provider) => matchesFamily(provider, "pi"),
+  supportsMcpInjection: true,
+  supportsNativePaseoTools: true,
+  manualConfigPath: path.join(os.homedir(), ".pi", "agent", "mcp.json"),
   async probe(ctx: ProbeContext) {
     const home = os.homedir();
     const envDir = process.env.PI_CODING_AGENT_DIR?.trim()

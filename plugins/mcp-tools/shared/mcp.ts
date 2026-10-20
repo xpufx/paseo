@@ -39,6 +39,11 @@ export const listMcp = defineContract({
     servers: z.array(McpServerSchema),
     paseoTools: z.array(PaseoToolSchema),
     error: z.string().nullable(),
+    supportsMcpInjection: z.boolean().optional(),
+    supportsNativePaseoTools: z.boolean().optional(),
+    manualConfigPath: z.string().nullable().optional(),
+    manualConfigSnippet: z.string().nullable().optional(),
+    warning: z.string().nullable().optional(),
   }),
 });
 
@@ -153,7 +158,37 @@ export const diagnoseMcp = defineContract({
     steps: z.array(DiagnosticStepSchema),
     discoveredServerCount: z.number(),
     error: z.string().nullable(),
+    supportsMcpInjection: z.boolean().optional(),
+    supportsNativePaseoTools: z.boolean().optional(),
+    manualConfigPath: z.string().nullable().optional(),
+    manualConfigSnippet: z.string().nullable().optional(),
+    warning: z.string().nullable().optional(),
   }),
+});
+
+export const ProviderInjectionCapabilitySchema = z.object({
+  provider: z.string(),
+  supportsMcpInjection: z.boolean(),
+  supportsNativePaseoTools: z.boolean(),
+  status: z.enum(["supported", "unsupported", "degraded"]),
+  manualConfigPath: z.string().nullable(),
+  manualConfigSnippet: z.string().nullable(),
+  warning: z.string().nullable(),
+  checkedAt: z.string().optional(),
+});
+
+export type ProviderInjectionCapability = z.infer<typeof ProviderInjectionCapabilitySchema>;
+
+export const inspectProviderMcp = defineContract({
+  name: "mcp.inspect_provider",
+  description: "Checks whether an agent provider supports runtime MCP injection and returns configuration guidance",
+  input: z.object({
+    provider: z.string(),
+    capabilities: z.array(z.string()).optional(),
+    supportsNativePaseoTools: z.boolean().optional(),
+    agentId: z.string().optional(),
+  }),
+  output: ProviderInjectionCapabilitySchema,
 });
 
 export const McpToolsSettingsSchema = z.object({

@@ -9,3 +9,4 @@ export function probeForProvider(provider: string, ...labels: Array<string | nul
 }
 
 export * from "./catalog";
+export * from "./capability";

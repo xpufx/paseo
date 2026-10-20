@@ -8,6 +8,9 @@ export const claudeProbe: McpProbe = {
   id: "claude",
   label: "claude · live",
   matches: (provider) => matchesFamily(provider, "claude"),
+  supportsMcpInjection: true,
+  supportsNativePaseoTools: true,
+  manualConfigPath: path.join(os.homedir(), ".claude.json"),
   async probe(ctx: ProbeContext) {
     const home = os.homedir();
     return discoverFromCandidates("claude", [

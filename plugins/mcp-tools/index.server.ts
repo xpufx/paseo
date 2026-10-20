@@ -4,6 +4,7 @@ import {
   createCallMcpToolHandler,
   createDiagnoseMcpHandler,
   createHealthHandler,
+  createInspectProviderMcpHandler,
   createListMcpHandler,
   createMcpSlashHandler,
   createReadMcpHandler,
@@ -13,6 +14,7 @@ import {
   callMcpTool,
   checkMcpHealth,
   diagnoseMcp,
+  inspectProviderMcp,
   listMcp,
   mcpToolsSettingsContract,
   readMcp,
@@ -30,6 +32,7 @@ export default function contribute(server: PluginServerContext) {
   server.handle(checkMcpHealth, createHealthHandler());
   server.handle(callMcpTool, createCallMcpToolHandler());
   server.handle(diagnoseMcp, createDiagnoseMcpHandler());
+  server.handle(inspectProviderMcp, createInspectProviderMcpHandler());
   server.handle(runMcpSlash, createMcpSlashHandler());
   server.handle(mcpToolsSettingsContract.get, settingsHandlers.get);
   server.handle(mcpToolsSettingsContract.update, settingsHandlers.update);
