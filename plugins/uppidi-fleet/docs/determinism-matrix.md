@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 122 |
+| `deterministic` | 116 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **126** |
+| **total** | **120** |
 
-Inventory: 118 tracked source files in scope — 67 described above as source (59 files, some carrying several parts) and 59 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 112 tracked source files in scope — 64 described above as source (56 files, some carrying several parts) and 56 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -196,18 +196,12 @@ See *What this table does not cover* below for the sessions themselves.
 | Main branch test guard and git branch resolution | `test/main-branch-guard.mjs` | 6 | 76 | `deterministic` | `ALLOW_MAIN_TESTS_ENV`, `BLOCKED_BRANCHES`, `MAIN_BRANCH_MESSAGE`, `assertNotOnMainBranch`, `enforceMainBranchGuard`, `resolveCurrentBranch` | main-branch-guard.mjs:34-44 — resolves current branch via git rev-parse with symbolic-ref fallback<br>main-branch-guard.mjs:50-60 — asserts branch is not main/master unless ALLOW_MAIN_TESTS=1<br>main-branch-guard.mjs:63-70 — fails fast and exits with error code 1 when guard fails |
 | ESM resolve-hook registration for `node --test` | `test/register-ts-hooks.mjs` | 0 | 29 | `deterministic` | whole file | register-ts-hooks.mjs:12 — `register('./resolve-ts-hooks.mjs', import.meta.url)` |
 | TS specifier resolution fallback for the node test runner | `test/resolve-ts-hooks.mjs` | 1 | 86 | `deterministic` | `resolve` | resolve-ts-hooks.mjs:32-63 — calls `next()` first and only falls back on `ERR_MODULE_NOT_FOUND`<br>resolve-ts-hooks.mjs:45 — a real `.json`/`.node` specifier keeps failing loudly<br>resolve-ts-hooks.mjs:48-53 — deliberately no `.tsx` probe: node type-stripping cannot load JSX |
-| Standalone CLI entrypoint for board checking and triage ranking | `bin/fleet-board-check.mjs` | 0 | 114 | `deterministic` | `fleet-board-check`, `runIssuesCheck` | fleet-board-check.mjs:20-55 — parses CLI flags (--repo, --role, --force, --all, --json)<br>fleet-board-check.mjs:75-95 — runs issues check and sets exit code 1 on actionable candidates, 0 on clean |
-| Standalone CLI entrypoint for fleet watchdog health auditing | `bin/fleet-watchdog.mjs` | 0 | 117 | `deterministic` | `runWatchdogAudit`, `renderWatchdogAuditMarkdown` | fleet-watchdog.mjs:20-60 — parses CLI flags (--front-desk-id, --recover/--no-recover, --json)<br>fleet-watchdog.mjs:80-98 — executes auditFleet and exits with non-zero code on unresolved anomalies |
 | Standalone MCP stdio JSON-RPC 2.0 server | `bin/fleet-mcp-server.mjs` | 0 | 120 | `deterministic` | `executeFleetTool`, `FLEET_MCP_TOOLS` | fleet-mcp-server.mjs:25-50 — stdio readline transport for JSON-RPC 2.0 messages<br>fleet-mcp-server.mjs:60-110 — dispatches initialize, ping, tools/list, and tools/call |
-| Standalone CLI entrypoint to deterministically ensure repo orchestrators | `bin/fleet-ensure-orchestrator.mjs` | 0 | 111 | `deterministic` | `fleet-ensure-orchestrator`, `ensureOrchestrator` | fleet-ensure-orchestrator.mjs:30-65 — parses CLI flags (--repo, --mode, --provider, --model, --force, --json)<br>fleet-ensure-orchestrator.mjs:70-100 — invokes router.ensureOrchestrator and prints outcome or JSON |
 
 - **Main branch test guard and git branch resolution** (`test/main-branch-guard.mjs`) — Fail-fast pre-flight check preventing destructive test execution on main/master (#1161).
 - **ESM resolve-hook registration for `node --test`** (`test/register-ts-hooks.mjs`) — Loaded via `node --import`. A separate file because a hooks module must be registered, not imported.
 - **TS specifier resolution fallback for the node test runner** (`test/resolve-ts-hooks.mjs`) — Build-time only. It replaced an `npx tsx` shellout that was in no package.json and absent from the lockfile (12-16) — a silent download of whatever was current that day. Worth recording as the repo's own worked example of the drift class this matrix is generated to prevent.
-- **Standalone CLI entrypoint for board checking and triage ranking** (`bin/fleet-board-check.mjs`) — Standalone executable CLI wrapping server/issues-check.ts with identical arguments and exit code contract.
-- **Standalone CLI entrypoint for fleet watchdog health auditing** (`bin/fleet-watchdog.mjs`) — Standalone executable CLI wrapping HookRouter watchdog health audit with recovery controls.
 - **Standalone MCP stdio JSON-RPC 2.0 server** (`bin/fleet-mcp-server.mjs`) — Exposes fleet tools over standard Model Context Protocol stdio transport for any MCP-compatible client.
-- **Standalone CLI entrypoint to deterministically ensure repo orchestrators** (`bin/fleet-ensure-orchestrator.mjs`) — Standalone executable CLI wrapping HookRouter deterministic orchestrator provisioning.
 
 ## Test suites
 
@@ -272,10 +266,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 | `shared/fleet-control.test.ts` | shared/fleet-control | `test:node` | 290 | `deterministic` |
 | `shared/repo-identity.test.ts` | shared/repo-identity | `test:node` | 132 | `deterministic` |
 | `shared/sort-filter.test.ts` | Filter, sort, gauge and grouping functions | `test:node` | 1684 | `deterministic` |
-| `test/fleet-board-check-cli.test.mjs` | Standalone fleet-board-check CLI options and exit codes | `test:node` | 46 | `deterministic` |
-| `test/fleet-ensure-orchestrator-cli.test.mjs` | test/fleet-ensure-orchestrator-cli | `test:node` | 44 | `deterministic` |
 | `test/fleet-mcp-server.test.mjs` | MCP stdio protocol handshake, tools/list and execution over stdin/stdout | `test:node` | 583 | `deterministic` |
-| `test/fleet-watchdog-cli.test.mjs` | Standalone fleet-watchdog CLI options, recency validation, and diagnostic run | `test:node` | 60 | `deterministic` |
 | `test/main-branch-guard.test.mjs` | test/main-branch-guard | `test:node` | 122 | `deterministic` |
 | `test/runtime-boundary.test.mjs` | test/runtime-boundary | `test:node` | 53 | `deterministic` |
 
@@ -303,10 +294,7 @@ matrix above is the judgement half.
 
 | File | Layer | Loc | Exports | Top-level exported names |
 | --- | --- | ---: | ---: | --- |
-| `bin/fleet-board-check.mjs` | script | 114 | 0 | — |
-| `bin/fleet-ensure-orchestrator.mjs` | script | 111 | 0 | — |
 | `bin/fleet-mcp-server.mjs` | script | 120 | 0 | — |
-| `bin/fleet-watchdog.mjs` | script | 117 | 0 | — |
 | `client/actions-tab.tsx` | client | 443 | 1 | `ActionsTabView` |
 | `client/agent-switcher-data.ts` | client | 59 | 3 | `AgentSwitcherData`, `AgentSwitcherGroup`, `mapAgentSwitcherData` |
 | `client/agent-switcher.test.tsx` | client | 420 | 0 | — |
@@ -412,10 +400,7 @@ matrix above is the judgement half.
 | `shared/sort-filter.ts` | shared | 1233 | 46 | `AgentPreset`, `AgentSortField`, `BuildProjectGroupsOptions`, `BuildProjectGroupsResult`, `DEFAULT_HEALTH_GAUGE_THRESHOLDS`, `HealthGauge`, `HealthGaugeKind`, `HealthGaugeSegment`, `HealthGaugeThresholds`, `HealthGaugeTone`, `IssuePreset`, `IssueSortField` …+34 more |
 | `shared/types.ts` | shared | 58 | 4 | `AttentionLabel`, `ForgeIssue`, `ForgeRepoInfo`, `StateLabel` |
 | `shared/version.ts` | shared | 2 | 1 | `PLUGIN_VERSION` |
-| `test/fleet-board-check-cli.test.mjs` | script | 46 | 0 | — |
-| `test/fleet-ensure-orchestrator-cli.test.mjs` | script | 44 | 0 | — |
 | `test/fleet-mcp-server.test.mjs` | script | 583 | 0 | — |
-| `test/fleet-watchdog-cli.test.mjs` | script | 60 | 0 | — |
 | `test/main-branch-guard.mjs` | script | 76 | 6 | `ALLOW_MAIN_TESTS_ENV`, `BLOCKED_BRANCHES`, `MAIN_BRANCH_MESSAGE`, `assertNotOnMainBranch`, `enforceMainBranchGuard`, `resolveCurrentBranch` |
 | `test/main-branch-guard.test.mjs` | script | 122 | 0 | — |
 | `test/register-ts-hooks.mjs` | script | 29 | 0 | — |

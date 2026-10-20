@@ -1246,30 +1246,6 @@ const PARTS = [
     note: "Build-time only. It replaced an `npx tsx` shellout that was in no package.json and absent from the lockfile (12-16) — a silent download of whatever was current that day. Worth recording as the repo's own worked example of the drift class this matrix is generated to prevent.",
   },
   {
-    file: `${PLUGIN}/bin/fleet-board-check.mjs`,
-    part: "Standalone CLI entrypoint for board checking and triage ranking",
-    layer: "script",
-    label: DETERMINISTIC,
-    anchors: { symbols: ["fleet-board-check", "runIssuesCheck"] },
-    evidence: [
-      [`fleet-board-check.mjs:20-55`, "parses CLI flags (--repo, --role, --force, --all, --json)"],
-      [`fleet-board-check.mjs:75-95`, "runs issues check and sets exit code 1 on actionable candidates, 0 on clean"],
-    ],
-    note: "Standalone executable CLI wrapping server/issues-check.ts with identical arguments and exit code contract.",
-  },
-  {
-    file: `${PLUGIN}/bin/fleet-watchdog.mjs`,
-    part: "Standalone CLI entrypoint for fleet watchdog health auditing",
-    layer: "script",
-    label: DETERMINISTIC,
-    anchors: { symbols: ["runWatchdogAudit", "renderWatchdogAuditMarkdown"] },
-    evidence: [
-      [`fleet-watchdog.mjs:20-60`, "parses CLI flags (--front-desk-id, --recover/--no-recover, --json)"],
-      [`fleet-watchdog.mjs:80-98`, "executes auditFleet and exits with non-zero code on unresolved anomalies"],
-    ],
-    note: "Standalone executable CLI wrapping HookRouter watchdog health audit with recovery controls.",
-  },
-  {
     file: `${PLUGIN}/bin/fleet-mcp-server.mjs`,
     part: "Standalone MCP stdio JSON-RPC 2.0 server",
     layer: "script",
@@ -1280,18 +1256,6 @@ const PARTS = [
       [`fleet-mcp-server.mjs:60-110`, "dispatches initialize, ping, tools/list, and tools/call"],
     ],
     note: "Exposes fleet tools over standard Model Context Protocol stdio transport for any MCP-compatible client.",
-  },
-  {
-    file: `${PLUGIN}/bin/fleet-ensure-orchestrator.mjs`,
-    part: "Standalone CLI entrypoint to deterministically ensure repo orchestrators",
-    layer: "script",
-    label: DETERMINISTIC,
-    anchors: { symbols: ["fleet-ensure-orchestrator", "ensureOrchestrator"] },
-    evidence: [
-      [`fleet-ensure-orchestrator.mjs:30-65`, "parses CLI flags (--repo, --mode, --provider, --model, --force, --json)"],
-      [`fleet-ensure-orchestrator.mjs:70-100`, "invokes router.ensureOrchestrator and prints outcome or JSON"],
-    ],
-    note: "Standalone executable CLI wrapping HookRouter deterministic orchestrator provisioning.",
   },
   {
     file: `${PLUGIN}/server/agent-health.ts`,
@@ -1375,8 +1339,6 @@ const SUITE_NOTES = {
   "server/mcp.test.ts": "MCP tool definitions, schema validation, and dispatch fixtures",
   "server/mcp-injection.test.ts": "Profile shape, fleet agent filter scoping, and lifecycle registration",
   "server/storage-guard.test.ts": "Scoped storage write guard installation, allowed and blocked path enforcement, and teardown lifecycle (#1423)",
-  "test/fleet-board-check-cli.test.mjs": "Standalone fleet-board-check CLI options and exit codes",
-  "test/fleet-watchdog-cli.test.mjs": "Standalone fleet-watchdog CLI options, recency validation, and diagnostic run",
   "test/fleet-mcp-server.test.mjs": "MCP stdio protocol handshake, tools/list and execution over stdin/stdout",
   "client/entry.test.ts": "Surface/panel registration and teardown",
   "client/fleet-state-filter-row.test.ts": "Fleet state filter row rendering",
