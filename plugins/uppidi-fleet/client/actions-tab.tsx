@@ -220,12 +220,18 @@ export function ActionsTabView({
                   size="sm"
                 />
               )}
-              {/* Workflow name */}
+              {/* Workflow name as clickable link */}
               <Text
+                accessibilityRole="link"
+                accessibilityLabel={run.name}
+                onPress={() => {
+                  if (run.html_url) Linking.openURL(run.html_url).catch(() => {});
+                }}
                 style={{
-                  color: colors.foreground,
+                  color: colors.accent,
                   ...typography.body,
                   fontWeight: 600,
+                  textDecorationLine: "underline",
                   flexShrink: 1,
                 }}
                 numberOfLines={1}

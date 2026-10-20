@@ -29,13 +29,13 @@ the easy mistake.
 
 | Label | Parts |
 | --- | ---: |
-| `deterministic` | 116 |
+| `deterministic` | 117 |
 | `hybrid` | 3 |
 | `ai-llm` | 0 |
 | `contested` | 1 |
-| **total** | **120** |
+| **total** | **121** |
 
-Inventory: 112 tracked source files in scope — 64 described above as source (56 files, some carrying several parts) and 56 test suites, which are described by the inventory itself rather than by hand.
+Inventory: 113 tracked source files in scope — 64 described above as source (56 files, some carrying several parts) and 57 test suites, which are described by the inventory itself rather than by hand.
 
 **The `ai-llm` column is empty, and that is the finding rather than a gap.** Nothing in this
 plugin performs model inference: there is no completions call, no provider SDK, no temperature
@@ -146,7 +146,7 @@ See *What this table does not cover* below for the sessions themselves.
 | Fleet theme accessor: host theme colors and helpers plus plugin typography scale | `client/theme.ts` | 6 | 80 | `deterministic` | `FleetTheme`, `useFleetTheme` | theme.ts:50-60 — colors, alpha and status helpers come from the host theme; typography is a fixed local scale<br>theme.ts:7-13 — no computed-style scraping, no client provider |
 | Plugin-local presentation kit: layout, cards, badges, buttons, inputs, table, ticket lifecycle | `client/host-ui.tsx` | 127 | 764 | `deterministic` | `Card`, `Button`, `Badge`, `DataTable`, `ModalBody`, `ForgeIcon`, +2 more | host-ui.tsx:1-20 — component library over the host theme, host Icon and plain react-native; no model call<br>host-ui.tsx:100-200 — Row/Stack/Grid and Card/Tabs compose host theme colors only<br>host-ui.tsx:603-760 — ticket lifecycle view renders RPC payloads; it does not produce model output |
 | CI Runner Fleet presentation: runner cards, scaler telemetry, DinD status | `client/runners-tab.tsx` | 1 | 427 | `deterministic` | `RunnersTab` | runners-tab.tsx:228-335 — renders runner status, scaler telemetry, and DinD status from RPC; no model inference |
-| Action Runs tab: repository-scoped RPC query, client-side search, status quick-filter chips, rich run cards | `client/actions-tab.tsx` | 1 | 443 | `deterministic` | `ActionsTabView` | actions-tab.tsx:95-130 — uses `useRpcQuery` with `forgeActionRunsContract`; poll interval set to 30 s for live telemetry<br>actions-tab.tsx:140-155 — client-side search across workflow name, commit message, branch, SHA, user login, event type<br>actions-tab.tsx:175-280 — rich card rendering: repo pill, status/conclusion badges, branch, short SHA link, avatar, event pill, elapsed duration |
+| Action Runs tab: repository-scoped RPC query, client-side search, status quick-filter chips, rich run cards | `client/actions-tab.tsx` | 1 | 449 | `deterministic` | `ActionsTabView` | actions-tab.tsx:95-130 — uses `useRpcQuery` with `forgeActionRunsContract`; poll interval set to 30 s for live telemetry<br>actions-tab.tsx:140-155 — client-side search across workflow name, commit message, branch, SHA, user login, event type<br>actions-tab.tsx:175-280 — rich card rendering: repo pill, status/conclusion badges, branch, short SHA link, avatar, event pill, elapsed duration |
 | Static fleet fixtures for client tests | `client/testing/fleet-fixtures.ts` | 9 | 422 | `deterministic` | `agentsPayload`, `issuesPayload`, `metricsPayload`, `runnersPayload`, `hookQueuesPayload` | fleet-fixtures.ts:222-370 — seven payload builders returning fixed records<br>fleet-fixtures.ts:32 — one wide-worktree geometry constant |
 | Render harness: host element stubs, rpc stubs, provider wrapper | `client/testing/fleet-harness.ts` | 36 | 280 | `deterministic` | `getFleetHarness`, `useToast`, `Icon`, `useRevealedText` | fleet-harness.ts:28-58 — host components stubbed to inert React elements<br>fleet-harness.ts:70-80 — toast, icon, scroll/flatlist and copyText stubs<br>fleet-harness.ts:111 — the harness is assembled once and awaited |
 
@@ -213,6 +213,7 @@ that enforces the invariant; this table is the readable view of the same fact.
 
 | Suite | Covers | Runs under | Loc | Classification |
 | --- | --- | --- | ---: | --- |
+| `client/actions-tab.test.tsx` | client/actions-tab | `test:tsx` | 187 | `deterministic` |
 | `client/agent-switcher.test.tsx` | client/agent-switcher | `test:tsx` | 420 | `deterministic` |
 | `client/cross-repo-issues.test.ts` | client/cross-repo-issues | `test:tsx` | 277 | `deterministic` |
 | `client/entry.test.ts` | Surface/panel registration and teardown | `test:tsx` | 1465 | `deterministic` |
@@ -295,7 +296,8 @@ matrix above is the judgement half.
 | File | Layer | Loc | Exports | Top-level exported names |
 | --- | --- | ---: | ---: | --- |
 | `bin/fleet-mcp-server.mjs` | script | 120 | 0 | — |
-| `client/actions-tab.tsx` | client | 443 | 1 | `ActionsTabView` |
+| `client/actions-tab.test.tsx` | client | 187 | 0 | — |
+| `client/actions-tab.tsx` | client | 449 | 1 | `ActionsTabView` |
 | `client/agent-switcher-data.ts` | client | 59 | 3 | `AgentSwitcherData`, `AgentSwitcherGroup`, `mapAgentSwitcherData` |
 | `client/agent-switcher.test.tsx` | client | 420 | 0 | — |
 | `client/agent-switcher.tsx` | client | 373 | 11 | `AGENT_SWITCHER_JUMP_SCREEN_ID`, `AgentRowItem`, `AgentSwitcherDropdown`, `AgentSwitcherDropdownProps`, `AgentSwitcherJumpScreen`, `AgentSwitcherPopover`, `AgentSwitcherSidebarIcon`, `AgentSwitcherSidebarItem`, `PluginPopoverProps`, `PluginScreenProps`, `PluginSidebarItemProps` |
