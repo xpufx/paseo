@@ -6,7 +6,7 @@
  * disable specific MCP injection profiles (Serena, etc.) without redeploying.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -229,9 +229,8 @@ export interface ResolveFleetMcpServerOptions {
  * Resolution order:
  * 1. Process environment override `PASEO_FLEET_MCP_SERVER`
  * 2. Unbundled `import.meta.url` (guarded against non-file / invalid URLs)
- * 3. `~/.paseo/config.json` recorded plugin install path
- * 4. Stable fleet server path (`~/.paseo/plugin-data/xpufx/uppidi-fleet/bin/...`)
- * 5. Relative paths from cwd or Paseo home
+ * 3. Stable fleet server path (`~/.paseo/plugin-data/xpufx/uppidi-fleet/bin/...`)
+ * 4. Relative paths from cwd or Paseo home
  */
 export function resolveFleetMcpServerPath(options: ResolveFleetMcpServerOptions = {}): string {
   const env = options.env ?? process.env;
@@ -265,47 +264,7 @@ export function resolveFleetMcpServerPath(options: ResolveFleetMcpServerOptions 
     }
   }
 
-  // 3. ~/.paseo/config.json recorded plugin path
-  const configPaths = options.home
-    ? [join(options.home, ".paseo", "config.json")]
-    : [
-        ...(env.PASEO_HOME ? [join(env.PASEO_HOME, "config.json")] : []),
-        join(home, ".paseo", "config.json"),
-      ];
-
-  let configPluginBin: string | null = null;
-  for (const configPath of configPaths) {
-    try {
-      if (existsSync(configPath)) {
-        const parsed = JSON.parse(readFileSync(configPath, "utf8"));
-        const plugins = (parsed as { plugins?: Record<string, { path?: string }> })?.plugins;
-        if (plugins && typeof plugins === "object") {
-          const entry =
-            plugins["uppidi-fleet"] ??
-            plugins["@xpufx/paseo-uppidi-fleet"] ??
-            plugins["paseo-uppidi-fleet"];
-          let pluginDir = entry?.path;
-          if (typeof pluginDir === "string" && pluginDir.trim()) {
-            pluginDir = pluginDir.trim();
-            if (pluginDir.startsWith("~/")) {
-              pluginDir = join(home, pluginDir.slice(2));
-            }
-            const candidate = join(pluginDir, "bin", "fleet-mcp-server.mjs");
-            if (existsSync(candidate)) {
-              return candidate;
-            }
-            if (!configPluginBin) {
-              configPluginBin = candidate;
-            }
-          }
-        }
-      }
-    } catch {
-      // Ignore parsing or read error
-    }
-  }
-
-  // 4. Stable fleet server path
+  // 3. Stable fleet server path
   const stable = stableFleetServerPath(options.stateDirPath);
   if (existsSync(stable)) {
     return stable;
@@ -315,7 +274,7 @@ export function resolveFleetMcpServerPath(options: ResolveFleetMcpServerOptions 
     return stablePlain;
   }
 
-  // 5. Relative paths from cwd or Paseo home
+  // 4. Relative paths from cwd or Paseo home
   const paseoHome = options.home ? join(options.home, ".paseo") : (env.PASEO_HOME ?? join(home, ".paseo"));
   const candidateRelativePaths = [
     resolve(cwd, "bin", "fleet-mcp-server.mjs"),
@@ -331,8 +290,8 @@ export function resolveFleetMcpServerPath(options: ResolveFleetMcpServerOptions 
     }
   }
 
-  // 6. Safe fallback: never throws Invalid URL
-  return configPluginBin ?? candidateRelativePaths[0];
+  // 5. Safe fallback: never throws Invalid URL
+  return candidateRelativePaths[0];
 }
 
 /**

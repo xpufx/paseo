@@ -343,46 +343,6 @@ describe("resolveFleetMcpServerPath and resolveFleetMcpServerConfig (#1475)", ()
     assert.equal(relPath, "/workspace/test-repo/custom-rel/bin/fleet-mcp-server.mjs");
   });
 
-  it("resolves from ~/.paseo/config.json when moduleUrl is empty and recorded plugin path exists", () => {
-    const tmpHome = mkdtempSync(path.join(os.tmpdir(), "mcp-test-home-"));
-    try {
-      const fakePluginDir = path.join(tmpHome, "installed-plugins", "uppidi-fleet");
-      const fakeBinDir = path.join(fakePluginDir, "bin");
-      mkdirSync(fakeBinDir, { recursive: true });
-      const fakeServerFile = path.join(fakeBinDir, "fleet-mcp-server.mjs");
-      writeFileSync(fakeServerFile, "// fake server");
-
-      const paseoDir = path.join(tmpHome, ".paseo");
-      mkdirSync(paseoDir, { recursive: true });
-      writeFileSync(
-        path.join(paseoDir, "config.json"),
-        JSON.stringify({
-          plugins: {
-            "uppidi-fleet": {
-              path: fakePluginDir,
-            },
-          },
-        }),
-      );
-
-      const resolved = resolveFleetMcpServerPath({
-        moduleUrl: "",
-        home: tmpHome,
-        cwd: tmpHome,
-      });
-      assert.equal(resolved, fakeServerFile);
-
-      const config = resolveFleetMcpServerConfig({
-        moduleUrl: "",
-        home: tmpHome,
-        cwd: tmpHome,
-      });
-      assert.equal(config.args[0], fakeServerFile);
-    } finally {
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
-  });
-
   it("resolves from stableFleetServerPath when bundled binary exists", () => {
     const tmpState = mkdtempSync(path.join(os.tmpdir(), "mcp-test-state-"));
     try {
